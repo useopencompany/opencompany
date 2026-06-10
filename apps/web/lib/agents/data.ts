@@ -34,7 +34,7 @@ async function loadBrainPathsForWorkspace(workspaceId: string): Promise<string[]
   return rows.map((row) => row.path);
 }
 
-async function loadGitHubIntegrationRepositoriesForWorkspace(
+export async function loadGitHubIntegrationRepositoriesForWorkspace(
   workspaceId: string,
 ): Promise<GitHubIntegrationRepositoryPayload[]> {
   const db = getDb();

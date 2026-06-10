@@ -292,28 +292,6 @@ export async function prepareWorkspace(input: {
     ].join(" && "),
     options: { user: SANDBOX_USER, timeoutMs: 30_000 },
   });
-  await ensureSandboxDevTooling(input.sandbox);
-}
-
-// Best-effort install of the CLIs coding sessions reach for but that the base image may lack:
-// `rg` (ripgrep) for repo search and `bun` for running tests/builds. Presence-checked, so it is a
-// fast no-op once these are baked into the template — which is the proper fix; this is the safety
-// net until then. Never fatal: a failed install (e.g. a non-apt base image) must not block session
-// readiness, so the shell `|| true` guards swallow install errors and any sandbox-level error is
-// caught here. bun installs to /usr/local so it lands on PATH for the shell tool without sourcing a
-// profile.
-async function ensureSandboxDevTooling(sandbox: SandboxHandle) {
-  try {
-    await sandbox.commands.run(
-      [
-        "command -v rg >/dev/null 2>&1 || (apt-get update -y && apt-get install -y ripgrep) || true",
-        "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash || true",
-      ].join("\n"),
-      { user: SANDBOX_ROOT_USER, timeoutMs: 180_000 },
-    );
-  } catch {
-    // Swallow: dev tooling is a convenience, not a precondition for the session to run.
-  }
 }
 
 async function runSandboxPreparationCommand(input: {

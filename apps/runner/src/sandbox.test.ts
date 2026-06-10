@@ -243,7 +243,7 @@ describe("prepareWorkspace", () => {
     ).toBe(true);
   });
 
-  it("installs rg and bun on demand without blocking on failure", async () => {
+  it("does not install optional dev tooling during workspace preparation", async () => {
     const sandbox = {
       commands: {
         run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
@@ -259,11 +259,11 @@ describe("prepareWorkspace", () => {
       agentFile: "agent",
     });
 
-    const toolingCall = sandbox.commands.run.mock.calls.find(([command]) =>
-      String(command).includes("command -v rg"),
-    );
-    expect(toolingCall).toBeDefined();
-    expect(String(toolingCall?.[0])).toContain("command -v bun");
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands.some((command) => command.includes("command -v rg"))).toBe(false);
+    expect(commands.some((command) => command.includes("command -v bun"))).toBe(false);
+    expect(commands.some((command) => command.includes("apt-get install"))).toBe(false);
+    expect(commands.some((command) => command.includes("bun.sh/install"))).toBe(false);
   });
 
   it("matches tokenized GitHub remotes without exposing the token", () => {

@@ -36,8 +36,12 @@ Some frontmatter fields are **derived from body mentions** rather than authored 
 
 - Unique supported `@tool` mentions → written to `tools:`.
 - Unique supported `@brain/<path>` mentions → written to `brain:`.
-- A supported GitHub repository mention, such as `@owner/repo`, is written to
-  `integrations.github.repositories` and used by repository-aware coding tools.
+- A plain `@github` mention writes `integrations.github.allRepositories: true`.
+  This gives repository-aware coding tools live access to any repository the
+  workspace's GitHub connection can reach.
+- A supported GitHub repository mention, such as `@owner/repo` or its
+  `@github/owner/repo` alias, is written to `integrations.github.repositories`
+  and used by repository-aware coding tools.
 - Unique supported `@agent/<slug>` mentions → written to `agents:`.
 - The title input → written to `title:`.
 
@@ -233,9 +237,29 @@ As a guardrail, the runner rejects `update_agent_file` until the agent has read 
 `agent-self-edit` SKILL.md (via `read_skill`) in the current session, so the edit is always
 made with the skill's guidance in context.
 
+### `integrations.github` — GitHub access object
+
+GitHub access is derived from body mentions. A plain `@github` mention enables
+live workspace-wide access:
+
+```yaml
+integrations:
+  github:
+    repositories: []
+    allRepositories: true
+```
+
+`allRepositories: true` is not a snapshot of repository names. At runtime,
+repository-aware coding tools resolve the requested `owner/repo` against the
+workspace's connected GitHub installations. Agents with this access must pass an
+explicit repository, such as the `repository` argument for coding tools or
+`--repo owner/repo` for `gh` commands.
+
 ### `integrations.github.repositories` — list of repository objects
 
 Each entry binds a workspace-authorized GitHub repository referenced by the body.
+Both `@owner/repo` and `@github/owner/repo` serialize to the same repository
+object.
 
 ```yaml
 integrations:

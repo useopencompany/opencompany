@@ -67,6 +67,7 @@ export function parseAgentFile(source: string): AgentFile {
   const brain = normalizeBrainReferences(frontmatter.brain);
   const agents = normalizeAgentReferences(frontmatter.agents);
   const repositories = normalizeGitHubRepositories(frontmatter.integrations);
+  const githubAllRepositories = normalizeGitHubAllRepositories(frontmatter.integrations);
   const neonDatabases = normalizeNeonDatabases(frontmatter.integrations);
   const tools = normalizeTools(frontmatter.tools);
   const skills = normalizeAgentSkills(frontmatter.skills);
@@ -84,6 +85,7 @@ export function parseAgentFile(source: string): AgentFile {
       agents,
       skills,
       repositories,
+      githubAllRepositories,
       neonDatabases,
       triggers,
     }),
@@ -227,6 +229,10 @@ export function serializeAgentFile(input: {
       integrations: {
         github: {
           repositories,
+          // Body-derived, not taken from input.integrations: the body is the source of truth
+          // for the @github mention, so stale persisted integrations (e.g. the self-edit path)
+          // can never keep the flag alive after the mention is removed.
+          ...(fromMentions.githubAllRepositories ? { allRepositories: true } : {}),
         },
         ...(neonDatabases.length > 0 ? { neon: { databases: neonDatabases } } : {}),
       },
@@ -265,6 +271,7 @@ export function serializeAgentFrontmatter(input: {
   const title = normalizeTitle(input.title);
   const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const repositories = normalizeGitHubRepositories(input.integrations);
+  const githubAllRepositories = normalizeGitHubAllRepositories(input.integrations);
   const neonDatabases = normalizeNeonDatabases(input.integrations);
   const tools = normalizeTools(input.tools);
   const brain = normalizeBrainReferences(input.brain);
@@ -286,6 +293,8 @@ export function serializeAgentFrontmatter(input: {
     integrations: {
       github: {
         repositories,
+        // Omit when false so existing agent files don't gain a noisy key on re-serialize.
+        ...(githubAllRepositories ? { allRepositories: true } : {}),
       },
       ...(neonDatabases.length > 0 ? { neon: { databases: neonDatabases } } : {}),
     },
@@ -325,6 +334,8 @@ export function buildAgentFile(input: {
       agents,
       skills,
       repositories,
+      // Body-derived (like serializeAgentFile): the @github mention is the source of truth.
+      githubAllRepositories: mentioned.githubAllRepositories,
       neonDatabases,
       triggers,
     }),
@@ -381,6 +392,7 @@ function buildAgentConfig(input: {
   agents: AgentReference[];
   skills: AgentSkillReference[];
   repositories: AgentGitHubRepositoryConfig[];
+  githubAllRepositories: boolean;
   neonDatabases: AgentNeonDatabaseConfig[];
   triggers: AgentTriggerConfig[];
 }): AgentConfig {
@@ -402,6 +414,7 @@ function buildAgentConfig(input: {
     integrations: {
       github: {
         repositories: input.repositories,
+        ...(input.githubAllRepositories ? { allRepositories: true } : {}),
       },
       ...(input.neonDatabases.length > 0
         ? {
@@ -590,6 +603,13 @@ function normalizeAgentPath(value: string) {
 function normalizeAgentName(value: string) {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : "Untitled agent";
+}
+
+// Whether the integrations frontmatter/config carries the live `@github` all-repositories
+// scope. Anything but a literal `true` normalizes to false so old files stay byte-identical.
+function normalizeGitHubAllRepositories(value: unknown): boolean {
+  if (!isRecord(value) || !isRecord(value.github)) return false;
+  return value.github.allRepositories === true;
 }
 
 function normalizeGitHubRepositories(value: unknown): AgentGitHubRepositoryConfig[] {

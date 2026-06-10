@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditorWithAddSkillDialog } from "@/components/agent-editor/AgentEditorWithAddSkillDialog";
 import { mergeSkillCatalog } from "@/components/agent-editor/skillCatalog";
 import { buildAgentMentionItems } from "@/components/agent-editor/tools";
+import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { updatePersonalAgentBehavior } from "@/lib/personal/actions";
@@ -35,6 +36,7 @@ export function PersonalBehaviorEditor({
   onDraftChange: (body: string, content: TiptapDoc) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
+  const { githubRepositories } = usePersonalAgent();
   const { showError } = useToast();
   const { data: workspaceSkills } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
@@ -46,16 +48,13 @@ export function PersonalBehaviorEditor({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // External skills the agent already references stay mentionable; everything else
-  // (built-in tools, the GitHub integration) comes from the default catalog.
+  // (built-in tools, the GitHub integration) comes from the default catalog. Repositories come
+  // from the workspace GitHub integration's catalog (mirrors AgentDetail), so the user can
+  // @-mention any repo the connection can reach — not only repos already saved on the config.
   const mentionItems = useMemo(() => {
-    const repositories = config.integrations.github.repositories.map((repository) => ({
-      fullName: repository.fullName,
-      defaultBranch: repository.defaultBranch,
-      ...(repository.binding ? { binding: repository.binding } : {}),
-    }));
     const skills = mergeSkillCatalog(config.skills ?? [], workspaceSkills ?? []);
-    return buildAgentMentionItems(repositories, [], { skills });
-  }, [config.integrations.github.repositories, config.skills, workspaceSkills]);
+    return buildAgentMentionItems(githubRepositories, [], { skills });
+  }, [githubRepositories, config.skills, workspaceSkills]);
 
   // The actual persist. `interactive` debounced saves drive the local save indicator; the
   // final flush on unmount runs fire-and-forget (this component is gone, so it must not touch

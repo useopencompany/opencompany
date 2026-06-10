@@ -301,4 +301,95 @@ describe("deriveAgentConfigFromBody", () => {
 
     expect(config.skills).toBeUndefined();
   });
+
+  describe("plain @github (all repositories)", () => {
+    it("sets allRepositories without attaching repositories or triggers", () => {
+      const { config } = deriveAgentConfigFromBody({
+        title: "Code agent",
+        body: "Use @github for anything code related.",
+        repositories,
+        triggers: [
+          {
+            id: "old-pr",
+            type: "github.pull_request",
+            repository: "old",
+            events: ["opened"],
+            branches: [],
+            enabled: true,
+          },
+        ],
+      });
+
+      expect(config.integrations.github.allRepositories).toBe(true);
+      expect(config.integrations.github.repositories).toEqual([]);
+      // No activeRepository from @github → triggers are not re-synced to any repository.
+      expect(config.triggers).toEqual([]);
+    });
+
+    it("is omitted when the body has no @github mention", () => {
+      const { config } = deriveAgentConfigFromBody({
+        title: "Code agent",
+        body: "Use @opencompany/web.",
+        repositories,
+      });
+
+      expect(config.integrations.github).not.toHaveProperty("allRepositories");
+    });
+
+    it("combines with explicit repository mentions", () => {
+      const { config } = deriveAgentConfigFromBody({
+        title: "Code agent",
+        body: "Use @github broadly, but prefer @opencompany/web.",
+        repositories,
+      });
+
+      expect(config.integrations.github.allRepositories).toBe(true);
+      expect(config.integrations.github.repositories).toEqual([
+        { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+      ]);
+    });
+  });
+
+  describe("@github/owner/repo alias", () => {
+    it("binds the same repository as @owner/repo", () => {
+      const { config } = deriveAgentConfigFromBody({
+        title: "Code agent",
+        body: "Work in @github/opencompany/web.",
+        repositories: boundRepositories,
+      });
+
+      expect(config.integrations.github).not.toHaveProperty("allRepositories");
+      expect(config.integrations.github.repositories).toEqual([
+        {
+          id: "opencompany-web",
+          fullName: "opencompany/web",
+          defaultBranch: "main",
+          binding: boundRepositories[0]!.binding,
+        },
+      ]);
+    });
+
+    it("ignores an alias for an unknown repository", () => {
+      const { config } = deriveAgentConfigFromBody({
+        title: "Code agent",
+        body: "Work in @github/opencompany/missing.",
+        repositories,
+      });
+
+      expect(config.integrations.github.repositories).toEqual([]);
+      expect(config.integrations.github).not.toHaveProperty("allRepositories");
+    });
+
+    it("does not strip the prefix from a repository owned by a 'github' org", () => {
+      const { config } = deriveAgentConfigFromBody({
+        title: "Code agent",
+        body: "Work in @github/docs.",
+        repositories: [{ fullName: "github/docs", defaultBranch: "main" }],
+      });
+
+      expect(config.integrations.github.repositories).toEqual([
+        { id: "github-docs", fullName: "github/docs", defaultBranch: "main" },
+      ]);
+    });
+  });
 });

@@ -38,6 +38,7 @@ type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & 
   integrations?: {
     github?: {
       repositories?: AgentGitHubRepositoryConfig[];
+      allRepositories?: boolean;
     };
     neon?: {
       databases?: AgentNeonDatabaseConfig[];
@@ -96,6 +97,7 @@ export function resolveAgentRuntimeConfig(input: {
   // on this; the company/workspace agent keeps the original text exactly.
   const isPersonal = input.personalAgent ?? false;
   const repositories = input.agent.integrations?.github?.repositories ?? [];
+  const githubAllRepositories = input.agent.integrations?.github?.allRepositories === true;
   const baseSkills = resolveEnabledSkillMetadata(input.agent);
   // Personal skills never shadow a built-in/external skill: drop any whose id is already taken.
   const baseSkillIds = new Set(baseSkills.map((skill) => skill.id));
@@ -112,7 +114,7 @@ export function resolveAgentRuntimeConfig(input: {
   ];
   const toolPolicyContext = input.toolPolicy
     ? formatWorkspaceToolPolicyContext({
-        providerKeys: enabledGatedProviderKeys(input.agent, repositories),
+        providerKeys: enabledGatedProviderKeys(input.agent, repositories, githubAllRepositories),
         policy: input.toolPolicy.policy,
         suspendable: input.toolPolicy.suspendable,
       })
@@ -138,8 +140,8 @@ export function resolveAgentRuntimeConfig(input: {
       ? "File tools require paths prefixed with work/, personal-brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, personal-brain/notes.md, or agent/user.md. Use read_skill for skill files."
       : "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/user.md. Use read_skill for skill files.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
-    ...opencodePublicRepositoryContext(input.agent, repositories),
-    ...githubRepositoryContext(repositories),
+    ...opencodePublicRepositoryContext(input.agent, repositories, githubAllRepositories),
+    ...githubRepositoryContext(repositories, githubAllRepositories),
     input.agent.brain?.length
       ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
           .map((reference) => formatBrainReferencePath(reference.path))
@@ -187,6 +189,7 @@ export function resolveAgentRuntimeConfig(input: {
       tools: input.agent.tools,
       agents: input.agent.agents,
       repositories,
+      allRepositories: githubAllRepositories,
       selfEditEnabled: skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID),
       memorySkillEnabled: skills.some((skill) => skill.id === MEMORY_SKILL_ID),
       personalInboxEnabled: input.personalAgent ?? false,
@@ -332,6 +335,9 @@ export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
         repositories: Array.isArray(persisted.integrations?.github?.repositories)
           ? persisted.integrations.github.repositories
           : [],
+        ...(persisted.integrations?.github?.allRepositories === true
+          ? { allRepositories: true }
+          : {}),
       },
       neon: {
         databases: Array.isArray(persisted.integrations?.neon?.databases)
@@ -347,9 +353,18 @@ export function agentGitHubRepositories(config: AgentConfig): AgentGitHubReposit
   return normalizeAgentConfig(config).integrations.github.repositories;
 }
 
+// Single predicate for "this agent can reach GitHub": either explicit attached repositories
+// or the live `@github` all-repositories scope. Used by the runner for sandbox template
+// selection, gh-tool enablement, and capability discovery so they can never disagree.
+export function agentHasGitHubAccess(config: AgentConfig): boolean {
+  const github = normalizeAgentConfig(config).integrations.github;
+  return github.repositories.length > 0 || github.allRepositories === true;
+}
+
 function enabledGatedProviderKeys(
   config: AgentConfig,
   repositories: AgentGitHubRepositoryConfig[],
+  allRepositories = false,
 ) {
   const providerKeys = new Set<string>();
   for (const tool of config.tools) {
@@ -363,7 +378,7 @@ function enabledGatedProviderKeys(
       providerKeys.add("neon");
     }
   }
-  if (repositories.length > 0) {
+  if (repositories.length > 0 || allRepositories) {
     providerKeys.add("github");
   }
   return [...providerKeys].filter((providerKey) => PROVIDER_PERMISSION_REGISTRY[providerKey]);
@@ -373,18 +388,29 @@ function formatBrainReferencePath(path: string) {
   return path === "/" ? "brain/" : path;
 }
 
-function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): string[] {
-  if (repositories.length === 0) return [];
+function githubRepositoryContext(
+  repositories: AgentGitHubRepositoryConfig[],
+  allRepositories = false,
+): string[] {
+  if (repositories.length === 0 && !allRepositories) return [];
 
-  const fullNames = repositories.map((repository) => repository.fullName).join(", ");
-  const ghRepoGuidance =
-    repositories.length === 1
-      ? "gh commands default to the attached repository even before it is cloned; --repo is not needed when targeting this attached repository."
-      : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
+  const lines: string[] = [];
+  if (allRepositories) {
+    lines.push(
+      "GitHub access: you can work with any repository the workspace's GitHub connection can reach — not just a pre-attached list. Always pass the repository argument (owner/repo) explicitly to amp_coder/opencode_coder, and use --repo owner/repo with gh commands.",
+    );
+  }
+  if (repositories.length > 0) {
+    const fullNames = repositories.map((repository) => repository.fullName).join(", ");
+    const ghRepoGuidance =
+      repositories.length === 1 && !allRepositories
+        ? "gh commands default to the attached repository even before it is cloned; --repo is not needed when targeting this attached repository."
+        : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
+    lines.push(`Attached GitHub repositories: ${fullNames}.`, ghRepoGuidance);
+  }
   return [
-    `Attached GitHub repositories: ${fullNames}.`,
-    "You have repository-scoped gh (GitHub CLI) access to these repositories through the gh tool. Authentication is injected automatically; never handle tokens yourself. Use shell for local sandbox commands, not authenticated GitHub operations.",
-    ghRepoGuidance,
+    ...lines,
+    "You have repository-scoped gh (GitHub CLI) access through the gh tool. Authentication is injected automatically; never handle tokens yourself. Use shell for local sandbox commands, not authenticated GitHub operations.",
     "The sandbox starts with work/ as an empty scratch git repository. Clone a repository into work/<repo> on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
     "All session work must happen under work/. Never push to a repository's default branch; use a feature branch and open a pull request.",
   ];
@@ -393,8 +419,9 @@ function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): s
 function opencodePublicRepositoryContext(
   config: AgentConfig,
   repositories: AgentGitHubRepositoryConfig[],
+  allRepositories = false,
 ): string[] {
-  if (repositories.length > 0) return [];
+  if (repositories.length > 0 || allRepositories) return [];
   if (!config.tools.some((tool) => tool.id === "opencode")) return [];
 
   return [

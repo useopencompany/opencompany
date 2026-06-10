@@ -41,7 +41,8 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
   {
     id: "github",
     label: "GitHub",
-    description: "Clone, edit, and open pull requests against your repositories.",
+    description:
+      "Clone, edit, and open pull requests against any repository the connection can reach. Mention a repo (@owner/repo) in Behavior to scope it down.",
     icon: GitBranch,
     kind: "github",
     connectUrl: (returnTo) =>

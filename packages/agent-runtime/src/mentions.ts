@@ -112,6 +112,7 @@ export function extractConfigFromMentions(body: string): {
   tools: AgentToolId[];
   brain: AgentBrainReference[];
   agents: AgentReference[];
+  githubAllRepositories: boolean;
   afterSession?: AgentConfig["afterSession"];
 } {
   const mentions = collectBodyMentions(body, [], [], []);
@@ -120,12 +121,15 @@ export function extractConfigFromMentions(body: string): {
     tools: mentions.tools,
     brain: mentions.brain,
     agents: mentions.agents,
+    githubAllRepositories: mentions.githubAllRepositories,
     ...(afterSession ? { afterSession } : {}),
   };
 }
 
 export function collectBodyRepositoryMentions(body: string) {
-  return extractMentionIds(body).filter((id) => isValidGitHubFullName(id));
+  return extractMentionIds(body)
+    .map((id) => stripGitHubMentionPrefix(id))
+    .filter((id) => isValidGitHubFullName(id));
 }
 
 // Built-in skills mentioned as `@skill/<id>` in a body, as bare references. Built-in ids
@@ -193,6 +197,7 @@ export function deriveAgentConfigFromBody(input: {
       integrations: {
         github: {
           repositories: mentions.repositories,
+          ...(mentions.githubAllRepositories ? { allRepositories: true } : {}),
         },
         ...(neonEnabled && input.neonDatabases?.length
           ? { neon: { databases: input.neonDatabases } }
@@ -250,6 +255,7 @@ function collectBodyMentions(
   const agentCatalog = agentCatalogForDerivation(agents);
   const skillCatalog = new Map(skills.map((skill) => [skill.id.toLowerCase(), skill]));
   let activeRepository: AgentGitHubRepositoryConfig | null = null;
+  let githubAllRepositories = false;
   const repositoriesById = new Map<string, AgentGitHubRepositoryConfig>();
   const tools = new Set<AgentToolId>();
   const brain = new Map<string, AgentBrainReference>();
@@ -257,6 +263,14 @@ function collectBodyMentions(
   const enabledSkills = new Map<string, AgentSkillReference>();
 
   for (const rawId of extractMentionIds(body)) {
+    // Plain `@github` grants live integration-wide access (every repository the workspace's
+    // GitHub connection can reach, resolved at session time). It deliberately does NOT set
+    // `activeRepository`, so trigger syncing still follows explicit repository mentions only.
+    if (rawId.toLowerCase() === "github") {
+      githubAllRepositories = true;
+      continue;
+    }
+
     // `@skill/<id>` enables a skill. A known built-in id (e.g. first-principles) resolves to a
     // bare reference straight from code — no catalog needed. Otherwise the id must match the
     // injected external catalog (which carries provenance); an unknown id is dropped so it
@@ -290,14 +304,17 @@ function collectBodyMentions(
       continue;
     }
 
-    const repositoryById = repositoryCatalog.byId.get(repositoryIdForFullName(rawId));
+    // `@github/owner/repo` is an alias for `@owner/repo` — strip the prefix before lookup.
+    const repoToken = stripGitHubMentionPrefix(rawId);
+
+    const repositoryById = repositoryCatalog.byId.get(repositoryIdForFullName(repoToken));
     if (repositoryById) {
       repositoriesById.set(repositoryById.id, repositoryById);
       activeRepository = repositoryById;
       continue;
     }
 
-    const repositoryByFullName = repositoryCatalog.byFullName.get(rawId.toLowerCase());
+    const repositoryByFullName = repositoryCatalog.byFullName.get(repoToken.toLowerCase());
     if (repositoryByFullName) {
       repositoriesById.set(repositoryByFullName.id, repositoryByFullName);
       activeRepository = repositoryByFullName;
@@ -311,7 +328,17 @@ function collectBodyMentions(
     skills: Array.from(enabledSkills.values()),
     repositories: Array.from(repositoriesById.values()),
     activeRepository,
+    githubAllRepositories,
   };
+}
+
+// `@github/owner/repo` aliases `@owner/repo`; strip the `github/` prefix only when what
+// follows still looks like an owner/repo pair, so a repository literally named
+// `github/<repo>` keeps resolving as itself.
+function stripGitHubMentionPrefix(id: string) {
+  if (!id.toLowerCase().startsWith("github/")) return id;
+  const remainder = id.slice("github/".length);
+  return isValidGitHubFullName(remainder) ? remainder : id;
 }
 
 function agentCatalogForDerivation(agents: AgentConfigDerivationAgent[]) {
@@ -621,6 +648,16 @@ export function buildConfigMentionResolver(config: AgentConfig): MentionResolver
     const repository = repositoryByFullName.get(token.toLowerCase());
     if (repository) {
       return { id: repositoryMentionIdForConfig(repository), label: repository.fullName };
+    }
+
+    // `@github/owner/repo` alias: resolve to the same repository pill, keeping the typed
+    // token as the label so the round-trip guard (display === token) holds.
+    const aliasToken = stripGitHubMentionPrefix(token);
+    if (aliasToken !== token) {
+      const aliasRepository = repositoryByFullName.get(aliasToken.toLowerCase());
+      if (aliasRepository) {
+        return { id: repositoryMentionIdForConfig(aliasRepository), label: token };
+      }
     }
 
     return null;
