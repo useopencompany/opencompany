@@ -338,8 +338,9 @@ computes — already done for this project).
    Re-fork + re-sanitize on a cadence (`--refresh`) so the seed stays realistic. Electric
    uses the branch owner role by default; `scripts/sql/preview-seed-electric-role.sql` is
    an optional least-privilege hardening to apply + test later.
-2. **Vercel.** Attach `*.preview.opencompany.cloud` (wildcard) to the web project. Populate
-   the Vercel **Preview** environment base values from Infisical `dev` + `/web`.
+2. **Vercel.** Attach `*.preview.opencompany.cloud` (wildcard) and
+   `oauth.opencompany.cloud` to the existing web project. Populate the Vercel **Preview**
+   environment base values from Infisical `dev` + `/web`.
 3. **Inngest.** Use the existing Inngest Cloud account with Branch Environments. Add the
    branch-environment `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` to the Vercel Preview
    environment base values (via Infisical/Vercel sync or the Inngest Vercel integration).
@@ -365,7 +366,11 @@ computes — already done for this project).
 6. **WorkOS.** On the preview AuthKit env, register wildcard **login** and **sign-out**
    redirects (`https://*.preview.opencompany.cloud/...`) and keep a concrete default (a
    wildcard cannot be the default).
-7. **Shared services (guardrails).** Use capped preview E2B + AI Gateway keys (or accept
+7. **Google OAuth.** In Google Cloud Console, add
+   `https://oauth.opencompany.cloud/api/google/callback` as an authorized redirect URI.
+   Set `GOOGLE_OAUTH_CALLBACK_URL` to that same value in the Vercel/Infisical envs used by
+   previews, and in production if production should also route through the broker.
+8. **Shared services (guardrails).** Use capped preview E2B + AI Gateway keys (or accept
    dev keys), and a sandbox GitHub org/App (or accept the dev org). Stripe can degrade
    gracefully in preview; Inngest is required for delayed/background behavior such as the
    5-minute memory pass.

@@ -52,8 +52,8 @@ export function toDirectConnectionString(pooledUrl) {
 export function webDeployEnv({
   pr,
   sha,
-  databaseUrl,
   appUrl,
+  databaseUrl,
   runnerUrl,
   runnerInternalToken,
   electricUrl,
@@ -61,6 +61,7 @@ export function webDeployEnv({
   streamsUrl,
   streamsToken,
   redirectUri,
+  googleOAuthCallbackUrl,
 }) {
   return compact({
     DATABASE_URL: databaseUrl,
@@ -73,6 +74,7 @@ export function webDeployEnv({
     DURABLE_STREAMS_TOKEN: streamsToken,
     NEXT_PUBLIC_APP_URL: appUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
+    GOOGLE_OAUTH_CALLBACK_URL: googleOAuthCallbackUrl,
     INNGEST_ENV: pr === undefined ? undefined : `preview-pr-${pr}`,
     INNGEST_SERVE_ORIGIN: appUrl,
     OBSERVABILITY_ENV: "preview",

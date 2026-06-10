@@ -44,7 +44,8 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Vercel web envs | Integration GitHub App OAuth client secret. |
 | `GITHUB_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign GitHub integration OAuth state. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Vercel web envs | Base64-encoded 32-byte key used to encrypt workspace provider credentials stored in Neon. |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel, Render | Google OAuth client shared by the Gmail and Google Calendar integrations. Redirect URIs: `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback` and `.../api/integrations/google-calendar/callback`. The runner also needs these to refresh access tokens. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel, Render | Google OAuth client shared by the Gmail and Google Calendar integrations. Direct redirect URIs are `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback` and `.../api/integrations/google-calendar/callback`; hosted previews should use `GOOGLE_OAUTH_CALLBACK_URL` instead. The runner also needs these to refresh access tokens. |
+| `GOOGLE_OAUTH_CALLBACK_URL` | Vercel web envs | Optional stable Google callback broker, e.g. `https://oauth.opencompany.cloud/api/google/callback`. When set, Google authorization and token exchange both use this exact redirect URI. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign Google integration OAuth state. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
@@ -76,6 +77,7 @@ Set these in Vercel Production.
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Base64-encoded 32-byte key used to encrypt workspace provider and MCP credentials in Neon. Generate with `openssl rand -base64 32`. |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google only | Google OAuth client id (Gmail + Calendar integrations). |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth client secret. |
+| `GOOGLE_OAUTH_CALLBACK_URL` | Google only | Optional stable callback broker URL for hosted previews, normally `https://oauth.opencompany.cloud/api/google/callback`. Leave unset for direct local callback behavior. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Google only | Dedicated secret used to sign Google OAuth setup state. Generate a separate 32+ character value. |
 | `MCP_OAUTH_STATE_SECRET` | MCP only | Dedicated secret used to sign MCP OAuth setup state. Generate a separate 32+ character value with `openssl rand -base64 32`. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Callback URL: `${NEXT_PUBLIC_APP_URL}/api/mcp/slack/callback`. |
@@ -326,8 +328,9 @@ orchestrator and are not stored anywhere long-term.
 | `DURABLE_STREAMS_URL` | web, runner | Per-PR Durable Streams service URL. |
 | `INNGEST_ENV` | web | `preview-pr-<n>`, routing events and function syncs into the isolated Inngest branch environment. |
 | `INNGEST_SERVE_ORIGIN` | web | `https://pr-<n>.<domain>`, ensuring Inngest calls the deterministic preview custom domain rather than a protected Vercel deployment URL. |
-| `NEXT_PUBLIC_APP_URL` | web (build-time + runtime) | `https://pr-<n>.<domain>`. Integration OAuth callbacks derive from this origin. |
+| `NEXT_PUBLIC_APP_URL` | web (build-time + runtime) | `https://pr-<n>.<domain>`. Used in signed OAuth state so the stable Google broker can forward back to the right preview. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | web (build-time) | `https://pr-<n>.<domain>/auth/callback`. |
+| `GOOGLE_OAUTH_CALLBACK_URL` | web | Optional pass-through from the provision environment. Set to `https://oauth.opencompany.cloud/api/google/callback` to use the stable Google OAuth broker for previews. |
 | `PREVIEW_ALLOW_UNVERIFIED_ENDPOINT` | runner | Emergency escape hatch for the boot gate. Leave unset. |
 
 The prod runner carries **none** of `PREVIEW_ENV` / `NEON_BRANCH_ID` / `PREVIEW_PR_NUMBER`;

@@ -55,6 +55,7 @@ const renderRegion = process.env.RENDER_REGION?.trim() || "frankfurt";
 const renderPlan = process.env.RENDER_PLAN?.trim() || "starter";
 const electricImage = process.env.ELECTRIC_IMAGE?.trim() || "docker.io/electricsql/electric:latest";
 const electricStorageDir = process.env.ELECTRIC_STORAGE_DIR?.trim();
+const googleOAuthCallbackUrl = process.env.GOOGLE_OAUTH_CALLBACK_URL?.trim();
 
 const requiredRunnerRuntimeEnv = requiredEnvMap([
   "E2B_API_KEY",
@@ -163,7 +164,7 @@ async function main() {
     DURABLE_STREAMS_DEV_HOST: "0.0.0.0",
     DURABLE_STREAMS_TOKEN: streamsToken,
   });
-  const streams = await ensureService(render, {
+  const streamsPromise = ensureService(render, {
     name: names.streamsService,
     env: streamsEnv,
     buildSpec: (env) =>
@@ -183,7 +184,7 @@ async function main() {
     electricSecret,
     storageDir: electricStorageDir,
   });
-  const electric = await ensureService(render, {
+  const electricPromise = ensureService(render, {
     name: names.electricService,
     env: electricEnv,
     buildSpec: (env) =>
@@ -197,6 +198,9 @@ async function main() {
       }),
   });
 
+  // Streams and Electric are independent. Start them together, then start the runner
+  // as soon as Streams has a URL; Electric can keep deploying in parallel.
+  const streams = await streamsPromise;
   const runnerEnv = runnerServiceEnv({
     pr,
     directDatabaseUrl: directUrl,
@@ -210,7 +214,7 @@ async function main() {
     streamsToken,
     allowedOrigins: names.aliasUrl,
   });
-  const runner = await ensureService(render, {
+  const runnerPromise = ensureService(render, {
     name: names.runnerService,
     env: runnerEnv,
     buildSpec: (env) =>
@@ -224,6 +228,7 @@ async function main() {
         env,
       }),
   });
+  const [electric, runner] = await Promise.all([electricPromise, runnerPromise]);
 
   // 4) Manifest + outputs for the workflow (Vercel deploy + GitHub Deployment record).
   const manifest = buildManifest({
@@ -245,6 +250,7 @@ async function main() {
   const webEnv = webDeployEnv({
     pr,
     sha,
+    appUrl: names.aliasUrl,
     databaseUrl: pooledUrl,
     appUrl: names.aliasUrl,
     runnerUrl: runner.url,
@@ -254,6 +260,7 @@ async function main() {
     streamsUrl: streams.url,
     streamsToken,
     redirectUri: names.redirectUri,
+    googleOAuthCallbackUrl,
   });
 
   emitOutputs({ manifest, webEnv });
