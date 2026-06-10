@@ -10,8 +10,8 @@ import {
   isExternalSkillReference,
   listAddableBuiltinSkills,
   parseAgentFile,
-  serializeAgentFile,
   SUPPORTED_AGENT_TOOLS,
+  serializeAgentFile,
 } from "@opencompany/agent-runtime";
 import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";

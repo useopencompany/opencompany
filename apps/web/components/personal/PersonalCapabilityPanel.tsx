@@ -6,8 +6,7 @@ import {
   type ResolvedSkillMetadata,
   repositoryIdForFullName,
 } from "@opencompany/agent-runtime";
-import type { AgentConfig } from "@opencompany/agent-runtime/types";
-import type { AgentToolId } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentToolId } from "@opencompany/agent-runtime/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
@@ -23,15 +22,16 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { type AddedSkill, AddSkillDialog } from "@/components/agent-editor/AddSkillDialog";
 import { mergeSkillCatalog } from "@/components/agent-editor/skillCatalog";
-import { findTool } from "@/components/agent-editor/tools";
 import {
   ADD_SKILL_MENTION_ID,
   AGENT_TOOLS,
-  buildSkillMentionItems,
   type AgentSkillCatalogEntry,
   type AgentSkillMention,
   type AgentTool,
+  buildSkillMentionItems,
+  findTool,
 } from "@/components/agent-editor/tools";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import {
   ONBOARDING_CONNECTED_MESSAGE,
   type OnboardingConnectedMessage,
@@ -45,7 +45,6 @@ import {
   personalIntegrationConnectUrl,
 } from "@/lib/personal/integrations-catalog";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
-import { useWorkspaceContext } from "@/components/WorkspaceContext";
 
 export type CapabilitySection = "skills" | "integrations" | "tools";
 
@@ -57,7 +56,8 @@ const SECTION_META: Record<
     title: "Skills",
     description:
       "Skill packs your agent can load on demand. Add one here or mention it in Behavior.",
-    empty: "No skills yet. Add one here, mention @skill/… in Behavior, or let your agent write its own.",
+    empty:
+      "No skills yet. Add one here, mention @skill/… in Behavior, or let your agent write its own.",
   },
   integrations: {
     title: "Integrations",
@@ -479,9 +479,7 @@ function AddToolButton({
         <Plus size={13} strokeWidth={2} />
         Add tool
       </button>
-      {open && (
-        <AddToolModal config={config} onAdd={onAdd} onClose={() => setOpen(false)} />
-      )}
+      {open && <AddToolModal config={config} onAdd={onAdd} onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -584,9 +582,7 @@ function AddSkillButton({
         <Plus size={13} strokeWidth={2} />
         Add skill
       </button>
-      {open && (
-        <AddSkillModal config={config} onAdd={onAdd} onClose={() => setOpen(false)} />
-      )}
+      {open && <AddSkillModal config={config} onAdd={onAdd} onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -711,10 +707,7 @@ function AddSkillModal({
         })}
       </CapabilityPickerModal>
       {showAddSkillDialog ? (
-        <AddSkillDialog
-          onClose={() => setShowAddSkillDialog(false)}
-          onAdded={handleAddedSkill}
-        />
+        <AddSkillDialog onClose={() => setShowAddSkillDialog(false)} onAdded={handleAddedSkill} />
       ) : null}
     </>
   );
@@ -815,11 +808,7 @@ function CapabilityPickerRow({
         <div className="mt-0.5 truncate text-[12px] leading-4 text-ink-muted">{description}</div>
       </div>
       {loading ? (
-        <LoaderCircle
-          size={13}
-          strokeWidth={2}
-          className="shrink-0 animate-spin text-ink-subtle"
-        />
+        <LoaderCircle size={13} strokeWidth={2} className="shrink-0 animate-spin text-ink-subtle" />
       ) : added ? (
         <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-ink-subtle">
           <Check size={13} strokeWidth={2} className="text-success" />
