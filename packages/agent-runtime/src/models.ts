@@ -49,8 +49,9 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 //   capability (AA index): <40 → 1 · 40–52 → 2 · ≥53 → 3 (flagships nudged up at borderlines)
 //   speed (output tok/sec): <60 → 1 · 60–150 → 2 · >150 → 3
 //   cost (output $/M tokens): ≤$2.50 → 1 · $2.51–$7.50 → 2 · >$7.50 → 3
-// minimax/minimax-m3 and xai/grok-build-0.1 are estimates (no published
-// benchmark yet) — revisit when Artificial Analysis lists them.
+// minimax/minimax-m3, xai/grok-build-0.1, and anthropic/claude-fable-5 are
+// estimates (no published benchmark yet) — revisit when Artificial Analysis
+// lists them.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-5.4-mini",
@@ -199,6 +200,26 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     supportsImages: true,
     supportsPdf: true,
     ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        anthropic: {
+          thinkingBudget: 0.001,
+        },
+      },
+      exposure: "hidden",
+    },
+  },
+  {
+    id: "anthropic/claude-fable-5",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "Claude Fable 5",
+    description: "Mythos-class Claude model for long-running, complex agent tasks.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
+    ratings: { capability: 3, speed: 1, cost: 3 },
     reasoning: {
       providerOptions: {
         anthropic: {

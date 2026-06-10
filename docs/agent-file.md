@@ -70,6 +70,7 @@ The model the agent runs on. Must be one of:
 | `anthropic/claude-sonnet-4.6`              | High-capability Claude for coding-heavy and professional tasks. |
 | `anthropic/claude-opus-4.7`                | Highest-capability Claude for demanding agent workflows.        |
 | `anthropic/claude-opus-4.8`                | Latest highest-capability Claude for demanding agent workflows. |
+| `anthropic/claude-fable-5`                 | Mythos-class Claude for long-running, complex agent tasks.      |
 | `google/gemini-3-flash`                    | Popular Gemini model with strong speed and long context.        |
 | `google/gemini-3.1-flash-lite-preview`     | Very fast, low-cost Gemini for simple high-volume tasks.        |
 | `deepseek/deepseek-v4-flash`               | High-throughput DeepSeek for cost-sensitive work.               |
