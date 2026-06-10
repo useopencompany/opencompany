@@ -11,8 +11,8 @@ import {
 } from "@/lib/integrations/credential-storage";
 import { sanitizeIntegrationStatusReason } from "@/lib/integrations/status";
 
-export const NEON_INTEGRATION_PROVIDER = "neon";
-export const NEON_DATABASE_RESOURCE_TYPE = "database";
+const NEON_INTEGRATION_PROVIDER = "neon";
+const NEON_DATABASE_RESOURCE_TYPE = "database";
 const NEON_CREDENTIAL_KIND = "api_key";
 const NEON_API_BASE = "https://console.neon.tech/api/v2";
 
