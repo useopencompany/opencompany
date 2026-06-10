@@ -11,6 +11,7 @@ export default function PersonalIntegrationsPage() {
     githubIntegrationStatus,
     integrationConnections,
     integrationDetails,
+    toolPolicies,
     addIntegration,
   } = usePersonalAgent();
 
@@ -24,6 +25,7 @@ export default function PersonalIntegrationsPage() {
         githubStatus={githubIntegrationStatus}
         connections={integrationConnections}
         details={integrationDetails}
+        toolPolicies={toolPolicies}
         onAddIntegration={addIntegration}
       />
     </div>

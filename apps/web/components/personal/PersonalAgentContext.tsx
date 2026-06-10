@@ -9,6 +9,7 @@ import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
 import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 // The immutable identity of the personal agent the surface is rendering. Mutable surfaces
 // (config, behavior body) live as context state below, not here.
@@ -38,6 +39,8 @@ export type PersonalAgentContextValue = {
   integrationConnections: PersonalIntegrationConnections;
   // Per-integration accounts/resources/permissions detail for the expandable Integrations rows.
   integrationDetails: PersonalIntegrationDetails;
+  // Workspace-level tool permission overrides, used by the personal Integrations tab.
+  toolPolicies: WorkspaceToolPolicyOverrides;
 
   config: AgentConfig;
   setConfig: (config: AgentConfig) => void;

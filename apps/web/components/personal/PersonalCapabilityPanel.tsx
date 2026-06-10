@@ -32,6 +32,7 @@ import {
   buildSkillMentionItems,
   findTool,
 } from "@/components/agent-editor/tools";
+import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import {
   disconnectGitHubIntegrationAction,
@@ -63,6 +64,7 @@ import {
   personalIntegrationConnectUrl,
 } from "@/lib/personal/integrations-catalog";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 export type CapabilitySection = "skills" | "integrations" | "tools";
 
@@ -109,6 +111,8 @@ type IntegrationRow = Row & {
   // The catalog id behind this row, used to route the expanded section's disconnect/refresh
   // actions. Integration rows only — repository rows manage nothing.
   integrationId?: PersonalIntegrationId;
+  policyProviderKey?: string;
+  policyOverrides?: WorkspaceToolPolicyOverrides[string] | undefined;
 };
 
 export type PersonalGitHubIntegrationStatus =
@@ -127,6 +131,7 @@ export function PersonalCapabilityPanel({
   githubStatus,
   connections,
   details,
+  toolPolicies,
   onAddIntegration,
   onAddTool,
   onAddSkill,
@@ -140,6 +145,7 @@ export function PersonalCapabilityPanel({
   connections?: PersonalIntegrationConnections;
   // Per-integration accounts/resources detail for the expandable rows. Integrations only.
   details?: PersonalIntegrationDetails;
+  toolPolicies?: WorkspaceToolPolicyOverrides;
   // Append an integration's @-mention to the agent body. Only wired for the integrations section.
   onAddIntegration?: (integration: PersonalIntegrationId) => Promise<void>;
   onAddTool?: (toolId: AgentToolId) => Promise<void>;
@@ -153,6 +159,7 @@ export function PersonalCapabilityPanel({
           githubStatus,
           connections,
           details,
+          toolPolicies,
         })
       : buildRows(section, config, personalSkills);
 
@@ -170,6 +177,7 @@ export function PersonalCapabilityPanel({
             config={config}
             githubRequested={githubRequested}
             connections={connections}
+            onConnect={openConnectPopup}
             onAdd={onAddIntegration}
           />
         )}
@@ -270,12 +278,16 @@ function CapabilityRow({
   integrationId,
   onConnect,
   connecting,
+  policyProviderKey,
+  policyOverrides,
 }: IntegrationRow & { onConnect?: (() => void) | undefined; connecting?: boolean | undefined }) {
   const [expanded, setExpanded] = useState(false);
   // Integration rows with connection detail or a permissions summary expand inline; plain rows
   // (tools, skills, agent-attached repositories) keep the flat layout.
   const expandable = Boolean(
-    (detail && (detail.accounts.length > 0 || detail.statusReason)) || permissions?.length,
+    (detail && (detail.accounts.length > 0 || detail.statusReason)) ||
+      permissions?.length ||
+      policyProviderKey,
   );
 
   return (
@@ -338,6 +350,8 @@ function CapabilityRow({
           permissions={permissions}
           connected={connected}
           integrationId={integrationId}
+          policyProviderKey={policyProviderKey}
+          policyOverrides={policyOverrides}
         />
       )}
     </div>
@@ -353,11 +367,15 @@ function IntegrationRowDetail({
   permissions,
   connected,
   integrationId,
+  policyProviderKey,
+  policyOverrides,
 }: {
   detail?: PersonalIntegrationDetail | undefined;
   permissions?: string[] | undefined;
   connected?: boolean | undefined;
   integrationId?: PersonalIntegrationId | undefined;
+  policyProviderKey?: string | undefined;
+  policyOverrides?: WorkspaceToolPolicyOverrides[string] | undefined;
 }) {
   // Captured once when the section is expanded — keeps render pure (same pattern as PersonalInbox).
   const [now] = useState(() => Date.now());
@@ -395,6 +413,9 @@ function IntegrationRowDetail({
       {connected && integrationId && detail?.accounts.length === 0 && (
         <IntegrationDetailActions integrationId={integrationId} />
       )}
+      {policyProviderKey ? (
+        <ToolPolicyEditor providerKey={policyProviderKey} overrides={policyOverrides} />
+      ) : null}
     </div>
   );
 }
@@ -625,11 +646,13 @@ function AddIntegrationButton({
   config,
   githubRequested,
   connections,
+  onConnect,
   onAdd,
 }: {
   config: AgentConfig;
   githubRequested: boolean;
   connections?: PersonalIntegrationConnections | undefined;
+  onConnect: (entry: PersonalIntegrationCatalogEntry) => void;
   onAdd: (integration: PersonalIntegrationId) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -649,6 +672,7 @@ function AddIntegrationButton({
           config={config}
           githubRequested={githubRequested}
           connections={connections}
+          onConnect={onConnect}
           onAdd={onAdd}
           onClose={() => setOpen(false)}
         />
@@ -665,12 +689,14 @@ function AddIntegrationModal({
   config,
   githubRequested,
   connections,
+  onConnect,
   onAdd,
   onClose,
 }: {
   config: AgentConfig;
   githubRequested: boolean;
   connections?: PersonalIntegrationConnections | undefined;
+  onConnect: (entry: PersonalIntegrationCatalogEntry) => void;
   onAdd: (integration: PersonalIntegrationId) => Promise<void>;
   onClose: () => void;
 }) {
@@ -705,6 +731,8 @@ function AddIntegrationModal({
   const handleSelect = async (entry: PersonalIntegrationCatalogEntry) => {
     if (pending) return;
     if (isIntegrationAdded(entry.id, config, githubRequested)) return;
+    const connected = Boolean(connections?.[entry.id]);
+    if (!connected) onConnect(entry);
     setPending(entry.id);
     try {
       await onAdd(entry.id);
@@ -1194,6 +1222,7 @@ export function buildPersonalIntegrationRows(
     githubStatus: PersonalGitHubIntegrationStatus;
     connections?: PersonalIntegrationConnections | undefined;
     details?: PersonalIntegrationDetails | undefined;
+    toolPolicies?: WorkspaceToolPolicyOverrides | undefined;
   },
 ): IntegrationRow[] {
   const rows: IntegrationRow[] = [];
@@ -1211,6 +1240,8 @@ export function buildPersonalIntegrationRows(
         permissions: entry.permissions,
         connected: input.githubStatus === "connected",
         integrationId: entry.id,
+        policyProviderKey: "github",
+        policyOverrides: input.toolPolicies?.github,
       });
       continue;
     }
@@ -1227,6 +1258,8 @@ export function buildPersonalIntegrationRows(
       permissions: entry.permissions,
       connected,
       integrationId: entry.id,
+      policyProviderKey: entry.id,
+      policyOverrides: input.toolPolicies?.[entry.id],
       ...(connected
         ? { badge: "Connected", badgeTone: "success" as const }
         : { badge: "Connect", connectEntry: entry }),
