@@ -1,7 +1,7 @@
 "use client";
 
 import { agentBundleDir, type ResolvedSkillMetadata } from "@opencompany/agent-runtime";
-import type { AgentConfig } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { PanelLeft } from "lucide-react";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { FloatingNavInsetProvider } from "@/components/FloatingNavInsetContext";
@@ -17,7 +17,12 @@ import {
 import { useToast } from "@/components/ToastProvider";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
-import { addPersonalAgentIntegration, type PersonalIntegrationId } from "@/lib/personal/actions";
+import {
+  addPersonalAgentIntegration,
+  addPersonalAgentSkill,
+  addPersonalAgentTool,
+  type PersonalIntegrationId,
+} from "@/lib/personal/actions";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
@@ -51,6 +56,10 @@ function persistSidebarCollapsed(next: boolean) {
   window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
   for (const subscriber of sidebarCollapsedSubscribers) subscriber();
 }
+
+type AddCapabilityResult =
+  | { ok: true; config: AgentConfig; body: string; content: TiptapDoc }
+  | { ok: false; error: string };
 
 export type PersonalShellProps = {
   agent: PersonalAgent;
@@ -114,6 +123,16 @@ export default function PersonalShell({
     });
   };
 
+  const applyCapabilityResult = (result: AddCapabilityResult, title: string) => {
+    if (!result.ok) {
+      showError(result.error, title);
+      return;
+    }
+    setConfig(result.config);
+    setGitHubRequested(hasPersonalGitHubIntegrationRequest(result.body));
+    draftRef.current = { body: result.body, content: result.content };
+  };
+
   // The manual "Add integration" path appends the integration's @-mention to the agent body
   // server-side, then hands back the re-derived config + rebuilt draft. We reseed config, the
   // github-requested flag, and the behavior draft so every surface (sidebar count, integrations
@@ -121,13 +140,17 @@ export default function PersonalShell({
   // single source of truth.
   const addIntegration = async (integration: PersonalIntegrationId) => {
     const result = await addPersonalAgentIntegration(agent.id, integration);
-    if (!result.ok) {
-      showError(result.error, "Could not add integration");
-      return;
-    }
-    setConfig(result.config);
-    setGitHubRequested(hasPersonalGitHubIntegrationRequest(result.body));
-    draftRef.current = { body: result.body, content: result.content };
+    applyCapabilityResult(result, "Could not add integration");
+  };
+
+  const addTool = async (toolId: AgentToolId) => {
+    const result = await addPersonalAgentTool(agent.id, toolId);
+    applyCapabilityResult(result, "Could not add tool");
+  };
+
+  const addSkill = async (skillId: string) => {
+    const result = await addPersonalAgentSkill(agent.id, skillId);
+    applyCapabilityResult(result, "Could not add skill");
   };
 
   const contextValue = useMemo(
@@ -154,6 +177,8 @@ export default function PersonalShell({
       files,
       upsertFile,
       addIntegration,
+      addTool,
+      addSkill,
     }),
     // upsertFile/addIntegration close over stable setters; re-create only when rendered data
     // changes. agent/initial* are stable per layout mount.

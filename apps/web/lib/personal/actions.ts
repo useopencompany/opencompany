@@ -8,10 +8,12 @@ import {
   deriveAgentConfigFromBody,
   extractMentionIds,
   isExternalSkillReference,
+  listAddableBuiltinSkills,
   parseAgentFile,
   serializeAgentFile,
+  SUPPORTED_AGENT_TOOLS,
 } from "@opencompany/agent-runtime";
-import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentFiles, agents, inboxItems } from "@opencompany/db/schema";
@@ -223,28 +225,36 @@ const PERSONAL_INTEGRATION_MENTIONS = {
 
 export type PersonalIntegrationId = keyof typeof PERSONAL_INTEGRATION_MENTIONS;
 
-type AddIntegrationResult =
+type AddCapabilityResult =
   | { ok: true; config: AgentConfig; body: string; content: TiptapDoc }
   | { ok: false; error: string };
 
-/**
- * Manually attach an integration to the /personal agent from the Integrations tab.
- *
- * This is deliberately NOT a separate store: it appends the integration's @-mention to the bottom
- * of the agent's `.agent` body and re-derives everything from that text — exactly as if the user
- * had typed the mention in Behavior. The body stays the single source of truth, so the mention is
- * visible and removable in the Behavior editor, and the manual path can never drift from the
- * @-mention path. We rebuild the Tiptap presentation cache from the canonical body so the editor
- * reseeds with the appended mention pill instead of a stale doc. Local-only, like
- * {@link updatePersonalAgentBehavior}.
- */
-export async function addPersonalAgentIntegration(
-  agentId: string,
-  integration: PersonalIntegrationId,
-): Promise<AddIntegrationResult> {
-  const mention = PERSONAL_INTEGRATION_MENTIONS[integration];
-  if (!mention) return { ok: false, error: "Unknown integration." };
+type AddIntegrationResult = AddCapabilityResult;
 
+const PERSONAL_TOOL_EXCLUDED_TOOL_IDS = new Set<AgentToolId>([
+  "gmail",
+  "google_calendar",
+  "linear",
+  "slack",
+  "posthog",
+  "betterstack",
+  "braintrust",
+]);
+
+const PERSONAL_ADDABLE_TOOL_IDS = new Set(
+  SUPPORTED_AGENT_TOOLS.map((tool) => tool.id).filter(
+    (id): id is AgentToolId => !PERSONAL_TOOL_EXCLUDED_TOOL_IDS.has(id),
+  ),
+);
+
+function mentionToken(mention: string) {
+  return mention.replace(/^@/, "").toLowerCase();
+}
+
+async function appendPersonalAgentMention(
+  agentId: string,
+  mention: string,
+): Promise<AddCapabilityResult> {
   const { user, workspace } = await currentWorkspace();
   const db = getDb();
 
@@ -271,12 +281,10 @@ export async function addPersonalAgentIntegration(
     return { ok: false, error: "Personal agent not found." };
   }
 
-  // The mention token is what the runtime keys on (e.g. `@github` -> id "github"); skip the append
-  // if it's already in the body so re-adding is a no-op rather than a duplicate pill.
-  const mentionToken = mention.replace(/^@/, "").toLowerCase();
-  const alreadyPresent = extractMentionIds(agent.body).some(
-    (id) => id.toLowerCase() === mentionToken,
-  );
+  // The mention token is what the runtime keys on (e.g. `@github` -> id "github"); skip the
+  // append if it's already in the body so re-adding is a no-op rather than a duplicate pill.
+  const token = mentionToken(mention);
+  const alreadyPresent = extractMentionIds(agent.body).some((id) => id.toLowerCase() === token);
   const trimmedBody = agent.body.replace(/\s+$/g, "");
   const nextBody = alreadyPresent
     ? agent.body
@@ -309,6 +317,57 @@ export async function addPersonalAgentIntegration(
   });
 
   return { ok: true, config: saved.config, body: saved.body, content };
+}
+
+/**
+ * Manually attach an integration to the /personal agent from the Integrations tab.
+ *
+ * This is deliberately NOT a separate store: it appends the integration's @-mention to the bottom
+ * of the agent's `.agent` body and re-derives everything from that text — exactly as if the user
+ * had typed the mention in Behavior. The body stays the single source of truth, so the mention is
+ * visible and removable in the Behavior editor, and the manual path can never drift from the
+ * @-mention path. We rebuild the Tiptap presentation cache from the canonical body so the editor
+ * reseeds with the appended mention pill instead of a stale doc. Local-only, like
+ * {@link updatePersonalAgentBehavior}.
+ */
+export async function addPersonalAgentIntegration(
+  agentId: string,
+  integration: PersonalIntegrationId,
+): Promise<AddIntegrationResult> {
+  const mention = PERSONAL_INTEGRATION_MENTIONS[integration];
+  if (!mention) return { ok: false, error: "Unknown integration." };
+
+  return appendPersonalAgentMention(agentId, mention);
+}
+
+export async function addPersonalAgentTool(
+  agentId: string,
+  toolId: AgentToolId,
+): Promise<AddCapabilityResult> {
+  if (!PERSONAL_ADDABLE_TOOL_IDS.has(toolId)) {
+    return { ok: false, error: "Unknown tool." };
+  }
+  return appendPersonalAgentMention(agentId, `@${toolId}`);
+}
+
+export async function addPersonalAgentSkill(
+  agentId: string,
+  skillId: string,
+): Promise<AddCapabilityResult> {
+  const normalized = skillId.trim().toLowerCase();
+  if (!normalized) return { ok: false, error: "Unknown skill." };
+
+  const addableBuiltinIds = new Set(listAddableBuiltinSkills().map((skill) => skill.id));
+  const { workspace } = await currentWorkspace();
+  const workspaceSkillIds = new Set(
+    (await listWorkspaceSkillSnapshots(workspace.id)).map((snapshot) => snapshot.skillId),
+  );
+
+  if (!addableBuiltinIds.has(normalized) && !workspaceSkillIds.has(normalized)) {
+    return { ok: false, error: "Unknown skill." };
+  }
+
+  return appendPersonalAgentMention(agentId, `@skill/${normalized}`);
 }
 
 type EnableIntegrationsResult = { ok: true; config: AgentConfig } | { ok: false; error: string };

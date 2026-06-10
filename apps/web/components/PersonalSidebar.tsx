@@ -12,6 +12,7 @@ import {
   Inbox,
   MessageCircle,
   PanelLeft,
+  Pin,
   Plug,
   Sparkles,
   Wrench,
@@ -25,14 +26,11 @@ import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
-import { isSessionUnseen } from "@/lib/agent-sessions/payload";
-import { deriveVisibleInbox } from "@/lib/collections/selectors";
+import { derivePersonalSidebarSessions, deriveVisibleInbox } from "@/lib/collections/selectors";
 import { PERSONAL_INTEGRATION_TOOL_IDS } from "@/lib/personal/integrations-catalog";
 import { personalPaths } from "@/lib/personal/paths";
-
-// Sessions mid-archive must not flash in the list (mirrors deriveSidebarSessions).
-const HIDDEN_SESSION_STATUSES = new Set(["archiving", "archived"]);
 
 // How long the red highlight shows on a session row before it is optimistically removed.
 const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
@@ -46,12 +44,14 @@ function CapabilityNavRow({
   label,
   active,
   count,
+  proBadge,
   onClick,
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
   count?: number;
+  proBadge?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -68,8 +68,15 @@ function CapabilityNavRow({
         className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
+      {proBadge && (
+        <span className="ml-auto rounded-[3px] bg-ink/[0.07] px-1 py-px text-[9px] font-semibold uppercase tracking-[0.04em] text-ink-subtle">
+          Pro
+        </span>
+      )}
       {count !== undefined && count > 0 && (
-        <span className="ml-auto text-[11px] tabular-nums text-ink-subtle">{count}</span>
+        <span className={`${proBadge ? "" : "ml-auto"} text-[11px] tabular-nums text-ink-subtle`}>
+          {count}
+        </span>
       )}
     </button>
   );
@@ -185,12 +192,16 @@ function groupSessions(sessions: SidebarSession[]) {
 function SessionRow({
   session,
   active,
+  starred,
   onSelect,
+  onToggleStar,
   onArchive,
 }: {
   session: SidebarSession;
   active: boolean;
+  starred?: boolean;
   onSelect: (sessionId: string) => void;
+  onToggleStar: (sessionId: string, currentlyStarred: boolean) => void;
   onArchive: (sessionId: string, active: boolean) => void;
 }) {
   const [archiving, setArchiving] = useState(false);
@@ -234,6 +245,24 @@ function SessionRow({
       </button>
       <button
         type="button"
+        title={starred ? "Unpin session" : "Pin session"}
+        aria-label={starred ? `Unpin ${session.title}` : `Pin ${session.title}`}
+        aria-pressed={starred}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleStar(session.id, Boolean(starred));
+        }}
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          starred
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+        }`}
+      >
+        <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
+      </button>
+      <button
+        type="button"
         title="Archive session"
         aria-label={`Archive ${session.title}`}
         aria-busy={archiving}
@@ -266,34 +295,14 @@ function SessionRow({
 // collection (scoped to the current workspace/user by the shape proxy) and filtering
 // to this agent. Falls back to the server-rendered list until the collection hydrates.
 function useLivePersonalSessions(agentId: string, initialSessions: SidebarSession[]) {
-  const { agentSessions } = useCollections();
+  const { agentSessions, sessionStars } = useCollections();
   const { data: rows, isLoading } = useLiveQuery((q) => q.from({ session: agentSessions }));
+  const { data: starRows } = useLiveQuery((q) => q.from({ star: sessionStars }));
 
   return useMemo(() => {
     if (isLoading || !rows) return initialSessions;
-    return rows
-      .filter(
-        (row) =>
-          row.agent_id === agentId &&
-          // Unified list: web sessions AND WhatsApp-originated sessions (not delegated agent ones).
-          (row.source === "user" || row.source === "whatsapp") &&
-          row.archived_at === null &&
-          !HIDDEN_SESSION_STATUSES.has(row.status),
-      )
-      .map((row) => ({
-        id: row.id,
-        title: row.title,
-        status: row.status,
-        source: row.source === "whatsapp" ? ("whatsapp" as const) : ("user" as const),
-        modelName: row.model_name,
-        lastError: row.last_error,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        starredAt: null,
-        unseen: isSessionUnseen(row.last_turn_finished_at, row.last_seen_at),
-      }))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [rows, isLoading, agentId, initialSessions]);
+    return derivePersonalSidebarSessions(agentId, rows, starRows ?? []);
+  }, [rows, starRows, isLoading, agentId, initialSessions]);
 }
 
 // Live count of visible inbox items, for the Home nav badge. Mirrors PersonalInbox's derivation
@@ -373,11 +382,40 @@ function PersonalSidebarView({
   inboxCount?: number;
 }) {
   const router = useRouter();
-  const { agentSessions } = useCollections();
+  const { userId } = useWorkspaceContext();
+  const { agentSessions, sessionStars } = useCollections();
   const { showError } = useToast();
   const { agent, userName, userEmail, config, personalSkills, githubRequested, proMode } =
     usePersonalAgent();
   const { inboxActive, activePanel, activeSessionId } = useActivePersonalRoute();
+  // Sessions with an in-flight pin toggle. Guards rapid re-clicks from firing an
+  // insert against an already-optimistically-inserted star (duplicate key).
+  const pinTogglesInFlight = useRef<Set<string>>(new Set());
+
+  const handleToggleStar = useCallback(
+    (sessionId: string, currentlyStarred: boolean) => {
+      if (pinTogglesInFlight.current.has(sessionId)) return;
+      pinTogglesInFlight.current.add(sessionId);
+
+      const tx = currentlyStarred
+        ? sessionStars.delete(sessionId)
+        : sessionStars.insert({
+            session_id: sessionId,
+            user_id: userId,
+            starred_at: new Date().toISOString(),
+          });
+
+      void tx.isPersisted.promise
+        .catch((error) => {
+          showError(
+            error instanceof Error ? error.message : "Could not reach the server.",
+            currentlyStarred ? "Could not unpin session" : "Could not pin session",
+          );
+        })
+        .finally(() => pinTogglesInFlight.current.delete(sessionId));
+    },
+    [sessionStars, userId, showError],
+  );
 
   // Archive is the sidebar's soft delete: optimistically remove the row from the
   // agent_sessions collection (it vanishes at once) and navigate home if the archived
@@ -397,7 +435,21 @@ function PersonalSidebarView({
     [agentSessions, router, showError],
   );
 
-  const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
+  const { starredSessions, unstarredSessions } = useMemo(() => {
+    const starred: SidebarSession[] = [];
+    const unstarred: SidebarSession[] = [];
+    for (const session of sessions) {
+      if (session.starredAt) {
+        starred.push(session);
+      } else {
+        unstarred.push(session);
+      }
+    }
+    starred.sort((a, b) => Date.parse(b.starredAt ?? "0") - Date.parse(a.starredAt ?? "0"));
+    return { starredSessions: starred, unstarredSessions: unstarred };
+  }, [sessions]);
+  const groupedSessions = useMemo(() => groupSessions(unstarredSessions), [unstarredSessions]);
+  const showSessionsSection = sessions.length === 0 || unstarredSessions.length > 0;
   const skillCount = (config.skills?.length ?? 0) + personalSkills.length;
   const integrationCount = personalIntegrationCount({ config, githubRequested });
   const toolCount = config.tools.filter(
@@ -452,6 +504,30 @@ function PersonalSidebarView({
 
         {/* Scrollable body */}
         <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
+          {starredSessions.length > 0 && (
+            <div className="px-2 pt-3">
+              <div className="flex items-center gap-1 px-2 pb-1">
+                <Pin size={9} strokeWidth={2} fill="currentColor" className="text-ink-subtle" />
+                <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                  Pinned
+                </span>
+              </div>
+              <div className="flex flex-col gap-px">
+                {starredSessions.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    active={activeSessionId === session.id}
+                    starred
+                    onSelect={(id) => router.push(personalPaths.session(id))}
+                    onToggleStar={handleToggleStar}
+                    onArchive={handleArchive}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           <Section title="Configuration">
             <CapabilityNavRow
               icon={Bot}
@@ -464,6 +540,7 @@ function PersonalSidebarView({
                 icon={BrainCircuit}
                 label="Memory"
                 active={activePanel === "memory"}
+                proBadge
                 onClick={() => router.push(personalPaths.memory)}
               />
             )}
@@ -513,34 +590,40 @@ function PersonalSidebarView({
             </CapabilityGroupRow>
           </Section>
 
-          <Section title="Sessions">
-            {sessions.length === 0 ? (
-              <div className="mx-1 mt-1 rounded-md border border-dashed border-border bg-surface/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
-                Sessions you start will appear here.
-              </div>
-            ) : (
-              groupedSessions.map((group, index) => (
-                <div key={group.label} className={index === 0 ? "" : "pt-3"}>
-                  {!group.hideLabel && (
-                    <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.05em] text-ink-subtle/80">
-                      {group.label}
-                    </div>
-                  )}
-                  <div className="flex flex-col gap-px">
-                    {group.sessions.map((session) => (
-                      <SessionRow
-                        key={session.id}
-                        session={session}
-                        active={activeSessionId === session.id}
-                        onSelect={(id) => router.push(personalPaths.session(id))}
-                        onArchive={handleArchive}
-                      />
-                    ))}
-                  </div>
+          {showSessionsSection && (
+            <Section title="Sessions">
+              {sessions.length === 0 ? (
+                <div className="mx-1 mt-1 rounded-md border border-dashed border-border bg-surface/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
+                  Sessions you start will appear here.
                 </div>
-              ))
-            )}
-          </Section>
+              ) : (
+                <>
+                  {groupedSessions.map((group, index) => (
+                    <div key={group.label} className={index === 0 ? "" : "pt-3"}>
+                      {!group.hideLabel && (
+                        <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.05em] text-ink-subtle/80">
+                          {group.label}
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-px">
+                        {group.sessions.map((session) => (
+                          <SessionRow
+                            key={session.id}
+                            session={session}
+                            active={activeSessionId === session.id}
+                            starred={false}
+                            onSelect={(id) => router.push(personalPaths.session(id))}
+                            onToggleStar={handleToggleStar}
+                            onArchive={handleArchive}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </Section>
+          )}
         </div>
 
         <SidebarAccountFooter

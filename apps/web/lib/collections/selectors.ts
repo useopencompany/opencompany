@@ -89,6 +89,44 @@ export function deriveSidebarSessions(
   );
 }
 
+/**
+ * Personal session list variant: scoped to a single default agent, includes WhatsApp
+ * sessions, and otherwise mirrors the workspace sidebar's pin-aware recency behavior.
+ */
+export function derivePersonalSidebarSessions(
+  agentId: string,
+  sessions: AgentSessionRow[],
+  stars: SessionStarRow[],
+): SidebarSessionPayload[] {
+  const starredAtBySession = new Map(stars.map((star) => [star.session_id, star.starred_at]));
+
+  const visible = sessions
+    .filter(
+      (row) =>
+        row.agent_id === agentId &&
+        (row.source === "user" || row.source === "whatsapp") &&
+        row.archived_at === null &&
+        !SIDEBAR_HIDDEN_STATUSES.has(row.status),
+    )
+    .map((row) => ({
+      id: row.id,
+      title: row.title,
+      status: row.status,
+      source: row.source === "whatsapp" ? ("whatsapp" as const) : ("user" as const),
+      modelName: row.model_name,
+      lastError: row.last_error,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      starredAt: starredAtBySession.get(row.id) ?? null,
+      unseen: isSessionUnseen(row.last_turn_finished_at, row.last_seen_at),
+    }))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+  return visible.filter(
+    (session, index) => index < SIDEBAR_RECENCY_LIMIT || session.starredAt !== null,
+  );
+}
+
 export type InboxItemPayload = {
   id: string;
   title: string;

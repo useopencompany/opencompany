@@ -1,7 +1,7 @@
 "use client";
 
 import type { ResolvedSkillMetadata } from "@opencompany/agent-runtime";
-import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { createContext, useContext } from "react";
 import type { PersonalGitHubIntegrationStatus } from "@/components/personal/PersonalCapabilityPanel";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
@@ -57,6 +57,9 @@ export type PersonalAgentContextValue = {
 
   // Append an integration's @-mention to the agent body server-side, then re-seed config + draft.
   addIntegration: (integration: PersonalIntegrationId) => Promise<void>;
+  // Append a tool or skill @-mention to the personal agent body, then re-seed config + draft.
+  addTool: (toolId: AgentToolId) => Promise<void>;
+  addSkill: (skillId: string) => Promise<void>;
 };
 
 const PersonalAgentContext = createContext<PersonalAgentContextValue | null>(null);

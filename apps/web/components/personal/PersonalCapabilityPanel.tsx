@@ -7,6 +7,8 @@ import {
   repositoryIdForFullName,
 } from "@opencompany/agent-runtime";
 import type { AgentConfig } from "@opencompany/agent-runtime/types";
+import type { AgentToolId } from "@opencompany/agent-runtime/types";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   GitBranch,
@@ -18,8 +20,18 @@ import {
   Wrench,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { type AddedSkill, AddSkillDialog } from "@/components/agent-editor/AddSkillDialog";
+import { mergeSkillCatalog } from "@/components/agent-editor/skillCatalog";
 import { findTool } from "@/components/agent-editor/tools";
+import {
+  ADD_SKILL_MENTION_ID,
+  AGENT_TOOLS,
+  buildSkillMentionItems,
+  type AgentSkillCatalogEntry,
+  type AgentSkillMention,
+  type AgentTool,
+} from "@/components/agent-editor/tools";
 import {
   ONBOARDING_CONNECTED_MESSAGE,
   type OnboardingConnectedMessage,
@@ -32,6 +44,8 @@ import {
   type PersonalIntegrationConnections,
   personalIntegrationConnectUrl,
 } from "@/lib/personal/integrations-catalog";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
 
 export type CapabilitySection = "skills" | "integrations" | "tools";
 
@@ -42,8 +56,8 @@ const SECTION_META: Record<
   skills: {
     title: "Skills",
     description:
-      "Skill packs your agent can load on demand. Add one by @-mentioning it in Behavior; your agent can also write its own personal skills.",
-    empty: "No skills yet. Mention @skill/… in Behavior, or let your agent write its own.",
+      "Skill packs your agent can load on demand. Add one here or mention it in Behavior.",
+    empty: "No skills yet. Add one here, mention @skill/… in Behavior, or let your agent write its own.",
   },
   integrations: {
     title: "Integrations",
@@ -52,8 +66,8 @@ const SECTION_META: Record<
   },
   tools: {
     title: "Tools",
-    description: "Built-in tools your agent can call. Add one by @-mentioning it in Behavior.",
-    empty: "No tools yet. Mention a tool like @exa in Behavior to enable it.",
+    description: "Built-in tools your agent can call. Add one here or mention it in Behavior.",
+    empty: "No tools yet. Add one here or mention a tool like @exa in Behavior.",
   },
 };
 
@@ -84,6 +98,8 @@ export function PersonalCapabilityPanel({
   githubStatus,
   connections,
   onAddIntegration,
+  onAddTool,
+  onAddSkill,
 }: {
   section: CapabilitySection;
   config: AgentConfig;
@@ -94,6 +110,8 @@ export function PersonalCapabilityPanel({
   connections?: PersonalIntegrationConnections;
   // Append an integration's @-mention to the agent body. Only wired for the integrations section.
   onAddIntegration?: (integration: PersonalIntegrationId) => Promise<void>;
+  onAddTool?: (toolId: AgentToolId) => Promise<void>;
+  onAddSkill?: (skillId: string) => Promise<void>;
 }) {
   const meta = SECTION_META[section];
   const rows =
@@ -117,6 +135,10 @@ export function PersonalCapabilityPanel({
             connections={connections}
             onAdd={onAddIntegration}
           />
+        )}
+        {section === "tools" && onAddTool && <AddToolButton config={config} onAdd={onAddTool} />}
+        {section === "skills" && onAddSkill && (
+          <AddSkillButton config={config} onAdd={onAddSkill} />
         )}
       </div>
 
@@ -438,6 +460,378 @@ function AddIntegrationModal({
   );
 }
 
+function AddToolButton({
+  config,
+  onAdd,
+}: {
+  config: AgentConfig;
+  onAdd: (toolId: AgentToolId) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface/70 px-2.5 py-1.5 text-[12.5px] font-medium text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Plus size={13} strokeWidth={2} />
+        Add tool
+      </button>
+      {open && (
+        <AddToolModal config={config} onAdd={onAdd} onClose={() => setOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function AddToolModal({
+  config,
+  onAdd,
+  onClose,
+}: {
+  config: AgentConfig;
+  onAdd: (toolId: AgentToolId) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [pending, setPending] = useState<AgentToolId | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !pending) onClose();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [pending, onClose]);
+
+  const tools = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return AGENT_TOOLS.filter((tool) => !PERSONAL_INTEGRATION_TOOL_IDS.has(tool.id)).filter(
+      (tool) =>
+        !needle ||
+        tool.label.toLowerCase().includes(needle) ||
+        tool.description.toLowerCase().includes(needle) ||
+        tool.id.toLowerCase().includes(needle),
+    );
+  }, [query]);
+
+  const handleSelect = async (tool: AgentTool) => {
+    if (pending || isToolAdded(tool.id, config)) return;
+    setPending(tool.id);
+    try {
+      await onAdd(tool.id);
+      onClose();
+    } finally {
+      setPending(null);
+    }
+  };
+
+  return (
+    <CapabilityPickerModal
+      title="Add tool"
+      searchPlaceholder="Search tools…"
+      query={query}
+      onQueryChange={setQuery}
+      inputRef={inputRef}
+      onClose={onClose}
+      pending={Boolean(pending)}
+      emptyMessage={query.trim() ? `No tools match "${query.trim()}".` : "No tools available."}
+    >
+      {tools.map((tool) => {
+        const added = isToolAdded(tool.id, config);
+        const loading = pending === tool.id;
+        return (
+          <CapabilityPickerRow
+            key={tool.id}
+            icon={tool.icon}
+            label={tool.displayLabel}
+            description={tool.description}
+            added={added}
+            loading={loading}
+            disabled={added || Boolean(pending)}
+            onClick={() => handleSelect(tool)}
+          />
+        );
+      })}
+    </CapabilityPickerModal>
+  );
+}
+
+function AddSkillButton({
+  config,
+  onAdd,
+}: {
+  config: AgentConfig;
+  onAdd: (skillId: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface/70 px-2.5 py-1.5 text-[12.5px] font-medium text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Plus size={13} strokeWidth={2} />
+        Add skill
+      </button>
+      {open && (
+        <AddSkillModal config={config} onAdd={onAdd} onClose={() => setOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function AddSkillModal({
+  config,
+  onAdd,
+  onClose,
+}: {
+  config: AgentConfig;
+  onAdd: (skillId: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const { workspaceId } = useWorkspaceContext();
+  const queryClient = useQueryClient();
+  const { data: workspaceSkills } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+  });
+  const [query, setQuery] = useState("");
+  const [pending, setPending] = useState<string | null>(null);
+  const [showAddSkillDialog, setShowAddSkillDialog] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !pending && !showAddSkillDialog) onClose();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [pending, showAddSkillDialog, onClose]);
+
+  const skills = useMemo(() => {
+    const catalog = mergeSkillCatalog(config.skills ?? [], workspaceSkills ?? []);
+    const items = buildSkillMentionItems(catalog);
+    const needle = query.trim().toLowerCase();
+    if (!needle) return items;
+    return items.filter(
+      (skill) =>
+        skill.displayLabel.toLowerCase().includes(needle) ||
+        skill.description.toLowerCase().includes(needle) ||
+        skill.label.toLowerCase().includes(needle),
+    );
+  }, [config.skills, workspaceSkills, query]);
+
+  const handleSelect = async (skill: AgentSkillMention) => {
+    if (skill.id === ADD_SKILL_MENTION_ID) {
+      setShowAddSkillDialog(true);
+      return;
+    }
+
+    const skillId = skillIdFromMentionItem(skill);
+    if (!skillId || pending || isSkillAdded(skillId, config)) return;
+    setPending(skillId);
+    try {
+      await onAdd(skillId);
+      onClose();
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const handleAddedSkill = (skill: AddedSkill) => {
+    setShowAddSkillDialog(false);
+    queryClient.setQueryData<AgentSkillCatalogEntry[]>(
+      ["workspace-skills", workspaceId],
+      (skills = []) => {
+        if (skills.some((existing) => existing.id === skill.id)) return skills;
+        return [
+          ...skills,
+          {
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            source: skill.source,
+          },
+        ];
+      },
+    );
+    queryClient.invalidateQueries({ queryKey: ["workspace-skills", workspaceId] });
+    setPending(skill.id);
+    void onAdd(skill.id).finally(() => {
+      setPending(null);
+      onClose();
+    });
+  };
+
+  return (
+    <>
+      <CapabilityPickerModal
+        title="Add skill"
+        searchPlaceholder="Search skills…"
+        query={query}
+        onQueryChange={setQuery}
+        inputRef={inputRef}
+        onClose={onClose}
+        pending={Boolean(pending) || showAddSkillDialog}
+        emptyMessage={query.trim() ? `No skills match "${query.trim()}".` : "No skills available."}
+      >
+        {skills.map((skill) => {
+          const addUrl = skill.id === ADD_SKILL_MENTION_ID;
+          const skillId = skillIdFromMentionItem(skill);
+          const added = Boolean(skillId && isSkillAdded(skillId, config));
+          const loading = Boolean(skillId && pending === skillId);
+          return (
+            <CapabilityPickerRow
+              key={skill.id}
+              icon={skill.icon}
+              label={skill.displayLabel}
+              description={skill.description}
+              added={added}
+              loading={loading}
+              disabled={addUrl ? Boolean(pending) : added || Boolean(pending)}
+              onClick={() => handleSelect(skill)}
+            />
+          );
+        })}
+      </CapabilityPickerModal>
+      {showAddSkillDialog ? (
+        <AddSkillDialog
+          onClose={() => setShowAddSkillDialog(false)}
+          onAdded={handleAddedSkill}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function CapabilityPickerModal({
+  title,
+  searchPlaceholder,
+  query,
+  onQueryChange,
+  inputRef,
+  onClose,
+  pending,
+  emptyMessage,
+  children,
+}: {
+  title: string;
+  searchPlaceholder: string;
+  query: string;
+  onQueryChange: (value: string) => void;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onClose: () => void;
+  pending: boolean;
+  emptyMessage: string;
+  children: ReactNode;
+}) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/35 px-4 py-[12vh]"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !pending) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="flex max-h-[calc(100vh-24vh)] w-full max-w-[460px] flex-col overflow-hidden rounded-lg border border-black/[0.1] bg-surface-raised shadow-[0_24px_64px_rgba(0,0,0,0.22),0_4px_14px_rgba(0,0,0,0.12)]"
+      >
+        <div className="border-b border-black/[0.08] px-3 py-2.5">
+          <div className="flex h-9 items-center gap-2 rounded-md border border-border bg-surface px-2.5">
+            <Search size={14} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder={searchPlaceholder}
+              className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-subtle/70"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-y-auto p-1.5">
+          {hasChildren ? (
+            children
+          ) : (
+            <div className="px-2.5 py-6 text-center text-[12.5px] text-ink-muted">
+              {emptyMessage}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CapabilityPickerRow({
+  icon: Icon,
+  label,
+  description,
+  added,
+  loading,
+  disabled,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  description: string;
+  added: boolean;
+  loading: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover disabled:cursor-default disabled:hover:bg-transparent"
+    >
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
+        <Icon size={14} strokeWidth={1.85} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium text-ink">{label}</div>
+        <div className="mt-0.5 truncate text-[12px] leading-4 text-ink-muted">{description}</div>
+      </div>
+      {loading ? (
+        <LoaderCircle
+          size={13}
+          strokeWidth={2}
+          className="shrink-0 animate-spin text-ink-subtle"
+        />
+      ) : added ? (
+        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-ink-subtle">
+          <Check size={13} strokeWidth={2} className="text-success" />
+          Added
+        </span>
+      ) : (
+        <Plus size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+      )}
+    </button>
+  );
+}
+
 export function hasPersonalGitHubIntegrationRequest(body: string) {
   return extractMentionIds(body).some((id) => id.trim().toLowerCase() === "github");
 }
@@ -528,6 +922,18 @@ function githubRowStatus(
       ? "Connected — choose repositories to use in workspace settings."
       : "Connect GitHub before your agent can use repositories.";
   return { description, badge: "Connect", connectEntry: entry };
+}
+
+function isToolAdded(toolId: AgentToolId, config: AgentConfig) {
+  return config.tools.some((tool) => tool.id === toolId);
+}
+
+function skillIdFromMentionItem(skill: AgentSkillMention) {
+  return skill.id.startsWith("skill/") ? skill.id.slice("skill/".length) : null;
+}
+
+function isSkillAdded(skillId: string, config: AgentConfig) {
+  return (config.skills ?? []).some((skill) => skill.id === skillId);
 }
 
 function buildRows(

@@ -89,9 +89,8 @@ export async function loadSidebarSessionsForWorkspace(
 }
 
 // Personal sessions are the user's sessions against their private default agent. Same
-// shape as the sidebar list, but scoped to a single agent and without star state (the
-// /personal experiment has no pinning yet). Ordered most-recently-updated first so the
-// sidebar can group them by recency the same way the main app does.
+// shape as the sidebar list, but scoped to a single agent and including WhatsApp-originated
+// threads. Fetch starred sessions explicitly so pinned stale sessions still render.
 export async function loadPersonalSessionsForAgent(
   userId: string,
   workspaceId: string,
@@ -99,42 +98,59 @@ export async function loadPersonalSessionsForAgent(
 ): Promise<SidebarSessionPayload[]> {
   const db = getDb();
 
-  const rows = await db
-    .select({
-      id: agentSessions.id,
-      title: agentSessions.title,
-      status: agentSessions.status,
-      source: agentSessions.source,
-      modelName: agentSessions.modelName,
-      lastError: agentSessions.lastError,
-      createdAt: agentSessions.createdAt,
-      updatedAt: agentSessions.updatedAt,
-      lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
-      lastSeenAt: agentSessions.lastSeenAt,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.workspaceId, workspaceId),
-        eq(agentSessions.userId, userId),
-        eq(agentSessions.agentId, agentId),
-        // Unified personal list: web-originated AND WhatsApp-originated threads (not delegated).
-        inArray(agentSessions.source, ["user", "whatsapp"]),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .orderBy(desc(agentSessions.updatedAt))
-    .limit(SIDEBAR_RECENCY_LIMIT);
+  const baseColumns = {
+    id: agentSessions.id,
+    title: agentSessions.title,
+    status: agentSessions.status,
+    source: agentSessions.source,
+    modelName: agentSessions.modelName,
+    lastError: agentSessions.lastError,
+    createdAt: agentSessions.createdAt,
+    updatedAt: agentSessions.updatedAt,
+    starredAt: sessionStars.starredAt,
+    lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+    lastSeenAt: agentSessions.lastSeenAt,
+  };
 
-  // /personal has no star/pin state yet, so starredAt is always null; the "unseen"
-  // blue dot still applies (agent finished a turn since the user last viewed it).
-  return rows.map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
-    serializeSidebarSession({
-      ...row,
-      starredAt: null,
-      unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt),
-    }),
+  const visibilityFilter = and(
+    eq(agentSessions.workspaceId, workspaceId),
+    eq(agentSessions.userId, userId),
+    eq(agentSessions.agentId, agentId),
+    // Unified personal list: web-originated AND WhatsApp-originated threads (not delegated).
+    inArray(agentSessions.source, ["user", "whatsapp"]),
+    isNull(agentSessions.archivedAt),
   );
+
+  const starJoin = and(
+    eq(sessionStars.sessionId, agentSessions.id),
+    eq(sessionStars.userId, userId),
+  );
+
+  const [recent, starred] = await Promise.all([
+    db
+      .select(baseColumns)
+      .from(agentSessions)
+      .leftJoin(sessionStars, starJoin)
+      .where(visibilityFilter)
+      .orderBy(desc(agentSessions.updatedAt))
+      .limit(SIDEBAR_RECENCY_LIMIT),
+    db
+      .select(baseColumns)
+      .from(agentSessions)
+      .innerJoin(sessionStars, starJoin)
+      .where(and(visibilityFilter, isNotNull(sessionStars.starredAt)))
+      .orderBy(desc(agentSessions.updatedAt)),
+  ]);
+
+  const byId = new Map<string, (typeof recent)[number]>();
+  for (const row of recent) byId.set(row.id, row);
+  for (const row of starred) byId.set(row.id, row);
+
+  return Array.from(byId.values())
+    .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+      serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
+    );
 }
 
 export async function loadAgentSessionDetailForWorkspace(
