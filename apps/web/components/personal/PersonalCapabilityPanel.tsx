@@ -10,6 +10,7 @@ import type { AgentConfig, AgentToolId } from "@opencompany/agent-runtime/types"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
+  ChevronRight,
   GitBranch,
   LoaderCircle,
   type LucideIcon,
@@ -33,10 +34,27 @@ import {
 } from "@/components/agent-editor/tools";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import {
+  disconnectGitHubIntegrationAction,
+  refreshGitHubRepositories,
+} from "@/lib/integrations/actions";
+import { disconnectGoogleIntegrationAction } from "@/lib/integrations/google-actions";
+import {
+  removeBetterStackMcpConnection,
+  removeBraintrustMcpConnection,
+  removeLinearMcpToken,
+  removePostHogMcpConnection,
+  removeSlackMcpConnection,
+} from "@/lib/mcp/actions";
+import {
   ONBOARDING_CONNECTED_MESSAGE,
   type OnboardingConnectedMessage,
 } from "@/lib/onboarding/setups";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
+import type {
+  PersonalIntegrationAccountDetail,
+  PersonalIntegrationDetail,
+  PersonalIntegrationDetails,
+} from "@/lib/personal/integration-details";
 import {
   PERSONAL_INTEGRATION_TOOL_IDS,
   PERSONAL_INTEGRATIONS_CATALOG,
@@ -80,6 +98,17 @@ type IntegrationRow = Row & {
   // Controls badge styling: "success" (green, default), "warning" (amber, used for setup prompts),
   // or "neutral" (muted, used to mark agent-authored personal skills).
   badgeTone?: "success" | "warning" | "neutral";
+  // Rich connection detail (accounts, repositories/calendars, MCP endpoint) rendered in the row's
+  // expandable section. Integration rows only.
+  detail?: PersonalIntegrationDetail;
+  // What the integration grants the agent — shown as an access summary when connected, and as a
+  // "connecting grants…" preview before. Integration rows only.
+  permissions?: string[];
+  // Whether the integration is connected at the workspace level; switches the permissions heading.
+  connected?: boolean;
+  // The catalog id behind this row, used to route the expanded section's disconnect/refresh
+  // actions. Integration rows only — repository rows manage nothing.
+  integrationId?: PersonalIntegrationId;
 };
 
 export type PersonalGitHubIntegrationStatus =
@@ -97,6 +126,7 @@ export function PersonalCapabilityPanel({
   githubRequested,
   githubStatus,
   connections,
+  details,
   onAddIntegration,
   onAddTool,
   onAddSkill,
@@ -108,6 +138,8 @@ export function PersonalCapabilityPanel({
   githubStatus: PersonalGitHubIntegrationStatus;
   // Workspace-level connection state per integration (Connected vs Connect). Integrations only.
   connections?: PersonalIntegrationConnections;
+  // Per-integration accounts/resources detail for the expandable rows. Integrations only.
+  details?: PersonalIntegrationDetails;
   // Append an integration's @-mention to the agent body. Only wired for the integrations section.
   onAddIntegration?: (integration: PersonalIntegrationId) => Promise<void>;
   onAddTool?: (toolId: AgentToolId) => Promise<void>;
@@ -116,7 +148,12 @@ export function PersonalCapabilityPanel({
   const meta = SECTION_META[section];
   const rows =
     section === "integrations"
-      ? buildPersonalIntegrationRows(config, { githubRequested, githubStatus, connections })
+      ? buildPersonalIntegrationRows(config, {
+          githubRequested,
+          githubStatus,
+          connections,
+          details,
+        })
       : buildRows(section, config, personalSkills);
 
   const { connectingId, openConnectPopup } = useConnectPopup();
@@ -227,38 +264,345 @@ function CapabilityRow({
   description,
   badge,
   badgeTone = "success",
+  detail,
+  permissions,
+  connected,
+  integrationId,
   onConnect,
   connecting,
 }: IntegrationRow & { onConnect?: (() => void) | undefined; connecting?: boolean | undefined }) {
+  const [expanded, setExpanded] = useState(false);
+  // Integration rows with connection detail or a permissions summary expand inline; plain rows
+  // (tools, skills, agent-attached repositories) keep the flat layout.
+  const expandable = Boolean(
+    (detail && (detail.accounts.length > 0 || detail.statusReason)) || permissions?.length,
+  );
+
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-surface/55 px-3.5 py-3">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
-        <Icon size={15} strokeWidth={1.85} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium text-ink">{label}</div>
-        <div className="mt-0.5 truncate text-[12px] leading-4 text-ink-muted">{description}</div>
-      </div>
-      {badge &&
-        (onConnect ? (
+    <div className="min-w-0 rounded-lg border border-border bg-surface/55">
+      {/* Row click is a convenience; the chevron button below is the keyboard/AT path. */}
+      <div
+        className={`flex min-w-0 items-center gap-3 px-3.5 py-3 ${expandable ? "cursor-pointer select-none" : ""}`}
+        onClick={expandable ? () => setExpanded((value) => !value) : undefined}
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
+          <Icon size={15} strokeWidth={1.85} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-medium text-ink">{label}</div>
+          <div className="mt-0.5 truncate text-[12px] leading-4 text-ink-muted">{description}</div>
+        </div>
+        {badge &&
+          (onConnect ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onConnect();
+              }}
+              disabled={connecting}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium transition-opacity hover:opacity-80 disabled:opacity-70 ${BADGE_TONE_CLASS.warning}`}
+            >
+              {connecting && <LoaderCircle size={10} strokeWidth={2} className="animate-spin" />}
+              {connecting ? "Connecting…" : badge}
+            </button>
+          ) : (
+            <span
+              className={`shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${BADGE_TONE_CLASS[badgeTone]}`}
+            >
+              {badge}
+            </span>
+          ))}
+        {expandable && (
           <button
             type="button"
-            onClick={onConnect}
-            disabled={connecting}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium transition-opacity hover:opacity-80 disabled:opacity-70 ${BADGE_TONE_CLASS.warning}`}
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse ${label} details` : `Expand ${label} details`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setExpanded((value) => !value);
+            }}
+            className="shrink-0 rounded p-0.5 text-ink-subtle transition-colors hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
-            {connecting && <LoaderCircle size={10} strokeWidth={2} className="animate-spin" />}
-            {connecting ? "Connecting…" : badge}
+            <ChevronRight
+              size={14}
+              strokeWidth={2}
+              className={`transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+            />
           </button>
-        ) : (
-          <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${BADGE_TONE_CLASS[badgeTone]}`}
-          >
-            {badge}
-          </span>
-        ))}
+        )}
+      </div>
+      {expanded && expandable && (
+        <IntegrationRowDetail
+          detail={detail}
+          permissions={permissions}
+          connected={connected}
+          integrationId={integrationId}
+        />
+      )}
     </div>
   );
+}
+
+// The expanded body of an integration row: who is connected (accounts), what the connection can
+// reach (repositories/calendars), connection health, what the integration lets the agent do, and
+// the management actions (refresh, disconnect). Rendered only after the user expands the row, so
+// the relative timestamps never run during SSR.
+function IntegrationRowDetail({
+  detail,
+  permissions,
+  connected,
+  integrationId,
+}: {
+  detail?: PersonalIntegrationDetail | undefined;
+  permissions?: string[] | undefined;
+  connected?: boolean | undefined;
+  integrationId?: PersonalIntegrationId | undefined;
+}) {
+  // Captured once when the section is expanded — keeps render pure (same pattern as PersonalInbox).
+  const [now] = useState(() => Date.now());
+  return (
+    <div className="space-y-3 border-t border-border/70 px-3.5 py-3">
+      {detail?.statusReason && <p className="text-[12px] text-warning">{detail.statusReason}</p>}
+
+      {detail?.accounts.map((account) => (
+        <IntegrationAccountDetail
+          key={account.id}
+          account={account}
+          resourcesLabel={detail.resourcesLabel}
+          now={now}
+          integrationId={integrationId}
+        />
+      ))}
+
+      {permissions && permissions.length > 0 && (
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+            {connected ? "What your agent can do" : "Connecting grants your agent"}
+          </div>
+          <ul className="mt-1.5 space-y-1">
+            {permissions.map((permission) => (
+              <li key={permission} className="flex items-start gap-1.5 text-[12px] text-ink-muted">
+                <Check size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-success" />
+                <span>{permission}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* MCP connections have no per-account section, so their disconnect action lives here. */}
+      {connected && integrationId && detail?.accounts.length === 0 && (
+        <IntegrationDetailActions integrationId={integrationId} />
+      )}
+    </div>
+  );
+}
+
+// One connected account inside an expanded integration row — "@login · Organization" or the
+// Google account email — plus its resource list (repositories, calendars), any health warning,
+// and the account's management actions.
+function IntegrationAccountDetail({
+  account,
+  resourcesLabel,
+  now,
+  integrationId,
+}: {
+  account: PersonalIntegrationAccountDetail;
+  resourcesLabel: string | null;
+  now: number;
+  integrationId?: PersonalIntegrationId | undefined;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="min-w-0 truncate text-[12.5px] text-ink">
+          <span className="font-medium">{account.label}</span>
+          {account.detail && <span className="text-ink-muted"> · {account.detail}</span>}
+        </div>
+        {account.updatedAt && (
+          <span className="shrink-0 text-[11px] text-ink-subtle">
+            synced {relativeTime(account.updatedAt, now)}
+          </span>
+        )}
+      </div>
+      {account.status !== "connected" && (
+        <p className="mt-1 text-[11.5px] text-warning">
+          {account.statusReason ?? "Connection needs attention — reconnect to restore access."}
+        </p>
+      )}
+      {resourcesLabel && account.resources.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+            {resourcesLabel} · {account.resources.length}
+          </div>
+          <div className="mt-1 max-h-56 space-y-px overflow-y-auto">
+            {account.resources.map((resource) => (
+              <div
+                key={resource.id}
+                className="flex items-center justify-between gap-2 rounded px-1.5 py-1 text-[12px] hover:bg-surface-hover"
+              >
+                <span className="truncate text-ink">{resource.name}</span>
+                {resource.warning ? (
+                  <span
+                    className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium ${BADGE_TONE_CLASS.warning}`}
+                  >
+                    {resource.warning}
+                  </span>
+                ) : (
+                  resource.detail && (
+                    <span className="shrink-0 text-[11px] text-ink-subtle">{resource.detail}</span>
+                  )
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {integrationId && (
+        <IntegrationDetailActions integrationId={integrationId} accountId={account.id} />
+      )}
+    </div>
+  );
+}
+
+// Disconnect actions per integration. GitHub/Google disconnect a specific connection (account);
+// MCP integrations remove the workspace credential. All of these re-derive server state via
+// router.refresh() on success, same as the connect flow.
+const MCP_DISCONNECT_ACTIONS: Partial<
+  Record<PersonalIntegrationId, () => Promise<{ ok: boolean }>>
+> = {
+  linear: removeLinearMcpToken,
+  slack: removeSlackMcpConnection,
+  posthog: removePostHogMcpConnection,
+  betterstack: removeBetterStackMcpConnection,
+  braintrust: removeBraintrustMcpConnection,
+};
+
+async function disconnectIntegration(
+  integrationId: PersonalIntegrationId,
+  accountId?: string,
+): Promise<{ ok: boolean; message?: string }> {
+  if (integrationId === "github") {
+    if (!accountId) return { ok: false, message: "Missing connection id." };
+    return disconnectGitHubIntegrationAction(accountId);
+  }
+  if (integrationId === "gmail" || integrationId === "google_calendar") {
+    if (!accountId) return { ok: false, message: "Missing connection id." };
+    return disconnectGoogleIntegrationAction({ provider: integrationId, integrationId: accountId });
+  }
+  const remove = MCP_DISCONNECT_ACTIONS[integrationId];
+  if (!remove) return { ok: false, message: "This integration cannot be disconnected here." };
+  return remove();
+}
+
+// The management footer of an expanded integration/account section: refresh (GitHub only) and a
+// two-step disconnect ("Disconnect" → "Confirm disconnect") so one stray click can't drop a
+// working connection. Errors render inline next to the action that failed.
+function IntegrationDetailActions({
+  integrationId,
+  accountId,
+}: {
+  integrationId: PersonalIntegrationId;
+  accountId?: string | undefined;
+}) {
+  const router = useRouter();
+  const [pending, setPending] = useState<"refresh" | "disconnect" | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // An unconfirmed disconnect resets after a beat so the danger state never lingers.
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = window.setTimeout(() => setConfirming(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [confirming]);
+
+  const run = async (
+    kind: "refresh" | "disconnect",
+    action: () => Promise<{ ok: boolean; message?: string }>,
+  ) => {
+    if (pending) return;
+    setPending(kind);
+    setError(null);
+    try {
+      const result = await action();
+      if (result.ok) {
+        router.refresh();
+      } else {
+        setError(result.message ?? "Something went wrong. Try again.");
+      }
+    } catch {
+      setError("Something went wrong. Try again.");
+    } finally {
+      setPending(null);
+      setConfirming(false);
+    }
+  };
+
+  const handleDisconnect = () => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    void run("disconnect", () => disconnectIntegration(integrationId, accountId));
+  };
+
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-center gap-3">
+        {integrationId === "github" && accountId && (
+          <button
+            type="button"
+            disabled={Boolean(pending)}
+            onClick={() =>
+              void run("refresh", async () => {
+                await refreshGitHubRepositories(accountId);
+                return { ok: true };
+              })
+            }
+            className="inline-flex items-center gap-1 text-[11.5px] font-medium text-ink-muted transition-colors hover:text-ink disabled:opacity-60"
+          >
+            {pending === "refresh" && (
+              <LoaderCircle size={11} strokeWidth={2} className="animate-spin" />
+            )}
+            {pending === "refresh" ? "Refreshing…" : "Refresh repositories"}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={Boolean(pending)}
+          onClick={handleDisconnect}
+          className={`inline-flex items-center gap-1 text-[11.5px] font-medium transition-colors disabled:opacity-60 ${
+            confirming
+              ? "rounded border border-danger-border bg-danger-bg px-1.5 py-px text-danger"
+              : "text-danger/75 hover:text-danger"
+          }`}
+        >
+          {pending === "disconnect" && (
+            <LoaderCircle size={11} strokeWidth={2} className="animate-spin" />
+          )}
+          {pending === "disconnect"
+            ? "Disconnecting…"
+            : confirming
+              ? "Confirm disconnect"
+              : "Disconnect"}
+        </button>
+      </div>
+      {error && <p className="mt-1.5 text-[11.5px] text-danger">{error}</p>}
+    </div>
+  );
+}
+
+function relativeTime(iso: string, now: number): string {
+  const diff = now - Date.parse(iso);
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  return day === 1 ? "1d ago" : `${day}d ago`;
 }
 
 // Whether an integration is already attached to the agent — GitHub via its `@github` mention,
@@ -841,13 +1185,15 @@ export function personalIntegrationCount(input: { config: AgentConfig; githubReq
 
 // One row per integration attached to the agent. GitHub keeps its `@github` summary row plus a row
 // per connected repository; the other integrations each render a row when their tool is enabled.
-// Each row shows a Connected badge or a "Connect" badge linking to the in-tab OAuth flow.
+// Each row shows a Connected badge or a "Connect" badge linking to the in-tab OAuth flow, and
+// carries the connection detail + permissions that power the row's expandable section.
 export function buildPersonalIntegrationRows(
   config: AgentConfig,
   input: {
     githubRequested: boolean;
     githubStatus: PersonalGitHubIntegrationStatus;
     connections?: PersonalIntegrationConnections | undefined;
+    details?: PersonalIntegrationDetails | undefined;
   },
 ): IntegrationRow[] {
   const rows: IntegrationRow[] = [];
@@ -855,60 +1201,84 @@ export function buildPersonalIntegrationRows(
   for (const entry of PERSONAL_INTEGRATIONS_CATALOG) {
     if (entry.id === "github") {
       if (!input.githubRequested) continue;
+      const detail = input.details?.github;
       rows.push({
         id: "github",
         icon: entry.icon,
         label: entry.label,
-        ...githubRowStatus(input.githubStatus, entry),
+        ...githubRowStatus(input.githubStatus, entry, detail),
+        ...(detail ? { detail } : {}),
+        permissions: entry.permissions,
+        connected: input.githubStatus === "connected",
+        integrationId: entry.id,
       });
       continue;
     }
 
     if (!config.tools.some((tool) => tool.id === entry.id)) continue;
     const connected = Boolean(input.connections?.[entry.id]);
+    const detail = input.details?.[entry.id];
     rows.push({
       id: entry.id,
       icon: entry.icon,
       label: entry.label,
-      description: entry.description,
+      description: (connected && detail?.summary) || entry.description,
+      ...(detail ? { detail } : {}),
+      permissions: entry.permissions,
+      connected,
+      integrationId: entry.id,
       ...(connected
         ? { badge: "Connected", badgeTone: "success" as const }
         : { badge: "Connect", connectEntry: entry }),
     });
   }
 
+  // Repositories available through the workspace GitHub connection, keyed by full name, so the
+  // agent's repository rows can flag degraded access.
+  const githubResources = new Map(
+    (input.details?.github?.accounts ?? []).flatMap((account) =>
+      account.resources.map((resource) => [resource.name, resource] as const),
+    ),
+  );
+
   rows.push(
-    ...config.integrations.github.repositories.map((repository) => ({
-      id: repository.binding
-        ? `${repository.binding.connection.externalId}:${repository.binding.externalId}`
-        : repositoryIdForFullName(repository.fullName),
-      icon: GitBranch,
-      label: repository.fullName,
-      description: repository.binding?.connection.label
-        ? `GitHub · ${repository.binding.connection.label}`
-        : "GitHub repository",
-    })),
+    ...config.integrations.github.repositories.map((repository) => {
+      const resource = githubResources.get(repository.fullName);
+      return {
+        id: repository.binding
+          ? `${repository.binding.connection.externalId}:${repository.binding.externalId}`
+          : repositoryIdForFullName(repository.fullName),
+        icon: GitBranch,
+        label: repository.fullName,
+        description: repository.binding?.connection.label
+          ? `GitHub · ${repository.binding.connection.label}`
+          : "GitHub repository",
+        ...(resource?.warning ? { badge: resource.warning, badgeTone: "warning" as const } : {}),
+      };
+    }),
   );
 
   return rows;
 }
 
 // Description + badge for the `@github` summary row, derived from the workspace connection status.
+// When connected, prefers the live connection summary ("Connected as @acme · 12 repositories").
 // Not-connected states open the GitHub connect flow in a popup.
 function githubRowStatus(
   status: PersonalGitHubIntegrationStatus,
   entry: PersonalIntegrationCatalogEntry,
+  detail: PersonalIntegrationDetail | undefined,
 ): Pick<IntegrationRow, "description" | "badge" | "connectEntry" | "badgeTone"> {
   if (status === "connected") {
     return {
-      description: "Workspace GitHub integration is available.",
+      description: detail?.summary ?? "Workspace GitHub integration is available.",
       badge: "Connected",
       badgeTone: "success",
     };
   }
   const description =
     status === "needs_repository_access"
-      ? "Connected — choose repositories to use in workspace settings."
+      ? "Connected, but no repositories granted yet — use Connect to choose them."
       : "Connect GitHub before your agent can use repositories.";
   return { description, badge: "Connect", connectEntry: entry };
 }

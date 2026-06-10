@@ -10,6 +10,7 @@ export default function PersonalIntegrationsPage() {
     githubRequested,
     githubIntegrationStatus,
     integrationConnections,
+    integrationDetails,
     addIntegration,
   } = usePersonalAgent();
 
@@ -22,6 +23,7 @@ export default function PersonalIntegrationsPage() {
         githubRequested={githubRequested}
         githubStatus={githubIntegrationStatus}
         connections={integrationConnections}
+        details={integrationDetails}
         onAddIntegration={addIntegration}
       />
     </div>

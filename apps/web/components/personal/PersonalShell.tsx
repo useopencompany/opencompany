@@ -23,6 +23,7 @@ import {
   addPersonalAgentTool,
   type PersonalIntegrationId,
 } from "@/lib/personal/actions";
+import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
@@ -71,6 +72,7 @@ export type PersonalShellProps = {
   personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
   integrationConnections: PersonalIntegrationConnections;
+  integrationDetails: PersonalIntegrationDetails;
   proMode: boolean;
   companySurfaceEnabled: boolean;
   children: React.ReactNode;
@@ -89,6 +91,7 @@ export default function PersonalShell({
   personalSkills,
   githubIntegrationStatus,
   integrationConnections,
+  integrationDetails,
   proMode: initialProMode,
   companySurfaceEnabled: initialCompanySurfaceEnabled,
   children,
@@ -167,6 +170,7 @@ export default function PersonalShell({
       personalSkills,
       githubIntegrationStatus,
       integrationConnections,
+      integrationDetails,
       config,
       setConfig,
       proMode,
@@ -199,6 +203,7 @@ export default function PersonalShell({
       personalSkills,
       githubIntegrationStatus,
       integrationConnections,
+      integrationDetails,
     ],
   );
 

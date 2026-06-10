@@ -7,6 +7,7 @@ import type { PersonalGitHubIntegrationStatus } from "@/components/personal/Pers
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
+import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 
 // The immutable identity of the personal agent the surface is rendering. Mutable surfaces
@@ -35,6 +36,8 @@ export type PersonalAgentContextValue = {
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
   // Workspace-level connection state per integration, used to render Connected/Connect badges.
   integrationConnections: PersonalIntegrationConnections;
+  // Per-integration accounts/resources/permissions detail for the expandable Integrations rows.
+  integrationDetails: PersonalIntegrationDetails;
 
   config: AgentConfig;
   setConfig: (config: AgentConfig) => void;

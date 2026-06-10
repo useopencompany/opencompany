@@ -11,6 +11,7 @@ import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
 import { loadGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { loadPersonalAgentContextFiles, loadPersonalSkills } from "@/lib/personal/context";
+import { buildPersonalIntegrationDetails } from "@/lib/personal/integration-details-server";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 
@@ -57,6 +58,14 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     braintrust: mcpSettings.braintrust.configured,
   };
 
+  // Richer per-integration detail (accounts, repositories/calendars, MCP endpoints) for the
+  // expandable rows on the Integrations tab. Pure projection of the state loaded above.
+  const integrationDetails = buildPersonalIntegrationDetails({
+    github: workspaceIntegrations.github,
+    google: googleState,
+    mcp: mcpSettings,
+  });
+
   return (
     <AnalyticsProvider
       identity={{
@@ -82,6 +91,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                 personalSkills={personalSkills}
                 githubIntegrationStatus={workspaceIntegrations.github.status}
                 integrationConnections={integrationConnections}
+                integrationDetails={integrationDetails}
                 proMode={user.proMode}
                 companySurfaceEnabled={user.companySurfaceEnabled}
               >
