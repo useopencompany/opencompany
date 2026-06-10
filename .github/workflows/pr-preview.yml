@@ -3,7 +3,8 @@ name: PR Preview
 # Full per-PR preview stack (issue #351). GitHub Actions is the single orchestrator:
 # for PRs carrying the `preview` label it provisions an isolated vertical ANTOS stack —
 # Neon branch (from the sanitized preview-seed) + per-PR Render runner + Electric +
-# Durable Streams + a Vercel web preview wired to all of them — and tears it all down on
+# Durable Streams + Inngest branch environment + a Vercel web preview wired to all of them —
+# and tears it all down on
 # close or when the label is removed. Preview orchestration is intentionally advisory:
 # failures are reported in the PR comment and deployment status when available, but must
 # not block merges.
@@ -276,6 +277,15 @@ jobs:
         run: |
           bunx vercel alias set "${{ steps.deploy-web.outputs.url }}" "${{ steps.provision.outputs.alias }}" --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
+      - name: Sync Inngest preview app
+        run: |
+          bunx vercel curl /api/inngest \
+            --deployment "${{ steps.deploy-web.outputs.url }}" \
+            --token="$VERCEL_TOKEN" \
+            --scope="$VERCEL_ORG_ID" \
+            -X PUT \
+            -H "Accept: application/json,text/plain,*/*"
+
       - name: Post preview URL (early)
         if: ${{ steps.provision.outputs.alias != '' }}
         # Surface the URL the moment the alias resolves, before the health smoke wait.
@@ -347,7 +357,7 @@ jobs:
               "",
               ok ? `<details><summary>Stack</summary>\n\n- Runner: ${process.env.RUNNER_URL}\n- Electric: ${process.env.ELECTRIC_URL}\n- Commit: \`${sha}\`\n\n</details>` : "",
               "",
-              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams). The DB is **reset from the sanitized seed on every push**. Auto-expires ~24h after the last push (Neon TTL + the reaper, every 6h); removing the `preview` label or closing the PR tears it down immediately.",
+              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams + Inngest branch env). The DB is **reset from the sanitized seed on every push**. Auto-expires ~24h after the last push (Neon TTL + the reaper, every 6h; Inngest branch envs auto-archive separately); removing the `preview` label or closing the PR tears down the stack resources immediately.",
             ].join("\n");
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,

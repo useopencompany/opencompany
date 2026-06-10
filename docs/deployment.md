@@ -340,10 +340,19 @@ computes — already done for this project).
    an optional least-privilege hardening to apply + test later.
 2. **Vercel.** Attach `*.preview.opencompany.cloud` (wildcard) to the web project. Populate
    the Vercel **Preview** environment base values from Infisical `dev` + `/web`.
-3. **GitHub.** Create the `preview` environment and label. Set repo `vars` (see
+3. **Inngest.** Use the existing Inngest Cloud account with Branch Environments. Add the
+   branch-environment `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` to the Vercel Preview
+   environment base values (via Infisical/Vercel sync or the Inngest Vercel integration).
+   Keep `INNGEST_DEV` unset. The PR workflow injects `INNGEST_ENV=preview-pr-<n>` and runs
+   a `PUT /api/inngest` sync after each web deploy, so every preview gets isolated events,
+   logs, delayed jobs, and function definitions. If Vercel Deployment Protection is enabled
+   for previews, configure Protection Bypass for Automation in the Inngest Vercel integration
+   settings; otherwise Inngest can sync but later function invocations will be blocked by
+   Vercel auth.
+4. **GitHub.** Create the `preview` environment and label. Set repo `vars` (see
    [env-vars.md → Preview Environments](./env-vars.md#preview-environments-per-pr)):
    at minimum `PREVIEW_BASE_DOMAIN`, plus the Infisical OIDC `vars`.
-4. **Infisical.** In the provision path (`dev` + `/release` by default) add `NEON_API_KEY`,
+5. **Infisical.** In the provision path (`dev` + `/release` by default) add `NEON_API_KEY`,
    `NEON_PROJECT_ID`, `RENDER_API_KEY`, and `VERCEL_TOKEN/ORG_ID/PROJECT_ID` (the same
    `RENDER_API_KEY` / `VERCEL_*` model as the prod release CI; `RENDER_OWNER_ID` is
    optional — auto-resolved from the API). Broaden the OIDC machine identity so the
@@ -351,12 +360,13 @@ computes — already done for this project).
    reads runner runtime secrets from `prod` + `/runner` by default
    (`PREVIEW_RUNNER_INFISICAL_ENV_SLUG` / `PREVIEW_RUNNER_INFISICAL_SECRET_PATH`) so preview
    runners can boot with E2B, AI Gateway, integration encryption, and GitHub App credentials.
-5. **WorkOS.** On the preview AuthKit env, register wildcard **login** and **sign-out**
+6. **WorkOS.** On the preview AuthKit env, register wildcard **login** and **sign-out**
    redirects (`https://*.preview.opencompany.cloud/...`) and keep a concrete default (a
    wildcard cannot be the default).
-6. **Shared services (guardrails).** Use capped preview E2B + AI Gateway keys (or accept
-   dev keys), and a sandbox GitHub org/App (or accept the dev org). Stripe/Inngest degrade
-   gracefully in preview.
+7. **Shared services (guardrails).** Use capped preview E2B + AI Gateway keys (or accept
+   dev keys), and a sandbox GitHub org/App (or accept the dev org). Stripe can degrade
+   gracefully in preview; Inngest is required for delayed/background behavior such as the
+   5-minute memory pass.
 
 ### Operating a preview
 
