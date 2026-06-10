@@ -2,6 +2,7 @@ import {
   AGENT_SELF_EDIT_SKILL_ID,
   type AgentBrainReference,
   type AgentConfig,
+  agentHasGitHubAccess,
   BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
   formatBrainReferenceDisplay,
@@ -22,6 +23,7 @@ import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
+  loadConnectedGitHubInstallation,
   readSandboxBrainSnapshot,
   resolveAttachedRepositoryInstallations,
   runAmpCoderTool,
@@ -595,7 +597,9 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
-          hasAttachedRepository: Boolean(input.repository),
+          hasAttachedRepository:
+            Boolean(input.repository) ||
+            (input.agentConfig ? agentHasGitHubAccess(input.agentConfig) : false),
           googleContext: input.workspaceId
             ? {
                 workspaceId: input.workspaceId,
@@ -1072,6 +1076,10 @@ function createCommandOutputPublisher(input: {
 // installation token cannot span installations, so we scope the token to the repos
 // of the first attached repository's installation; cross-installation sessions get
 // auth for one installation at a time.
+//
+// With the live `@github` all-repositories scope, the token is minted UNSCOPED for the
+// workspace's first connected installation instead — full access to everything that
+// installation can reach, resolved at call time (never snapshotted into the config).
 async function resolveShellGitHubAuth(input: {
   workspaceId?: string | undefined;
   agentConfig?: AgentConfig | undefined;
@@ -1079,7 +1087,33 @@ async function resolveShellGitHubAuth(input: {
 }) {
   if (!input.workspaceId || !input.agentConfig) return null;
 
-  const repositories = input.agentConfig.integrations.github.repositories;
+  const github = input.agentConfig.integrations.github;
+  if (github.allRepositories === true) {
+    const installation = await loadConnectedGitHubInstallation(input.workspaceId);
+    // GitHub not connected: same graceful no-auth behavior as an agent without repositories.
+    if (!installation) return null;
+
+    const githubToken = await getGitHubWorkInstallationToken({
+      installationId: installation.installationId,
+    });
+    if (!githubToken) return null;
+
+    const githubAuthHeader = gitAuthHeader(githubToken);
+    return {
+      env: buildGitHubCommandEnv({
+        githubAuthHeader,
+        githubToken,
+        toolCallId: input.toolCallId,
+        // No GH_REPO default: with installation-wide access the agent must pass --repo.
+        ...(github.repositories.length === 1
+          ? { repositoryFullName: github.repositories[0]!.fullName }
+          : {}),
+      }),
+      redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+    };
+  }
+
+  const repositories = github.repositories;
   if (repositories.length === 0) return null;
 
   const resolved = await resolveAttachedRepositoryInstallations(input.workspaceId, repositories);
