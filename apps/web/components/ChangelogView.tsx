@@ -18,6 +18,7 @@ import {
   type Changelog,
   type ChangeSection,
   type InlineToken,
+  isVideoSrc,
   type Release,
   renderInline,
 } from "@/lib/changelog";
@@ -98,8 +99,35 @@ function InlineMarkdown({ text }: { text: string }) {
   );
 }
 
+// Renders `![alt](src)` media. Videos (.mp4/.webm/.mov) play GIF-style:
+// muted, looping, inline. Uses block-level <span> wrappers so the embed
+// stays valid inside the <p>/<span> containers InlineMarkdown renders into.
+function MediaEmbed({ alt, src }: { alt: string; src: string }) {
+  return (
+    <span className="my-2 block max-w-[560px] overflow-hidden rounded-lg border border-border bg-surface-subtle shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+      {isVideoSrc(src) ? (
+        <video
+          src={src}
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="metadata"
+          aria-label={alt || "Screen recording"}
+          className="block w-full"
+        />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element -- remote changelog media, dimensions unknown
+        <img src={src} alt={alt} loading="lazy" className="block w-full" />
+      )}
+    </span>
+  );
+}
+
 function InlineTokenView({ token }: { token: InlineToken }) {
   switch (token.kind) {
+    case "image":
+      return <MediaEmbed alt={token.alt} src={token.src} />;
     case "code":
       return (
         <code className="rounded bg-surface-subtle px-1 py-0.5 font-mono text-[12px] text-ink">

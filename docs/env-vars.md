@@ -34,6 +34,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `RUNNER_PUBLIC_URL` | Vercel, GitHub Actions | Browser-reachable Render URL. |
 | `RUNNER_ALLOWED_ORIGINS` | Render, production web domain | Must include the exact Vercel production origin if browser-origin runner requests are enabled. |
 | `DURABLE_STREAMS_URL` / `DURABLE_STREAMS_TOKEN` | Vercel, Render | Web owns the read proxy and web-authored appends; runner owns model/tool appends. |
+| `BLOB_READ_WRITE_TOKEN` | Vercel, Render | Token for the private `opencompany-attachments` Blob store. Web mints client upload tokens and serves attachments; the runner downloads attachment bytes for model calls. See [Vercel Blob stores](#vercel-blob-stores). |
 | `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner Brain sync. |
 | `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Managed workspace-state installation target used for workspace repo writes and runner Brain sync. |
 | `GITHUB_APP_PRIVATE_KEY` | Vercel, Render | Same private key, with newlines preserved or escaped as `\n`. |
@@ -50,6 +51,26 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
+
+## Vercel Blob stores
+
+Blob access mode is **per-store and immutable**, so we run two stores on the team:
+
+| Store | Access | Used by | Token (Infisical `prod`) |
+|---|---|---|---|
+| `opencompany-attachments` | Private | Web (`/api/upload`, `/api/attachments/[id]`) and runner (attachment hydration) | `BLOB_READ_WRITE_TOKEN` in `/web` and `/runner` |
+| `opencompany-changelog` | Public | Changelog screen recordings, uploaded at authoring time ([changelog-media.md](./changelog-media.md)) | `CHANGELOG_BLOB_READ_WRITE_TOKEN` in `/release` |
+
+As with everything else, **Infisical is the source of truth** for the tokens the
+apps read: the `/web` and `/runner` syncs deliver `BLOB_READ_WRITE_TOKEN` to
+Vercel and Render.
+
+The Vercel project additionally carries two **Vercel-managed** env vars,
+`ATTACHMENTS_BLOB_READ_WRITE_TOKEN` and `CHANGELOG_BLOB_READ_WRITE_TOKEN`,
+created by the store↔project connections (custom env prefixes were chosen so
+they never collide with the Infisical-synced `BLOB_READ_WRITE_TOKEN`). They are
+the token anchors — **do not delete the store connections or these vars**, that
+revokes the tokens. No app code reads them directly.
 
 ## Vercel Web
 
@@ -96,6 +117,7 @@ Set these in Vercel Production.
 | `ELECTRIC_TOKEN` | Self-hosted Electric only | Bearer token for protected self-hosted Electric. |
 | `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for session transcript reads and web-authored appends. |
 | `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Server-only; never exposed to the browser. |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Mints client upload tokens (`/api/upload`) and serves attachments (`/api/attachments/[id]`). Must match Render. |
 | `LINEAR_API_KEY` | No | Enables feedback intake. |
 | `LINEAR_TEAM_ID` | No | Linear team for feedback. |
 | `LINEAR_FEEDBACK_PROJECT_ID` | No | Optional project routing for feedback. |
@@ -191,6 +213,7 @@ Set these in the Render `opencompany-runner` service.
 | `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for runner requests. |
 | `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for model/tool transcript appends. Must match Vercel. |
 | `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Must match Vercel. |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Downloads attachment bytes (images/PDFs) to inline into model calls. Must match Vercel. |
 | `E2B_API_KEY` | Yes | Creates/connects E2B sandboxes. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
 | `EXA_API_KEY` | No | Required only for agents that enable Exa. |
@@ -243,6 +266,7 @@ Infisical `prod` + `/release` secrets:
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
+| `CHANGELOG_BLOB_READ_WRITE_TOKEN` | Public `opencompany-changelog` Blob store token. Authoring-time credential for uploading changelog screen recordings (see [changelog-media.md](./changelog-media.md)); not read by CI or any runtime. |
 
 GitHub environment variables:
 
