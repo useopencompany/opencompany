@@ -55,6 +55,7 @@ const renderRegion = process.env.RENDER_REGION?.trim() || "frankfurt";
 const renderPlan = process.env.RENDER_PLAN?.trim() || "starter";
 const electricImage = process.env.ELECTRIC_IMAGE?.trim() || "docker.io/electricsql/electric:latest";
 const electricStorageDir = process.env.ELECTRIC_STORAGE_DIR?.trim();
+const googleOAuthCallbackUrl = process.env.GOOGLE_OAUTH_CALLBACK_URL?.trim();
 
 const requiredRunnerRuntimeEnv = requiredEnvMap([
   "E2B_API_KEY",
@@ -249,6 +250,7 @@ async function main() {
   const webEnv = webDeployEnv({
     pr,
     sha,
+    appUrl: names.aliasUrl,
     databaseUrl: pooledUrl,
     runnerUrl: runner.url,
     runnerInternalToken,
@@ -257,6 +259,7 @@ async function main() {
     streamsUrl: streams.url,
     streamsToken,
     redirectUri: names.redirectUri,
+    googleOAuthCallbackUrl,
   });
 
   emitOutputs({ manifest, webEnv });

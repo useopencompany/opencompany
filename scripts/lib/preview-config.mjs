@@ -52,6 +52,7 @@ export function toDirectConnectionString(pooledUrl) {
 export function webDeployEnv({
   pr,
   sha,
+  appUrl,
   databaseUrl,
   runnerUrl,
   runnerInternalToken,
@@ -60,6 +61,7 @@ export function webDeployEnv({
   streamsUrl,
   streamsToken,
   redirectUri,
+  googleOAuthCallbackUrl,
 }) {
   return compact({
     DATABASE_URL: databaseUrl,
@@ -70,7 +72,9 @@ export function webDeployEnv({
     ELECTRIC_SECRET: electricSecret,
     DURABLE_STREAMS_URL: streamsUrl,
     DURABLE_STREAMS_TOKEN: streamsToken,
+    NEXT_PUBLIC_APP_URL: appUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
+    GOOGLE_OAUTH_CALLBACK_URL: googleOAuthCallbackUrl,
     OBSERVABILITY_ENV: "preview",
     // Leave server-side OBSERVABILITY_RELEASE unset (repo convention: it's a manual
     // override only). The browser tag below is enough for release grouping, and the
