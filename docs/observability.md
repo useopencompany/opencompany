@@ -93,6 +93,9 @@ Production logs are forwarded by the hosting platforms, not by app-side source t
 
 - Vercel web logs: Better Stack source `opencompany-web-production`.
 - Render runner logs: Better Stack source `opencompany-runner-production`.
+- Render preview runner logs: shared Better Stack Render source `opencompany-runner-preview`
+  (`source_id=2511725`; one source for all PR previews; query by `preview_pr_number` and
+  `session_id`).
 
 Keep source tokens in Better Stack/Vercel/Render/Infisical configuration only. Do not commit source
 tokens, Logtail browser tokens, or OTLP exporter credentials.
@@ -183,6 +186,27 @@ Prefer these correlation fields in all handled captures:
 - `sandbox_id`
 - `model_provider`
 - `model_name`
+
+### Preview Sessions
+
+For hosted PR previews, run the read-only debugger before the preview stack is torn down:
+
+```sh
+PREVIEW_DATABASE_URL="$PREVIEW_NEON_URL" \
+  bun run preview:debug-session -- --pr <number> --session <session_id>
+```
+
+The script opens a `READ ONLY` transaction, runs only `SELECT` queries, rolls back, and prints:
+
+- session status, last error, model, sandbox, and run-lease state
+- runner job state and last errors
+- message role/status/timing summaries with content lengths only
+- selected runtime event summaries without raw event payloads
+- approval/question states and usage totals
+- Better Stack searches for the shared preview source
+
+Use `BETTER_STACK_PREVIEW_SOURCE_NAME` only if the shared source is named differently. Do not pass or
+paste raw database URLs in issue comments or logs; keep preview DB access in the operator shell.
 
 ## What To Look For
 

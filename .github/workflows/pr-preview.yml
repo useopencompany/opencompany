@@ -279,10 +279,15 @@ jobs:
 
       - name: Sync Inngest preview app
         run: |
-          curl --fail-with-body --retry 6 --retry-delay 5 \
+          if [ -z "$VERCEL_AUTOMATION_BYPASS_SECRET" ]; then
+            echo "::error::VERCEL_AUTOMATION_BYPASS_SECRET is not set in the preview release secrets."
+            exit 1
+          fi
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 \
             -X PUT \
             -H "Accept: application/json,text/plain,*/*" \
-            "https://${{ steps.provision.outputs.alias }}/api/inngest"
+            --output /tmp/inngest-preview-sync-response \
+            "https://${{ steps.provision.outputs.alias }}/api/inngest?x-vercel-protection-bypass=$VERCEL_AUTOMATION_BYPASS_SECRET"
 
       - name: Post preview URL (early)
         if: ${{ steps.provision.outputs.alias != '' }}

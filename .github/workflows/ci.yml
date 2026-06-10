@@ -53,7 +53,7 @@ jobs:
 
       # scripts/ is not a workspace package, so turbo test doesn't cover it.
       - name: Test preview scripts
-        run: node --test scripts/lib/preview-config.test.mjs scripts/lib/preview-render.test.mjs
+        run: node --test scripts/lib/preview-config.test.mjs scripts/lib/preview-render.test.mjs scripts/lib/preview-debug-session.test.mjs
 
   secrets:
     name: Secret scan

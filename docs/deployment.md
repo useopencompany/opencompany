@@ -363,14 +363,21 @@ computes — already done for this project).
    reads runner runtime secrets from `prod` + `/runner` by default
    (`PREVIEW_RUNNER_INFISICAL_ENV_SLUG` / `PREVIEW_RUNNER_INFISICAL_SECRET_PATH`) so preview
    runners can boot with E2B, AI Gateway, integration encryption, and GitHub App credentials.
-6. **WorkOS.** On the preview AuthKit env, register wildcard **login** and **sign-out**
+6. **Better Stack / Render logs.** Create one shared Better Stack Render log source for preview
+   runner logs, normally `opencompany-runner-preview`. Store its syslog endpoint and source token
+   in Infisical `dev` + `/release` as `PREVIEW_RENDER_LOG_ENDPOINT` and
+   `PREVIEW_RENDER_LOG_TOKEN` so `scripts/preview-provision.mjs` can apply a Render resource log
+   stream override to each preview runner. If using a workspace-level Render Log Stream instead,
+   point it at the same source and enable **Include logs from preview instances**. Search the shared
+   source by `preview_pr_number` and `session_id`.
+7. **WorkOS.** On the preview AuthKit env, register wildcard **login** and **sign-out**
    redirects (`https://*.preview.opencompany.cloud/...`) and keep a concrete default (a
    wildcard cannot be the default).
-7. **Google OAuth.** In Google Cloud Console, add
+8. **Google OAuth.** In Google Cloud Console, add
    `https://oauth.opencompany.cloud/api/google/callback` as an authorized redirect URI.
    Set `GOOGLE_OAUTH_CALLBACK_URL` to that same value in the Vercel/Infisical envs used by
    previews, and in production if production should also route through the broker.
-8. **Shared services (guardrails).** Use capped preview E2B + AI Gateway keys (or accept
+9. **Shared services (guardrails).** Use capped preview E2B + AI Gateway keys (or accept
    dev keys), and a sandbox GitHub org/App (or accept the dev org). Stripe can degrade
    gracefully in preview; Inngest is required for delayed/background behavior such as the
    5-minute memory pass.

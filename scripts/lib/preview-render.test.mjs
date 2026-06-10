@@ -4,6 +4,7 @@ import {
   buildElectricServiceSpec,
   buildRunnerServiceSpec,
   buildStreamsServiceSpec,
+  createRenderClient,
   serviceHasPreviewTag,
   toRenderEnvVars,
 } from "./preview-render.mjs";
@@ -69,4 +70,31 @@ test("serviceHasPreviewTag reads both tag locations and rejects prod services", 
   assert.equal(serviceHasPreviewTag({ serviceDetails: { tags: ["opencompany-preview"] } }), true);
   assert.equal(serviceHasPreviewTag({ name: "opencompany-runner", tags: ["prod"] }), false);
   assert.equal(serviceHasPreviewTag({}), false);
+});
+
+test("updateResourceLogStream sends a resource-level log stream override", async () => {
+  const calls = [];
+  const render = createRenderClient({
+    apiKey: "render-key",
+    apiUrl: "https://api.render.test/v1",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ id: "ls-1" }), { status: 200 });
+    },
+  });
+
+  await render.updateResourceLogStream("srv-123", {
+    endpoint: "s2511725.eu-fsn-3-vec.betterstackdata.com:6514",
+    token: "better-stack-token",
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.render.test/v1/logs/streams/resource/srv-123");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer render-key");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    endpoint: "s2511725.eu-fsn-3-vec.betterstackdata.com:6514",
+    token: "better-stack-token",
+    setting: "send",
+  });
 });
