@@ -72,6 +72,7 @@ export type PersonalShellProps = {
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
   integrationConnections: PersonalIntegrationConnections;
   proMode: boolean;
+  companySurfaceEnabled: boolean;
   children: React.ReactNode;
 };
 
@@ -89,11 +90,13 @@ export default function PersonalShell({
   githubIntegrationStatus,
   integrationConnections,
   proMode: initialProMode,
+  companySurfaceEnabled: initialCompanySurfaceEnabled,
   children,
 }: PersonalShellProps) {
   const { showError } = useToast();
   const [config, setConfig] = useState<AgentConfig>(agent.config);
   const [proMode, setProMode] = useState(initialProMode);
+  const [companySurfaceEnabled, setCompanySurfaceEnabled] = useState(initialCompanySurfaceEnabled);
   const [githubRequested, setGitHubRequested] = useState(() =>
     hasPersonalGitHubIntegrationRequest(agent.body),
   );
@@ -168,6 +171,8 @@ export default function PersonalShell({
       setConfig,
       proMode,
       setProMode,
+      companySurfaceEnabled,
+      setCompanySurfaceEnabled,
       githubRequested,
       getDraft: () => draftRef.current,
       setDraft: (body: string, content: typeof agent.content) => {
@@ -188,6 +193,7 @@ export default function PersonalShell({
       bundleDir,
       config,
       proMode,
+      companySurfaceEnabled,
       githubRequested,
       files,
       personalSkills,

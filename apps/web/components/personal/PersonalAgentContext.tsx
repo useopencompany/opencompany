@@ -46,6 +46,11 @@ export type PersonalAgentContextValue = {
   proMode: boolean;
   setProMode: (next: boolean) => void;
 
+  // Per-user opt-in to the legacy company/workspace surface. Seeded from the DB at layout load;
+  // the setter flips it optimistically so the sidebar's space switcher updates without a reload.
+  companySurfaceEnabled: boolean;
+  setCompanySurfaceEnabled: (next: boolean) => void;
+
   // The behavior editor's live draft. Held as a ref-backed getter (not state) because only the
   // Behavior route reads it, and only at mount — it must not trigger re-renders elsewhere.
   getDraft: () => { body: string; content: TiptapDoc };

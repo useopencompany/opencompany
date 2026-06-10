@@ -24,6 +24,7 @@ import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
+import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -385,8 +386,17 @@ function PersonalSidebarView({
   const { userId } = useWorkspaceContext();
   const { agentSessions, sessionStars } = useCollections();
   const { showError } = useToast();
-  const { agent, userName, userEmail, config, personalSkills, githubRequested, proMode } =
-    usePersonalAgent();
+  const {
+    agent,
+    userName,
+    userEmail,
+    workspaceName,
+    config,
+    personalSkills,
+    githubRequested,
+    proMode,
+    companySurfaceEnabled,
+  } = usePersonalAgent();
   const { inboxActive, activePanel, activeSessionId } = useActivePersonalRoute();
   // Sessions with an in-flight pin toggle. Guards rapid re-clicks from firing an
   // insert against an already-optimistically-inserted star (duplicate key).
@@ -475,6 +485,14 @@ function PersonalSidebarView({
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
+          {/* Personal-first users only see the company tab after opting in from Settings. */}
+          {companySurfaceEnabled && (
+            <SpaceSwitcher
+              activeSpace="personal"
+              workspaceName={workspaceName}
+              className="min-w-0 flex-1 px-0 pb-0"
+            />
+          )}
         </div>
 
         {/* Primary nav */}

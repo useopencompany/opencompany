@@ -7,13 +7,23 @@ import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useToast } from "@/components/ToastProvider";
 import { Toggle } from "@/components/ui/toggle";
-import { setProMode as setProModeAction } from "@/lib/users/actions";
+import {
+  setCompanySurfaceEnabled as setCompanySurfaceEnabledAction,
+  setProMode as setProModeAction,
+} from "@/lib/users/actions";
 
 // Lightweight settings for the /personal surface: the Pro mode toggle (DB-backed), appearance,
 // read-only account info, and billing. Deliberately minimal — the full workspace settings live at
 // /settings. Billing is workspace-scoped and loaded by the route, then passed in here.
 export default function PersonalSettingsView({ billing }: { billing: BillingData }) {
-  const { userName, userEmail, proMode, setProMode } = usePersonalAgent();
+  const {
+    userName,
+    userEmail,
+    proMode,
+    setProMode,
+    companySurfaceEnabled,
+    setCompanySurfaceEnabled,
+  } = usePersonalAgent();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
 
@@ -25,6 +35,18 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
       if (!result.ok) {
         setProMode(!next);
         showError(result.error, "Could not update Pro mode");
+      }
+    });
+  }
+
+  function onToggleCompanySurface(next: boolean) {
+    // Flip optimistically so the sidebar's space switcher appears/disappears immediately, then persist.
+    setCompanySurfaceEnabled(next);
+    startTransition(async () => {
+      const result = await setCompanySurfaceEnabledAction(next);
+      if (!result.ok) {
+        setCompanySurfaceEnabled(!next);
+        showError(result.error, "Could not update company access");
       }
     });
   }
@@ -51,6 +73,27 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
           </Toggle>
           <span className="text-[12.5px] text-ink-muted">
             {proMode ? "Advanced surfaces are visible." : "Advanced surfaces are hidden."}
+          </span>
+        </div>
+      </Section>
+
+      <Section
+        title="Company workspace"
+        description="Bring back the legacy company workspace surface, switchable from the sidebar."
+      >
+        <div className="flex items-center gap-3">
+          <Toggle
+            pressed={companySurfaceEnabled}
+            disabled={isPending}
+            aria-label={`${companySurfaceEnabled ? "Disable" : "Enable"} company workspace access`}
+            onPressedChange={onToggleCompanySurface}
+          >
+            {companySurfaceEnabled ? "On" : "Off"}
+          </Toggle>
+          <span className="text-[12.5px] text-ink-muted">
+            {companySurfaceEnabled
+              ? "The company workspace is available from the sidebar."
+              : "The company workspace is hidden."}
           </span>
         </div>
       </Section>

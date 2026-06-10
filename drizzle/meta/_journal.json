@@ -379,6 +379,13 @@
       "when": 1781017850938,
       "tag": "0053_omniscient_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1781093722325,
+      "tag": "0054_add_user_company_surface_enabled",
+      "breakpoints": true
     }
   ]
 }

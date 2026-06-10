@@ -83,6 +83,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                 githubIntegrationStatus={workspaceIntegrations.github.status}
                 integrationConnections={integrationConnections}
                 proMode={user.proMode}
+                companySurfaceEnabled={user.companySurfaceEnabled}
               >
                 {children}
               </PersonalShell>
