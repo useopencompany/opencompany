@@ -57,9 +57,34 @@ describe("classifyRuntimeTool", () => {
     });
   });
 
-  it("treats delegation and tool help as never gated", () => {
+  it("maps session-history, inbox, and self-edit tools to the system provider", () => {
+    expect(classifyRuntimeTool("recall")).toEqual({ providerKey: "system", group: "read" });
+    expect(classifyRuntimeTool("fetch_transcript")).toEqual({
+      providerKey: "system",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("inbox_list")).toEqual({ providerKey: "system", group: "read" });
+    expect(classifyRuntimeTool("inbox_add")).toEqual({ providerKey: "system", group: "modify" });
+    expect(classifyRuntimeTool("inbox_update")).toEqual({ providerKey: "system", group: "modify" });
+    expect(classifyRuntimeTool("read_skill")).toEqual({ providerKey: "system", group: "read" });
+    expect(classifyRuntimeTool("update_agent_file")).toEqual({
+      providerKey: "system",
+      group: "modify",
+    });
+  });
+
+  it("treats delegation, discovery, and tool help as never gated", () => {
     expect(classifyRuntimeTool("delegate_to_agent")).toBeNull();
     expect(classifyRuntimeTool("tool_help")).toBeNull();
+    expect(classifyRuntimeTool("find_tools")).toBeNull();
+    expect(classifyRuntimeTool("discover_capabilities")).toBeNull();
+  });
+
+  it("routes unknown tool names through the gated unknown provider, not ungated system", () => {
+    expect(classifyRuntimeTool("totally_unknown_tool")).toEqual({
+      providerKey: "unknown",
+      group: "admin",
+    });
   });
 });
 
@@ -80,6 +105,28 @@ describe("classifyNeonSql", () => {
 
   it("ignores semicolons inside string literals", () => {
     expect(classifyNeonSql("select ';' as semi;")).toBe("read");
+  });
+
+  it("classifies data-modifying CTEs and SELECT INTO as modify", () => {
+    expect(
+      classifyNeonSql("WITH d AS (DELETE FROM users RETURNING *) SELECT count(*) FROM d"),
+    ).toBe("modify");
+    expect(
+      classifyNeonSql("with u as (update users set name = 'a' returning id) select * from u"),
+    ).toBe("modify");
+    expect(classifyNeonSql("WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x")).toBe("modify");
+    expect(classifyNeonSql("SELECT * INTO archived_users FROM users")).toBe("modify");
+    expect(classifyNeonSql("WITH x AS (SELECT 1) SELECT * INTO t FROM x")).toBe("modify");
+  });
+
+  it("does not let quoted text affect CTE classification", () => {
+    // DML keyword inside a string literal must not bump a pure read to modify…
+    expect(classifyNeonSql("WITH x AS (SELECT 'delete me' AS label) SELECT * FROM x")).toBe("read");
+    expect(classifyNeonSql("WITH x AS (SELECT 1) SELECT 'into the void' FROM x")).toBe("read");
+    // …and a quoted identifier can't hide a real one (the DELETE here is unquoted).
+    expect(
+      classifyNeonSql(`WITH "select" AS (DELETE FROM users RETURNING *) SELECT * FROM "select"`),
+    ).toBe("modify");
   });
 });
 
@@ -245,6 +292,12 @@ describe("classifyGitHubCliArgs", () => {
       "api repos/opencompany/web/issues --raw-field=title=bug",
       "api repos/opencompany/web/issues --input=body.json",
       "api graphql -f query='mutation { __typename }'",
+      // pflag attached-value shorthands must classify like their spaced forms.
+      "api repos/opencompany/web/issues -ftitle=bug",
+      "api repos/opencompany/web/issues -Ftitle=bug",
+      "api repos/opencompany/web/issues -f=title=bug",
+      "api -XPOST repos/opencompany/web/issues",
+      "api -X=PATCH repos/opencompany/web/issues/123",
     ]) {
       expect(classifyGitHubCliArgs(args)).toBe("modify");
     }
@@ -254,6 +307,11 @@ describe("classifyGitHubCliArgs", () => {
     for (const args of [
       "repo delete opencompany/web --yes",
       "api --method DELETE repos/opencompany/web/issues/comments/1",
+      // Attached shorthand method: previously fell through to "no method" → read.
+      "api -XDELETE repos/opencompany/web/issues/comments/1",
+      "api -X=DELETE repos/opencompany/web/issues/comments/1",
+      // Empty attached value is unparseable → treated as DELETE, not waved through.
+      "api -X= repos/opencompany/web",
       "pr frobnicate 301",
       "workflow run deploy.yml",
       "",
@@ -283,6 +341,16 @@ describe("resolveToolDecision", () => {
       providerKey: "system",
       group: "read",
     });
+  });
+
+  it("gates unknown tool names instead of allowing them through system", () => {
+    expect(
+      resolveToolDecision({ toolName: "totally_unknown_tool", policy: empty, suspendable: true }),
+    ).toEqual({ decision: "ask", providerKey: "unknown", group: "admin" });
+    expect(
+      resolveToolDecision({ toolName: "totally_unknown_tool", policy: empty, suspendable: false })
+        .decision,
+    ).toBe("deny");
   });
 
   it("applies the default hybrid stance for gated providers", () => {
