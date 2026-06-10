@@ -343,12 +343,14 @@ computes — already done for this project).
 3. **Inngest.** Use the existing Inngest Cloud account with Branch Environments. Add the
    branch-environment `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` to the Vercel Preview
    environment base values (via Infisical/Vercel sync or the Inngest Vercel integration).
-   Keep `INNGEST_DEV` unset. The PR workflow injects `INNGEST_ENV=preview-pr-<n>` and runs
-   a `PUT /api/inngest` sync after each web deploy, so every preview gets isolated events,
-   logs, delayed jobs, and function definitions. If Vercel Deployment Protection is enabled
-   for previews, configure Protection Bypass for Automation in the Inngest Vercel integration
-   settings; otherwise Inngest can sync but later function invocations will be blocked by
-   Vercel auth.
+   Keep `INNGEST_DEV` unset. The PR workflow injects `INNGEST_ENV=preview-pr-<n>` and
+   `INNGEST_SERVE_ORIGIN=https://pr-<n>.<preview-domain>`, then runs a `PUT /api/inngest`
+   sync against that deterministic custom domain after each web deploy, so every preview gets
+   isolated events, logs, delayed jobs, and function definitions. The Vercel project should keep
+   preview custom domains outside deployment protection, or Inngest function invocations will be
+   blocked. If you later install the Inngest Vercel integration and use protected deployment URLs
+   instead of the custom preview domain, configure Protection Bypass for Automation in the Inngest
+   Vercel integration settings.
 4. **GitHub.** Create the `preview` environment and label. Set repo `vars` (see
    [env-vars.md → Preview Environments](./env-vars.md#preview-environments-per-pr)):
    at minimum `PREVIEW_BASE_DOMAIN`, plus the Infisical OIDC `vars`.

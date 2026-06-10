@@ -74,6 +74,7 @@ export function webDeployEnv({
     NEXT_PUBLIC_APP_URL: appUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
     INNGEST_ENV: pr === undefined ? undefined : `preview-pr-${pr}`,
+    INNGEST_SERVE_ORIGIN: appUrl,
     OBSERVABILITY_ENV: "preview",
     // Leave server-side OBSERVABILITY_RELEASE unset (repo convention: it's a manual
     // override only). The browser tag below is enough for release grouping, and the

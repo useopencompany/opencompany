@@ -279,12 +279,10 @@ jobs:
 
       - name: Sync Inngest preview app
         run: |
-          bunx vercel curl /api/inngest \
-            --deployment "${{ steps.deploy-web.outputs.url }}" \
-            --token="$VERCEL_TOKEN" \
-            --scope="$VERCEL_ORG_ID" \
+          curl --fail-with-body --retry 6 --retry-delay 5 \
             -X PUT \
-            -H "Accept: application/json,text/plain,*/*"
+            -H "Accept: application/json,text/plain,*/*" \
+            "https://${{ steps.provision.outputs.alias }}/api/inngest"
 
       - name: Post preview URL (early)
         if: ${{ steps.provision.outputs.alias != '' }}
