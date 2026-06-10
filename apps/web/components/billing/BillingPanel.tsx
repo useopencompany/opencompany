@@ -98,7 +98,13 @@ function CostLine({ label, value }: { label: string; value: number }) {
   );
 }
 
-function SessionChargeRow({ entry }: { entry: BillingData["recentSessionCharges"][number] }) {
+function SessionChargeRow({
+  entry,
+  sessionPathPrefix,
+}: {
+  entry: BillingData["recentSessionCharges"][number];
+  sessionPathPrefix: string;
+}) {
   const otherCostUsdMicros = Math.max(
     entry.totalUsdMicros -
       entry.modelCostUsdMicros -
@@ -154,7 +160,7 @@ function SessionChargeRow({ entry }: { entry: BillingData["recentSessionCharges"
           </div>
         </div>
         <Link
-          href={`/session/${entry.sessionId}`}
+          href={`${sessionPathPrefix}/session/${entry.sessionId}`}
           className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-ink hover:text-ink"
         >
           Open session
@@ -176,9 +182,11 @@ function parseUsdAmountCents(value: string) {
 
 function TopUpButton({
   amountCents,
+  returnPath,
   onError,
 }: {
   amountCents: number;
+  returnPath: string;
   onError: (message: string | null) => void;
 }) {
   const [isPending, startTransition] = useTransition();
@@ -191,7 +199,7 @@ function TopUpButton({
       onClick={() => {
         onError(null);
         startTransition(async () => {
-          const result = await createCreditCheckoutSession(amountCents);
+          const result = await createCreditCheckoutSession(amountCents, returnPath);
           if (result?.ok === false) {
             onError(result.error);
           }
@@ -209,7 +217,13 @@ function TopUpButton({
   );
 }
 
-function CustomTopUpForm({ onError }: { onError: (message: string | null) => void }) {
+function CustomTopUpForm({
+  returnPath,
+  onError,
+}: {
+  returnPath: string;
+  onError: (message: string | null) => void;
+}) {
   const [amount, setAmount] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -230,7 +244,7 @@ function CustomTopUpForm({ onError }: { onError: (message: string | null) => voi
         }
 
         startTransition(async () => {
-          const result = await createCreditCheckoutSession(amountCents);
+          const result = await createCreditCheckoutSession(amountCents, returnPath);
           if (result?.ok === false) {
             onError(result.error);
           }
@@ -262,8 +276,17 @@ function CustomTopUpForm({ onError }: { onError: (message: string | null) => voi
   );
 }
 
-export function BillingPanel({ billing }: { billing: BillingData }) {
+export function BillingPanel({
+  billing,
+  sessionPathPrefix,
+}: {
+  billing: BillingData;
+  // "/company" or "/personal" — the surface this panel is rendered on. Session
+  // links and the Stripe checkout return path both depend on it.
+  sessionPathPrefix: string;
+}) {
   const router = useRouter();
+  const settingsReturnPath = `${sessionPathPrefix}/settings`;
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -310,10 +333,14 @@ export function BillingPanel({ billing }: { billing: BillingData }) {
         <div className="mt-4 flex flex-wrap gap-2">
           {TOP_UP_AMOUNTS_CENTS.map((amountCents) => (
             <div key={amountCents}>
-              <TopUpButton amountCents={amountCents} onError={setCheckoutError} />
+              <TopUpButton
+                amountCents={amountCents}
+                returnPath={settingsReturnPath}
+                onError={setCheckoutError}
+              />
             </div>
           ))}
-          <CustomTopUpForm onError={setCheckoutError} />
+          <CustomTopUpForm returnPath={settingsReturnPath} onError={setCheckoutError} />
         </div>
         {checkoutError && <div className="mt-2 text-[12px] text-danger">{checkoutError}</div>}
       </div>
@@ -386,7 +413,11 @@ export function BillingPanel({ billing }: { billing: BillingData }) {
         ) : (
           <div className="mb-4 overflow-hidden rounded-lg border border-border bg-surface/55">
             {billing.recentSessionCharges.map((entry) => (
-              <SessionChargeRow key={entry.sessionId} entry={entry} />
+              <SessionChargeRow
+                key={entry.sessionId}
+                entry={entry}
+                sessionPathPrefix={sessionPathPrefix}
+              />
             ))}
           </div>
         )}

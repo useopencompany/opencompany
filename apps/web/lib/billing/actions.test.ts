@@ -173,6 +173,44 @@ describe("createCreditCheckoutSession", () => {
     });
   });
 
+  it("uses the caller-provided return path for the Stripe redirect URLs", async () => {
+    const create = vi.fn().mockResolvedValue({
+      id: "cs_test_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_123",
+    });
+    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
+
+    await expect(createCreditCheckoutSession(2500, "/company/settings")).rejects.toThrow(
+      "redirect:https://checkout.stripe.com/c/pay/cs_test_123",
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success_url: "https://app.example.com/company/settings?billing=success",
+        cancel_url: "https://app.example.com/company/settings?billing=cancelled",
+      }),
+    );
+  });
+
+  it("falls back to /personal/settings for unsafe return paths", async () => {
+    const create = vi.fn().mockResolvedValue({
+      id: "cs_test_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_123",
+    });
+    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
+
+    await expect(createCreditCheckoutSession(2500, "//evil.example.com/phish")).rejects.toThrow(
+      "redirect:https://checkout.stripe.com/c/pay/cs_test_123",
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success_url: "https://app.example.com/personal/settings?billing=success",
+        cancel_url: "https://app.example.com/personal/settings?billing=cancelled",
+      }),
+    );
+  });
+
   it("creates a Stripe Checkout Session for a custom top-up amount", async () => {
     const create = vi.fn().mockResolvedValue({
       id: "cs_test_123",

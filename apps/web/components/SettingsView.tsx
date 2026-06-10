@@ -38,15 +38,15 @@ import { updateWorkspaceName } from "@/lib/workspaces/actions";
 
 const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
 const LINEAR_MCP_DOCS_URL = "https://linear.app/docs/mcp";
-const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/settings";
+const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/company/settings";
 const SLACK_MCP_DOCS_URL = "https://docs.slack.dev/ai/slack-mcp-server/";
-const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/settings";
+const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/company/settings";
 const POSTHOG_MCP_DOCS_URL = "https://posthog.com/docs/model-context-protocol";
-const POSTHOG_MCP_START_URL = "/api/mcp/posthog/start?returnTo=/settings";
+const POSTHOG_MCP_START_URL = "/api/mcp/posthog/start?returnTo=/company/settings";
 const BETTERSTACK_MCP_DOCS_URL = "https://betterstack.com/docs/getting-started/integrations/mcp/";
-const BETTERSTACK_MCP_START_URL = "/api/mcp/betterstack/start?returnTo=/settings";
+const BETTERSTACK_MCP_START_URL = "/api/mcp/betterstack/start?returnTo=/company/settings";
 const BRAINTRUST_MCP_DOCS_URL = "https://www.braintrust.dev/docs/integrations/developer-tools/mcp";
-const BRAINTRUST_MCP_START_URL = "/api/mcp/braintrust/start?returnTo=/settings";
+const BRAINTRUST_MCP_START_URL = "/api/mcp/braintrust/start?returnTo=/company/settings";
 
 type Props = {
   profile: {
@@ -1336,7 +1336,7 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
           </Section>
 
           <Section title="Billing" description="Workspace credits are stored in USD cents.">
-            <BillingPanel billing={billing} />
+            <BillingPanel billing={billing} sessionPathPrefix="/company" />
           </Section>
 
           <Section title="Account" description="Sign out of all sessions for this device.">

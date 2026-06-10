@@ -28,6 +28,25 @@ const nextConfig = {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
   },
   transpilePackages: ["@opencompany/analytics", "@opencompany/db", "@opencompany/observability"],
+  // The workspace route group moved from the root to /company. Keep old root
+  // links (bookmarks, emails, stale clients) working with temporary redirects.
+  async redirects() {
+    const workspaceRoutes = [
+      "agents",
+      "settings",
+      "session",
+      "inbox",
+      "brain",
+      "people",
+      "org-chart",
+      "companies",
+    ];
+    return workspaceRoutes.map((route) => ({
+      source: `/${route}/:path*`,
+      destination: `/company/${route}/:path*`,
+      permanent: false,
+    }));
+  },
 };
 
 const withMDX = createMDX();

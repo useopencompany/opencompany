@@ -403,7 +403,7 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
         {configured ? (
           <a
             href={`/api/integrations/github/start?intent=settings&returnTo=${encodeURIComponent(
-              "/settings/integrations",
+              "/company/settings/integrations",
             )}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85"
           >
@@ -695,7 +695,7 @@ function GoogleControls({
         {integration.configured ? (
           <a
             href={`/api/integrations/${routeSegment}/start?returnTo=${encodeURIComponent(
-              "/settings/integrations",
+              "/company/settings/integrations",
             )}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85"
           >
@@ -735,7 +735,7 @@ function GoogleControls({
                   {connection.status !== "connected" ? (
                     <a
                       href={`/api/integrations/${routeSegment}/start?returnTo=${encodeURIComponent(
-                        "/settings/integrations",
+                        "/company/settings/integrations",
                       )}`}
                       className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-canvas"
                     >

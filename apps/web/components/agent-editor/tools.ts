@@ -377,7 +377,7 @@ function buildToolMentionItems(options: { enabledMcpToolIds?: AgentToolId[] }): 
 // Single source of truth for the MCP connect (OAuth start) URL, reused by the agent
 // inspector. The route issues an external OAuth redirect, so callers link to it with a
 // plain anchor (full-page navigation), not a client-side router.
-export function mcpConnectUrl(toolId: AgentToolId, returnTo = "/settings") {
+export function mcpConnectUrl(toolId: AgentToolId, returnTo = "/company/settings") {
   return `/api/mcp/${toolId}/start?returnTo=${encodeURIComponent(returnTo)}`;
 }
 

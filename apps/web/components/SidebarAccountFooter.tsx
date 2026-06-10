@@ -237,7 +237,7 @@ export function SidebarAccountFooter({
   userEmail,
   subtitle,
   trailing,
-  settingsHref = "/settings",
+  settingsHref = "/company/settings",
 }: Props) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
