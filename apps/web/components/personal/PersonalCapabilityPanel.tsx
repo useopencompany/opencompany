@@ -31,6 +31,7 @@ import {
   buildSkillMentionItems,
   findTool,
 } from "@/components/agent-editor/tools";
+import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import {
   ONBOARDING_CONNECTED_MESSAGE,
@@ -45,6 +46,7 @@ import {
   personalIntegrationConnectUrl,
 } from "@/lib/personal/integrations-catalog";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 export type CapabilitySection = "skills" | "integrations" | "tools";
 
@@ -80,6 +82,8 @@ type IntegrationRow = Row & {
   // Controls badge styling: "success" (green, default), "warning" (amber, used for setup prompts),
   // or "neutral" (muted, used to mark agent-authored personal skills).
   badgeTone?: "success" | "warning" | "neutral";
+  policyProviderKey?: string;
+  policyOverrides?: WorkspaceToolPolicyOverrides[string] | undefined;
 };
 
 export type PersonalGitHubIntegrationStatus =
@@ -97,6 +101,7 @@ export function PersonalCapabilityPanel({
   githubRequested,
   githubStatus,
   connections,
+  toolPolicies,
   onAddIntegration,
   onAddTool,
   onAddSkill,
@@ -108,6 +113,7 @@ export function PersonalCapabilityPanel({
   githubStatus: PersonalGitHubIntegrationStatus;
   // Workspace-level connection state per integration (Connected vs Connect). Integrations only.
   connections?: PersonalIntegrationConnections;
+  toolPolicies?: WorkspaceToolPolicyOverrides;
   // Append an integration's @-mention to the agent body. Only wired for the integrations section.
   onAddIntegration?: (integration: PersonalIntegrationId) => Promise<void>;
   onAddTool?: (toolId: AgentToolId) => Promise<void>;
@@ -116,7 +122,12 @@ export function PersonalCapabilityPanel({
   const meta = SECTION_META[section];
   const rows =
     section === "integrations"
-      ? buildPersonalIntegrationRows(config, { githubRequested, githubStatus, connections })
+      ? buildPersonalIntegrationRows(config, {
+          githubRequested,
+          githubStatus,
+          connections,
+          toolPolicies,
+        })
       : buildRows(section, config, personalSkills);
 
   const { connectingId, openConnectPopup } = useConnectPopup();
@@ -133,6 +144,7 @@ export function PersonalCapabilityPanel({
             config={config}
             githubRequested={githubRequested}
             connections={connections}
+            onConnect={openConnectPopup}
             onAdd={onAddIntegration}
           />
         )}
@@ -229,34 +241,43 @@ function CapabilityRow({
   badgeTone = "success",
   onConnect,
   connecting,
+  policyProviderKey,
+  policyOverrides,
 }: IntegrationRow & { onConnect?: (() => void) | undefined; connecting?: boolean | undefined }) {
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-surface/55 px-3.5 py-3">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
-        <Icon size={15} strokeWidth={1.85} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium text-ink">{label}</div>
-        <div className="mt-0.5 truncate text-[12px] leading-4 text-ink-muted">{description}</div>
+    <div className="rounded-lg border border-border bg-surface/55 px-3.5 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
+          <Icon size={15} strokeWidth={1.85} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-medium text-ink">{label}</div>
+          <div className="mt-0.5 truncate text-[12px] leading-4 text-ink-muted">
+            {description}
+          </div>
+        </div>
+        {badge &&
+          (onConnect ? (
+            <button
+              type="button"
+              onClick={onConnect}
+              disabled={connecting}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium transition-opacity hover:opacity-80 disabled:opacity-70 ${BADGE_TONE_CLASS.warning}`}
+            >
+              {connecting && <LoaderCircle size={10} strokeWidth={2} className="animate-spin" />}
+              {connecting ? "Connecting…" : badge}
+            </button>
+          ) : (
+            <span
+              className={`shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${BADGE_TONE_CLASS[badgeTone]}`}
+            >
+              {badge}
+            </span>
+          ))}
       </div>
-      {badge &&
-        (onConnect ? (
-          <button
-            type="button"
-            onClick={onConnect}
-            disabled={connecting}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium transition-opacity hover:opacity-80 disabled:opacity-70 ${BADGE_TONE_CLASS.warning}`}
-          >
-            {connecting && <LoaderCircle size={10} strokeWidth={2} className="animate-spin" />}
-            {connecting ? "Connecting…" : badge}
-          </button>
-        ) : (
-          <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${BADGE_TONE_CLASS[badgeTone]}`}
-          >
-            {badge}
-          </span>
-        ))}
+      {policyProviderKey ? (
+        <ToolPolicyEditor providerKey={policyProviderKey} overrides={policyOverrides} />
+      ) : null}
     </div>
   );
 }
@@ -281,11 +302,13 @@ function AddIntegrationButton({
   config,
   githubRequested,
   connections,
+  onConnect,
   onAdd,
 }: {
   config: AgentConfig;
   githubRequested: boolean;
   connections?: PersonalIntegrationConnections | undefined;
+  onConnect: (entry: PersonalIntegrationCatalogEntry) => void;
   onAdd: (integration: PersonalIntegrationId) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -305,6 +328,7 @@ function AddIntegrationButton({
           config={config}
           githubRequested={githubRequested}
           connections={connections}
+          onConnect={onConnect}
           onAdd={onAdd}
           onClose={() => setOpen(false)}
         />
@@ -321,12 +345,14 @@ function AddIntegrationModal({
   config,
   githubRequested,
   connections,
+  onConnect,
   onAdd,
   onClose,
 }: {
   config: AgentConfig;
   githubRequested: boolean;
   connections?: PersonalIntegrationConnections | undefined;
+  onConnect: (entry: PersonalIntegrationCatalogEntry) => void;
   onAdd: (integration: PersonalIntegrationId) => Promise<void>;
   onClose: () => void;
 }) {
@@ -361,6 +387,8 @@ function AddIntegrationModal({
   const handleSelect = async (entry: PersonalIntegrationCatalogEntry) => {
     if (pending) return;
     if (isIntegrationAdded(entry.id, config, githubRequested)) return;
+    const connected = Boolean(connections?.[entry.id]);
+    if (!connected) onConnect(entry);
     setPending(entry.id);
     try {
       await onAdd(entry.id);
@@ -848,6 +876,7 @@ export function buildPersonalIntegrationRows(
     githubRequested: boolean;
     githubStatus: PersonalGitHubIntegrationStatus;
     connections?: PersonalIntegrationConnections | undefined;
+    toolPolicies?: WorkspaceToolPolicyOverrides | undefined;
   },
 ): IntegrationRow[] {
   const rows: IntegrationRow[] = [];
@@ -859,6 +888,8 @@ export function buildPersonalIntegrationRows(
         id: "github",
         icon: entry.icon,
         label: entry.label,
+        policyProviderKey: "github",
+        policyOverrides: input.toolPolicies?.github,
         ...githubRowStatus(input.githubStatus, entry),
       });
       continue;
@@ -871,6 +902,8 @@ export function buildPersonalIntegrationRows(
       icon: entry.icon,
       label: entry.label,
       description: entry.description,
+      policyProviderKey: entry.id,
+      policyOverrides: input.toolPolicies?.[entry.id],
       ...(connected
         ? { badge: "Connected", badgeTone: "success" as const }
         : { badge: "Connect", connectEntry: entry }),

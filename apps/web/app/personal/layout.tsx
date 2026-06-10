@@ -13,6 +13,7 @@ import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { loadPersonalAgentContextFiles, loadPersonalSkills } from "@/lib/personal/context";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
+import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it does
 // not inherit AppShell/Sidebar — but it still needs the same provider stack (minus the workspace
@@ -32,15 +33,23 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     name: agentName,
   });
 
-  const [sessions, contextFiles, personalSkills, workspaceIntegrations, googleState, mcpSettings] =
-    await Promise.all([
-      loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
-      loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
-      loadPersonalSkills(workspace.id, agent.id, agent.path, agent.config),
-      loadWorkspaceIntegrationState(),
-      loadGoogleIntegrationState(),
-      loadWorkspaceMcpSettingsForWorkspace(workspace.id),
-    ]);
+  const [
+    sessions,
+    contextFiles,
+    personalSkills,
+    workspaceIntegrations,
+    googleState,
+    mcpSettings,
+    toolPolicies,
+  ] = await Promise.all([
+    loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
+    loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
+    loadPersonalSkills(workspace.id, agent.id, agent.path, agent.config),
+    loadWorkspaceIntegrationState(),
+    loadGoogleIntegrationState(),
+    loadWorkspaceMcpSettingsForWorkspace(workspace.id),
+    loadWorkspaceToolPolicyOverrides(workspace.id),
+  ]);
   const userName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
 
@@ -82,6 +91,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                 personalSkills={personalSkills}
                 githubIntegrationStatus={workspaceIntegrations.github.status}
                 integrationConnections={integrationConnections}
+                toolPolicies={toolPolicies}
                 proMode={user.proMode}
                 companySurfaceEnabled={user.companySurfaceEnabled}
               >

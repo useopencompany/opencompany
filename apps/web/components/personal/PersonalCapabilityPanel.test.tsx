@@ -25,6 +25,12 @@ vi.mock("@/components/agent-editor/AddSkillDialog", () => ({
   AddSkillDialog: () => <div role="dialog" aria-label="Add skill from GitHub or skills.sh" />,
 }));
 
+vi.mock("@/components/ToolPolicyEditor", () => ({
+  ToolPolicyEditor: ({ providerKey }: { providerKey: string }) => (
+    <div data-testid={`tool-policy-${providerKey}`} />
+  ),
+}));
+
 const baseConfig: AgentConfig = {
   schemaVersion: "agent.v1",
   title: "Personal",
@@ -120,6 +126,83 @@ describe("PersonalCapabilityPanel integrations", () => {
     // Connect opens the OAuth flow in a popup (see useConnectPopup), so it's a button, not a link.
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
+  });
+
+  it("renders permission controls for attached integrations", () => {
+    const config: AgentConfig = {
+      ...baseConfig,
+      tools: [
+        {
+          id: "linear",
+          type: "mcp",
+          server: "linear",
+          label: "Linear",
+          description: "Linear MCP",
+        },
+      ],
+    };
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={config}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: false,
+          google_calendar: false,
+          linear: true,
+          slack: false,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+        }}
+        toolPolicies={{ linear: { read: "ask" } }}
+      />,
+    );
+
+    expect(screen.getByTestId("tool-policy-linear")).toBeInTheDocument();
+  });
+
+  it("opens the OAuth flow directly when adding a disconnected integration", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    const onAddIntegration = vi.fn(async () => undefined);
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={baseConfig}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: false,
+          google_calendar: false,
+          linear: false,
+          slack: false,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+        }}
+        onAddIntegration={onAddIntegration}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    await user.click(screen.getByRole("button", { name: /Linear/i }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/mcp/linear/start?returnTo=%2Fonboarding%2Fconnected",
+      "oc-personal-connect",
+      expect.any(String),
+    );
+    expect(onAddIntegration).toHaveBeenCalledWith("linear");
+
+    openSpy.mockRestore();
   });
 
   it("renders personal skills with a Personal badge in the skills section", () => {

@@ -24,6 +24,7 @@ import {
   type PersonalIntegrationId,
 } from "@/lib/personal/actions";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
 const sidebarCollapsedSubscribers = new Set<() => void>();
@@ -71,6 +72,7 @@ export type PersonalShellProps = {
   personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
   integrationConnections: PersonalIntegrationConnections;
+  toolPolicies: WorkspaceToolPolicyOverrides;
   proMode: boolean;
   companySurfaceEnabled: boolean;
   children: React.ReactNode;
@@ -89,6 +91,7 @@ export default function PersonalShell({
   personalSkills,
   githubIntegrationStatus,
   integrationConnections,
+  toolPolicies,
   proMode: initialProMode,
   companySurfaceEnabled: initialCompanySurfaceEnabled,
   children,
@@ -167,6 +170,7 @@ export default function PersonalShell({
       personalSkills,
       githubIntegrationStatus,
       integrationConnections,
+      toolPolicies,
       config,
       setConfig,
       proMode,
@@ -199,6 +203,7 @@ export default function PersonalShell({
       personalSkills,
       githubIntegrationStatus,
       integrationConnections,
+      toolPolicies,
     ],
   );
 
