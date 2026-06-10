@@ -154,7 +154,9 @@ describe("agent editor mention tools", () => {
     expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fcompany%2Fsettings");
     expect(betterstack).toBeDefined();
     expect(betterstack?.needsSetup).toBe(true);
-    expect(betterstack?.connectUrl).toBe("/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fsettings");
+    expect(betterstack?.connectUrl).toBe(
+      "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fsettings",
+    );
   });
 
   test("offers the addable built-in first-principles skill in the mention menu", () => {
