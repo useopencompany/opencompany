@@ -93,6 +93,8 @@ export type GoogleIntegrationStatePayload = {
   workspaceId: string;
   userId: string;
   returnTo: string;
+  oauthRedirectUri?: string;
+  targetOrigin?: string;
   expiresAt: number;
   nonce: string;
 };
@@ -100,9 +102,14 @@ export type GoogleIntegrationStatePayload = {
 export function createGoogleIntegrationState(
   input: Omit<GoogleIntegrationStatePayload, "expiresAt" | "nonce">,
 ) {
+  const { oauthRedirectUri: rawOauthRedirectUri, targetOrigin: rawTargetOrigin, ...rest } = input;
+  const oauthRedirectUri = sanitizeGoogleOAuthRedirectUri(rawOauthRedirectUri, input.provider);
+  const targetOrigin = sanitizeTargetOrigin(rawTargetOrigin);
   const payload: GoogleIntegrationStatePayload = {
-    ...input,
+    ...rest,
     returnTo: sanitizeReturnTo(input.returnTo),
+    ...(oauthRedirectUri ? { oauthRedirectUri } : {}),
+    ...(targetOrigin ? { targetOrigin } : {}),
     expiresAt: Date.now() + 10 * 60 * 1000,
     nonce: crypto.randomUUID(),
   };
@@ -127,15 +134,27 @@ export function verifyGoogleIntegrationState(state: string): GoogleIntegrationSt
     throw new Error("Google integration state expired.");
   }
 
-  return { ...payload, returnTo: sanitizeReturnTo(payload.returnTo) };
+  const { oauthRedirectUri: rawOauthRedirectUri, targetOrigin: rawTargetOrigin, ...rest } = payload;
+  const oauthRedirectUri = sanitizeGoogleOAuthRedirectUri(rawOauthRedirectUri, payload.provider);
+  const targetOrigin = sanitizeTargetOrigin(rawTargetOrigin);
+  return {
+    ...rest,
+    returnTo: sanitizeReturnTo(payload.returnTo),
+    ...(oauthRedirectUri ? { oauthRedirectUri } : {}),
+    ...(targetOrigin ? { targetOrigin } : {}),
+  };
 }
 
 // --- Authorization + token endpoints --------------------------------------
 
-export function buildGoogleAuthorizationUrl(config: GoogleProviderConfig, state: string) {
+export function buildGoogleAuthorizationUrl(
+  config: GoogleProviderConfig,
+  state: string,
+  redirectUri = googleOAuthRedirectUri(config),
+) {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", requiredEnv("GOOGLE_OAUTH_CLIENT_ID"));
-  url.searchParams.set("redirect_uri", googleCallbackUrl(config));
+  url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", config.scopes.join(" "));
   // offline + consent guarantee a refresh_token on every connect; select_account lets a user
@@ -150,6 +169,7 @@ export function buildGoogleAuthorizationUrl(config: GoogleProviderConfig, state:
 export async function exchangeGoogleCode(
   config: GoogleProviderConfig,
   code: string,
+  redirectUri = googleOAuthRedirectUri(config),
 ): Promise<GoogleTokenExchangeResult> {
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -159,7 +179,7 @@ export async function exchangeGoogleCode(
       client_secret: requiredEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
       code,
       grant_type: "authorization_code",
-      redirect_uri: googleCallbackUrl(config),
+      redirect_uri: redirectUri,
     }),
   });
 
@@ -249,11 +269,44 @@ export function appendGoogleIntegrationStatus(
   return `${url.pathname}${url.search}`;
 }
 
-// --- internals -------------------------------------------------------------
-
-function googleCallbackUrl(config: GoogleProviderConfig) {
-  return `${getAppUrl()}/api/integrations/${config.routeSegment}/callback`;
+export function googleOAuthRedirectUri(config: GoogleProviderConfig) {
+  return googleOAuthBrokerCallbackUrl() ?? googleDirectCallbackUrl(config);
 }
+
+export function googleDirectCallbackUrl(config: GoogleProviderConfig, origin = getAppUrl()) {
+  return `${origin.replace(/\/$/, "")}/api/integrations/${config.routeSegment}/callback`;
+}
+
+export function googleOAuthBrokerCallbackUrl() {
+  const value = process.env.GOOGLE_OAUTH_CALLBACK_URL?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && !isLocalhost(url)) return null;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function googleOAuthTargetOriginForState() {
+  if (!googleOAuthBrokerCallbackUrl()) return undefined;
+  const targetOrigin = sanitizeTargetOrigin(getAppUrl());
+  if (!targetOrigin) return undefined;
+  return isPreviewGoogleOAuthTargetOrigin(targetOrigin) ? targetOrigin : undefined;
+}
+
+export function isAllowedGoogleOAuthTargetOrigin(targetOrigin: string) {
+  const sanitized = sanitizeTargetOrigin(targetOrigin);
+  if (!sanitized) return false;
+  if (sanitized === new URL(getAppUrl()).origin) return true;
+  if (isPreviewGoogleOAuthTargetOrigin(sanitized)) return true;
+  if (isDevelopmentRuntime() && isLocalhost(new URL(sanitized))) return true;
+  return false;
+}
+
+// --- internals -------------------------------------------------------------
 
 function stripExpiry(tokens: GoogleOAuthTokens & { expires_in?: number }): GoogleOAuthTokens {
   const { access_token, refresh_token, scope, token_type, id_token } = tokens;
@@ -279,6 +332,8 @@ function isGoogleIntegrationStatePayload(value: unknown): value is GoogleIntegra
     typeof record.workspaceId === "string" &&
     typeof record.userId === "string" &&
     typeof record.returnTo === "string" &&
+    (record.oauthRedirectUri === undefined || typeof record.oauthRedirectUri === "string") &&
+    (record.targetOrigin === undefined || typeof record.targetOrigin === "string") &&
     typeof record.expiresAt === "number" &&
     typeof record.nonce === "string"
   );
@@ -287,6 +342,52 @@ function isGoogleIntegrationStatePayload(value: unknown): value is GoogleIntegra
 function sanitizeReturnTo(value: string) {
   if (!value.startsWith("/") || value.startsWith("//")) return "/settings/integrations";
   return value;
+}
+
+function sanitizeTargetOrigin(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" && !isLocalhost(url)) return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function sanitizeGoogleOAuthRedirectUri(value: unknown, provider: GoogleIntegrationProvider) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    const url = new URL(value.trim());
+    if (url.hash) url.hash = "";
+    if (url.protocol !== "https:" && !isLocalhost(url)) return undefined;
+
+    const config = GOOGLE_PROVIDER_CONFIG[provider];
+    if (
+      url.pathname === "/api/google/callback" ||
+      url.pathname === `/api/integrations/${config.routeSegment}/callback`
+    ) {
+      return url.toString();
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function isPreviewGoogleOAuthTargetOrigin(origin: string) {
+  return /^https:\/\/pr-\d+\.preview\.opencompany\.cloud$/.test(origin);
+}
+
+function isLocalhost(url: URL) {
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1")
+  );
+}
+
+function isDevelopmentRuntime() {
+  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 }
 
 function signStateBody(body: string) {

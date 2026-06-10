@@ -59,6 +59,7 @@ test("webDeployEnv wires per-PR cross-service vars and drops empties", () => {
   const env = webDeployEnv({
     pr: 42,
     sha: "abc1234",
+    appUrl: "https://pr-42.preview.opencompany.cloud",
     databaseUrl: "postgresql://pooled",
     runnerUrl: "https://oc-preview-pr-42-runner.onrender.com",
     runnerInternalToken: "tok",
@@ -67,13 +68,19 @@ test("webDeployEnv wires per-PR cross-service vars and drops empties", () => {
     streamsUrl: "https://oc-preview-pr-42-streams.onrender.com",
     streamsToken: undefined, // optional → dropped
     redirectUri: "https://pr-42.preview.opencompany.cloud/auth/callback",
+    googleOAuthCallbackUrl: "https://oauth.opencompany.cloud/api/google/callback",
   });
   assert.equal(env.DATABASE_URL, "postgresql://pooled");
   assert.equal(env.RUNNER_INTERNAL_URL, env.RUNNER_PUBLIC_URL);
   assert.equal(env.ELECTRIC_SECRET, "sek");
+  assert.equal(env.NEXT_PUBLIC_APP_URL, "https://pr-42.preview.opencompany.cloud");
   assert.equal(
     env.NEXT_PUBLIC_WORKOS_REDIRECT_URI,
     "https://pr-42.preview.opencompany.cloud/auth/callback",
+  );
+  assert.equal(
+    env.GOOGLE_OAUTH_CALLBACK_URL,
+    "https://oauth.opencompany.cloud/api/google/callback",
   );
   assert.equal(env.OBSERVABILITY_ENV, "preview");
   assert.equal(env.NEXT_PUBLIC_OBSERVABILITY_RELEASE, "abc1234");
