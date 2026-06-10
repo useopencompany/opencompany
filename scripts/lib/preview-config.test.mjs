@@ -60,6 +60,7 @@ test("webDeployEnv wires per-PR cross-service vars and drops empties", () => {
     pr: 42,
     sha: "abc1234",
     databaseUrl: "postgresql://pooled",
+    appUrl: "https://pr-42.preview.opencompany.cloud",
     runnerUrl: "https://oc-preview-pr-42-runner.onrender.com",
     runnerInternalToken: "tok",
     electricUrl: "https://oc-preview-pr-42-electric.onrender.com",
@@ -75,6 +76,7 @@ test("webDeployEnv wires per-PR cross-service vars and drops empties", () => {
     env.NEXT_PUBLIC_WORKOS_REDIRECT_URI,
     "https://pr-42.preview.opencompany.cloud/auth/callback",
   );
+  assert.equal(env.NEXT_PUBLIC_APP_URL, "https://pr-42.preview.opencompany.cloud");
   assert.equal(env.OBSERVABILITY_ENV, "preview");
   assert.equal(env.NEXT_PUBLIC_OBSERVABILITY_RELEASE, "abc1234");
   // Server-side OBSERVABILITY_RELEASE stays unset (manual-override-only convention).

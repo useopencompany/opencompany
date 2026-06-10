@@ -1188,6 +1188,18 @@ async function runAfterSessionWithContext(
     // transcript and updates memory. The brief parent lease + the after-session run record (deduped
     // per parent message version) we just took ensure only one keeper spawns per idle message.
     if (memoryKeeperEligible) {
+      // The idle window between dispatch and now (and the lease/credit steps above) leaves room for
+      // the user to archive the parent after load_session passed the archivedAt gate. Re-check fresh
+      // so the memory pass only ever runs for a non-archived session.
+      if (await observeRunStep(ctx, "recheck_archived", () => isSessionArchived(input.sessionId))) {
+        outcome = "skipped_archived";
+        await completeAfterSessionRun(afterSessionRunId, {
+          status: "skipped",
+          skippedReason: "archived_session",
+        });
+        await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+        return;
+      }
       const { childSessionId } = await observeRunStep(ctx, "spawn_memory_keeper", () =>
         spawnMemoryKeeperSession({
           parentSessionId: input.sessionId,

@@ -3,6 +3,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
+  Archive,
   Blocks,
   Bot,
   Brain,
@@ -16,12 +17,13 @@ import {
   Wrench,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
+import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { isSessionUnseen } from "@/lib/agent-sessions/payload";
@@ -31,6 +33,9 @@ import { personalPaths } from "@/lib/personal/paths";
 
 // Sessions mid-archive must not flash in the list (mirrors deriveSidebarSessions).
 const HIDDEN_SESSION_STATUSES = new Set(["archiving", "archived"]);
+
+// How long the red highlight shows on a session row before it is optimistically removed.
+const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
 
 type SidebarSession = SidebarSessionPayload;
 
@@ -181,11 +186,22 @@ function SessionRow({
   session,
   active,
   onSelect,
+  onArchive,
 }: {
   session: SidebarSession;
   active: boolean;
   onSelect: (sessionId: string) => void;
+  onArchive: (sessionId: string, active: boolean) => void;
 }) {
+  const [archiving, setArchiving] = useState(false);
+  const archiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (archiveTimerRef.current) clearTimeout(archiveTimerRef.current);
+    };
+  }, []);
+
   const showStatusDot =
     session.status === "running" ||
     session.status === "provisioning" ||
@@ -194,25 +210,55 @@ function SessionRow({
     session.status === "interrupted";
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(session.id)}
-      title={session.lastError ?? session.title}
-      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+    <div
+      className={`group flex items-center rounded-md text-[13px] transition-all duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-      }`}
+      } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : ""}`}
     >
-      {showStatusDot ? <SessionStatusDot status={session.status} pulse /> : null}
-      <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
-      {session.source === "whatsapp" ? (
-        <MessageCircle
-          size={12}
-          strokeWidth={2}
-          className="shrink-0 text-emerald-600"
-          aria-label="WhatsApp"
-        />
-      ) : null}
-    </button>
+      <button
+        type="button"
+        onClick={() => onSelect(session.id)}
+        title={session.lastError ?? session.title}
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        {showStatusDot ? <SessionStatusDot status={session.status} pulse /> : null}
+        <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
+        {session.source === "whatsapp" ? (
+          <MessageCircle
+            size={12}
+            strokeWidth={2}
+            className="shrink-0 text-emerald-600"
+            aria-label="WhatsApp"
+          />
+        ) : null}
+      </button>
+      <button
+        type="button"
+        title="Archive session"
+        aria-label={`Archive ${session.title}`}
+        aria-busy={archiving}
+        disabled={archiving}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          // Brief red highlight as feedback before the optimistic delete removes
+          // the row from the sidebar (onArchive archives via the collection).
+          setArchiving(true);
+          archiveTimerRef.current = setTimeout(() => {
+            archiveTimerRef.current = null;
+            onArchive(session.id, active);
+          }, ARCHIVE_HIGHLIGHT_DELAY_MS);
+        }}
+        className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+          archiving
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+        }`}
+      >
+        <Archive size={12.5} strokeWidth={1.8} />
+      </button>
+    </div>
   );
 }
 
@@ -327,9 +373,29 @@ function PersonalSidebarView({
   inboxCount?: number;
 }) {
   const router = useRouter();
+  const { agentSessions } = useCollections();
+  const { showError } = useToast();
   const { agent, userName, userEmail, config, personalSkills, githubRequested, proMode } =
     usePersonalAgent();
   const { inboxActive, activePanel, activeSessionId } = useActivePersonalRoute();
+
+  // Archive is the sidebar's soft delete: optimistically remove the row from the
+  // agent_sessions collection (it vanishes at once) and navigate home if the archived
+  // session is the one open. The collection's onDelete archives via the server action;
+  // a failure rolls the row back and surfaces the error.
+  const handleArchive = useCallback(
+    (sessionId: string, active: boolean) => {
+      const tx = agentSessions.delete(sessionId);
+      if (active) router.replace(personalPaths.home);
+      void tx.isPersisted.promise.catch((error) => {
+        showError(
+          error instanceof Error ? error.message : "Could not archive session.",
+          "Could not archive session",
+        );
+      });
+    },
+    [agentSessions, router, showError],
+  );
 
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
   const skillCount = (config.skills?.length ?? 0) + personalSkills.length;
@@ -467,6 +533,7 @@ function PersonalSidebarView({
                         session={session}
                         active={activeSessionId === session.id}
                         onSelect={(id) => router.push(personalPaths.session(id))}
+                        onArchive={handleArchive}
                       />
                     ))}
                   </div>

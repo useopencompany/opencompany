@@ -246,6 +246,7 @@ async function main() {
     pr,
     sha,
     databaseUrl: pooledUrl,
+    appUrl: names.aliasUrl,
     runnerUrl: runner.url,
     runnerInternalToken,
     electricUrl: electric.url,

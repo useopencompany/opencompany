@@ -70,8 +70,8 @@ export async function createCreditCheckoutSession(amountCents: number) {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer_email: authUser.email,
-      success_url: `${appUrl}/settings?billing=success`,
-      cancel_url: `${appUrl}/settings?billing=cancelled`,
+      success_url: `${appUrl}/personal/settings?billing=success`,
+      cancel_url: `${appUrl}/personal/settings?billing=cancelled`,
       metadata,
       payment_intent_data: { metadata },
       line_items: [

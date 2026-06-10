@@ -1022,6 +1022,9 @@ describe("describeToolCall", () => {
     expect(describeToolCall("delegate_to_agent", { agent: "research" })).toBe(
       "Delegating to research",
     );
+    expect(describeToolCall("memory", { args: 'query "acme blockers" --limit 5' })).toBe(
+      "Looking in memory for “acme blockers”",
+    );
   });
 
   it("falls back to a generic phrase when the primary input is missing", () => {
@@ -1040,6 +1043,21 @@ describe("describeToolCall", () => {
     expect(describeToolCall("x_search_posts", { query: "AI agents" })).toBe(
       "Searching X for “AI agents”",
     );
+  });
+
+  it("derives action-oriented one-liners for memory commands", () => {
+    expect(
+      describeToolCall("memory", { args: 'create --type company --id acme --alias "Acme Inc"' }),
+    ).toBe("Saving acme to memory");
+    expect(
+      describeToolCall("memory", {
+        args: "append-evidence --kind conversation --id acme-call --subject acme",
+      }),
+    ).toBe("Saving evidence to memory for acme");
+    expect(describeToolCall("memory", { args: 'rewrite acme --truth "Updated [^ev:x]"' })).toBe(
+      "Updating memory for acme",
+    );
+    expect(describeToolCall("memory", { args: "doctor" })).toBe("Checking memory consistency");
   });
 });
 

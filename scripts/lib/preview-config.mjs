@@ -53,6 +53,7 @@ export function webDeployEnv({
   pr,
   sha,
   databaseUrl,
+  appUrl,
   runnerUrl,
   runnerInternalToken,
   electricUrl,
@@ -70,6 +71,7 @@ export function webDeployEnv({
     ELECTRIC_SECRET: electricSecret,
     DURABLE_STREAMS_URL: streamsUrl,
     DURABLE_STREAMS_TOKEN: streamsToken,
+    NEXT_PUBLIC_APP_URL: appUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
     OBSERVABILITY_ENV: "preview",
     // Leave server-side OBSERVABILITY_RELEASE unset (repo convention: it's a manual

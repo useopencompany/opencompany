@@ -2,15 +2,17 @@
 
 import { LogOut, Monitor, Moon, Sun } from "lucide-react";
 import { useTransition } from "react";
+import { type BillingData, BillingPanel } from "@/components/billing/BillingPanel";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useToast } from "@/components/ToastProvider";
 import { Toggle } from "@/components/ui/toggle";
 import { setProMode as setProModeAction } from "@/lib/users/actions";
 
-// Lightweight settings for the /personal surface: the Pro mode toggle (DB-backed), appearance, and
-// read-only account info. Deliberately minimal — the full workspace settings live at /settings.
-export default function PersonalSettingsView() {
+// Lightweight settings for the /personal surface: the Pro mode toggle (DB-backed), appearance,
+// read-only account info, and billing. Deliberately minimal — the full workspace settings live at
+// /settings. Billing is workspace-scoped and loaded by the route, then passed in here.
+export default function PersonalSettingsView({ billing }: { billing: BillingData }) {
   const { userName, userEmail, proMode, setProMode } = usePersonalAgent();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
@@ -73,6 +75,10 @@ export default function PersonalSettingsView() {
           <LogOut size={13} strokeWidth={1.9} />
           Log out
         </a>
+      </Section>
+
+      <Section title="Billing" description="Your credit balance, usage, and top-ups.">
+        <BillingPanel billing={billing} />
       </Section>
     </div>
   );
