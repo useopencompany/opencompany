@@ -48,7 +48,9 @@ export async function runRecallTool(input: { sessionId: string; args: unknown })
   let results: Awaited<ReturnType<typeof recallSessions>>;
   try {
     results = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL statement_timeout = ${RECALL_STATEMENT_TIMEOUT_MS}`);
+      await tx.execute(
+        sql`SELECT set_config('statement_timeout', ${`${RECALL_STATEMENT_TIMEOUT_MS}ms`}, true)`,
+      );
       return recallSessions(tx, {
         agentId: session.agentId,
         userId: session.userId,
