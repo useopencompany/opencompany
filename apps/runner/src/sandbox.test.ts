@@ -30,6 +30,7 @@ import {
   SandboxPreparationError,
   sandboxLayout,
   sandboxPreparationErrorFields,
+  writeSandboxTextFiles,
 } from "./sandbox";
 
 afterEach(() => {
@@ -196,27 +197,25 @@ describe("prepareWorkspace", () => {
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       [
         "mkdir -p '/home/user/workspace/agent' '/home/user/workspace/brain' '/home/user/workspace/work' '/home/user/.opencompany'",
+        "git -C '/home/user/workspace/work' init -q",
         "chown -R user:user '/home/user/workspace'",
         "chown root:root '/home/user/.opencompany'",
         "chmod 700 '/home/user/.opencompany'",
       ].join(" && "),
       { user: "root", timeoutMs: 30_000 },
     );
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/.opencompany/agent.agent",
-      '---\ntitle: "Agent"\n---\n\nInstructions',
-      { user: "root", requestTimeoutMs: 30_000 },
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("base64 -d > '/home/user/.opencompany/agent.agent'"),
+      { user: "root", timeoutMs: 30_000 },
+    );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("chmod 600 '/home/user/.opencompany/agent.agent'"),
+      { user: "root", timeoutMs: 30_000 },
     );
     expect(
       sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git clone")),
     ).toBe(false);
-    expect(sandbox.commands.run).toHaveBeenCalledWith(
-      "git -C '/home/user/workspace/work' init -q",
-      {
-        user: "user",
-        timeoutMs: 30_000,
-      },
-    );
   });
 
   it("wires the GitHub credential helper so plain git can authenticate", async () => {
@@ -242,6 +241,30 @@ describe("prepareWorkspace", () => {
           String(command).includes("!gh auth git-credential"),
       ),
     ).toBe(true);
+  });
+
+  it("skips the GitHub credential helper when authenticated git is not needed", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: "agent",
+      configureGitCredentialHelper: false,
+    });
+
+    expect(
+      sandbox.commands.run.mock.calls.some(([command]) =>
+        String(command).includes("credential.https://github.com.helper"),
+      ),
+    ).toBe(false);
   });
 
   it("does not install optional dev tooling during workspace preparation", async () => {
@@ -277,6 +300,42 @@ describe("prepareWorkspace", () => {
     expect(githubRemoteMatches("git@github.com:opencompany/app.git", "opencompany/app")).toBe(true);
     expect(githubRemoteMatches("https://github.com/opencompany/other.git", "opencompany/app")).toBe(
       false,
+    );
+  });
+});
+
+describe("writeSandboxTextFiles", () => {
+  it("writes files with one bulk E2B request", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await writeSandboxTextFiles({
+      sandbox: sandbox as never,
+      user: "root",
+      files: [
+        { path: "/tmp/tree/a/one.txt", content: "one" },
+        { path: "/tmp/tree/a/two.txt", content: "two" },
+        { path: "/tmp/tree/b/three.txt", content: "three" },
+        { path: "/tmp/tree/b/four.txt", content: "four" },
+      ],
+    });
+
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+    expect(sandbox.files.write).toHaveBeenCalledTimes(1);
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      [
+        { path: "/tmp/tree/a/one.txt", data: "one" },
+        { path: "/tmp/tree/a/two.txt", data: "two" },
+        { path: "/tmp/tree/b/three.txt", data: "three" },
+        { path: "/tmp/tree/b/four.txt", data: "four" },
+      ],
+      { user: "root" },
     );
   });
 });

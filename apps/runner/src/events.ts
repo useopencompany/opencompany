@@ -8,7 +8,7 @@ import { rowsFromExecute } from "./sql-exec";
 type Db = ReturnType<typeof getDb>;
 type TransientPublishableRuntimeEvent = Extract<
   AgentRuntimeEvent,
-  { type: "message.delta" | "message.reasoning_delta" | "command.output" }
+  { type: "message.delta" | "message.reasoning_delta" | "command.output" | "subagent.progress" }
 >;
 export type PersistedRuntimeEvent = Omit<
   Awaited<ReturnType<typeof listSessionEvents>>[number],

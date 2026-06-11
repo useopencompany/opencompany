@@ -6,6 +6,9 @@ import { getWorkOSRedirectUri } from "@/lib/workos";
 // https://nextjs.org/docs/app/getting-started/proxy
 
 const SIGN_UP_PATHS = ["/auth/sign-up"];
+// Keep in sync with SKIP_ONBOARDING_COOKIE in lib/auth.ts (not imported to keep the
+// proxy bundle free of the db/WorkOS server dependencies).
+const SKIP_ONBOARDING_COOKIE = "opencompany-skip-onboarding";
 const GOOGLE_OAUTH_BROKER_HOST = "oauth.opencompany.cloud";
 const GOOGLE_OAUTH_BROKER_PATH = "/api/google/callback";
 
@@ -56,6 +59,12 @@ export default async function proxy(request: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   }
 
+  // Preview/dev convenience: visiting any URL with ?skipOnboarding persists a cookie that
+  // lets lib/auth.ts treat the user as onboarded. Never honored in production (the cookie
+  // check in lib/auth.ts is also gated on VERCEL_ENV !== "production").
+  const wantsSkipOnboarding =
+    request.nextUrl.searchParams.has("skipOnboarding") && process.env.VERCEL_ENV !== "production";
+
   let refreshFailed = false;
   const { session, headers, authorizationUrl } = await authkit(request, {
     redirectUri: getWorkOSRedirectUri(),
@@ -64,6 +73,14 @@ export default async function proxy(request: NextRequest) {
       refreshFailed = true;
     },
   });
+
+  if (wantsSkipOnboarding) {
+    const secure = request.nextUrl.protocol === "https:" ? "; Secure" : "";
+    headers.append(
+      "Set-Cookie",
+      `${SKIP_ONBOARDING_COOKIE}=1; Path=/; Max-Age=604800; SameSite=Lax${secure}`,
+    );
+  }
 
   if (isUnauthenticatedPath(request.nextUrl.pathname) || session.user) {
     return handleAuthkitHeaders(request, headers);

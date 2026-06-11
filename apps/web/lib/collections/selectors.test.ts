@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   derivePersonalSidebarSessions,
   deriveSessionDetailPlaceholder,
+  deriveSidebarSessions,
 } from "@/lib/collections/selectors";
 import type { AgentRow, AgentSessionRow, SessionStarRow } from "@/lib/collections/types";
 
@@ -122,6 +123,25 @@ describe("deriveSessionDetailPlaceholder", () => {
 });
 
 describe("derivePersonalSidebarSessions", () => {
+  it("sorts sessions by created time, not updated time", () => {
+    const sessions = [
+      makeSessionRow({
+        id: "older-updated",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-04T00:00:00.000Z",
+      }),
+      makeSessionRow({
+        id: "newer-created",
+        created_at: "2026-01-03T00:00:00.000Z",
+        updated_at: "2026-01-03T00:00:00.000Z",
+      }),
+    ];
+
+    expect(
+      derivePersonalSidebarSessions("agt_1", sessions, []).map((session) => session.id),
+    ).toEqual(["newer-created", "older-updated"]);
+  });
+
   it("joins pin state and keeps personal web and WhatsApp sessions only", () => {
     const sessions = [
       makeSessionRow({ id: "web", title: "Web", source: "user" }),
@@ -150,7 +170,8 @@ describe("derivePersonalSidebarSessions", () => {
     const sessions = Array.from({ length: 52 }, (_, index) =>
       makeSessionRow({
         id: `ses_${index}`,
-        updated_at: new Date(base - index * 60_000).toISOString(),
+        created_at: new Date(base - index * 60_000).toISOString(),
+        updated_at: new Date(base + index * 60_000).toISOString(),
       }),
     );
 
@@ -164,5 +185,27 @@ describe("derivePersonalSidebarSessions", () => {
     expect(derived).toHaveLength(51);
     expect(derived.map((session) => session.id)).toContain("ses_51");
     expect(derived.map((session) => session.id)).not.toContain("ses_50");
+  });
+});
+
+describe("deriveSidebarSessions", () => {
+  it("sorts workspace sessions by created time, not updated time", () => {
+    const sessions = [
+      makeSessionRow({
+        id: "older-updated",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-04T00:00:00.000Z",
+      }),
+      makeSessionRow({
+        id: "newer-created",
+        created_at: "2026-01-03T00:00:00.000Z",
+        updated_at: "2026-01-03T00:00:00.000Z",
+      }),
+    ];
+
+    expect(deriveSidebarSessions(sessions, []).map((session) => session.id)).toEqual([
+      "newer-created",
+      "older-updated",
+    ]);
   });
 });

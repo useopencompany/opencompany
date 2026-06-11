@@ -13,7 +13,7 @@ import { agentFiles, agents } from "@opencompany/db/schema";
 import { getMemoryCliSource } from "@opencompany/memory/cli-bundle";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";
-import { type SandboxHandle, sandboxLayout } from "./sandbox";
+import { type SandboxHandle, sandboxLayout, writeSandboxTextFiles } from "./sandbox";
 import { loadExternalSkillFiles } from "./skill-snapshots";
 
 const SANDBOX_ROOT_USER = "root";
@@ -43,33 +43,33 @@ export async function materializeSkillsForSession(input: {
   const reservedIds = new Set(skills.map((skill) => skill.id));
   const personal = await loadPersonalSkillsForMount(input.workspaceId, input.agentId, reservedIds);
   skills.push(...personal);
+  const memoryCliEnabled = skills.some((skill) => skill.id === MEMORY_SKILL_ID);
+  const skillFiles = skills.flatMap((skill) =>
+    skill.files.map((file) => ({
+      path: `${layout.skillsRoot}/${skill.id}/${file.path}`,
+      content: file.content,
+    })),
+  );
+  // The `memory` skill's CLI bundle is delivered here rather than via the skill catalog so the
+  // ~150 KB JS never ships inside agent-runtime (and the web bundle that imports it). The agent
+  // runs it with `node skills/memory/memory.mjs <command>`.
+  if (memoryCliEnabled) {
+    skillFiles.push({
+      path: `${layout.skillsRoot}/${MEMORY_SKILL_ID}/${MEMORY_CLI_FILE}`,
+      content: getMemoryCliSource(),
+    });
+  }
 
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(layout.skillsRoot)} && mkdir -p ${shellQuote(layout.skillsRoot)}`,
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   );
 
-  for (const skill of skills) {
-    for (const file of skill.files) {
-      const fullPath = `${layout.skillsRoot}/${skill.id}/${file.path}`;
-      await input.sandbox.commands.run(`mkdir -p ${shellQuote(dirname(fullPath))}`, {
-        user: SANDBOX_ROOT_USER,
-        timeoutMs: 30_000,
-      });
-      await input.sandbox.files.write(fullPath, file.content, { user: SANDBOX_ROOT_USER });
-    }
-  }
-
-  // The `memory` skill's CLI bundle is delivered here rather than via the skill catalog so the
-  // ~150 KB JS never ships inside agent-runtime (and the web bundle that imports it). The agent
-  // runs it with `node skills/memory/memory.mjs <command>`.
-  if (skills.some((skill) => skill.id === MEMORY_SKILL_ID)) {
-    await input.sandbox.files.write(
-      `${layout.skillsRoot}/${MEMORY_SKILL_ID}/${MEMORY_CLI_FILE}`,
-      getMemoryCliSource(),
-      { user: SANDBOX_ROOT_USER },
-    );
-  }
+  await writeSandboxTextFiles({
+    sandbox: input.sandbox,
+    files: skillFiles,
+    user: SANDBOX_ROOT_USER,
+  });
 
   // Lock the tree down: root-owned, directories traversable+readable (555), files read-only
   // (444). The agent runs as `user` and can read via the world bits but cannot write.
@@ -105,9 +105,4 @@ async function loadPersonalSkillsForMount(
     .where(and(eq(agentFiles.workspaceId, workspaceId), eq(agentFiles.agentId, agentId)));
   const { skills } = scanPersonalSkills({ bundleFiles: rows, bundleDir, reservedIds });
   return skills.map((skill) => ({ id: skill.metadata.id, files: skill.files }));
-}
-
-function dirname(path: string) {
-  const index = path.lastIndexOf("/");
-  return index === -1 ? "." : path.slice(0, index);
 }
