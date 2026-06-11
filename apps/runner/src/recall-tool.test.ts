@@ -168,6 +168,34 @@ describe("runRecallTool", () => {
     expect(dbMocks.getDb).not.toHaveBeenCalled();
     expect(recallMocks.recallSessions).not.toHaveBeenCalled();
   });
+
+  it("rejects time_window amounts beyond the bounded recall range", async () => {
+    const tooManyDays = await runRecallTool({
+      sessionId: "session_live",
+      args: { time_window: { amount: 31, unit: "days" } },
+    });
+    const tooManyHours = await runRecallTool({
+      sessionId: "session_live",
+      args: { time_window: { amount: 721, unit: "hours" } },
+    });
+
+    expect(tooManyDays).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_tool_input",
+        message: "`time_window.amount` must be at most 30 days.",
+      },
+    });
+    expect(tooManyHours).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_tool_input",
+        message: "`time_window.amount` must be at most 720 hours.",
+      },
+    });
+    expect(dbMocks.getDb).not.toHaveBeenCalled();
+    expect(recallMocks.recallSessions).not.toHaveBeenCalled();
+  });
 });
 
 function mockDb(tx: unknown) {

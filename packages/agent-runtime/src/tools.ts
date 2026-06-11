@@ -428,7 +428,8 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           properties: {
             amount: {
               type: "integer",
-              description: "Positive number of hours or days to look back.",
+              description:
+                "Positive number of hours or days to look back. Max 720 hours or 30 days.",
             },
             unit: {
               type: "string",

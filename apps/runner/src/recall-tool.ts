@@ -83,6 +83,8 @@ export async function runRecallTool(input: { sessionId: string; args: unknown })
 }
 
 type RecallTimeWindowUnit = "hours" | "days";
+const RECALL_MAX_TIME_WINDOW_DAYS = 30;
+const RECALL_MAX_TIME_WINDOW_HOURS = RECALL_MAX_TIME_WINDOW_DAYS * 24;
 type NormalizedRecallTimeWindow = {
   amount: number;
   unit: RecallTimeWindowUnit;
@@ -150,12 +152,20 @@ function parseTimeWindow(value: unknown): { value?: NormalizedRecallTimeWindow; 
   if (unit !== "hours" && unit !== "days") {
     return { error: '`time_window.unit` must be either "hours" or "days".' };
   }
+  const maxAmount = unit === "hours" ? RECALL_MAX_TIME_WINDOW_HOURS : RECALL_MAX_TIME_WINDOW_DAYS;
+  if (amount > maxAmount) {
+    return { error: `\`time_window.amount\` must be at most ${maxAmount} ${unit}.` };
+  }
   const millisecondsPerUnit = unit === "hours" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const createdAfter = new Date(Date.now() - amount * millisecondsPerUnit);
+  if (Number.isNaN(createdAfter.getTime())) {
+    return { error: "`time_window.amount` produced an invalid time window." };
+  }
   return {
     value: {
       amount,
       unit,
-      createdAfter: new Date(Date.now() - amount * millisecondsPerUnit),
+      createdAfter,
     },
   };
 }
