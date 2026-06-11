@@ -71,7 +71,7 @@ import { useToast } from "@/components/ToastProvider";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
-import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
+import { formatElapsed, useElapsedSeconds, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import {
@@ -2531,6 +2531,11 @@ function ToolCallCardDefault({
   const isCompleted = toolCall.status === "completed";
   const activityLine = latestActivityLine(toolCall.activityPreview);
   const isFailed = toolCall.status === "failed";
+  // Only count elapsed time for running tool calls — completed/failed/interrupted never need it.
+  const isRunning = toolCall.status === "running";
+  const elapsedSeconds = useElapsedSeconds(isRunning ? toolCall.startedAt : undefined);
+  // Show the live counter only after 20s so it stays quiet for normal-length tool calls.
+  const showElapsedCounter = isRunning && elapsedSeconds >= 20;
   const awaitingApproval = toolCall.approval?.status === "required" && optimisticDecision === null;
   const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
   const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
@@ -2609,7 +2614,13 @@ function ToolCallCardDefault({
           ) : !isCompleted ? (
             <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
               <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
-              running
+              {showElapsedCounter ? (
+                <>
+                  running · <span className="tabular-nums">{formatElapsed(elapsedSeconds)}</span>
+                </>
+              ) : (
+                "running"
+              )}
             </span>
           ) : null}
         </button>
