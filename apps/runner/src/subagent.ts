@@ -1,4 +1,6 @@
 import {
+  AGENT_TOOL_DEFINITION_BY_ID,
+  type AgentToolId,
   buildDeniedToolOutput,
   getAgentModelDefinition,
   getAgentModelRuntimeOptions,
@@ -55,6 +57,16 @@ const NEVER_GRANTABLE_TOOL_NAMES = new Set<RuntimeToolName>([
 ]);
 
 const DEFAULT_EXCLUDED_TOOL_NAMES = new Set<RuntimeToolName>(["write_file", "edit_file", "shell"]);
+
+// Dispatcher/meta tools the parent uses to reach capability tools. Subagents receive their
+// granted tools directly, so granting one of these is the most common model mistake — it
+// gets a targeted correction instead of the full grantable list.
+const DISPATCHER_TOOL_NAMES = new Set([
+  "use_tool",
+  "find_tools",
+  "tool_help",
+  "discover_capabilities",
+]);
 
 const INTERNAL_SUBAGENT_TOOL_NAMES = new Set<RuntimeToolName>(["recall", "fetch_transcript"]);
 
@@ -405,26 +417,38 @@ export function resolveSubagentGrant(input: {
   const grantable = grantableToolDefinitions(input);
   const grantableNames = new Set(grantable.map((tool) => tool.name));
   const requested = input.requestedTools?.map((tool) => tool.trim()).filter(Boolean);
-  const names =
-    requested && requested.length > 0
-      ? [...new Set(requested)]
-      : grantable
-          .map((tool) => tool.name)
-          .filter((name) => !DEFAULT_EXCLUDED_TOOL_NAMES.has(name as RuntimeToolName))
-          .slice(0, SUBAGENT_MAX_GRANTED_TOOLS);
 
-  const invalid = names.filter((name) => !grantableNames.has(name as RuntimeToolName));
-  if (invalid.length > 0) {
-    return {
-      ok: false,
-      error: `Cannot grant ${invalid.map((name) => `"${name}"`).join(", ")} to a subagent. Grantable tools are: ${[...grantableNames].join(", ") || "(none)"}.`,
-    };
-  }
-  if (requested && requested.length > 0 && names.length > SUBAGENT_MAX_GRANTED_TOOLS) {
-    return {
-      ok: false,
-      error: `Subagents can receive at most ${SUBAGENT_MAX_GRANTED_TOOLS} tools. Requested ${names.length}. Grantable tools are: ${[...grantableNames].join(", ") || "(none)"}.`,
-    };
+  let names: string[];
+  if (requested && requested.length > 0) {
+    const expanded: string[] = [];
+    const invalid: string[] = [];
+    for (const name of requested) {
+      if (grantableNames.has(name as RuntimeToolName)) {
+        expanded.push(name);
+        continue;
+      }
+      const capabilityTools = grantableCapabilityTools(name, grantableNames);
+      if (capabilityTools) {
+        expanded.push(...capabilityTools);
+        continue;
+      }
+      invalid.push(name);
+    }
+    if (invalid.length > 0) {
+      return { ok: false, error: formatGrantError(invalid, grantableNames) };
+    }
+    names = [...new Set(expanded)];
+    if (names.length > SUBAGENT_MAX_GRANTED_TOOLS) {
+      return {
+        ok: false,
+        error: `Subagents can receive at most ${SUBAGENT_MAX_GRANTED_TOOLS} tools; the request expands to ${names.length}. Grant fewer tool names or narrower capability ids.`,
+      };
+    }
+  } else {
+    names = grantable
+      .map((tool) => tool.name)
+      .filter((name) => !DEFAULT_EXCLUDED_TOOL_NAMES.has(name as RuntimeToolName))
+      .slice(0, SUBAGENT_MAX_GRANTED_TOOLS);
   }
 
   return {
@@ -435,6 +459,31 @@ export function resolveSubagentGrant(input: {
       )
       .filter((tool): tool is RuntimeToolDefinition => Boolean(tool)),
   };
+}
+
+// Expand a capability id (e.g. "exa") into its grantable runtime tools. Returns null when the
+// name is not a capability id, or when the capability has no grantable tools here (MCP-backed,
+// not enabled, or never-grantable) — callers then report the name as invalid.
+function grantableCapabilityTools(name: string, grantableNames: Set<RuntimeToolName>) {
+  const capability = AGENT_TOOL_DEFINITION_BY_ID.get(name as AgentToolId);
+  if (!capability) return null;
+  const tools = capability.runtimeTools.filter((tool) => grantableNames.has(tool));
+  return tools.length > 0 ? tools : null;
+}
+
+function formatGrantError(invalid: string[], grantableNames: Set<RuntimeToolName>) {
+  const quoted = (values: string[]) => values.map((value) => `"${value}"`).join(", ");
+  const dispatchers = invalid.filter((name) => DISPATCHER_TOOL_NAMES.has(name));
+  if (dispatchers.length > 0) {
+    return `Cannot grant ${quoted(dispatchers)}: subagents call their granted tools directly, so dispatcher tools are never granted. Pass the underlying tool names (e.g. "exa_search") or a capability id that expands to them (e.g. "exa") instead.`;
+  }
+  const emptyCapabilities = invalid.filter((name) =>
+    AGENT_TOOL_DEFINITION_BY_ID.has(name as AgentToolId),
+  );
+  if (emptyCapabilities.length > 0) {
+    return `Cannot grant ${quoted(emptyCapabilities)}: this capability has no tools grantable to a subagent here (MCP-backed or not enabled). Grantable tools are: ${[...grantableNames].join(", ") || "(none)"}.`;
+  }
+  return `Cannot grant ${quoted(invalid)} to a subagent. Pass enabled tool names or capability ids (e.g. "exa"). Grantable tools are: ${[...grantableNames].join(", ") || "(none)"}.`;
 }
 
 function grantableToolDefinitions(input: {

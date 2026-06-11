@@ -748,7 +748,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         tools: {
           type: "array",
           description:
-            "Optional subset of your enabled runtime tool names to grant. Omit for the default read/research set.",
+            'Optional tools to grant: underlying runtime tool names (e.g. "exa_search") and/or capability ids (e.g. "exa") that expand to their tools. Never use_tool or find_tools — the subagent calls its granted tools directly. Omit for the default read/research set.',
           items: { type: "string" },
         },
         model: {
@@ -769,6 +769,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Use run_subagent when a focused parallel-style investigation would keep your own context cleaner.",
       "The subagent is temporary and does not ask the user questions. Its final answer is returned as this tool's result.",
       "Only grant tools needed for the task. If tools is omitted, a safe read/research-oriented set is used.",
+      'Grant a whole capability by its id (e.g. "exa", "youtube") or individual underlying tool names. The subagent calls its granted tools directly — never grant use_tool, find_tools, or tool_help.',
       "The subagent cannot spawn other agents, delegate, edit your agent file, use MCP tools, or use user-interaction tools.",
     ].join("\n"),
   },
