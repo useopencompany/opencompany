@@ -26,6 +26,8 @@ import { personalIntegrationCount } from "@/components/personal/PersonalCapabili
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
+import { useOptionalOpenSession } from "@/components/session-split/PersonalSessionSplit";
+import { useOptionalSessionDrag } from "@/components/session-split/SessionDragContext";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -33,6 +35,7 @@ import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { derivePersonalSidebarSessions, deriveVisibleInbox } from "@/lib/collections/selectors";
 import { PERSONAL_INTEGRATION_TOOL_IDS } from "@/lib/personal/integrations-catalog";
 import { personalPaths } from "@/lib/personal/paths";
+import { writeSessionDragPayload } from "@/types/session-layout";
 
 // How long the red highlight shows on a session row before it is optimistically removed.
 const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
@@ -208,6 +211,11 @@ function SessionRow({
 }) {
   const [archiving, setArchiving] = useState(false);
   const archiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Split-pane integration (null on surfaces without a split provider): rows are
+  // drag sources for the session canvas, and clicks post an open-request so the
+  // canvas can swap/flash panes even when the URL doesn't change.
+  const drag = useOptionalSessionDrag();
+  const openSession = useOptionalOpenSession();
 
   useEffect(() => {
     return () => {
@@ -224,13 +232,32 @@ function SessionRow({
 
   return (
     <div
+      draggable={Boolean(drag)}
+      onDragStart={
+        drag
+          ? (event) => {
+              writeSessionDragPayload(event.dataTransfer, {
+                id: session.id,
+                name: session.title,
+              });
+              // Defer the state flip so the browser captures the drag image before
+              // React re-renders (a synchronous re-render during dragstart cancels
+              // the drag in some browsers).
+              setTimeout(() => drag.startDrag({ id: session.id, name: session.title }), 0);
+            }
+          : undefined
+      }
+      onDragEnd={drag ? () => drag.endDrag() : undefined}
       className={`group flex items-center rounded-md text-[13px] transition-all duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : ""}`}
     >
       <button
         type="button"
-        onClick={() => onSelect(session.id)}
+        onClick={() => {
+          openSession?.openSession({ id: session.id, name: session.title });
+          onSelect(session.id);
+        }}
         title={session.lastError ?? session.title}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
