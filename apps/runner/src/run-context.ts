@@ -20,6 +20,7 @@ import type { RunnerEnv } from "./env";
 import { createRunControlGate, type RunControlCheck } from "./run-control";
 import type { SandboxHandle } from "./sandbox";
 import { parkSandboxWhenIdle } from "./session-lifecycle";
+import type { ToolLatencySummary } from "./tool-latency";
 import { recordSandboxUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
@@ -185,6 +186,7 @@ export async function captureTurnCompletedAnalytics(input: {
   assistantMessageId: string;
   modelProvider: string | undefined;
   modelName: string | undefined;
+  toolLatency?: ToolLatencySummary | undefined;
 }) {
   if (
     !input.userId ||
@@ -229,6 +231,24 @@ export async function captureTurnCompletedAnalytics(input: {
     model_cost_usd_micros: cost?.modelCostUsdMicros ?? 0,
     tool_cost_usd_micros: cost?.toolCostUsdMicros ?? 0,
     sandbox_cost_usd_micros: cost?.sandboxCostUsdMicros ?? 0,
+    // Latency rollup: run start → now (trace.startedAt is performance.now()-based), plus the
+    // per-phase sums collected from every tool call's ToolCallTimings this turn.
+    turn_duration_ms: Math.round(performance.now() - input.ctx.trace.startedAt),
+    ...(input.toolLatency
+      ? {
+          tool_call_count: input.toolLatency.toolCallCount,
+          tool_failed_count: input.toolLatency.toolFailedCount,
+          tool_total_ms: input.toolLatency.toolTotalMs,
+          tool_exec_ms: input.toolLatency.toolExecMs,
+          tool_sandbox_wait_ms: input.toolLatency.toolSandboxWaitMs,
+          tool_gate_wait_ms: input.toolLatency.toolGateWaitMs,
+          tool_persist_ms: input.toolLatency.toolPersistMs,
+          tool_max_total_ms: input.toolLatency.toolMaxTotalMs,
+          ...(input.toolLatency.slowestToolName
+            ? { slowest_tool_name: input.toolLatency.slowestToolName }
+            : {}),
+        }
+      : {}),
   });
 }
 
