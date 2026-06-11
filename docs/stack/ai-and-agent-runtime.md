@@ -270,7 +270,8 @@ Skill-enabled tools are enabled by agent skill configuration:
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
-- `opencode_coder` when `@opencode` is enabled and bound to a connected GitHub work repository
+- `opencode_coder` when `@opencode` is enabled; it can target attached, integration-wide, or public GitHub repositories
+- `codex_coder` when `@codex` is enabled; it can target attached, integration-wide, or public GitHub repositories
 
 These coding-agent harnesses own their coding checkout and may clone the selected connected
 repository directly into `work/` for that tool run. They share the repo-clone, diff, draft-PR,
@@ -284,19 +285,25 @@ is chosen per tool call via the optional `model` argument (validated against `AG
 defaulting to a fixed platform model when omitted. Cost is recorded from opencode's reported token
 usage; dollar attribution is tracked through gateway spend (opencode has no per-run cost API).
 
+Codex runs headless as `codex exec --json --sandbox workspace-write --ask-for-approval never`
+inside the same coding sandbox template. V1 is platform-auth only: the runner reads
+`OPENAI_CODEX_API_KEY`, passes it to the single CLI process as `CODEX_API_KEY`, and sets an isolated
+`CODEX_HOME` under `/tmp`. The model is selected by `RUNNER_CODEX_MODEL`, defaults to
+`gpt-5.2-codex`, and is intentionally not exposed as a tool argument until CLI/model compatibility
+is tested. When Codex emits token usage in JSONL output, `codex_coder` records hosted-tool usage
+with platform OpenAI model pricing; otherwise the artifact metadata carries `usageMissing: true`.
+
 > Foundational note: opencode also speaks the Agent Client Protocol (`opencode acp`, JSON-RPC over
 > stdio). A future iteration can run harnesses through an in-runner ACP client to surface their
 > individual tool calls and permission requests through the existing approval gate, and to bring
 > additional harnesses (Claude Code, Codex, Gemini) the same way. Phase 1 intentionally uses the
 > simpler one-shot `opencode run` path that mirrors AMP.
 
-Both harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
-`opencode` CLI is made available defensively: `opencode-tool.ts` checks for the binary and installs
-it on demand if missing, so the tool works on the current template without a rebuild. The durable
-option is to bake opencode into `OPENCOMPANY_AMP_E2B_TEMPLATE` — either via the installer or by
-basing that image on e2b's prebuilt `opencode` template and layering `git`/`gh`/`amp` on top. We do
-not point the runner directly at e2b's stock `opencode` template because a session uses one template
-and still needs `gh`/`amp` for the other tools.
+These harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
+`opencode` and `codex` CLIs are made available defensively: their tool files check for the binary
+and install on demand if missing, so the tools work on the current template without a rebuild. The
+durable option is to bake both CLIs into `OPENCOMPANY_AMP_E2B_TEMPLATE` and keep the on-demand
+install path as a fallback.
 
 MCP tools are enabled by workspace setup plus agent configuration:
 

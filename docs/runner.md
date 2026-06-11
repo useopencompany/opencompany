@@ -134,6 +134,8 @@ V1 tools:
 - `update_agent_file` when the saved agent enables the `agent-self-edit` skill; validates and
   persists version-guarded changes to the agent's own `.agent` configuration and queues GitHub sync
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
+- `opencode_coder` when the saved agent enables the opencode coding-agent tool
+- `codex_coder` when the saved agent enables the Codex coding-agent tool
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
   experiment on, and Linear MCP has workspace OAuth or bearer-token credentials configured
 - `slack__*` dynamic tools when the saved agent enables `@slack`, the workspace has the `mcp`

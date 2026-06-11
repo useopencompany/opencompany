@@ -105,6 +105,12 @@ tools:
     type: coding_agent
     provider: amp
     prCapable: true
+  - id: codex
+    type: coding_agent
+    provider: codex
+    label: Codex
+    description: Delegate coding work to Codex inside an E2B sandbox.
+    prCapable: true
 ```
 
 GitHub repository access is derived from body mentions, not the `amp` tool. A
@@ -124,6 +130,8 @@ for coding tools, `--repo owner/repo` for `gh` commands).
 | `tiktok` | Inspect public TikTok profiles, recent videos, comments, and search results through Apify; fetch direct-video metadata/transcripts through Supadata. |
 | `instagram` | Inspect public Instagram profiles, recent posts/reels, comments, and profile search results through Apify; fetch direct-media metadata/transcripts through Supadata. |
 | `amp` | Coding work delegated into a sandboxed runtime, operating on an attached repository. |
+| `opencode` | Coding work delegated into a sandboxed runtime, with attached or public GitHub repository support. |
+| `codex` | Codex coding work delegated into a sandboxed runtime, with attached or public GitHub repository support. |
 | `linear` | Workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Workspace MCP access to Slack search, messages, files, emoji, and users. |
 

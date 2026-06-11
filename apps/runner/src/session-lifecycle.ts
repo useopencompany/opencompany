@@ -228,7 +228,9 @@ function errorName(error: unknown) {
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
   const needsCodingTemplate =
     agentHasGitHubAccess(agentConfig) ||
-    agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode");
+    agentConfig.tools.some(
+      (tool) => tool.id === "amp" || tool.id === "opencode" || tool.id === "codex",
+    );
   return needsCodingTemplate ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
 

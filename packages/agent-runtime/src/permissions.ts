@@ -478,6 +478,7 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   gh: { providerKey: "github", group: "admin" },
   amp_coder: { providerKey: "github", group: "modify" },
   opencode_coder: { providerKey: "github", group: "modify" },
+  codex_coder: { providerKey: "github", group: "modify" },
   // Never gated.
   delegate_to_agent: null,
   tool_help: null,

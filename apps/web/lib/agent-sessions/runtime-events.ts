@@ -1601,6 +1601,10 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "amp_coder":
       return "Coding with Amp";
+    case "opencode_coder":
+      return "Coding with opencode";
+    case "codex_coder":
+      return "Coding with Codex";
     case "read_skill": {
       const skillId = field("skillId");
       return skillId ? `Reading ${skillId} skill` : "Reading a skill";

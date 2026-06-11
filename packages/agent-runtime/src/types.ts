@@ -57,6 +57,7 @@ export type AgentToolId =
   | "neon"
   | "amp"
   | "opencode"
+  | "codex"
   | "linear"
   | "slack"
   | "posthog"
@@ -110,9 +111,9 @@ export type AgentHostedToolConfig = {
 };
 
 export type AgentCodingToolConfig = {
-  id: "amp" | "opencode";
+  id: "amp" | "opencode" | "codex";
   type: "coding_agent";
-  provider: "amp" | "opencode";
+  provider: "amp" | "opencode" | "codex";
   label: string;
   description: string;
   prCapable: boolean;

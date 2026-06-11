@@ -227,6 +227,9 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
+| `OPENAI_CODEX_API_KEY` | Codex only | Platform OpenAI API key used by the runner for non-interactive `codex_coder` runs. Passed to the Codex CLI only as process env `CODEX_API_KEY`. |
+| `RUNNER_CODEX_MODEL` | No | Codex CLI model for `codex_coder`, defaults to `gpt-5.2-codex`. Not exposed as a tool argument in v1. |
+| `RUNNER_CODEX_TIMEOUT_MS` | No | Wall-clock ceiling for a single `codex_coder` delegation, defaults to `1200000` (20 min). Timeouts surface partial diffs and skip PR creation. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP and Google (Gmail/Calendar) credentials. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Used by the runner to refresh Gmail/Calendar access tokens against Google's token endpoint. Must match Vercel. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |

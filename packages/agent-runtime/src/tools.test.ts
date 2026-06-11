@@ -70,6 +70,23 @@ describe("AGENT_TOOL_CATALOG", () => {
       opencodeRuntimeTools.find((tool) => tool?.name === "opencode_coder")
         ?.requiresAttachedRepository,
     ).toBeUndefined();
+
+    const codex = AGENT_TOOL_DEFINITION_BY_ID.get("codex");
+    expect(codex?.credentialSource).toBe("mixed");
+    expect(codex?.requiredPlatformEnvVars).toEqual(["OPENAI_CODEX_API_KEY"]);
+    expect(codex?.requiredWorkspaceResource).toBeUndefined();
+    const codexRuntimeTools = (codex?.runtimeTools ?? []).map((name) =>
+      RUNTIME_TOOL_DEFINITION_BY_NAME.get(name),
+    );
+    expect(codexRuntimeTools).toContainEqual(
+      expect.objectContaining({
+        name: "codex_coder",
+        configToolId: "codex",
+      }),
+    );
+    expect(
+      codexRuntimeTools.find((tool) => tool?.name === "codex_coder")?.requiresAttachedRepository,
+    ).toBeUndefined();
   });
 
   it("exposes Amp modes on amp_coder", () => {
@@ -330,6 +347,17 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     ).not.toContain("opencode_coder");
   });
 
+  it("enables codex_coder when codex is selected, even without an attached repository", () => {
+    const codexTool = { id: "codex" };
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [codexTool] })).toContain("codex_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [codexTool], repositories: [repo] }),
+    ).toContain("codex_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
+    ).not.toContain("codex_coder");
+  });
+
   it("gates the memory, recall, and fetch_transcript tools on the memory skill being enabled", () => {
     const withoutMemory = resolveRuntimeToolNamesForConfigTools({ tools: [] });
     expect(withoutMemory).not.toContain("memory");
@@ -511,7 +539,9 @@ describe("buildCapabilityDiscovery", () => {
     });
     const ids = results.map((result) => result.id);
     // Platform/mixed hosted + coding capabilities are present...
-    expect(ids).toEqual(expect.arrayContaining(["exa", "x", "youtube", "amp", "opencode"]));
+    expect(ids).toEqual(
+      expect.arrayContaining(["exa", "x", "youtube", "amp", "opencode", "codex"]),
+    );
     // ...workspace-OAuth capabilities (MCP servers + Google tools) are not discoverable in v1.
     for (const excluded of [
       "linear",
@@ -576,6 +606,7 @@ describe("buildCapabilityDiscovery", () => {
     expect(byId(noRepo).get("amp")?.reason).toContain("repository");
     // opencode does not require an attached repository, so it stays available.
     expect(byId(noRepo).get("opencode")?.status).toBe("available");
+    expect(byId(noRepo).get("codex")?.status).toBe("available");
 
     const withRepo = buildCapabilityDiscovery({
       enabledTools: [],
