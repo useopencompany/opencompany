@@ -366,7 +366,7 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("recall");
     if (!definition) throw new Error("Expected recall runtime tool definition to exist");
 
-    expect(definition.description).toContain('omit query and pass only time_window');
+    expect(definition.description).toContain("omit query and pass only time_window");
     expect(definition.description).toContain("what did we discuss today?");
 
     const query = definition.parameters.properties.query as { description?: string };

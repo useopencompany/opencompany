@@ -419,7 +419,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "recall",
     kind: "internal",
     description:
-      "Recall your own past sessions with this user from the raw transcript. Use query for topic searches. For broad time-bounded recap questions like \"what did we discuss today?\", \"what happened yesterday?\", or \"catch me up on this week\", omit query and pass only time_window so results come back newest-first instead of keyword-filtered. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
+      'Recall your own past sessions with this user from the raw transcript. Use query for topic searches. For broad time-bounded recap questions like "what did we discuss today?", "what happened yesterday?", or "catch me up on this week", omit query and pass only time_window so results come back newest-first instead of keyword-filtered. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.',
     parameters: {
       type: "object",
       properties: {
