@@ -901,7 +901,8 @@ function githubRowStatus(
 ): Pick<IntegrationRow, "description" | "badge" | "connectEntry" | "badgeTone"> {
   if (status === "connected") {
     return {
-      description: "Workspace GitHub integration is available.",
+      description:
+        "Your agent can use any repository the GitHub connection can reach. Mention a repo (@owner/repo) in Behavior to scope it down.",
       badge: "Connected",
       badgeTone: "success",
     };

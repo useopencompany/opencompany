@@ -2,6 +2,7 @@ import {
   AGENT_SELF_EDIT_SKILL_ID,
   type AgentBrainReference,
   type AgentConfig,
+  agentHasGitHubAccess,
   BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
   formatBrainReferenceDisplay,
@@ -9,6 +10,7 @@ import {
   isBrainPathAllowed,
   isDeferrableRuntimeTool,
   newAgentSessionMessageId,
+  parseGitHubCliArgs,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
@@ -22,6 +24,8 @@ import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
+  loadConnectedGitHubInstallation,
+  loadGitHubWorkRepositoryByFullName,
   readSandboxBrainSnapshot,
   resolveAttachedRepositoryInstallations,
   runAmpCoderTool,
@@ -595,7 +599,9 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
-          hasAttachedRepository: Boolean(input.repository),
+          hasAttachedRepository:
+            Boolean(input.repository) ||
+            (input.agentConfig ? agentHasGitHubAccess(input.agentConfig) : false),
           googleContext: input.workspaceId
             ? {
                 workspaceId: input.workspaceId,
@@ -766,6 +772,7 @@ export async function executeRuntimeTool(input: {
           ? await resolveShellGitHubAuth({
               workspaceId: input.workspaceId,
               agentConfig: input.agentConfig,
+              args: input.args,
               toolCallId: input.toolCallId,
             })
           : null;
@@ -1067,22 +1074,114 @@ function createCommandOutputPublisher(input: {
 }
 
 // Inject repo-scoped git + gh credentials into the explicit gh tool whenever the
-// agent has at least one attached GitHub repository. A broken integration
-// (e.g. needs-reauth) propagates and surfaces as a recoverable tool error. A single
-// installation token cannot span installations, so we scope the token to the repos
-// of the first attached repository's installation; cross-installation sessions get
-// auth for one installation at a time.
+// agent has attached GitHub access. A broken integration (e.g. needs-reauth)
+// propagates and surfaces as a recoverable tool error. A single installation token
+// cannot span installations, so explicit repositories are scoped to one installation.
+// With the live `@github` all-repositories scope, `gh --repo owner/repo ...` resolves
+// that repository's installation at call time so multi-installation workspaces use
+// the token for the requested repo instead of whichever connection was created first.
 async function resolveShellGitHubAuth(input: {
   workspaceId?: string | undefined;
   agentConfig?: AgentConfig | undefined;
+  args?: unknown;
   toolCallId: string;
 }) {
   if (!input.workspaceId || !input.agentConfig) return null;
 
-  const repositories = input.agentConfig.integrations.github.repositories;
+  const github = input.agentConfig.integrations.github;
+  if (github.allRepositories === true) {
+    const requestedRepository = readGhRepoArgument(input.args);
+    if (requestedRepository) {
+      const attachedRepository = github.repositories.find(
+        (repository) => repository.fullName.toLowerCase() === requestedRepository.toLowerCase(),
+      );
+      if (attachedRepository) {
+        return resolveAttachedGitHubCommandAuth({
+          workspaceId: input.workspaceId,
+          repositories: [attachedRepository],
+          toolCallId: input.toolCallId,
+        });
+      }
+
+      const resolved = await loadGitHubWorkRepositoryByFullName(
+        input.workspaceId,
+        requestedRepository,
+      );
+      if (!resolved) {
+        throw new Error(
+          `GitHub work repository ${requestedRepository} is not available to this workspace. Reconnect GitHub or grant the installation access to it.`,
+        );
+      }
+
+      const githubToken = await getGitHubWorkInstallationToken({
+        installationId: resolved.installationId,
+        repositoryFullName: resolved.repository.fullName,
+      });
+      if (!githubToken) return null;
+
+      const githubAuthHeader = gitAuthHeader(githubToken);
+      return {
+        env: buildGitHubCommandEnv({
+          githubAuthHeader,
+          githubToken,
+          toolCallId: input.toolCallId,
+          repositoryFullName: resolved.repository.fullName,
+        }),
+        redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+      };
+    }
+
+    if (github.repositories.length === 1) {
+      return resolveAttachedGitHubCommandAuth({
+        workspaceId: input.workspaceId,
+        repositories: github.repositories,
+        toolCallId: input.toolCallId,
+      });
+    }
+
+    const installation = await loadConnectedGitHubInstallation(input.workspaceId);
+    // GitHub not connected: same graceful no-auth behavior as an agent without repositories.
+    if (!installation) return null;
+
+    const githubToken = await getGitHubWorkInstallationToken({
+      installationId: installation.installationId,
+    });
+    if (!githubToken) return null;
+
+    const githubAuthHeader = gitAuthHeader(githubToken);
+    return {
+      env: buildGitHubCommandEnv({
+        githubAuthHeader,
+        githubToken,
+        toolCallId: input.toolCallId,
+        // No GH_REPO default: with installation-wide access the agent must pass --repo.
+        ...(github.repositories.length === 1
+          ? { repositoryFullName: github.repositories[0]!.fullName }
+          : {}),
+      }),
+      redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+    };
+  }
+
+  const repositories = github.repositories;
   if (repositories.length === 0) return null;
 
-  const resolved = await resolveAttachedRepositoryInstallations(input.workspaceId, repositories);
+  return resolveAttachedGitHubCommandAuth({
+    workspaceId: input.workspaceId,
+    repositories,
+    toolCallId: input.toolCallId,
+  });
+}
+
+async function resolveAttachedGitHubCommandAuth(input: {
+  workspaceId: string;
+  repositories: AgentConfig["integrations"]["github"]["repositories"];
+  toolCallId: string;
+}) {
+  const resolved = await resolveAttachedRepositoryInstallations(
+    input.workspaceId,
+    input.repositories,
+  );
   if (resolved.length === 0) return null;
 
   const installationId = resolved[0]!.installationId;
@@ -1106,6 +1205,32 @@ async function resolveShellGitHubAuth(input: {
     }),
     redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
   };
+}
+
+function readGhRepoArgument(args: unknown) {
+  const argv = isRecord(args) ? parseGitHubCliArgs(args.args) : null;
+  if (!argv) return null;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]!;
+    if (arg === "--") return null;
+    if (arg === "--repo" || arg === "-R") {
+      const value = argv[index + 1]?.trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+    if (arg.startsWith("--repo=")) {
+      const value = arg.slice("--repo=".length).trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+    if (arg.startsWith("-R") && arg.length > 2) {
+      const value = arg.slice(2).trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+  }
+  return null;
+}
+
+function isGitHubRepositoryFullName(value: string) {
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value);
 }
 
 function gitAuthHeader(token: string) {

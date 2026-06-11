@@ -2517,6 +2517,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   tools: ReadonlyArray<{ id?: unknown }> | undefined;
   agents?: ReadonlyArray<unknown> | undefined;
   repositories?: ReadonlyArray<unknown> | undefined;
+  // Live `@github` all-repositories scope: counts as having an attached repository, so it
+  // unlocks the same repo-gated runtime tools (e.g. gh) as an explicit attachment.
+  allRepositories?: boolean;
   // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on;
   // `memory` only when the memory skill is on.
   selfEditEnabled?: boolean;
@@ -2525,7 +2528,8 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   // post to a personal inbox. The runner passes `row.agent.isDefault`.
   personalInboxEnabled?: boolean;
 }) {
-  const hasAttachedRepository = (input.repositories ?? []).length > 0;
+  const hasAttachedRepository =
+    (input.repositories ?? []).length > 0 || input.allRepositories === true;
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
     // Skill- and reference-gated tools are added below, not unconditionally.
