@@ -28,6 +28,7 @@ import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
+import { BRAIN_BASE_PATH } from "@/lib/brain/paths";
 import { deriveSidebarSessions } from "@/lib/collections/selectors";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
@@ -493,10 +494,10 @@ function SidebarContent({
               active={isActive("/company/agents")}
             />
             <NavItem
-              href="/company/brain"
+              href={BRAIN_BASE_PATH}
               icon={Brain}
               label="Brain"
-              active={isActive("/company/brain")}
+              active={isActive(BRAIN_BASE_PATH)}
             />
             <NavItem
               href="/company/inbox"
