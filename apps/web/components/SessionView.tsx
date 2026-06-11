@@ -443,8 +443,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // position survives viewport resize. Cleared as soon as the one-shot scroll runs.
   const [pendingScrollMessageId, setPendingScrollMessageId] = useState<string | null>(null);
   // Whether the user is "pinned" at the bottom of the scroll container. Drives the
-  // streaming bottom-follow.
+  // streaming bottom-follow (hot-path read, via the ref) AND the jump-to-bottom pill's
+  // visibility (needs a re-render, via the state mirror). `setPinnedAtBottom` is the
+  // single writer that keeps the two in sync; it only re-renders when the boolean
+  // actually flips, so per-scroll churn stays off the streaming follow.
   const isPinnedAtBottomRef = useRef(true);
+  const [isPinnedAtBottom, setIsPinnedAtBottomState] = useState(true);
+  const setPinnedAtBottom = (value: boolean) => {
+    isPinnedAtBottomRef.current = value;
+    setIsPinnedAtBottomState((prev) => (prev === value ? prev : value));
+  };
   // True only briefly after a genuine USER scroll input (wheel / trackpad / touch).
   // onScroll only updates isPinnedAtBottom while this is set, so it ignores BOTH our own
   // programmatic scrolls (snap + follow) AND layout-driven scroll events (reflow,
@@ -999,7 +1007,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     container.scrollTo({ top: container.scrollTop + drift, behavior: "auto" });
     // The user is now reading from the top, not pinned at the bottom — the streaming
     // follow stays off until they scroll back down themselves.
-    isPinnedAtBottomRef.current = false;
+    setPinnedAtBottom(false);
     setPendingScrollMessageId(null);
   }, [pendingScrollMessageId, visibleMessages]);
 
@@ -1370,7 +1378,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             if (!userScrollIntentRef.current) return;
             const el = event.currentTarget;
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-            isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+            setPinnedAtBottom(distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX);
           }}
           onDragEnter={(event) => {
             if (!attachmentsEnabled) return;
