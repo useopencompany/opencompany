@@ -2363,17 +2363,54 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(parts).toEqual([
       {
-        type: "tool-call",
-        toolCall: {
-          id: "after-session:12",
-          name: "updating_memory",
-          label: "Updating memory",
-          status: "completed",
-          inputPreview: "",
-          activityPreview: "",
-          outputPreview: "Memory updated",
-          startedEventId: 1,
-          completedEventId: 2,
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            label: "Updated memory",
+            status: "completed",
+            inputPreview: "",
+            activityPreview: "",
+            outputPreview: "Memory updated",
+            startedEventId: 1,
+            completedEventId: 2,
+          },
+        },
+      },
+    ]);
+  });
+
+  it("surfaces the memory pass summary as the tool call's result", () => {
+    const parts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+        event(2, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+          summary: "Remembered the integration-connection-pill product idea.",
+        }),
+      ],
+      [],
+    );
+
+    expect(parts).toMatchObject([
+      {
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            label: "Updated memory",
+            status: "completed",
+            activityPreview: "Remembered the integration-connection-pill product idea.",
+            outputPreview: "Remembered the integration-connection-pill product idea.",
+          },
         },
       },
     ]);
@@ -2410,12 +2447,15 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(parts).toHaveLength(1);
     expect(parts[0]).toMatchObject({
-      type: "tool-call",
-      toolCall: {
-        name: "updating_memory",
-        status: "completed",
-        startedEventId: 1,
-        completedEventId: 2,
+      anchorMessageId: "msg_user",
+      part: {
+        type: "tool-call",
+        toolCall: {
+          name: "updating_memory",
+          status: "completed",
+          startedEventId: 1,
+          completedEventId: 2,
+        },
       },
     });
   });
@@ -2434,12 +2474,15 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(runningParts).toMatchObject([
       {
-        type: "tool-call",
-        toolCall: {
-          id: "after-session:12",
-          name: "updating_memory",
-          status: "running",
-          startedEventId: 1,
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            status: "running",
+            startedEventId: 1,
+          },
         },
       },
     ]);
@@ -2462,14 +2505,17 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(completedParts).toMatchObject([
       {
-        type: "tool-call",
-        toolCall: {
-          id: "after-session:12",
-          name: "updating_memory",
-          status: "completed",
-          outputPreview: "Memory updated",
-          startedEventId: 1,
-          completedEventId: 9,
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            status: "completed",
+            outputPreview: "Memory updated",
+            startedEventId: 1,
+            completedEventId: 9,
+          },
         },
       },
     ]);
@@ -2529,20 +2575,26 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(parts).toMatchObject([
       {
-        type: "tool-call",
-        toolCall: {
-          id: "after-session:12",
-          name: "updating_memory",
-          status: "completed",
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            status: "completed",
+          },
         },
       },
       {
-        type: "tool-call",
-        toolCall: {
-          id: "call_1",
-          name: "write_file",
-          status: "completed",
-          brainPath: "memory.md",
+        anchorMessageId: null,
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "call_1",
+            name: "write_file",
+            status: "completed",
+            brainPath: "memory.md",
+          },
         },
       },
     ]);

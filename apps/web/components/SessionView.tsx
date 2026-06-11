@@ -40,6 +40,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -91,6 +92,7 @@ import {
 } from "@/lib/agent-sessions/payload";
 import { isToolStepLimitResumable } from "@/lib/agent-sessions/resumable";
 import {
+  AFTER_SESSION_TOOL_NAME,
   type AssistantTurnPart,
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
@@ -634,8 +636,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
   );
-  const backgroundParts = useMemo(
-    () => buildBackgroundActivityParts(runtime.events, runtime.messages).slice(-8),
+  const backgroundActivity = useMemo(
+    () => buildBackgroundActivityParts(runtime.events, runtime.messages),
     [runtime.events, runtime.messages],
   );
   const visibleMessages = useMemo(
@@ -645,6 +647,42 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       ),
     [runtime.messages],
   );
+  // Interleave background passes (memory updates) at their true chronological position: each
+  // entry is anchored to the user message whose turn it followed, so it renders after that
+  // turn's last message — not pinned to the transcript bottom once the user keeps typing.
+  // Entries from the latest turn, or with no resolvable anchor, keep the old bottom placement.
+  const { backgroundPartsAfterMessageId, trailingBackgroundParts } = useMemo(() => {
+    const afterMessageId = new Map<string, AssistantTurnPart[]>();
+    const trailing: AssistantTurnPart[] = [];
+    for (const entry of backgroundActivity) {
+      const anchorIndex = entry.anchorMessageId
+        ? visibleMessages.findIndex((message) => message.id === entry.anchorMessageId)
+        : -1;
+      let nextUserIndex = -1;
+      for (let i = anchorIndex + 1; anchorIndex >= 0 && i < visibleMessages.length; i++) {
+        if (visibleMessages[i]?.role === "user") {
+          nextUserIndex = i;
+          break;
+        }
+      }
+      if (anchorIndex < 0 || nextUserIndex <= 0) {
+        trailing.push(entry.part);
+        continue;
+      }
+      const afterId = visibleMessages[nextUserIndex - 1]?.id;
+      if (!afterId) {
+        trailing.push(entry.part);
+        continue;
+      }
+      const list = afterMessageId.get(afterId) ?? [];
+      list.push(entry.part);
+      afterMessageId.set(afterId, list);
+    }
+    return {
+      backgroundPartsAfterMessageId: afterMessageId,
+      trailingBackgroundParts: trailing.slice(-8),
+    };
+  }, [backgroundActivity, visibleMessages]);
   const assistantPartsByMessageId = useMemo(() => {
     const partsByMessageId = new Map<string, AssistantTurnPart[]>();
     for (const message of runtime.messages) {
@@ -668,9 +706,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       const match = findPending(parts);
       if (match?.type === "tool-call") return match.toolCall;
     }
-    const background = findPending(backgroundParts);
+    const background = findPending(backgroundActivity.map((entry) => entry.part));
     return background?.type === "tool-call" ? background.toolCall : null;
-  }, [assistantPartsByMessageId, backgroundParts]);
+  }, [assistantPartsByMessageId, backgroundActivity]);
   const lastVisibleMessage = visibleMessages.at(-1);
   // Index of the last user message. Everything from here down (that message, its reply,
   // the working indicator, background tool cards) is the "active turn" and gets wrapped
@@ -794,6 +832,35 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           ) : null}
         </div>
       </div>
+    );
+  };
+
+  // A block of background-pass tool cards (memory updates). Shared between the interleaved
+  // per-turn placement and the trailing block at the bottom of the active turn.
+  const renderBackgroundParts = (parts: AssistantTurnPart[]) => (
+    <div className="space-y-1.5">
+      {parts.map((part) =>
+        part.type === "tool-call" ? (
+          <div key={part.toolCall.id} className="flex justify-start">
+            <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
+              <ToolCallCard toolCall={part.toolCall} sessionIsInterrupted={sessionIsInterrupted} />
+            </div>
+          </div>
+        ) : null,
+      )}
+    </div>
+  );
+
+  // A transcript row: the message plus any background passes anchored after it (a memory
+  // update that followed this turn renders here, at its true position in the conversation).
+  const renderMessageRow = (message: SessionMessage) => {
+    const anchoredParts = backgroundPartsAfterMessageId.get(message.id);
+    if (!anchoredParts?.length) return renderMessage(message);
+    return (
+      <Fragment key={`${message.id}-row`}>
+        {renderMessage(message)}
+        {renderBackgroundParts(anchoredParts)}
+      </Fragment>
     );
   };
 
@@ -1362,7 +1429,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               </div>
             ) : null}
 
-            {visibleMessages.slice(0, Math.max(lastUserTurnStart, 0)).map(renderMessage)}
+            {visibleMessages.slice(0, Math.max(lastUserTurnStart, 0)).map(renderMessageRow)}
 
             {/* Active turn: the last user message + its reply + indicators, wrapped in a
                 min-height box so the just-sent message can sit at the top with a viewport
@@ -1380,7 +1447,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               {(lastUserTurnStart >= 0
                 ? visibleMessages.slice(lastUserTurnStart)
                 : visibleMessages
-              ).map(renderMessage)}
+              ).map(renderMessageRow)}
 
               {showWaitingForAssistant ? (
                 <div className="flex justify-start">
@@ -1392,22 +1459,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 </div>
               ) : null}
 
-              {backgroundParts.length > 0 ? (
-                <div className="space-y-1.5">
-                  {backgroundParts.map((part) =>
-                    part.type === "tool-call" ? (
-                      <div key={part.toolCall.id} className="flex justify-start">
-                        <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
-                          <ToolCallCard
-                            toolCall={part.toolCall}
-                            sessionIsInterrupted={sessionIsInterrupted}
-                          />
-                        </div>
-                      </div>
-                    ) : null,
-                  )}
-                </div>
-              ) : null}
+              {trailingBackgroundParts.length > 0
+                ? renderBackgroundParts(trailingBackgroundParts)
+                : null}
             </div>
           </div>
         </div>
@@ -2512,7 +2566,11 @@ function ToolCallCardDefault({
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-            <Wrench size={11} strokeWidth={1.75} />
+            {toolCall.name === AFTER_SESSION_TOOL_NAME ? (
+              <Brain size={11} strokeWidth={1.75} />
+            ) : (
+              <Wrench size={11} strokeWidth={1.75} />
+            )}
           </span>
           <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
             {toolCall.label || formatToolName(toolCall.name)}
@@ -2577,7 +2635,11 @@ function ToolCallCardDefault({
           onDeny={() => submitDecision("denied")}
         />
       ) : null}
-      {activityLine && !expanded && !toolCall.outputPreview ? (
+      {/* Memory passes keep their one-line summary visible when collapsed (it IS the result);
+          other tools hide stale activity once the output preview exists. */}
+      {activityLine &&
+      !expanded &&
+      (!toolCall.outputPreview || toolCall.name === AFTER_SESSION_TOOL_NAME) ? (
         <div
           title={activityLine}
           className="ml-6 mt-0.5 max-w-[min(520px,calc(100vw-112px))] truncate text-[11px] leading-4 text-ink-subtle"
