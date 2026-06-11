@@ -6,6 +6,7 @@ import {
   type RuntimeToolName,
   searchRuntimeTools,
 } from "@opencompany/agent-runtime";
+import type { HostedToolCostSource } from "@opencompany/billing";
 import type { RunnerEnv } from "./env";
 import {
   executeGoogleHostedTool,
@@ -19,6 +20,8 @@ export type HostedToolUsage = {
   operation: string;
   providerRequestId?: string;
   costUsdMicros: number;
+  // Omitted means provider_reported (the default in calculateHostedToolUsageCost).
+  costSource?: HostedToolCostSource;
   rawUsage: Record<string, unknown>;
 };
 
