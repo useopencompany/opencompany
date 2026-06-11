@@ -14,7 +14,7 @@ import type { AgentModelId } from "./types";
 // model override.
 export const MEMORY_KEEPER_MODEL: { provider: string; name: AgentModelId } = {
   provider: "vercel-ai-gateway",
-  name: "zai/glm-5.1",
+  name: "google/gemini-3.1-flash-lite-preview",
 };
 
 // Appended to the personal agent's resolved system prompt (not a replacement — the file-root,

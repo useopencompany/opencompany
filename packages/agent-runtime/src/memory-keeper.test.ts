@@ -78,7 +78,10 @@ describe("MEMORY_KEEPER_SYSTEM_PROMPT", () => {
 
 describe("MEMORY_KEEPER_MODEL", () => {
   it("pins a valid catalog model so the session-level override always applies", () => {
-    expect(MEMORY_KEEPER_MODEL).toEqual({ provider: "vercel-ai-gateway", name: "zai/glm-5.1" });
+    expect(MEMORY_KEEPER_MODEL).toEqual({
+      provider: "vercel-ai-gateway",
+      name: "google/gemini-3.1-flash-lite-preview",
+    });
     // resolveAgentRuntimeConfig only honors overrides it can find in the catalog.
     expect(getAgentModelDefinition(MEMORY_KEEPER_MODEL.name)).not.toBeNull();
   });
