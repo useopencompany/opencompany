@@ -368,8 +368,10 @@ async function runMessageWithContext(
     });
     // Memory-keeper mode: a `source: "memory"` session is an invisible background pass that runs
     // under the personal agent's own bundle but with a platform-owned system prompt appended and a
-    // restricted toolset. Keep the agent's model and the rest of `runtime` (file roots, profile,
-    // tool index) intact — only the framing and the tools change.
+    // restricted toolset. The rest of `runtime` (file roots, profile, tool index) stays intact —
+    // only the framing and the tools change here. The model is already the pinned cheap keeper
+    // model (MEMORY_KEEPER_MODEL): the spawn path stored it as the session's modelName, which
+    // resolveAgentRuntimeConfig above applied as the model override.
     const enabledTools = memoryKeeperRun
       ? restrictToolsForMemoryKeeper(runtime.tools)
       : runtime.tools;
@@ -1212,8 +1214,6 @@ async function runAfterSessionWithContext(
           workspaceId: row.workspace.id,
           userId: row.session.userId,
           agentId: row.agent.id,
-          modelProvider: row.session.modelProvider,
-          modelName: row.session.modelName,
         }),
       );
       await markAfterSessionRunSpawned(afterSessionRunId, childSessionId);
