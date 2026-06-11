@@ -418,25 +418,43 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "recall",
     kind: "internal",
     description:
-      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges. Use to remember earlier discussions, decisions, or facts that are not in your current context. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
+      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges, optionally constrained to the past N hours or days. You can also omit query and provide a time_window to recall recent session snippets. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
           description:
-            "What to look for, in natural language or keywords. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+            "What to look for, in natural language or keywords. Optional when time_window is provided. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+        },
+        time_window: {
+          type: "object",
+          properties: {
+            amount: {
+              type: "integer",
+              description:
+                "Positive number of hours or days to look back. Max 720 hours or 30 days.",
+            },
+            unit: {
+              type: "string",
+              enum: ["hours", "days"],
+              description: "Whether amount is measured in hours or days.",
+            },
+          },
+          required: ["amount", "unit"],
+          additionalProperties: false,
         },
         limit: {
           type: "number",
           description: "Maximum number of matching exchanges to return (default 5, max 20).",
         },
       },
-      required: ["query"],
       additionalProperties: false,
     },
     help: [
       "Searches the raw transcript of your previous sessions with this user (this agent only); the current session is excluded.",
+      "Pass query only to search all indexed history; pass query plus time_window to restrict the search to recent messages.",
+      "Pass time_window without query to recall recent session snippets, newest first.",
       "Returns each hit as a short window: the matching message plus the one before and after it for context.",
       "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
       "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
