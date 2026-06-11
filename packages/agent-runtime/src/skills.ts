@@ -1,5 +1,5 @@
 import { parse as parseYaml } from "yaml";
-import { validateSkillFiles } from "./skill-resolver";
+import { normalizeSkillCommand, validateSkillFiles } from "./skill-resolver";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import {
   type AgentConfig,
@@ -967,6 +967,7 @@ export type ResolvedSkillMetadata = {
   id: string;
   name: string;
   description: string;
+  command?: string;
   origin: "builtin" | "external" | "personal";
   source?: AgentSkillSource;
   provenance?: "agent" | "user";
@@ -1162,7 +1163,7 @@ export type PersonalSkillScanResult = {
 // `description`, and additionally reads the optional `provenance` marker (agent- vs user-authored).
 function parsePersonalSkillFrontmatter(
   content: string,
-): { name: string; description: string; provenance?: "agent" | "user" } | null {
+): { name: string; description: string; command?: string; provenance?: "agent" | "user" } | null {
   const normalized = content.replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) return null;
   const end = normalized.indexOf("\n---", 4);
@@ -1181,7 +1182,13 @@ function parsePersonalSkillFrontmatter(
   const rawProvenance = typeof record.provenance === "string" ? record.provenance.trim() : "";
   const provenance =
     rawProvenance === "agent" || rawProvenance === "user" ? rawProvenance : undefined;
-  return { name, description, ...(provenance ? { provenance } : {}) };
+  const command = normalizeSkillCommand(record.command);
+  return {
+    name,
+    description,
+    ...(command ? { command } : {}),
+    ...(provenance ? { provenance } : {}),
+  };
 }
 
 // Discover the agent's personal skills from its bundle files. Pure: no DB, no files, no network —
@@ -1252,6 +1259,7 @@ export function scanPersonalSkills(input: {
         id,
         name: parsed.name,
         description: parsed.description,
+        ...(parsed.command ? { command: parsed.command } : {}),
         origin: "personal",
         ...(parsed.provenance ? { provenance: parsed.provenance } : {}),
       },

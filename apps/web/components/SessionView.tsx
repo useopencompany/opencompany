@@ -5,13 +5,15 @@ import {
   ATTACHMENT_TEXT_MAX_BYTES,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  listAddableBuiltinSkills,
   modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  type ResolvedSkillMetadata,
   validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -66,6 +68,7 @@ import {
   uploadAttachment,
 } from "@/components/composer-attachments";
 import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
+import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -131,6 +134,63 @@ import {
 
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
+
+function buildAttachedSkillCommandSources({
+  configSkills,
+  workspaceSkills,
+  personalSkills = [],
+}: {
+  configSkills: AgentConfig["skills"];
+  workspaceSkills: SkillCommandSource[];
+  personalSkills?: ResolvedSkillMetadata[];
+}): SkillCommandSource[] {
+  const workspaceById = new Map(workspaceSkills.map((skill) => [skill.id, skill]));
+  const addableBuiltinById = new Map(listAddableBuiltinSkills().map((skill) => [skill.id, skill]));
+  const seen = new Set<string>();
+  const sources: SkillCommandSource[] = [];
+
+  const add = (skill: SkillCommandSource) => {
+    if (seen.has(skill.id)) return;
+    seen.add(skill.id);
+    sources.push(skill);
+  };
+
+  for (const skill of configSkills ?? []) {
+    const workspaceSkill = workspaceById.get(skill.id);
+    if (workspaceSkill) {
+      add({
+        id: workspaceSkill.id,
+        name: workspaceSkill.name,
+        ...(workspaceSkill.description !== undefined
+          ? { description: workspaceSkill.description }
+          : {}),
+        ...(workspaceSkill.command ? { command: workspaceSkill.command } : {}),
+      });
+      continue;
+    }
+
+    const builtin = addableBuiltinById.get(skill.id);
+    if (builtin) {
+      add({
+        id: builtin.id,
+        name: builtin.name,
+        description: builtin.description,
+        ...(builtin.command ? { command: builtin.command } : {}),
+      });
+    }
+  }
+
+  for (const skill of personalSkills) {
+    add({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(skill.command ? { command: skill.command } : {}),
+    });
+  }
+
+  return sources;
+}
 
 // Snapshot statuses where the server snapshot is the authoritative transcript AND no
 // turn can still be racing into the Durable Stream — the lease has been released
@@ -1081,34 +1141,42 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
   // Skills attached to this session's agent contribute `/<command>` entries alongside the
   // built-ins — using each skill's declared `command:` when present, else a slug of its name.
-  // The attached set comes from the synced agent config; the command + metadata come from the
-  // workspace skill catalog.
+  // Company sessions derive attached skills from the synced agent row; personal sessions use the
+  // live personal context so unsaved soft-navigation state and personal skills stay visible.
   const { agents } = useCollections();
   const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const personalAgent = useOptionalPersonalAgent();
   const { data: skillCatalog } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
     queryFn: fetchWorkspaceSkills,
     staleTime: 60_000,
   });
   const allSlashCommands = useMemo(() => {
+    const workspaceSkills: SkillCommandSource[] = (skillCatalog ?? []).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(skill.command ? { command: skill.command } : {}),
+    }));
     const attached = agentRows?.find((agent) => agent.id === session.agentId);
-    const attachedIds = new Set(
-      (attached ? (agentRowToListItem(attached).config.skills ?? []) : []).map((skill) => skill.id),
-    );
-    const sources: SkillCommandSource[] = (skillCatalog ?? [])
-      .filter((skill) => attachedIds.has(skill.id))
-      .map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        ...(skill.command ? { command: skill.command } : {}),
-      }));
+    const configSkills =
+      personalAgent?.agent.id === session.agentId
+        ? personalAgent.config.skills
+        : attached
+          ? agentRowToListItem(attached).config.skills
+          : [];
+    const sources = buildAttachedSkillCommandSources({
+      configSkills,
+      workspaceSkills,
+      personalSkills:
+        personalAgent?.agent.id === session.agentId ? personalAgent.personalSkills : [],
+    });
     if (sources.length === 0) return SLASH_COMMANDS;
     return [
       ...SLASH_COMMANDS,
       ...buildSkillSlashCommands(sources, new Set(SLASH_COMMANDS.map((c) => c.id))),
     ];
-  }, [agentRows, session.agentId, skillCatalog]);
+  }, [agentRows, personalAgent, session.agentId, skillCatalog]);
 
   // Command mode is active while the caret sits on a `/token` (at the start of the
   // input or after whitespace). The token after the slash is the live filter query.
