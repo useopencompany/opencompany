@@ -1778,3 +1778,96 @@ describe("pastedTextFile — oversized paste → attachment", () => {
     expect(pastedTextFile("more text", pending).name).toBe("pasted-text-2.txt");
   });
 });
+
+// ── Open chat scrolled to the bottom ────────────────────────────────────────
+describe("SessionViewContent — opens a chat scrolled to the bottom", () => {
+  let scrollToSpy: ReturnType<typeof vi.fn>;
+  let originalScrollTo: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    scrollToSpy = vi.fn();
+    originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo");
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollToSpy,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 2000,
+    });
+  });
+
+  afterEach(() => {
+    if (originalScrollTo) {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
+    } else {
+      // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+      delete (HTMLElement.prototype as unknown as { scrollTo?: unknown }).scrollTo;
+    }
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { clientHeight?: unknown }).clientHeight;
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { scrollHeight?: unknown }).scrollHeight;
+    vi.clearAllMocks();
+  });
+
+  it("snaps an idle session with existing messages to the bottom on open", async () => {
+    const detail = makeDetail({
+      messages: [
+        { id: "m_user", role: "user", content: "Question", status: "completed" },
+        { id: "m_assistant", role: "assistant", content: "Answer", status: "completed" },
+      ],
+    });
+    streamMock.status = "live";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      const wentToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(wentToBottom).toBe(true);
+    });
+  });
+
+  it("hides the pill at the bottom, shows it after scrolling up, and jumps back on click", async () => {
+    const detail = makeDetail({
+      messages: [
+        { id: "m_user", role: "user", content: "Question", status: "completed" },
+        { id: "m_assistant", role: "assistant", content: "Answer", status: "completed" },
+      ],
+    });
+    streamMock.status = "live";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" })).toBeNull();
+
+    const scroller = view.container.querySelector(".overflow-y-auto") as HTMLElement;
+    scroller.scrollTop = 0; // distanceFromBottom = 2000 - 0 - 800 = 1200 > 80 threshold
+    fireEvent.wheel(scroller);
+    fireEvent.scroll(scroller);
+
+    const pill = await screen.findByRole("button", { name: "Scroll to bottom" });
+
+    scrollToSpy.mockClear();
+    fireEvent.click(pill);
+
+    expect(scrollToSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ top: 2000, behavior: "smooth" }),
+    );
+  });
+});

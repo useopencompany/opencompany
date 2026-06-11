@@ -1063,6 +1063,23 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     showWaitingForAssistant,
   ]);
 
+  // Open at bottom: when a chat is first opened (or switched to), land on the newest
+  // message — once per session. Runs in useLayoutEffect (before paint) so there is no
+  // visible top→bottom jump. Keyed on session.id and guarded by a ref so it never
+  // re-fires on later message/stream renders (the streaming follow owns those) and
+  // never fights the send-snap (which positions the view itself on send).
+  const initialScrollSessionRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (pendingScrollMessageId) return; // a send-snap owns this frame
+    if (initialScrollSessionRef.current === session.id) return; // already snapped this chat
+    if (visibleMessages.length === 0) return; // wait until content exists
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    setPinnedAtBottom(true);
+    initialScrollSessionRef.current = session.id;
+  }, [session.id, visibleMessages, pendingScrollMessageId]);
+
   // Keep the reserved-space height (--chat-vh) in sync with the scroll container's own
   // height. A single ResizeObserver means the CSS min-height on the last turn recomputes
   // on every viewport/container resize (window resize, sidebar toggle, devtools), so the
