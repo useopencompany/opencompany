@@ -303,12 +303,15 @@ export function SessionViewContent(props: SessionViewContentProps) {
 function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const surface = useSessionSurface();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
   const relatedSessionCount = relatedCount(detail.related);
   const previousRelatedSessionCountRef = useRef(relatedSessionCount);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(relatedSessionCount === 0);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
+    defaultInspectorCollapsed(surface, relatedSessionCount),
+  );
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -3589,6 +3592,11 @@ function InspectorRelatedSession({
 function useSessionSurface(): "personal" | "company" {
   const pathname = usePathname();
   return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
+}
+
+function defaultInspectorCollapsed(surface: "personal" | "company", relatedSessionCount: number) {
+  if (surface === "personal") return true;
+  return relatedSessionCount === 0;
 }
 
 function sessionHref(surface: "personal" | "company", sessionId: string) {

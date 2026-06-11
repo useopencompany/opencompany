@@ -35,6 +35,11 @@ export type AnalyticsEventPropertiesByName = {
     workspace_id: string;
     agent_id: string;
   };
+  personal_agent_reset: {
+    user_id: string;
+    workspace_id: string;
+    agent_id: string | null;
+  };
   session_started: {
     user_id: string;
     workspace_id: string;
@@ -171,6 +176,11 @@ export const analyticsEvents = {
   agent_deleted: {
     name: "agent_deleted",
     description: "A user deleted an agent.",
+    safeProperties: ["user_id", "workspace_id", "agent_id"],
+  },
+  personal_agent_reset: {
+    name: "personal_agent_reset",
+    description: "A user reset their local-only personal agent.",
     safeProperties: ["user_id", "workspace_id", "agent_id"],
   },
   session_started: {

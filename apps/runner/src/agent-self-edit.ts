@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AGENT_SCHEDULE_TRIGGER_TYPE,
+  FIXED_PERSONAL_AGENT_NAME,
   type AgentConfig,
   type AgentModelId,
   type AgentScheduleTriggerConfig,
@@ -63,6 +64,7 @@ export async function applyAgentSelfUpdate(input: {
       workspaceId: agents.workspaceId,
       path: agents.path,
       name: agents.name,
+      isDefault: agents.isDefault,
       version: agents.version,
       config: agents.config,
     })
@@ -76,6 +78,14 @@ export async function applyAgentSelfUpdate(input: {
   }
 
   const current = normalizeAgentConfig(row.config);
+  if (row.isDefault && title && title !== FIXED_PERSONAL_AGENT_NAME) {
+    return {
+      ok: false,
+      errors: [
+        `The personal agent has a fixed identity. Keep the title "${FIXED_PERSONAL_AGENT_NAME}" and update the body instead.`,
+      ],
+    };
+  }
 
   // The body is the source of truth: tools and brain follow its @mentions. The title changes only
   // when an explicit `title` is passed (otherwise the current name is kept); path, delegated
@@ -98,7 +108,7 @@ export async function applyAgentSelfUpdate(input: {
   const nextSkills = [...collectBuiltinSkillMentions(body), ...preservedExternalSkills];
 
   const source = serializeAgentFile({
-    title: title ?? row.name,
+    title: row.isDefault ? FIXED_PERSONAL_AGENT_NAME : (title ?? row.name),
     body,
     model: model ?? current.model.name,
     agents: current.agents ?? [],
@@ -172,7 +182,7 @@ export async function applyAgentSelfUpdate(input: {
 
   const changedFields = diffChangedFields(current, nextConfig);
   // Title isn't part of AgentConfig, so diffChangedFields can't see it — surface a rename here.
-  if (title && title !== row.name) changedFields.push("name");
+  if (!row.isDefault && title && title !== row.name) changedFields.push("name");
 
   await requireLeaseWrite(
     appendRuntimeEventForLease({

@@ -48,11 +48,7 @@ import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
 import { normalizeCompanyUrl } from "@/lib/onboarding/validation";
-import {
-  enablePersonalAgentIntegrations,
-  type PersonalIntegrationId,
-  setPersonalAgentName,
-} from "@/lib/personal/actions";
+import { enablePersonalAgentIntegrations, type PersonalIntegrationId } from "@/lib/personal/actions";
 import { determineApprovalResolution } from "./approval-resolution";
 
 export async function createAgentSession(idOrPath: string) {
@@ -196,15 +192,14 @@ export type PersonalOnboardingContext = {
   agentExperience?: string;
 };
 
-// The chosen preset (if any) from the agent-setup step, the integrations the user left enabled, the
-// name they gave the agent, and the short attribution survey we persist for analytics. The
+// The chosen preset (if any) from the agent-setup step, the integrations the user left enabled, and
+// the short attribution survey we persist for analytics. The
 // integrations are written to the agent body before the run fires; the preset's mode + integration
 // list ride (invisibly) into the first message so the onboarding skill tunes the soul to that role;
 // the survey + context are persisted best-effort and never block the session.
 export type PersonalOnboardingOptions = {
   integrations: PersonalIntegrationId[];
   setup?: { id: string; title: string; intent: string };
-  agentName?: string;
   survey?: { heardFrom: string; heardFromDetail: string };
 };
 
@@ -287,12 +282,6 @@ export async function createPersonalOnboardingSession(
 
   // Persist the attribution survey + role/team/company (best-effort, never blocks the session).
   await persistPersonalOnboardingSurvey(user.id, workspace.id, context, options.survey);
-
-  // Name the agent the user chose. Re-serializes the agent source so name + body stay in lockstep,
-  // and runs before integrations are enabled so the freshly-written name flows into that save too.
-  if (options.agentName?.trim()) {
-    await setPersonalAgentName(agentId, options.agentName.trim());
-  }
 
   // Enable the integrations the user kept selected before the run fires. This appends their
   // @mentions to the agent body (idempotent); the deferred run below reads the fresh agent, so the

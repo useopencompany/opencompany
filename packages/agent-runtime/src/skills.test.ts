@@ -5,6 +5,7 @@ import {
   AGENT_SELF_EDIT_SKILL_ID,
   computeSkillFolderIntegrity,
   FIRST_PRINCIPLES_SKILL_ID,
+  HUMANIZER_SKILL_ID,
   isKnownAgentSkillId,
   listAddableBuiltinSkills,
   MAX_PERSONAL_SKILLS,
@@ -176,6 +177,36 @@ describe("first-principles skill (addable built-in)", () => {
     const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
     expect(skillMd).toContain("@skill/");
     expect(skillMd).toContain(`@skill/${FIRST_PRINCIPLES_SKILL_ID}`);
+    expect(skillMd).toContain(`@skill/${HUMANIZER_SKILL_ID}`);
+  });
+});
+
+describe("humanizer skill (addable built-in)", () => {
+  test("is a known built-in but off by default", () => {
+    expect(isKnownAgentSkillId(HUMANIZER_SKILL_ID)).toBe(true);
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((s) => s.id)).not.toContain(
+      HUMANIZER_SKILL_ID,
+    );
+    expect(resolveEnabledSkillMetadata(baseConfig()).map((s) => s.id)).not.toContain(
+      HUMANIZER_SKILL_ID,
+    );
+  });
+
+  test("materializes once listed in config.skills as a bare built-in ref", () => {
+    const config = baseConfig({ skills: [{ id: HUMANIZER_SKILL_ID }] });
+    const skill = resolveEnabledBuiltinSkillFiles(config).find((s) => s.id === HUMANIZER_SKILL_ID);
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    // Ships the pattern catalog and the voice guidance.
+    expect(skillMd).toContain("humanizer");
+    expect(skillMd).toMatch(/AI-generated/i);
+    expect(skillMd).toMatch(/voice/i);
+    expect(
+      resolveEnabledSkillMetadata(config).find((s) => s.id === HUMANIZER_SKILL_ID)?.origin,
+    ).toBe("builtin");
+  });
+
+  test("listAddableBuiltinSkills offers it", () => {
+    expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(HUMANIZER_SKILL_ID);
   });
 });
 
