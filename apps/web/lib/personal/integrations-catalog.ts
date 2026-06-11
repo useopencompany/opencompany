@@ -30,6 +30,11 @@ export type PersonalIntegrationCatalogEntry = {
   kind: PersonalIntegrationKind;
   // Builds the OAuth start URL (full-page navigation) for the in-tab connect flow.
   connectUrl: (returnTo: string) => string;
+  // What connecting grants the agent, in user terms. Shown in the row's expanded detail — both as
+  // a preview before connecting and as the access summary afterwards. Mirrors the actual scopes
+  // requested by each connect flow (e.g. GOOGLE_PROVIDER_CONFIG scopes, the GitHub App's
+  // permissions, what each MCP server exposes) — keep in sync when those change.
+  permissions: string[];
 };
 
 // Whether each integration is connected at the workspace level (OAuth/MCP credentials present).
@@ -47,6 +52,12 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     kind: "github",
     connectUrl: (returnTo) =>
       `/api/integrations/github/start?intent=settings&returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Read and write code in the repositories you grant",
+      "Create branches and open pull requests",
+      "Read repository metadata and default branches",
+      "No access to repositories outside the installation",
+    ],
   },
   {
     id: "gmail",
@@ -56,6 +67,10 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     kind: "google",
     connectUrl: (returnTo) =>
       `/api/integrations/gmail/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Read mail in the connected account",
+      "Read-only — cannot send, modify, or delete mail",
+    ],
   },
   {
     id: "google_calendar",
@@ -65,6 +80,11 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     kind: "google",
     connectUrl: (returnTo) =>
       `/api/integrations/google-calendar/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "List the account's calendars",
+      "Read events on selected calendars",
+      "Create, update, and delete events",
+    ],
   },
   {
     id: "linear",
@@ -73,6 +93,11 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     icon: ListTodo,
     kind: "mcp",
     connectUrl: (returnTo) => `/api/mcp/linear/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Read and search issues, projects, and teams",
+      "Create and update issues and comments",
+      "Acts as the Linear account you authorize",
+    ],
   },
   {
     id: "slack",
@@ -81,6 +106,11 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     icon: MessageSquare,
     kind: "mcp",
     connectUrl: (returnTo) => `/api/mcp/slack/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Read channels and messages you can see",
+      "Search workspace conversations",
+      "Acts as the Slack account you authorize",
+    ],
   },
   {
     id: "posthog",
@@ -89,6 +119,11 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     icon: BarChart3,
     kind: "mcp",
     connectUrl: (returnTo) => `/api/mcp/posthog/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Query analytics, insights, and dashboards",
+      "Read feature flags and experiments",
+      "Acts as the PostHog account you authorize",
+    ],
   },
   {
     id: "betterstack",
@@ -97,6 +132,11 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     icon: Monitor,
     kind: "mcp",
     connectUrl: (returnTo) => `/api/mcp/betterstack/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Read monitors, incidents, and status pages",
+      "Query logs and uptime data",
+      "Acts as the Better Stack account you authorize",
+    ],
   },
   {
     id: "braintrust",
@@ -105,6 +145,11 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     icon: FlaskConical,
     kind: "mcp",
     connectUrl: (returnTo) => `/api/mcp/braintrust/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Read experiments, datasets, and logs",
+      "Read and run prompts",
+      "Acts as the Braintrust account you authorize",
+    ],
   },
 ];
 
