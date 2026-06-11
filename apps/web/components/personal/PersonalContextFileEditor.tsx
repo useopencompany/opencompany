@@ -2,6 +2,7 @@
 
 import { Check, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
+import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
 import { useToast } from "@/components/ToastProvider";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import {
@@ -11,7 +12,8 @@ import {
 
 type SaveState = "idle" | "saving" | "saved";
 
-// A plain monospace editor for a single file in the personal agent's bundle. Two modes:
+// Editor for a single file in the personal agent's bundle. Markdown files use the shared Tiptap
+// markdown editor; other file types stay in the raw monospace editor. Two modes:
 //  - editing an existing file: relativePath is fixed, content auto-saves on a debounce.
 //  - creating a new file: the user names it (prefilled with the folder prefix) and hits Create.
 // Both write through local-only server actions (no GitHub sync) scoped to the personal agent.
@@ -70,6 +72,7 @@ function ExistingFileEditor({
   const [, startTransition] = useTransition();
   const pendingRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markdownFile = isMarkdownPath(file.relativePath);
 
   const flush = () => {
     const next = pendingRef.current;
@@ -122,18 +125,38 @@ function ExistingFileEditor({
         <SaveIndicator state={saveState} />
       </div>
 
-      <textarea
-        value={content}
-        onChange={(event) => {
-          setContent(event.target.value);
-          setSaveState("idle");
-          schedule(event.target.value);
-        }}
-        onBlur={flush}
-        spellCheck={false}
-        className="mt-6 min-h-0 flex-1 resize-none rounded-lg border border-border bg-surface/40 px-4 py-3 font-mono text-[13px] leading-6 text-ink outline-none focus:border-ink/25 focus:bg-canvas"
-        placeholder="Empty file"
-      />
+      {markdownFile ? (
+        <div
+          onBlur={(event) => {
+            const nextFocus = event.relatedTarget;
+            if (!(nextFocus instanceof Node) || !event.currentTarget.contains(nextFocus)) flush();
+          }}
+          className="mt-6 min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-canvas px-4 py-4 focus-within:border-ink/25"
+        >
+          <MarkdownBrainEditor
+            key={file.path}
+            content={content}
+            onChange={(next) => {
+              setContent(next);
+              setSaveState("idle");
+              schedule(next);
+            }}
+          />
+        </div>
+      ) : (
+        <textarea
+          value={content}
+          onChange={(event) => {
+            setContent(event.target.value);
+            setSaveState("idle");
+            schedule(event.target.value);
+          }}
+          onBlur={flush}
+          spellCheck={false}
+          className="mt-6 min-h-0 flex-1 resize-none rounded-lg border border-border bg-surface/40 px-4 py-3 font-mono text-[13px] leading-6 text-ink outline-none focus:border-ink/25 focus:bg-canvas"
+          placeholder="Empty file"
+        />
+      )}
     </div>
   );
 }
@@ -164,6 +187,7 @@ function NewFileEditor({
   }, []);
 
   const trimmed = path.trim();
+  const markdownFile = isMarkdownPath(trimmed);
   const canCreate = Boolean(trimmed) && !trimmed.endsWith("/") && !isPending;
 
   const create = () => {
@@ -216,13 +240,23 @@ function NewFileEditor({
         </button>
       </div>
 
-      <textarea
-        value={content}
-        onChange={(event) => setContent(event.target.value)}
-        spellCheck={false}
-        className="mt-6 min-h-0 flex-1 resize-none rounded-lg border border-border bg-surface/40 px-4 py-3 font-mono text-[13px] leading-6 text-ink outline-none focus:border-ink/25 focus:bg-canvas"
-        placeholder="Empty file"
-      />
+      {markdownFile ? (
+        <div className="mt-6 min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-canvas px-4 py-4 focus-within:border-ink/25">
+          <MarkdownBrainEditor
+            key={trimmed}
+            content={content}
+            onChange={(next) => setContent(next)}
+          />
+        </div>
+      ) : (
+        <textarea
+          value={content}
+          onChange={(event) => setContent(event.target.value)}
+          spellCheck={false}
+          className="mt-6 min-h-0 flex-1 resize-none rounded-lg border border-border bg-surface/40 px-4 py-3 font-mono text-[13px] leading-6 text-ink outline-none focus:border-ink/25 focus:bg-canvas"
+          placeholder="Empty file"
+        />
+      )}
     </div>
   );
 }
@@ -249,4 +283,8 @@ function SaveIndicator({ state }: { state: SaveState }) {
 
 function fileName(relativePath: string) {
   return relativePath.split("/").filter(Boolean).at(-1) ?? relativePath;
+}
+
+function isMarkdownPath(path: string) {
+  return /\.mdx?$/i.test(path);
 }
