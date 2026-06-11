@@ -139,7 +139,6 @@ export default function SessionSplitView({ sessionId }: { sessionId: string }) {
             <SessionView
               sessionId={paneId}
               isPrimary={index === 0}
-              inspectorDefaultCollapsed
               onRequestSplit={handleRequestSplit}
               splitDisabled={splitDisabled}
               // Closing only means something with another session pane to fall back

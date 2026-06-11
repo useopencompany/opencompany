@@ -2,6 +2,8 @@
 
 import {
   ATTACHMENT_MAX_PER_MESSAGE,
+  ATTACHMENT_TEXT_MAX_BYTES,
+  COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
@@ -112,6 +114,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { BRAIN_BASE_PATH, brainHref } from "@/lib/brain/paths";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import { personalPaths } from "@/lib/personal/paths";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
@@ -150,6 +153,15 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+
+// Wraps an oversized composer paste in a File so it rides the normal attachment pipeline.
+// Numbered against the pending attachments so two pastes in one message don't show as
+// identically-named chips (uniqueness is guaranteed by the attachment id either way).
+export function pastedTextFile(text: string, pending: PendingAttachment[]): File {
+  const count = pending.filter((att) => att.filename.startsWith("pasted-text")).length;
+  const name = count === 0 ? "pasted-text.txt" : `pasted-text-${count + 1}.txt`;
+  return new File([text], name, { type: "text/plain" });
+}
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 // How far from the bottom (in px) before we consider the user "pinned".
@@ -174,12 +186,6 @@ type PaneControlProps = {
   // When provided, the top bar shows a Close button that asks the container to remove
   // this pane.
   onClosePane?: () => void;
-  // When true, the inspector starts collapsed regardless of related-session count (split
-  // panes are narrow), and the auto-expand when the first related session appears is
-  // suppressed too — only an explicit user toggle opens the inspector. Assumed constant
-  // for the lifetime of the pane: it seeds a useState initializer, so flipping it on a
-  // live pane won't re-apply the initial state.
-  inspectorDefaultCollapsed?: boolean;
 };
 
 type SessionViewContentProps = PaneControlProps & {
@@ -378,7 +384,7 @@ function SessionViewQuery({
 export function SessionViewContent(props: SessionViewContentProps) {
   return (
     <ToolApprovalContext.Provider value={{ sessionId: props.detail.session.id }}>
-      <SessionViewContentBody {...props} />
+      <SessionViewContentBody key={props.detail.session.id} {...props} />
     </ToolApprovalContext.Provider>
   );
 }
@@ -390,18 +396,13 @@ function SessionViewContentBody({
   onRequestSplit,
   splitDisabled,
   onClosePane,
-  inspectorDefaultCollapsed,
 }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
-  const relatedSessionCount = relatedCount(detail.related);
-  const previousRelatedSessionCountRef = useRef(relatedSessionCount);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(
-    inspectorDefaultCollapsed ? true : relatedSessionCount === 0,
-  );
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -842,6 +843,19 @@ function SessionViewContentBody({
 
   const renderMessage = (message: SessionMessage) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
+    // Brain files this turn created or edited (write_file/edit_file set brainPath), deduped
+    // and kept in tool-call order so the footer can link straight to each one.
+    const brainFilePaths: string[] = [];
+    if (message.role === "assistant") {
+      const seenBrainPaths = new Set<string>();
+      for (const part of assistantParts) {
+        if (part.type !== "tool-call") continue;
+        const brainPath = part.toolCall.brainPath;
+        if (!brainPath || seenBrainPaths.has(brainPath)) continue;
+        seenBrainPaths.add(brainPath);
+        brainFilePaths.push(brainPath);
+      }
+    }
     const copyText =
       message.role === "assistant"
         ? extractAssistantText(assistantParts) || message.content
@@ -909,20 +923,23 @@ function SessionViewContentBody({
               ) : null}
             </div>
           )}
-          {canCopy && message.status !== "running" && !awaitingInput ? (
+          {(canCopy || brainFilePaths.length > 0) &&
+          message.status !== "running" &&
+          !awaitingInput ? (
             <div
-              className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 transition-opacity ${
+              className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
                 message.role === "assistant"
                   ? "opacity-100"
                   : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
               }`}
             >
-              <CopyMessageButton text={copyText} />
+              {canCopy ? <CopyMessageButton text={copyText} /> : null}
               {duration > 0 ? (
                 <span className="text-[10px] tabular-nums text-ink-subtle/60 select-none">
                   {formatElapsed(Math.round(duration))}
                 </span>
               ) : null}
+              {brainFilePaths.length > 0 ? <BrainAttachments paths={brainFilePaths} /> : null}
             </div>
           ) : null}
         </div>
@@ -1065,17 +1082,6 @@ function SessionViewContentBody({
       document.removeEventListener("focusin", handleFocusIn);
     };
   }, [attachMenuOpen]);
-
-  useEffect(() => {
-    const previousCount = previousRelatedSessionCountRef.current;
-    previousRelatedSessionCountRef.current = relatedSessionCount;
-    // Panes that start collapsed (split view) stay collapsed even when the first related
-    // session appears — only an explicit toggle opens the inspector there. This return must
-    // stay below the ref update so count tracking continues while gated; otherwise a later
-    // ungated run would fire off a stale previousCount.
-    if (inspectorDefaultCollapsed) return;
-    if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
-  }, [relatedSessionCount, inspectorDefaultCollapsed]);
 
   // One-shot snap: place the just-sent user message at the TOP of the viewport, exactly
   // once. Done in useLayoutEffect (before the browser paints) and INSTANTLY, so the very
@@ -1689,12 +1695,27 @@ function SessionViewContentBody({
                         const file = item.getAsFile();
                         if (file) files.push(file);
                       }
-                      if (files.length === 0) return;
-                      // Files in the clipboard: take them as attachments and stop the browser
-                      // from also pasting them (e.g. an image) into the textarea. Any text
-                      // portion of a mixed paste still falls through normally.
+                      if (files.length > 0) {
+                        // Files in the clipboard: take them as attachments and stop the browser
+                        // from also pasting them (e.g. an image) into the textarea. Any text
+                        // portion of a mixed paste still falls through normally.
+                        event.preventDefault();
+                        acceptFiles(files);
+                        return;
+                      }
+                      // Oversized plain-text pastes become a .txt attachment instead of dumping
+                      // a wall of text into the composer. Beyond the attachment size cap the
+                      // paste falls through untouched — losing the user's text to a rejection
+                      // toast would be worse than a huge textarea.
+                      const text = event.clipboardData?.getData("text/plain") ?? "";
+                      if (
+                        text.length < COMPOSER_PASTE_ATTACHMENT_MIN_CHARS ||
+                        new Blob([text]).size > ATTACHMENT_TEXT_MAX_BYTES
+                      ) {
+                        return;
+                      }
                       event.preventDefault();
-                      acceptFiles(files);
+                      acceptFiles([pastedTextFile(text, attachments)]);
                     }}
                     placeholder="Ask this agent to do something"
                     role="combobox"
@@ -2213,6 +2234,39 @@ function CopyMessageButton({ text }: { text: string }) {
         <Copy size={10} strokeWidth={1.75} />
       )}
     </button>
+  );
+}
+
+const BRAIN_ATTACHMENT_VISIBLE_LIMIT = 3;
+
+// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links
+// straight to each file in the (URL-addressable) Brain editor; collapses the tail past 3.
+function BrainAttachments({ paths }: { paths: string[] }) {
+  const visible = paths.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
+  const overflow = paths.length - visible.length;
+  return (
+    <>
+      {visible.map((path) => (
+        <Link
+          key={path}
+          href={brainHref(path)}
+          title={`brain/${path}`}
+          className="inline-flex max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
+        >
+          <Brain size={9} strokeWidth={1.9} className="shrink-0" />
+          <span className="truncate">{path}</span>
+        </Link>
+      ))}
+      {overflow > 0 ? (
+        <Link
+          href={BRAIN_BASE_PATH}
+          title={`${overflow} more brain ${overflow === 1 ? "file" : "files"}`}
+          className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
+        >
+          +{overflow} others
+        </Link>
+      ) : null}
+    </>
   );
 }
 

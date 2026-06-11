@@ -26,7 +26,7 @@ import type {
   SessionRuntimeState,
 } from "@/lib/agent-sessions/runtime-events";
 import type { SessionStreamStatus } from "@/lib/agent-sessions/session-stream";
-import { AssistantMessageContent, SessionViewContent } from "./SessionView";
+import { AssistantMessageContent, pastedTextFile, SessionViewContent } from "./SessionView";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 
@@ -1716,6 +1716,106 @@ function makeRelatedChild(
 }
 
 describe("SessionViewContent — surface-aware inspector links", () => {
+  it("keeps runtime details collapsed by default for past personal sessions", () => {
+    navigationMock.pathname = "/personal/session/sess_001";
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps runtime details collapsed by default for company sessions without related sessions", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps runtime details collapsed by default for company sessions with related sessions", () => {
+    navigationMock.pathname = "/company/session/sess_child";
+    renderSessionViewContent(
+      makeDetail({
+        session: makeSession({
+          id: "sess_child",
+          status: "completed",
+          parentSessionId: "sess_001",
+        }),
+        related: { parent: makeRelatedChild({ id: "sess_001" }), children: [] },
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("does not expand runtime details when related sessions arrive after first paint", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    const { rerender } = renderSessionViewContent(
+      makeDetail({ session: makeSession({ status: "running" }) }),
+    );
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent
+          detail={makeDetail({
+            session: makeSession({ status: "running" }),
+            related: { parent: null, children: [makeRelatedChild()] },
+          })}
+          workspaceId="wks_test"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("resets runtime details to collapsed when navigating to a different session", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/company/session/sess_001";
+    const { rerender } = renderSessionViewContent(
+      makeDetail({ session: makeSession({ id: "sess_001", status: "running" }) }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Expand runtime details" }));
+    expect(
+      screen.getByRole("button", { name: "Collapse runtime details", expanded: true }),
+    ).toHaveAttribute("aria-expanded", "true");
+
+    navigationMock.pathname = "/company/session/sess_child";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent
+          detail={makeDetail({
+            session: makeSession({
+              id: "sess_child",
+              status: "ready",
+              parentSessionId: "sess_001",
+            }),
+            related: { parent: makeRelatedChild({ id: "sess_001" }), children: [] },
+          })}
+          workspaceId="wks_test"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
   it("links child sessions under /personal when viewed on the personal surface", () => {
     navigationMock.pathname = "/personal/session/sess_001";
     const detail = makeDetail({
@@ -1740,5 +1840,21 @@ describe("SessionViewContent — surface-aware inspector links", () => {
 
     const childLink = screen.getByTitle("Child session");
     expect(childLink).toHaveAttribute("href", "/company/session/sess_child");
+  });
+});
+
+describe("pastedTextFile — oversized paste → attachment", () => {
+  it("wraps the pasted text in a plain-text File", async () => {
+    const file = pastedTextFile("a".repeat(5000), []);
+    expect(file.name).toBe("pasted-text.txt");
+    expect(file.type).toBe("text/plain");
+    expect(await file.text()).toBe("a".repeat(5000));
+  });
+
+  it("numbers subsequent pastes against pending pasted-text attachments", () => {
+    const pending = [{ filename: "pasted-text.txt" }, { filename: "notes.md" }] as Parameters<
+      typeof pastedTextFile
+    >[1];
+    expect(pastedTextFile("more text", pending).name).toBe("pasted-text-2.txt");
   });
 });

@@ -6,19 +6,25 @@ import {
   BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
   formatBrainReferenceDisplay,
+  getRuntimeToolDefinition,
+  getRuntimeToolDefinitions,
   isBrainListingAllowed,
   isBrainPathAllowed,
   isDeferrableRuntimeTool,
   newAgentSessionMessageId,
   parseGitHubCliArgs,
-  RUNTIME_TOOL_DEFINITION_BY_NAME,
-  RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
   type ToolArgResolution,
+  type ToolCallTimings,
 } from "@opencompany/agent-runtime";
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
+import {
+  type BraintrustSpan,
+  logBraintrustSpan,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
@@ -70,6 +76,7 @@ import {
 } from "./sandbox";
 import { hasReadSkill, markSkillRead } from "./self-edit-gate";
 import { prepareToolArgs } from "./tool-arg-repair";
+import type { ToolTimingRecord } from "./tool-latency";
 import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
@@ -140,6 +147,14 @@ type DelegateToAgent = (input: {
   toolCallId: string;
 }) => Promise<unknown>;
 
+// Wall-clock anchors for one tool call's phase breakdown (ToolCallTimings). Created at execute()
+// entry in createToolSet so the gate wait (waitForStarted: stream-loop scheduling + policy +
+// the blocking tool.started write) is included; executeRuntimeTool fills in the later phases.
+type ToolCallPhaseTimer = {
+  executeStartedAt: number;
+  gateWaitMs: number;
+};
+
 class RecoverableToolError extends Error {
   code: string;
 
@@ -172,10 +187,14 @@ export function createToolSet(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  // Receives each call's ToolCallTimings once measured (per-turn rollup + slow-call analytics).
+  onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
 }) {
   const tools: ToolSet = {};
 
-  for (const definition of RUNTIME_TOOL_DEFINITIONS) {
+  for (const definition of getRuntimeToolDefinitions({
+    personalAgent: input.personalAgent ?? false,
+  })) {
     tools[definition.name] = tool({
       description: definition.description,
       inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
@@ -188,6 +207,7 @@ export function createToolSet(input: {
         });
       },
       execute: async (toolInput, options) => {
+        const executeStartedAt = performance.now();
         const verdict = await input.toolStartCoordinator.waitForStarted(
           options.toolCallId,
           input.signal,
@@ -211,6 +231,11 @@ export function createToolSet(input: {
           });
         }
         return executeRuntimeTool({
+          phaseTimer: {
+            executeStartedAt,
+            gateWaitMs: performance.now() - executeStartedAt,
+          },
+          onToolTimings: input.onToolTimings,
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
@@ -255,6 +280,7 @@ export function createToolSet(input: {
       });
     },
     execute: async (toolInput, options) => {
+      const executeStartedAt = performance.now();
       const verdict = await input.toolStartCoordinator.waitForStarted(
         options.toolCallId,
         input.signal,
@@ -275,6 +301,11 @@ export function createToolSet(input: {
         });
       }
       return dispatchBuiltinUseTool({
+        phaseTimer: {
+          executeStartedAt,
+          gateWaitMs: performance.now() - executeStartedAt,
+        },
+        onToolTimings: input.onToolTimings,
         sessionId: input.sessionId,
         assistantMessageId: input.assistantMessageId,
         runLeaseId: input.runLeaseId,
@@ -341,6 +372,8 @@ export async function dispatchBuiltinUseTool(input: {
   personalAgent?: boolean;
   toolCallId: string;
   args: unknown;
+  phaseTimer?: ToolCallPhaseTimer | undefined;
+  onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -354,7 +387,9 @@ export async function dispatchBuiltinUseTool(input: {
 }) {
   const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
   const definition = rawName
-    ? RUNTIME_TOOL_DEFINITION_BY_NAME.get(rawName as RuntimeToolName)
+    ? getRuntimeToolDefinition(rawName as RuntimeToolName, {
+        personalAgent: input.personalAgent ?? false,
+      })
     : undefined;
   if (
     !definition ||
@@ -429,6 +464,8 @@ export async function dispatchBuiltinUseTool(input: {
     args: prepared.args,
     persistAsToolName: BUILTIN_USE_TOOL_NAME,
     argResolution: prepared.resolution,
+    phaseTimer: input.phaseTimer,
+    onToolTimings: input.onToolTimings,
     getSandbox: input.getSandbox,
     workdir: input.workdir,
     env: input.env,
@@ -541,10 +578,7 @@ function formatRuntimeToolName(name: RuntimeToolName) {
   return name.replace(/_/g, " ");
 }
 
-// Tool execution is traced by Braintrust's `wrapAISDK` as a tool-call/tool-result pair nested under
-// the model's LLM span — no manual span is opened here. Errors are still reported via
-// `captureException` for Better Stack.
-export async function executeRuntimeTool(input: {
+type ExecuteRuntimeToolInput = {
   sessionId: string;
   assistantMessageId: string;
   runLeaseId: string;
@@ -564,6 +598,11 @@ export async function executeRuntimeTool(input: {
   // How the deferred-tool arguments were resolved (valid/coerced/repaired) before this ran. Carried
   // onto the tool.completed/failed event for telemetry. Only set on the use_tool dispatch path.
   argResolution?: ToolArgResolution | undefined;
+  // Wall-clock anchors from the execute() entry point so the timing breakdown can include the
+  // gate wait. Absent on the resume path (agent-loop) where there is no gate.
+  phaseTimer?: ToolCallPhaseTimer | undefined;
+  // Receives this call's ToolCallTimings once measured (per-turn rollup + slow-call analytics).
+  onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -574,7 +613,37 @@ export async function executeRuntimeTool(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
-}) {
+};
+
+// Braintrust's `wrapAISDK` already traces tool execution as a tool-call/tool-result pair nested
+// under the model's LLM span, but that span is a single opaque duration and is unreachable from
+// inside execute() (wrapAISDK starts the body before entering the span context). This explicit
+// span carries the per-phase latency breakdown (gate wait / sandbox wait / body / persistence
+// tail) as metrics — the same numbers persisted on the tool.completed/failed event as `timings` —
+// so slow tool calls can be attributed post-hoc. Errors are still reported via `captureException`
+// for Better Stack.
+export async function executeRuntimeTool(input: ExecuteRuntimeToolInput) {
+  return traceBraintrustStep(
+    `tool:${input.definition.name}`,
+    (span) => executeRuntimeToolInner(input, span),
+    {
+      tool_name: input.definition.name,
+      tool_kind: input.definition.kind,
+      tool_call_id: input.toolCallId,
+      session_id: input.sessionId,
+      ...(input.persistAsToolName ? { persisted_tool_name: input.persistAsToolName } : {}),
+    },
+    { type: "tool" },
+  );
+}
+
+async function executeRuntimeToolInner(
+  input: ExecuteRuntimeToolInput,
+  span: BraintrustSpan | undefined,
+) {
+  const bodyStartedAt = performance.now();
+  let bodyEndedAt = bodyStartedAt;
+  let sandboxWaitMs = 0;
   const persistedToolName = input.persistAsToolName ?? input.definition.name;
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
@@ -599,6 +668,7 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
+          personalAgent: input.personalAgent ?? false,
           hasAttachedRepository:
             Boolean(input.repository) ||
             (input.agentConfig ? agentHasGitHubAccess(input.agentConfig) : false),
@@ -692,7 +762,12 @@ export async function executeRuntimeTool(input: {
         brainReferences: input.agentConfig?.brain ?? [],
         personal: input.personalAgent ?? false,
       });
+      // The first sandbox tool of a turn pays the whole hydration here (connect/resume +
+      // prepare + materialize); later calls resolve the memoized handle instantly. Timed
+      // separately so a slow "read_file" is attributable to hydration vs the read itself.
+      const sandboxWaitStartedAt = performance.now();
       const activeSandbox = await input.getSandbox();
+      sandboxWaitMs += performance.now() - sandboxWaitStartedAt;
       sandboxIdForCapture = activeSandbox.sandboxId;
       if (input.definition.name === "amp_coder") {
         if (!input.workspaceId || !input.agentConfig) {
@@ -834,6 +909,7 @@ export async function executeRuntimeTool(input: {
     failedOutput = buildFailedToolOutput(error);
     output = failedOutput;
   } finally {
+    bodyEndedAt = performance.now();
     commandOutput.flush();
     releaseToolBudget?.();
   }
@@ -940,6 +1016,42 @@ export async function executeRuntimeTool(input: {
     });
   }
 
+  // Phase breakdown for this call: persisted on the completed/failed event (post-hoc DB
+  // queries, stream consumers) and mirrored as metrics on the Braintrust tool span.
+  const persistEndedAt = performance.now();
+  const timings = buildToolCallTimings({
+    phaseTimer: input.phaseTimer,
+    bodyStartedAt,
+    bodyEndedAt,
+    persistEndedAt,
+    sandboxWaitMs,
+  });
+  logBraintrustSpan(span, {
+    metrics: {
+      ...(timings.gateWaitMs !== undefined ? { gate_wait_ms: timings.gateWaitMs } : {}),
+      ...(timings.sandboxWaitMs !== undefined ? { sandbox_wait_ms: timings.sandboxWaitMs } : {}),
+      exec_ms: timings.execMs ?? 0,
+      persist_ms: timings.persistMs ?? 0,
+      total_ms: timings.totalMs ?? 0,
+    },
+    metadata: {
+      ...(sandboxIdForCapture ? { sandbox_id: sandboxIdForCapture } : {}),
+      failed: Boolean(persistedFailedOutput),
+    },
+  });
+  try {
+    input.onToolTimings?.({
+      toolName: input.definition.name,
+      toolKind: input.definition.kind,
+      toolCallId: input.toolCallId,
+      failed: Boolean(persistedFailedOutput),
+      timings,
+      ...(sandboxIdForCapture ? { sandboxId: sandboxIdForCapture } : {}),
+    });
+  } catch {
+    // Analytics must not affect the tool result.
+  }
+
   if (persistedFailedOutput) {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -955,6 +1067,7 @@ export async function executeRuntimeTool(input: {
           error: persistedFailedOutput.error,
           outputPreview: formatRuntimePreview(persistedOutput),
           ...(input.argResolution ? { argResolution: input.argResolution } : {}),
+          timings,
         },
       }),
     );
@@ -972,12 +1085,30 @@ export async function executeRuntimeTool(input: {
           name: persistedToolName,
           outputPreview: formatRuntimePreview(persistedOutput),
           ...(input.argResolution ? { argResolution: input.argResolution } : {}),
+          timings,
         },
       }),
     );
   }
 
   return persistedOutput;
+}
+
+function buildToolCallTimings(input: {
+  phaseTimer: ToolCallPhaseTimer | undefined;
+  bodyStartedAt: number;
+  bodyEndedAt: number;
+  persistEndedAt: number;
+  sandboxWaitMs: number;
+}): ToolCallTimings {
+  const startedAt = input.phaseTimer?.executeStartedAt ?? input.bodyStartedAt;
+  return {
+    ...(input.phaseTimer ? { gateWaitMs: Math.round(input.phaseTimer.gateWaitMs) } : {}),
+    ...(input.sandboxWaitMs > 0 ? { sandboxWaitMs: Math.round(input.sandboxWaitMs) } : {}),
+    execMs: Math.round(Math.max(0, input.bodyEndedAt - input.bodyStartedAt - input.sandboxWaitMs)),
+    persistMs: Math.round(Math.max(0, input.persistEndedAt - input.bodyEndedAt)),
+    totalMs: Math.round(Math.max(0, input.persistEndedAt - startedAt)),
+  };
 }
 
 async function persistToolResultMessage(input: {
@@ -1272,6 +1403,16 @@ export function preflightSandboxToolArgs(input: {
   }
 
   const requestedPath = typeof pathValue === "string" ? pathValue : undefined;
+  const requestedRoot = requestedPath
+    ?.trim()
+    .replace(/^\.?\//, "")
+    .split("/")[0];
+  if (personal && requestedRoot === "memory") {
+    throw new RecoverableToolError(
+      "Generic file tools cannot access memory/. Use the memory tool to read or write structured memory.",
+      "invalid_sandbox_path",
+    );
+  }
 
   let brainRelativePath: string | null;
   try {
@@ -1279,7 +1420,7 @@ export function preflightSandboxToolArgs(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
     const hint = personal
-      ? "Use paths prefixed with work/ for scratch files, personal-brain/ for the user's private knowledge, memory/ for your structured memory, or agent/ for your private agent folder."
+      ? "Use paths prefixed with work/ for scratch files, personal-brain/ for the user's private knowledge, or agent/ for your private agent folder. Use the memory tool for structured memory."
       : "Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.";
     throw new RecoverableToolError(`${message} ${hint}`, "invalid_sandbox_path");
   }

@@ -76,6 +76,7 @@ const baseRow = {
   workspaceId: "wsp_1",
   path: "agents/leo.agent",
   name: "Leo",
+  isDefault: false,
   version: 3,
   config: agentConfig(),
 };
@@ -160,6 +161,43 @@ describe("applyAgentSelfUpdate", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.changedFields).toContain("name");
     expect(calls.update[0]).toMatchObject({ name: "Friday" });
+  });
+
+  it("rejects renaming a default personal agent away from Leo", async () => {
+    const { db, calls } = createDb({
+      row: {
+        ...baseRow,
+        name: "Leo",
+        isDefault: true,
+        config: agentConfig({ title: "Leo" }),
+      },
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Keep helping.", title: "Friday" }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("fixed identity");
+    expect(calls.update).toHaveLength(0);
+    expect(calls.insert).toHaveLength(0);
+  });
+
+  it("keeps Leo as the title for default personal agents when title is omitted", async () => {
+    const { db, calls } = createDb({
+      row: {
+        ...baseRow,
+        name: "Old name",
+        isDefault: true,
+        config: agentConfig({ title: "Old name" }),
+      },
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Keep helping." }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.changedFields).not.toContain("name");
+    expect(calls.update[0]).toMatchObject({ name: "Leo" });
   });
 
   it("keeps the current name when title is omitted", async () => {

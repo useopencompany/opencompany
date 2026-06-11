@@ -91,8 +91,35 @@ export const ATTACHMENT_UPLOAD_CONTENT_TYPES = [
 ] as const;
 
 export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024; // images/pdf: 25 MB per file
-export const ATTACHMENT_TEXT_MAX_BYTES = 2 * 1024 * 1024; // text: 2 MB (inlined → guards model context)
+export const ATTACHMENT_TEXT_MAX_BYTES = 2 * 1024 * 1024; // text: 2 MB per file (upload cap)
 export const ATTACHMENT_MAX_PER_MESSAGE = 10;
+
+// Text attachments at or below this are inlined verbatim into the model message (replayed
+// every turn). Larger ones would blow up the context window — they are materialized into the
+// sandbox instead and referenced by path, with only a short inline preview.
+export const ATTACHMENT_TEXT_INLINE_MAX_BYTES = 64 * 1024;
+// Preview size (in characters) inlined for above-threshold text attachments so even a
+// sandbox-less (chat-only) agent sees how the file starts.
+export const ATTACHMENT_TEXT_PREVIEW_CHARS = 2_000;
+// Composer pastes at or above this many characters are captured as a .txt attachment instead
+// of being dumped into the textarea/message.
+export const COMPOSER_PASTE_ATTACHMENT_MIN_CHARS = 4_000;
+
+// Where above-threshold text attachments live inside the sandbox, relative to the session
+// workdir. Inside work/ so the agent's file tools reach it; the materializer drops a
+// self-ignoring .gitignore in the directory so the files stay out of diffs and PRs.
+export const ATTACHMENT_SANDBOX_DIR = "work/attachments";
+
+// Sandbox filename for a materialized attachment. The blob pathname ends in
+// `<attachmentId>-<sanitizedFilename>` (see uploadAttachment), which is already unique and
+// shell-safe — reuse it so the materializer and the model-message reference always agree.
+export function attachmentSandboxFilename(blobPathname: string): string {
+  return blobPathname.split("/").pop() || "attachment.txt";
+}
+
+export function attachmentSandboxPath(blobPathname: string): string {
+  return `${ATTACHMENT_SANDBOX_DIR}/${attachmentSandboxFilename(blobPathname)}`;
+}
 
 function extensionOf(filename?: string): string {
   if (!filename) return "";

@@ -48,6 +48,7 @@ export async function hydrateMessageAttachments(
         mediaType: row.mediaType,
         filename: row.filename,
         base64,
+        blobPathname: row.blobPathname,
       };
       const existing = attachmentsByMessageId.get(row.messageId);
       if (existing) {
@@ -68,6 +69,16 @@ async function downloadBlobAsBase64(
   blobUrl: string,
   blobToken: string | undefined,
 ): Promise<string> {
+  const bytes = await downloadBlobBytes(blobUrl, blobToken);
+  return bytes.toString("base64");
+}
+
+// Also used by the sandbox materializer (attachment-materialize.ts) to write above-threshold
+// text attachments into the workspace.
+export async function downloadBlobBytes(
+  blobUrl: string,
+  blobToken: string | undefined,
+): Promise<Buffer> {
   // The blobs are stored in a PRIVATE Vercel Blob store, so the bytes require authentication.
   // @vercel/blob@2.4.0 exposes get(urlOrPathname, { access: 'private', token }) which returns
   // a ReadableStream + metadata; the token defaults to BLOB_READ_WRITE_TOKEN but we pass it
@@ -83,8 +94,7 @@ async function downloadBlobAsBase64(
     throw new Error(`Failed to download private blob: ${blobUrl}`);
   }
 
-  const bytes = await readStreamToBuffer(result.stream);
-  return bytes.toString("base64");
+  return readStreamToBuffer(result.stream);
 }
 
 async function readStreamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Buffer> {

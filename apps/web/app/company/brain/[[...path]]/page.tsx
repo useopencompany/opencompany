@@ -3,8 +3,11 @@ import { brainFiles } from "@opencompany/db/schema";
 import { asc, eq } from "drizzle-orm";
 import BrainView from "@/components/BrainView";
 import { currentWorkspace } from "@/lib/auth";
+import { BRAIN_BASE_PATH, brainInitialPathFromSegments } from "@/lib/brain/paths";
 
-export default async function BrainPage() {
+export default async function BrainPage({ params }: { params: Promise<{ path?: string[] }> }) {
+  const { path } = await params;
+  const initialPath = brainInitialPathFromSegments(path);
   const { workspace } = await currentWorkspace();
   const files = await getDb()
     .select()
@@ -14,6 +17,8 @@ export default async function BrainPage() {
 
   return (
     <BrainView
+      initialPath={initialPath}
+      urlBasePath={BRAIN_BASE_PATH}
       files={files.map((file) => ({
         path: file.path,
         content: file.content,
