@@ -17,6 +17,7 @@ export const personalPaths = {
   home: "/personal",
   session: (id: string) => `/personal/session/${id}`,
   agent: "/personal/agent",
+  soul: "/personal/files/soul.md",
   brain: "/personal/brain",
   memory: "/personal/memory",
   settings: "/personal/settings",

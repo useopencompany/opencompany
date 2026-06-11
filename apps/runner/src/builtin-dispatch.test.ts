@@ -92,9 +92,18 @@ describe("dispatchBuiltinUseTool", () => {
       expect.objectContaining({ toolName: "use_tool", toolCallId: "call_use" }),
     );
     const completed = leaseWrites.appendRuntimeEventForLease.mock.calls
-      .map((call) => call[0] as { type: string; payload: { name: string } })
+      .map(
+        (call) =>
+          call[0] as {
+            type: string;
+            payload: { name: string; timings?: { execMs?: number; totalMs?: number } };
+          },
+      )
       .find((event) => event.type === "tool.completed");
     expect(completed?.payload.name).toBe("use_tool");
+    // The phase-timing breakdown rides on the completed event for post-hoc latency analysis.
+    expect(completed?.payload.timings?.execMs).toBeGreaterThanOrEqual(0);
+    expect(completed?.payload.timings?.totalMs).toBeGreaterThanOrEqual(0);
   });
 
   it("returns a recoverable error for an unknown tool, persisted under use_tool", async () => {

@@ -8,11 +8,11 @@ import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 export default async function PersonalOnboardingPage() {
   const { authUser, user, workspace } = await currentWorkspace({ skipOnboarding: true });
 
-  const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
+  const userName = user.firstName?.trim() || authUser.email.split("@")[0] || "you";
   const agent = await ensurePersonalAgent({
     userId: user.id,
     workspaceId: workspace.id,
-    name: agentName,
+    userName,
   });
 
   // Prefill the name field from the WorkOS profile captured at sign-up (first + last

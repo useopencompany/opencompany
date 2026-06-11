@@ -213,6 +213,9 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("Attached GitHub repositories: opencompany/web.");
     expect(resolved.systemPrompt).toContain("gh (GitHub CLI) access");
     expect(resolved.systemPrompt).toContain("Use shell for local sandbox commands");
+    expect(resolved.systemPrompt).toContain(
+      "Core tools (read_file, write_file, edit_file, list_files, git_diff, shell, read_skill, gh) are available directly.",
+    );
     expect(resolved.systemPrompt).toContain("gh commands default to the attached repository");
     expect(resolved.systemPrompt).toContain(
       "--repo is not needed when targeting this attached repository",
@@ -265,6 +268,10 @@ describe("resolveAgentRuntimeConfig", () => {
 
     expect(resolved.tools).not.toContain("gh");
     expect(resolved.systemPrompt).not.toContain("Attached GitHub repositories");
+    expect(resolved.systemPrompt).toContain(
+      "Core tools (read_file, write_file, edit_file, list_files, git_diff, shell, read_skill) are available directly.",
+    );
+    expect(resolved.systemPrompt).not.toContain("read_skill, gh");
   });
 
   it("explains opencode can target public GitHub repositories without an attached repository", () => {
@@ -371,12 +378,36 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("use_tool");
     expect(resolved.systemPrompt).toContain("Linear");
     expect(resolved.systemPrompt).toContain("linear__search_tools");
+    expect(resolved.systemPrompt).toContain("find_tools does not list the core tools above");
 
     // Deferred runtime tools are enabled, but their per-tool names/schemas are not in the prompt.
     expect(resolved.tools).toContain("exa_search");
     expect(resolved.tools).toContain("instagram_get_profile");
     expect(resolved.systemPrompt).not.toContain("exa_search");
     expect(resolved.systemPrompt).not.toContain("instagram_get_profile");
+  });
+
+  it("renders personal file-root guidance without generic brain or memory file access", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Personal agent",
+      instructions: "Help the user.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config, personalAgent: true });
+
+    expect(resolved.systemPrompt).toContain("personal-brain/");
+    expect(resolved.systemPrompt).toContain(
+      "File tools require paths prefixed with work/, personal-brain/, or agent/.",
+    );
+    expect(resolved.systemPrompt).not.toContain("work/, brain/, or agent/");
+    expect(resolved.systemPrompt).not.toContain("./brain is shared company knowledge");
+    expect(resolved.systemPrompt).toContain("Manage it ONLY through the `memory` tool");
   });
 
   it("keeps MCP tools separate from static runtime tools", () => {

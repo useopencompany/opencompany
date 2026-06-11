@@ -107,7 +107,7 @@ export async function query(
       const top = ordered.slice(0, 20);
       const rankedIds = await providers.rerank(
         options.text,
-        top.map(({ id }) => ({ id, text: snippetFor(byId.get(id)) })),
+        top.map(({ id }) => ({ id, text: rerankTextFor(byId.get(id)) })),
       );
       const rerankRelevance = new Map(rankedIds.map((id, rank) => [id, rankedIds.length - rank]));
       ordered = ordered.map((item) => ({
@@ -272,9 +272,35 @@ function cosine(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
+const QUERY_TRUTH_PREVIEW_CHARS = 1200;
+const RERANK_TRUTH_CHARS = 1200;
+const RERANK_TIMELINE_CHARS = 800;
+
+function rerankTextFor(record: IndexRecord | undefined): string {
+  if (!record) return "";
+  const truth = record.compiledTruth.trim();
+  const timeline = record.timelineText.trim();
+  const parts = [
+    `Title: ${record.title}`,
+    truth
+      ? `Compiled truth:\n${truncateForModel(truth, RERANK_TRUTH_CHARS, "compiled truth")}`
+      : "",
+    timeline
+      ? `Timeline preview:\n${truncateForModel(timeline, RERANK_TIMELINE_CHARS, "timeline")}`
+      : "",
+  ].filter(Boolean);
+  return parts.join("\n\n") || record.id;
+}
+
 function snippetFor(record: IndexRecord | undefined): string {
   if (!record) return "";
-  const source = record.compiledTruth || record.timelineText;
-  const firstSentence = source.split(/(?<=[.!?])\s/)[0] ?? source;
-  return firstSentence.slice(0, 240).trim();
+  const truth = record.compiledTruth.trim();
+  if (!truth) return "_No compiled truth yet._";
+  if (truth.length <= QUERY_TRUTH_PREVIEW_CHARS) return truth;
+  return `${truth.slice(0, QUERY_TRUTH_PREVIEW_CHARS).trimEnd()}... [truncated; run memory get ${record.id}]`;
+}
+
+function truncateForModel(text: string, maxChars: number, label: string): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars).trimEnd()}... [truncated ${label}]`;
 }

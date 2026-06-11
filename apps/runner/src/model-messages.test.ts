@@ -437,6 +437,7 @@ describe("buildModelMessages with attachments", () => {
             mediaType: "image/png",
             filename: "screenshot.png",
             base64: imageBase64,
+            blobPathname: "workspace/wsp_1/sessions/ses_1/att_1-screenshot.png",
           },
         ],
       },
@@ -467,6 +468,7 @@ describe("buildModelMessages with attachments", () => {
             mediaType: "application/pdf",
             filename: "report.pdf",
             base64: pdfBase64,
+            blobPathname: "workspace/wsp_1/sessions/ses_1/att_2-report.pdf",
           },
         ],
       },
@@ -503,6 +505,7 @@ describe("buildModelMessages with attachments", () => {
             mediaType: "text/markdown",
             filename: "notes.md",
             base64: textBase64,
+            blobPathname: "workspace/wsp_1/sessions/ses_1/att_3-notes.md",
           },
         ],
       },
@@ -517,6 +520,40 @@ describe("buildModelMessages with attachments", () => {
         ],
       },
     ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
+  it("path-references an above-threshold text attachment instead of inlining it", () => {
+    const line = "x".repeat(99) + "\n"; // 100 bytes per line
+    const bigText = line.repeat(1024); // 100 KiB > ATTACHMENT_TEXT_INLINE_MAX_BYTES (64 KiB)
+    const bigBase64 = Buffer.from(bigText).toString("base64");
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_big_text",
+        role: "user",
+        content: "Dig through this log.",
+        modelMessage: { role: "user", content: "Dig through this log." },
+        attachments: [
+          {
+            kind: "text",
+            mediaType: "text/plain",
+            filename: "server.log",
+            base64: bigBase64,
+            blobPathname: "workspace/wsp_1/sessions/ses_1/att_4-server.log",
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    const content = messages[0]?.content as Array<{ type: string; text: string }>;
+    expect(content[0]).toEqual({ type: "text", text: "Dig through this log." });
+    const reference = content[1]?.text ?? "";
+    // Path + stats are present; the full body is not.
+    expect(reference).toContain('Attached file "server.log" (100 KB, 1025 lines)');
+    expect(reference).toContain("work/attachments/att_4-server.log");
+    expect(reference).toContain("Preview (first 2000 characters):");
+    expect(reference.length).toBeLessThan(3_000);
     expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
   });
 
