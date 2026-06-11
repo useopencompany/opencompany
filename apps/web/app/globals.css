@@ -2,8 +2,9 @@
 
 /* Tailwind's automatic content detection stops at this app's directory; the shared
    @opencompany/ui components imported here live outside it, so their class names must
-   be scanned explicitly. */
-@source "../../../packages/ui/src/components/resizable.tsx";
+   be scanned explicitly. The whole components directory is listed (not per-file
+   entries) because a forgotten file fails silently as unstyled markup. */
+@source "../../../packages/ui/src/components";
 
 @theme {
   --color-canvas: #f7f7f5;

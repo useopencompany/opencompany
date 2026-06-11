@@ -1,6 +1,5 @@
 "use client";
 
-import { X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useState, useSyncExternalStore } from "react";
 import {
@@ -8,6 +7,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@opencompany/ui/components/resizable";
+import SessionPickerPane from "@/components/SessionPickerPane";
 import SessionView from "@/components/SessionView";
 import {
   buildSplitViewHref,
@@ -157,54 +157,14 @@ export default function SessionSplitView({ sessionId }: { sessionId: string }) {
             className="flex h-full min-w-0 flex-col"
             style={{ overflow: "hidden" }}
           >
-            <SessionPickerPane onPick={handlePick} onCancel={handleCancelPick} />
+            <SessionPickerPane
+              onPick={handlePick}
+              onCancel={handleCancelPick}
+              excludeSessionIds={paneIds}
+            />
           </ResizablePanel>
         </Fragment>
       ) : null}
     </ResizablePanelGroup>
-  );
-}
-
-type SessionPickerPaneProps = {
-  // Contract for the real picker (see below): called with the chosen session id.
-  onPick: (sessionId: string) => void;
-  onCancel: () => void;
-};
-
-// Placeholder pane shown while the user chooses which session to open in a new split.
-// Task 4 replaces the body with a cmdk session picker; the props contract — onPick(id),
-// onCancel() — stays as-is. Until then it only offers Cancel (button or Escape).
-function SessionPickerPane({ onCancel }: SessionPickerPaneProps) {
-  return (
-    <section
-      aria-label="Choose a session"
-      className="flex h-full flex-col bg-surface/45"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.stopPropagation();
-        onCancel();
-      }}
-    >
-      <header className="flex items-center justify-end py-2 pr-6 pl-6">
-        <button
-          type="button"
-          aria-label="Cancel choosing a session"
-          // Focused on mount so Escape cancels without an extra click.
-          autoFocus
-          onClick={onCancel}
-          className="shrink-0 rounded-md p-1.5 text-ink/55 transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <X size={15} strokeWidth={1.75} />
-        </button>
-      </header>
-      <div className="flex flex-1 items-center justify-center px-6">
-        <div className="max-w-sm rounded-lg border border-dashed border-border bg-surface/45 px-5 py-6 text-center">
-          <p className="text-[13.5px] font-medium text-ink">Choose a session</p>
-          <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-            The session picker lands here next.
-          </p>
-        </div>
-      </div>
-    </section>
   );
 }
