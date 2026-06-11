@@ -1569,7 +1569,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             type="button"
             aria-label="Scroll to bottom"
             onClick={scrollToBottom}
-            className="absolute bottom-4 left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-canvas/90 text-ink shadow-md backdrop-blur transition hover:bg-surface"
+            className="absolute right-4 bottom-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-canvas/90 text-ink shadow-md backdrop-blur transition hover:bg-surface"
           >
             <ArrowDown size={16} strokeWidth={2} />
           </button>
