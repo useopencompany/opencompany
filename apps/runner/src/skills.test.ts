@@ -56,6 +56,12 @@ describe("materializeSkillsForSession", () => {
     };
   }
 
+  function writtenSkillFiles(sandbox: ReturnType<typeof fakeSandbox>) {
+    expect(sandbox.files.write).toHaveBeenCalledTimes(1);
+    expect(sandbox.files.write).toHaveBeenCalledWith(expect.any(Array), { user: "root" });
+    return sandbox.files.write.mock.calls[0]?.[0] as Array<{ path: string; data: string }>;
+  }
+
   it("writes enabled skill files read-only under ./skills as root", async () => {
     const sandbox = fakeSandbox();
 
@@ -68,10 +74,13 @@ describe("materializeSkillsForSession", () => {
     });
 
     // The default self-edit skill is materialized even without an explicit config entry.
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      `/home/user/workspace/skills/${AGENT_SELF_EDIT_SKILL_ID}/SKILL.md`,
-      expect.stringContaining("update_agent_file"),
-      { user: "root" },
+    expect(writtenSkillFiles(sandbox)).toEqual(
+      expect.arrayContaining([
+        {
+          path: `/home/user/workspace/skills/${AGENT_SELF_EDIT_SKILL_ID}/SKILL.md`,
+          data: expect.stringContaining("update_agent_file"),
+        },
+      ]),
     );
 
     // The tree is reset, root-owned, and locked to read-only (555 dirs / 444 files).
@@ -79,6 +88,8 @@ describe("materializeSkillsForSession", () => {
     expect(commands.some((command) => command.includes("rm -rf"))).toBe(true);
     expect(commands.some((command) => command.includes("chmod 444"))).toBe(true);
     expect(commands.some((command) => command.includes("chmod 555"))).toBe(true);
+    expect(commands).toHaveLength(2);
+    expect(commands.filter((command) => command.startsWith("mkdir -p "))).toHaveLength(0);
   });
 
   it("delivers the bundled memory CLI alongside the memory skill", async () => {
@@ -92,13 +103,12 @@ describe("materializeSkillsForSession", () => {
       config: { skills: [] },
     });
 
-    const memoryJs = sandbox.files.write.mock.calls.find(
-      ([path]) => path === `/home/user/workspace/skills/${MEMORY_SKILL_ID}/memory.mjs`,
+    const memoryJs = writtenSkillFiles(sandbox).find(
+      ({ path }) => path === `/home/user/workspace/skills/${MEMORY_SKILL_ID}/memory.mjs`,
     );
     expect(memoryJs).toBeDefined();
     // The bundle is the self-contained CLI (minisearch inlined), written as root.
-    expect(String(memoryJs?.[1] ?? "")).toContain("append-evidence");
-    expect(memoryJs?.[2]).toEqual({ user: "root" });
+    expect(String(memoryJs?.data ?? "")).toContain("append-evidence");
   });
 
   it("materializes external skill files (incl. secondary files) alongside built-ins", async () => {
@@ -122,15 +132,17 @@ describe("materializeSkillsForSession", () => {
     });
 
     expect(loadExternalSkillFiles).toHaveBeenCalledWith("ws_1", [externalSkill]);
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/skills/improve-codebase-architecture/SKILL.md",
-      "skill body",
-      { user: "root" },
-    );
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/skills/improve-codebase-architecture/LANGUAGE.md",
-      "secondary",
-      { user: "root" },
+    expect(writtenSkillFiles(sandbox)).toEqual(
+      expect.arrayContaining([
+        {
+          path: "/home/user/workspace/skills/improve-codebase-architecture/SKILL.md",
+          data: "skill body",
+        },
+        {
+          path: "/home/user/workspace/skills/improve-codebase-architecture/LANGUAGE.md",
+          data: "secondary",
+        },
+      ]),
     );
   });
 
@@ -155,19 +167,20 @@ describe("materializeSkillsForSession", () => {
       config: { skills: [] },
     });
 
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/skills/weekly-digest/SKILL.md",
-      expect.stringContaining("How I post the Monday digest."),
-      { user: "root" },
+    const writes = writtenSkillFiles(sandbox);
+    expect(writes).toEqual(
+      expect.arrayContaining([
+        {
+          path: "/home/user/workspace/skills/weekly-digest/SKILL.md",
+          data: expect.stringContaining("How I post the Monday digest."),
+        },
+        {
+          path: "/home/user/workspace/skills/weekly-digest/references/format.md",
+          data: "format",
+        },
+      ]),
     );
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/skills/weekly-digest/references/format.md",
-      "format",
-      { user: "root" },
-    );
-    expect(
-      sandbox.files.write.mock.calls.some(([path]) => String(path).includes("/skills/memory.md")),
-    ).toBe(false);
+    expect(writes.some(({ path }) => path.includes("/skills/memory.md"))).toBe(false);
   });
 
   it("does not let a personal skill shadow a built-in skill id", async () => {
@@ -189,10 +202,10 @@ describe("materializeSkillsForSession", () => {
     });
 
     // The built-in `memory` skill body is written; the colliding personal one is dropped.
-    const memoryWrite = sandbox.files.write.mock.calls.find(
-      ([path]) => path === `/home/user/workspace/skills/${MEMORY_SKILL_ID}/SKILL.md`,
+    const memoryWrite = writtenSkillFiles(sandbox).find(
+      ({ path }) => path === `/home/user/workspace/skills/${MEMORY_SKILL_ID}/SKILL.md`,
     );
     expect(memoryWrite).toBeDefined();
-    expect(String(memoryWrite?.[1] ?? "")).not.toContain("malicious override");
+    expect(String(memoryWrite?.data ?? "")).not.toContain("malicious override");
   });
 });
