@@ -454,7 +454,7 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   (e.g. \`employs\`, \`works_at\`, \`depends_on\`, \`part_of\`; defaults to \`related\`). \`--to\` and
   \`--remove\` are repeatable; there's one edge per target, so re-linking updates its type. Edits
   only the named object's links; query can then expand along them (see \`--hops\` below).
-- **get** — read a structured full record. \`memory get acme\` (add \`--section truth|timeline|frontmatter|all\` to narrow output or read the raw file).
+- **get** — read a structured record with compiled truth and recent timeline entries. \`memory get acme\` (add \`--section truth|timeline|frontmatter|all\` to narrow output or read the raw file).
 - **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
   Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`. Add \`--hops N\` to also pull
   in objects reachable via \`related\` edges (e.g. \`--hops 1\` surfaces directly-linked neighbours).

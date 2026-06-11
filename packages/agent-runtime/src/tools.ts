@@ -405,7 +405,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Status lifecycle: objects start as draft (uncited scratch) and become active once rewrite backs their compiled truth with evidence citations. create --status active requires the truth to already be cited; the normal path is create → append-evidence → rewrite.",
       'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
       'Query before answering questions about people, companies, projects, or past decisions: query "topic" --type company --limit 5. Results include capped compiled truth; use the shown `memory get <id>` hint when you need the full record or timeline. For relationship questions add --hops 1 to pull in linked objects. query hides merged stubs and invalid records by default.',
-      "get reads a structured full record by default; get --section truth|timeline|frontmatter|all scopes both the text and the --json payload to that part.",
+      "get renders a structured record with compiled truth and recent timeline entries by default; get --section truth|timeline|frontmatter|all scopes both the text and the --json payload to that part.",
       "Writes are last-write-wins — do not issue two memory writes against the same object in parallel.",
       "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
     ].join("\n"),

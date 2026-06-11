@@ -273,10 +273,23 @@ function cosine(a: number[], b: number[]): number {
 }
 
 const QUERY_TRUTH_PREVIEW_CHARS = 1200;
+const RERANK_TRUTH_CHARS = 1200;
+const RERANK_TIMELINE_CHARS = 800;
 
 function rerankTextFor(record: IndexRecord | undefined): string {
   if (!record) return "";
-  return `${record.title}\n${record.compiledTruth}\n${record.timelineText}`.trim();
+  const truth = record.compiledTruth.trim();
+  const timeline = record.timelineText.trim();
+  const parts = [
+    `Title: ${record.title}`,
+    truth
+      ? `Compiled truth:\n${truncateForModel(truth, RERANK_TRUTH_CHARS, "compiled truth")}`
+      : "",
+    timeline
+      ? `Timeline preview:\n${truncateForModel(timeline, RERANK_TIMELINE_CHARS, "timeline")}`
+      : "",
+  ].filter(Boolean);
+  return parts.join("\n\n") || record.id;
 }
 
 function snippetFor(record: IndexRecord | undefined): string {
@@ -285,4 +298,9 @@ function snippetFor(record: IndexRecord | undefined): string {
   if (!truth) return "_No compiled truth yet._";
   if (truth.length <= QUERY_TRUTH_PREVIEW_CHARS) return truth;
   return `${truth.slice(0, QUERY_TRUTH_PREVIEW_CHARS).trimEnd()}... [truncated; run memory get ${record.id}]`;
+}
+
+function truncateForModel(text: string, maxChars: number, label: string): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars).trimEnd()}... [truncated ${label}]`;
 }

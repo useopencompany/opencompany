@@ -441,6 +441,14 @@ describe("memory CLI", () => {
     expect(all.timeline).toBeDefined();
   });
 
+  it("rejects unknown get sections", async () => {
+    await run(create, ["--type", "company", "--id", "acme"]);
+
+    const result = await run(get, ["acme", "--section", "summary"]);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain("`--section` must be one of");
+  });
+
   it("renders default get as a structured record with recent timeline entries", async () => {
     await run(create, [
       "--type",

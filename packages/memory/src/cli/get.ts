@@ -1,6 +1,6 @@
 import { parseDocument } from "../document";
 import { findFile } from "../store";
-import { type CommandContext, type CommandResult, notFound, ok } from "./io";
+import { type CommandContext, type CommandResult, fail, notFound, ok } from "./io";
 
 const DEFAULT_TIMELINE_ENTRIES = 5;
 
@@ -30,6 +30,16 @@ export async function get(ctx: CommandContext): Promise<CommandResult> {
   }
 
   const section = args.get("section");
+  if (
+    section !== undefined &&
+    section !== "truth" &&
+    section !== "timeline" &&
+    section !== "frontmatter" &&
+    section !== "all"
+  ) {
+    return fail("`--section` must be one of: truth, timeline, frontmatter, all.");
+  }
+
   // Section reads scope both the human `text` and machine `data` payload, so
   // `--section truth --json` returns only the truth. Without `--section`, the text is an
   // agent-friendly structured view while the JSON payload keeps the full parsed record.
