@@ -7,13 +7,16 @@ import {
   ChevronRight,
   Clock3,
   Cpu,
+  FolderSearch,
   MessagesSquare,
   Plug,
   Sparkles,
   Wrench,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import { ADD_SKILL_MENTION_ID, type AgentMentionItem } from "./tools";
+import { BrainFolderPicker } from "./BrainFolderPicker";
+import { ADD_SKILL_MENTION_ID, type AgentBrainMention, type AgentMentionItem } from "./tools";
 
 export type MentionListHandle = {
   onKeyDown: (event: KeyboardEvent) => boolean;
@@ -33,6 +36,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeKind, setActiveKind] = useState<AgentMentionItem["kind"] | null>(null);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
   const normalizedQuery = query.trim().toLowerCase();
 
   const categoryRows = [
@@ -162,18 +166,32 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       className="w-[238px] overflow-hidden rounded-md border border-black/[0.08] bg-surface-raised p-1 shadow-[0_10px_22px_rgba(0,0,0,0.09),0_1px_5px_rgba(0,0,0,0.05)]"
     >
       {activeKind && normalizedQuery.length === 0 && (
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            setActiveKind(null);
-            setSelectedIndex(0);
-          }}
-          className="mb-0.5 flex h-6 w-full items-center gap-1 rounded px-1.5 text-left text-[11.5px] font-medium text-ink-muted hover:bg-surface-hover/70"
-        >
-          <ChevronLeft size={12} strokeWidth={1.9} />
-          {kindLabel(activeKind)}
-        </button>
+        <div className="mb-0.5 flex items-center gap-0.5">
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setActiveKind(null);
+              setSelectedIndex(0);
+            }}
+            className="flex h-6 flex-1 items-center gap-1 rounded px-1.5 text-left text-[11.5px] font-medium text-ink-muted hover:bg-surface-hover/70"
+          >
+            <ChevronLeft size={12} strokeWidth={1.9} />
+            {kindLabel(activeKind)}
+          </button>
+          {activeKind === "brain" && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowFolderPicker(true)}
+              title="Browse folders"
+              aria-label="Browse brain folders"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-muted hover:bg-surface-hover/70 hover:text-ink"
+            >
+              <FolderSearch size={12} strokeWidth={1.9} />
+            </button>
+          )}
+        </div>
       )}
       {rows.map((row, index) => {
         const Icon = row.type === "category" ? row.icon : row.item.icon;
@@ -233,6 +251,20 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
           </div>
         );
       })}
+      {showFolderPicker &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <BrainFolderPicker
+            brainItems={items.filter((item): item is AgentBrainMention => item.kind === "brain")}
+            onSelect={(item) => {
+              setShowFolderPicker(false);
+              command(mentionCommandItem(item));
+              onSelect?.(item);
+            }}
+            onClose={() => setShowFolderPicker(false)}
+          />,
+          document.body,
+        )}
     </div>
   );
 });
