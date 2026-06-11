@@ -120,6 +120,41 @@ describe("resolveOpencodeTarget", () => {
       }),
     ).toThrow(/not an attached repository or a supported public GitHub repository/);
   });
+
+  describe("allRepositories (live @github scope)", () => {
+    it("resolves a non-attached owner/repo as a workspace target", () => {
+      expect(
+        resolveOpencodeTarget({
+          repositories: [attachedRepo],
+          requestedRepository: "opencompany/other",
+          allRepositories: true,
+        }),
+      ).toEqual({ kind: "workspace", repositoryFullName: "opencompany/other" });
+      expect(
+        resolveOpencodeTarget({
+          repositories: [],
+          requestedRepository: "https://github.com/opencompany/other",
+          allRepositories: true,
+        }),
+      ).toEqual({ kind: "workspace", repositoryFullName: "opencompany/other" });
+    });
+
+    it("still prefers attached repository matches", () => {
+      expect(
+        resolveOpencodeTarget({
+          repositories: [attachedRepo],
+          requestedRepository: "opencompany/web",
+          allRepositories: true,
+        }),
+      ).toEqual({ kind: "attached", repository: attachedRepo });
+    });
+
+    it("requires the repository argument when nothing is attached", () => {
+      expect(() => resolveOpencodeTarget({ repositories: [], allRepositories: true })).toThrow(
+        /needs the repository argument/,
+      );
+    });
+  });
 });
 
 describe("public GitHub clone helpers", () => {

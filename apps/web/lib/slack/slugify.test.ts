@@ -37,12 +37,12 @@ describe("channelName", () => {
     expect(channelName("acme-corp")).toBe("acme-corp-x-opencompany");
   });
 
-  it("inserts the per-workspace suffix: <slug>-<suffix>-x-opencompany", () => {
-    expect(channelName("acme-corp", "a1b2c3")).toBe("acme-corp-a1b2c3-x-opencompany");
+  it("appends the per-workspace suffix at the end: <slug>-x-opencompany-<suffix>", () => {
+    expect(channelName("acme-corp", "a1b2c3")).toBe("acme-corp-x-opencompany-a1b2c3");
   });
 
   it("stays within Slack's 80-char limit with a max-length slug + suffix", () => {
-    const slug = workspaceChannelSlug("a".repeat(100)); // capped at 59
-    expect(channelName(slug, "abcdef").length).toBeLessThanOrEqual(80);
+    const slug = workspaceChannelSlug("a".repeat(100)); // capped at 57
+    expect(channelName(slug, "abcdef12").length).toBeLessThanOrEqual(80);
   });
 });

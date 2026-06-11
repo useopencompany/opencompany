@@ -6,6 +6,8 @@ import QueryProvider from "@/components/QueryProvider";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
+import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
+import { agentGitHubRepositories, buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { currentWorkspace } from "@/lib/auth";
 import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
 import { loadGoogleIntegrationState } from "@/lib/integrations/google-data";
@@ -32,15 +34,30 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     name: agentName,
   });
 
-  const [sessions, contextFiles, personalSkills, workspaceIntegrations, googleState, mcpSettings] =
-    await Promise.all([
-      loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
-      loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
-      loadPersonalSkills(workspace.id, agent.id, agent.path, agent.config),
-      loadWorkspaceIntegrationState(),
-      loadGoogleIntegrationState(),
-      loadWorkspaceMcpSettingsForWorkspace(workspace.id),
-    ]);
+  const [
+    sessions,
+    contextFiles,
+    personalSkills,
+    workspaceIntegrations,
+    googleState,
+    mcpSettings,
+    githubIntegrationRepositories,
+  ] = await Promise.all([
+    loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
+    loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
+    loadPersonalSkills(workspace.id, agent.id, agent.path, agent.config),
+    loadWorkspaceIntegrationState(),
+    loadGoogleIntegrationState(),
+    loadWorkspaceMcpSettingsForWorkspace(workspace.id),
+    loadGitHubIntegrationRepositoriesForWorkspace(workspace.id),
+  ]);
+
+  // The workspace GitHub integration's repository catalog (only usable repos), so the Behavior
+  // editor can offer concrete @owner/repo mentions instead of just the generic @github pill.
+  const { usableRepositories: githubRepositories } = buildGitHubRepositoryCatalogs({
+    repositories: githubIntegrationRepositories,
+    savedRepositories: agentGitHubRepositories(agent.config),
+  });
   const userName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
 
@@ -81,6 +98,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                 contextFiles={contextFiles}
                 personalSkills={personalSkills}
                 githubIntegrationStatus={workspaceIntegrations.github.status}
+                githubRepositories={githubRepositories}
                 integrationConnections={integrationConnections}
                 proMode={user.proMode}
                 companySurfaceEnabled={user.companySurfaceEnabled}

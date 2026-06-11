@@ -42,9 +42,11 @@ vi.mock("next/link", () => ({
   },
 }));
 
+// Mutable so surface-aware tests can render under /personal/... vs /company/... pages.
+const navigationMock = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ prefetch: vi.fn(), push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/",
+  usePathname: () => navigationMock.pathname,
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -137,6 +139,7 @@ afterEach(() => {
   streamMock.status = "live";
   streamMock.state = emptyStreamState();
   streamMock.lastOptions = undefined;
+  navigationMock.pathname = "/";
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -1565,5 +1568,55 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     await waitFor(() => {
       expect(scrollToSpy).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ── Surface-aware inspector links ────────────────────────────────────────────
+// Session pages render under both /company and /personal; related-session and
+// session-page links must stay within the surface the user is on.
+
+function makeRelatedChild(
+  overrides: Partial<AgentSessionDetailPayload["related"]["children"][number]> = {},
+): AgentSessionDetailPayload["related"]["children"][number] {
+  return {
+    id: "sess_child",
+    title: "Child session",
+    status: "completed",
+    source: "agent",
+    agentName: "Test Agent",
+    agentPath: null,
+    parentMessageId: null,
+    parentToolCallId: null,
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("SessionViewContent — surface-aware inspector links", () => {
+  it("links child sessions under /personal when viewed on the personal surface", () => {
+    navigationMock.pathname = "/personal/session/sess_001";
+    const detail = makeDetail({
+      related: { parent: null, children: [makeRelatedChild()] },
+    });
+    renderSessionViewContent(detail);
+
+    const childLink = screen.getByTitle("Child session");
+    expect(childLink).toHaveAttribute("href", "/personal/session/sess_child");
+    expect(screen.getByText("Session page").parentElement?.querySelector("a")).toHaveAttribute(
+      "href",
+      "/personal/session/sess_001",
+    );
+  });
+
+  it("keeps child-session links under /company on the company surface", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    const detail = makeDetail({
+      related: { parent: null, children: [makeRelatedChild()] },
+    });
+    renderSessionViewContent(detail);
+
+    const childLink = screen.getByTitle("Child session");
+    expect(childLink).toHaveAttribute("href", "/company/session/sess_child");
   });
 });

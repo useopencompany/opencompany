@@ -752,6 +752,82 @@ describe("runtime tool dispatch", () => {
     );
   });
 
+  it("resolves gh auth for all-repositories access from the requested repo installation", async () => {
+    githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("github_token_456");
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      githubRows: [
+        {
+          integrationId: "wint_456",
+          fullName: "other/api",
+          installationId: "install_456",
+          connectionLabel: "other",
+          connectionStatus: "connected",
+          connectionStatusReason: null,
+          resourceStatus: "available",
+          resourceStatusReason: null,
+          metadata: { defaultBranch: "main" },
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const commands = {
+      run: vi.fn(async (command: string, options: { envs?: Record<string, string> }) => {
+        if (command.includes("find brain")) return { stdout: "", stderr: "", exitCode: 0 };
+        return {
+          stdout: options.envs?.GH_TOKEN ?? "no-token",
+          stderr: "",
+          exitCode: 0,
+        };
+      }),
+    };
+    const getSandbox = vi.fn(async () => ({ sandboxId: "sbx_123", commands }));
+    const config = agentConfig({
+      integrations: {
+        github: {
+          allRepositories: true,
+          repositories: [],
+        },
+      },
+    });
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: config,
+      toolCallId: "call_gh_all_repos",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("gh") as RuntimeToolDefinition,
+      args: { args: "--repo other/api pr list" },
+      getSandbox: getSandbox as never,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["gh"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    const shellRun = commands.run.mock.calls.find(
+      ([command]: [string, unknown]) => command === "gh '--repo' 'other/api' 'pr' 'list'",
+    );
+    expect(shellRun?.[1]).toMatchObject({
+      envs: {
+        GH_TOKEN: "github_token_456",
+        GH_REPO: "other/api",
+      },
+    });
+    expect(githubMocks.getGitHubWorkInstallationToken).toHaveBeenCalledWith({
+      installationId: "install_456",
+      repositoryFullName: "other/api",
+    });
+    expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toMatchObject({
+      stdout: "[redacted]",
+      exitCode: 0,
+    });
+  });
+
   it("leaves shell unauthenticated even when an explicit repository binding exists", async () => {
     const db = createLeaseDb({ runLeaseId: "run_123" });
     dbMocks.getDb.mockReturnValue(db);

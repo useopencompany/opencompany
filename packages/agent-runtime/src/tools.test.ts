@@ -297,6 +297,15 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     );
   });
 
+  it("treats the @github all-repositories scope as an attached repository", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [], allRepositories: true })).toContain(
+      "gh",
+    );
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [{ id: "amp" }], allRepositories: true }),
+    ).toContain("amp_coder");
+  });
+
   it("enables amp_coder only when amp is selected and a repository is attached", () => {
     const ampTool = { id: "amp" };
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [ampTool] })).not.toContain("amp_coder");

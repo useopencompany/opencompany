@@ -37,7 +37,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -110,6 +110,7 @@ import {
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { personalPaths } from "@/lib/personal/paths";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import {
   getSlashContext,
@@ -3217,7 +3218,13 @@ function SessionInspector({
   isPending: boolean;
   onAbort: () => void;
 }) {
-  const agentHref = `/company/agents/${session.agentPath ?? session.agentId}`;
+  const surface = useSessionSurface();
+  // The personal surface has a single agent page (no per-agent route), so the agent link
+  // collapses to /personal/agent there.
+  const agentHref =
+    surface === "personal"
+      ? personalPaths.agent
+      : `/company/agents/${session.agentPath ?? session.agentId}`;
 
   return (
     <div className="space-y-8">
@@ -3229,7 +3236,7 @@ function SessionInspector({
         <div className="mt-4 space-y-4">
           <InspectorLink
             label="Session page"
-            href={`/company/session/${session.id}`}
+            href={sessionHref(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
@@ -3478,14 +3485,28 @@ function InspectorRelatedSession({
   );
 }
 
+// Session pages render under both surfaces (/company/session/<id> and /personal/session/<id>);
+// inspector links must stay within whichever surface the user is on.
+function useSessionSurface(): "personal" | "company" {
+  const pathname = usePathname();
+  return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
+}
+
+function sessionHref(surface: "personal" | "company", sessionId: string) {
+  return surface === "personal"
+    ? personalPaths.session(sessionId)
+    : `/company/session/${sessionId}`;
+}
+
 function RelatedSessionLink({
   session,
 }: {
   session: AgentSessionDetailPayload["related"]["children"][number];
 }) {
+  const surface = useSessionSurface();
   return (
     <Link
-      href={`/company/session/${session.id}`}
+      href={sessionHref(surface, session.id)}
       target="_blank"
       rel="noreferrer"
       title={session.title}
