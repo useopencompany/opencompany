@@ -21,10 +21,12 @@ export function mergeSkillCatalog(
   for (const skill of workspaceSkills) {
     const existing = byId.get(skill.id);
     const source = skill.source ?? existing?.source;
+    const command = skill.command ?? existing?.command;
     byId.set(skill.id, {
       id: skill.id,
       name: skill.name || existing?.name || skill.id,
       description: skill.description || existing?.description || "",
+      ...(command ? { command } : {}),
       ...(source ? { source } : {}),
     });
   }

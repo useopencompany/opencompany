@@ -96,3 +96,7 @@ export function usePersonalAgent(): PersonalAgentContextValue {
   }
   return value;
 }
+
+export function useOptionalPersonalAgent(): PersonalAgentContextValue | null {
+  return useContext(PersonalAgentContext);
+}
