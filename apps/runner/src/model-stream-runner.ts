@@ -20,8 +20,9 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import type { SpendCapCheck } from "./run-context";
 import type { RunControlCheck } from "./run-control";
-import { RunSuspendedError } from "./runner-errors";
+import { RunSpendCapError, RunSuspendedError } from "./runner-errors";
 import { normalizeQuestionsInput } from "./session-questions";
 import {
   buildRecoverableToolStreamOutput,
@@ -50,6 +51,8 @@ export async function collectAssistantStream(input: {
   reasoningExposure: "hidden" | "summary" | "raw";
   signal: AbortSignal;
   checkAbort: RunControlCheck;
+  // Daily-spend-cap gate, checked at each step boundary. Absent on runs that never enforce it.
+  checkSpendCap?: SpendCapCheck | undefined;
   toolStartCoordinator: ToolStartCoordinator;
   policy: WorkspaceToolPolicyMap;
   // Whether this run can durably suspend for an "ask" approval. Top-level user and
@@ -208,6 +211,21 @@ export async function collectAssistantStream(input: {
           finishReason: part.finishReason,
           rawFinishReason: part.rawFinishReason,
         });
+        // The step's cost has just landed in the ledger, so trailing-24h spend is fresh. If it
+        // reached the daily cap, stop before the next model step — bounding overshoot to this
+        // one step. Carry the partial turn so the run persists a clean point (mirrors the
+        // RunSuspendedError unwind); the `finally` below closes the iterator, never mid-stream.
+        const capStatus = await input.checkSpendCap?.();
+        if (capStatus?.overCap) {
+          throw new RunSpendCapError({
+            spentTrailing24hUsdMicros: capStatus.spentTrailing24hUsdMicros,
+            capUsdMicros: capStatus.capUsdMicros ?? 0,
+            assistantContent,
+            assistantReplayParts,
+            reasoningSummary,
+            reasoningContent,
+          });
+        }
       }
 
       if (part.type === "tool-call") {

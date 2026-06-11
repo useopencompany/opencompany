@@ -41,10 +41,15 @@ export type ToolCallTimings = {
   totalMs?: number;
 };
 
+// Why a run did not (or no longer) runs, when the status alone is ambiguous. `daily_spend_cap`
+// means the workspace reached its rolling-24h spend cap; agents resume automatically as spend
+// ages out of the window. Surfaced on the session so the UI can explain the pause.
+export type SessionStatusReason = "daily_spend_cap";
+
 export type AgentRuntimeEvent =
   | {
       type: "session.status";
-      payload: { status: AgentSessionStatus; message?: string };
+      payload: { status: AgentSessionStatus; message?: string; reason?: SessionStatusReason };
     }
   | {
       type: "message.created";

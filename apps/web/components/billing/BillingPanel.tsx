@@ -1,16 +1,28 @@
 "use client";
 
-import { ChevronRight, CreditCard, ExternalLink, Gift, WalletCards } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  CreditCard,
+  ExternalLink,
+  Gauge,
+  Gift,
+  WalletCards,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { createCreditCheckoutSession, redeemCreditCode } from "@/lib/billing/actions";
 import {
+  isValidDailyCapCents,
   isValidTopUpAmountCents,
+  MAX_DAILY_CAP_CENTS,
   MAX_TOP_UP_AMOUNT_CENTS,
+  MIN_DAILY_CAP_CENTS,
   MIN_TOP_UP_AMOUNT_CENTS,
   TOP_UP_AMOUNTS_CENTS,
 } from "@/lib/billing/constants";
+import { setWorkspaceDailyCap } from "@/lib/workspaces/actions";
 
 // Serialized billing overview (dates as ISO strings) shared by the workspace and personal settings
 // surfaces. Mirrors loadBillingOverview's shape after createdAt is stringified at the route.
@@ -18,6 +30,16 @@ export type BillingData = {
   balanceUsdMicros: number;
   spendLast7UsdMicros: number;
   spendLast30UsdMicros: number;
+  // Per-workspace daily (rolling-24h) spend cap. Only the company surface wires this; the personal
+  // settings surface omits it, so the cap card is rendered only when present.
+  dailyCap?: {
+    enabled: boolean;
+    capUsdMicros: number | null;
+    spentTrailing24hUsdMicros: number;
+    overCap: boolean;
+  };
+  // Whether the viewer can change the cap (workspace admin). Omitted on surfaces without the cap.
+  isAdmin?: boolean;
   recentSessionCharges: Array<{
     sessionId: string;
     title: string;
@@ -276,6 +298,141 @@ function CustomTopUpForm({
   );
 }
 
+function parseDailyCapCents(value: string) {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d{0,2})?$/.test(normalized)) return null;
+
+  const [dollars, cents = ""] = normalized.split(".");
+  const amountCents = Number(dollars) * 100 + Number(cents.padEnd(2, "0"));
+  return isValidDailyCapCents(amountCents) ? amountCents : null;
+}
+
+function DailySpendCapCard({
+  dailyCap,
+  isAdmin,
+}: {
+  dailyCap: NonNullable<BillingData["dailyCap"]>;
+  isAdmin: boolean;
+}) {
+  const router = useRouter();
+  const [amount, setAmount] = useState(
+    dailyCap.capUsdMicros !== null ? String(dailyCap.capUsdMicros / 1_000_000) : "",
+  );
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const submit = (amountCents: number | null) => {
+    setMessage(null);
+    startTransition(async () => {
+      const result = await setWorkspaceDailyCap({ amountCents });
+      if (result.ok) {
+        setMessage({
+          type: "success",
+          text: amountCents === null ? "Daily cap removed." : "Daily cap saved.",
+        });
+        router.refresh();
+        return;
+      }
+      setMessage({ type: "error", text: result.error });
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+          <Gauge size={15} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+            Daily spend cap
+          </div>
+          <div className="mt-1 text-[12px] text-ink-muted">
+            {dailyCap.enabled && dailyCap.capUsdMicros !== null
+              ? `${formatUsdMicros(dailyCap.spentTrailing24hUsdMicros)} of ${formatUsdMicros(
+                  dailyCap.capUsdMicros,
+                )} spent in the last 24h`
+              : "No cap — agents run until workspace credits run out."}
+          </div>
+          {dailyCap.overCap && (
+            <div className="mt-2 flex items-center gap-1.5 text-[12px] text-danger">
+              <AlertTriangle size={13} strokeWidth={1.9} />
+              Daily cap reached — agents are paused until spend ages out of the last 24h.
+            </div>
+          )}
+
+          {isAdmin ? (
+            <>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const amountCents = parseDailyCapCents(amount);
+                  if (amountCents === null) {
+                    setMessage({
+                      type: "error",
+                      text: `Enter an amount from ${formatUsd(MIN_DAILY_CAP_CENTS)} to ${formatUsd(
+                        MAX_DAILY_CAP_CENTS,
+                      )}.`,
+                    });
+                    return;
+                  }
+                  submit(amountCents);
+                }}
+                className="mt-3 flex flex-wrap items-center gap-2"
+              >
+                <div className="flex h-8 min-w-[150px] items-center rounded-md border border-border bg-surface transition-colors focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15">
+                  <span className="pl-2.5 text-[12.5px] text-ink-subtle">$</span>
+                  <input
+                    value={amount}
+                    onChange={(event) => {
+                      setAmount(event.target.value);
+                      setMessage(null);
+                    }}
+                    placeholder="Daily limit"
+                    inputMode="decimal"
+                    aria-label="Daily spend cap in dollars"
+                    className="h-full min-w-0 flex-1 bg-transparent px-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isPending || !amount.trim()}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isPending ? "Saving..." : "Save"}
+                </button>
+                {dailyCap.enabled && (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => submit(null)}
+                    className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-surface px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Remove cap
+                  </button>
+                )}
+              </form>
+              {message && (
+                <div
+                  className={`mt-2 text-[12px] ${
+                    message.type === "success" ? "text-success" : "text-danger"
+                  }`}
+                >
+                  {message.text}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="mt-2 text-[12px] text-ink-subtle">
+              Only workspace admins can change the spend cap.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BillingPanel({
   billing,
   sessionPathPrefix,
@@ -344,6 +501,10 @@ export function BillingPanel({
         </div>
         {checkoutError && <div className="mt-2 text-[12px] text-danger">{checkoutError}</div>}
       </div>
+
+      {billing.dailyCap && (
+        <DailySpendCapCard dailyCap={billing.dailyCap} isAdmin={billing.isAdmin ?? false} />
+      )}
 
       <form
         onSubmit={(event) => {

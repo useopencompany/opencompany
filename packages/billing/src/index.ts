@@ -671,6 +671,76 @@ export async function hasPositiveWorkspaceBalance(input: {
   return Number.isFinite(balanceUsdMicros) && balanceUsdMicros > 0;
 }
 
+export type SpendCapStatus = {
+  /** A usable cap is set: enabled and a positive amount. */
+  capConfigured: boolean;
+  /** The cap amount in USD micros, or null when no cap is configured. */
+  capUsdMicros: number | null;
+  /** Workspace debits (model + tool + sandbox) over the trailing 24h, in USD micros. */
+  spentTrailing24hUsdMicros: number;
+  /** True when a cap is configured and trailing-24h spend has reached or exceeded it. */
+  overCap: boolean;
+  /** Remaining headroom before the cap, in USD micros, or null when no cap is configured. */
+  remainingUsdMicros: number | null;
+};
+
+/**
+ * Computes a workspace's daily spend-cap status against a rolling 24h window.
+ *
+ * Spend = the sum of all ledger debits (model, tool, and sandbox usage are all
+ * negative ledger rows) within the last 24 hours. As old debits age out of the
+ * window the workspace self-heals back under the cap. Returns an unconfigured
+ * (never over-cap) status when no row exists, the cap is disabled, or the amount
+ * is non-positive — so the default-off majority is unaffected.
+ */
+export async function getWorkspaceSpendCapStatus(input: {
+  db: {
+    execute: (query: string | SQLWrapper) => Promise<unknown>;
+  };
+  workspaceId: string;
+}): Promise<SpendCapStatus> {
+  const result = await input.db.execute(sql`
+    WITH lim AS (
+      SELECT daily_cap_usd_micros, enabled
+      FROM workspace_spend_limits
+      WHERE workspace_id = ${input.workspaceId}
+      LIMIT 1
+    ),
+    spend AS (
+      SELECT COALESCE(SUM(-amount_usd_micros), 0) AS spent
+      FROM workspace_credit_ledger
+      WHERE workspace_id = ${input.workspaceId}
+        AND amount_usd_micros < 0
+        AND created_at >= now() - interval '24 hours'
+    )
+    SELECT
+      lim.daily_cap_usd_micros AS "capUsdMicros",
+      COALESCE(lim.enabled, false) AS "enabled",
+      spend.spent AS "spentUsdMicros"
+    FROM spend
+    LEFT JOIN lim ON true
+  `);
+  const row = rowsFromExecute<{
+    capUsdMicros: number | string | null;
+    enabled: boolean | null;
+    spentUsdMicros: number | string | null;
+  }>(result)[0];
+
+  const capUsdMicros = readMicrosNullable(row?.capUsdMicros);
+  const spentTrailing24hUsdMicros = readMicros(row?.spentUsdMicros);
+  const capConfigured = Boolean(row?.enabled) && capUsdMicros !== null && capUsdMicros > 0;
+
+  return {
+    capConfigured,
+    capUsdMicros: capConfigured ? capUsdMicros : null,
+    spentTrailing24hUsdMicros,
+    overCap: capConfigured && spentTrailing24hUsdMicros >= (capUsdMicros as number),
+    remainingUsdMicros: capConfigured
+      ? Math.max((capUsdMicros as number) - spentTrailing24hUsdMicros, 0)
+      : null,
+  };
+}
+
 function tokenCost(tokens: number, usdMicrosPerMillionTokens: number) {
   return Math.round((safeTokenCount(tokens) * usdMicrosPerMillionTokens) / TOKENS_PER_MILLION);
 }
@@ -686,4 +756,17 @@ function rowsFromExecute<T extends Record<string, unknown>>(result: unknown): T[
     if (Array.isArray(rows)) return rows as T[];
   }
   return [];
+}
+
+// Postgres returns bigint columns as strings over the wire; coerce to a number.
+function readMicros(value: number | string | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  const parsed = typeof value === "string" ? Number.parseInt(value, 10) : value;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function readMicrosNullable(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "string" ? Number.parseInt(value, 10) : value;
+  return Number.isFinite(parsed) ? parsed : null;
 }

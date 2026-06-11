@@ -80,10 +80,44 @@ export class RunSuspendedError extends Error {
   }
 }
 
+// Thrown out of the model stream when a step pushed the workspace's trailing-24h spend to or
+// past its daily cap. Like RunSuspendedError this is not a failure: it carries the partial
+// assistant turn (text + reasoning accumulated so far) so the run can persist a clean point,
+// pause the session to `ready`, and release its lease. The agent self-heals on its next trigger
+// once spend ages out of the 24h window — the run-start cap gate re-blocks runs until then.
+// Non-retryable at the job layer: a retry would just re-pause and replay the turn's side effects.
+export class RunSpendCapError extends Error {
+  readonly spentTrailing24hUsdMicros: number;
+  readonly capUsdMicros: number;
+  readonly assistantContent: string;
+  readonly assistantReplayParts: AssistantReplayPart[];
+  readonly reasoningSummary: string;
+  readonly reasoningContent: string;
+
+  constructor(input: {
+    spentTrailing24hUsdMicros: number;
+    capUsdMicros: number;
+    assistantContent: string;
+    assistantReplayParts: AssistantReplayPart[];
+    reasoningSummary: string;
+    reasoningContent: string;
+  }) {
+    super("Run paused: workspace daily spend cap reached.");
+    this.name = "RunSpendCapError";
+    this.spentTrailing24hUsdMicros = input.spentTrailing24hUsdMicros;
+    this.capUsdMicros = input.capUsdMicros;
+    this.assistantContent = input.assistantContent;
+    this.assistantReplayParts = input.assistantReplayParts;
+    this.reasoningSummary = input.reasoningSummary;
+    this.reasoningContent = input.reasoningContent;
+  }
+}
+
 export function isNonRetryableRunnerError(error: unknown) {
   return (
     error instanceof ToolStepLimitExceededError ||
     error instanceof RunSuspendedError ||
+    error instanceof RunSpendCapError ||
     error instanceof MessageTurnFailedError
   );
 }

@@ -52,7 +52,10 @@ export type ClaimRunLeaseInput = RunLeaseIdentity & {
 };
 
 export type FinishRunLeaseInput = RunLeaseIdentity & {
-  status: "completed" | "aborting" | "failed" | "awaiting_approval" | "awaiting_input";
+  // `ready` releases the lease back to an idle, re-triggerable resting state (used when a run is
+  // paused, not finished — e.g. the daily spend cap). It is a valid session status everywhere
+  // `setStatus` accepts it; finishing just sets it atomically while clearing the lease.
+  status: "completed" | "aborting" | "failed" | "awaiting_approval" | "awaiting_input" | "ready";
   lastError?: string | null;
 };
 

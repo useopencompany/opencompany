@@ -1,5 +1,6 @@
 import { newRunLeaseId } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
+import { getWorkspaceSpendCapStatus, type SpendCapStatus } from "@opencompany/billing";
 import { workspaceCreditLedger } from "@opencompany/db/schema";
 import {
   createLogger,
@@ -77,6 +78,28 @@ export async function observeRunStep<T>(
 
 export function createLeaseAbortCheck(ctx: RunContext): RunControlCheck {
   return createRunControlGate({ runLease: ctx.runLease, controller: ctx.controller });
+}
+
+/**
+ * A daily-spend-cap check for the streaming hot path. Returns the cap status when a cap is
+ * configured for the workspace (so the caller can act on `overCap`), or `null` when no cap
+ * applies. Once it observes "no cap configured" it caches that and short-circuits to `null`,
+ * so the default-off majority pays a single query per turn rather than one per model step.
+ * Construct once per run; call at each step boundary (see collectAssistantStream).
+ */
+export type SpendCapCheck = () => Promise<SpendCapStatus | null>;
+
+export function createSpendCapGate(ctx: RunContext, workspaceId: string): SpendCapCheck {
+  let knownUnconfigured = false;
+  return async () => {
+    if (knownUnconfigured) return null;
+    const status = await getWorkspaceSpendCapStatus({ db: ctx.db, workspaceId });
+    if (!status.capConfigured) {
+      knownUnconfigured = true;
+      return null;
+    }
+    return status;
+  };
 }
 
 export function linkExternalAbortSignal(

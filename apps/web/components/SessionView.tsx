@@ -26,6 +26,7 @@ import {
   CircleStop,
   Copy,
   ExternalLink,
+  Gauge,
   LoaderCircle,
   MessageCircleQuestion,
   PanelRight,
@@ -112,6 +113,7 @@ import {
   type SessionMessage,
   type SessionToolUsageSummary,
   type SessionUsageSummary,
+  spendCapPauseMessage,
 } from "@/lib/agent-sessions/runtime-events";
 import { BRAIN_BASE_PATH, brainHref } from "@/lib/brain/paths";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
@@ -743,6 +745,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     lastError: runtime.lastError,
   });
   const sessionCanContinue = sessionIsInterrupted || sessionHasResumableStepLimitFailure;
+  // Surfaced when the agent paused on the workspace daily spend cap (most recent status event).
+  const spendCapPause = spendCapPauseMessage(runtime.events);
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
@@ -1439,6 +1443,13 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
                 <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
                 <span>{runtime.lastError}</span>
+              </div>
+            ) : null}
+
+            {!runtime.lastError && spendCapPause ? (
+              <div className="flex items-start gap-2 rounded-md border border-border bg-surface-muted px-3 py-2 text-[12.5px] leading-5 text-ink-muted">
+                <Gauge size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
+                <span>{spendCapPause}</span>
               </div>
             ) : null}
 

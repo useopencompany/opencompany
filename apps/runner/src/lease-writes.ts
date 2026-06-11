@@ -645,7 +645,7 @@ export async function releaseRunLease(
   sessionId: string,
   leaseId: string,
   leaseOwner: string,
-  status: "completed",
+  status: "completed" | "ready",
 ) {
   return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: null });
 }

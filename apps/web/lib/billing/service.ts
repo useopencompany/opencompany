@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { centsToUsdMicros, USD_MICROS_PER_CENT, usdMicrosToCents } from "@opencompany/billing";
+import {
+  centsToUsdMicros,
+  getWorkspaceSpendCapStatus,
+  USD_MICROS_PER_CENT,
+  usdMicrosToCents,
+} from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
   creditCodeRedemptions,
@@ -61,7 +66,7 @@ export function newStripeCheckoutRecordId() {
 
 export async function loadBillingOverview(workspaceId: string) {
   const db = getDb();
-  const [balanceRow, ledgerRows, spendRows, sessionChargeRows] = await Promise.all([
+  const [balanceRow, ledgerRows, spendRows, sessionChargeRows, spendCap] = await Promise.all([
     db
       .select({
         balanceCents: workspaceCreditBalances.balanceCents,
@@ -139,6 +144,7 @@ export async function loadBillingOverview(workspaceId: string) {
       ORDER BY MAX(ledger_with_root.created_at) DESC
       LIMIT 5
     `),
+    getWorkspaceSpendCapStatus({ db, workspaceId }),
   ]);
   const balanceUsdMicros =
     balanceRow[0]?.balanceUsdMicros ?? centsToUsdMicros(balanceRow[0]?.balanceCents ?? 0);
@@ -152,6 +158,12 @@ export async function loadBillingOverview(workspaceId: string) {
     balanceCents: usdMicrosToCents(balanceUsdMicros),
     spendLast7UsdMicros: readMicros(spend?.spendLast7UsdMicros),
     spendLast30UsdMicros: readMicros(spend?.spendLast30UsdMicros),
+    dailyCap: {
+      enabled: spendCap.capConfigured,
+      capUsdMicros: spendCap.capUsdMicros,
+      spentTrailing24hUsdMicros: spendCap.spentTrailing24hUsdMicros,
+      overCap: spendCap.overCap,
+    },
     recentSessionCharges: rowsFromExecute<BillingSessionChargeSummary>(sessionChargeRows)
       .filter((row): row is typeof row & { sessionId: string } => Boolean(row.sessionId))
       .map((row) => ({

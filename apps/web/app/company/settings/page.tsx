@@ -31,7 +31,7 @@ function formatDate(date: Date) {
 }
 
 export default async function SettingsPage() {
-  const { authUser, user, workspace } = await currentWorkspace();
+  const { authUser, user, workspace, role } = await currentWorkspace();
   const db = getDb();
   const [syncStatus, [avatar], billing, mcp, toolPolicies] = await Promise.all([
     loadWorkspaceSyncStatus(db, workspace.id),
@@ -77,6 +77,8 @@ export default async function SettingsPage() {
         balanceUsdMicros: billing.balanceUsdMicros,
         spendLast7UsdMicros: billing.spendLast7UsdMicros,
         spendLast30UsdMicros: billing.spendLast30UsdMicros,
+        dailyCap: billing.dailyCap,
+        isAdmin: role === "admin",
         recentSessionCharges: billing.recentSessionCharges.map((entry) => ({
           ...entry,
           createdAt: entry.createdAt.toISOString(),

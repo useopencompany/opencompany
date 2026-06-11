@@ -19,3 +19,13 @@ export function isValidTopUpAmountCents(value: number) {
 export function normalizeCreditCode(code: string) {
   return code.trim().toUpperCase();
 }
+
+// Daily spend-cap bounds (per workspace). Floor keeps a cap meaningful; ceiling guards typos.
+export const MIN_DAILY_CAP_CENTS = 100; // $1.00
+export const MAX_DAILY_CAP_CENTS = 1_000_000; // $10,000.00
+
+export function isValidDailyCapCents(value: number) {
+  return (
+    Number.isSafeInteger(value) && value >= MIN_DAILY_CAP_CENTS && value <= MAX_DAILY_CAP_CENTS
+  );
+}

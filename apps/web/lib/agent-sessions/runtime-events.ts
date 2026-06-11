@@ -1362,6 +1362,20 @@ export function readString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+// The session is paused on the workspace daily spend cap when the most recent `session.status`
+// event carries that reason. Returns the human message to surface, or null. A later run emits a
+// newer session.status (running/completed/…) that supersedes it, so the banner clears on its own
+// once the agent runs again.
+export function spendCapPauseMessage(events: RuntimeEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type !== "session.status") continue;
+    if (readString(event.payload.reason) !== "daily_spend_cap") return null;
+    return readString(event.payload.message) || "Paused: daily spend cap reached.";
+  }
+  return null;
+}
+
 function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" | undefined {
   return value === "read" || value === "post" || value === "modify" || value === "admin"
     ? value

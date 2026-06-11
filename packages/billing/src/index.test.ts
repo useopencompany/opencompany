@@ -1,9 +1,12 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import {
   calculateHostedToolUsageCost,
   calculateModelUsageCost,
   calculatePlatformFeeUsdMicros,
   calculateSandboxUsageCost,
+  getWorkspaceSpendCapStatus,
   recordWorkspaceUsageDebit,
 } from ".";
 
@@ -292,5 +295,80 @@ describe("recordWorkspaceUsageDebit", () => {
       }),
     ).resolves.toEqual({ ok: true, ledgerId: 9, balanceUsdMicros: 88_003 });
     expect(captured).toBeDefined();
+  });
+});
+
+describe("getWorkspaceSpendCapStatus", () => {
+  function fakeDb(row: Record<string, unknown> | null) {
+    let captured: unknown;
+    return {
+      db: {
+        execute: async (query: unknown) => {
+          captured = query;
+          return { rows: row ? [row] : [] };
+        },
+      },
+      captured: () => captured,
+    };
+  }
+
+  it("treats a workspace with no spend-limit row as unconfigured", async () => {
+    const { db } = fakeDb({ capUsdMicros: null, enabled: false, spentUsdMicros: 5_000 });
+    await expect(getWorkspaceSpendCapStatus({ db, workspaceId: "wks_1" })).resolves.toEqual({
+      capConfigured: false,
+      capUsdMicros: null,
+      spentTrailing24hUsdMicros: 5_000,
+      overCap: false,
+      remainingUsdMicros: null,
+    });
+  });
+
+  it("treats a disabled cap as unconfigured even when an amount is stored", async () => {
+    const { db } = fakeDb({ capUsdMicros: 100_000, enabled: false, spentUsdMicros: 200_000 });
+    const status = await getWorkspaceSpendCapStatus({ db, workspaceId: "wks_1" });
+    expect(status.capConfigured).toBe(false);
+    expect(status.overCap).toBe(false);
+    expect(status.capUsdMicros).toBeNull();
+  });
+
+  it("reports remaining headroom when enabled and under cap", async () => {
+    const { db } = fakeDb({ capUsdMicros: 1_000_000, enabled: true, spentUsdMicros: 400_000 });
+    await expect(getWorkspaceSpendCapStatus({ db, workspaceId: "wks_1" })).resolves.toEqual({
+      capConfigured: true,
+      capUsdMicros: 1_000_000,
+      spentTrailing24hUsdMicros: 400_000,
+      overCap: false,
+      remainingUsdMicros: 600_000,
+    });
+  });
+
+  it("is over cap at exactly the cap (boundary is inclusive)", async () => {
+    const { db } = fakeDb({ capUsdMicros: 1_000_000, enabled: true, spentUsdMicros: 1_000_000 });
+    const status = await getWorkspaceSpendCapStatus({ db, workspaceId: "wks_1" });
+    expect(status.overCap).toBe(true);
+    expect(status.remainingUsdMicros).toBe(0);
+  });
+
+  it("is over cap when spend exceeds the cap", async () => {
+    const { db } = fakeDb({ capUsdMicros: 1_000_000, enabled: true, spentUsdMicros: 1_500_000 });
+    const status = await getWorkspaceSpendCapStatus({ db, workspaceId: "wks_1" });
+    expect(status.overCap).toBe(true);
+    expect(status.remainingUsdMicros).toBe(0);
+  });
+
+  it("coerces bigint string columns returned by the driver", async () => {
+    const { db } = fakeDb({ capUsdMicros: "1000000", enabled: true, spentUsdMicros: "1200000" });
+    const status = await getWorkspaceSpendCapStatus({ db, workspaceId: "wks_1" });
+    expect(status.capUsdMicros).toBe(1_000_000);
+    expect(status.spentTrailing24hUsdMicros).toBe(1_200_000);
+    expect(status.overCap).toBe(true);
+  });
+
+  it("queries the rolling 24h window over ledger debits", async () => {
+    const { db, captured } = fakeDb({ capUsdMicros: 1_000_000, enabled: true, spentUsdMicros: 0 });
+    await getWorkspaceSpendCapStatus({ db, workspaceId: "wks_1" });
+    const { sql: rendered } = new PgDialect().sqlToQuery(captured() as SQL);
+    expect(rendered).toContain("interval '24 hours'");
+    expect(rendered).toContain("amount_usd_micros < 0");
   });
 });

@@ -1030,6 +1030,30 @@ export const workspaceCreditBalances = pgTable("workspace_credit_balances", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const workspaceSpendLimits = pgTable(
+  "workspace_spend_limits",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // Trailing-24h hard cap in USD micros. NULL = no cap configured (unlimited).
+    dailyCapUsdMicros: bigint("daily_cap_usd_micros", { mode: "number" }),
+    // Opt-in switch independent of the amount, so an admin can disable without losing the value.
+    enabled: boolean("enabled").notNull().default(false),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    dailyCapPositiveCheck: check(
+      "workspace_spend_limits_daily_cap_positive_check",
+      sql`${table.dailyCapUsdMicros} IS NULL OR ${table.dailyCapUsdMicros} > 0`,
+    ),
+  }),
+);
+
 export const stripeCheckoutSessions = pgTable(
   "stripe_checkout_sessions",
   {
@@ -1762,6 +1786,10 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   creditBalance: one(workspaceCreditBalances, {
     fields: [workspaces.id],
     references: [workspaceCreditBalances.workspaceId],
+  }),
+  spendLimit: one(workspaceSpendLimits, {
+    fields: [workspaces.id],
+    references: [workspaceSpendLimits.workspaceId],
   }),
   creditLedger: many(workspaceCreditLedger),
   stripeCheckoutSessions: many(stripeCheckoutSessions),

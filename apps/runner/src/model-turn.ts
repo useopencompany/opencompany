@@ -18,7 +18,7 @@ import {
 import { createMcpToolSet } from "./mcp-tools";
 import { buildAssistantModelMessage, toPersistedModelMessage } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
-import { observeRunStep, type RunContext } from "./run-context";
+import { observeRunStep, type RunContext, type SpendCapCheck } from "./run-context";
 import type { RunControlCheck } from "./run-control";
 import { ToolStepLimitExceededError } from "./runner-errors";
 import type { LoadedSession } from "./session-lifecycle";
@@ -66,6 +66,7 @@ export async function streamAssistantResponse(input: {
   personalAgent?: boolean;
   toolStartCoordinator: ToolStartCoordinator;
   checkAbort: RunControlCheck;
+  checkSpendCap?: SpendCapCheck;
   policy: WorkspaceToolPolicyMap;
   suspendable: boolean;
   extraStopConditions?: StopCondition<ToolSet>[];
@@ -189,6 +190,7 @@ export async function streamAssistantResponse(input: {
           reasoningExposure: input.runtime.model.reasoningExposure,
           signal: input.ctx.controller.signal,
           checkAbort: input.checkAbort,
+          checkSpendCap: input.checkSpendCap,
           toolStartCoordinator: input.toolStartCoordinator,
           policy: input.policy,
           suspendable: input.suspendable,

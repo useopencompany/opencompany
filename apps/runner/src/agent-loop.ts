@@ -14,7 +14,7 @@ import {
   restrictToolsForMemoryKeeper,
   scanPersonalSkills,
 } from "@opencompany/agent-runtime";
-import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
+import { getWorkspaceSpendCapStatus, hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { agentFiles, agentSessionMessages } from "@opencompany/db/schema";
 import {
   captureException,
@@ -73,6 +73,7 @@ import {
   captureTurnCompletedAnalytics,
   createLeaseAbortCheck,
   createRunContext,
+  createSpendCapGate,
   finalizeRun,
   observeRunStep,
   type RunContext,
@@ -85,7 +86,7 @@ import {
   RunLeaseBusyError,
   RunLeaseLostError,
 } from "./run-control";
-import { MessageTurnFailedError, RunSuspendedError } from "./runner-errors";
+import { MessageTurnFailedError, RunSpendCapError, RunSuspendedError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
   appendAfterSessionSkipped,
@@ -305,6 +306,20 @@ async function runMessageWithContext(
         sessionId: input.sessionId,
         type: "session.status",
         payload: { status: "ready", message: "Add workspace credits to continue running agents." },
+      });
+      return;
+    }
+
+    const spendCap = await observeRunStep(ctx, "check_daily_spend_cap", () =>
+      getWorkspaceSpendCapStatus({ db: ctx.db, workspaceId: row.session.workspaceId }),
+    );
+    if (spendCap.overCap) {
+      outcome = "skipped_daily_cap";
+      await setStatus(input.sessionId, "ready");
+      await appendRuntimeEvent(ctx.db, {
+        sessionId: input.sessionId,
+        type: "session.status",
+        payload: { status: "ready", reason: "daily_spend_cap", message: SPEND_CAP_PAUSED_MESSAGE },
       });
       return;
     }
@@ -832,6 +847,79 @@ async function suspendRunForInput(input: {
   await requireLeaseWrite(suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, status));
 }
 
+const SPEND_CAP_PAUSED_MESSAGE =
+  "Paused: daily spend cap reached. Agents resume automatically as spend ages out of the last 24h.";
+
+// Pause a run that hit the workspace daily spend cap mid-turn. Mirrors suspendRunForInput, but the
+// resting state is `ready` (re-triggerable) rather than awaiting a human: persist the partial
+// assistant turn, sync the sandbox brain so allowed side effects survive, bill the sandbox window
+// while the lease is still held, emit a `session.status` event explaining the pause, then release
+// the lease back to `ready`. The run resumes on its next trigger; the run-start cap gate re-blocks
+// it until trailing-24h spend drops below the cap.
+async function pauseRunForSpendCap(input: {
+  ctx: RunContext;
+  row: LoadedSession;
+  sandbox: SandboxHandle | null;
+  sandboxBilling: SandboxBillingSnapshot | null;
+  assistantMessageId: string;
+  error: RunSpendCapError;
+}) {
+  const { ctx, row, assistantMessageId, error } = input;
+
+  if (input.sandbox) {
+    const activeSandbox = input.sandbox;
+    await observeRunStep(ctx, "sync_brain_before_spend_cap_pause", () =>
+      syncBrainFromSandbox({
+        sandbox: activeSandbox,
+        sessionId: ctx.sessionId,
+        workspaceId: row.workspace.id,
+        workdir: row.session.workdir,
+      }),
+    );
+  }
+
+  await persistAssistantCompletion({
+    sessionId: ctx.sessionId,
+    assistantMessageId,
+    leaseId: ctx.leaseId,
+    leaseOwner: ctx.leaseOwner,
+    assistantContent: error.assistantContent,
+    assistantReplayParts: error.assistantReplayParts,
+    reasoningSummary: error.reasoningSummary,
+    reasoningContent: error.reasoningContent,
+    internal: false,
+  });
+
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: ctx.sessionId,
+      messageId: null,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+      type: "session.status",
+      payload: { status: "ready", reason: "daily_spend_cap", message: SPEND_CAP_PAUSED_MESSAGE },
+    }),
+  );
+
+  logger.info("Runner turn paused at daily spend cap", {
+    event: "opencompany.runner_spend_cap_paused",
+    workspace_id: row.workspace.id,
+    session_id: ctx.sessionId,
+    assistant_message_id: assistantMessageId,
+    spent_trailing_24h_usd_micros: error.spentTrailing24hUsdMicros,
+    cap_usd_micros: error.capUsdMicros,
+  });
+
+  // Bill the sandbox active window while the lease is still held (see executeStreamingTurn).
+  await recordSandboxUsageBestEffort({
+    ctx,
+    assistantMessageId,
+    sandboxBilling: input.sandboxBilling,
+  });
+
+  await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "ready"));
+}
+
 // Shared "model turn" middle used by the message, after-session, and resume runs: stream the
 // model (suspending durably at an "ask" gate when `suspendable`), sync brain, persist the
 // assistant completion, emit the caller's completed event, and release the lease. Returns the
@@ -875,11 +963,28 @@ async function executeStreamingTurn(input: {
       personalAgent: row.agent.isDefault,
       toolStartCoordinator: input.toolStartCoordinator,
       checkAbort: input.checkAbort,
+      // Enforce the workspace daily spend cap between model steps (no-op when no cap is set).
+      checkSpendCap: createSpendCapGate(ctx, row.workspace.id),
       policy: input.policy,
       suspendable: input.suspendable,
       ...(input.extraStopConditions ? { extraStopConditions: input.extraStopConditions } : {}),
     });
   } catch (error) {
+    if (error instanceof RunSpendCapError) {
+      // Trailing-24h spend reached the daily cap mid-turn. Persist the partial turn, pause the
+      // session to `ready`, and release the lease — like a suspension, not a failure. The session
+      // re-triggers normally; the run-start cap gate keeps new runs blocked until spend ages out
+      // of the 24h window. Treated as "suspended" for the caller's tail (no steer/analytics).
+      await pauseRunForSpendCap({
+        ctx,
+        row,
+        sandbox: sandboxAcquirer.current,
+        sandboxBilling: sandboxAcquirer.billingSnapshot(),
+        assistantMessageId,
+        error,
+      });
+      return { outcome: "suspended" };
+    }
     if (error instanceof RunSuspendedError) {
       // A suspension point fired: an "ask" approval gate (→ awaiting_approval) or an
       // ask_user_question call (→ awaiting_input). Persist the partial assistant turn (ending in
@@ -1127,6 +1232,19 @@ async function runAfterSessionWithContext(
         sessionId: input.sessionId,
         messageId: input.messageId,
         reason: "no_credits",
+      });
+      return;
+    }
+
+    const spendCap = await observeRunStep(ctx, "check_daily_spend_cap", () =>
+      getWorkspaceSpendCapStatus({ db: ctx.db, workspaceId: row.session.workspaceId }),
+    );
+    if (spendCap.overCap) {
+      outcome = "skipped_daily_cap";
+      await appendAfterSessionSkipped({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        reason: "daily_cap",
       });
       return;
     }
@@ -1622,6 +1740,20 @@ async function resumeApprovalWithContext(
     ) {
       outcome = "skipped_no_credits";
       await setStatus(input.sessionId, "ready");
+      return;
+    }
+
+    const spendCap = await observeRunStep(ctx, "check_daily_spend_cap", () =>
+      getWorkspaceSpendCapStatus({ db: ctx.db, workspaceId: row.session.workspaceId }),
+    );
+    if (spendCap.overCap) {
+      outcome = "skipped_daily_cap";
+      await setStatus(input.sessionId, "ready");
+      await appendRuntimeEvent(ctx.db, {
+        sessionId: input.sessionId,
+        type: "session.status",
+        payload: { status: "ready", reason: "daily_spend_cap", message: SPEND_CAP_PAUSED_MESSAGE },
+      });
       return;
     }
 
@@ -2156,6 +2288,20 @@ async function resumeQuestionResponseWithContext(
     ) {
       outcome = "skipped_no_credits";
       await setStatus(input.sessionId, "ready");
+      return;
+    }
+
+    const spendCap = await observeRunStep(ctx, "check_daily_spend_cap", () =>
+      getWorkspaceSpendCapStatus({ db: ctx.db, workspaceId: row.session.workspaceId }),
+    );
+    if (spendCap.overCap) {
+      outcome = "skipped_daily_cap";
+      await setStatus(input.sessionId, "ready");
+      await appendRuntimeEvent(ctx.db, {
+        sessionId: input.sessionId,
+        type: "session.status",
+        payload: { status: "ready", reason: "daily_spend_cap", message: SPEND_CAP_PAUSED_MESSAGE },
+      });
       return;
     }
 

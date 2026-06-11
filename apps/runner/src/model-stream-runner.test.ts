@@ -18,7 +18,7 @@ import {
   type RunControlStore,
   type RunLeaseState,
 } from "./run-control";
-import { RunSuspendedError, ToolStepLimitExceededError } from "./runner-errors";
+import { RunSpendCapError, RunSuspendedError, ToolStepLimitExceededError } from "./runner-errors";
 import { throwIfStreamErrorPart } from "./stream-helpers";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -521,6 +521,56 @@ describe("collectAssistantStream", () => {
       type: "message.delta",
       payload: { messageId: "msg_assistant", delta: "Visible answer" },
     });
+  });
+
+  it("stops at a daily spend cap after the step that crosses it, bounding overshoot to one step", async () => {
+    const stream = createStream([
+      streamPart({ type: "text-delta", text: "working" }),
+      streamPart({ type: "finish-step", finishReason: "stop", rawFinishReason: "stop" }),
+      // A second step that must never start because the cap check after the first finish-step throws.
+      streamPart({ type: "finish-step", finishReason: "stop", rawFinishReason: "stop" }),
+    ]);
+    const checkSpendCap = vi.fn(async () => ({
+      capConfigured: true,
+      capUsdMicros: 1_000_000,
+      spentTrailing24hUsdMicros: 1_200_000,
+      overCap: true,
+      remainingUsdMicros: 0,
+    }));
+
+    const error = await collect(stream, { checkSpendCap }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(RunSpendCapError);
+    const capped = error as RunSpendCapError;
+    expect(capped.capUsdMicros).toBe(1_000_000);
+    expect(capped.spentTrailing24hUsdMicros).toBe(1_200_000);
+    // The partial assistant turn is carried so the run can persist a clean point.
+    expect(capped.assistantContent).toBe("working");
+    // Overshoot bounded to one step: usage recorded once, the second finish-step never ran.
+    expect(usageRecorder.recordStepUsage).toHaveBeenCalledTimes(1);
+    expect(checkSpendCap).toHaveBeenCalledTimes(1);
+    // The stream is torn down on the way out.
+    expect(stream.return).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues past a finish-step when under the daily spend cap", async () => {
+    const stream = createStream([
+      streamPart({ type: "finish-step", finishReason: "stop", rawFinishReason: "stop" }),
+      streamPart({ type: "text-delta", text: "answer" }),
+    ]);
+    const checkSpendCap = vi.fn(async () => ({
+      capConfigured: true,
+      capUsdMicros: 1_000_000,
+      spentTrailing24hUsdMicros: 400_000,
+      overCap: false,
+      remainingUsdMicros: 600_000,
+    }));
+
+    await expect(collect(stream, { checkSpendCap })).resolves.toMatchObject({
+      assistantContent: "answer",
+    });
+    expect(checkSpendCap).toHaveBeenCalledTimes(1);
+    expect(stream.return).not.toHaveBeenCalled();
   });
 
   it("persists reasoning phase boundaries without exposing deltas when reasoning is hidden", async () => {
