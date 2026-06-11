@@ -531,6 +531,9 @@ function SessionViewContentBody({
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
+  // Root element of this pane, marked with data-session-pane — the window drop handler
+  // uses it to tell whether a drop landed in this pane or a sibling split pane.
+  const paneRootRef = useRef<HTMLElement>(null);
   // ID of the user message to scroll to the top of the viewport ONCE, right after a
   // send. The reserved space below it is held by CSS (min-height on the last turn),
   // not a JS maintain loop — so there is no per-frame re-pin (no jitter) and the
@@ -1034,7 +1037,10 @@ function SessionViewContentBody({
 
   // A file dropped anywhere in the window — not just on the composer drop zone — must NOT make
   // the browser navigate to / open the file (its default). Prevent that window-wide, and route
-  // any in-window file drop into the composer as an attachment.
+  // any in-window file drop into the composer as an attachment. In a split view every pane
+  // registers this listener, so exactly one instance may accept the files: the pane the drop
+  // landed in (resolved via DOM containment, since dragCounterRef can't see sibling panes), or
+  // the primary pane for drops outside any pane (sidebar etc. — the legacy single-chat behavior).
   useEffect(() => {
     const onWindowDragOver = (event: DragEvent) => {
       if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
@@ -1044,6 +1050,9 @@ function SessionViewContentBody({
       event.preventDefault();
       dragCounterRef.current = 0;
       setIsDragActive(false);
+      const targetPane =
+        event.target instanceof Element ? event.target.closest("[data-session-pane]") : null;
+      if (targetPane ? targetPane !== paneRootRef.current : !isPrimary) return;
       const files = Array.from(event.dataTransfer.files);
       if (files.length > 0) acceptFiles(files);
     };
@@ -1053,7 +1062,7 @@ function SessionViewContentBody({
       window.removeEventListener("dragover", onWindowDragOver);
       window.removeEventListener("drop", onWindowDrop);
     };
-  }, [acceptFiles]);
+  }, [acceptFiles, isPrimary]);
 
   // The Durable Stream self-recovers (the client reconnects + resumes from its
   // offset) and refresh/visibility recovery is no longer needed — a refresh
@@ -1451,7 +1460,7 @@ function SessionViewContentBody({
   };
 
   return (
-    <main className="relative flex h-full flex-1 overflow-hidden">
+    <main ref={paneRootRef} data-session-pane className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <SessionTopBar
           session={session}
