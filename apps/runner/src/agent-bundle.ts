@@ -7,7 +7,7 @@ import { MAX_BRAIN_FILE_BYTES, MAX_BRAIN_MOUNT_BYTES, MAX_BRAIN_MOUNT_FILES } fr
 import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
 import { conflictPath, hashContent } from "./repo-files";
-import { type SandboxHandle, sandboxLayout } from "./sandbox";
+import { type SandboxHandle, sandboxLayout, writeSandboxTextFiles } from "./sandbox";
 
 const MAX_AGENT_BUNDLE_FILE_BYTES = MAX_BRAIN_FILE_BYTES;
 const MAX_AGENT_BUNDLE_MOUNT_FILES = MAX_BRAIN_MOUNT_FILES;
@@ -16,6 +16,7 @@ const MAX_AGENT_BUNDLE_MOUNT_BYTES = MAX_BRAIN_MOUNT_BYTES;
 // into the system prompt every session (see resolveAgentRuntimeConfig). Created empty when
 // absent, exactly like a freshly-seeded scratchpad.
 const AGENT_USER_MEMORY_PATH = "user.md";
+const SANDBOX_USER = "user";
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 type AgentFileRow = typeof agentFiles.$inferSelect;
@@ -96,46 +97,60 @@ export async function materializeAgentBundleForSession(input: {
 
   for (const root of roots) {
     assertSafeDestructiveRoot(root, input.workdir);
-    await input.sandbox.commands.run(`rm -rf ${shellQuote(root)} && mkdir -p ${shellQuote(root)}`);
   }
+  const quotedRoots = roots.map(shellQuote).join(" ");
+  await input.sandbox.commands.run(`rm -rf ${quotedRoots} && mkdir -p ${quotedRoots}`, {
+    user: SANDBOX_USER,
+    timeoutMs: 30_000,
+  });
 
-  const mountedPaths = new Set<string>();
-  for (const file of limitedFiles) {
+  const mountedPaths = new Set(limitedFiles.map((file) => file.relativePath));
+  const materializedFiles: AgentBundleMaterializationFile[] = limitedFiles.map((file) => {
     const sandboxRelative = bundleRelativeToSandboxRelative(file.relativePath, personal);
-    const destination = `${input.workdir}/${sandboxRelative}`;
-    await input.sandbox.commands.run(`mkdir -p ${shellQuote(dirname(destination))}`);
-    await input.sandbox.files.write(destination, file.content);
-    mountedPaths.add(file.relativePath);
-    await mountAgentBundleFile({
-      sessionId: input.sessionId,
-      workspaceId: input.workspaceId,
+    return {
       repoPath: file.repoPath,
-      sandboxPath: sandboxRelative,
+      sandboxRelative,
+      destination: `${input.workdir}/${sandboxRelative}`,
+      content: file.content,
       contentHash: file.contentHash,
+    };
+  });
+  if (!mountedPaths.has(AGENT_USER_MEMORY_PATH)) {
+    const sandboxRelative = bundleRelativeToSandboxRelative(AGENT_USER_MEMORY_PATH, personal);
+    materializedFiles.push({
+      repoPath: repoPathFor(bundle.dir, AGENT_USER_MEMORY_PATH),
+      sandboxRelative,
+      destination: `${input.workdir}/${sandboxRelative}`,
+      content: "",
+      contentHash: hashContent(""),
     });
   }
 
-  for (const path of [AGENT_USER_MEMORY_PATH]) {
-    if (mountedPaths.has(path)) continue;
-    const contentHash = hashContent("");
-    const sandboxRelative = bundleRelativeToSandboxRelative(path, personal);
-    await input.sandbox.files.write(`${input.workdir}/${sandboxRelative}`, "");
-    await mountAgentBundleFile({
-      sessionId: input.sessionId,
-      workspaceId: input.workspaceId,
-      repoPath: repoPathFor(bundle.dir, path),
-      sandboxPath: sandboxRelative,
-      contentHash,
-    });
-  }
-
-  for (const root of roots) {
-    await input.sandbox.commands.run(`chown -R user:user ${shellQuote(root)}`, {
-      user: "root",
-      timeoutMs: 30_000,
-    });
-  }
+  await writeSandboxTextFiles({
+    sandbox: input.sandbox,
+    files: materializedFiles.map((file) => ({ path: file.destination, content: file.content })),
+    user: SANDBOX_USER,
+  });
+  await Promise.all(
+    materializedFiles.map((file) =>
+      mountAgentBundleFile({
+        sessionId: input.sessionId,
+        workspaceId: input.workspaceId,
+        repoPath: file.repoPath,
+        sandboxPath: file.sandboxRelative,
+        contentHash: file.contentHash,
+      }),
+    ),
+  );
 }
+
+type AgentBundleMaterializationFile = {
+  repoPath: string;
+  sandboxRelative: string;
+  destination: string;
+  content: string;
+  contentHash: string;
+};
 
 export async function syncAgentBundleFromSandbox(input: {
   sandbox: SandboxHandle;
@@ -460,9 +475,4 @@ function normalizeAgentBundlePath(input: string) {
   const path = input.trim().replace(/^\/+/, "").split("/").filter(Boolean).join("/");
   if (!path || path.startsWith(".") || path.includes("..")) return null;
   return path;
-}
-
-function dirname(path: string) {
-  const index = path.lastIndexOf("/");
-  return index === -1 ? "." : path.slice(0, index);
 }
