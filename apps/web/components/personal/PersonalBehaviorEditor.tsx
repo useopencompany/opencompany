@@ -17,7 +17,7 @@ import { fetchWorkspaceSkills } from "@/lib/skills/client";
 
 type SaveState = "idle" | "saving" | "saved";
 
-const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+const DEFAULT_MODEL_ID: AgentModelId = "moonshotai/kimi-k2.6";
 
 // The behavior surface = the agent's editable `.agent` body. We reuse the shared Tiptap
 // AgentEditor (same one the full agent inspector uses) so @-mentioning a tool, skill, or

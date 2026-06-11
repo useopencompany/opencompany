@@ -1736,6 +1736,86 @@ describe("SessionViewContent — surface-aware inspector links", () => {
     );
   });
 
+  it("keeps runtime details collapsed by default for company sessions with related sessions", () => {
+    navigationMock.pathname = "/company/session/sess_child";
+    renderSessionViewContent(
+      makeDetail({
+        session: makeSession({
+          id: "sess_child",
+          status: "completed",
+          parentSessionId: "sess_001",
+        }),
+        related: { parent: makeRelatedChild({ id: "sess_001" }), children: [] },
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("does not expand runtime details when related sessions arrive after first paint", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    const { rerender } = renderSessionViewContent(
+      makeDetail({ session: makeSession({ status: "running" }) }),
+    );
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent
+          detail={makeDetail({
+            session: makeSession({ status: "running" }),
+            related: { parent: null, children: [makeRelatedChild()] },
+          })}
+          workspaceId="wks_test"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("resets runtime details to collapsed when navigating to a different session", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/company/session/sess_001";
+    const { rerender } = renderSessionViewContent(
+      makeDetail({ session: makeSession({ id: "sess_001", status: "running" }) }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Expand runtime details" }));
+    expect(
+      screen.getByRole("button", { name: "Collapse runtime details", expanded: true }),
+    ).toHaveAttribute("aria-expanded", "true");
+
+    navigationMock.pathname = "/company/session/sess_child";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent
+          detail={makeDetail({
+            session: makeSession({
+              id: "sess_child",
+              status: "ready",
+              parentSessionId: "sess_001",
+            }),
+            related: { parent: makeRelatedChild({ id: "sess_001" }), children: [] },
+          })}
+          workspaceId="wks_test"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
   it("links child sessions under /personal when viewed on the personal surface", () => {
     navigationMock.pathname = "/personal/session/sess_001";
     const detail = makeDetail({
