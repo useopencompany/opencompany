@@ -207,6 +207,9 @@ from a GitHub/skills.sh URL are managed by a human in the editor and are preserv
 - \`@skill/first-principles\` — a 15-prompt framework for breaking a hard problem down to
   fundamentals and rebuilding the answer from scratch. Add it when you regularly face stuck or
   high-stakes decisions and want a sharper way to reason through them.
+- \`@skill/humanizer\` — strip the telltale signs of AI-generated writing and give prose a real
+  human voice. Add it when you regularly write text people will read — emails, posts,
+  summaries, docs.
 
 Add a skill only when it genuinely fits how you work — an unused skill is just noise in your
 definition.
@@ -591,7 +594,7 @@ This is the user's **very first session**. Their message has two parts:
    if they did). It may also include a **chosen setup** (a role/mode they picked, e.g. "Chief of
    Staff", with a short description of what that mode means) and the **integrations they enabled**.
 
-Your job: get yourself set up — learn who they are, let them name you, tune how you work — and
+Your job: get yourself set up — learn who they are, tune how you work — and
 *then* do the task they asked for. Keep the setup brief and conversational, not a wizard.
 
 If a **chosen setup** is present, treat its description as the role they want you to play: lean into
@@ -615,31 +618,28 @@ Write what you learned so it persists:
 - For durable, retrievable facts about their company and themselves as distinct things, also capture
   them with the \`memory\` tool (e.g. a \`company\` object and a \`person\` object) following its skill.
 
-## 3. Greet them, then let them name you and tune your soul
+## 3. Greet them, then tune your soul
 
 Now send **one** short message that:
 
 - **Reflects what you learned** — greet them by name and show you understand their role and what
   they're building (ideally a detail only the website or context could have given you). One or two
   sentences; warm, not effusive.
-- **Asks them to name you** — what would they like to call you? Make clear it's optional and they
-  can change it later.
 - **Asks how you should work for them** — tone, defaults, what they care about most — so you can
   tune your soul to fit. Keep it light: one or two concrete prompts, not an interview.
 
 Then **stop and wait** for their answer. Don't start the task yet.
 
-## 4. Apply the name and tune the soul
+## 4. Tune the soul
 
 Once they reply:
 
-- **If they gave a name**, adopt it: read the \`agent-self-edit\` skill with
-  \`read_skill({skillId:"agent-self-edit"})\`, then call \`update_agent_file\` with the \`title\` set to
-  the chosen name (and your current body). If they didn't pick one, keep your current name.
+- **Keep your identity fixed** — your name is Leo. Do not ask the user to rename you, and do not
+  call \`update_agent_file\` to change your title.
 - **Tune your soul** — update \`agent/soul.md\` with \`write_file\` to reflect who they are and how
   they want you to work (the "Who I serve" and "How I work" sections especially). Keep it tight.
 
-Do this quickly and don't over-explain the mechanics — a brief "Got it, I'm <name> now" is plenty.
+Do this quickly and don't over-explain the mechanics — a brief "Got it, I'll work that way" is plenty.
 
 ## 5. Now do the task
 
@@ -757,6 +757,123 @@ it's right instead of just assuming it.
 
 const FIRST_PRINCIPLES_SKILL_MD = buildFirstPrinciplesSkillMd();
 
+export const HUMANIZER_SKILL_ID = "humanizer";
+
+function buildHumanizerSkillMd(): string {
+  return `---
+name: humanizer
+description: Make writing sound human. Strip the telltale patterns of AI-generated text and give the prose a real voice. Use whenever you write or edit something a person will actually read — an email, a post, a summary, a doc, a message.
+---
+
+# Humanizer: write like a person
+
+Anything you write for a human gets judged twice: once on what it says, once on whether it
+sounds like a person said it. AI-generated text has recognizable tells — readers spot them in
+seconds and discount everything that follows. This skill is how you strip those tells and put
+a real voice in their place. It draws on Wikipedia's "Signs of AI writing" guide, built from
+thousands of observed instances of AI text.
+
+Apply it to drafts you produce (emails, posts, summaries, docs) and to text you're asked to
+edit. Preserve the meaning and the intended tone; rewrite the delivery.
+
+## Patterns to strip
+
+### Significance inflation
+
+Puffing up importance with claims about legacy and broader trends: *stands as a testament,
+pivotal moment, underscores its importance, reflects broader trends, marking a shift, evolving
+landscape, indelible mark*. Cut the inflation; state what the thing is and what it does.
+
+> Before: "The launch marks a pivotal moment in the company's journey, reflecting broader
+> industry trends."
+> After: "The product launched in March. It's the company's first paid tier."
+
+### Promotional gloss
+
+LLMs drift into ad copy: *vibrant, rich, boasts, nestled, groundbreaking, renowned, stunning,
+seamless, commitment to excellence*. Neutral, specific facts beat every one of these words.
+
+### Fake-depth "-ing" add-ons
+
+Tacked-on participle phrases that pretend to analyze: *...highlighting the importance of,
+...ensuring alignment, ...showcasing its versatility, ...fostering collaboration*. Either say
+something concrete or end the sentence.
+
+### AI vocabulary
+
+Words that spike in post-2023 text, especially together: *delve, crucial, pivotal, intricate,
+tapestry, landscape (abstract), testament, underscore, showcase, foster, enduring, vibrant,
+interplay, Additionally*. None are wrong alone; a cluster of them is a fingerprint. Prefer the
+plain word: use, important, complex, also.
+
+### Copula avoidance
+
+"Serves as", "stands as", "functions as", "boasts", "features" where "is" and "has" belong.
+"The gallery is LAAA's exhibition space", not "serves as LAAA's exhibition space".
+
+### Formula tics
+
+- **Negative parallelism:** "It's not just X, it's Y." Say Y.
+- **Rule of three everywhere:** "innovation, inspiration, and insights." Two is fine. One is fine.
+- **False ranges:** "from the Big Bang to dark matter." Name the actual contents.
+- **Synonym cycling:** the protagonist / the main character / the central figure / the hero —
+  pick one name and repeat it; repetition is human.
+- **Vague authority:** "experts argue", "industry reports suggest", "observers have noted" —
+  name the source or drop the claim.
+
+### Visual tells
+
+- Em dashes sprinkled everywhere — like this — for punch. Use commas, periods, or parentheses.
+- Bolded inline headers in every bullet ("**Speed:** ...", "**Quality:** ...") — write sentences.
+- Emojis decorating headings or bullets.
+- Title Case Headings — use sentence case.
+- Curly quotes from a chat window; use straight quotes.
+
+### Chat residue
+
+"Great question!", "I hope this helps", "Let me know if...", "As of my last update", "While
+specific details are limited" — correspondence artifacts and disclaimers don't belong in
+finished text. Neither does excessive hedging ("could potentially possibly suggest") or the
+generic upbeat close ("The future looks bright. Exciting times lie ahead."). End on a fact or
+a next step.
+
+## Put a voice in it
+
+Stripping the tells gets you to neutral. Neutral is still obviously machine-made — sterile
+prose with identical sentence lengths, no opinions, no first person, no friction. Go further:
+
+- **Have a take.** "I'd skip this one" reads human; a balanced list of pros and cons reads
+  generated.
+- **Vary the rhythm.** Short sentence. Then a longer one that takes its time getting where
+  it's going. The pattern-free pattern is the human one.
+- **Admit uncertainty and mixed feelings.** "Impressive and a little unsettling" beats
+  "impressive."
+- **Use "I" when it's honest.** "I keep coming back to the pricing" signals a person thinking.
+- **Be specific about feelings and facts alike.** Not "this is concerning" but what exactly
+  worries you; not "significantly faster" but the number.
+- **Let a little mess in.** An aside, a tangent, a sentence fragment. Perfect structure feels
+  algorithmic.
+
+Match the voice to the audience: a Slack reply, an investor email, and a blog post should not
+sound like the same narrator. When you're writing as the user, match how *they* write — read a
+few of their messages or posts first if you can.
+
+## Process
+
+1. Draft (or read) the text.
+2. Sweep it against every pattern group above; rewrite what you catch.
+3. Run the final audit on your own output: ask yourself "what makes this still read as
+   AI-generated?" — name the remaining tells honestly, then fix them.
+4. Read it aloud in your head. If a sentence would sound stilted spoken to a colleague,
+   rewrite it.
+
+Deliver the final text only — the audit is your internal pass, not part of the output, unless
+the user asked to see the reasoning.
+`;
+}
+
+const HUMANIZER_SKILL_MD = buildHumanizerSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -810,6 +927,17 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
     defaultEnabled: false,
     addable: true,
     files: [{ path: "SKILL.md", content: FIRST_PRINCIPLES_SKILL_MD }],
+  },
+  {
+    id: HUMANIZER_SKILL_ID,
+    name: "Humanizer",
+    description:
+      "Make writing sound human — strip the telltale patterns of AI-generated text (significance inflation, promotional gloss, -ing add-ons, rule-of-three, em-dash overuse) and give prose a real voice. Use whenever writing or editing text a person will read.",
+    // Offered, not default-on — same model as first-principles. The personal agent scaffold
+    // enables it by default via an @skill/humanizer body mention.
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: HUMANIZER_SKILL_MD }],
   },
 ];
 

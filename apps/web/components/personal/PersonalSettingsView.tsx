@@ -1,12 +1,14 @@
 "use client";
 
-import { LogOut, Monitor, Moon, Sun } from "lucide-react";
-import { useTransition } from "react";
+import { LogOut, Monitor, Moon, RotateCcw, Sun } from "lucide-react";
+import { useState, useTransition } from "react";
 import { type BillingData, BillingPanel } from "@/components/billing/BillingPanel";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
+import { ResetPersonalAgentDialog } from "@/components/personal/ResetPersonalAgentDialog";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useToast } from "@/components/ToastProvider";
 import { Toggle } from "@/components/ui/toggle";
+import { resetPersonalAgent } from "@/lib/personal/actions";
 import {
   setCompanySurfaceEnabled as setCompanySurfaceEnabledAction,
   setProMode as setProModeAction,
@@ -26,6 +28,25 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
   } = usePersonalAgent();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  // Tracked outside useTransition: the pending state must survive until the full-page
+  // navigation below lands, not just until the server action resolves.
+  const [isResetting, setIsResetting] = useState(false);
+
+  function onConfirmReset() {
+    setIsResetting(true);
+    void (async () => {
+      const result = await resetPersonalAgent();
+      if (!result.ok) {
+        setIsResetting(false);
+        showError(result.error, "Could not reset your agent");
+        return;
+      }
+      // Full navigation (not a client-side transition) so the /personal layout re-runs
+      // ensurePersonalAgent — re-scaffolding the default agent — with no stale client state.
+      window.location.assign("/personal");
+    })();
+  }
 
   function onToggleProMode(next: boolean) {
     // Flip optimistically so the sidebar's Memory row appears/disappears immediately, then persist.
@@ -123,6 +144,32 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
       <Section title="Billing" description="Your credit balance, usage, and top-ups.">
         <BillingPanel billing={billing} sessionPathPrefix="/personal" />
       </Section>
+
+      <Section
+        title="Reset personal agent"
+        description="Start over with a fresh agent on the default setup."
+      >
+        <p className="text-[12.5px] leading-5 text-ink-muted">
+          Permanently deletes your agent&apos;s behavior, files, memory, sessions, connected
+          channels, and inbox, then recreates the default agent. This cannot be undone.
+        </p>
+        <button
+          type="button"
+          onClick={() => setResetDialogOpen(true)}
+          disabled={isResetting}
+          className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-danger-border bg-danger-bg px-3 text-[12.5px] font-medium text-danger transition-colors duration-150 hover:bg-danger-bg focus:outline-none focus-visible:ring-1 focus-visible:ring-danger/30 disabled:cursor-not-allowed disabled:opacity-65"
+        >
+          <RotateCcw size={13} strokeWidth={1.9} />
+          Reset personal agent
+        </button>
+      </Section>
+
+      <ResetPersonalAgentDialog
+        isOpen={resetDialogOpen}
+        isPending={isResetting}
+        onClose={() => setResetDialogOpen(false)}
+        onConfirm={onConfirmReset}
+      />
     </div>
   );
 }

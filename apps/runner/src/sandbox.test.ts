@@ -21,6 +21,7 @@ import {
   cloneGitHubRepositoryIntoWorkdir,
   createOrConnectSandbox,
   githubRemoteMatches,
+  guardCommandStreamCallbacks,
   prepareWorkspace,
   resolveSandboxBrainRelativePath,
   resolveSandboxSkillPath,
@@ -243,7 +244,7 @@ describe("prepareWorkspace", () => {
     ).toBe(true);
   });
 
-  it("installs rg and bun on demand without blocking on failure", async () => {
+  it("does not install optional dev tooling during workspace preparation", async () => {
     const sandbox = {
       commands: {
         run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
@@ -259,11 +260,11 @@ describe("prepareWorkspace", () => {
       agentFile: "agent",
     });
 
-    const toolingCall = sandbox.commands.run.mock.calls.find(([command]) =>
-      String(command).includes("command -v rg"),
-    );
-    expect(toolingCall).toBeDefined();
-    expect(String(toolingCall?.[0])).toContain("command -v bun");
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands.some((command) => command.includes("command -v rg"))).toBe(false);
+    expect(commands.some((command) => command.includes("command -v bun"))).toBe(false);
+    expect(commands.some((command) => command.includes("apt-get install"))).toBe(false);
+    expect(commands.some((command) => command.includes("bun.sh/install"))).toBe(false);
   });
 
   it("matches tokenized GitHub remotes without exposing the token", () => {
@@ -590,6 +591,36 @@ describe("runSandboxTool", () => {
       stderr: "fatal: not a git repository\n",
       exitCode: 1,
     });
+  });
+
+  it("rejects with the stream-callback error instead of leaking an unhandled rejection", async () => {
+    // Regression for the 2026-06-10 prod crash: e2b fires onStdout WITHOUT awaiting it,
+    // so a rejecting async callback (the run-control gate throwing RunAbortError on Stop)
+    // became an unhandled rejection that exited the whole runner process. The guarded
+    // callbacks must never reject; the error must surface from the awaited tool call.
+    const abortError = Object.assign(new Error("Run aborted."), { name: "RunAbortError" });
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStdout?: (data: string) => void }) => {
+          // Fire-and-forget, exactly like e2b's CommandHandle.handleEvents. If this
+          // returned promise could reject, the test run itself would crash.
+          options.onStdout?.("chunk\n");
+          return { stdout: "done", stderr: "", exitCode: 0 };
+        }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "shell",
+        args: { command: "sleep 5" },
+        onOutput: async () => {
+          throw abortError;
+        },
+      }),
+    ).rejects.toBe(abortError);
   });
 
   it("runs gh commands from the work directory with injected auth and redaction", async () => {
@@ -1279,6 +1310,60 @@ describe("runSandboxTool", () => {
     expect(diff).toContain("--- work/app/ ---");
     expect(diff).toContain("?? new.txt");
     expect(diff).toContain("nested");
+  });
+});
+
+describe("guardCommandStreamCallbacks", () => {
+  it("captures the first callback rejection, drops later chunks, and rethrows at the boundary", async () => {
+    const seen: string[] = [];
+    const failure = new Error("Run aborted.");
+    const guarded = guardCommandStreamCallbacks({
+      onStdout: async (data: string) => {
+        if (data === "boom") throw failure;
+        seen.push(data);
+      },
+    });
+
+    // The wrapped callback must never reject — that is the whole point.
+    await expect(guarded.options.onStdout?.("a")).resolves.toBeUndefined();
+    await expect(guarded.options.onStdout?.("boom")).resolves.toBeUndefined();
+    await expect(guarded.options.onStdout?.("b")).resolves.toBeUndefined();
+
+    expect(seen).toEqual(["a"]);
+    await expect(guarded.rethrow()).rejects.toBe(failure);
+  });
+
+  it("observes a rejection from a fire-and-forget invocation still in flight", async () => {
+    // e2b invokes the callback without awaiting it, possibly in the same tick the command
+    // result resolves — rethrow must wait for in-flight invocations before deciding.
+    const failure = new Error("Run aborted.");
+    const guarded = guardCommandStreamCallbacks({
+      onStdout: async (_data: string) => {
+        await Promise.resolve();
+        throw failure;
+      },
+    });
+
+    void guarded.options.onStdout?.("chunk");
+    await expect(guarded.rethrow()).rejects.toBe(failure);
+  });
+
+  it("captures stderr failures too and is a no-op when callbacks succeed", async () => {
+    const failure = new Error("stderr failed");
+    const failing = guardCommandStreamCallbacks({
+      onStdout: async (_data: string) => undefined,
+      onStderr: async (_data: string) => {
+        throw failure;
+      },
+    });
+    await failing.options.onStderr?.("err");
+    await expect(failing.rethrow()).rejects.toBe(failure);
+
+    const healthy = guardCommandStreamCallbacks({
+      onStdout: async (_data: string) => undefined,
+    });
+    await healthy.options.onStdout?.("ok");
+    await expect(healthy.rethrow()).resolves.toBeUndefined();
   });
 });
 

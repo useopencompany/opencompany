@@ -1,5 +1,6 @@
 import {
   type AgentConfig,
+  agentHasGitHubAccess,
   normalizeAgentConfig,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
@@ -18,10 +19,12 @@ import {
   workspaces,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
+import { traceBraintrustStep } from "@opencompany/observability/braintrust";
 import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
 import { materializeAgentBundleForSession } from "./agent-bundle";
+import { materializeLargeTextAttachmentsForSession } from "./attachment-materialize";
 import { materializeBrainForSession } from "./brain";
 import { getDb } from "./db";
 import { closeSessionStream } from "./durable-streams";
@@ -49,63 +52,91 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   const existingSandbox = Boolean(row.session.e2bSandboxId);
   const readyStartedAt = performance.now();
   try {
-    sandbox = await createOrConnectSandbox({
-      sandboxId: row.session.e2bSandboxId,
-      template,
-      envs: {
-        E2B_API_KEY: env.e2bApiKey,
-        VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
-      },
-      idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
-      onLatency: (observation) =>
-        captureE2BSandboxLatency({
-          row,
+    // Each hydration stage gets its own Braintrust child span (under the caller's
+    // ensure_sandbox span) so a slow first tool call is attributable to connect/resume vs the
+    // sequential e2b prep/materialize round-trips. No-ops when Braintrust is disabled.
+    sandbox = await traceBraintrustStep(
+      "sandbox_connect_or_create",
+      () =>
+        createOrConnectSandbox({
+          sandboxId: row.session.e2bSandboxId,
           template,
-          existingSandbox,
-          phase: "e2b_request",
-          ...observation,
+          envs: {
+            E2B_API_KEY: env.e2bApiKey,
+            VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
+          },
+          idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
+          onLatency: (observation) =>
+            captureE2BSandboxLatency({
+              row,
+              template,
+              existingSandbox,
+              phase: "e2b_request",
+              ...observation,
+            }),
         }),
-    });
-    await prepareWorkspace({
-      sandbox,
-      workdir: row.session.workdir,
-      personal,
-      agentFile: serializeAgentFile({
-        title: agentConfig.title,
-        body: agentConfig.instructions,
-        model: agentConfig.model.name,
-        tools: agentConfig.tools,
-        brain: agentConfig.brain,
-        skills: agentConfig.skills ?? [],
-        integrations: agentConfig.integrations,
-        triggers: agentConfig.triggers,
+      { existing_sandbox: existingSandbox, template: template ?? "default" },
+    );
+    const readySandbox = sandbox;
+    await traceBraintrustStep("sandbox_prepare_workspace", () =>
+      prepareWorkspace({
+        sandbox: readySandbox,
+        workdir: row.session.workdir,
+        personal,
+        agentFile: serializeAgentFile({
+          title: agentConfig.title,
+          body: agentConfig.instructions,
+          model: agentConfig.model.name,
+          tools: agentConfig.tools,
+          brain: agentConfig.brain,
+          skills: agentConfig.skills ?? [],
+          integrations: agentConfig.integrations,
+          triggers: agentConfig.triggers,
+        }),
       }),
-    });
+    );
     // Personal agents have no company brain mount — skip materializing ./brain for them.
     if (!personal) {
-      await materializeBrainForSession({
-        sandbox,
+      await traceBraintrustStep("sandbox_materialize_brain", () =>
+        materializeBrainForSession({
+          sandbox: readySandbox,
+          sessionId: row.session.id,
+          workspaceId: row.workspace.id,
+          workdir: row.session.workdir,
+          references: agentConfig.brain,
+        }),
+      );
+    }
+    await traceBraintrustStep("sandbox_materialize_agent_bundle", () =>
+      materializeAgentBundleForSession({
+        sandbox: readySandbox,
         sessionId: row.session.id,
         workspaceId: row.workspace.id,
+        agentId: row.agent.id,
         workdir: row.session.workdir,
-        references: agentConfig.brain,
-      });
-    }
-    await materializeAgentBundleForSession({
-      sandbox,
-      sessionId: row.session.id,
-      workspaceId: row.workspace.id,
-      agentId: row.agent.id,
-      workdir: row.session.workdir,
-      personal,
-    });
-    await materializeSkillsForSession({
-      sandbox,
-      workdir: row.session.workdir,
-      workspaceId: row.workspace.id,
-      agentId: row.agent.id,
-      config: agentConfig,
-    });
+        personal,
+      }),
+    );
+    await traceBraintrustStep("sandbox_materialize_skills", () =>
+      materializeSkillsForSession({
+        sandbox: readySandbox,
+        workdir: row.session.workdir,
+        workspaceId: row.workspace.id,
+        agentId: row.agent.id,
+        config: agentConfig,
+      }),
+    );
+    // Above-threshold text attachments are path-referenced in the model history instead of
+    // inlined, so they must exist in the workspace on every acquire (survives recycles).
+    // Never throws — a failure degrades to the inline preview, not a failed sandbox.
+    await traceBraintrustStep("sandbox_materialize_attachments", () =>
+      materializeLargeTextAttachmentsForSession({
+        sandbox: readySandbox,
+        sessionId: row.session.id,
+        workdir: row.session.workdir,
+        blobToken: env.blobReadWriteToken,
+      }),
+    );
     captureE2BSandboxLatency({
       row,
       template,
@@ -191,11 +222,12 @@ function errorName(error: unknown) {
 }
 
 // The richer sandbox template (with git, gh, and the coding-agent CLIs installed)
-// is used whenever the agent has at least one GitHub repository attached or a
-// coding-agent tool enabled; plain chat agents get the lighter default template.
+// is used whenever the agent has GitHub access (an attached repository or the live
+// `@github` all-repositories scope) or a coding-agent tool enabled; plain chat agents
+// get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
   const needsCodingTemplate =
-    agentConfig.integrations.github.repositories.length > 0 ||
+    agentHasGitHubAccess(agentConfig) ||
     agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode");
   return needsCodingTemplate ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
@@ -418,10 +450,21 @@ export async function markAfterSessionRunSpawned(id: number, childSessionId: str
     .where(eq(agentSessionAfterSessionRuns.id, id));
 }
 
+// Collapse a memory pass's closing note into a single short line safe to embed in the parent's
+// `after_session.completed` event payload (the web surfaces it as the memory card's result).
+export function summarizeAfterSessionNote(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > 280 ? `${collapsed.slice(0, 277)}...` : collapsed;
+}
+
 export async function completeSpawnedAfterSessionRunForChild(input: {
   childSessionId: string;
   status: "completed" | "failed";
   lastError?: string;
+  // One-line summary of what the memory pass stored (the keeper's closing note).
+  summary?: string;
 }) {
   const db = getDb();
   const [run] = await db
@@ -456,6 +499,7 @@ export async function completeSpawnedAfterSessionRunForChild(input: {
         runId: run.id,
         messageId: run.lastUserMessageId,
         childSessionId: input.childSessionId,
+        ...(input.summary ? { summary: input.summary } : {}),
       },
     });
   } else {

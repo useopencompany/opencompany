@@ -6,6 +6,7 @@ import { createContext, useContext } from "react";
 import type { PersonalGitHubIntegrationStatus } from "@/components/personal/PersonalCapabilityPanel";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
+import type { GitHubIntegrationRepositoryPayload } from "@/lib/agents/payload";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
 import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
@@ -35,6 +36,9 @@ export type PersonalAgentContextValue = {
   initialSessions: SidebarSessionPayload[];
   personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
+  // The workspace GitHub integration's usable repository catalog (loaded once at layout
+  // mount), so the Behavior editor can offer concrete @owner/repo mention items.
+  githubRepositories: GitHubIntegrationRepositoryPayload[];
   // Workspace-level connection state per integration, used to render Connected/Connect badges.
   integrationConnections: PersonalIntegrationConnections;
   // Per-integration accounts/resources/permissions detail for the expandable Integrations rows.

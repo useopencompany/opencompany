@@ -5,7 +5,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   Blocks,
-  Bot,
   Brain,
   BrainCircuit,
   ChevronDown,
@@ -14,12 +13,14 @@ import {
   PanelLeft,
   Pin,
   Plug,
+  ScrollText,
   Sparkles,
   Wrench,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
+import { PersonalAgentAvatar } from "@/components/personal/PersonalAgentAvatar";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
@@ -397,7 +398,7 @@ function PersonalSidebarView({
     proMode,
     companySurfaceEnabled,
   } = usePersonalAgent();
-  const { inboxActive, activePanel, activeSessionId } = useActivePersonalRoute();
+  const { inboxActive, activePanel, activeSessionId, activeFilePath } = useActivePersonalRoute();
   // Sessions with an in-flight pin toggle. Guards rapid re-clicks from firing an
   // insert against an already-optimistically-inserted star (duplicate key).
   const pinTogglesInFlight = useRef<Set<string>>(new Set());
@@ -518,6 +519,20 @@ function PersonalSidebarView({
               </span>
             ) : null}
           </button>
+          {/* The agent's identity row: avatar + name, right under Home, so the agent reads as a
+              persistent "who" rather than a config panel buried in settings. */}
+          <button
+            type="button"
+            onClick={() => router.push(personalPaths.agent)}
+            className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              activePanel === "agent"
+                ? "bg-surface-active text-ink"
+                : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+            }`}
+          >
+            <PersonalAgentAvatar name={agent.name} size={14} />
+            <span className="truncate tracking-[-0.005em]">{agent.name}</span>
+          </button>
         </nav>
 
         {/* Scrollable body */}
@@ -548,10 +563,10 @@ function PersonalSidebarView({
 
           <Section title="Configuration">
             <CapabilityNavRow
-              icon={Bot}
-              label="Agent"
-              active={activePanel === "agent"}
-              onClick={() => router.push(personalPaths.agent)}
+              icon={ScrollText}
+              label="Soul"
+              active={activeFilePath === "soul.md"}
+              onClick={() => router.push(personalPaths.soul)}
             />
             {proMode && (
               <CapabilityNavRow

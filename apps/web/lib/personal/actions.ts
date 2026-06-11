@@ -7,13 +7,19 @@ import {
   buildConfigMentionResolver,
   deriveAgentConfigFromBody,
   extractMentionIds,
+  FIXED_PERSONAL_AGENT_NAME,
   isExternalSkillReference,
   listAddableBuiltinSkills,
   parseAgentFile,
   SUPPORTED_AGENT_TOOLS,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
-import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentModelId,
+  AgentToolId,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentFiles, agents, inboxItems } from "@opencompany/db/schema";
@@ -24,7 +30,9 @@ import {
   normalizeAgentBundleRelativePath,
   serializeAgentBundleFiles,
 } from "@/lib/agents/bundle-files";
+import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
 import { hashAgentSource } from "@/lib/agents/hash";
+import { buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
@@ -43,13 +51,22 @@ async function derivePersonalAgentSave(
   agent: { name: string; config: AgentConfig },
   workspaceId: string,
   body: string,
+  model?: AgentModelId,
 ): Promise<{ title: string; body: string; config: AgentConfig; source: string }> {
   const currentConfig = agent.config;
-  const repositories = currentConfig.integrations.github.repositories.map((repository) => ({
+  const savedRepositories = currentConfig.integrations.github.repositories.map((repository) => ({
     fullName: repository.fullName,
     defaultBranch: repository.defaultBranch,
     ...(repository.binding ? { binding: repository.binding } : {}),
   }));
+  // Resolve repo mentions against the workspace GitHub integration's catalog (plus repos
+  // already saved on the config, so existing bindings keep resolving even if a repo drops out
+  // of the synced catalog). Previously only saved config repos were passed, which made
+  // @owner/repo mentions unresolvable until a repo somehow reached the config — chicken-and-egg.
+  const { derivationRepositories } = buildGitHubRepositoryCatalogs({
+    repositories: await loadGitHubIntegrationRepositoriesForWorkspace(workspaceId),
+    savedRepositories: currentConfig.integrations.github.repositories,
+  });
   const skillsById = new Map(
     (currentConfig.skills ?? [])
       .filter(isExternalSkillReference)
@@ -64,17 +81,17 @@ async function derivePersonalAgentSave(
   const skills = [...skillsById.values()];
 
   const derived = deriveAgentConfigFromBody({
-    title: agent.name,
+    title: FIXED_PERSONAL_AGENT_NAME,
     body,
-    model: currentConfig.model.name,
-    repositories,
+    model: model ?? currentConfig.model.name,
+    repositories: derivationRepositories,
     skills,
-    preferredRepositories: repositories.filter((repository) => repository.binding),
+    preferredRepositories: savedRepositories.filter((repository) => repository.binding),
     triggers: currentConfig.triggers,
   });
 
   const source = serializeAgentFile({
-    title: agent.name,
+    title: FIXED_PERSONAL_AGENT_NAME,
     body: derived.body,
     model: derived.config.model.name,
     tools: derived.config.tools,
@@ -101,7 +118,7 @@ async function derivePersonalAgentSave(
  */
 export async function updatePersonalAgentBehavior(
   agentId: string,
-  patch: { body: string; content: TiptapDoc },
+  patch: { body: string; content: TiptapDoc; model?: AgentModelId },
 ): Promise<UpdateBehaviorResult> {
   const { user, workspace } = await currentWorkspace();
   const db = getDb();
@@ -128,7 +145,7 @@ export async function updatePersonalAgentBehavior(
     return { ok: false, error: "Personal agent not found." };
   }
 
-  const saved = await derivePersonalAgentSave(agent, workspace.id, patch.body);
+  const saved = await derivePersonalAgentSave(agent, workspace.id, patch.body, patch.model);
   const contentHash = hashAgentSource(saved.source);
   const sanitizedContent = sanitizeTiptapDoc(patch.content);
 
@@ -149,7 +166,7 @@ export async function updatePersonalAgentBehavior(
     user_id: user.id,
     workspace_id: workspace.id,
     agent_id: agent.id,
-    changed_fields: ["body"],
+    changed_fields: patch.model ? ["body", "model"] : ["body"],
   });
 
   return { ok: true, config: saved.config };
@@ -158,25 +175,23 @@ export async function updatePersonalAgentBehavior(
 type ResetPersonalAgentResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Dev-only full reset of the caller's personal agent — wipes it to a clean slate so the V2
- * onboarding surface (`/onboarding/personal`) can be tested repeatedly.
+ * Full reset of the caller's personal agent — wipes everything back to the default scaffold.
+ * Exposed in /personal settings behind a confirmation dialog (and doubles as the dev reset for
+ * re-testing the V2 onboarding surface).
  *
  * Deletes the agent row (scoped to the caller's own default agent): FK cascades remove all of
  * its sessions (→ messages, chunks, events, usage, run jobs, sandbox usage, stars), its bundle
  * files, and its messaging channels. Inbox items aren't FK-tied to the agent (they're scoped to
  * the user), so they're cleared separately.
  *
- * On the next `/onboarding/personal` (or `/personal`) load, `ensurePersonalAgent` provisions a
- * fresh agent with a new id/path and the default behavior. We intentionally do NOT reuse
- * `deleteAgent` — it requires admin role and enqueues GitHub sync jobs + E2B sandbox archival,
- * none of which apply to the local-only personal agent. Any live E2B sandbox for a deleted
- * session is simply left to expire on its own; acceptable for a dev reset.
+ * On the next `/personal` (or `/onboarding/personal`) load, `ensurePersonalAgent` provisions a
+ * fresh agent with a new id/path and the default behavior — callers should follow up with a full
+ * navigation so the layout re-scaffolds. We intentionally do NOT reuse `deleteAgent` — it
+ * requires admin role and enqueues GitHub sync jobs + E2B sandbox archival, none of which apply
+ * to the local-only personal agent. Any live E2B sandbox for a deleted session is simply left to
+ * expire on its own.
  */
 export async function resetPersonalAgent(): Promise<ResetPersonalAgentResult> {
-  if (process.env.NODE_ENV === "production") {
-    return { ok: false, error: "Reset is disabled in production." };
-  }
-
   const { user, workspace } = await currentWorkspace();
   const db = getDb();
 
@@ -202,6 +217,12 @@ export async function resetPersonalAgent(): Promise<ResetPersonalAgentResult> {
       .delete(agents)
       .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)));
   }
+
+  await captureServerEvent("personal_agent_reset", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent?.id ?? null,
+  });
 
   return { ok: true };
 }
@@ -461,74 +482,6 @@ export async function enablePersonalAgentIntegrations(
     agent_id: agent.id,
     changed_fields: ["body"],
   });
-
-  return { ok: true, config: saved.config };
-}
-
-type SetNameResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
-
-/**
- * Rename the caller's /personal agent — used by the onboarding agent-setup step, where the user
- * names their agent before the first session.
- *
- * The `.agent` source title and the `agents.name` column are kept in lockstep everywhere else (see
- * {@link derivePersonalAgentSave}, which serializes the source using `agent.name`), so we re-derive
- * and re-serialize with the new name rather than poking `agents.name` alone — otherwise the stored
- * source/hash would drift from the displayed name. Local-only and scoped to the caller's own default
- * agent, like {@link updatePersonalAgentBehavior}.
- */
-export async function setPersonalAgentName(agentId: string, name: string): Promise<SetNameResult> {
-  const trimmed = name.trim();
-  if (!trimmed) return { ok: false, error: "Enter a name for your agent." };
-  if (trimmed.length > 60) return { ok: false, error: "Keep the agent name under 60 characters." };
-
-  // skipOnboarding: invoked from the onboarding submit, before onboarding is marked complete.
-  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
-  const db = getDb();
-
-  const [agent] = await db
-    .select({
-      id: agents.id,
-      name: agents.name,
-      body: agents.body,
-      config: agents.config,
-      version: agents.version,
-    })
-    .from(agents)
-    .where(
-      and(
-        eq(agents.id, agentId),
-        eq(agents.workspaceId, workspace.id),
-        eq(agents.userId, user.id),
-        eq(agents.isDefault, true),
-      ),
-    )
-    .limit(1);
-
-  if (!agent) {
-    return { ok: false, error: "Personal agent not found." };
-  }
-
-  const saved = await derivePersonalAgentSave(
-    { name: trimmed, config: agent.config },
-    workspace.id,
-    agent.body,
-  );
-  const content = buildAgentTiptapDoc(saved.body, buildConfigMentionResolver(saved.config));
-  const contentHash = hashAgentSource(saved.source);
-
-  await db
-    .update(agents)
-    .set({
-      name: saved.title,
-      body: saved.body,
-      content,
-      contentHash,
-      version: agent.version + 1,
-      config: saved.config,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)));
 
   return { ok: true, config: saved.config };
 }

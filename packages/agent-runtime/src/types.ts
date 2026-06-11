@@ -268,6 +268,10 @@ export type AgentConfig = {
   integrations: {
     github: {
       repositories: AgentGitHubRepositoryConfig[];
+      // Live integration-wide scope: the agent may target any repository accessible to the
+      // workspace's GitHub connection(s), resolved at session/tool time rather than expanded
+      // into `repositories`. Set if and only if the body mentions plain `@github`.
+      allRepositories?: boolean;
     };
     neon?: {
       databases: AgentNeonDatabaseConfig[];

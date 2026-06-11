@@ -292,28 +292,6 @@ export async function prepareWorkspace(input: {
     ].join(" && "),
     options: { user: SANDBOX_USER, timeoutMs: 30_000 },
   });
-  await ensureSandboxDevTooling(input.sandbox);
-}
-
-// Best-effort install of the CLIs coding sessions reach for but that the base image may lack:
-// `rg` (ripgrep) for repo search and `bun` for running tests/builds. Presence-checked, so it is a
-// fast no-op once these are baked into the template — which is the proper fix; this is the safety
-// net until then. Never fatal: a failed install (e.g. a non-apt base image) must not block session
-// readiness, so the shell `|| true` guards swallow install errors and any sandbox-level error is
-// caught here. bun installs to /usr/local so it lands on PATH for the shell tool without sourcing a
-// profile.
-async function ensureSandboxDevTooling(sandbox: SandboxHandle) {
-  try {
-    await sandbox.commands.run(
-      [
-        "command -v rg >/dev/null 2>&1 || (apt-get update -y && apt-get install -y ripgrep) || true",
-        "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash || true",
-      ].join("\n"),
-      { user: SANDBOX_ROOT_USER, timeoutMs: 180_000 },
-    );
-  } catch {
-    // Swallow: dev tooling is a convenience, not a precondition for the session to run.
-  }
 }
 
 async function runSandboxPreparationCommand(input: {
@@ -663,13 +641,68 @@ async function runCommandWithExitResult(
   command: string,
   options: Parameters<SandboxHandle["commands"]["run"]>[1],
 ) {
-  try {
-    return await sandbox.commands.run(command, options);
-  } catch (error) {
+  const guarded = guardCommandStreamCallbacks(options ?? {});
+  const result = await sandbox.commands.run(command, guarded.options).catch(async (error) => {
+    // A captured stream-callback error (typically RunAbortError) outranks the command's
+    // own failure: it is the reason the run is unwinding.
+    await guarded.rethrow();
     const exitResult = commandExitResult(error);
-    if (exitResult) return exitResult;
-    throw error;
-  }
+    if (!exitResult) throw error;
+    return exitResult;
+  });
+  await guarded.rethrow();
+  return result;
+}
+
+type CommandStreamCallback = (data: string) => void | Promise<void>;
+
+/**
+ * E2B's `CommandHandle.handleEvents` invokes `onStdout`/`onStderr` WITHOUT awaiting them,
+ * so an async callback that rejects — e.g. the run-control gate throwing `RunAbortError`
+ * when the user hits Stop mid-stream — becomes an unhandled promise rejection detached
+ * from the awaited `commands.run` chain, which exits the whole multi-session Bun process
+ * (prod crash 2026-06-10). This wraps the stream callbacks so they can never reject: the
+ * first error is captured (later chunks are dropped) and surfaced via `rethrow()` at the
+ * awaited boundary, where the regular tool-failure/abort handling can see it.
+ */
+export function guardCommandStreamCallbacks<
+  T extends { onStdout?: CommandStreamCallback; onStderr?: CommandStreamCallback },
+>(options: T): { options: T; rethrow: () => Promise<void> } {
+  let failed = false;
+  let callbackError: unknown;
+  // Chain of in-flight callback invocations. `rethrow` waits for it so a rejection from
+  // the final chunk — which e2b fires without awaiting, possibly in the same tick the
+  // command result resolves — is still observed at the boundary. Links never reject
+  // (errors are captured below), so the chain itself is safe to await.
+  let settled: Promise<void> = Promise.resolve();
+
+  const guard = (callback: CommandStreamCallback | undefined) =>
+    callback &&
+    ((data: string): Promise<void> => {
+      if (failed) return Promise.resolve();
+      const invocation = (async () => {
+        try {
+          await callback(data);
+        } catch (error) {
+          failed = true;
+          callbackError = error;
+        }
+      })();
+      settled = settled.then(() => invocation);
+      return invocation;
+    });
+
+  return {
+    options: {
+      ...options,
+      onStdout: guard(options.onStdout),
+      onStderr: guard(options.onStderr),
+    } as T,
+    rethrow: async () => {
+      await settled;
+      if (failed) throw callbackError;
+    },
+  };
 }
 
 export function commandExitResult(error: unknown) {

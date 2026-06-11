@@ -106,6 +106,7 @@ import {
   optionalUserContext,
   resolveSandboxBilling,
   setStatus,
+  summarizeAfterSessionNote,
 } from "./session-lifecycle";
 import {
   buildQuestionAnswerToolOutput,
@@ -120,6 +121,7 @@ import {
   executeRuntimeTool,
   persistDeniedToolResult,
 } from "./tool-dispatcher";
+import { createToolLatencyCollector } from "./tool-latency";
 import { loadWorkspaceToolPolicy } from "./tool-policies";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -367,8 +369,10 @@ async function runMessageWithContext(
     });
     // Memory-keeper mode: a `source: "memory"` session is an invisible background pass that runs
     // under the personal agent's own bundle but with a platform-owned system prompt appended and a
-    // restricted toolset. Keep the agent's model and the rest of `runtime` (file roots, profile,
-    // tool index) intact — only the framing and the tools change.
+    // restricted toolset. The rest of `runtime` (file roots, profile, tool index) stays intact —
+    // only the framing and the tools change here. The model is already the pinned cheap keeper
+    // model (MEMORY_KEEPER_MODEL): the spawn path stored it as the session's modelName, which
+    // resolveAgentRuntimeConfig above applied as the model override.
     const enabledTools = memoryKeeperRun
       ? restrictToolsForMemoryKeeper(runtime.tools)
       : runtime.tools;
@@ -480,6 +484,15 @@ async function runMessageWithContext(
     }
 
     const toolStartCoordinator = createToolStartCoordinator();
+    // Aggregates each call's phase timings for the turn-completed latency rollup and emits
+    // tool_call_slow analytics for outliers as they happen.
+    const toolLatency = createToolLatencyCollector({
+      userId,
+      workspaceId,
+      agentId,
+      sessionId: input.sessionId,
+      assistantMessageId,
+    });
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
@@ -497,6 +510,7 @@ async function runMessageWithContext(
       checkAbort,
       toolStartCoordinator,
       observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+      onToolTimings: toolLatency.record,
       toolBudget: createHostedToolBudget(),
       delegateToAgent: createAgentDelegationHandler({
         parentSessionId: input.sessionId,
@@ -569,10 +583,14 @@ async function runMessageWithContext(
     }
     outcome = "completed";
     if (memoryKeeperRun) {
+      // Forward the keeper's one-line closing note so the parent session's memory card can
+      // show what was actually stored instead of a bare "Memory updated".
+      const summary = summarizeAfterSessionNote(turn.assistantContent);
       await observeRunStep(ctx, "complete_memory_keeper_parent_after_session", () =>
         completeSpawnedAfterSessionRunForChild({
           childSessionId: input.sessionId,
           status: "completed",
+          ...(summary ? { summary } : {}),
         }),
       );
     }
@@ -607,6 +625,7 @@ async function runMessageWithContext(
         assistantMessageId,
         modelProvider,
         modelName,
+        toolLatency: toolLatency.summary(),
       }).catch((error) => {
         logger.warn("Failed to capture turn analytics", {
           event: "opencompany.runner_turn_analytics_failed",
@@ -837,11 +856,11 @@ async function executeStreamingTurn(input: {
   internal: boolean;
   brainStep: string;
   bundleStep: string;
-  appendCompletedEvent: () => Promise<boolean>;
+  appendCompletedEvent: (result: { assistantContent: string }) => Promise<boolean>;
   emptyOutputFallback?: string;
   beforeRelease?: () => Promise<void>;
   extraStopConditions?: Parameters<typeof streamAssistantResponse>[0]["extraStopConditions"];
-}): Promise<{ outcome: "completed" | "suspended" }> {
+}): Promise<{ outcome: "suspended" } | { outcome: "completed"; assistantContent: string }> {
   const { ctx, row, sandboxAcquirer, assistantMessageId } = input;
 
   let streamResult: Awaited<ReturnType<typeof streamAssistantResponse>>;
@@ -978,7 +997,7 @@ async function executeStreamingTurn(input: {
     });
   }
 
-  await requireLeaseWrite(input.appendCompletedEvent());
+  await requireLeaseWrite(input.appendCompletedEvent({ assistantContent }));
 
   if (input.beforeRelease) await input.beforeRelease();
 
@@ -992,7 +1011,7 @@ async function executeStreamingTurn(input: {
 
   await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
 
-  return { outcome: "completed" };
+  return { outcome: "completed", assistantContent };
 }
 
 export async function runAfterSession(input: {
@@ -1207,8 +1226,6 @@ async function runAfterSessionWithContext(
           workspaceId: row.workspace.id,
           userId: row.session.userId,
           agentId: row.agent.id,
-          modelProvider: row.session.modelProvider,
-          modelName: row.session.modelName,
         }),
       );
       await markAfterSessionRunSpawned(afterSessionRunId, childSessionId);
@@ -1366,15 +1383,21 @@ async function runAfterSessionWithContext(
       brainStep: "sync_brain_after_session",
       bundleStep: "sync_agent_bundle_after_session",
       emptyOutputFallback: "After-session run completed without changes.",
-      appendCompletedEvent: () =>
-        appendRuntimeEventForLease({
+      appendCompletedEvent: ({ assistantContent }) => {
+        const summary = summarizeAfterSessionNote(assistantContent);
+        return appendRuntimeEventForLease({
           sessionId: input.sessionId,
           messageId: null,
           leaseId: ctx.leaseId,
           leaseOwner: ctx.leaseOwner,
           type: "after_session.completed",
-          payload: { runId: completedRunId, messageId: input.messageId },
-        }),
+          payload: {
+            runId: completedRunId,
+            messageId: input.messageId,
+            ...(summary ? { summary } : {}),
+          },
+        });
+      },
       beforeRelease: async () => {
         await completeAfterSessionRun(completedRunId, { status: "completed" });
       },
@@ -1959,6 +1982,15 @@ async function continueTurnAfterToolResult(input: {
   );
 
   const toolStartCoordinator = createToolStartCoordinator();
+  // The resumed turn has no turn-completed rollup of its own, but the collector still emits
+  // tool_call_slow analytics for outliers on this path.
+  const toolLatency = createToolLatencyCollector({
+    userId: input.observabilityContext.userId,
+    workspaceId: input.observabilityContext.workspaceId,
+    agentId: input.observabilityContext.agentId,
+    sessionId: input.sessionId,
+    assistantMessageId: continuationAssistantMessageId,
+  });
   const tools = createToolSet({
     sessionId: input.sessionId,
     assistantMessageId: continuationAssistantMessageId,
@@ -1977,6 +2009,7 @@ async function continueTurnAfterToolResult(input: {
     toolStartCoordinator,
     observabilityContext: input.observabilityContext,
     toolBudget: createHostedToolBudget(),
+    onToolTimings: toolLatency.record,
   });
 
   const turn = await executeStreamingTurn({

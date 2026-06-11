@@ -35,6 +35,11 @@ export type AnalyticsEventPropertiesByName = {
     workspace_id: string;
     agent_id: string;
   };
+  personal_agent_reset: {
+    user_id: string;
+    workspace_id: string;
+    agent_id: string | null;
+  };
   session_started: {
     user_id: string;
     workspace_id: string;
@@ -81,6 +86,38 @@ export type AnalyticsEventPropertiesByName = {
     model_cost_usd_micros: number;
     tool_cost_usd_micros: number;
     sandbox_cost_usd_micros: number;
+    // Latency rollup for the turn: run start → completion, plus the per-phase sums of every
+    // tool call's ToolCallTimings (see agent-runtime). Optional so older captures stay valid.
+    turn_duration_ms?: number;
+    tool_call_count?: number;
+    tool_failed_count?: number;
+    tool_total_ms?: number;
+    tool_exec_ms?: number;
+    tool_sandbox_wait_ms?: number;
+    tool_gate_wait_ms?: number;
+    tool_persist_ms?: number;
+    tool_max_total_ms?: number;
+    slowest_tool_name?: string;
+  };
+  // One event per tool call slower than the runner's slow-call threshold (~2s). The aggregate
+  // picture lives on session_turn_completed; this keeps the tail individually visible with its
+  // phase breakdown without paying per-call event volume.
+  tool_call_slow: {
+    user_id: string;
+    workspace_id?: string;
+    agent_id?: string;
+    session_id: string;
+    message_id: string;
+    tool_call_id: string;
+    tool_name: string;
+    tool_kind: "hosted" | "internal" | "sandbox";
+    failed: boolean;
+    total_ms: number;
+    exec_ms: number;
+    persist_ms: number;
+    gate_wait_ms?: number;
+    sandbox_wait_ms?: number;
+    sandbox_id?: string;
   };
   e2b_sandbox_latency: {
     user_id: string;
@@ -173,6 +210,11 @@ export const analyticsEvents = {
     description: "A user deleted an agent.",
     safeProperties: ["user_id", "workspace_id", "agent_id"],
   },
+  personal_agent_reset: {
+    name: "personal_agent_reset",
+    description: "A user reset their local-only personal agent.",
+    safeProperties: ["user_id", "workspace_id", "agent_id"],
+  },
   session_started: {
     name: "session_started",
     description: "A user started a new agent session.",
@@ -234,6 +276,38 @@ export const analyticsEvents = {
       "model_cost_usd_micros",
       "tool_cost_usd_micros",
       "sandbox_cost_usd_micros",
+      "turn_duration_ms",
+      "tool_call_count",
+      "tool_failed_count",
+      "tool_total_ms",
+      "tool_exec_ms",
+      "tool_sandbox_wait_ms",
+      "tool_gate_wait_ms",
+      "tool_persist_ms",
+      "tool_max_total_ms",
+      "slowest_tool_name",
+    ],
+  },
+  tool_call_slow: {
+    name: "tool_call_slow",
+    description:
+      "A tool call exceeded the runner's slow-call threshold, with its per-phase latency breakdown.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "agent_id",
+      "session_id",
+      "message_id",
+      "tool_call_id",
+      "tool_name",
+      "tool_kind",
+      "failed",
+      "total_ms",
+      "exec_ms",
+      "persist_ms",
+      "gate_wait_ms",
+      "sandbox_wait_ms",
+      "sandbox_id",
     ],
   },
   e2b_sandbox_latency: {

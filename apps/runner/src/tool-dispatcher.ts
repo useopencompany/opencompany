@@ -2,6 +2,7 @@ import {
   AGENT_SELF_EDIT_SKILL_ID,
   type AgentBrainReference,
   type AgentConfig,
+  agentHasGitHubAccess,
   BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
   formatBrainReferenceDisplay,
@@ -9,19 +10,28 @@ import {
   isBrainPathAllowed,
   isDeferrableRuntimeTool,
   newAgentSessionMessageId,
+  parseGitHubCliArgs,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
   type ToolArgResolution,
+  type ToolCallTimings,
 } from "@opencompany/agent-runtime";
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
+import {
+  type BraintrustSpan,
+  logBraintrustSpan,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
+  loadConnectedGitHubInstallation,
+  loadGitHubWorkRepositoryByFullName,
   readSandboxBrainSnapshot,
   resolveAttachedRepositoryInstallations,
   runAmpCoderTool,
@@ -66,6 +76,7 @@ import {
 } from "./sandbox";
 import { hasReadSkill, markSkillRead } from "./self-edit-gate";
 import { prepareToolArgs } from "./tool-arg-repair";
+import type { ToolTimingRecord } from "./tool-latency";
 import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
@@ -136,6 +147,14 @@ type DelegateToAgent = (input: {
   toolCallId: string;
 }) => Promise<unknown>;
 
+// Wall-clock anchors for one tool call's phase breakdown (ToolCallTimings). Created at execute()
+// entry in createToolSet so the gate wait (waitForStarted: stream-loop scheduling + policy +
+// the blocking tool.started write) is included; executeRuntimeTool fills in the later phases.
+type ToolCallPhaseTimer = {
+  executeStartedAt: number;
+  gateWaitMs: number;
+};
+
 class RecoverableToolError extends Error {
   code: string;
 
@@ -168,6 +187,8 @@ export function createToolSet(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  // Receives each call's ToolCallTimings once measured (per-turn rollup + slow-call analytics).
+  onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
 }) {
   const tools: ToolSet = {};
 
@@ -184,6 +205,7 @@ export function createToolSet(input: {
         });
       },
       execute: async (toolInput, options) => {
+        const executeStartedAt = performance.now();
         const verdict = await input.toolStartCoordinator.waitForStarted(
           options.toolCallId,
           input.signal,
@@ -207,6 +229,11 @@ export function createToolSet(input: {
           });
         }
         return executeRuntimeTool({
+          phaseTimer: {
+            executeStartedAt,
+            gateWaitMs: performance.now() - executeStartedAt,
+          },
+          onToolTimings: input.onToolTimings,
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
@@ -251,6 +278,7 @@ export function createToolSet(input: {
       });
     },
     execute: async (toolInput, options) => {
+      const executeStartedAt = performance.now();
       const verdict = await input.toolStartCoordinator.waitForStarted(
         options.toolCallId,
         input.signal,
@@ -271,6 +299,11 @@ export function createToolSet(input: {
         });
       }
       return dispatchBuiltinUseTool({
+        phaseTimer: {
+          executeStartedAt,
+          gateWaitMs: performance.now() - executeStartedAt,
+        },
+        onToolTimings: input.onToolTimings,
         sessionId: input.sessionId,
         assistantMessageId: input.assistantMessageId,
         runLeaseId: input.runLeaseId,
@@ -337,6 +370,8 @@ export async function dispatchBuiltinUseTool(input: {
   personalAgent?: boolean;
   toolCallId: string;
   args: unknown;
+  phaseTimer?: ToolCallPhaseTimer | undefined;
+  onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -425,6 +460,8 @@ export async function dispatchBuiltinUseTool(input: {
     args: prepared.args,
     persistAsToolName: BUILTIN_USE_TOOL_NAME,
     argResolution: prepared.resolution,
+    phaseTimer: input.phaseTimer,
+    onToolTimings: input.onToolTimings,
     getSandbox: input.getSandbox,
     workdir: input.workdir,
     env: input.env,
@@ -537,10 +574,7 @@ function formatRuntimeToolName(name: RuntimeToolName) {
   return name.replace(/_/g, " ");
 }
 
-// Tool execution is traced by Braintrust's `wrapAISDK` as a tool-call/tool-result pair nested under
-// the model's LLM span — no manual span is opened here. Errors are still reported via
-// `captureException` for Better Stack.
-export async function executeRuntimeTool(input: {
+type ExecuteRuntimeToolInput = {
   sessionId: string;
   assistantMessageId: string;
   runLeaseId: string;
@@ -560,6 +594,11 @@ export async function executeRuntimeTool(input: {
   // How the deferred-tool arguments were resolved (valid/coerced/repaired) before this ran. Carried
   // onto the tool.completed/failed event for telemetry. Only set on the use_tool dispatch path.
   argResolution?: ToolArgResolution | undefined;
+  // Wall-clock anchors from the execute() entry point so the timing breakdown can include the
+  // gate wait. Absent on the resume path (agent-loop) where there is no gate.
+  phaseTimer?: ToolCallPhaseTimer | undefined;
+  // Receives this call's ToolCallTimings once measured (per-turn rollup + slow-call analytics).
+  onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -570,7 +609,37 @@ export async function executeRuntimeTool(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
-}) {
+};
+
+// Braintrust's `wrapAISDK` already traces tool execution as a tool-call/tool-result pair nested
+// under the model's LLM span, but that span is a single opaque duration and is unreachable from
+// inside execute() (wrapAISDK starts the body before entering the span context). This explicit
+// span carries the per-phase latency breakdown (gate wait / sandbox wait / body / persistence
+// tail) as metrics — the same numbers persisted on the tool.completed/failed event as `timings` —
+// so slow tool calls can be attributed post-hoc. Errors are still reported via `captureException`
+// for Better Stack.
+export async function executeRuntimeTool(input: ExecuteRuntimeToolInput) {
+  return traceBraintrustStep(
+    `tool:${input.definition.name}`,
+    (span) => executeRuntimeToolInner(input, span),
+    {
+      tool_name: input.definition.name,
+      tool_kind: input.definition.kind,
+      tool_call_id: input.toolCallId,
+      session_id: input.sessionId,
+      ...(input.persistAsToolName ? { persisted_tool_name: input.persistAsToolName } : {}),
+    },
+    { type: "tool" },
+  );
+}
+
+async function executeRuntimeToolInner(
+  input: ExecuteRuntimeToolInput,
+  span: BraintrustSpan | undefined,
+) {
+  const bodyStartedAt = performance.now();
+  let bodyEndedAt = bodyStartedAt;
+  let sandboxWaitMs = 0;
   const persistedToolName = input.persistAsToolName ?? input.definition.name;
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
@@ -595,7 +664,9 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
-          hasAttachedRepository: Boolean(input.repository),
+          hasAttachedRepository:
+            Boolean(input.repository) ||
+            (input.agentConfig ? agentHasGitHubAccess(input.agentConfig) : false),
           googleContext: input.workspaceId
             ? {
                 workspaceId: input.workspaceId,
@@ -686,7 +757,12 @@ export async function executeRuntimeTool(input: {
         brainReferences: input.agentConfig?.brain ?? [],
         personal: input.personalAgent ?? false,
       });
+      // The first sandbox tool of a turn pays the whole hydration here (connect/resume +
+      // prepare + materialize); later calls resolve the memoized handle instantly. Timed
+      // separately so a slow "read_file" is attributable to hydration vs the read itself.
+      const sandboxWaitStartedAt = performance.now();
       const activeSandbox = await input.getSandbox();
+      sandboxWaitMs += performance.now() - sandboxWaitStartedAt;
       sandboxIdForCapture = activeSandbox.sandboxId;
       if (input.definition.name === "amp_coder") {
         if (!input.workspaceId || !input.agentConfig) {
@@ -766,6 +842,7 @@ export async function executeRuntimeTool(input: {
           ? await resolveShellGitHubAuth({
               workspaceId: input.workspaceId,
               agentConfig: input.agentConfig,
+              args: input.args,
               toolCallId: input.toolCallId,
             })
           : null;
@@ -827,6 +904,7 @@ export async function executeRuntimeTool(input: {
     failedOutput = buildFailedToolOutput(error);
     output = failedOutput;
   } finally {
+    bodyEndedAt = performance.now();
     commandOutput.flush();
     releaseToolBudget?.();
   }
@@ -933,6 +1011,42 @@ export async function executeRuntimeTool(input: {
     });
   }
 
+  // Phase breakdown for this call: persisted on the completed/failed event (post-hoc DB
+  // queries, stream consumers) and mirrored as metrics on the Braintrust tool span.
+  const persistEndedAt = performance.now();
+  const timings = buildToolCallTimings({
+    phaseTimer: input.phaseTimer,
+    bodyStartedAt,
+    bodyEndedAt,
+    persistEndedAt,
+    sandboxWaitMs,
+  });
+  logBraintrustSpan(span, {
+    metrics: {
+      ...(timings.gateWaitMs !== undefined ? { gate_wait_ms: timings.gateWaitMs } : {}),
+      ...(timings.sandboxWaitMs !== undefined ? { sandbox_wait_ms: timings.sandboxWaitMs } : {}),
+      exec_ms: timings.execMs ?? 0,
+      persist_ms: timings.persistMs ?? 0,
+      total_ms: timings.totalMs ?? 0,
+    },
+    metadata: {
+      ...(sandboxIdForCapture ? { sandbox_id: sandboxIdForCapture } : {}),
+      failed: Boolean(persistedFailedOutput),
+    },
+  });
+  try {
+    input.onToolTimings?.({
+      toolName: input.definition.name,
+      toolKind: input.definition.kind,
+      toolCallId: input.toolCallId,
+      failed: Boolean(persistedFailedOutput),
+      timings,
+      ...(sandboxIdForCapture ? { sandboxId: sandboxIdForCapture } : {}),
+    });
+  } catch {
+    // Analytics must not affect the tool result.
+  }
+
   if (persistedFailedOutput) {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -948,6 +1062,7 @@ export async function executeRuntimeTool(input: {
           error: persistedFailedOutput.error,
           outputPreview: formatRuntimePreview(persistedOutput),
           ...(input.argResolution ? { argResolution: input.argResolution } : {}),
+          timings,
         },
       }),
     );
@@ -965,12 +1080,30 @@ export async function executeRuntimeTool(input: {
           name: persistedToolName,
           outputPreview: formatRuntimePreview(persistedOutput),
           ...(input.argResolution ? { argResolution: input.argResolution } : {}),
+          timings,
         },
       }),
     );
   }
 
   return persistedOutput;
+}
+
+function buildToolCallTimings(input: {
+  phaseTimer: ToolCallPhaseTimer | undefined;
+  bodyStartedAt: number;
+  bodyEndedAt: number;
+  persistEndedAt: number;
+  sandboxWaitMs: number;
+}): ToolCallTimings {
+  const startedAt = input.phaseTimer?.executeStartedAt ?? input.bodyStartedAt;
+  return {
+    ...(input.phaseTimer ? { gateWaitMs: Math.round(input.phaseTimer.gateWaitMs) } : {}),
+    ...(input.sandboxWaitMs > 0 ? { sandboxWaitMs: Math.round(input.sandboxWaitMs) } : {}),
+    execMs: Math.round(Math.max(0, input.bodyEndedAt - input.bodyStartedAt - input.sandboxWaitMs)),
+    persistMs: Math.round(Math.max(0, input.persistEndedAt - input.bodyEndedAt)),
+    totalMs: Math.round(Math.max(0, input.persistEndedAt - startedAt)),
+  };
 }
 
 async function persistToolResultMessage(input: {
@@ -1067,22 +1200,114 @@ function createCommandOutputPublisher(input: {
 }
 
 // Inject repo-scoped git + gh credentials into the explicit gh tool whenever the
-// agent has at least one attached GitHub repository. A broken integration
-// (e.g. needs-reauth) propagates and surfaces as a recoverable tool error. A single
-// installation token cannot span installations, so we scope the token to the repos
-// of the first attached repository's installation; cross-installation sessions get
-// auth for one installation at a time.
+// agent has attached GitHub access. A broken integration (e.g. needs-reauth)
+// propagates and surfaces as a recoverable tool error. A single installation token
+// cannot span installations, so explicit repositories are scoped to one installation.
+// With the live `@github` all-repositories scope, `gh --repo owner/repo ...` resolves
+// that repository's installation at call time so multi-installation workspaces use
+// the token for the requested repo instead of whichever connection was created first.
 async function resolveShellGitHubAuth(input: {
   workspaceId?: string | undefined;
   agentConfig?: AgentConfig | undefined;
+  args?: unknown;
   toolCallId: string;
 }) {
   if (!input.workspaceId || !input.agentConfig) return null;
 
-  const repositories = input.agentConfig.integrations.github.repositories;
+  const github = input.agentConfig.integrations.github;
+  if (github.allRepositories === true) {
+    const requestedRepository = readGhRepoArgument(input.args);
+    if (requestedRepository) {
+      const attachedRepository = github.repositories.find(
+        (repository) => repository.fullName.toLowerCase() === requestedRepository.toLowerCase(),
+      );
+      if (attachedRepository) {
+        return resolveAttachedGitHubCommandAuth({
+          workspaceId: input.workspaceId,
+          repositories: [attachedRepository],
+          toolCallId: input.toolCallId,
+        });
+      }
+
+      const resolved = await loadGitHubWorkRepositoryByFullName(
+        input.workspaceId,
+        requestedRepository,
+      );
+      if (!resolved) {
+        throw new Error(
+          `GitHub work repository ${requestedRepository} is not available to this workspace. Reconnect GitHub or grant the installation access to it.`,
+        );
+      }
+
+      const githubToken = await getGitHubWorkInstallationToken({
+        installationId: resolved.installationId,
+        repositoryFullName: resolved.repository.fullName,
+      });
+      if (!githubToken) return null;
+
+      const githubAuthHeader = gitAuthHeader(githubToken);
+      return {
+        env: buildGitHubCommandEnv({
+          githubAuthHeader,
+          githubToken,
+          toolCallId: input.toolCallId,
+          repositoryFullName: resolved.repository.fullName,
+        }),
+        redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+      };
+    }
+
+    if (github.repositories.length === 1) {
+      return resolveAttachedGitHubCommandAuth({
+        workspaceId: input.workspaceId,
+        repositories: github.repositories,
+        toolCallId: input.toolCallId,
+      });
+    }
+
+    const installation = await loadConnectedGitHubInstallation(input.workspaceId);
+    // GitHub not connected: same graceful no-auth behavior as an agent without repositories.
+    if (!installation) return null;
+
+    const githubToken = await getGitHubWorkInstallationToken({
+      installationId: installation.installationId,
+    });
+    if (!githubToken) return null;
+
+    const githubAuthHeader = gitAuthHeader(githubToken);
+    return {
+      env: buildGitHubCommandEnv({
+        githubAuthHeader,
+        githubToken,
+        toolCallId: input.toolCallId,
+        // No GH_REPO default: with installation-wide access the agent must pass --repo.
+        ...(github.repositories.length === 1
+          ? { repositoryFullName: github.repositories[0]!.fullName }
+          : {}),
+      }),
+      redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+    };
+  }
+
+  const repositories = github.repositories;
   if (repositories.length === 0) return null;
 
-  const resolved = await resolveAttachedRepositoryInstallations(input.workspaceId, repositories);
+  return resolveAttachedGitHubCommandAuth({
+    workspaceId: input.workspaceId,
+    repositories,
+    toolCallId: input.toolCallId,
+  });
+}
+
+async function resolveAttachedGitHubCommandAuth(input: {
+  workspaceId: string;
+  repositories: AgentConfig["integrations"]["github"]["repositories"];
+  toolCallId: string;
+}) {
+  const resolved = await resolveAttachedRepositoryInstallations(
+    input.workspaceId,
+    input.repositories,
+  );
   if (resolved.length === 0) return null;
 
   const installationId = resolved[0]!.installationId;
@@ -1106,6 +1331,32 @@ async function resolveShellGitHubAuth(input: {
     }),
     redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
   };
+}
+
+function readGhRepoArgument(args: unknown) {
+  const argv = isRecord(args) ? parseGitHubCliArgs(args.args) : null;
+  if (!argv) return null;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]!;
+    if (arg === "--") return null;
+    if (arg === "--repo" || arg === "-R") {
+      const value = argv[index + 1]?.trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+    if (arg.startsWith("--repo=")) {
+      const value = arg.slice("--repo=".length).trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+    if (arg.startsWith("-R") && arg.length > 2) {
+      const value = arg.slice(2).trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+  }
+  return null;
+}
+
+function isGitHubRepositoryFullName(value: string) {
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value);
 }
 
 function gitAuthHeader(token: string) {

@@ -1,3 +1,4 @@
+import { calculateModelUsageCost } from "@opencompany/billing";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildOpencodeCommand,
@@ -6,6 +7,7 @@ import {
   buildPublicGitHubDefaultBranchCommand,
   clonePublicGitHubRepositoryIntoWorkdir,
   createOpencodeStreamAccumulator,
+  opencodeHostedToolUsage,
   parsePublicGitHubRepository,
   resolveOpencodeModel,
   resolveOpencodeTarget,
@@ -119,6 +121,41 @@ describe("resolveOpencodeTarget", () => {
         requestedRepository: "https://gitlab.com/vercel/next.js",
       }),
     ).toThrow(/not an attached repository or a supported public GitHub repository/);
+  });
+
+  describe("allRepositories (live @github scope)", () => {
+    it("resolves a non-attached owner/repo as a workspace target", () => {
+      expect(
+        resolveOpencodeTarget({
+          repositories: [attachedRepo],
+          requestedRepository: "opencompany/other",
+          allRepositories: true,
+        }),
+      ).toEqual({ kind: "workspace", repositoryFullName: "opencompany/other" });
+      expect(
+        resolveOpencodeTarget({
+          repositories: [],
+          requestedRepository: "https://github.com/opencompany/other",
+          allRepositories: true,
+        }),
+      ).toEqual({ kind: "workspace", repositoryFullName: "opencompany/other" });
+    });
+
+    it("still prefers attached repository matches", () => {
+      expect(
+        resolveOpencodeTarget({
+          repositories: [attachedRepo],
+          requestedRepository: "opencompany/web",
+          allRepositories: true,
+        }),
+      ).toEqual({ kind: "attached", repository: attachedRepo });
+    });
+
+    it("requires the repository argument when nothing is attached", () => {
+      expect(() => resolveOpencodeTarget({ repositories: [], allRepositories: true })).toThrow(
+        /needs the repository argument/,
+      );
+    });
   });
 });
 
@@ -256,6 +293,41 @@ describe("createOpencodeStreamAccumulator", () => {
     expect(stream.summary({ exitCode: 0, stdout: "", stderr: "" }).result).toBe("ok");
   });
 
+  it("reads tokens and cost from current step_finish events (part payload, opencode >=1.17)", () => {
+    // Verbatim shape captured from a real `opencode run --format json` against the
+    // platform gateway (2026-06-11, opencode 1.17.3): usage lives under `part`, not
+    // `info`, and cost self-reports 0 because opencode cannot price the custom
+    // gateway provider (OC-328).
+    const stream = createOpencodeStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "step_finish",
+        timestamp: 1781173519306,
+        sessionID: "ses_149c9072dffefTjnjV2CvdfyM7",
+        part: {
+          id: "prt_eb63703bb001CnLNQqnXq9F2dQ",
+          messageID: "msg_eb636fbe5001GHWabnmprTSrs7",
+          sessionID: "ses_149c9072dffefTjnjV2CvdfyM7",
+          type: "step-finish",
+          reason: "stop",
+          cost: 0,
+          tokens: {
+            total: 11549,
+            input: 11545,
+            output: 4,
+            reasoning: 0,
+            cache: { write: 0, read: 0 },
+          },
+        },
+      })}\n`,
+    );
+    stream.finish();
+    const summary = stream.summary({ exitCode: 0, stdout: "", stderr: "" });
+    expect(summary.sessionId).toBe("ses_149c9072dffefTjnjV2CvdfyM7");
+    expect(summary.usage).toEqual({ input_tokens: 11545, output_tokens: 4 });
+    expect(summary.costUsdMicros).toBe(0);
+  });
+
   it("marks a timed-out run and surfaces the resumable session id + partial result", () => {
     const stream = createOpencodeStreamAccumulator();
     stream.push(`${JSON.stringify({ type: "session", sessionID: "ses_abc" })}\n`);
@@ -267,5 +339,93 @@ describe("createOpencodeStreamAccumulator", () => {
     expect(summary.sessionId).toBe("ses_abc");
     expect(summary.result).toBe("partial work so far");
     expect(summary.error).toMatch(/resume/i);
+  });
+});
+
+describe("opencodeHostedToolUsage", () => {
+  it("bills gateway runs from platform pricing even though opencode self-reports cost 0 (OC-328)", () => {
+    // The exact shape a gateway run produces: token counts present, cost 0 because
+    // opencode's catalog has no pricing for the custom "gateway" provider.
+    const usage = opencodeHostedToolUsage({
+      modelId: "anthropic/claude-haiku-4.5",
+      summary: {
+        usage: { input_tokens: 11_000, output_tokens: 600, cache_creation_input_tokens: 5_000 },
+        costUsdMicros: 0,
+      },
+    });
+    expect(usage).not.toBeNull();
+    expect(usage?.costUsdMicros).toBeGreaterThan(0);
+    expect(usage?.costSource).toBe("platform_model_pricing");
+    expect(usage?.rawUsage.cost_source).toBe("platform_model_pricing");
+    expect(usage?.rawUsage.opencode_reported_cost_usd_micros).toBe(0);
+  });
+
+  it("prices tokens with the same rates the main agent loop bills", () => {
+    const usage = opencodeHostedToolUsage({
+      modelId: "anthropic/claude-sonnet-4.6",
+      summary: {
+        usage: {
+          input_tokens: 1_000_000,
+          output_tokens: 500_000,
+          cache_read_input_tokens: 200_000,
+          cache_creation_input_tokens: 100_000,
+        },
+        costUsdMicros: null,
+      },
+    });
+    const expected = calculateModelUsageCost({
+      modelName: "anthropic/claude-sonnet-4.6",
+      inputTokens: 1_300_000,
+      inputNoCacheTokens: 1_000_000,
+      inputCacheReadTokens: 200_000,
+      inputCacheWriteTokens: 100_000,
+      outputTokens: 500_000,
+    });
+    expect(usage?.costUsdMicros).toBe(expected.providerCostUsdMicros);
+    // sonnet-4.6: 1M uncached @ $3/M + 200k cache-read @ $0.30/M + 100k cache-write
+    // @ $3.75/M + 500k output @ $15/M = $10.935 provider cost.
+    expect(usage?.costUsdMicros).toBe(10_935_000);
+    expect(usage?.provider).toBe("opencode");
+    expect(usage?.operation).toBe("session");
+    expect(usage?.rawUsage.model).toBe("anthropic/claude-sonnet-4.6");
+  });
+
+  it("prefers platform pricing over a non-zero opencode-reported cost", () => {
+    const usage = opencodeHostedToolUsage({
+      modelId: "anthropic/claude-haiku-4.5",
+      summary: {
+        usage: { input_tokens: 1_000_000, output_tokens: 0 },
+        costUsdMicros: 999,
+      },
+    });
+    // 1M uncached haiku input @ $1/M = $1.00, not the self-reported $0.000999.
+    expect(usage?.costUsdMicros).toBe(1_000_000);
+    expect(usage?.rawUsage.cost_source).toBe("platform_model_pricing");
+    expect(usage?.rawUsage.opencode_reported_cost_usd_micros).toBe(999);
+  });
+
+  it("falls back to the opencode-reported cost when no token counts were streamed", () => {
+    const usage = opencodeHostedToolUsage({
+      modelId: "anthropic/claude-sonnet-4.6",
+      summary: { usage: null, costUsdMicros: 250_000 },
+    });
+    expect(usage?.costUsdMicros).toBe(250_000);
+    expect(usage?.costSource).toBe("provider_reported");
+    expect(usage?.rawUsage.cost_source).toBe("provider_reported");
+  });
+
+  it("returns null when the run produced neither tokens nor a reported cost", () => {
+    expect(
+      opencodeHostedToolUsage({
+        modelId: "anthropic/claude-sonnet-4.6",
+        summary: { usage: null, costUsdMicros: null },
+      }),
+    ).toBeNull();
+    expect(
+      opencodeHostedToolUsage({
+        modelId: "anthropic/claude-sonnet-4.6",
+        summary: { usage: null, costUsdMicros: 0 },
+      }),
+    ).toBeNull();
   });
 });

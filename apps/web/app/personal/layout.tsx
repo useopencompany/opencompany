@@ -6,6 +6,8 @@ import QueryProvider from "@/components/QueryProvider";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
+import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
+import { agentGitHubRepositories, buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { currentWorkspace } from "@/lib/auth";
 import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
 import { loadGoogleIntegrationState } from "@/lib/integrations/google-data";
@@ -27,11 +29,13 @@ import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 export default async function PersonalLayout({ children }: { children: React.ReactNode }) {
   const { authUser, user, workspace } = await currentWorkspace();
 
-  const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
+  // Short first-person name the scaffold templates into the agent's body/soul ("{{userName}}");
+  // distinct from the full display name derived below for the sidebar footer.
+  const scaffoldUserName = user.firstName?.trim() || authUser.email.split("@")[0] || "you";
   const agent = await ensurePersonalAgent({
     userId: user.id,
     workspaceId: workspace.id,
-    name: agentName,
+    userName: scaffoldUserName,
   });
 
   const [
@@ -42,6 +46,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     googleState,
     mcpSettings,
     toolPolicies,
+    githubIntegrationRepositories,
   ] = await Promise.all([
     loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
     loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
@@ -50,7 +55,15 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     loadGoogleIntegrationState(),
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
     loadWorkspaceToolPolicyOverrides(workspace.id),
+    loadGitHubIntegrationRepositoriesForWorkspace(workspace.id),
   ]);
+
+  // The workspace GitHub integration's repository catalog (only usable repos), so the Behavior
+  // editor can offer concrete @owner/repo mentions instead of just the generic @github pill.
+  const { usableRepositories: githubRepositories } = buildGitHubRepositoryCatalogs({
+    repositories: githubIntegrationRepositories,
+    savedRepositories: agentGitHubRepositories(agent.config),
+  });
   const userName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
 
@@ -99,6 +112,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                 contextFiles={contextFiles}
                 personalSkills={personalSkills}
                 githubIntegrationStatus={workspaceIntegrations.github.status}
+                githubRepositories={githubRepositories}
                 integrationConnections={integrationConnections}
                 integrationDetails={integrationDetails}
                 toolPolicies={toolPolicies}

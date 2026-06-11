@@ -17,6 +17,7 @@ import {
 import { useToast } from "@/components/ToastProvider";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
+import type { GitHubIntegrationRepositoryPayload } from "@/lib/agents/payload";
 import {
   addPersonalAgentIntegration,
   addPersonalAgentSkill,
@@ -72,6 +73,9 @@ export type PersonalShellProps = {
   contextFiles: AgentBundleFilePayload[];
   personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
+  // The workspace GitHub integration's usable repository catalog, so the Behavior editor can
+  // offer concrete @owner/repo mentions (not just the generic @github pill).
+  githubRepositories: GitHubIntegrationRepositoryPayload[];
   integrationConnections: PersonalIntegrationConnections;
   integrationDetails: PersonalIntegrationDetails;
   toolPolicies: WorkspaceToolPolicyOverrides;
@@ -92,6 +96,7 @@ export default function PersonalShell({
   contextFiles,
   personalSkills,
   githubIntegrationStatus,
+  githubRepositories,
   integrationConnections,
   integrationDetails,
   toolPolicies,
@@ -173,6 +178,7 @@ export default function PersonalShell({
       initialSessions,
       personalSkills,
       githubIntegrationStatus,
+      githubRepositories,
       integrationConnections,
       integrationDetails,
       toolPolicies,
@@ -207,6 +213,7 @@ export default function PersonalShell({
       files,
       personalSkills,
       githubIntegrationStatus,
+      githubRepositories,
       integrationConnections,
       integrationDetails,
       toolPolicies,

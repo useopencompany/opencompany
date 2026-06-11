@@ -1,3 +1,4 @@
+import { MEMORY_KEEPER_MODEL } from "@opencompany/agent-runtime";
 import { agentSessionEvents, agentSessionMessages, agentSessions } from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -48,8 +49,6 @@ describe("spawnMemoryKeeperSession", () => {
       workspaceId: "ws_1",
       userId: "user_1",
       agentId: "agent_personal",
-      modelProvider: "vercel-ai-gateway",
-      modelName: "openai/gpt-5.4-mini",
     });
 
     const sessionInsert = inserts.find((i) => i.table === agentSessions);
@@ -60,6 +59,9 @@ describe("spawnMemoryKeeperSession", () => {
       agentId: "agent_personal",
       source: "memory",
       parentSessionId: "ses_parent",
+      // The keeper never inherits the parent's model — always the pinned cheap one.
+      modelProvider: MEMORY_KEEPER_MODEL.provider,
+      modelName: MEMORY_KEEPER_MODEL.name,
     });
     expect(sessionInsert?.values.title).toContain("Memory pass");
 

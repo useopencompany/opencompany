@@ -1,4 +1,8 @@
-import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import {
+  MEMORY_KEEPER_MODEL,
+  newAgentSessionId,
+  newAgentSessionMessageId,
+} from "@opencompany/agent-runtime";
 import { agentSessionEvents, agentSessionMessages, agentSessions } from "@opencompany/db/schema";
 import { getDb } from "./db";
 
@@ -17,8 +21,6 @@ export async function spawnMemoryKeeperSession(input: {
   workspaceId: string;
   userId: string;
   agentId: string;
-  modelProvider: string;
-  modelName: string;
 }): Promise<{ childSessionId: string; childMessageId: string }> {
   const childSessionId = newAgentSessionId();
   const childMessageId = newAgentSessionMessageId();
@@ -33,8 +35,10 @@ export async function spawnMemoryKeeperSession(input: {
       agentId: input.agentId,
       title: memoryKeeperTitle(input.parentTitle),
       source: "memory",
-      modelProvider: input.modelProvider,
-      modelName: input.modelName,
+      // Always the pinned cheap keeper model, never the parent's: the session's modelName becomes
+      // the run's model override in resolveAgentRuntimeConfig.
+      modelProvider: MEMORY_KEEPER_MODEL.provider,
+      modelName: MEMORY_KEEPER_MODEL.name,
       parentSessionId: input.parentSessionId,
     });
     await tx.insert(agentSessionMessages).values({

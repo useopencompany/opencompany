@@ -89,6 +89,53 @@ describe(".agent files", () => {
     expect(config.tools).toEqual(["amp"]);
   });
 
+  test("round-trips the @github all-repositories scope from the body", () => {
+    const source = serializeAgentFile({
+      title: "Code agent",
+      body: "Use @github for anything code related.",
+    });
+
+    expect(source).toContain("allRepositories: true");
+    const parsed = parseAgentFile(source);
+    expect(parsed.config.integrations.github.allRepositories).toBe(true);
+    expect(parsed.config.integrations.github.repositories).toEqual([]);
+
+    // Re-serializing the parsed file must be stable.
+    const reserialized = serializeAgentFile({
+      title: parsed.title,
+      body: parsed.body,
+      model: parsed.config.model.name,
+      tools: parsed.config.tools,
+      brain: parsed.config.brain,
+      integrations: parsed.config.integrations,
+      triggers: parsed.config.triggers,
+    });
+    expect(parseAgentFile(reserialized).config.integrations.github.allRepositories).toBe(true);
+  });
+
+  test("drops the all-repositories scope when the body loses the @github mention", () => {
+    // Self-edit style: stale persisted integrations still carry the flag, but the new body
+    // no longer mentions @github — the body wins.
+    const source = serializeAgentFile({
+      title: "Code agent",
+      body: "No GitHub access needed anymore.",
+      integrations: {
+        github: { repositories: [], allRepositories: true },
+      },
+    });
+
+    expect(source).not.toContain("allRepositories");
+    expect(parseAgentFile(source).config.integrations.github).not.toHaveProperty("allRepositories");
+  });
+
+  test("agent files without the allRepositories key parse without the flag", () => {
+    const parsed = parseAgentFile(
+      ["---", 'title: "Ops"', "model: openai/gpt-5.4", "---", "", "Do the work."].join("\n"),
+    );
+
+    expect(parsed.config.integrations.github).not.toHaveProperty("allRepositories");
+  });
+
   test("syncs opencode tool config from a mention", () => {
     const config = extractConfigFromMentions("Use @opencode for code changes.");
 

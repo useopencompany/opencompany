@@ -497,6 +497,7 @@ export function startRunnerJobWorker(
     stop: async (options?: {
       interruptAfterMs?: number;
       onInterrupt?: () => Promise<void> | void;
+      postInterruptWaitMs?: number;
     }) => {
       stopped = true;
       // Break out of any in-progress wait so shutdown does not stall a poll interval.
@@ -516,6 +517,16 @@ export function startRunnerJobWorker(
 
       if (!drained) {
         await options.onInterrupt?.();
+        // The interrupt only *requests* aborts; the aborted jobs still need to unwind
+        // (job fail writes, final stream events). Give them a bounded window so the
+        // caller does not close the DB pool behind writes that are still in flight —
+        // bounded, so one hung abort cannot eat the rest of the shutdown grace.
+        if (options.postInterruptWaitMs !== undefined) {
+          await Promise.race([
+            Promise.allSettled(Array.from(active)),
+            sleep(options.postInterruptWaitMs),
+          ]);
+        }
       }
     },
   };
