@@ -420,10 +420,21 @@ export async function markAfterSessionRunSpawned(id: number, childSessionId: str
     .where(eq(agentSessionAfterSessionRuns.id, id));
 }
 
+// Collapse a memory pass's closing note into a single short line safe to embed in the parent's
+// `after_session.completed` event payload (the web surfaces it as the memory card's result).
+export function summarizeAfterSessionNote(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > 280 ? `${collapsed.slice(0, 277)}...` : collapsed;
+}
+
 export async function completeSpawnedAfterSessionRunForChild(input: {
   childSessionId: string;
   status: "completed" | "failed";
   lastError?: string;
+  // One-line summary of what the memory pass stored (the keeper's closing note).
+  summary?: string;
 }) {
   const db = getDb();
   const [run] = await db
@@ -458,6 +469,7 @@ export async function completeSpawnedAfterSessionRunForChild(input: {
         runId: run.id,
         messageId: run.lastUserMessageId,
         childSessionId: input.childSessionId,
+        ...(input.summary ? { summary: input.summary } : {}),
       },
     });
   } else {

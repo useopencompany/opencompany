@@ -84,6 +84,13 @@ export type SessionRuntimeState = {
   statusObserved: boolean;
 };
 
+export type SessionAggregateSnapshot = {
+  usage: SessionUsageSummary;
+  toolUsage: SessionToolUsageSummary;
+  cost: SessionCostSummary;
+  currentContextTokens: number;
+};
+
 /**
  * Union-merge a durable server snapshot (the Postgres system-of-record, complete
  * but as-of fetch time) with the live Durable-Stream overlay. The snapshot is the
@@ -138,6 +145,60 @@ export function mergeEvents(snapshot: RuntimeEvent[], overlay: RuntimeEvent[]): 
   return merged;
 }
 
+export function mergeLiveSessionAggregates(
+  snapshot: SessionAggregateSnapshot,
+  overlayEvents: RuntimeEvent[],
+  afterEventId: number,
+): SessionAggregateSnapshot {
+  let usage = snapshot.usage;
+  let toolUsage = snapshot.toolUsage;
+  let cost = snapshot.cost;
+  let currentContextTokens = snapshot.currentContextTokens;
+  let lastUsageEventId = afterEventId;
+
+  for (const event of overlayEvents) {
+    if (typeof event.id !== "number" || event.id <= afterEventId) continue;
+
+    if (event.type === "session.usage") {
+      usage = addUsageSummary(usage, event.payload);
+      cost = addCostSummary(cost, event.payload, "model");
+      if (event.id > lastUsageEventId) {
+        currentContextTokens =
+          readNumber(event.payload.inputTokens) + readNumber(event.payload.outputTokens);
+        lastUsageEventId = event.id;
+      }
+      continue;
+    }
+
+    if (event.type === "session.tool_usage") {
+      cost = addCostSummary(cost, event.payload, "tool");
+      toolUsage = addToolUsageEvent(toolUsage, event.payload);
+      continue;
+    }
+
+    if (event.type === "session.sandbox_usage") {
+      cost = addCostSummary(cost, event.payload, "sandbox");
+      continue;
+    }
+
+    if (event.type === "session.delegated_usage") {
+      const eventUsage = isRecord(event.payload.usage) ? event.payload.usage : {};
+      const eventCost = isRecord(event.payload.cost) ? event.payload.cost : {};
+      const eventToolUsage = isRecord(event.payload.toolUsage) ? event.payload.toolUsage : {};
+      usage = addUsageSummary(usage, eventUsage);
+      cost = addCostRollup(cost, eventCost);
+      toolUsage = addToolUsageRollup(toolUsage, eventToolUsage);
+      if (event.id > lastUsageEventId) {
+        currentContextTokens =
+          readNumber(eventUsage.inputTokens) + readNumber(eventUsage.outputTokens);
+        lastUsageEventId = event.id;
+      }
+    }
+  }
+
+  return { usage, toolUsage, cost, currentContextTokens };
+}
+
 export type RuntimeToolApprovalState = {
   status: "required" | "approved" | "denied";
   providerKey: string;
@@ -189,6 +250,8 @@ export type RuntimeToolCall = {
   question?: RuntimeQuestionState | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
+  // ISO timestamp from tool.started event, used to show an elapsed counter for long-running tools.
+  startedAt?: string | undefined;
 };
 
 export type AssistantTurnPart =
@@ -262,38 +325,11 @@ export function applyRuntimeEventToState(
   }
 
   if (event.type === "session.tool_usage") {
-    const provider = readString(event.payload.provider);
-    const operation = readString(event.payload.operation);
-    const costUsdMicros = readNumber(event.payload.costUsdMicros);
-    if (provider && operation) {
-      const key = `${provider}:${operation}`;
-      let matched = false;
-      const byProviderOperation = next.toolUsage.byProviderOperation.map((item) => {
-        if (`${item.provider}:${item.operation}` !== key) return item;
-        matched = true;
-        return {
-          ...item,
-          costUsdMicros: item.costUsdMicros + costUsdMicros,
-          calls: item.calls + 1,
-        };
-      });
-      if (!matched) {
-        byProviderOperation.push({ provider, operation, costUsdMicros, calls: 1 });
-      }
-
-      next = {
-        ...next,
-        cost: addCostSummary(next.cost, event.payload, "tool"),
-        toolUsage: {
-          totalCostUsdMicros: next.toolUsage.totalCostUsdMicros + costUsdMicros,
-          byProviderOperation: byProviderOperation.sort((left, right) =>
-            `${left.provider}:${left.operation}`.localeCompare(
-              `${right.provider}:${right.operation}`,
-            ),
-          ),
-        },
-      };
-    }
+    next = {
+      ...next,
+      cost: addCostSummary(next.cost, event.payload, "tool"),
+      toolUsage: addToolUsageEvent(next.toolUsage, event.payload),
+    };
   }
 
   if (event.type === "session.sandbox_usage") {
@@ -495,6 +531,38 @@ function addCostRollup(
     modelCostUsdMicros: totals.modelCostUsdMicros + readNumber(payload.modelCostUsdMicros),
     toolCostUsdMicros: totals.toolCostUsdMicros + readNumber(payload.toolCostUsdMicros),
     sandboxCostUsdMicros: totals.sandboxCostUsdMicros + readNumber(payload.sandboxCostUsdMicros),
+  };
+}
+
+function addToolUsageEvent(
+  totals: SessionToolUsageSummary,
+  payload: Record<string, unknown>,
+): SessionToolUsageSummary {
+  const provider = readString(payload.provider);
+  const operation = readString(payload.operation);
+  const costUsdMicros = readNumber(payload.costUsdMicros);
+  if (!provider || !operation) return totals;
+
+  const key = `${provider}:${operation}`;
+  let matched = false;
+  const byProviderOperation = totals.byProviderOperation.map((item) => {
+    if (`${item.provider}:${item.operation}` !== key) return item;
+    matched = true;
+    return {
+      ...item,
+      costUsdMicros: item.costUsdMicros + costUsdMicros,
+      calls: item.calls + 1,
+    };
+  });
+  if (!matched) {
+    byProviderOperation.push({ provider, operation, costUsdMicros, calls: 1 });
+  }
+
+  return {
+    totalCostUsdMicros: totals.totalCostUsdMicros + costUsdMicros,
+    byProviderOperation: byProviderOperation.sort((left, right) =>
+      `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
+    ),
   };
 }
 
@@ -733,16 +801,28 @@ function normalizeAssistantTurnParts(parts: AssistantTurnPart[]): AssistantTurnP
   return result;
 }
 
+// The synthetic tool-call name for after-session/memory-pass lifecycle rows. The view keys
+// memory-specific rendering (the collapsed summary line) off this name.
+export const AFTER_SESSION_TOOL_NAME = "updating_memory";
+
+// A background pass (memory keeper / after-session hook) surfaced as a transcript part.
+// `anchorMessageId` is the user message whose turn the pass followed — the view uses it to
+// interleave the card at its true chronological position instead of pinning it to the bottom.
+export type BackgroundActivityEntry = {
+  anchorMessageId: string | null;
+  part: AssistantTurnPart;
+};
+
 export function buildBackgroundActivityParts(
   events: RuntimeEvent[],
   messages: SessionMessage[],
-): AssistantTurnPart[] {
-  const partsWithOrder: Array<{ order: number; part: AssistantTurnPart }> = [];
+): BackgroundActivityEntry[] {
+  const partsWithOrder: Array<{ order: number; entry: BackgroundActivityEntry }> = [];
 
-  for (const toolCall of buildAfterSessionLifecycleToolCalls(events)) {
+  for (const { toolCall, anchorMessageId } of buildAfterSessionLifecycleToolCalls(events)) {
     partsWithOrder.push({
       order: toolCall.startedEventId ?? toolCall.completedEventId ?? Number.MAX_SAFE_INTEGER,
-      part: { type: "tool-call", toolCall },
+      entry: { anchorMessageId, part: { type: "tool-call", toolCall } },
     });
   }
 
@@ -758,16 +838,16 @@ export function buildBackgroundActivityParts(
           part.toolCall.completedEventId ??
           eventOrderForMessage(events, message.id) ??
           Number.MAX_SAFE_INTEGER,
-        part,
+        entry: { anchorMessageId: message.responseToMessageId ?? null, part },
       });
     }
   }
 
-  return partsWithOrder.sort((left, right) => left.order - right.order).map((item) => item.part);
+  return partsWithOrder.sort((left, right) => left.order - right.order).map((item) => item.entry);
 }
 
 function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
-  const calls: RuntimeToolCall[] = [];
+  const calls: Array<{ toolCall: RuntimeToolCall; anchorMessageId: string | null }> = [];
   const callsByKey = new Map<string, RuntimeToolCall>();
   const callsByMessageId = new Map<string, RuntimeToolCall>();
 
@@ -784,7 +864,7 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
 
     const call: RuntimeToolCall = {
       id: `after-session:${key}`,
-      name: "updating_memory",
+      name: AFTER_SESSION_TOOL_NAME,
       label: "Updating memory",
       status: "running",
       inputPreview: "",
@@ -793,7 +873,7 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
       startedEventId: null,
       completedEventId: null,
     };
-    calls.push(call);
+    calls.push({ toolCall: call, anchorMessageId: input.messageId || null });
     if (input.runId) callsByKey.set(input.runId, call);
     if (input.messageId) callsByMessageId.set(input.messageId, call);
     return call;
@@ -808,6 +888,12 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
     if (!runId && !messageId) continue;
 
     const call = getCall({ runId, messageId });
+    // The first event for a run may carry only the runId; backfill the turn anchor as soon
+    // as any lifecycle event names the user message the pass followed.
+    if (messageId) {
+      const entry = calls.find((item) => item.toolCall === call);
+      if (entry && !entry.anchorMessageId) entry.anchorMessageId = messageId;
+    }
     if (event.type === "after_session.started") {
       call.status = "running";
       call.startedEventId = event.id ?? null;
@@ -818,7 +904,12 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
     }
     if (event.type === "after_session.completed") {
       call.status = "completed";
-      call.outputPreview = "Memory updated";
+      call.label = "Updated memory";
+      // The memory pass forwards the keeper's one-line closing note as `summary` — what was
+      // actually stored (or "Nothing new worth saving."). Fall back for events that predate it.
+      const summary = readString(event.payload.summary);
+      call.outputPreview = summary || "Memory updated";
+      call.activityPreview = summary;
       call.completedEventId = event.id ?? null;
     }
     if (event.type === "after_session.failed") {
@@ -1013,6 +1104,9 @@ export function buildRuntimeToolCallsForMessage(
         call.issueUrl = issueUrl;
       }
       call.startedEventId = event.id ?? null;
+      if (event.createdAt) {
+        call.startedAt = event.createdAt;
+      }
     }
 
     if (event.type === "tool.completed" || event.type === "tool.failed") {

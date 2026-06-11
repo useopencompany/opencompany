@@ -174,11 +174,11 @@ Setup checklist:
 If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
 and the workspace-home card degrades to the booking fallback (onboarding never breaks).
 
-Channel naming: each customer channel is `<customer-slug>-<id8>-x-opencompany` (the
-`-x-opencompany` convention plus a short per-workspace suffix so two same-named customers
-practically never collide). Ownership is also stamped in the channel purpose
-(`opencompany-support:<workspaceId>`) and checked before adopting on a retry, so a channel is
-never hijacked across workspaces.
+Channel naming: each customer channel is `<customer-slug>-x-opencompany-<id8>` — the customer
+name leads so the channel reads cleanly in Slack's sidebar, and the short per-workspace suffix
+at the end keeps two same-named customers from colliding. Ownership is also stamped in the
+channel purpose (`opencompany-support:<workspaceId>`) and checked before adopting on a retry,
+so a channel is never hijacked across workspaces.
 
 Recovery: an hourly Inngest cron (`sweep-failed-slack-support-channels`) re-dispatches
 provisioning for workspaces stuck in `failed` or `pending` — so a transient failure, or a

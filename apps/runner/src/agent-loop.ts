@@ -106,6 +106,7 @@ import {
   optionalUserContext,
   resolveSandboxBilling,
   setStatus,
+  summarizeAfterSessionNote,
 } from "./session-lifecycle";
 import {
   buildQuestionAnswerToolOutput,
@@ -569,10 +570,14 @@ async function runMessageWithContext(
     }
     outcome = "completed";
     if (memoryKeeperRun) {
+      // Forward the keeper's one-line closing note so the parent session's memory card can
+      // show what was actually stored instead of a bare "Memory updated".
+      const summary = summarizeAfterSessionNote(turn.assistantContent);
       await observeRunStep(ctx, "complete_memory_keeper_parent_after_session", () =>
         completeSpawnedAfterSessionRunForChild({
           childSessionId: input.sessionId,
           status: "completed",
+          ...(summary ? { summary } : {}),
         }),
       );
     }
@@ -837,11 +842,11 @@ async function executeStreamingTurn(input: {
   internal: boolean;
   brainStep: string;
   bundleStep: string;
-  appendCompletedEvent: () => Promise<boolean>;
+  appendCompletedEvent: (result: { assistantContent: string }) => Promise<boolean>;
   emptyOutputFallback?: string;
   beforeRelease?: () => Promise<void>;
   extraStopConditions?: Parameters<typeof streamAssistantResponse>[0]["extraStopConditions"];
-}): Promise<{ outcome: "completed" | "suspended" }> {
+}): Promise<{ outcome: "suspended" } | { outcome: "completed"; assistantContent: string }> {
   const { ctx, row, sandboxAcquirer, assistantMessageId } = input;
 
   let streamResult: Awaited<ReturnType<typeof streamAssistantResponse>>;
@@ -978,7 +983,7 @@ async function executeStreamingTurn(input: {
     });
   }
 
-  await requireLeaseWrite(input.appendCompletedEvent());
+  await requireLeaseWrite(input.appendCompletedEvent({ assistantContent }));
 
   if (input.beforeRelease) await input.beforeRelease();
 
@@ -992,7 +997,7 @@ async function executeStreamingTurn(input: {
 
   await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
 
-  return { outcome: "completed" };
+  return { outcome: "completed", assistantContent };
 }
 
 export async function runAfterSession(input: {
@@ -1366,15 +1371,21 @@ async function runAfterSessionWithContext(
       brainStep: "sync_brain_after_session",
       bundleStep: "sync_agent_bundle_after_session",
       emptyOutputFallback: "After-session run completed without changes.",
-      appendCompletedEvent: () =>
-        appendRuntimeEventForLease({
+      appendCompletedEvent: ({ assistantContent }) => {
+        const summary = summarizeAfterSessionNote(assistantContent);
+        return appendRuntimeEventForLease({
           sessionId: input.sessionId,
           messageId: null,
           leaseId: ctx.leaseId,
           leaseOwner: ctx.leaseOwner,
           type: "after_session.completed",
-          payload: { runId: completedRunId, messageId: input.messageId },
-        }),
+          payload: {
+            runId: completedRunId,
+            messageId: input.messageId,
+            ...(summary ? { summary } : {}),
+          },
+        });
+      },
       beforeRelease: async () => {
         await completeAfterSessionRun(completedRunId, { status: "completed" });
       },
