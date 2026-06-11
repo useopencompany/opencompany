@@ -112,6 +112,7 @@ import {
   buildUnansweredQuestionToolOutput,
   loadSessionQuestion,
 } from "./session-questions";
+import { createRunSubagentHandler } from "./subagent";
 import { loadToolApproval } from "./tool-approvals";
 import {
   createHostedToolBudget,
@@ -524,6 +525,23 @@ async function runMessageWithContext(
         depth: input.delegationDepth ?? 0,
         agentReferences: agentConfig.agents ?? [],
         runChildMessage: runDelegatedChildMessage,
+      }),
+      runSubagent: createRunSubagentHandler({
+        parentSessionId: input.sessionId,
+        parentMessageId: assistantMessageId,
+        parentRunLeaseId: ctx.leaseId,
+        parentRunLeaseOwner: ctx.leaseOwner,
+        parentModelName: runtime.model.name,
+        workspaceId: row.workspace.id,
+        agentConfigBrain: agentConfig.brain ?? [],
+        personalAgent: row.agent.isDefault,
+        enabledTools,
+        getSandbox: sandboxAcquirer.get,
+        workdir: row.session.workdir,
+        env: input.env,
+        signal: ctx.controller.signal,
+        checkAbort,
+        policy: toolPolicy,
       }),
     });
 
@@ -1348,6 +1366,23 @@ async function runAfterSessionWithContext(
       toolStartCoordinator,
       observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       toolBudget: createHostedToolBudget(),
+      runSubagent: createRunSubagentHandler({
+        parentSessionId: input.sessionId,
+        parentMessageId: assistantMessageId,
+        parentRunLeaseId: ctx.leaseId,
+        parentRunLeaseOwner: ctx.leaseOwner,
+        parentModelName: runtime.model.name,
+        workspaceId: row.workspace.id,
+        agentConfigBrain: agentConfig.brain ?? [],
+        personalAgent: row.agent.isDefault,
+        enabledTools: runtime.tools,
+        getSandbox: sandboxAcquirer.get,
+        workdir: row.session.workdir,
+        env: input.env,
+        signal: ctx.controller.signal,
+        checkAbort,
+        policy: toolPolicy,
+      }),
     });
 
     // Snapshot the now-resolved run id into a const so the closures below capture a narrowed
@@ -2012,6 +2047,23 @@ async function continueTurnAfterToolResult(input: {
     observabilityContext: input.observabilityContext,
     toolBudget: createHostedToolBudget(),
     onToolTimings: toolLatency.record,
+    runSubagent: createRunSubagentHandler({
+      parentSessionId: input.sessionId,
+      parentMessageId: continuationAssistantMessageId,
+      parentRunLeaseId: ctx.leaseId,
+      parentRunLeaseOwner: ctx.leaseOwner,
+      parentModelName: input.runtime.model.name,
+      workspaceId: row.workspace.id,
+      agentConfigBrain: input.agentConfig.brain ?? [],
+      personalAgent: row.agent.isDefault,
+      enabledTools: input.runtime.tools,
+      getSandbox: sandboxAcquirer.get,
+      workdir: row.session.workdir,
+      env: input.env,
+      signal: ctx.controller.signal,
+      checkAbort,
+      policy: input.toolPolicy,
+    }),
   });
 
   const turn = await executeStreamingTurn({

@@ -236,6 +236,23 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "subagent.progress";
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        label: string;
+        kind: "text-delta" | "tool-call" | "tool-result";
+        delta?: string;
+        tool?: {
+          name: string;
+          toolCallId: string;
+          status: "running" | "completed" | "failed" | "denied";
+          inputPreview?: string;
+          outputPreview?: string;
+        };
+      };
+    }
+  | {
       type: "session.error";
       payload: { message: string };
     }
