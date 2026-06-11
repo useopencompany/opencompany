@@ -28,6 +28,11 @@ describe("session interruption cleanup", () => {
           leaseId: "run_stale",
           leaseOwner: "runner-old",
         },
+        {
+          sessionId: "ses_stale_2",
+          leaseId: "run_stale_2",
+          leaseOwner: "runner-old",
+        },
       ],
     }));
     const insert = vi.fn(() => ({
@@ -53,10 +58,11 @@ describe("session interruption cleanup", () => {
 
     const count = await interruptStaleActiveRuns(new Date("2026-06-09T12:10:00.000Z"));
 
-    expect(count).toBe(1);
+    expect(count).toBe(2);
     expect(execute).toHaveBeenCalledOnce();
+    // All sessions' events land in a single batched insert inside the transaction.
     expect(insert).toHaveBeenCalledOnce();
-    expect(publishRuntimeEvent).toHaveBeenCalledTimes(2);
+    expect(publishRuntimeEvent).toHaveBeenCalledTimes(4);
     expect(publishRuntimeEvent).toHaveBeenNthCalledWith(
       1,
       "ses_stale",
@@ -75,6 +81,28 @@ describe("session interruption cleanup", () => {
         payload: {
           reason: "stale_heartbeat",
           leaseId: "run_stale",
+          leaseOwner: "runner-old",
+        },
+      }),
+    );
+    expect(publishRuntimeEvent).toHaveBeenNthCalledWith(
+      3,
+      "ses_stale_2",
+      expect.objectContaining({
+        sessionId: "ses_stale_2",
+        type: "session.status",
+        payload: { status: "interrupted" },
+      }),
+    );
+    expect(publishRuntimeEvent).toHaveBeenNthCalledWith(
+      4,
+      "ses_stale_2",
+      expect.objectContaining({
+        sessionId: "ses_stale_2",
+        type: "session.interrupted",
+        payload: {
+          reason: "stale_heartbeat",
+          leaseId: "run_stale_2",
           leaseOwner: "runner-old",
         },
       }),

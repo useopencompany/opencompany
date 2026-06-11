@@ -16,7 +16,15 @@ import { createServer } from "./server";
 import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "index" });
-const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 0;
+// Shutdown budget. Render sends SIGTERM on deploy and SIGKILLs after
+// `maxShutdownDelaySeconds` (300s, render.yaml). An interrupted turn is non-retryable —
+// the job layer treats post-lease failures as terminal (see MessageTurnFailedError) and
+// the user has to resend — so we drain in-flight runs for most of the grace window: turns
+// that finish within it continue seamlessly across the deploy. The split below leaves
+// ~60s after the interrupt fires for the interrupt writes, the aborted jobs' unwinding
+// (bounded below), the stream flush, and the pool close to land before the hard kill.
+const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 240_000;
+const RENDER_SHUTDOWN_POST_INTERRUPT_WAIT_MS = 30_000;
 
 initializeExceptionReporting();
 
@@ -43,6 +51,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     void Promise.allSettled([
       jobWorker.stop({
         interruptAfterMs: RENDER_SHUTDOWN_INTERRUPT_AFTER_MS,
+        postInterruptWaitMs: RENDER_SHUTDOWN_POST_INTERRUPT_WAIT_MS,
         onInterrupt: async () => {
           logger.warn("Runner shutdown interrupting runs", {
             event: "opencompany.runner_shutdown_interrupting_runs",

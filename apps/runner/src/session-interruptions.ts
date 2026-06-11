@@ -117,41 +117,41 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
           updated_at = now()
       FROM candidates
       WHERE session.id = candidates.id
+        -- Re-checked on the post-lock row version: during a deploy the old and new
+        -- instances both run this sweep, and without this guard the loser of the row
+        -- lock would re-apply the update and emit duplicate interruption events.
+        AND session.status = 'running'
       RETURNING
         session.id AS "sessionId",
         candidates."leaseId",
         candidates."leaseOwner"
     `);
     const interrupted = rowsFromExecute<InterruptedRunRow>(updatedResult);
-    const events: PersistedRuntimeEvent[] = [];
+    if (interrupted.length === 0) return [];
 
-    for (const run of interrupted) {
-      events.push(
-        ...(await tx
-          .insert(agentSessionEvents)
-          .values([
-            {
-              sessionId: run.sessionId,
-              messageId: null,
-              type: "session.status",
-              payload: { status: "interrupted" },
+    return tx
+      .insert(agentSessionEvents)
+      .values(
+        interrupted.flatMap((run) => [
+          {
+            sessionId: run.sessionId,
+            messageId: null,
+            type: "session.status",
+            payload: { status: "interrupted" },
+          },
+          {
+            sessionId: run.sessionId,
+            messageId: null,
+            type: "session.interrupted",
+            payload: {
+              reason: input.reason,
+              leaseId: run.leaseId,
+              leaseOwner: run.leaseOwner,
             },
-            {
-              sessionId: run.sessionId,
-              messageId: null,
-              type: "session.interrupted",
-              payload: {
-                reason: input.reason,
-                leaseId: run.leaseId,
-                leaseOwner: run.leaseOwner,
-              },
-            },
-          ])
-          .returning()),
-      );
-    }
-
-    return events;
+          },
+        ]),
+      )
+      .returning();
   });
 }
 

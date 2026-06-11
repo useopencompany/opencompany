@@ -516,6 +516,81 @@ describe("runner job worker shutdown", () => {
     expect(onInterrupt).toHaveBeenCalledOnce();
     expect(firstJob(store).status).toBe("running");
   });
+
+  it("waits for interrupted jobs to unwind before stop resolves", async () => {
+    vi.useFakeTimers();
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "pending",
+        nextRunAt: new Date("2026-05-27T00:00:00.000Z"),
+      }),
+    ]);
+    const releaseRun = deferred<void>();
+    const runMessage = vi.fn(async () => releaseRun.promise);
+    // Simulate the interrupt aborting the run: the job unwinds shortly after the hook.
+    const onInterrupt = vi.fn(() => {
+      releaseRun.resolve();
+    });
+    const worker = startRunnerJobWorker(env(), {
+      store,
+      handlers: handlers({ runMessage }),
+      pollIntervalMs: 50,
+    });
+
+    await vi.waitFor(() => expect(runMessage).toHaveBeenCalledOnce());
+
+    const stopPromise = worker.stop({
+      interruptAfterMs: 250,
+      postInterruptWaitMs: 10_000,
+      onInterrupt,
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    await stopPromise;
+
+    expect(onInterrupt).toHaveBeenCalledOnce();
+    // The job's completion write landed before stop resolved.
+    expect(firstJob(store).status).toBe("completed");
+  });
+
+  it("stops after the post-interrupt wait even if an aborted job never unwinds", async () => {
+    vi.useFakeTimers();
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "pending",
+        nextRunAt: new Date("2026-05-27T00:00:00.000Z"),
+      }),
+    ]);
+    const runMessage = vi.fn(async () => new Promise<void>(() => undefined));
+    const onInterrupt = vi.fn();
+    const worker = startRunnerJobWorker(env(), {
+      store,
+      handlers: handlers({ runMessage }),
+      pollIntervalMs: 50,
+    });
+
+    await vi.waitFor(() => expect(runMessage).toHaveBeenCalledOnce());
+
+    let stopped = false;
+    const stopPromise = worker.stop({
+      interruptAfterMs: 250,
+      postInterruptWaitMs: 1_000,
+      onInterrupt,
+    });
+    void stopPromise.then(() => {
+      stopped = true;
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(onInterrupt).toHaveBeenCalledOnce();
+    expect(stopped).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await stopPromise;
+    expect(firstJob(store).status).toBe("running");
+  });
 });
 
 function createMemoryRunnerJobStore(initialJobs: RunnerJob[] = []): RunnerJobStore & {
