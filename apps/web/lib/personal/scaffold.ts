@@ -17,8 +17,8 @@ import { buildPendingAgent, newAgentId } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 
-// The /personal experiment agent is a low-latency, capable default. Mirrors leo's choice.
-const PERSONAL_AGENT_MODEL: AgentModelId = "minimax/minimax-m2.7-highspeed";
+// The /personal experiment agent defaults to Kimi for long-horizon coding and agent workflows.
+const PERSONAL_AGENT_MODEL: AgentModelId = "moonshotai/kimi-k2.6";
 
 // Self-contained starter instructions. The /personal agent's richer operating guidance lives in
 // agent/soul.md (seeded at creation, see DEFAULT_PERSONAL_SOUL_MD). It has no @brain/ mounts, so
