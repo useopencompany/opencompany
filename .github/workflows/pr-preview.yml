@@ -303,7 +303,7 @@ jobs:
               marker,
               "### 🔄 Preview environment deploying…",
               "",
-              `**Preview:** ${process.env.PREVIEW_URL}`,
+              `**Preview:** ${process.env.PREVIEW_URL}/?skipOnboarding=1`,
               "",
               "_Verifying health — this comment updates when it's ready._",
             ].join("\n");
@@ -356,7 +356,7 @@ jobs:
               marker,
               `### 🚀 Preview environment ${ok ? "ready" : "failed"}`,
               "",
-              ok ? `**Preview:** ${previewUrl}` : failureMessage,
+              ok ? `**Preview:** ${previewUrl}/?skipOnboarding=1` : failureMessage,
               "",
               ok ? `<details><summary>Stack</summary>\n\n- Runner: ${process.env.RUNNER_URL}\n- Electric: ${process.env.ELECTRIC_URL}\n- Commit: \`${sha}\`\n\n</details>` : "",
               "",

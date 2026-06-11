@@ -9,6 +9,7 @@ import {
 import { refreshSession, withAuth } from "@workos-inc/authkit-nextjs";
 import type { User as WorkOSUser } from "@workos-inc/node";
 import { and, eq, isNotNull } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { grantDefaultSignupCreditForWorkspace } from "@/lib/billing/service";
@@ -77,6 +78,21 @@ function localOnboardingBypassEmails() {
 
 function shouldBypassOnboarding(user: OnboardingUser) {
   return isLocalDevelopmentRuntime() && localOnboardingBypassEmails().has(user.email.toLowerCase());
+}
+
+// Set by proxy.ts when a preview/dev URL carries ?skipOnboarding; never honored in production.
+export const SKIP_ONBOARDING_COOKIE = "opencompany-skip-onboarding";
+
+async function hasSkipOnboardingCookie() {
+  if (process.env.VERCEL_ENV === "production") return false;
+
+  try {
+    const cookieStore = await cookies();
+    return cookieStore.get(SKIP_ONBOARDING_COOKIE)?.value === "1";
+  } catch {
+    // Outside a request scope (tests, background jobs) there is no cookie store.
+    return false;
+  }
 }
 
 async function syncUser(authUser: WorkOSUser) {
@@ -341,6 +357,10 @@ export async function refreshIntoWorkspaceOrganization(workspace: AppWorkspace) 
 
 export async function hasCompletedOnboarding(user: string | OnboardingUser) {
   if (typeof user !== "string" && shouldBypassOnboarding(user)) {
+    return true;
+  }
+
+  if (await hasSkipOnboardingCookie()) {
     return true;
   }
 

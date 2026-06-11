@@ -1,4 +1,5 @@
 import { getDb } from "@opencompany/db/client";
+import { cookies } from "next/headers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getWorkOSClient } from "@/lib/workos";
 import {
@@ -23,12 +24,19 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("next/headers", () => ({
+  cookies: vi.fn(() => {
+    throw new Error("cookies called outside a request scope");
+  }),
+}));
+
 vi.mock("@/lib/workos", () => ({
   getWorkOSClient: vi.fn(),
 }));
 
 const getDbMock = vi.mocked(getDb);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
+const cookiesMock = vi.mocked(cookies);
 const originalEnv = { ...process.env };
 
 const authUser = {
@@ -265,6 +273,32 @@ describe("workspace organization auth sync", () => {
       }),
     ).resolves.toBe(false);
 
+    expect(getDbMock).toHaveBeenCalledOnce();
+  });
+
+  it("treats the skip-onboarding cookie as onboarded on preview deployments", async () => {
+    process.env.VERCEL_ENV = "preview";
+    cookiesMock.mockReturnValueOnce({
+      get: (name: string) =>
+        name === "opencompany-skip-onboarding" ? { name, value: "1" } : undefined,
+    } as never);
+
+    await expect(hasCompletedOnboarding("usr_louis")).resolves.toBe(true);
+
+    expect(getDbMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores the skip-onboarding cookie in production", async () => {
+    process.env.VERCEL_ENV = "production";
+    const { db } = createDbMock({
+      selectResults: [[]],
+      insertReturningResults: [],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(hasCompletedOnboarding("usr_louis")).resolves.toBe(false);
+
+    expect(cookiesMock).not.toHaveBeenCalled();
     expect(getDbMock).toHaveBeenCalledOnce();
   });
 
