@@ -1350,6 +1350,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         <SessionTopBar
           session={session}
           currentContextTokens={runtime.currentContextTokens}
+          totalCostUsdMicros={runtime.cost.totalCostUsdMicros}
           inspectorCollapsed={inspectorCollapsed}
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
         />
@@ -1788,11 +1789,13 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 function SessionTopBar({
   session,
   currentContextTokens,
+  totalCostUsdMicros,
   inspectorCollapsed,
   onToggleInspector,
 }: {
   session: AgentSessionDetailPayload["session"];
   currentContextTokens: number;
+  totalCostUsdMicros: number;
   inspectorCollapsed: boolean;
   onToggleInspector: () => void;
 }) {
@@ -1843,7 +1846,11 @@ function SessionTopBar({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {currentContextTokens > 0 ? (
-          <ContextWindowMeter used={currentContextTokens} max={contextMax} />
+          <ContextWindowMeter
+            used={currentContextTokens}
+            max={contextMax}
+            totalCostUsdMicros={totalCostUsdMicros}
+          />
         ) : null}
         <button
           type="button"
@@ -1871,21 +1878,33 @@ function formatCompactTokens(value: number): string {
 
 // A small ring that fills to the share of the model's context window in use. The exact
 // "used / max" figure stays out of the chrome and is surfaced only on hover (native title),
-// keeping the top bar quiet.
-function ContextWindowMeter({ used, max }: { used: number; max: number }) {
+// keeping the top bar quiet. When a cost total is available it appears below the context line.
+function ContextWindowMeter({
+  used,
+  max,
+  totalCostUsdMicros,
+}: {
+  used: number;
+  max: number;
+  totalCostUsdMicros?: number;
+}) {
   const fraction = max > 0 ? Math.min(1, used / max) : 0;
   const size = 14;
   const strokeWidth = 2;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const detail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
+  const contextDetail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
     fraction * 100,
   )}%`;
+  const ariaLabel =
+    totalCostUsdMicros !== undefined && totalCostUsdMicros > 0
+      ? `Context window usage: ${contextDetail} · ${formatUsdMicros(totalCostUsdMicros)} total cost`
+      : `Context window usage: ${contextDetail}`;
   return (
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger
-          aria-label={`Context window usage: ${detail}`}
+          aria-label={ariaLabel}
           className="flex shrink-0 items-center rounded-full text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
@@ -1912,7 +1931,14 @@ function ContextWindowMeter({ used, max }: { used: number; max: number }) {
             />
           </svg>
         </TooltipTrigger>
-        <TooltipContent>{detail}</TooltipContent>
+        <TooltipContent>
+          <div>{contextDetail}</div>
+          {totalCostUsdMicros !== undefined && totalCostUsdMicros > 0 ? (
+            <div className="mt-0.5 text-ink-muted">
+              {formatUsdMicros(totalCostUsdMicros)} total cost
+            </div>
+          ) : null}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
