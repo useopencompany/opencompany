@@ -422,6 +422,20 @@ describe("scanPersonalSkills", () => {
     ]);
   });
 
+  test("reads a personal skill's optional command slug", () => {
+    const { skills, warnings } = scanPersonalSkills({
+      bundleDir,
+      bundleFiles: [
+        file(
+          "skills/weekly-digest/SKILL.md",
+          skillMd("Weekly digest", "Monday digest.", "command: /Weekly-Digest\n"),
+        ),
+      ],
+    });
+    expect(warnings).toEqual([]);
+    expect(skills[0]?.metadata.command).toBe("weekly_digest");
+  });
+
   test("skips a folder with missing/invalid frontmatter, with a warning", () => {
     const { skills, warnings } = scanPersonalSkills({
       bundleDir,

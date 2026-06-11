@@ -113,15 +113,19 @@ export async function createAgentSessionFromPrompt(
   if (!trimmed) {
     return { ok: false, error: "Message is required." } as const;
   }
-  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+  const db = getDb();
+  const [hasBalance, agent] = await Promise.all([
+    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+    loadAgentForSession(agentId, workspace.id, user.id, db),
+  ]);
+
+  if (!hasBalance) {
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
     } as const;
   }
-
-  const agent = await loadAgentForSession(agentId, workspace.id, user.id);
   if (!agent) {
     return { ok: false, error: "Agent not found." } as const;
   }
@@ -130,18 +134,15 @@ export async function createAgentSessionFromPrompt(
   // session only; an unknown/stale id is ignored in favor of the agent default.
   const modelName = modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
 
-  const { session, statusEvent } = await insertAgentSession({
+  const { session, statusEvent, message, createdEvent } = await insertAgentSessionWithUserMessage({
     agent,
     title: titleFromPrompt(trimmed),
     userId: user.id,
     workspaceId: workspace.id,
     modelName,
+    content: trimmed,
   });
   const sessionId = session.id;
-  const { message, createdEvent } = await insertUserMessage(sessionId, trimmed, {
-    workspaceId: workspace.id,
-    attachments: [],
-  });
   const messageId = message.id;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
@@ -1037,8 +1038,12 @@ async function archiveSessionLocally(
   return txid;
 }
 
-async function loadAgentForSession(idOrPath: string, workspaceId: string, userId: string) {
-  const db = getDb();
+async function loadAgentForSession(
+  idOrPath: string,
+  workspaceId: string,
+  userId: string,
+  db = getDb(),
+) {
   const decodedPath = decodeURIComponent(idOrPath);
   const [agent] = await db
     .select()
@@ -1113,6 +1118,95 @@ async function insertAgentSession(input: {
   }
 
   return { session, statusEvent };
+}
+
+async function insertAgentSessionWithUserMessage(input: {
+  agent: Agent;
+  title: string;
+  userId: string;
+  workspaceId: string;
+  modelName: string;
+  content: string;
+}) {
+  const db = getDb();
+  const sessionId = newAgentSessionId();
+  const messageId = newAgentSessionMessageId();
+  const now = new Date();
+  const payload = { messageId, role: "user", content: input.content, status: "completed" };
+
+  const [sessionRows, statusEventRows, messageRows, createdEventRows] = await db.batch([
+    db
+      .insert(agentSessions)
+      .values({
+        id: sessionId,
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        agentId: input.agent.id,
+        title: input.title,
+        modelProvider: input.agent.config.model.provider,
+        modelName: input.modelName,
+      })
+      .returning(),
+    db
+      .insert(agentSessionEvents)
+      .values({
+        sessionId,
+        type: "session.status",
+        payload: { status: "created", message: "Session created" },
+      })
+      .returning({
+        id: agentSessionEvents.id,
+        type: agentSessionEvents.type,
+        messageId: agentSessionEvents.messageId,
+        payload: agentSessionEvents.payload,
+        createdAt: agentSessionEvents.createdAt,
+      }),
+    db
+      .insert(agentSessionMessages)
+      .values({
+        id: messageId,
+        sessionId,
+        role: "user",
+        status: "completed",
+        content: input.content,
+        modelMessage: { role: "user", content: input.content },
+        completedAt: now,
+      })
+      .returning(),
+    db
+      .insert(agentSessionEvents)
+      .values({ sessionId, messageId, type: "message.created", payload })
+      .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt }),
+  ]);
+
+  const session = sessionRows[0];
+  const statusEvent = statusEventRows[0];
+  const message = messageRows[0];
+  const createdEventRow = createdEventRows[0];
+  if (!session || !statusEvent || !message || !createdEventRow) {
+    throw new Error("Failed to create agent session with user message.");
+  }
+
+  await appendSessionStreamEvent(sessionId, {
+    id: createdEventRow.id,
+    type: "message.created",
+    messageId,
+    payload,
+    createdAt: createdEventRow.createdAt.toISOString(),
+  });
+
+  return {
+    session,
+    statusEvent,
+    message,
+    createdEvent: {
+      id: createdEventRow.id,
+      type: "message.created" as const,
+      messageId,
+      payload,
+      createdAt: createdEventRow.createdAt,
+    },
+  };
 }
 
 async function insertUserMessage(

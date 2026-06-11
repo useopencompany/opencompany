@@ -67,14 +67,14 @@ export async function loadSidebarSessionsForWorkspace(
       .from(agentSessions)
       .leftJoin(sessionStars, starJoin)
       .where(visibilityFilter)
-      .orderBy(desc(agentSessions.updatedAt))
+      .orderBy(desc(agentSessions.createdAt))
       .limit(SIDEBAR_RECENCY_LIMIT),
     db
       .select(baseColumns)
       .from(agentSessions)
       .innerJoin(sessionStars, starJoin)
       .where(and(visibilityFilter, isNotNull(sessionStars.starredAt)))
-      .orderBy(desc(agentSessions.updatedAt)),
+      .orderBy(desc(agentSessions.createdAt)),
   ]);
 
   const byId = new Map<string, (typeof recent)[number]>();
@@ -82,7 +82,7 @@ export async function loadSidebarSessionsForWorkspace(
   for (const row of starred) byId.set(row.id, row);
 
   return Array.from(byId.values())
-    .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
     .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
       serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
     );
@@ -132,14 +132,14 @@ export async function loadPersonalSessionsForAgent(
       .from(agentSessions)
       .leftJoin(sessionStars, starJoin)
       .where(visibilityFilter)
-      .orderBy(desc(agentSessions.updatedAt))
+      .orderBy(desc(agentSessions.createdAt))
       .limit(SIDEBAR_RECENCY_LIMIT),
     db
       .select(baseColumns)
       .from(agentSessions)
       .innerJoin(sessionStars, starJoin)
       .where(and(visibilityFilter, isNotNull(sessionStars.starredAt)))
-      .orderBy(desc(agentSessions.updatedAt)),
+      .orderBy(desc(agentSessions.createdAt)),
   ]);
 
   const byId = new Map<string, (typeof recent)[number]>();
@@ -147,7 +147,7 @@ export async function loadPersonalSessionsForAgent(
   for (const row of starred) byId.set(row.id, row);
 
   return Array.from(byId.values())
-    .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
     .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
       serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
     );
