@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveRoot } from "../store";
 import { formatMemoryUsageReport } from "../usage";
 import { alias } from "./alias";
@@ -27,7 +29,57 @@ const COMMANDS: Record<string, (ctx: CommandContext) => Promise<CommandResult>> 
   doctor,
 };
 
-const HELP = `memory — structured, evidence-first memory for the personal agent
+type CommandSpec = {
+  flags: readonly string[];
+  maxPositionals?: number;
+};
+
+const GLOBAL_FLAGS = ["root", "json", "report-usage"] as const;
+
+const COMMAND_SPECS: Record<string, CommandSpec> = {
+  create: {
+    flags: ["type", "id", "status", "truth", "truth-stdin", "alias", "related", "title"],
+    maxPositionals: 0,
+  },
+  get: { flags: ["id", "section", "follow"], maxPositionals: 1 },
+  query: {
+    flags: [
+      "text",
+      "type",
+      "status",
+      "folder",
+      "since",
+      "limit",
+      "lexical-only",
+      "hops",
+      "include-merged",
+      "include-invalid",
+    ],
+  },
+  "append-evidence": {
+    flags: [
+      "kind",
+      "id",
+      "subject",
+      "source-ref",
+      "captured-at",
+      "body",
+      "body-stdin",
+      "author",
+      "summary",
+      "title",
+    ],
+    maxPositionals: 0,
+  },
+  rewrite: { flags: ["id", "truth", "truth-stdin"], maxPositionals: 1 },
+  alias: { flags: ["id", "add", "remove"], maxPositionals: 1 },
+  link: { flags: ["id", "to", "as", "remove"], maxPositionals: 1 },
+  merge: { flags: ["from", "into", "dry-run", "force"], maxPositionals: 0 },
+  delete: { flags: ["id", "force", "dry-run"], maxPositionals: 1 },
+  doctor: { flags: [], maxPositionals: 0 },
+};
+
+export const HELP = `memory — structured, evidence-first memory for the personal agent
 
 Usage: memory <command> [options]
 
@@ -60,6 +112,32 @@ Global options:
   --json           Machine-readable output
 `;
 
+export function helpResult(message: string): CommandResult {
+  return fail(`${message}\n\n${HELP}`);
+}
+
+export function validateCommandArgs(
+  commandName: string,
+  args: ReturnType<typeof parseArgs>,
+): string | null {
+  const spec = COMMAND_SPECS[commandName];
+  if (!spec) return null;
+
+  const allowedFlags = new Set([...GLOBAL_FLAGS, ...spec.flags]);
+  const unknownFlag = args.names().find((name) => !allowedFlags.has(name));
+  if (unknownFlag) return `Unknown option "--${unknownFlag}".`;
+
+  if (spec.maxPositionals !== undefined && args.positionals.length > spec.maxPositionals) {
+    const expected =
+      spec.maxPositionals === 0
+        ? "no positional arguments"
+        : `${spec.maxPositionals} positional argument`;
+    return `Unexpected argument "${args.positionals[spec.maxPositionals]}"; ${commandName} accepts ${expected}.`;
+  }
+
+  return null;
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const commandName = argv[0];
@@ -77,7 +155,14 @@ async function main(): Promise<void> {
   const reportUsage = args.has("report-usage");
 
   if (!handler) {
-    const result = fail(`Unknown command "${commandName}". Run \`memory help\`.`);
+    const result = helpResult(`Unknown command "${commandName}".`);
+    render(result, json);
+    process.exit(1);
+  }
+
+  const invalidArgs = validateCommandArgs(commandName, args);
+  if (invalidArgs) {
+    const result = helpResult(invalidArgs);
     render(result, json);
     process.exit(1);
   }
@@ -100,4 +185,6 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  void main();
+}
