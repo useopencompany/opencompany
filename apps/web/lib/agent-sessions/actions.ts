@@ -48,7 +48,10 @@ import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
 import { normalizeCompanyUrl } from "@/lib/onboarding/validation";
-import { enablePersonalAgentIntegrations, type PersonalIntegrationId } from "@/lib/personal/actions";
+import {
+  enablePersonalAgentIntegrations,
+  type PersonalIntegrationId,
+} from "@/lib/personal/actions";
 import { determineApprovalResolution } from "./approval-resolution";
 
 export async function createAgentSession(idOrPath: string) {

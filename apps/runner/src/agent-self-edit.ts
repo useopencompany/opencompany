@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   AGENT_SCHEDULE_TRIGGER_TYPE,
-  FIXED_PERSONAL_AGENT_NAME,
   type AgentConfig,
   type AgentModelId,
   type AgentScheduleTriggerConfig,
   buildAgentTiptapDoc,
   buildConfigMentionResolver,
   collectBuiltinSkillMentions,
+  FIXED_PERSONAL_AGENT_NAME,
   getAgentModelDefinition,
   isExternalSkillReference,
   isSupportedScheduleCron,
