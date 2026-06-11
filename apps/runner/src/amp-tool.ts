@@ -11,7 +11,12 @@ import type { RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
 import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
-import { cloneGitHubRepositoryIntoWorkdir, type SandboxHandle, sandboxLayout } from "./sandbox";
+import {
+  cloneGitHubRepositoryIntoWorkdir,
+  guardCommandStreamCallbacks,
+  type SandboxHandle,
+  sandboxLayout,
+} from "./sandbox";
 
 const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
 const AMP_API_BASE_URL = "https://ampcode.com";
@@ -92,26 +97,32 @@ export async function runAmpCoderTool(input: {
   await input.sandbox.commands.run(`mkdir -p ${shellQuote(ampEnv.GH_CONFIG_DIR)}`, {
     timeoutMs: 30_000,
   });
+  // E2B fires these callbacks without awaiting them, so a rejection here (e.g. the
+  // run-control gate inside onOutput throwing RunAbortError on Stop) would escape as an
+  // unhandled rejection and kill the whole runner process. The guard captures the first
+  // callback error and rethrows it right after the awaited run.
+  const guardedRun = guardCommandStreamCallbacks({
+    envs: ampEnv,
+    timeoutMs: 600_000,
+    onStdout: async (data: string) => {
+      const redacted = redactAmpOutput(data);
+      ampStream.push(redacted);
+      const activity = ampActivity.push(redacted);
+      if (activity) await input.onOutput?.(activity);
+    },
+    onStderr: async (data: string) => {
+      await input.onOutput?.(redactAmpOutput(data));
+    },
+  });
   const result = await input.sandbox.commands.run(
     `cd ${shellQuote(layout.workRoot)} && ${buildAmpCommand({
       task,
       ampThreadId: requestedAmpThreadId,
       mode: ampMode,
     })}`,
-    {
-      envs: ampEnv,
-      timeoutMs: 600_000,
-      onStdout: async (data: string) => {
-        const redacted = redactAmpOutput(data);
-        ampStream.push(redacted);
-        const activity = ampActivity.push(redacted);
-        if (activity) await input.onOutput?.(activity);
-      },
-      onStderr: async (data: string) => {
-        await input.onOutput?.(redactAmpOutput(data));
-      },
-    },
+    guardedRun.options,
   );
+  await guardedRun.rethrow();
   const remainingActivity = ampActivity.finish();
   if (remainingActivity) await input.onOutput?.(remainingActivity);
   ampStream.finish();
