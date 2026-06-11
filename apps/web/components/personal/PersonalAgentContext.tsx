@@ -8,7 +8,9 @@ import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import type { GitHubIntegrationRepositoryPayload } from "@/lib/agents/payload";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
+import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 // The immutable identity of the personal agent the surface is rendering. Mutable surfaces
 // (config, behavior body) live as context state below, not here.
@@ -39,6 +41,10 @@ export type PersonalAgentContextValue = {
   githubRepositories: GitHubIntegrationRepositoryPayload[];
   // Workspace-level connection state per integration, used to render Connected/Connect badges.
   integrationConnections: PersonalIntegrationConnections;
+  // Per-integration accounts/resources/permissions detail for the expandable Integrations rows.
+  integrationDetails: PersonalIntegrationDetails;
+  // Workspace-level tool permission overrides, used by the personal Integrations tab.
+  toolPolicies: WorkspaceToolPolicyOverrides;
 
   config: AgentConfig;
   setConfig: (config: AgentConfig) => void;
@@ -65,7 +71,7 @@ export type PersonalAgentContextValue = {
   upsertFile: (file: AgentBundleFilePayload) => void;
 
   // Append an integration's @-mention to the agent body server-side, then re-seed config + draft.
-  addIntegration: (integration: PersonalIntegrationId) => Promise<void>;
+  addIntegration: (integration: PersonalIntegrationId) => Promise<boolean>;
   // Append a tool or skill @-mention to the personal agent body, then re-seed config + draft.
   addTool: (toolId: AgentToolId) => Promise<void>;
   addSkill: (skillId: string) => Promise<void>;

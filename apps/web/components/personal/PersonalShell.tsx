@@ -24,7 +24,9 @@ import {
   addPersonalAgentTool,
   type PersonalIntegrationId,
 } from "@/lib/personal/actions";
+import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
 const sidebarCollapsedSubscribers = new Set<() => void>();
@@ -75,6 +77,8 @@ export type PersonalShellProps = {
   // offer concrete @owner/repo mentions (not just the generic @github pill).
   githubRepositories: GitHubIntegrationRepositoryPayload[];
   integrationConnections: PersonalIntegrationConnections;
+  integrationDetails: PersonalIntegrationDetails;
+  toolPolicies: WorkspaceToolPolicyOverrides;
   proMode: boolean;
   companySurfaceEnabled: boolean;
   children: React.ReactNode;
@@ -94,6 +98,8 @@ export default function PersonalShell({
   githubIntegrationStatus,
   githubRepositories,
   integrationConnections,
+  integrationDetails,
+  toolPolicies,
   proMode: initialProMode,
   companySurfaceEnabled: initialCompanySurfaceEnabled,
   children,
@@ -134,11 +140,12 @@ export default function PersonalShell({
   const applyCapabilityResult = (result: AddCapabilityResult, title: string) => {
     if (!result.ok) {
       showError(result.error, title);
-      return;
+      return false;
     }
     setConfig(result.config);
     setGitHubRequested(hasPersonalGitHubIntegrationRequest(result.body));
     draftRef.current = { body: result.body, content: result.content };
+    return true;
   };
 
   // The manual "Add integration" path appends the integration's @-mention to the agent body
@@ -148,7 +155,7 @@ export default function PersonalShell({
   // single source of truth.
   const addIntegration = async (integration: PersonalIntegrationId) => {
     const result = await addPersonalAgentIntegration(agent.id, integration);
-    applyCapabilityResult(result, "Could not add integration");
+    return applyCapabilityResult(result, "Could not add integration");
   };
 
   const addTool = async (toolId: AgentToolId) => {
@@ -173,6 +180,8 @@ export default function PersonalShell({
       githubIntegrationStatus,
       githubRepositories,
       integrationConnections,
+      integrationDetails,
+      toolPolicies,
       config,
       setConfig,
       proMode,
@@ -206,6 +215,8 @@ export default function PersonalShell({
       githubIntegrationStatus,
       githubRepositories,
       integrationConnections,
+      integrationDetails,
+      toolPolicies,
     ],
   );
 
