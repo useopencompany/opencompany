@@ -93,14 +93,15 @@ function isCustomerInviteBenign(error: unknown): boolean {
 }
 
 // A short per-workspace suffix from the workspace id (sha256 → 8 hex / 32 bit, uniform).
-// Baked into the channel name so two same-named customers practically never produce the same
-// name (collision only matters within an identical slug, where 32 bits is ample), and a
-// `name_taken` on retry is its own prior attempt rather than another workspace's channel.
+// Appended to the END of the channel name so the customer-facing part reads cleanly while
+// two same-named customers still practically never produce the same name (collision only
+// matters within an identical slug, where 32 bits is ample), and a `name_taken` on retry
+// is its own prior attempt rather than another workspace's channel.
 function channelSuffix(workspaceId: string): string {
   return createHash("sha256").update(workspaceId).digest("hex").slice(0, 8);
 }
 
-// The Slack channel name for a workspace's support channel: "<slug>-<suffix>-x-opencompany".
+// The Slack channel name for a workspace's support channel: "<slug>-x-opencompany-<suffix>".
 export function supportChannelName(workspace: { id: string; name: string }): string {
   return channelName(workspaceChannelSlug(workspace.name), channelSuffix(workspace.id));
 }

@@ -80,6 +80,7 @@ describe("session payload cache helpers", () => {
       toolUsage: base.toolUsage,
       cost: base.cost,
       currentContextTokens: base.currentContextTokens,
+      latestEventId: base.latestEventId,
       related: { parent: null, children: [] },
       session: {
         ...base.session,
@@ -112,6 +113,7 @@ describe("session payload cache helpers", () => {
       toolUsage: base.toolUsage,
       cost: base.cost,
       currentContextTokens: 14_200,
+      latestEventId: base.latestEventId,
       related: { parent: null, children: [] },
       session: {
         ...base.session,
@@ -133,6 +135,52 @@ describe("session payload cache helpers", () => {
     const { currentContextTokens: _omitted, ...legacy } = detail();
 
     expect(parseAgentSessionDetailResponse({ detail: legacy }).detail.currentContextTokens).toBe(0);
+  });
+
+  it("round-trips latestEventId through serialize and parse", () => {
+    const base = detail();
+    const serialized = serializeAgentSessionDetail({
+      usage: base.usage,
+      toolUsage: base.toolUsage,
+      cost: base.cost,
+      currentContextTokens: base.currentContextTokens,
+      latestEventId: 42,
+      related: { parent: null, children: [] },
+      session: {
+        ...base.session,
+        abortRequestedAt: null,
+        createdAt: new Date("2026-05-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-05-24T10:00:02.000Z"),
+      },
+      messages: [],
+      events: [],
+    });
+
+    expect(serialized.latestEventId).toBe(42);
+    expect(parseAgentSessionDetailResponse({ detail: serialized }).detail.latestEventId).toBe(42);
+  });
+
+  it("defaults latestEventId to the max event id for legacy payloads", () => {
+    const { latestEventId: _omitted, ...legacy } = detail({
+      events: [
+        {
+          id: 7,
+          type: "session.status",
+          messageId: null,
+          payload: { status: "running" },
+          createdAt: "2026-05-24T10:00:01.000Z",
+        },
+        {
+          id: 11,
+          type: "session.usage",
+          messageId: "msg_asst",
+          payload: {},
+          createdAt: "2026-05-24T10:00:02.000Z",
+        },
+      ],
+    });
+
+    expect(parseAgentSessionDetailResponse({ detail: legacy }).detail.latestEventId).toBe(11);
   });
 
   it("rejects invalid session detail payloads", () => {
@@ -317,5 +365,6 @@ function detail(
       sandboxCostUsdMicros: 0,
     },
     currentContextTokens: 0,
+    latestEventId: 0,
   };
 }

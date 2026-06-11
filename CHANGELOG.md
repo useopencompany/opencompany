@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-10
+
+### Added
+- The new `/personal` experiment surface gives each user a private default agent with its own sessions, behavior editor, capability panels, context files, memory, tools, skills, integrations, and settings views (#353) — @louis.
+- Claude Fable 5 is now available end to end in the model catalog, with reasoning, image, PDF, long-context, and billing support (#384) — @louis.
+- Preview deployments can now complete Gmail and Google Calendar OAuth through a stable callback broker, making Google integration testing work across hosted preview URLs (#382) — @louis.
+- Public changelog entries can now include embedded images and short looping videos, with docs for recording, compressing, uploading, and referencing changelog media (#387) — @louis.
+- The account menu now shows when the currently running build was last deployed, with release details in the tooltip (#388) — @louis.
+- Personal agents now support plain `@github` for all installation repositories and repo-scoped `@github/owner/repo` mentions, with matching sandbox and coding-tool access (#392) — @louis.
+
+### Changed
+- Sandbox preparation no longer waits on optional developer-tool installation during the critical setup path (#393) — @louis.
+
+### Fixed
+- Personal recall searches no longer fail before running when the runner configures its statement timeout (#389) — @louis.
+
 ## [0.10.0] - 2026-06-08
 
 ### Added

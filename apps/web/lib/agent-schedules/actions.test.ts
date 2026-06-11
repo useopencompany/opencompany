@@ -167,7 +167,10 @@ function fakeDetail(): AgentSessionDetailPayload {
       totalCostUsdMicros: 0,
       modelCostUsdMicros: 0,
       toolCostUsdMicros: 0,
+      sandboxCostUsdMicros: 0,
     },
+    currentContextTokens: 0,
+    latestEventId: 0,
     runnerUrl: null,
   };
 }

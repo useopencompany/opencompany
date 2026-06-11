@@ -86,6 +86,10 @@ export type AgentSessionDetailPayload = {
   // How full the model's context window currently is, in tokens: the latest model step's
   // input + output for this session (NOT the cumulative `usage` rollup, which only grows).
   currentContextTokens: number;
+  // Highest non-debug runtime event id included in the server aggregate snapshot. Live stream
+  // aggregate events above this id can be added to the snapshot without double-counting replayed
+  // history.
+  latestEventId: number;
   latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
@@ -119,6 +123,7 @@ export type AgentSessionDetailSerializable = {
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
   currentContextTokens: number;
+  latestEventId: number;
   latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
@@ -187,6 +192,7 @@ export function serializeAgentSessionDetail(
     toolUsage: detail.toolUsage,
     cost: detail.cost,
     currentContextTokens: detail.currentContextTokens,
+    latestEventId: detail.latestEventId,
     // Omit the key entirely when absent so the parse round-trip stays exact for sessions with no
     // recorded model-request snapshot.
     ...(detail.latestModelRequest ? { latestModelRequest: detail.latestModelRequest } : {}),
@@ -310,10 +316,23 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
     cost: parseCostSummary(record.cost),
     // Tolerant of absence so payloads cached before this field shipped still parse.
     currentContextTokens: readOptionalNumberField(record, "currentContextTokens") ?? 0,
+    latestEventId:
+      readOptionalNumberField(record, "latestEventId") ??
+      maxRuntimeEventId(assertArray(record.events, "events")),
     // Conditionally included so payloads without a snapshot stay byte-for-byte equal across the
     // serialize/parse round trip (and so older cached payloads parse unchanged).
     ...(latestModelRequest ? { latestModelRequest } : {}),
   });
+}
+
+function maxRuntimeEventId(events: unknown[]) {
+  let max = 0;
+  for (const item of events) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const id = (item as Record<string, unknown>).id;
+    if (typeof id === "number" && Number.isFinite(id)) max = Math.max(max, id);
+  }
+  return max;
 }
 
 // Debug-only snapshot — accept any object verbatim (tolerant of legacy field names), reject
