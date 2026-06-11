@@ -1,7 +1,7 @@
 import { AGENT_MODEL_CATALOG, type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
 import type { AgentGitHubRepositoryConfig, AgentModelId } from "@opencompany/agent-runtime/types";
 import { agentSessionArtifacts } from "@opencompany/db/schema";
-import { loadGitHubWorkRepository } from "./amp-tool";
+import { loadGitHubWorkRepository, loadGitHubWorkRepositoryByFullName } from "./amp-tool";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
@@ -51,9 +51,18 @@ type OpencodeTarget =
       repository: AgentGitHubRepositoryConfig;
     }
   | {
+      // Integration-wide (`@github` all-repositories) target: an owner/repo that isn't
+      // attached but may be reachable through the workspace's GitHub connection. Materialized
+      // into an attached-or-public target before the run (see materializeOpencodeWorkspaceTarget).
+      kind: "workspace";
+      repositoryFullName: string;
+    }
+  | {
       kind: "public";
       repositoryFullName: string;
     };
+
+type MaterializedOpencodeTarget = Exclude<OpencodeTarget, { kind: "workspace" }>;
 
 // Make opencode available regardless of the sandbox image. When the coding
 // template already ships opencode (e.g. baked in, or an e2b opencode-based image)
@@ -97,10 +106,15 @@ export async function runOpencodeCoderTool(input: {
   if (!opencodeTool || opencodeTool.id !== "opencode") {
     throw new Error("The opencode_coder tool is not enabled for this agent.");
   }
-  const target = resolveOpencodeTarget({
+  const requestedTarget = resolveOpencodeTarget({
     repositories: input.agentConfig.integrations.github.repositories,
     requestedRepository: typeof args.repository === "string" ? args.repository : undefined,
+    allRepositories: input.agentConfig.integrations.github.allRepositories === true,
   });
+  // Integration-wide (`@github`) targets resolve against the workspace's GitHub connection up
+  // front: a reachable repository behaves exactly like an attached one (authenticated clone,
+  // PR-capable); an unknown one degrades to the public clone path.
+  const target = await materializeOpencodeWorkspaceTarget(input.workspaceId, requestedTarget);
 
   const gatewayApiKey = input.env.vercelAiGatewayApiKey;
   const layout = sandboxLayout(input.workdir);
@@ -419,7 +433,11 @@ export function resolveOpencodeModel(value: unknown): AgentModelId {
 export function resolveOpencodeTarget(input: {
   repositories: AgentGitHubRepositoryConfig[];
   requestedRepository?: string | undefined;
+  // Live `@github` all-repositories scope: a requested owner/repo that isn't attached resolves
+  // via the workspace's GitHub connection (falling back to a public clone if unknown there).
+  allRepositories?: boolean;
 }): OpencodeTarget {
+  const allRepositories = input.allRepositories === true;
   const requested = input.requestedRepository?.trim();
   if (requested) {
     const requestedLower = requested.toLowerCase();
@@ -439,6 +457,9 @@ export function resolveOpencodeTarget(input: {
         return { kind: "attached", repository: attachedByRepositoryName };
       }
 
+      if (allRepositories) {
+        return { kind: "workspace", repositoryFullName: publicRepositoryFullName };
+      }
       return { kind: "public", repositoryFullName: publicRepositoryFullName };
     }
 
@@ -460,8 +481,25 @@ export function resolveOpencodeTarget(input: {
   }
 
   throw new Error(
-    "opencode_coder needs a repository argument when no GitHub repository is attached. Use a public GitHub owner/repo or https://github.com/owner/repo URL.",
+    allRepositories
+      ? "opencode_coder needs the repository argument (owner/repo): this agent has integration-wide GitHub access with no default repository attached."
+      : "opencode_coder needs a repository argument when no GitHub repository is attached. Use a public GitHub owner/repo or https://github.com/owner/repo URL.",
   );
+}
+
+// Resolve a `workspace` target (integration-wide `@github` scope) into a concrete target:
+// attached-shaped when the workspace's GitHub connection can reach the repository (live default
+// branch from the synced resource), public otherwise. Known-but-unusable repositories (e.g.
+// needs-reauth) throw their actionable status errors instead of silently degrading.
+async function materializeOpencodeWorkspaceTarget(
+  workspaceId: string,
+  target: OpencodeTarget,
+): Promise<MaterializedOpencodeTarget> {
+  if (target.kind !== "workspace") return target;
+
+  const resolved = await loadGitHubWorkRepositoryByFullName(workspaceId, target.repositoryFullName);
+  if (resolved) return { kind: "attached", repository: resolved.repository };
+  return { kind: "public", repositoryFullName: target.repositoryFullName };
 }
 
 function resolveSingleAttachedRepositoryByName(

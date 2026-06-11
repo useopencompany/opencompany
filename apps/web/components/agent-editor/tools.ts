@@ -293,8 +293,8 @@ export function buildAgentMentionItems(
     kind: "integration",
     provider: "github",
     label: "github",
-    displayLabel: "GitHub",
-    description: "Workspace GitHub integration.",
+    displayLabel: "GitHub — all repositories",
+    description: "Access every repository the workspace GitHub connection can reach.",
     icon: GitBranch,
   };
   const repositoryItems: AgentIntegration[] = repositories.map((repository) => {

@@ -37,7 +37,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   Fragment,
@@ -100,6 +100,7 @@ import {
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
+  mergeLiveSessionAggregates,
   mergeMessages,
   type RuntimeEvent,
   type RuntimeQuestionItem,
@@ -111,6 +112,7 @@ import {
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { personalPaths } from "@/lib/personal/paths";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import {
   getSlashContext,
@@ -493,17 +495,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     },
   });
   const baseRuntime = useMemo(() => {
-    // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
-    // session-tree rollup isn't reproduced client-side (D2); refreshed on
-    // completion via the effect below.
-    const aggregates = {
-      usage: detail.usage,
-      toolUsage: detail.toolUsage,
-      cost: detail.cost,
-      // Server-sourced like the other aggregates (refreshed on turn completion); the context
-      // gauge in the top bar reads this rather than the cumulative `usage` total.
-      currentContextTokens: detail.currentContextTokens,
-    };
+    // Server aggregates are the floor. The stream may replay historical events, so only usage/cost
+    // events above the loader's high-water mark are layered on top. This gives immediate per-step
+    // model/tool/sandbox/delegated usage without double-counting replayed history.
+    const aggregates = mergeLiveSessionAggregates(
+      {
+        usage: detail.usage,
+        toolUsage: detail.toolUsage,
+        cost: detail.cost,
+        currentContextTokens: detail.currentContextTokens,
+      },
+      streamState.events,
+      detail.latestEventId,
+    );
     // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
     // Stream (`streamState`) is the live overlay. Union-merge the two so the
     // transcript paints instantly from the snapshot AND never drops a durable
@@ -3276,7 +3280,13 @@ function SessionInspector({
   isPending: boolean;
   onAbort: () => void;
 }) {
-  const agentHref = `/company/agents/${session.agentPath ?? session.agentId}`;
+  const surface = useSessionSurface();
+  // The personal surface has a single agent page (no per-agent route), so the agent link
+  // collapses to /personal/agent there.
+  const agentHref =
+    surface === "personal"
+      ? personalPaths.agent
+      : `/company/agents/${session.agentPath ?? session.agentId}`;
 
   return (
     <div className="space-y-8">
@@ -3288,7 +3298,7 @@ function SessionInspector({
         <div className="mt-4 space-y-4">
           <InspectorLink
             label="Session page"
-            href={`/company/session/${session.id}`}
+            href={sessionHref(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
@@ -3537,14 +3547,28 @@ function InspectorRelatedSession({
   );
 }
 
+// Session pages render under both surfaces (/company/session/<id> and /personal/session/<id>);
+// inspector links must stay within whichever surface the user is on.
+function useSessionSurface(): "personal" | "company" {
+  const pathname = usePathname();
+  return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
+}
+
+function sessionHref(surface: "personal" | "company", sessionId: string) {
+  return surface === "personal"
+    ? personalPaths.session(sessionId)
+    : `/company/session/${sessionId}`;
+}
+
 function RelatedSessionLink({
   session,
 }: {
   session: AgentSessionDetailPayload["related"]["children"][number];
 }) {
+  const surface = useSessionSurface();
   return (
     <Link
-      href={`/company/session/${session.id}`}
+      href={sessionHref(surface, session.id)}
       target="_blank"
       rel="noreferrer"
       title={session.title}

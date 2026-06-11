@@ -84,6 +84,13 @@ export type SessionRuntimeState = {
   statusObserved: boolean;
 };
 
+export type SessionAggregateSnapshot = {
+  usage: SessionUsageSummary;
+  toolUsage: SessionToolUsageSummary;
+  cost: SessionCostSummary;
+  currentContextTokens: number;
+};
+
 /**
  * Union-merge a durable server snapshot (the Postgres system-of-record, complete
  * but as-of fetch time) with the live Durable-Stream overlay. The snapshot is the
@@ -136,6 +143,60 @@ export function mergeEvents(snapshot: RuntimeEvent[], overlay: RuntimeEvent[]): 
     if (event.id === null || !seenIds.has(event.id)) merged.push(event);
   }
   return merged;
+}
+
+export function mergeLiveSessionAggregates(
+  snapshot: SessionAggregateSnapshot,
+  overlayEvents: RuntimeEvent[],
+  afterEventId: number,
+): SessionAggregateSnapshot {
+  let usage = snapshot.usage;
+  let toolUsage = snapshot.toolUsage;
+  let cost = snapshot.cost;
+  let currentContextTokens = snapshot.currentContextTokens;
+  let lastUsageEventId = afterEventId;
+
+  for (const event of overlayEvents) {
+    if (typeof event.id !== "number" || event.id <= afterEventId) continue;
+
+    if (event.type === "session.usage") {
+      usage = addUsageSummary(usage, event.payload);
+      cost = addCostSummary(cost, event.payload, "model");
+      if (event.id > lastUsageEventId) {
+        currentContextTokens =
+          readNumber(event.payload.inputTokens) + readNumber(event.payload.outputTokens);
+        lastUsageEventId = event.id;
+      }
+      continue;
+    }
+
+    if (event.type === "session.tool_usage") {
+      cost = addCostSummary(cost, event.payload, "tool");
+      toolUsage = addToolUsageEvent(toolUsage, event.payload);
+      continue;
+    }
+
+    if (event.type === "session.sandbox_usage") {
+      cost = addCostSummary(cost, event.payload, "sandbox");
+      continue;
+    }
+
+    if (event.type === "session.delegated_usage") {
+      const eventUsage = isRecord(event.payload.usage) ? event.payload.usage : {};
+      const eventCost = isRecord(event.payload.cost) ? event.payload.cost : {};
+      const eventToolUsage = isRecord(event.payload.toolUsage) ? event.payload.toolUsage : {};
+      usage = addUsageSummary(usage, eventUsage);
+      cost = addCostRollup(cost, eventCost);
+      toolUsage = addToolUsageRollup(toolUsage, eventToolUsage);
+      if (event.id > lastUsageEventId) {
+        currentContextTokens =
+          readNumber(eventUsage.inputTokens) + readNumber(eventUsage.outputTokens);
+        lastUsageEventId = event.id;
+      }
+    }
+  }
+
+  return { usage, toolUsage, cost, currentContextTokens };
 }
 
 export type RuntimeToolApprovalState = {
@@ -262,38 +323,11 @@ export function applyRuntimeEventToState(
   }
 
   if (event.type === "session.tool_usage") {
-    const provider = readString(event.payload.provider);
-    const operation = readString(event.payload.operation);
-    const costUsdMicros = readNumber(event.payload.costUsdMicros);
-    if (provider && operation) {
-      const key = `${provider}:${operation}`;
-      let matched = false;
-      const byProviderOperation = next.toolUsage.byProviderOperation.map((item) => {
-        if (`${item.provider}:${item.operation}` !== key) return item;
-        matched = true;
-        return {
-          ...item,
-          costUsdMicros: item.costUsdMicros + costUsdMicros,
-          calls: item.calls + 1,
-        };
-      });
-      if (!matched) {
-        byProviderOperation.push({ provider, operation, costUsdMicros, calls: 1 });
-      }
-
-      next = {
-        ...next,
-        cost: addCostSummary(next.cost, event.payload, "tool"),
-        toolUsage: {
-          totalCostUsdMicros: next.toolUsage.totalCostUsdMicros + costUsdMicros,
-          byProviderOperation: byProviderOperation.sort((left, right) =>
-            `${left.provider}:${left.operation}`.localeCompare(
-              `${right.provider}:${right.operation}`,
-            ),
-          ),
-        },
-      };
-    }
+    next = {
+      ...next,
+      cost: addCostSummary(next.cost, event.payload, "tool"),
+      toolUsage: addToolUsageEvent(next.toolUsage, event.payload),
+    };
   }
 
   if (event.type === "session.sandbox_usage") {
@@ -495,6 +529,38 @@ function addCostRollup(
     modelCostUsdMicros: totals.modelCostUsdMicros + readNumber(payload.modelCostUsdMicros),
     toolCostUsdMicros: totals.toolCostUsdMicros + readNumber(payload.toolCostUsdMicros),
     sandboxCostUsdMicros: totals.sandboxCostUsdMicros + readNumber(payload.sandboxCostUsdMicros),
+  };
+}
+
+function addToolUsageEvent(
+  totals: SessionToolUsageSummary,
+  payload: Record<string, unknown>,
+): SessionToolUsageSummary {
+  const provider = readString(payload.provider);
+  const operation = readString(payload.operation);
+  const costUsdMicros = readNumber(payload.costUsdMicros);
+  if (!provider || !operation) return totals;
+
+  const key = `${provider}:${operation}`;
+  let matched = false;
+  const byProviderOperation = totals.byProviderOperation.map((item) => {
+    if (`${item.provider}:${item.operation}` !== key) return item;
+    matched = true;
+    return {
+      ...item,
+      costUsdMicros: item.costUsdMicros + costUsdMicros,
+      calls: item.calls + 1,
+    };
+  });
+  if (!matched) {
+    byProviderOperation.push({ provider, operation, costUsdMicros, calls: 1 });
+  }
+
+  return {
+    totalCostUsdMicros: totals.totalCostUsdMicros + costUsdMicros,
+    byProviderOperation: byProviderOperation.sort((left, right) =>
+      `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
+    ),
   };
 }
 

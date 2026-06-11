@@ -107,12 +107,14 @@ tools:
     prCapable: true
 ```
 
-Attaching a GitHub repository (via `integrations.github.repositories`) is what grants
-repository access — not the `amp` tool. Any agent with an attached repository gets
-repo-scoped `git`/`gh` credentials in the `shell` tool plus a dedicated `gh` tool, and
-can clone on demand into `work/`. `amp` is just one consumer of attached repositories;
-when more than one is attached, pass the target to `amp_coder` via its `repository`
-argument.
+GitHub repository access is derived from body mentions, not the `amp` tool. A
+plain `@github` mention grants live access to any repository the workspace's
+GitHub connection can reach and serializes with
+`integrations.github.allRepositories: true`. Concrete mentions like `@owner/repo`
+or `@github/owner/repo` serialize to `integrations.github.repositories`. Agents
+with GitHub access get a dedicated `gh` tool and can clone on demand into
+`work/`; with live `@github` access, pass an explicit repository (`repository`
+for coding tools, `--repo owner/repo` for `gh` commands).
 
 | ID | What it does |
 | --- | --- |
@@ -153,9 +155,29 @@ agents:
 The body mention is `@agent/<slug>`, where `<slug>` is the agent folder name under `agents/`. During a run, these references expose a delegation tool. The child agent runs in an inspectable child session hidden from sidebar history, and its answer is returned to the parent as a tool result.
 The result also includes `childSessionId`; passing that id back as `sessionId` with a new prompt continues the same delegated child session.
 
+### `integrations.github`
+
+GitHub access is derived from body mentions. A plain `@github` mention enables
+live workspace-wide access:
+
+```yaml
+integrations:
+  github:
+    repositories: []
+    allRepositories: true
+```
+
+`allRepositories: true` is not a snapshot of repository names. At runtime,
+repository-aware coding tools resolve the requested `owner/repo` against the
+workspace's connected GitHub installations. Agents with this access must pass an
+explicit repository, such as the `repository` argument for coding tools or
+`--repo owner/repo` for `gh` commands.
+
 ### `integrations.github.repositories`
 
 A list of workspace-authorized GitHub repositories referenced by the body.
+Both `@owner/repo` and `@github/owner/repo` serialize to the same repository
+object.
 
 ```yaml
 integrations:
