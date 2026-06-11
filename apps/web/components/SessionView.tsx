@@ -2,6 +2,8 @@
 
 import {
   ATTACHMENT_MAX_PER_MESSAGE,
+  ATTACHMENT_TEXT_MAX_BYTES,
+  COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
@@ -149,6 +151,15 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+
+// Wraps an oversized composer paste in a File so it rides the normal attachment pipeline.
+// Numbered against the pending attachments so two pastes in one message don't show as
+// identically-named chips (uniqueness is guaranteed by the attachment id either way).
+export function pastedTextFile(text: string, pending: PendingAttachment[]): File {
+  const count = pending.filter((att) => att.filename.startsWith("pasted-text")).length;
+  const name = count === 0 ? "pasted-text.txt" : `pasted-text-${count + 1}.txt`;
+  return new File([text], name, { type: "text/plain" });
+}
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 // How far from the bottom (in px) before we consider the user "pinned".
@@ -1589,12 +1600,27 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                         const file = item.getAsFile();
                         if (file) files.push(file);
                       }
-                      if (files.length === 0) return;
-                      // Files in the clipboard: take them as attachments and stop the browser
-                      // from also pasting them (e.g. an image) into the textarea. Any text
-                      // portion of a mixed paste still falls through normally.
+                      if (files.length > 0) {
+                        // Files in the clipboard: take them as attachments and stop the browser
+                        // from also pasting them (e.g. an image) into the textarea. Any text
+                        // portion of a mixed paste still falls through normally.
+                        event.preventDefault();
+                        acceptFiles(files);
+                        return;
+                      }
+                      // Oversized plain-text pastes become a .txt attachment instead of dumping
+                      // a wall of text into the composer. Beyond the attachment size cap the
+                      // paste falls through untouched — losing the user's text to a rejection
+                      // toast would be worse than a huge textarea.
+                      const text = event.clipboardData?.getData("text/plain") ?? "";
+                      if (
+                        text.length < COMPOSER_PASTE_ATTACHMENT_MIN_CHARS ||
+                        new Blob([text]).size > ATTACHMENT_TEXT_MAX_BYTES
+                      ) {
+                        return;
+                      }
                       event.preventDefault();
-                      acceptFiles(files);
+                      acceptFiles([pastedTextFile(text, attachments)]);
                     }}
                     placeholder="Ask this agent to do something"
                     role="combobox"
