@@ -13,6 +13,8 @@ export const PERSONAL_BRAIN_SUBDIR = "personal-brain";
 // The shape BrainView consumes. Personal Brain files are local-only, so the GitHub sync fields are
 // inert (synced / null) — BrainView simply never shows a pending-sync state for them.
 export type PersonalBrainFile = {
+  id?: number;
+  repoPath?: string;
   path: string;
   content: string;
   sizeBytes: number;
@@ -75,6 +77,8 @@ export async function loadPersonalBrainFiles(): Promise<PersonalBrainFile[]> {
   return rows
     .filter((row) => row.path.startsWith(prefix))
     .map((row) => ({
+      id: row.id,
+      repoPath: row.path,
       path: row.path.slice(prefix.length),
       content: row.content,
       sizeBytes: row.sizeBytes,

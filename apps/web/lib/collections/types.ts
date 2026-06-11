@@ -83,3 +83,21 @@ export type InboxItemRow = {
   updated_at: string;
   resolved_at: string | null;
 };
+
+export type AgentFileRow = {
+  id: number;
+  workspace_id: string;
+  agent_id: string;
+  path: string;
+  content: string;
+  content_hash: string;
+  size_bytes: number;
+  github_blob_sha: string | null;
+  github_commit_sha: string | null;
+  github_synced_hash: string | null;
+  github_synced_at: string | null;
+  github_sync_status: string;
+  github_sync_error: string | null;
+  created_at: string;
+  updated_at: string;
+};

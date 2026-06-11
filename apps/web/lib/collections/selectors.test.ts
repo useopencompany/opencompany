@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  derivePersonalFilesFromAgentRows,
   derivePersonalSidebarSessions,
   deriveSessionDetailPlaceholder,
 } from "@/lib/collections/selectors";
-import type { AgentRow, AgentSessionRow, SessionStarRow } from "@/lib/collections/types";
+import type {
+  AgentFileRow,
+  AgentRow,
+  AgentSessionRow,
+  SessionStarRow,
+} from "@/lib/collections/types";
 
 function makeSessionRow(overrides: Partial<AgentSessionRow> = {}): AgentSessionRow {
   return {
@@ -48,6 +54,27 @@ function makeAgentRow(overrides: Partial<AgentRow> = {}): AgentRow {
     path: "team/builder",
     ...overrides,
   } as unknown as AgentRow;
+}
+
+function makeAgentFileRow(overrides: Partial<AgentFileRow>): AgentFileRow {
+  return {
+    id: 1,
+    workspace_id: "wks_123",
+    agent_id: "agt_123",
+    path: "agents/personal/personal-brain/a.md",
+    content: "A",
+    content_hash: "hash-a",
+    size_bytes: 1,
+    github_blob_sha: null,
+    github_commit_sha: null,
+    github_synced_hash: null,
+    github_synced_at: null,
+    github_sync_status: "synced",
+    github_sync_error: null,
+    created_at: "2026-06-11T10:00:00.000Z",
+    updated_at: "2026-06-11T10:00:00.000Z",
+    ...overrides,
+  };
 }
 
 describe("deriveSessionDetailPlaceholder", () => {
@@ -164,5 +191,55 @@ describe("derivePersonalSidebarSessions", () => {
     expect(derived).toHaveLength(51);
     expect(derived.map((session) => session.id)).toContain("ses_51");
     expect(derived.map((session) => session.id)).not.toContain("ses_50");
+  });
+});
+
+describe("derivePersonalFilesFromAgentRows", () => {
+  it("filters to the requested bundle prefix and strips it from paths", () => {
+    const prefix = "agents/personal/personal-brain/";
+    const files = derivePersonalFilesFromAgentRows(
+      [
+        makeAgentFileRow({ id: 2, path: "agents/personal/personal-brain/z.md", content: "Z" }),
+        makeAgentFileRow({ id: 1, path: "agents/personal/personal-brain/a.md", content: "A" }),
+        makeAgentFileRow({ id: 3, path: "agents/personal/memory/user.md", content: "Memory" }),
+        makeAgentFileRow({ id: 4, path: "agents/other/personal-brain/a.md", content: "Other" }),
+      ],
+      prefix,
+    );
+
+    expect(files.map((file) => file.path)).toEqual(["a.md", "z.md"]);
+    expect(files).toEqual([
+      expect.objectContaining({ id: 1, repoPath: `${prefix}a.md`, content: "A" }),
+      expect.objectContaining({ id: 2, repoPath: `${prefix}z.md`, content: "Z" }),
+    ]);
+  });
+
+  it("preserves content metadata for memory rows", () => {
+    const prefix = "agents/personal/memory/";
+    const files = derivePersonalFilesFromAgentRows(
+      [
+        makeAgentFileRow({
+          id: 10,
+          path: "agents/personal/memory/people/louis.md",
+          content: "Truth",
+          content_hash: "hash-truth",
+          size_bytes: 5,
+          updated_at: "2026-06-11T11:00:00.000Z",
+        }),
+      ],
+      prefix,
+    );
+
+    expect(files).toEqual([
+      expect.objectContaining({
+        id: 10,
+        repoPath: "agents/personal/memory/people/louis.md",
+        path: "people/louis.md",
+        content: "Truth",
+        contentHash: "hash-truth",
+        sizeBytes: 5,
+        updatedAt: "2026-06-11T11:00:00.000Z",
+      }),
+    ]);
   });
 });

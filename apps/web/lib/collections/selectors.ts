@@ -7,11 +7,13 @@ import type {
 import { isSessionUnseen } from "@/lib/agent-sessions/payload";
 import { type AgentListItemPayload, normalizeAgentConfig } from "@/lib/agents/payload";
 import type {
+  AgentFileRow,
   AgentRow,
   AgentSessionRow,
   InboxItemRow,
   SessionStarRow,
 } from "@/lib/collections/types";
+import type { PersonalBrainFile } from "@/lib/personal/brain";
 
 /**
  * Selectors map raw synced rows (snake_case Postgres columns) into the
@@ -184,6 +186,28 @@ export function deriveVisibleInbox(rows: InboxItemRow[], now: number): InboxItem
       if (ra !== rb) return ra - rb;
       return b.createdAt.localeCompare(a.createdAt);
     });
+}
+
+export function derivePersonalFilesFromAgentRows(
+  rows: AgentFileRow[],
+  prefix: string,
+): PersonalBrainFile[] {
+  return rows
+    .filter((row) => row.path.startsWith(prefix))
+    .map((row) => ({
+      id: row.id,
+      repoPath: row.path,
+      path: row.path.slice(prefix.length),
+      content: row.content,
+      sizeBytes: row.size_bytes,
+      contentHash: row.content_hash,
+      githubCommitSha: row.github_commit_sha,
+      githubSyncedAt: row.github_synced_at,
+      githubSyncStatus: row.github_sync_status,
+      githubSyncError: row.github_sync_error,
+      updatedAt: row.updated_at,
+    }))
+    .sort((a, b) => a.path.localeCompare(b.path));
 }
 
 // Aggregates are a recursive server-side rollup over the session tree (D2) and the

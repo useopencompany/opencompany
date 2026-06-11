@@ -33,13 +33,18 @@ export default function PersonalMemoryView({
   );
 
   const tree = useMemo(() => buildBrainTree(files, query), [files, query]);
+  const effectiveSelectedPath = files.some((file) => file.path === selectedPath)
+    ? selectedPath
+    : (files[0]?.path ?? "");
   const isSearching = Boolean(query.trim());
   // While searching, reveal every folder so matches deep in the tree are visible.
-  const visibleExpandedPaths = useMemo(
-    () => (isSearching ? new Set(collectFolderPaths(tree)) : expandedPaths),
-    [isSearching, tree, expandedPaths],
-  );
-  const selected = files.find((file) => file.path === selectedPath) ?? null;
+  const visibleExpandedPaths = useMemo(() => {
+    if (isSearching) return new Set(collectFolderPaths(tree));
+    const next = new Set(expandedPaths);
+    for (const ancestor of ancestorFolderPaths(effectiveSelectedPath)) next.add(ancestor);
+    return next;
+  }, [isSearching, tree, expandedPaths, effectiveSelectedPath]);
+  const selected = files.find((file) => file.path === effectiveSelectedPath) ?? null;
 
   function toggleFolder(path: string) {
     setExpandedPaths((current) => {
