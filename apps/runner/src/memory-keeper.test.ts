@@ -72,8 +72,13 @@ describe("spawnMemoryKeeperSession", () => {
       role: "user",
       status: "completed",
     });
-    // The kickoff names the parent session so the keeper knows what to fetch_transcript.
-    expect(String(messageInsert?.values.content)).toContain("ses_parent");
+    expect(messageInsert?.values.content).toBe(
+      [
+        "ses_parent",
+        "",
+        "if you had to remember something from ses_parent for the future session to be more useful (focus especially on things the user said) - what would that be? reflect on that, then use the memory tool to properly update your memory.",
+      ].join("\n"),
+    );
 
     expect(inserts.some((i) => i.table === agentSessionEvents)).toBe(true);
 
