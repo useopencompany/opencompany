@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_PANES, parseSplitParam, serializeSplitParam } from "./split-panes";
+import {
+  buildSplitViewHref,
+  MAX_PANES,
+  parseSplitParam,
+  serializeSplitParam,
+} from "./split-panes";
 
 const PRIMARY = "primary-id";
 
@@ -49,5 +54,22 @@ describe("serializeSplitParam", () => {
     const serialized = serializeSplitParam(ids);
     expect(serialized).not.toBeNull();
     expect(parseSplitParam(serialized, PRIMARY)).toEqual(ids);
+  });
+});
+
+describe("buildSplitViewHref", () => {
+  it("swaps the trailing session-id segment of the pathname", () => {
+    expect(buildSplitViewHref("/company/session/old", "new", [])).toBe("/company/session/new");
+  });
+
+  it("works for any session route prefix", () => {
+    expect(buildSplitViewHref("/personal/session/old", "new", [])).toBe("/personal/session/new");
+  });
+
+  it("appends ?split= only when there are secondary panes", () => {
+    expect(buildSplitViewHref("/company/session/p", "p", ["a", "b"])).toBe(
+      "/company/session/p?split=a,b",
+    );
+    expect(buildSplitViewHref("/company/session/p", "p", [])).toBe("/company/session/p");
   });
 });

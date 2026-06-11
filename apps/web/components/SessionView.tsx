@@ -323,6 +323,17 @@ function SessionViewQuery({
             >
               {isRefetching ? "Retrying..." : "Try again"}
             </button>
+            {/* These error branches render no top bar, so a split pane pointing at a bad
+                id would otherwise be uncloseable. */}
+            {paneControls.onClosePane ? (
+              <button
+                type="button"
+                onClick={paneControls.onClosePane}
+                className="mt-4 ml-2 inline-flex h-7 items-center justify-center rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-surface-muted"
+              >
+                Close pane
+              </button>
+            ) : null}
           </div>
         </div>
       </main>
@@ -338,6 +349,15 @@ function SessionViewQuery({
             <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
               This session may have been archived or is no longer available.
             </p>
+            {paneControls.onClosePane ? (
+              <button
+                type="button"
+                onClick={paneControls.onClosePane}
+                className="mt-4 inline-flex h-7 items-center justify-center rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-surface-muted"
+              >
+                Close pane
+              </button>
+            ) : null}
           </div>
         </div>
       </main>

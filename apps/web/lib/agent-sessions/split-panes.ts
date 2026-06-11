@@ -36,3 +36,19 @@ export function parseSplitParam(
 export function serializeSplitParam(secondaryIds: string[]): string | null {
   return secondaryIds.length > 0 ? secondaryIds.join(",") : null;
 }
+
+// Build the href for a given pane layout by swapping the trailing session-id segment of
+// the current pathname and appending `?split=` when there are secondary panes. Deriving
+// the base from the live pathname (instead of hardcoding "/company/session") keeps the
+// helper reusable for the /personal session route.
+export function buildSplitViewHref(
+  pathname: string,
+  primaryId: string,
+  secondaryIds: string[],
+): string {
+  const segments = pathname.split("/");
+  segments[segments.length - 1] = primaryId;
+  const base = segments.join("/");
+  const split = serializeSplitParam(secondaryIds);
+  return split ? `${base}?split=${split}` : base;
+}

@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Tailwind's automatic content detection stops at this app's directory; the shared
+   @opencompany/ui components imported here live outside it, so their class names must
+   be scanned explicitly. */
+@source "../../../packages/ui/src/components/resizable.tsx";
+
 @theme {
   --color-canvas: #f7f7f5;
   --color-sidebar: #f1f1ef;
