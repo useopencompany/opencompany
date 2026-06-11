@@ -17,7 +17,7 @@ import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { personalPaths } from "@/lib/personal/paths";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
-const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+const DEFAULT_MODEL_ID: AgentModelId = "moonshotai/kimi-k2.6";
 
 // The /personal default view: the inbox attention-cards prototype stacked above a hero composer
 // locked to the single personal agent (no agent picker). On submit it swaps to an optimistic

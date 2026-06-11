@@ -1044,6 +1044,83 @@ describe("buildRuntimeToolCallsForMessage", () => {
     ]);
   });
 
+  it("attaches nested subagent progress to the parent tool call", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_subagent",
+          name: "run_subagent",
+          input: { description: "Research checkout options", prompt: "Find sources" },
+        }),
+        {
+          ...event(null, "subagent.progress", {
+            messageId: "msg_assistant",
+            toolCallId: "call_subagent",
+            label: "Research checkout options",
+            kind: "tool-call",
+            tool: {
+              name: "exa_search",
+              toolCallId: "inner_1",
+              status: "running",
+              inputPreview: '{"query":"checkout options"}',
+            },
+          }),
+          messageId: "msg_assistant",
+        },
+        {
+          ...event(null, "subagent.progress", {
+            messageId: "msg_assistant",
+            toolCallId: "call_subagent",
+            label: "Research checkout options",
+            kind: "tool-result",
+            tool: {
+              name: "exa_search",
+              toolCallId: "inner_1",
+              status: "completed",
+              outputPreview: "3 results",
+            },
+          }),
+          messageId: "msg_assistant",
+        },
+        {
+          ...event(null, "subagent.progress", {
+            messageId: "msg_assistant",
+            toolCallId: "call_subagent",
+            label: "Research checkout options",
+            kind: "text-delta",
+            delta: "Stripe Checkout is the best fit.",
+          }),
+          messageId: "msg_assistant",
+        },
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls).toMatchObject([
+      {
+        id: "call_subagent",
+        name: "run_subagent",
+        label: "Running subagent: Research checkout options",
+        activityPreview: "Stripe Checkout is the best fit.",
+        subagent: {
+          label: "Research checkout options",
+          textPreview: "Stripe Checkout is the best fit.",
+          toolLines: [
+            {
+              id: "inner_1",
+              name: "exa_search",
+              label: "Web search",
+              status: "completed",
+              inputPreview: '{"query":"checkout options"}',
+              outputPreview: "3 results",
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   it("marks write_file calls that update brain paths", () => {
     const calls = buildRuntimeToolCallsForMessage(
       [
@@ -1221,6 +1298,9 @@ describe("describeToolCall", () => {
     expect(describeToolCall("shell", { command: "ls -la" })).toBe("Running ls -la");
     expect(describeToolCall("delegate_to_agent", { agent: "research" })).toBe(
       "Delegating to research",
+    );
+    expect(describeToolCall("run_subagent", { description: "research checkout options" })).toBe(
+      "Running subagent: research checkout options",
     );
     expect(describeToolCall("memory", { args: 'query "acme blockers" --limit 5' })).toBe(
       "Looking in memory for “acme blockers”",

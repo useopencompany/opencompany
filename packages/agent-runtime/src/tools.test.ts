@@ -146,6 +146,22 @@ describe("AGENT_TOOL_CATALOG", () => {
   });
 });
 
+describe("run_subagent runtime tool", () => {
+  it("is always-on, directly callable, and documented in the runtime registry", () => {
+    const definition = getRuntimeToolDefinition("run_subagent");
+
+    expect(definition).toMatchObject({
+      name: "run_subagent",
+      kind: "internal",
+    });
+    expect(definition?.configToolId).toBeUndefined();
+    expect(partitionRuntimeToolNames(["run_subagent"] as RuntimeToolName[])).toEqual({
+      direct: ["run_subagent"],
+      deferred: [],
+    });
+  });
+});
+
 describe("runtime tool definitions", () => {
   it("lets delegate_to_agent continue prior child sessions by session id", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("delegate_to_agent");

@@ -31,6 +31,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function writtenSandboxFiles(sandbox: ReturnType<typeof createSandbox>) {
+  expect(sandbox.files.write).toHaveBeenCalledTimes(1);
+  expect(sandbox.files.write).toHaveBeenCalledWith(expect.any(Array), { user: "user" });
+  return sandbox.files.write.mock.calls[0]?.[0] as Array<{ path: string; data: string }>;
+}
+
 describe("materializeAgentBundleForSession", () => {
   it("mounts only files under the current agent bundle and preserves relative structure", async () => {
     const db = createAgentBundleDb({
@@ -72,17 +78,17 @@ describe("materializeAgentBundleForSession", () => {
       workdir: "/home/user/workspace",
     });
 
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/agent/memory.md",
-      "Sales memory",
+    const writes = writtenSandboxFiles(sandbox);
+    expect(writes).toEqual(
+      expect.arrayContaining([
+        { path: "/home/user/workspace/agent/memory.md", data: "Sales memory" },
+        { path: "/home/user/workspace/agent/playbooks/discovery.md", data: "Discovery" },
+      ]),
     );
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/agent/playbooks/discovery.md",
-      "Discovery",
-    );
-    expect(sandbox.files.write).not.toHaveBeenCalledWith(
-      "/home/user/workspace/agent/memory.md",
-      "Support memory",
+    expect(writes).not.toEqual(
+      expect.arrayContaining([
+        { path: "/home/user/workspace/agent/memory.md", data: "Support memory" },
+      ]),
     );
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
@@ -100,6 +106,16 @@ describe("materializeAgentBundleForSession", () => {
         }),
       ]),
     );
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toBe(
+      "rm -rf '/home/user/workspace/agent' && mkdir -p '/home/user/workspace/agent'",
+    );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "rm -rf '/home/user/workspace/agent' && mkdir -p '/home/user/workspace/agent'",
+      { user: "user", timeoutMs: 30_000 },
+    );
+    expect(commands.filter((command) => command.startsWith("mkdir -p "))).toHaveLength(0);
   });
 
   it("promotes memory/ and personal-brain/ to top-level roots for personal sessions", async () => {
@@ -141,15 +157,13 @@ describe("materializeAgentBundleForSession", () => {
     });
 
     // memory/ and personal-brain/ land at the top level; everything else stays under agent/.
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/memory/notes.md",
-      "Memory notes",
+    expect(writtenSandboxFiles(sandbox)).toEqual(
+      expect.arrayContaining([
+        { path: "/home/user/workspace/memory/notes.md", data: "Memory notes" },
+        { path: "/home/user/workspace/personal-brain/idea.md", data: "An idea" },
+        { path: "/home/user/workspace/agent/soul.md", data: "Soul" },
+      ]),
     );
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/personal-brain/idea.md",
-      "An idea",
-    );
-    expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/workspace/agent/soul.md", "Soul");
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -165,6 +179,14 @@ describe("materializeAgentBundleForSession", () => {
           path: "agents/personal-abc/soul.md",
         }),
       ]),
+    );
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands).toEqual([
+      "rm -rf '/home/user/workspace/agent' '/home/user/workspace/memory' '/home/user/workspace/personal-brain' && mkdir -p '/home/user/workspace/agent' '/home/user/workspace/memory' '/home/user/workspace/personal-brain'",
+    ]);
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "rm -rf '/home/user/workspace/agent' '/home/user/workspace/memory' '/home/user/workspace/personal-brain' && mkdir -p '/home/user/workspace/agent' '/home/user/workspace/memory' '/home/user/workspace/personal-brain'",
+      { user: "user", timeoutMs: 30_000 },
     );
   });
 
@@ -186,11 +208,13 @@ describe("materializeAgentBundleForSession", () => {
       workdir: "/home/user/workspace",
     });
 
-    expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/workspace/agent/user.md", "");
+    const writes = writtenSandboxFiles(sandbox);
+    expect(writes).toEqual(
+      expect.arrayContaining([{ path: "/home/user/workspace/agent/user.md", data: "" }]),
+    );
     // memory.md is no longer auto-created — durable facts live in structured memory.
-    expect(sandbox.files.write).not.toHaveBeenCalledWith(
-      "/home/user/workspace/agent/memory.md",
-      "",
+    expect(writes).not.toEqual(
+      expect.arrayContaining([{ path: "/home/user/workspace/agent/memory.md", data: "" }]),
     );
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
@@ -242,21 +266,18 @@ describe("materializeAgentBundleForSession", () => {
       workdir: "/home/user/workspace",
     });
 
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/agent/memory.md",
-      "Sales memory",
+    const writes = writtenSandboxFiles(sandbox);
+    expect(writes).toEqual(
+      expect.arrayContaining([
+        { path: "/home/user/workspace/agent/memory.md", data: "Sales memory" },
+        { path: "/home/user/workspace/agent/zz-078.md", data: "File 78" },
+      ]),
     );
-    expect(sandbox.files.write).not.toHaveBeenCalledWith(
-      "/home/user/workspace/agent/playbooks/oversized.md",
-      expect.any(String),
-    );
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/workspace/agent/zz-078.md",
-      "File 78",
-    );
-    expect(sandbox.files.write).not.toHaveBeenCalledWith(
-      "/home/user/workspace/agent/zz-079.md",
-      "File 79",
+    expect(writes).not.toEqual(
+      expect.arrayContaining([
+        { path: "/home/user/workspace/agent/playbooks/oversized.md", data: expect.any(String) },
+        { path: "/home/user/workspace/agent/zz-079.md", data: "File 79" },
+      ]),
     );
   });
 });

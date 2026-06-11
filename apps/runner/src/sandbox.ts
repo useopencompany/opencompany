@@ -9,6 +9,10 @@ import { Sandbox } from "e2b";
 import { gitHubPermissionErrorHint } from "./github";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
+export type SandboxTextFile = {
+  path: string;
+  content: string | Uint8Array;
+};
 export type SandboxLatencyObservation = {
   operation: "create" | "connect";
   outcome: "success" | "not_found" | "error";
@@ -230,8 +234,10 @@ export async function prepareWorkspace(input: {
   workdir: string;
   agentFile: string;
   personal?: boolean;
+  configureGitCredentialHelper?: boolean;
 }) {
   const layout = sandboxLayout(input.workdir, input.personal ?? false);
+  const configureGitCredentialHelper = input.configureGitCredentialHelper ?? true;
 
   // Personal sessions get memory/ + personal-brain/ at the top level instead of a company brain/
   // mount; agent/ is still created for the agent's private profile/soul/skill authoring.
@@ -242,39 +248,28 @@ export async function prepareWorkspace(input: {
   await runSandboxPreparationCommand({
     sandbox: input.sandbox,
     stage: "create_workspace_layout",
-    commandName: "mkdir_chown_metadata",
+    commandName: "mkdir_git_init_chown_metadata",
     command: [
       `mkdir -p ${layoutDirs
         .filter((dir): dir is string => Boolean(dir))
         .map(shellQuote)
         .join(" ")} ${shellQuote(layout.metadataRoot)}`,
+      `git -C ${shellQuote(layout.workRoot)} init -q`,
       `chown -R ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(layout.workspaceRoot)}`,
       `chown root:root ${shellQuote(layout.metadataRoot)}`,
       `chmod 700 ${shellQuote(layout.metadataRoot)}`,
     ].join(" && "),
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   });
-  // The session starts with an empty work/ directory. Repositories are cloned on
-  // demand by the agent (git/gh in the shell) or by amp; nothing is cloned here.
   await runSandboxPreparationCommand({
     sandbox: input.sandbox,
-    stage: "initialize_empty_work_repository",
-    commandName: "git_init",
-    command: `git -C ${shellQuote(layout.workRoot)} init -q`,
-    options: {
-      user: SANDBOX_USER,
-      timeoutMs: 30_000,
-    },
-  });
-  await input.sandbox.files.write(layout.agentFile, input.agentFile, {
-    user: SANDBOX_ROOT_USER,
-    requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
-  });
-  await runSandboxPreparationCommand({
-    sandbox: input.sandbox,
-    stage: "secure_agent_file",
-    commandName: "chmod_agent_file",
-    command: `chown root:root ${shellQuote(layout.agentFile)} && chmod 600 ${shellQuote(layout.agentFile)}`,
+    stage: "write_agent_file",
+    commandName: "write_agent_file",
+    command: [
+      `printf %s ${shellQuote(Buffer.from(input.agentFile, "utf8").toString("base64"))} | base64 -d > ${shellQuote(layout.agentFile)}`,
+      `chown root:root ${shellQuote(layout.agentFile)}`,
+      `chmod 600 ${shellQuote(layout.agentFile)}`,
+    ].join(" && "),
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   });
   // Wire git to GitHub's credential helper so plain `git push` / `git clone https://github.com/...`
@@ -282,16 +277,43 @@ export async function prepareWorkspace(input: {
   // failing with "could not read Username for github.com". Equivalent to `gh auth setup-git` but set
   // directly so it does not require gh to be authenticated at prepare time. Written to the `user`
   // global gitconfig — the same user the shell tool runs as.
-  await runSandboxPreparationCommand({
-    sandbox: input.sandbox,
-    stage: "configure_git_credential_helper",
-    commandName: "git_config_credential_helper",
-    command: [
-      `git config --global --replace-all ${shellQuote("credential.https://github.com.helper")} ${shellQuote("")}`,
-      `git config --global --add ${shellQuote("credential.https://github.com.helper")} ${shellQuote("!gh auth git-credential")}`,
-    ].join(" && "),
-    options: { user: SANDBOX_USER, timeoutMs: 30_000 },
-  });
+  if (configureGitCredentialHelper) {
+    await runSandboxPreparationCommand({
+      sandbox: input.sandbox,
+      stage: "configure_git_credential_helper",
+      commandName: "git_config_credential_helper",
+      command: [
+        `git config --global --replace-all ${shellQuote("credential.https://github.com.helper")} ${shellQuote("")}`,
+        `git config --global --add ${shellQuote("credential.https://github.com.helper")} ${shellQuote("!gh auth git-credential")}`,
+      ].join(" && "),
+      options: { user: SANDBOX_USER, timeoutMs: 30_000 },
+    });
+  }
+}
+
+export async function writeSandboxTextFiles(input: {
+  sandbox: SandboxHandle;
+  files: SandboxTextFile[];
+  user?: string | undefined;
+}) {
+  if (input.files.length === 0) return;
+
+  const files = input.files.map((file) => ({
+    path: file.path,
+    data: sandboxFileContent(file.content),
+  }));
+  if (input.user) {
+    await input.sandbox.files.write(files, { user: input.user });
+    return;
+  }
+  await input.sandbox.files.write(files);
+}
+
+function sandboxFileContent(content: SandboxTextFile["content"]) {
+  if (typeof content === "string") return content;
+  const copy = new Uint8Array(content.byteLength);
+  copy.set(content);
+  return copy.buffer;
 }
 
 async function runSandboxPreparationCommand(input: {
