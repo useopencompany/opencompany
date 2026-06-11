@@ -59,7 +59,8 @@ export function SessionPanel({
   const session = panelSession(panel);
   const isLastPane = countPanes(layout) === 1;
   const flashing = flashPanelId === panel.id;
-  const hoverZone = dragging && hoverPreview?.dragVersion === dragVersion ? hoverPreview.zone : null;
+  const hoverZone =
+    dragging && hoverPreview?.dragVersion === dragVersion ? hoverPreview.zone : null;
 
   // Nearest-edge detection from the pointer position (VS Code style): the whole
   // pane is one drop surface, split toward whichever edge the cursor is closest
