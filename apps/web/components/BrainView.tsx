@@ -166,16 +166,18 @@ export default function BrainView({
   actions = WORKSPACE_BRAIN_ACTIONS,
   title = "Project brain",
   emptyHint = "Create a Brain file to start adding long-lived context.",
+  refreshOnAction = true,
 }: {
   files: BrainFile[];
   initialPath?: string;
   // When set (e.g. "/company/brain"), the open file/folder is reflected in the URL bar so it can be
-  // linked to and restored on reload. Left undefined on surfaces that aren't URL-addressable
-  // (the personal Brain), where syncing would otherwise hijack their route.
+  // linked to and restored on reload. Leave undefined on surfaces that aren't URL-addressable, where
+  // syncing would otherwise hijack their route.
   urlBasePath?: string;
   actions?: BrainActions;
   title?: string;
   emptyHint?: string;
+  refreshOnAction?: boolean;
 }) {
   const {
     createFile: createBrainFile,
@@ -241,6 +243,37 @@ export default function BrainView({
   );
   const dirty = selected ? draftContent !== selected.content : false;
   const markdownFile = selected ? isMarkdownPath(selected.path) : false;
+
+  // Reflects the open file/folder in the URL bar so it can be linked to (and restored on
+  // reload) like the agent editor. Uses history.replaceState rather than router.replace so a
+  // plain selection doesn't trigger a server roundtrip — every brain file is already loaded.
+  const syncBrainUrl = useCallback(
+    (path: string) => {
+      if (!urlBasePath) return;
+      const next = brainUrlForPath(urlBasePath, path);
+      // Compare against the live address bar, not a cached value: router.refresh() can reset the URL
+      // to the base route behind our back, so a cached "already synced" guard would wrongly skip
+      // re-applying the deep link. Brain paths are restricted to [A-Za-z0-9._/-], so the encoded form
+      // matches window.location.pathname verbatim.
+      if (window.location.pathname === next) return;
+      window.history.replaceState(window.history.state, "", next);
+    },
+    [urlBasePath],
+  );
+
+  const refreshAfterAction = useCallback(() => {
+    if (refreshOnAction) router.refresh();
+  }, [refreshOnAction, router]);
+
+  const updateSelectedPath = useCallback(
+    (path: string) => {
+      selectedPathRef.current = path;
+      setSelectedPath(path);
+      if (path) setFocusedPath(path);
+      syncBrainUrl(path);
+    },
+    [syncBrainUrl],
+  );
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;
@@ -430,7 +463,7 @@ export default function BrainView({
             expandAncestors(updateResult.path);
           }
           setAutoSaveState("idle");
-          router.refresh();
+          refreshAfterAction();
         }
 
         const pendingSave = pendingSavesRef.current.entries().next();
@@ -446,7 +479,7 @@ export default function BrainView({
 
       return allSaved;
     },
-    [expandAncestors, router],
+    [expandAncestors, refreshAfterAction, updateBrainFile, updateSelectedPath],
   );
 
   useEffect(() => {
@@ -464,27 +497,6 @@ export default function BrainView({
   function updateDraftContent(content: string) {
     if (autoSaveState === "error") setAutoSaveState("idle");
     setDraftContent(content);
-  }
-
-  // Reflects the open file/folder in the URL bar so it can be linked to (and restored on
-  // reload) like the agent editor. Uses history.replaceState rather than router.replace so a
-  // plain selection doesn't trigger a server roundtrip — every brain file is already loaded.
-  function syncBrainUrl(path: string) {
-    if (!urlBasePath) return;
-    const next = brainUrlForPath(urlBasePath, path);
-    // Compare against the live address bar, not a cached value: router.refresh() can reset the URL
-    // to the base route behind our back, so a cached "already synced" guard would wrongly skip
-    // re-applying the deep link. Brain paths are restricted to [A-Za-z0-9._/-], so the encoded form
-    // matches window.location.pathname verbatim.
-    if (window.location.pathname === next) return;
-    window.history.replaceState(window.history.state, "", next);
-  }
-
-  function updateSelectedPath(path: string) {
-    selectedPathRef.current = path;
-    setSelectedPath(path);
-    if (path) setFocusedPath(path);
-    syncBrainUrl(path);
   }
 
   function beginOptimisticMutation() {
@@ -661,7 +673,7 @@ export default function BrainView({
           pendingCreatesRef.current.set(pendingKey, pendingCreate.promise);
         }
         pendingCreate.resolve(result.path);
-        router.refresh();
+        refreshAfterAction();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         cancelRenameFile();
@@ -727,7 +739,7 @@ export default function BrainView({
           }
         }
         pendingCreate.resolve(resolvedFolder);
-        router.refresh();
+        refreshAfterAction();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         cancelRenameFile();
@@ -836,7 +848,7 @@ export default function BrainView({
           setSelectedContextPath(parentFolderPath(result.path));
           expandAncestors(result.path);
         }
-        router.refresh();
+        refreshAfterAction();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         handleBrainActionError(error, "Rename failed.");
@@ -959,7 +971,7 @@ export default function BrainView({
             expandAncestors(result.path);
           }
         }
-        router.refresh();
+        refreshAfterAction();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         handleBrainActionError(error, "Move failed.");
@@ -1053,7 +1065,7 @@ export default function BrainView({
           setError(result.error);
           return;
         }
-        router.refresh();
+        refreshAfterAction();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         deletedPathsRef.current.delete(file.path);
@@ -1095,7 +1107,7 @@ export default function BrainView({
           setError(result.error);
           return;
         }
-        router.refresh();
+        refreshAfterAction();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         for (const file of deletedFiles) deletedPathsRef.current.delete(file.path);

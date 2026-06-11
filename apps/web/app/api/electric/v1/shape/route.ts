@@ -1,4 +1,10 @@
+import { agentBundleDir } from "@opencompany/agent-runtime";
+import { getDb } from "@opencompany/db/client";
+import { agents } from "@opencompany/db/schema";
+import { and, eq } from "drizzle-orm";
 import { currentWorkspace } from "@/lib/auth";
+import { personalBrainPrefix } from "@/lib/personal/brain";
+import { personalMemoryPrefix } from "@/lib/personal/memory";
 
 /**
  * Auth proxy in front of the ElectricSQL sync service.
@@ -23,7 +29,10 @@ type ShapeScope = {
   where: (ctx: {
     workspaceId: string;
     userId: string;
-  }) => { clause: string; params: string[] } | null;
+  }) =>
+    | { clause: string; params: string[] }
+    | null
+    | Promise<{ clause: string; params: string[] } | null>;
 };
 
 // Allow-list: maps the client's requested table to its trusted server-side scope.
@@ -58,6 +67,50 @@ const SHAPE_SCOPES: Record<string, ShapeScope> = {
       params: [workspaceId, userId],
     }),
   },
+  personal_agent_files: {
+    table: "agent_files",
+    columns: [
+      "id",
+      "workspace_id",
+      "agent_id",
+      "path",
+      "content",
+      "content_hash",
+      "size_bytes",
+      "github_blob_sha",
+      "github_commit_sha",
+      "github_synced_hash",
+      "github_synced_at",
+      "github_sync_status",
+      "github_sync_error",
+      "created_at",
+      "updated_at",
+    ],
+    where: async ({ workspaceId, userId }) => {
+      const [agent] = await getDb()
+        .select({ id: agents.id, path: agents.path })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.workspaceId, workspaceId),
+            eq(agents.userId, userId),
+            eq(agents.isDefault, true),
+          ),
+        )
+        .limit(1);
+      if (!agent?.path) return null;
+      const bundleDir = agentBundleDir(agent.path);
+      return {
+        clause: `"workspace_id" = $1 AND "agent_id" = $2 AND ("path" LIKE $3 OR "path" LIKE $4)`,
+        params: [
+          workspaceId,
+          agent.id,
+          `${personalBrainPrefix(bundleDir)}%`,
+          `${personalMemoryPrefix(bundleDir)}%`,
+        ],
+      };
+    },
+  },
 };
 
 function electricBaseUrl(): string | null {
@@ -83,7 +136,7 @@ export async function GET(request: Request): Promise<Response> {
     return new Response("Unknown or unauthorized shape.", { status: 403 });
   }
 
-  const resolved = scope.where({
+  const resolved = await scope.where({
     workspaceId: workspace.id,
     userId: user.id,
   });

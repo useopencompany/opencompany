@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
-import PersonalMemoryView from "@/components/PersonalMemoryView";
+import PersonalMemoryLiveView from "@/components/personal/PersonalMemoryLiveView";
 import { currentWorkspace } from "@/lib/auth";
 import { isProMode } from "@/lib/flags/proMode";
+import { requirePersonalAgentRef } from "@/lib/personal/brain";
 import { loadPersonalMemoryFiles } from "@/lib/personal/memory";
 import { personalPaths } from "@/lib/personal/paths";
 
@@ -14,7 +15,7 @@ export default async function PersonalMemoryPage() {
     redirect(personalPaths.agent);
   }
 
-  const files = await loadPersonalMemoryFiles();
+  const [files, ref] = await Promise.all([loadPersonalMemoryFiles(), requirePersonalAgentRef()]);
 
-  return <PersonalMemoryView files={files} />;
+  return <PersonalMemoryLiveView files={files} bundleDir={ref.bundleDir} />;
 }

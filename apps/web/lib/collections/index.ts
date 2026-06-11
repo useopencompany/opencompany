@@ -2,12 +2,18 @@ import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/action
 import { deleteAgent } from "@/lib/agents/actions";
 import { createElectricCollection } from "@/lib/collections/electric";
 import type {
+  AgentFileRow,
   AgentRow,
   AgentSessionRow,
   InboxItemRow,
   SessionStarRow,
 } from "@/lib/collections/types";
 import { completeInboxItem, dismissInboxItem, snoozeInboxItem } from "@/lib/inbox/actions";
+import {
+  createPersonalBrainFileFromCollection,
+  deletePersonalBrainFilesFromCollection,
+  updatePersonalBrainFilesFromCollection,
+} from "@/lib/personal/brain-actions";
 
 /**
  * All client collections for a workspace. Built by a factory (not module
@@ -101,7 +107,43 @@ export function createCollections(workspaceId: string) {
     },
   });
 
-  return { workspaceId, agents, agentSessions, sessionStars, inboxItems };
+  const personalAgentFiles = createElectricCollection<AgentFileRow>({
+    id: `personal_agent_files:${workspaceId}`,
+    table: "personal_agent_files",
+    getKey: (row) => row.id,
+    onInsert: async ({ transaction }) => {
+      const mutation = transaction.mutations[0];
+      if (!mutation) throw new Error("Personal Brain insert had no row.");
+      const row = mutation.modified as AgentFileRow;
+      const result = await createPersonalBrainFileFromCollection({
+        path: row.path,
+        content: row.content,
+      });
+      if (!result.ok) throw new Error(result.error);
+      return { txid: result.txid };
+    },
+    onUpdate: async ({ transaction }) => {
+      const updates = transaction.mutations.map((mutation) => {
+        const row = mutation.modified as AgentFileRow;
+        return {
+          id: Number(mutation.key),
+          path: row.path,
+          content: row.content,
+        };
+      });
+      const result = await updatePersonalBrainFilesFromCollection(updates);
+      if (!result.ok) throw new Error(result.error);
+      return { txid: result.txid };
+    },
+    onDelete: async ({ transaction }) => {
+      const ids = transaction.mutations.map((mutation) => Number(mutation.key));
+      const result = await deletePersonalBrainFilesFromCollection(ids);
+      if (!result.ok) throw new Error(result.error);
+      return { txid: result.txid };
+    },
+  });
+
+  return { workspaceId, agents, agentSessions, sessionStars, inboxItems, personalAgentFiles };
 }
 
 export type Collections = ReturnType<typeof createCollections>;

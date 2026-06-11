@@ -1,14 +1,6 @@
-import BrainView from "@/components/BrainView";
+import PersonalBrainLiveView from "@/components/personal/PersonalBrainLiveView";
 import { brainInitialPathFromSegments } from "@/lib/brain/paths";
-import { loadPersonalBrainFiles } from "@/lib/personal/brain";
-import {
-  createPersonalBrainFile,
-  deletePersonalBrainFile,
-  deletePersonalBrainFolder,
-  renamePersonalBrainFile,
-  renamePersonalBrainFolder,
-  updatePersonalBrainFile,
-} from "@/lib/personal/brain-actions";
+import { loadPersonalBrainFiles, requirePersonalAgentRef } from "@/lib/personal/brain";
 import { personalPaths } from "@/lib/personal/paths";
 
 // The personal agent's Personal Brain: the same workspace-Brain UX, scoped to the personal agent's
@@ -22,23 +14,14 @@ export default async function PersonalBrainPage({
 }) {
   const { path } = await params;
   const initialPath = brainInitialPathFromSegments(path);
-  const files = await loadPersonalBrainFiles();
+  const [files, ref] = await Promise.all([loadPersonalBrainFiles(), requirePersonalAgentRef()]);
 
   return (
-    <BrainView
+    <PersonalBrainLiveView
       files={files}
+      bundleDir={ref.bundleDir}
       initialPath={initialPath}
       urlBasePath={personalPaths.brain}
-      title="Personal brain"
-      emptyHint="Create a Personal Brain note to start saving your private knowledge."
-      actions={{
-        createFile: createPersonalBrainFile,
-        updateFile: updatePersonalBrainFile,
-        renameFile: renamePersonalBrainFile,
-        renameFolder: renamePersonalBrainFolder,
-        deleteFile: deletePersonalBrainFile,
-        deleteFolder: deletePersonalBrainFolder,
-      }}
     />
   );
 }

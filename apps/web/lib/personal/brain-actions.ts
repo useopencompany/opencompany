@@ -2,10 +2,11 @@
 
 import { getDb } from "@opencompany/db/client";
 import { agentFiles } from "@opencompany/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { isBrainTextFile, MAX_BRAIN_FILE_BYTES, normalizeBrainPath } from "@/lib/brain/paths";
+import { batchWithTxid } from "@/lib/db/txid";
 import {
   personalBrainPrefix,
   personalBrainRepoPath,
@@ -17,6 +18,13 @@ import {
 // LOCAL-ONLY — like the personal agent itself, they are never enqueued to the workspace sync outbox
 // and never projected to GitHub (githubSyncStatus stays "synced", nothing to sync).
 type BrainActionResult = { ok: true; path: string } | { ok: false; error: string };
+type BrainCollectionActionResult = { ok: true; txid: number } | { ok: false; error: string };
+
+export type PersonalBrainCollectionUpsert = {
+  id?: number;
+  path: string;
+  content: string;
+};
 
 function normalizeFolderPath(path: string) {
   return normalizeBrainPath(`${path.replace(/\/+$/g, "")}/`, { allowFolder: true }).replace(
@@ -249,5 +257,193 @@ export async function deletePersonalBrainFolder(path: string): Promise<BrainActi
     return { ok: true, path: folderPath };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Delete failed." };
+  }
+}
+
+export async function createPersonalBrainFileFromCollection(
+  input: PersonalBrainCollectionUpsert,
+): Promise<BrainCollectionActionResult> {
+  try {
+    const ref = await requirePersonalAgentRef();
+    const file = validatePersonalBrainWrite(ref.bundleDir, input.path, input.content);
+    const [existing] = await getDb()
+      .select({ id: agentFiles.id })
+      .from(agentFiles)
+      .where(and(eq(agentFiles.workspaceId, ref.workspaceId), eq(agentFiles.path, file.repoPath)))
+      .limit(1);
+    if (existing) {
+      return { ok: false, error: "A Personal Brain file already exists at this path." };
+    }
+
+    const now = new Date();
+    const txid = await batchWithTxid(
+      getDb().insert(agentFiles).values({
+        workspaceId: ref.workspaceId,
+        agentId: ref.agentId,
+        path: file.repoPath,
+        content: input.content,
+        contentHash: file.contentHash,
+        sizeBytes: file.sizeBytes,
+        githubSyncStatus: "synced",
+        githubSyncError: null,
+        updatedAt: now,
+      }),
+    );
+    return { ok: true, txid };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Create failed." };
+  }
+}
+
+export async function updatePersonalBrainFilesFromCollection(
+  inputs: PersonalBrainCollectionUpsert[],
+): Promise<BrainCollectionActionResult> {
+  try {
+    if (inputs.length === 0) return { ok: false, error: "No Personal Brain files to update." };
+    const ref = await requirePersonalAgentRef();
+    const db = getDb();
+    const prefix = personalBrainPrefix(ref.bundleDir);
+    const normalized = inputs.map((input) => ({
+      ...validatePersonalBrainWrite(ref.bundleDir, input.path, input.content),
+      id: requirePositiveRowId(input.id),
+      content: input.content,
+    }));
+    ensureUniqueTargets(normalized.map((file) => file.repoPath));
+
+    const ids = normalized.map((file) => file.id);
+    const rows = await db
+      .select({ id: agentFiles.id, path: agentFiles.path })
+      .from(agentFiles)
+      .where(
+        and(
+          eq(agentFiles.workspaceId, ref.workspaceId),
+          eq(agentFiles.agentId, ref.agentId),
+          inArray(agentFiles.id, ids),
+        ),
+      );
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
+    for (const file of normalized) {
+      const row = rowsById.get(file.id);
+      if (!row || !row.path.startsWith(prefix)) {
+        return { ok: false, error: "Personal Brain file not found." };
+      }
+      const [collision] = await db
+        .select({ id: agentFiles.id })
+        .from(agentFiles)
+        .where(
+          and(
+            eq(agentFiles.workspaceId, ref.workspaceId),
+            eq(agentFiles.path, file.repoPath),
+            ne(agentFiles.id, file.id),
+          ),
+        )
+        .limit(1);
+      if (collision && !ids.includes(collision.id)) {
+        return { ok: false, error: "A Personal Brain file already exists at that path." };
+      }
+    }
+
+    const now = new Date();
+    const statements = normalized.map((file) =>
+      db
+        .update(agentFiles)
+        .set({
+          path: file.repoPath,
+          content: file.content,
+          contentHash: file.contentHash,
+          sizeBytes: file.sizeBytes,
+          githubSyncStatus: "synced",
+          githubSyncError: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(agentFiles.workspaceId, ref.workspaceId),
+            eq(agentFiles.agentId, ref.agentId),
+            eq(agentFiles.id, file.id),
+          ),
+        ),
+    );
+    const first = statements[0];
+    if (!first) return { ok: false, error: "No Personal Brain files to update." };
+    const txid = await batchWithTxid(first, ...statements.slice(1));
+    return { ok: true, txid };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Save failed." };
+  }
+}
+
+export async function deletePersonalBrainFilesFromCollection(
+  ids: number[],
+): Promise<BrainCollectionActionResult> {
+  try {
+    const normalizedIds = [...new Set(ids.map(requirePositiveRowId))];
+    if (normalizedIds.length === 0) {
+      return { ok: false, error: "No Personal Brain files to delete." };
+    }
+    const ref = await requirePersonalAgentRef();
+    const prefix = personalBrainPrefix(ref.bundleDir);
+    const db = getDb();
+    const rows = await db
+      .select({ id: agentFiles.id, path: agentFiles.path })
+      .from(agentFiles)
+      .where(
+        and(
+          eq(agentFiles.workspaceId, ref.workspaceId),
+          eq(agentFiles.agentId, ref.agentId),
+          inArray(agentFiles.id, normalizedIds),
+        ),
+      );
+    if (rows.length !== normalizedIds.length || rows.some((row) => !row.path.startsWith(prefix))) {
+      return { ok: false, error: "Personal Brain file not found." };
+    }
+
+    const txid = await batchWithTxid(
+      db
+        .delete(agentFiles)
+        .where(
+          and(
+            eq(agentFiles.workspaceId, ref.workspaceId),
+            eq(agentFiles.agentId, ref.agentId),
+            inArray(agentFiles.id, normalizedIds),
+          ),
+        ),
+    );
+    return { ok: true, txid };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Delete failed." };
+  }
+}
+
+function validatePersonalBrainWrite(bundleDir: string, path: string, content: string) {
+  const prefix = personalBrainPrefix(bundleDir);
+  const logicalPath = normalizeBrainPath(
+    path.startsWith(prefix) ? path.slice(prefix.length) : path,
+  );
+  if (!isBrainTextFile(logicalPath)) {
+    throw new Error("Only text files are supported in Personal Brain.");
+  }
+  const sizeBytes = brainContentSize(content);
+  if (sizeBytes > MAX_BRAIN_FILE_BYTES) {
+    throw new Error("Personal Brain files must be 256 KB or smaller.");
+  }
+  return {
+    logicalPath,
+    repoPath: personalBrainRepoPath(bundleDir, logicalPath),
+    contentHash: hashBrainContent(content),
+    sizeBytes,
+  };
+}
+
+function requirePositiveRowId(id: number | undefined): number {
+  if (!Number.isInteger(id) || id === undefined || id <= 0) {
+    throw new Error("Personal Brain file has not synced yet.");
+  }
+  return id;
+}
+
+function ensureUniqueTargets(paths: string[]) {
+  if (new Set(paths).size !== paths.length) {
+    throw new Error("Personal Brain update contains duplicate target paths.");
   }
 }
