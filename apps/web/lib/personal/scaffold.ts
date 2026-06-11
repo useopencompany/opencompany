@@ -85,7 +85,7 @@ This is how I, ${FIXED_PERSONAL_AGENT_NAME}, operate for {{userName}}. I read it
 // short — it's the user's to edit and grow.
 export const DEFAULT_PERSONAL_BRAIN_README = `# {{userName}}'s Personal Brain
 
-This is your private knowledge space. Save notes, research, decisions, and reference material here — it persists across sessions and your agent can read from it.
+This is your private knowledge space. Save notes, research, decisions, and reference material here — it persists across sessions and your agent can read from it. Anything your agent produces for you (docs, reports, plans) is filed here too.
 
 This is different from Memory: Personal Brain holds your own files; Memory is what your agent distills about you over time.
 `;
