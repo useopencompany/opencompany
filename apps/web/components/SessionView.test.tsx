@@ -693,6 +693,7 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       platformFeeUsdMicros: 0,
     },
     currentContextTokens: 0,
+    latestEventId: 0,
     ...overrides,
   };
 }

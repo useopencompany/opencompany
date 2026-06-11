@@ -302,5 +302,6 @@ export function deriveSessionDetailPlaceholder(
     // This projection has no per-step usage rows to read; the live detail query supplies the
     // real context figure once it loads.
     currentContextTokens: 0,
+    latestEventId: 0,
   };
 }

@@ -200,6 +200,7 @@ export async function loadAgentSessionDetailForWorkspace(
     children,
     messages,
     events,
+    latestEventRows,
     usageRows,
     rollupRows,
     latestModelRequestRows,
@@ -278,6 +279,17 @@ export async function loadAgentSessionDetailForWorkspace(
       )
       .orderBy(asc(agentSessionEvents.id))
       .limit(300),
+    db
+      .select({
+        latestEventId: sql<number>`COALESCE(MAX(${agentSessionEvents.id}), 0)`,
+      })
+      .from(agentSessionEvents)
+      .where(
+        and(
+          eq(agentSessionEvents.sessionId, sessionId),
+          ne(agentSessionEvents.type, "debug.model_request"),
+        ),
+      ),
     db
       .select({
         messageId: agentSessionUsage.messageId,
@@ -412,6 +424,7 @@ export async function loadAgentSessionDetailForWorkspace(
   ]);
   const rollup = parseSessionTreeRollup(rowsFromExecute<Record<string, unknown>>(rollupRows)[0]);
   const usage = rollup.usage;
+  const latestEventId = readNumber(latestEventRows[0]?.latestEventId);
   const latestUsage = latestUsageRows[0];
   const currentContextTokens = latestUsage ? latestUsage.inputTokens + latestUsage.outputTokens : 0;
   const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
@@ -503,6 +516,7 @@ export async function loadAgentSessionDetailForWorkspace(
     toolUsage,
     cost,
     currentContextTokens,
+    latestEventId,
     latestModelRequest: latestModelRequestRows[0]?.payload ?? null,
   });
 }
@@ -606,6 +620,7 @@ export function buildCreatedSessionDetail(input: {
     cost: EMPTY_COST,
     // A just-created session has no model steps yet, so the context window is empty.
     currentContextTokens: 0,
+    latestEventId: input.events.reduce((max, event) => Math.max(max, event.id), 0),
   });
 }
 

@@ -98,6 +98,7 @@ import {
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
+  mergeLiveSessionAggregates,
   mergeMessages,
   type RuntimeEvent,
   type RuntimeQuestionItem,
@@ -492,17 +493,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     },
   });
   const baseRuntime = useMemo(() => {
-    // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
-    // session-tree rollup isn't reproduced client-side (D2); refreshed on
-    // completion via the effect below.
-    const aggregates = {
-      usage: detail.usage,
-      toolUsage: detail.toolUsage,
-      cost: detail.cost,
-      // Server-sourced like the other aggregates (refreshed on turn completion); the context
-      // gauge in the top bar reads this rather than the cumulative `usage` total.
-      currentContextTokens: detail.currentContextTokens,
-    };
+    // Server aggregates are the floor. The stream may replay historical events, so only usage/cost
+    // events above the loader's high-water mark are layered on top. This gives immediate per-step
+    // model/tool/sandbox/delegated usage without double-counting replayed history.
+    const aggregates = mergeLiveSessionAggregates(
+      {
+        usage: detail.usage,
+        toolUsage: detail.toolUsage,
+        cost: detail.cost,
+        currentContextTokens: detail.currentContextTokens,
+      },
+      streamState.events,
+      detail.latestEventId,
+    );
     // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
     // Stream (`streamState`) is the live overlay. Union-merge the two so the
     // transcript paints instantly from the snapshot AND never drops a durable
