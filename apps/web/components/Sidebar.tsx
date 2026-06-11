@@ -249,7 +249,7 @@ function groupSessions(sessions: SidebarSession[]) {
   const earlierGroup = groups[3]!;
 
   for (const session of sessions) {
-    const date = new Date(session.updatedAt);
+    const date = new Date(session.createdAt);
     const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
     const age = Math.floor((today - day) / dayMs);
 
