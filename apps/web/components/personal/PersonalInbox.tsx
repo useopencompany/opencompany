@@ -4,6 +4,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { ArrowUpRight, Check, ChevronRight, Clock, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
+import { Markdown } from "@/components/Markdown";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { deriveVisibleInbox, type InboxItemPayload } from "@/lib/collections/selectors";
@@ -143,9 +144,10 @@ function InboxRow({
           </div>
 
           {item.body ? (
-            <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-5 text-ink-muted">
-              {item.body}
-            </p>
+            <Markdown
+              className="markdown-compact mt-2 text-[12.5px] leading-5 text-ink-muted"
+              content={item.body}
+            />
           ) : null}
 
           {expanded && item.steps.length > 0 ? (
@@ -153,7 +155,7 @@ function InboxRow({
               {item.steps.map((step, index) => (
                 <li key={step} className="flex gap-2 text-[12px] leading-5 text-ink-muted">
                   <span className="shrink-0 tabular-nums text-ink-subtle">{index + 1}.</span>
-                  <span>{step}</span>
+                  <Markdown className="markdown-compact min-w-0 flex-1" content={step} />
                 </li>
               ))}
             </ol>

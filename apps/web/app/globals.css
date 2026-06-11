@@ -430,6 +430,22 @@ body {
 .session-markdown[data-streaming="true"] {
   will-change: opacity, filter;
 }
+/* Dense card contexts (inbox items): keep agent-markdown headings near body size. */
+.session-markdown.markdown-compact h1,
+.session-markdown.markdown-compact h2,
+.session-markdown.markdown-compact h3,
+.session-markdown.markdown-compact h4 {
+  margin: 0.9em 0 0.3em;
+  font-size: 1em;
+}
+.session-markdown.markdown-compact p,
+.session-markdown.markdown-compact ul,
+.session-markdown.markdown-compact ol,
+.session-markdown.markdown-compact blockquote,
+.session-markdown.markdown-compact pre,
+.session-markdown.markdown-compact table {
+  margin-bottom: 0.5em;
+}
 
 .thinking-shimmer {
   color: var(--color-ink);
