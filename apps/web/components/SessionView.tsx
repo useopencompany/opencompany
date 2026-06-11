@@ -2518,7 +2518,9 @@ function ToolCallCardDefault({
             <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
               <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
               {showElapsedCounter ? (
-                <>running · <span className="tabular-nums">{formatElapsed(elapsedSeconds)}</span></>
+                <>
+                  running · <span className="tabular-nums">{formatElapsed(elapsedSeconds)}</span>
+                </>
               ) : (
                 "running"
               )}
