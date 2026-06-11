@@ -41,6 +41,9 @@ export function serializeSplitParam(secondaryIds: string[]): string | null {
 // the current pathname and appending `?split=` when there are secondary panes. Deriving
 // the base from the live pathname (instead of hardcoding "/company/session") keeps the
 // helper reusable for the /personal session route.
+// Preconditions: the current session id must be the trailing path segment and the
+// pathname must have no trailing slash — both hold for Next's usePathname() on the
+// /company/session/[id] and /personal/session/[id] routes this is called from.
 export function buildSplitViewHref(
   pathname: string,
   primaryId: string,

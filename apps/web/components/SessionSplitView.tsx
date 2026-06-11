@@ -17,6 +17,9 @@ import {
 
 // Below a pane's minimum width chat transcripts become unusable; v4 of
 // react-resizable-panels accepts pixel min sizes directly.
+// Known v1 gap: MAX_PANES (4) x 360px = 1440px, but the wide-viewport gate below is only
+// 1024px, so with 3-4 panes on borderline widths the library clamps panes proportionally
+// below this minimum. Cosmetic only — accepted for v1.
 const MIN_PANE_WIDTH = "360px";
 
 // Split panes only make sense with room for at least two usable columns; below this the
