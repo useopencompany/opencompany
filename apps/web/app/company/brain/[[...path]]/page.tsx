@@ -3,6 +3,7 @@ import { brainFiles } from "@opencompany/db/schema";
 import { asc, eq } from "drizzle-orm";
 import BrainView from "@/components/BrainView";
 import { currentWorkspace } from "@/lib/auth";
+import { BRAIN_BASE_PATH } from "@/lib/brain/paths";
 
 // Decodes a single path segment, falling back to the raw value when the segment carries a malformed
 // percent-encoding (e.g. a bare `%`) so a bad URL never throws a URIError before the page renders.
@@ -27,7 +28,7 @@ export default async function BrainPage({ params }: { params: Promise<{ path?: s
   return (
     <BrainView
       initialPath={initialPath}
-      urlBasePath="/company/brain"
+      urlBasePath={BRAIN_BASE_PATH}
       files={files.map((file) => ({
         path: file.path,
         content: file.content,

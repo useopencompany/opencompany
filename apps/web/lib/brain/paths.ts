@@ -3,6 +3,23 @@ export const MAX_BRAIN_FILE_BYTES = 256 * 1024;
 export const MAX_BRAIN_MOUNT_FILES = 80;
 export const MAX_BRAIN_MOUNT_BYTES = 2 * 1024 * 1024;
 
+// Route of the company Brain surface. Single source of truth for links into it (the catch-all
+// page, the BrainView URL sync, the session attachment chips, and the sidebar all read this).
+export const BRAIN_BASE_PATH = "/company/brain";
+
+// Encodes each segment of a Brain file/folder path so spaces and special characters round-trip
+// through the `[[...path]]` catch-all route (which decodes each segment on the way in).
+export function encodeBrainPath(path: string): string {
+  const trimmed = path.replace(/^\/+|\/+$/g, "");
+  return trimmed ? trimmed.split("/").map(encodeURIComponent).join("/") : "";
+}
+
+// Absolute href to a Brain file/folder on the company surface (or the Brain root for "").
+export function brainHref(path: string): string {
+  const encoded = encodeBrainPath(path);
+  return encoded ? `${BRAIN_BASE_PATH}/${encoded}` : BRAIN_BASE_PATH;
+}
+
 export function normalizeBrainPath(input: string, options: { allowFolder?: boolean } = {}) {
   const raw = input
     .trim()

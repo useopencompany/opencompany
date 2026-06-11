@@ -33,6 +33,7 @@ import {
   fileNameFromPath,
   resolveBrainFileRenameName,
 } from "@/lib/brain/file-names";
+import { encodeBrainPath } from "@/lib/brain/paths";
 import { formatBrainRelativeTime } from "@/lib/brain/relative-time";
 import {
   ancestorFolderPaths,
@@ -85,6 +86,9 @@ type InitialBrainSelection = {
   contextPath: string;
   expandedPaths: Set<string>;
   draftContent: string;
+  // Whether the URL we loaded actually resolves to the selected file/folder. False only when a
+  // non-empty path matched nothing and we fell back to the first file (a stale/deleted link).
+  addressed: boolean;
 };
 
 // Resolves the file/folder the brain should open with based on the URL path
@@ -95,11 +99,14 @@ function resolveInitialBrainSelection(
   initialPath: string,
 ): InitialBrainSelection {
   const fallback = serverFiles[0];
+  // A bare base URL (no path) intentionally opens the first file, so it counts as addressed; only a
+  // non-empty path that resolves to nothing falls through to the unaddressed return at the end.
   const fallbackSelection: InitialBrainSelection = {
     selectedPath: fallback?.path ?? "",
     contextPath: fallback ? parentFolderPath(fallback.path) : "",
     expandedPaths: new Set(fallback ? ancestorFolderPaths(fallback.path) : []),
     draftContent: fallback?.content ?? "",
+    addressed: true,
   };
   const normalized = initialPath.replace(/^\/+|\/+$/g, "");
   if (!normalized) return fallbackSelection;
@@ -111,6 +118,7 @@ function resolveInitialBrainSelection(
       contextPath: parentFolderPath(exact.path),
       expandedPaths: new Set(ancestorFolderPaths(exact.path)),
       draftContent: exact.content,
+      addressed: true,
     };
   }
 
@@ -122,20 +130,19 @@ function resolveInitialBrainSelection(
       contextPath: normalized,
       expandedPaths: new Set(ancestorFolderPaths(underFolder.path)),
       draftContent: underFolder.content,
+      addressed: true,
     };
   }
 
-  return fallbackSelection;
+  return { ...fallbackSelection, addressed: false };
 }
 
-// Builds the URL that reflects the currently open brain file/folder, mirroring how the
-// agent editor keeps `/agents/<path>` in sync. Segments are encoded so spaces/special
-// characters round-trip through the `[[...path]]` route (which decodes each segment).
-// `basePath` is the surface root (e.g. `/company/brain`) so only URL-addressable surfaces sync.
+// Builds the URL that reflects the currently open brain file/folder. `basePath` is the surface
+// root (e.g. `/company/brain`) so only URL-addressable surfaces sync; segment encoding is shared
+// with the route and the session chips via `encodeBrainPath`.
 function brainUrlForPath(basePath: string, path: string): string {
-  const normalized = path.replace(/^\/+|\/+$/g, "");
-  if (!normalized) return basePath;
-  return `${basePath}/${normalized.split("/").map(encodeURIComponent).join("/")}`;
+  const encoded = encodeBrainPath(path);
+  return encoded ? `${basePath}/${encoded}` : basePath;
 }
 
 // The Brain CRUD surface, injected so the same view serves both the workspace Brain (brainFiles,
@@ -249,6 +256,15 @@ export default function BrainView({
   useEffect(() => {
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
+
+  // If the URL we loaded didn't address the open file (a stale/deleted link that fell back to the
+  // first file), reflect the actually-open file so a copy/reload points at it. Valid file, folder,
+  // and bare-base URLs are left untouched. Mount-only; later selection changes sync via handlers.
+  useEffect(() => {
+    if (!urlBasePath || initialSelection.addressed) return;
+    syncBrainUrl(selectedPathRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!focusedPath) return;
@@ -416,9 +432,10 @@ export default function BrainView({
           setError(updateResult.error);
         } else {
           if (selectedPathRef.current === path) {
-            selectedPathRef.current = updateResult.path;
-            setSelectedPath(updateResult.path);
-            setFocusedPath(updateResult.path);
+            // Route through updateSelectedPath so the URL stays in sync if the save normalized the
+            // path, instead of mutating selection directly and stranding the address bar on the old
+            // path.
+            updateSelectedPath(updateResult.path);
             setSelectedContextPath(parentFolderPath(updateResult.path));
             expandAncestors(updateResult.path);
           }

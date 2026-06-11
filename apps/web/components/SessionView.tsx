@@ -113,6 +113,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { BRAIN_BASE_PATH, brainHref } from "@/lib/brain/paths";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import { personalPaths } from "@/lib/personal/paths";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
@@ -2131,10 +2132,6 @@ function CopyMessageButton({ text }: { text: string }) {
 
 const BRAIN_ATTACHMENT_VISIBLE_LIMIT = 3;
 
-function brainFileHref(path: string) {
-  return `/company/brain/${path.split("/").map(encodeURIComponent).join("/")}`;
-}
-
 // Mini attachments shown beneath an assistant turn that created/edited Brain files. Links
 // straight to each file in the (URL-addressable) Brain editor; collapses the tail past 3.
 function BrainAttachments({ paths }: { paths: string[] }) {
@@ -2145,7 +2142,7 @@ function BrainAttachments({ paths }: { paths: string[] }) {
       {visible.map((path) => (
         <Link
           key={path}
-          href={brainFileHref(path)}
+          href={brainHref(path)}
           title={`brain/${path}`}
           className="inline-flex max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
@@ -2155,7 +2152,7 @@ function BrainAttachments({ paths }: { paths: string[] }) {
       ))}
       {overflow > 0 ? (
         <Link
-          href="/company/brain"
+          href={BRAIN_BASE_PATH}
           title={`${overflow} more brain ${overflow === 1 ? "file" : "files"}`}
           className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
