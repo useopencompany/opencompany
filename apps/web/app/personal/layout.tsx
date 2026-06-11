@@ -13,8 +13,10 @@ import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
 import { loadGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { loadPersonalAgentContextFiles, loadPersonalSkills } from "@/lib/personal/context";
+import { buildPersonalIntegrationDetails } from "@/lib/personal/integration-details-server";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
+import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it does
 // not inherit AppShell/Sidebar — but it still needs the same provider stack (minus the workspace
@@ -27,11 +29,13 @@ import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 export default async function PersonalLayout({ children }: { children: React.ReactNode }) {
   const { authUser, user, workspace } = await currentWorkspace();
 
-  const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
+  // Short first-person name the scaffold templates into the agent's body/soul ("{{userName}}");
+  // distinct from the full display name derived below for the sidebar footer.
+  const scaffoldUserName = user.firstName?.trim() || authUser.email.split("@")[0] || "you";
   const agent = await ensurePersonalAgent({
     userId: user.id,
     workspaceId: workspace.id,
-    name: agentName,
+    userName: scaffoldUserName,
   });
 
   const [
@@ -41,6 +45,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     workspaceIntegrations,
     googleState,
     mcpSettings,
+    toolPolicies,
     githubIntegrationRepositories,
   ] = await Promise.all([
     loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
@@ -49,6 +54,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     loadWorkspaceIntegrationState(),
     loadGoogleIntegrationState(),
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
+    loadWorkspaceToolPolicyOverrides(workspace.id),
     loadGitHubIntegrationRepositoriesForWorkspace(workspace.id),
   ]);
 
@@ -73,6 +79,14 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     betterstack: mcpSettings.betterstack.configured,
     braintrust: mcpSettings.braintrust.configured,
   };
+
+  // Richer per-integration detail (accounts, repositories/calendars, MCP endpoints) for the
+  // expandable rows on the Integrations tab. Pure projection of the state loaded above.
+  const integrationDetails = buildPersonalIntegrationDetails({
+    github: workspaceIntegrations.github,
+    google: googleState,
+    mcp: mcpSettings,
+  });
 
   return (
     <AnalyticsProvider
@@ -100,6 +114,8 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                 githubIntegrationStatus={workspaceIntegrations.github.status}
                 githubRepositories={githubRepositories}
                 integrationConnections={integrationConnections}
+                integrationDetails={integrationDetails}
+                toolPolicies={toolPolicies}
                 proMode={user.proMode}
                 companySurfaceEnabled={user.companySurfaceEnabled}
               >

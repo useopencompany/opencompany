@@ -20,6 +20,27 @@ export type AgentSessionStatus =
 
 export type AgentRuntimeIncompleteReason = "announced_unexecuted_next_action";
 
+// Per-phase latency breakdown of one tool call, in whole milliseconds. Captured by the runner and
+// carried on tool.completed/tool.failed so per-call latency is queryable post-hoc from
+// agent_session_events (and mirrored as Braintrust span metrics). All fields are optional: hosted/
+// internal tools have no sandbox wait, and older events predate the field entirely.
+export type ToolCallTimings = {
+  // execute() entry → start verdict: stream-loop scheduling + policy decision + the blocking
+  // tool.started event write.
+  gateWaitMs?: number;
+  // Waiting on the shared per-turn sandbox acquirer. The first sandbox tool of a turn pays the
+  // full hydration (connect/resume + workspace prepare + brain/bundle/skills materialize);
+  // subsequent calls are ~0.
+  sandboxWaitMs?: number;
+  // The tool body itself (the e2b call, hosted API call, or internal query).
+  execMs?: number;
+  // Persistence tail before the completed/failed event: tool-result message insert plus any
+  // file.changed/brain-sync/usage writes.
+  persistMs?: number;
+  // execute() entry → just before the tool.completed/failed event append (includes gate wait).
+  totalMs?: number;
+};
+
 export type AgentRuntimeEvent =
   | {
       type: "session.status";
@@ -102,6 +123,8 @@ export type AgentRuntimeEvent =
         // Present for deferred-tool dispatch (use_tool / {server}__use_tool) when the arguments
         // were validated, coerced, or repaired before the tool ran. See ToolArgResolution.
         argResolution?: ToolArgResolution;
+        // Per-phase latency breakdown captured by the runner. See ToolCallTimings.
+        timings?: ToolCallTimings;
       };
     }
   | {
@@ -116,6 +139,8 @@ export type AgentRuntimeEvent =
         // Present when the failure was a deferred-tool argument problem that survived coercion and
         // (optionally) repair. See ToolArgResolution.
         argResolution?: ToolArgResolution;
+        // Per-phase latency breakdown captured by the runner. See ToolCallTimings.
+        timings?: ToolCallTimings;
       };
     }
   | {

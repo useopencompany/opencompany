@@ -92,6 +92,10 @@ export type RuntimeToolDefinition = {
   help?: string;
 };
 
+export type RuntimeToolDefinitionContext = {
+  personalAgent?: boolean;
+};
+
 export type AgentToolCredentialSource = "platform" | "workspace" | "mixed" | "none";
 
 export type AgentToolWorkspaceResourceRequirement = {
@@ -404,8 +408,8 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Commands: create, get, query, append-evidence, rewrite, alias, link, merge, delete, doctor. Add --json for machine-readable output.",
       "Status lifecycle: objects start as draft (uncited scratch) and become active once rewrite backs their compiled truth with evidence citations. create --status active requires the truth to already be cited; the normal path is create → append-evidence → rewrite.",
       'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
-      "Query before answering questions about people, companies, projects, or past decisions: query \"topic\" --type company --limit 5. For relationship questions add --hops 1 to pull in linked objects (a person's company, a company's decisions). query hides merged stubs and invalid records by default.",
-      "get --section truth|timeline|frontmatter scopes both the text and the --json payload to that part.",
+      'Query before answering questions about people, companies, projects, or past decisions: query "topic" --type company --limit 5. Results include capped compiled truth; use the shown `memory get <id>` hint when you need the full record or timeline. For relationship questions add --hops 1 to pull in linked objects. query hides merged stubs and invalid records by default.',
+      "get renders a structured record with compiled truth and recent timeline entries by default; get --section truth|timeline|frontmatter|all scopes both the text and the --json payload to that part.",
       "Writes are last-write-wins — do not issue two memory writes against the same object in parallel.",
       "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
     ].join("\n"),
@@ -414,25 +418,43 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "recall",
     kind: "internal",
     description:
-      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges. Use to remember earlier discussions, decisions, or facts that are not in your current context. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
+      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges, optionally constrained to the past N hours or days. You can also omit query and provide a time_window to recall recent session snippets. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
           description:
-            "What to look for, in natural language or keywords. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+            "What to look for, in natural language or keywords. Optional when time_window is provided. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+        },
+        time_window: {
+          type: "object",
+          properties: {
+            amount: {
+              type: "integer",
+              description:
+                "Positive number of hours or days to look back. Max 720 hours or 30 days.",
+            },
+            unit: {
+              type: "string",
+              enum: ["hours", "days"],
+              description: "Whether amount is measured in hours or days.",
+            },
+          },
+          required: ["amount", "unit"],
+          additionalProperties: false,
         },
         limit: {
           type: "number",
           description: "Maximum number of matching exchanges to return (default 5, max 20).",
         },
       },
-      required: ["query"],
       additionalProperties: false,
     },
     help: [
       "Searches the raw transcript of your previous sessions with this user (this agent only); the current session is excluded.",
+      "Pass query only to search all indexed history; pass query plus time_window to restrict the search to recent messages.",
+      "Pass time_window without query to recall recent session snippets, newest first.",
       "Returns each hit as a short window: the matching message plus the one before and after it for context.",
       "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
       "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
@@ -2513,6 +2535,106 @@ export const RUNTIME_TOOL_DEFINITION_BY_NAME = new Map(
   RUNTIME_TOOL_DEFINITIONS.map((tool) => [tool.name, tool]),
 );
 
+export function getRuntimeToolDefinition(
+  name: RuntimeToolName,
+  context: RuntimeToolDefinitionContext = {},
+): RuntimeToolDefinition | undefined {
+  const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name);
+  if (!definition) return undefined;
+  return renderRuntimeToolDefinition(definition, context);
+}
+
+export function getRuntimeToolDefinitions(
+  context: RuntimeToolDefinitionContext = {},
+): RuntimeToolDefinition[] {
+  return RUNTIME_TOOL_DEFINITIONS.map((definition) =>
+    renderRuntimeToolDefinition(definition, context),
+  );
+}
+
+function renderRuntimeToolDefinition(
+  definition: RuntimeToolDefinition,
+  context: RuntimeToolDefinitionContext,
+): RuntimeToolDefinition {
+  if (!context.personalAgent) return definition;
+
+  if (definition.name === "shell") {
+    return {
+      ...definition,
+      description:
+        "Run a shell command from the session workspace root, where ./work, ./personal-brain, ./agent, and ./skills are visible. Personal shell commands cannot access memory/; use the memory tool for structured memory. Use the gh tool, not shell, for authenticated GitHub operations.",
+    };
+  }
+
+  if (
+    definition.name === "read_file" ||
+    definition.name === "edit_file" ||
+    definition.name === "write_file" ||
+    definition.name === "list_files"
+  ) {
+    return renderPersonalFileToolDefinition(definition);
+  }
+
+  if (definition.name === "memory") {
+    const help = definition.help?.replaceAll("agent/memory/", "memory/");
+    return {
+      ...definition,
+      description:
+        "Run the structured `memory` CLI over memory/ — create canonical objects, append cited evidence, rewrite compiled truth, and run hybrid retrieval. This is the only way to read or write structured memory; never edit files under memory/ directly. Pass the subcommand and flags via args (e.g. 'query \"acme blockers\"').",
+      ...(help ? { help } : {}),
+    };
+  }
+
+  return definition;
+}
+
+function renderPersonalFileToolDefinition(
+  definition: RuntimeToolDefinition,
+): RuntimeToolDefinition {
+  const pathDescription = "Relative path starting with work/, personal-brain/, or agent/.";
+  const parameters = {
+    ...definition.parameters,
+    properties: {
+      ...definition.parameters.properties,
+      path: {
+        ...(definition.parameters.properties.path as Record<string, unknown>),
+        description: pathDescription,
+      },
+    },
+  };
+
+  if (definition.name === "read_file") {
+    return {
+      ...definition,
+      description:
+        "Read a UTF-8 text file from ./work, ./personal-brain, or ./agent. The path must start with work/, personal-brain/, or agent/. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+      parameters,
+    };
+  }
+  if (definition.name === "edit_file") {
+    return {
+      ...definition,
+      description:
+        "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+      parameters,
+    };
+  }
+  if (definition.name === "write_file") {
+    return {
+      ...definition,
+      description:
+        "Create or overwrite a UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, personal-brain/, or agent/. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+      parameters,
+    };
+  }
+  return {
+    ...definition,
+    description:
+      "List files and directories below ./work, ./personal-brain, or ./agent. The path must start with work/, personal-brain/, or agent/. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+    parameters,
+  };
+}
+
 export function resolveRuntimeToolNamesForConfigTools(input: {
   tools: ReadonlyArray<{ id?: unknown }> | undefined;
   agents?: ReadonlyArray<unknown> | undefined;
@@ -2605,9 +2727,13 @@ function isRuntimeToolEnabledByConfig(
   return true;
 }
 
-export function getRuntimeToolHelp(toolName: string, enabledTools: readonly RuntimeToolName[]) {
+export function getRuntimeToolHelp(
+  toolName: string,
+  enabledTools: readonly RuntimeToolName[],
+  context: RuntimeToolDefinitionContext = {},
+) {
   if (!enabledTools.includes(toolName as RuntimeToolName)) return null;
-  const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(toolName as RuntimeToolName);
+  const definition = getRuntimeToolDefinition(toolName as RuntimeToolName, context);
   if (!definition) return null;
 
   return {
@@ -2810,6 +2936,7 @@ export type RuntimeToolSearchResult = {
 export function searchRuntimeTools(
   input: { capability?: string; query?: string },
   enabledTools: readonly RuntimeToolName[],
+  context: RuntimeToolDefinitionContext = {},
 ): RuntimeToolSearchResult[] {
   const enabledSet = new Set(enabledTools);
   const capabilityId = typeof input.capability === "string" ? input.capability.trim() : undefined;
@@ -2830,7 +2957,7 @@ export function searchRuntimeTools(
   for (const name of candidateNames) {
     if (seen.has(name)) continue;
     if (!enabledSet.has(name) || !isDeferrableRuntimeTool(name)) continue;
-    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name);
+    const definition = getRuntimeToolDefinition(name, context);
     if (!definition) continue;
     if (
       query &&

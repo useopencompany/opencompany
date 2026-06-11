@@ -1,4 +1,9 @@
 import {
+  ATTACHMENT_TEXT_INLINE_MAX_BYTES,
+  ATTACHMENT_TEXT_PREVIEW_CHARS,
+  attachmentSandboxPath,
+} from "@opencompany/agent-runtime";
+import {
   type AssistantModelMessage,
   type ModelMessage,
   modelMessageSchema,
@@ -17,6 +22,9 @@ export type ReplayAttachment = {
   mediaType: string;
   filename: string;
   base64: string; // hydrated by the loader (bytes downloaded from Blob)
+  // Blob pathname (`.../<attachmentId>-<sanitizedFilename>`) — determines the sandbox path
+  // an above-threshold text attachment is materialized to and referenced by.
+  blobPathname: string;
 };
 
 export type StoredSessionMessageForModelReplay = {
@@ -53,8 +61,17 @@ export function buildModelMessages(
         } else if (att.kind === "text") {
           // Text/code files are inlined as plain text (not base64) so every model can read
           // them with no file/vision capability — the bytes are UTF-8 decoded here.
-          const text = Buffer.from(att.base64, "base64").toString("utf8");
-          parts.push({ type: "text", text: `\n\nAttached file "${att.filename}":\n\n${text}` });
+          const bytes = Buffer.from(att.base64, "base64");
+          if (bytes.byteLength <= ATTACHMENT_TEXT_INLINE_MAX_BYTES) {
+            const text = bytes.toString("utf8");
+            parts.push({ type: "text", text: `\n\nAttached file "${att.filename}":\n\n${text}` });
+          } else {
+            // Above-threshold text would blow up the context window when replayed every turn.
+            // The sandbox materializer (ensureSandbox) writes the full file into the workspace;
+            // here the model only gets the path plus a short preview (the preview is all a
+            // sandbox-less chat-only agent ever sees — a documented limitation).
+            parts.push({ type: "text", text: largeTextAttachmentReference(att, bytes) });
+          }
         } else {
           parts.push({
             type: "file",
@@ -99,6 +116,18 @@ export function buildModelMessages(
   }
 
   return messages;
+}
+
+function largeTextAttachmentReference(att: ReplayAttachment, bytes: Buffer): string {
+  const text = bytes.toString("utf8");
+  const lineCount = text.split("\n").length;
+  const sizeKb = Math.round(bytes.byteLength / 1024);
+  const preview = text.slice(0, ATTACHMENT_TEXT_PREVIEW_CHARS);
+  return [
+    `\n\nAttached file "${att.filename}" (${sizeKb} KB, ${lineCount} lines) is too large to inline.`,
+    `The full content is at ${attachmentSandboxPath(att.blobPathname)} in your workspace — read it with your file tools. If you have no file tools, only the preview below is available; say so rather than guessing at the rest.`,
+    `Preview (first ${preview.length} characters):\n\n${preview}`,
+  ].join("\n");
 }
 
 export function buildAssistantModelMessage(input: {
