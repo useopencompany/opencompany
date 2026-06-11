@@ -23,6 +23,7 @@ import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
 import { materializeAgentBundleForSession } from "./agent-bundle";
+import { materializeLargeTextAttachmentsForSession } from "./attachment-materialize";
 import { materializeBrainForSession } from "./brain";
 import { getDb } from "./db";
 import { closeSessionStream } from "./durable-streams";
@@ -106,6 +107,15 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       workspaceId: row.workspace.id,
       agentId: row.agent.id,
       config: agentConfig,
+    });
+    // Above-threshold text attachments are path-referenced in the model history instead of
+    // inlined, so they must exist in the workspace on every acquire (survives recycles).
+    // Never throws — a failure degrades to the inline preview, not a failed sandbox.
+    await materializeLargeTextAttachmentsForSession({
+      sandbox,
+      sessionId: row.session.id,
+      workdir: row.session.workdir,
+      blobToken: env.blobReadWriteToken,
     });
     captureE2BSandboxLatency({
       row,
