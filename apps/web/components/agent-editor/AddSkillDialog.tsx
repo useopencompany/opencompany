@@ -8,6 +8,7 @@ export type AddedSkill = {
   id: string;
   name: string;
   description: string;
+  source: PreviewSkill["source"];
 };
 
 type Candidate = { path: string; name: string; description: string };
@@ -106,6 +107,7 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
         id: result.skill.id,
         name: result.skill.name,
         description: result.skill.description,
+        source: result.skill.source,
       });
     } catch {
       setError("Network error. Please try again.");

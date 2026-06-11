@@ -111,7 +111,7 @@ describe("completeOnboarding", () => {
     } as never);
 
     await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow(
-      "redirect:/session/ses_123",
+      "redirect:/company/session/ses_123",
     );
 
     expect(ensureUserOnboardingScaffoldMock).toHaveBeenCalledWith({

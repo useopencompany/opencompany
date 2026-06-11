@@ -42,6 +42,7 @@ describe("calculateModelUsageCost", () => {
     ["openai/gpt-5.4-nano", 1_670],
     ["anthropic/claude-opus-4.7", 36_750],
     ["anthropic/claude-opus-4.8", 36_750],
+    ["anthropic/claude-fable-5", 73_500],
     ["google/gemini-3-flash", 4_050],
     ["google/gemini-3.1-flash-lite-preview", 2_030],
     ["deepseek/deepseek-v4-flash", 563],
@@ -172,6 +173,30 @@ describe("fees and hosted tools", () => {
       providerCostUsdMicros: 7_000,
       platformFeeUsdMicros: 700,
       totalCostUsdMicros: 7_700,
+      costBasis: {
+        costSource: "provider_reported",
+        pricingVersion: "provider-reported.2026-05-22",
+      },
+    });
+  });
+
+  it("labels platform-priced tool usage with the model catalog version in the cost basis", () => {
+    // Tools whose provider cannot price gateway models (opencode, OC-328) compute the
+    // provider cost from tokens with MODEL_PRICING; the ledger must not claim that
+    // figure was provider-reported.
+    expect(
+      calculateHostedToolUsageCost({
+        provider: "opencode",
+        operation: "session",
+        providerCostUsdMicros: 11_565,
+        costSource: "platform_model_pricing",
+      }),
+    ).toMatchObject({
+      providerCostUsdMicros: 11_565,
+      costBasis: {
+        costSource: "platform_model_pricing",
+        pricingVersion: "2026-05-22.standard",
+      },
     });
   });
 });

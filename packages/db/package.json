@@ -23,6 +23,10 @@
     "./sync-outbox": {
       "types": "./src/sync-outbox.ts",
       "default": "./src/sync-outbox.ts"
+    },
+    "./recall": {
+      "types": "./src/recall.ts",
+      "default": "./src/recall.ts"
     }
   },
   "scripts": {

@@ -1,3 +1,5 @@
+import { parse as parseYaml } from "yaml";
+import { validateSkillFiles } from "./skill-resolver";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import {
   type AgentConfig,
@@ -18,6 +20,11 @@ export type AgentSkillDefinition = {
   // being listed in the agent's `skills:` frontmatter. The config field lets agents
   // (and, later, the editor) add more skills over time.
   defaultEnabled: boolean;
+  // Built-in skills with `addable` are offered in the agent editor's @-mention menu and
+  // can be self-added via self-edit, so an agent or user can turn them on per-agent. Only
+  // meaningful for `defaultEnabled: false` skills; `defaultEnabled: true` ones are always on,
+  // and internal skills (e.g. onboarding) leave this unset so they stay out of the picker.
+  addable?: boolean;
   files: AgentSkillFile[];
 };
 
@@ -93,6 +100,7 @@ changes here when you pass the explicit \`model\` argument to \`update_agent_fil
 
 - \`@brain/path\` or \`@brain/folder/\` — mount Brain context.
 - \`@toolname\` — enable a tool (see the list below).
+- \`@skill/<id>\` — turn on an addable built-in skill (see "Skills you can add" below).
 
 ## Keep the body light
 
@@ -189,6 +197,20 @@ triggers: [
 Set \`enabled: true\` only when you actually want it to run. A schedule with an unsupported
 cron or an empty prompt is rejected and nothing is saved — fix it and call again.
 
+## Skills you can add
+
+Some built-in skills are **available but off by default** — turn one on by mentioning it as
+\`@skill/<id>\` in your body, turn it off by dropping the mention. The skill then loads on
+demand whenever a matching task comes up. (This only works for built-in skills; skills added
+from a GitHub/skills.sh URL are managed by a human in the editor and are preserved as-is.)
+
+- \`@skill/first-principles\` — a 15-prompt framework for breaking a hard problem down to
+  fundamentals and rebuilding the answer from scratch. Add it when you regularly face stuck or
+  high-stakes decisions and want a sharper way to reason through them.
+
+Add a skill only when it genuinely fits how you work — an unused skill is just noise in your
+definition.
+
 ## How to make a change
 
 > The runner requires that you have read this skill (via \`read_skill\`) before it will accept
@@ -211,6 +233,8 @@ cron or an empty prompt is rejected and nothing is saved — fix it and call aga
    \`@mentions\` for tools and Brain mounts you still want active.
 4. Call \`update_agent_file\` with:
    - \`body\`: the full new Markdown body (required).
+   - \`title\`: an optional new display name for yourself (e.g. a name the user picked). Omit it
+     to keep your current name. Only set it when the user actually wants you renamed.
    - \`model\`: an optional model id to switch to. Omit it to keep your current model.
    - \`triggers\`: an optional complete list of your recurring schedules (see "Schedules"
      above). Omit it to keep your current schedules.
@@ -221,23 +245,25 @@ cron or an empty prompt is rejected and nothing is saved — fix it and call aga
 ## Important constraints
 
 - **Keep it valid.** A broken edit is rejected, never silently applied.
-- **Don't change your title/name** here — that is out of scope for self-editing in this
-  version; focus on instructions, model, tools, and brain mounts.
+- **Renaming yourself** is allowed via the optional \`title\` argument, but only when the user
+  asks for it (e.g. they pick a name during onboarding). Don't rename yourself unprompted.
 - **Repositories and delegated agents are preserved** automatically; you cannot add
   unauthorized repositories through this tool. To use \`@amp\` or \`gh\`, a repository must
   already be attached to you by a human. **GitHub pull-request triggers are also preserved**
   and can only be changed by a human — but you *can* manage your own **schedule** triggers
   here (see "Schedules" above).
-- **Changes take effect on your next session**, not the current one — the running session was
-  configured when it started. Tell the user this so they know to start a fresh session (or
-  send a new message, if your runtime reloads config per turn) to see the new behavior.
+- **Changes take effect on your next turn in this same session** — the runtime reloads your
+  configuration every turn, so the new tools, instructions, skills, model, and schedules are live
+  the moment you next act (your next reply, or the user's next message). No new session needed.
+  Only the reply you're finishing right now keeps the configuration it started with.
 
 ## A good loop
 
 Think about the agent's purpose and which tools fit → ask the user a short, structured
 round of personalization questions (\`ask_user_question\`) unless the change is trivial →
-draft a light, scannable body with the right \`@mentions\` → \`update_agent_file\` → report the
-new version and what changed → remind them it applies to the next session.
+draft a light, scannable body with the right \`@mentions\` → \`update_agent_file\` → keep the
+conversation flowing. The change is already live for the rest of this session, so just continue
+naturally; mention the new version or what changed only if it's useful to the user.
 `;
 }
 
@@ -335,7 +361,7 @@ Don't just stop after setup. In plain language:
 - Tell the user what you set up, and point them to the **Brain** tab (to see and expand the
   wiki) and the **Agent** tab (to see and customize you and your \`soul.md\`). Invite them to
   tweak anything — it's all theirs to edit.
-- Note that changes to your definition take effect on your next session.
+- Note that changes to your definition take effect from your next turn in this same session.
 - If a concrete first task is obvious from what you learned, **offer to start on it right now**
   rather than leaving them on a blank page.
 
@@ -354,6 +380,383 @@ Don't just stop after setup. In plain language:
 
 const OPENCOMPANY_SETUP_SKILL_MD = buildOpenCompanySetupSkillMd();
 
+export const MEMORY_SKILL_ID = "memory";
+
+// Relative path (under skills/<id>/) where the runner drops the bundled CLI. The skill's files
+// in this catalog are SKILL.md only — the ~150 KB JS bundle is delivered by the runner so it
+// never bloats agent-runtime (and the web bundle that imports it).
+//
+// `.mjs` (not `.js`) is load-bearing: the bundle is ESM (`import …`, `import.meta.url`), and it
+// lands in a read-only skills mount with no package.json, so `node memory.js` would treat it as
+// CommonJS and fail on the first `import`. The `.mjs` extension forces ESM.
+export const MEMORY_CLI_FILE = "memory.mjs";
+
+function buildMemorySkillMd(): string {
+  return `---
+name: memory
+description: Maintain durable, evidence-grounded memory across sessions with the \`memory\` CLI — canonical objects (people, companies, projects, decisions…) compiled from cited evidence, plus hybrid retrieval.
+---
+
+# Structured memory
+
+You have a persistent, structured memory under \`agent/memory/\` that survives across sessions.
+Manage it **only** through the \`memory\` tool — do not hand-edit files under \`agent/memory/\` with
+\`edit_file\`/\`write_file\`, and do not run the CLI yourself with \`shell\`; the \`memory\` tool enforces
+the structure, provenance, and links that keep memory trustworthy (and runs model-backed retrieval
+with credentials you never handle). (This structured tree is separate from your profile
+\`agent/user.md\`, which is small, always-loaded, and edited directly to capture who your user is —
+use this tree for every other durable fact, the deep retrieved long tail.)
+
+Call the \`memory\` tool, passing the subcommand and flags in its \`args\` string:
+
+\`\`\`
+memory({ args: '<command> [options]' })
+\`\`\`
+
+Add \`--json\` to any command for machine-readable output.
+
+## The model: compiled truth + evidence
+
+Memory has two kinds of files, each a two-layer document — a **compiled truth** (your current
+synthesized belief) on top, and an **append-only timeline** of dated entries below:
+
+- **Canonical objects** — one file per real thing: \`person\`, \`company\`, \`project\`, \`customer\`,
+  \`decision\`, \`concept\`, \`theme\`. This is what you believe is true *now*.
+- **Evidence** — immutable source records (\`meeting\`, \`conversation\`, \`doc\`, \`research\`,
+  \`correction\`) with provenance, linked to the canonical objects they are about.
+
+The rule that keeps memory honest: **compiled truth must cite evidence.** You capture evidence
+first, then rewrite an object's compiled truth with \`[^ev:<evidence-id>]\` citations pointing at it.
+(Need to write the citation pattern literally, e.g. to document it? Escape it as \`\\[^ev:id]\` and it
+is treated as prose, not a citation.)
+
+Every file has a unique \`id\` that is also its file name. Ids are lowercase slugs
+(e.g. \`acme\`, \`jane-doe\`, \`acme-call-2026-06-06\`).
+
+## Commands
+
+- **create** — a new canonical object.
+  \`memory create --type company --id acme --alias "Acme Inc" --truth "Logistics SaaS we sell to."\`
+- **append-evidence** — record immutable evidence and link it to canonical subjects.
+  \`memory append-evidence --kind meeting --id acme-call-2026-06-06 --subject acme --subject jane-doe --source-ref "gcal://event/abc" --summary "Confirmed enterprise eval; SSO is the blocker."\`
+  Provenance (\`--kind\` + \`--source-ref\`) and at least one existing \`--subject\` are required.
+- **rewrite** — update an object's compiled truth. Must cite linked evidence.
+  \`memory rewrite acme --truth "Acme is evaluating our enterprise tier; SSO is the gating requirement [^ev:acme-call-2026-06-06]."\`
+  Every \`[^ev:...]\` must point at evidence that lists this object as a subject, or it is rejected.
+- **alias** — add or remove alternate names on a canonical object (retrieval matches on them).
+  \`memory alias acme --add "Acme Corp" --remove "ACME"\` (both flags repeatable). An alias another
+  object already owns is rejected, so aliases stay globally unique.
+- **link** — add or remove **directional, typed** \`related\` edges between canonical objects.
+  \`memory link acme --to jane --as employs\` — \`--as\` is a freeform lowercase relation type
+  (e.g. \`employs\`, \`works_at\`, \`depends_on\`, \`part_of\`; defaults to \`related\`). \`--to\` and
+  \`--remove\` are repeatable; there's one edge per target, so re-linking updates its type. Edits
+  only the named object's links; query can then expand along them (see \`--hops\` below).
+- **get** — read a file. \`memory get acme\` (add \`--section truth|timeline|frontmatter\`).
+- **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
+  Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`. Add \`--hops N\` to also pull
+  in objects reachable via \`related\` edges (e.g. \`--hops 1\` surfaces directly-linked neighbours).
+- **merge** — fold a duplicate canonical object into another, then re-synthesize. Aliases, related
+  links and timeline move to the survivor; the source becomes a redirect stub.
+  \`memory merge --from acme-corp --into acme\` (then \`memory rewrite acme ...\`). Use \`--dry-run\` first.
+- **delete** — permanently remove a file (a leftover merge stub, a duplicate, or a bad object).
+  \`memory delete acme-corp\` (use \`--dry-run\` to preview). Related links and evidence subjects are
+  scrubbed automatically; if the target is still cited or is a merge target, it needs \`--force\` and
+  you must repair those references afterward (run \`memory doctor\`).
+- **doctor** — health check (broken links, missing provenance, stale truth, duplicates).
+  \`memory doctor\` — a read-only report; fix what it flags with the commands above.
+
+## How to use it well
+
+- When you learn something durable about a person, company, project, customer, or decision,
+  **capture it as evidence first**, then **rewrite** the relevant object's compiled truth citing it.
+- Before answering questions about people, companies, or past decisions, **query** memory.
+- When two objects are connected (a person at a company, a decision on a project), **link** them
+  so future queries can hop between them with \`--hops\`. A well-linked graph retrieves better.
+- Keep compiled truth tight and current; let the timeline hold the history.
+- Run **doctor** occasionally and after merges to catch broken links and stale summaries.
+- Prefer **merge** over **delete** when two objects are the same thing — it preserves the evidence
+  and timeline. Reach for **delete** only to clear leftover stubs or genuinely bad objects.
+- Don't record one-off, throwaway context here — that belongs in the conversation.
+`;
+}
+
+const MEMORY_SKILL_MD = buildMemorySkillMd();
+
+export const SKILL_CREATOR_SKILL_ID = "skill-creator";
+
+function buildSkillCreatorSkillMd(): string {
+  return `---
+name: skill-creator
+description: Create or improve your own personal skills — reusable, on-demand playbooks for procedures you repeat. Use when you notice a repeatable workflow worth saving, or when the user asks you to "make/save a skill", "remember how to do X", or "create a skill for X".
+---
+
+# Creating a personal skill
+
+A **personal skill** is a small playbook you write for your future self: a reusable procedure you
+can load on demand instead of relearning it each time. This skill explains when to make one and how
+to write a good one. Personal skills are private to you and persist across sessions.
+
+## When to create one
+
+Make a skill when you find yourself repeating — or expect to repeat — a multi-step procedure, and
+notes would help you do it well next time. Don't create one for a one-off task or something you can
+already do without notes.
+
+Pick the right surface — don't put everything in a skill:
+
+- **A repeatable procedure / how-to → a skill** (this surface).
+- **A fact** about a person, company, project, or decision → **memory** (the \`memory\` tool).
+- **How you behave by default** (tone, standing preferences, default tools/model) → your **\`.agent\`
+  definition** via self-edit.
+- **Shared team knowledge** others rely on → the **Brain** (\`brain/\`).
+- **One-off context** for this task only → just keep it in the **conversation**.
+
+## Where it lives and how it loads
+
+- A skill is a folder in your private bundle: \`agent/skills/<id>/SKILL.md\`, plus optional supporting
+  files. Create and edit it with \`write_file\` and \`edit_file\` — there is no special tool.
+- \`<id>\` is a short lowercase slug (letters, digits, hyphens), e.g. \`weekly-digest\`. It can't
+  collide with a built-in skill id.
+- Skills are **auto-discovered** — you never list them anywhere. They appear in your \`## Skills\`
+  index and load with \`read_skill\` **from your next turn in this same session onward** (only the
+  reply you're writing now was already configured). So a skill you write now is active the next
+  time you act this session — no new session needed. Within the current reply you can still
+  re-read your draft with \`read_file agent/skills/<id>/SKILL.md\`.
+
+## Write the SKILL.md
+
+Start with YAML frontmatter, then a Markdown body:
+
+\`\`\`
+---
+name: Weekly digest
+description: How to write and post the Monday digest the way the user likes it. Use when preparing the weekly digest or when asked to post the Monday update.
+provenance: agent
+---
+
+# Weekly digest
+
+1. Pull last week's shipped PRs and highlights.
+2. Draft in the user's preferred format (see references/format.md).
+3. Post and confirm.
+\`\`\`
+
+- **\`name\`** (required): a short human title.
+- **\`description\`** (required): the most important line — it's all your future self sees in the
+  index when deciding whether to open the skill. Say both **what** it does and **when** to use it,
+  in a sentence or two. Be specific and a little eager so you actually trigger it.
+- **\`provenance\`** (optional): \`agent\` when you created the skill yourself, \`user\` when the user
+  asked for it.
+
+## Keep it lean (progressive disclosure)
+
+- The SKILL.md body is the instructions you'll follow — write tight, imperative steps, and explain
+  *why* where it matters. Keep it focused on one class of task.
+- If it grows long or carries bulky reference material, split that into supporting files in the same
+  folder and point to them from the body:
+  - \`references/\` — detailed docs you read only when needed.
+  - \`templates/\` — boilerplate to copy.
+  - \`scripts/\` — helper scripts to run.
+- Only the SKILL.md body loads when you open a skill; supporting files load when you read them. Don't
+  dump everything into SKILL.md.
+
+## Constraints
+
+- A skill is **instructions only** — it can't grant tools or capabilities. To change your tools or
+  model, use self-edit, not a skill.
+- Improve a skill over time: when you learn a better way, \`edit_file\` its SKILL.md rather than making
+  a second near-duplicate skill.
+- A malformed skill (missing \`name\`/\`description\`, no \`SKILL.md\`, or an invalid id) is silently
+  skipped at next-session discovery — so double-check the frontmatter after you write it.
+`;
+}
+
+const SKILL_CREATOR_SKILL_MD = buildSkillCreatorSkillMd();
+
+export const ONBOARDING_SKILL_ID = "onboarding";
+
+function buildOnboardingSkillMd(): string {
+  return `---
+name: onboarding
+description: First-session onboarding for a brand-new user. Only for the very first session, when the user has just introduced themselves. Ignore in normal sessions.
+---
+
+# First-session onboarding
+
+This is the user's **very first session**. Their message has two parts:
+
+1. **The task they want done today** — what they actually typed and want from you.
+2. **First-session background** — their name, role, and website, collected on the onboarding
+   screen and attached to this message (they did *not* type it in chat, so don't quote it back as
+   if they did). It may also include a **chosen setup** (a role/mode they picked, e.g. "Chief of
+   Staff", with a short description of what that mode means) and the **integrations they enabled**.
+
+Your job: get yourself set up — learn who they are, let them name you, tune how you work — and
+*then* do the task they asked for. Keep the setup brief and conversational, not a wizard.
+
+If a **chosen setup** is present, treat its description as the role they want you to play: lean into
+it when you tune your soul (below), and reflect it back in your greeting. If **integrations** are
+listed, they're already enabled on you — don't ask the user to turn them on; just acknowledge them
+briefly (and note any that still need connecting in workspace settings if a task needs them).
+
+## 1. Read who they are (silently)
+
+From the background and task, pull out their **name**, **role**, the **company or project** behind
+their website and what it does. If a **website** is given, fetch it with \`web_fetch\` **before** you
+reply and use what you learn to be specific — quietly, don't narrate "let me check your site".
+
+## 2. Save the foundation to memory
+
+Write what you learned so it persists:
+
+- Put their identity into your hot-memory file \`agent/user.md\` with \`write_file\` — name, role,
+  company/project and what it does, and how they seem to want to work. Keep it tight; this rides in
+  every future session.
+- For durable, retrievable facts about their company and themselves as distinct things, also capture
+  them with the \`memory\` tool (e.g. a \`company\` object and a \`person\` object) following its skill.
+
+## 3. Greet them, then let them name you and tune your soul
+
+Now send **one** short message that:
+
+- **Reflects what you learned** — greet them by name and show you understand their role and what
+  they're building (ideally a detail only the website or context could have given you). One or two
+  sentences; warm, not effusive.
+- **Asks them to name you** — what would they like to call you? Make clear it's optional and they
+  can change it later.
+- **Asks how you should work for them** — tone, defaults, what they care about most — so you can
+  tune your soul to fit. Keep it light: one or two concrete prompts, not an interview.
+
+Then **stop and wait** for their answer. Don't start the task yet.
+
+## 4. Apply the name and tune the soul
+
+Once they reply:
+
+- **If they gave a name**, adopt it: read the \`agent-self-edit\` skill with
+  \`read_skill({skillId:"agent-self-edit"})\`, then call \`update_agent_file\` with the \`title\` set to
+  the chosen name (and your current body). If they didn't pick one, keep your current name.
+- **Tune your soul** — update \`agent/soul.md\` with \`write_file\` to reflect who they are and how
+  they want you to work (the "Who I serve" and "How I work" sections especially). Keep it tight.
+
+Do this quickly and don't over-explain the mechanics — a brief "Got it, I'm <name> now" is plenty.
+
+## 5. Now do the task
+
+Turn to the task they asked for in their first message and actually make progress on it — research,
+draft, or take the first concrete step. If you genuinely need a detail to proceed, ask, but bias to
+action. From here on, behave as their normal personal agent.
+
+The feeling to create: an agent that wanted to know them and let them shape it before diving in —
+not a setup wizard.
+`;
+}
+
+const ONBOARDING_SKILL_MD = buildOnboardingSkillMd();
+
+export const FIRST_PRINCIPLES_SKILL_ID = "first-principles";
+
+function buildFirstPrinciplesSkillMd(): string {
+  return `---
+name: first-principles
+description: Break a hard problem down to fundamental truths and rebuild the solution from scratch. Use for high-stakes or stuck decisions where the conventional approach isn't working, the assumptions feel shaky, or you need an answer better than "how it's usually done."
+---
+
+# First-principles thinking
+
+Most reasoning is **reasoning by analogy** — copying what already exists with small tweaks.
+First-principles thinking instead strips a problem down to the few things you *know* are true,
+then rebuilds an answer from only those, ignoring how it's normally done. It's slower, so spend
+it where it pays off, not on routine choices.
+
+## When to use this
+
+- A decision is hard, high-stakes, or you're stuck, and the obvious approach isn't working.
+- You suspect the "best practice" everyone copies doesn't actually fit this situation.
+- You're told something is impossible or fixed, and you're not sure the constraint is real.
+- You want an answer that's genuinely better than the default, not just a safe variation of it.
+
+Don't reach for it on reversible, low-stakes, or well-understood choices — there, analogy is
+faster and fine. Use judgement: the goal is a better decision, not a longer one.
+
+## How to run it
+
+Work the 15 prompts below **in order**, in five passes. Write your answers down (a scratch file
+in \`work/\` is ideal) — externalizing the reasoning is most of the value. You don't need a
+paragraph per prompt; a tight, honest answer beats a long one. Skip a prompt only when it
+genuinely doesn't apply, and say why. End at pass 5 with a decision and the single truth it
+rests on.
+
+### Pass 1 — Strip to fundamentals
+
+1. **State the real goal as an outcome, not a solution.** What are we *actually* trying to
+   achieve? Phrase it as the end result we want, with no method baked in. ("Move people across
+   the city in 10 minutes," not "build a faster train.")
+2. **List the bedrock facts.** What do we know to be true here that can't be reduced further —
+   physical limits, hard numbers, contractual or legal givens, things we've directly verified?
+   Keep only what you could defend if challenged.
+3. **Separate convention from truth.** Go through everything you "know" about this problem and
+   sort each item into *proven truth* vs *inherited convention* ("this is how it's done").
+   Convention is not evidence — set it aside for now.
+
+### Pass 2 — Challenge the assumptions
+
+4. **Test each constraint for necessity.** For every constraint and assumption, ask: is this
+   *actually* required by the fundamentals, or just how it's currently done? What's the evidence
+   it must be true? Demand a reason, not a precedent.
+5. **Sort real vs imagined constraints.** Split the constraints into ones rooted in the bedrock
+   facts (real) and ones that are habit, fear, or convenience (imagined). Be honest — most
+   "hard" constraints are softer than they look.
+6. **Five whys to a root cause.** Pick the core difficulty and ask "why" about five times in a
+   row, each answer feeding the next question, until you hit something fundamental that you
+   can't reduce further. That root is what you actually have to solve.
+
+### Pass 3 — Reason up from the ground
+
+7. **Rebuild from only the fundamentals.** Ignoring the current approach entirely, if you
+   assembled a solution using *only* the bedrock facts from pass 1 and the real constraints from
+   pass 2, what would it look like? Design it from scratch, not as an edit of the status quo.
+8. **Interrogate what you're copying.** Whatever convention or best practice you'd otherwise
+   reach for — what is it actually optimizing for, and was that the same goal as yours (prompt
+   1)? If the goals differ, the practice may be solving someone else's problem.
+9. **Find the simplest mechanism.** What is the simplest possible mechanism that satisfies the
+   fundamentals? Prefer the answer with the fewest moving parts that still works — added
+   complexity has to earn its place against this baseline.
+
+### Pass 4 — Stress-test and reconstruct
+
+10. **Find where it breaks.** Where does the from-scratch solution fail? Walk the edge cases and
+    the second- and third-order effects — what does it set in motion once it's running?
+11. **Pre-mortem.** Assume it's a year later and this failed badly. What would have had to be
+    true for that to happen? Which of those failure conditions are plausible, and what would
+    you change now to defuse them?
+12. **Flex the resources.** How would the fundamental solution change with 10× the resources, or
+    with one-tenth? The extremes expose which parts are essential and which are just sized to
+    today's budget — and often reveal a better middle.
+
+### Pass 5 — Decide and translate to action
+
+13. **Name the real tradeoff.** Put the conventional approach and the from-scratch one
+    side by side and state the tradeoff between them *in fundamentals* — not "safer vs riskier"
+    but what each actually buys and costs against the goal.
+14. **Design the cheapest test.** What is the smallest, fastest, cheapest experiment that would
+    validate (or kill) the core assumption everything rests on? Find a way to learn the truth
+    before committing fully.
+15. **Commit and stay falsifiable.** State the decision, name the single fundamental truth it
+    rests on, and write down exactly what evidence would change your mind. If you can't name
+    what would change your mind, you haven't finished reasoning.
+
+## The point
+
+The output isn't fifteen filled-in answers — it's a decision you can defend from the ground up,
+a clear view of which constraints were never real, and one cheap test before you bet on it. If
+the conventional answer survives all five passes, that's a real result too: now you *know* why
+it's right instead of just assuming it.
+`;
+}
+
+const FIRST_PRINCIPLES_SKILL_MD = buildFirstPrinciplesSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -370,6 +773,43 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
       "Set up the workspace for a new user — establish the Brain (shared company knowledge) and tune your own definition for great day-one scaffolding.",
     defaultEnabled: true,
     files: [{ path: "SKILL.md", content: OPENCOMPANY_SETUP_SKILL_MD }],
+  },
+  {
+    id: MEMORY_SKILL_ID,
+    name: "Structured memory",
+    description:
+      "Maintain durable, evidence-grounded memory across sessions with the memory CLI — canonical objects compiled from cited evidence, plus hybrid retrieval.",
+    defaultEnabled: true,
+    files: [{ path: "SKILL.md", content: MEMORY_SKILL_MD }],
+  },
+  {
+    id: SKILL_CREATOR_SKILL_ID,
+    name: "Create a personal skill",
+    description:
+      "Create or improve your own personal skills — save a reusable procedure as agent/skills/<id>/SKILL.md to load on demand later. Use when you spot a repeatable workflow worth keeping, or are asked to make or remember a skill.",
+    defaultEnabled: true,
+    files: [{ path: "SKILL.md", content: SKILL_CREATOR_SKILL_MD }],
+  },
+  {
+    id: ONBOARDING_SKILL_ID,
+    name: "First-session onboarding",
+    description:
+      "First-session onboarding for a brand-new user — turn their self-introduction into a personal, useful first interaction and seed memory. Only for the very first session; ignore in normal sessions.",
+    // Opt-in: enabled on the personal agent's config and invoked by the onboarding session's
+    // seeded pointer. Dormant (never read) in normal sessions.
+    defaultEnabled: false,
+    files: [{ path: "SKILL.md", content: ONBOARDING_SKILL_MD }],
+  },
+  {
+    id: FIRST_PRINCIPLES_SKILL_ID,
+    name: "First-principles thinking",
+    description:
+      "Break a hard problem down to fundamental truths and rebuild the solution from scratch — a 15-prompt framework for stuck or high-stakes decisions where the conventional approach isn't working.",
+    // Offered, not default-on: surfaced in the @-mention menu and self-addable, so any agent
+    // (company or personal) can turn it on per-agent without it loading in every session.
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: FIRST_PRINCIPLES_SKILL_MD }],
   },
 ];
 
@@ -389,14 +829,17 @@ export function isValidSkillMountId(id: string): boolean {
   return SKILL_MOUNT_ID_RE.test(id) && !id.includes("--");
 }
 
-// Metadata for an enabled skill (built-in or external), without file contents. Built-in
-// files live in code; external files live in the snapshot DB and are loaded by the runner.
+// Metadata for an enabled skill, without file contents. Built-in files live in code; external
+// files live in the snapshot DB; personal files live in the agent's bundle (agent_files). All are
+// loaded by the runner. `provenance` only applies to personal skills (who authored them) and feeds
+// future curation; it is absent for built-in/external skills.
 export type ResolvedSkillMetadata = {
   id: string;
   name: string;
   description: string;
-  origin: "builtin" | "external";
+  origin: "builtin" | "external" | "personal";
   source?: AgentSkillSource;
+  provenance?: "agent" | "user";
 };
 
 // The skills available to a session, as metadata only: every built-in `defaultEnabled`
@@ -435,6 +878,18 @@ export function resolveEnabledSkillMetadata(
     }
   }
   return out;
+}
+
+// Built-in skills the agent editor offers in its @-mention menu and that agents can self-add:
+// the `addable` catalog members (always `defaultEnabled: false`). Metadata only — no file
+// contents — so callers (incl. the web client) never pull the inline SKILL.md strings.
+export function listAddableBuiltinSkills(): ResolvedSkillMetadata[] {
+  return AGENT_SKILL_CATALOG.filter((skill) => skill.addable).map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    origin: "builtin" as const,
+  }));
 }
 
 // The built-in skills whose files (shipped in code) should be materialized for a session.
@@ -550,4 +1005,129 @@ export async function computeSkillFolderIntegrity(files: AgentSkillFile[]): Prom
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
   return `sha256:${hex}`;
+}
+
+// Personal skills are procedural playbooks the agent writes for itself. They live as ordinary
+// files in the agent's private bundle under `<bundleDir>/skills/<id>/SKILL.md` (+ supporting
+// files) and are auto-discovered each session — never listed in `skills:` frontmatter, which is
+// reserved for built-in and external skills. The cap keeps the always-injected ## Skills index
+// lean even if the agent accumulates many over time; skills beyond it are simply not surfaced.
+export const MAX_PERSONAL_SKILLS = 16;
+
+// One discovered personal skill: its catalog metadata plus the folder's files (relative to the
+// skill directory, e.g. "SKILL.md", "references/x.md") ready to materialize into the read-only mount.
+export type PersonalSkill = {
+  metadata: ResolvedSkillMetadata;
+  files: AgentSkillFile[];
+};
+
+export type PersonalSkillScanResult = {
+  skills: PersonalSkill[];
+  // Human-readable reasons a candidate folder was skipped (malformed frontmatter, bad id, collision,
+  // validation failure, cap). The runner logs these; the files themselves still persist as bundle files.
+  warnings: string[];
+};
+
+// SKILL.md frontmatter for a personal skill. Like the external-skill parser it requires `name` and
+// `description`, and additionally reads the optional `provenance` marker (agent- vs user-authored).
+function parsePersonalSkillFrontmatter(
+  content: string,
+): { name: string; description: string; provenance?: "agent" | "user" } | null {
+  const normalized = content.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return null;
+  const end = normalized.indexOf("\n---", 4);
+  if (end === -1) return null;
+  let frontmatter: unknown;
+  try {
+    frontmatter = parseYaml(normalized.slice(4, end));
+  } catch {
+    return null;
+  }
+  if (!frontmatter || typeof frontmatter !== "object") return null;
+  const record = frontmatter as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const description = typeof record.description === "string" ? record.description.trim() : "";
+  if (!name || !description) return null;
+  const rawProvenance = typeof record.provenance === "string" ? record.provenance.trim() : "";
+  const provenance =
+    rawProvenance === "agent" || rawProvenance === "user" ? rawProvenance : undefined;
+  return { name, description, ...(provenance ? { provenance } : {}) };
+}
+
+// Discover the agent's personal skills from its bundle files. Pure: no DB, no files, no network —
+// the runner passes in the already-loaded bundle rows. `bundleFiles` are repo-relative paths
+// (e.g. "agents/leo/skills/foo/SKILL.md"); `bundleDir` is the agent's bundle directory
+// ("agents/leo"); `reservedIds` are ids already taken by built-in/external skills so a personal
+// skill can never shadow one. Each candidate folder is validated (valid mount id, no collision,
+// well-formed SKILL.md frontmatter, passes validateSkillFiles); failures are skipped with a warning
+// rather than throwing, so one bad skill never blocks the rest or the session.
+export function scanPersonalSkills(input: {
+  bundleFiles: Array<{ path: string; content: string }>;
+  bundleDir: string;
+  reservedIds?: Iterable<string>;
+}): PersonalSkillScanResult {
+  const skillsPrefix = `${input.bundleDir}/skills/`;
+  const reserved = new Set(input.reservedIds ?? []);
+  const warnings: string[] = [];
+
+  // Group bundle files by skill id (the first path segment under skills/).
+  const filesById = new Map<string, AgentSkillFile[]>();
+  for (const file of input.bundleFiles) {
+    if (!file.path.startsWith(skillsPrefix)) continue;
+    const rest = file.path.slice(skillsPrefix.length);
+    const slash = rest.indexOf("/");
+    if (slash <= 0) continue; // a file directly under skills/ with no skill folder — ignore
+    const id = rest.slice(0, slash);
+    const relative = rest.slice(slash + 1);
+    if (!relative) continue;
+    const list = filesById.get(id);
+    if (list) list.push({ path: relative, content: file.content });
+    else filesById.set(id, [{ path: relative, content: file.content }]);
+  }
+
+  const skills: PersonalSkill[] = [];
+  for (const id of [...filesById.keys()].sort()) {
+    if (skills.length >= MAX_PERSONAL_SKILLS) {
+      warnings.push(
+        `Personal skill "${id}" omitted: exceeds the ${MAX_PERSONAL_SKILLS}-skill cap.`,
+      );
+      continue;
+    }
+    if (!isValidSkillMountId(id)) {
+      warnings.push(`Personal skill "${id}" skipped: not a valid skill id.`);
+      continue;
+    }
+    if (isKnownAgentSkillId(id) || reserved.has(id)) {
+      warnings.push(
+        `Personal skill "${id}" skipped: id collides with a built-in or external skill.`,
+      );
+      continue;
+    }
+    const files = filesById.get(id)!;
+    const validationError = validateSkillFiles(files);
+    if (validationError) {
+      warnings.push(`Personal skill "${id}" skipped: ${validationError}`);
+      continue;
+    }
+    const skillMd = files.find((file) => file.path === "SKILL.md")!; // guaranteed by validateSkillFiles
+    const parsed = parsePersonalSkillFrontmatter(skillMd.content);
+    if (!parsed) {
+      warnings.push(
+        `Personal skill "${id}" skipped: SKILL.md needs valid frontmatter with name and description.`,
+      );
+      continue;
+    }
+    skills.push({
+      metadata: {
+        id,
+        name: parsed.name,
+        description: parsed.description,
+        origin: "personal",
+        ...(parsed.provenance ? { provenance: parsed.provenance } : {}),
+      },
+      files,
+    });
+  }
+
+  return { skills, warnings };
 }

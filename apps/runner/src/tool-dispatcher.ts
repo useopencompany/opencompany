@@ -2,6 +2,7 @@ import {
   AGENT_SELF_EDIT_SKILL_ID,
   type AgentBrainReference,
   type AgentConfig,
+  agentHasGitHubAccess,
   BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
   formatBrainReferenceDisplay,
@@ -9,6 +10,7 @@ import {
   isBrainPathAllowed,
   isDeferrableRuntimeTool,
   newAgentSessionMessageId,
+  parseGitHubCliArgs,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
@@ -22,6 +24,8 @@ import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
+  loadConnectedGitHubInstallation,
+  loadGitHubWorkRepositoryByFullName,
   readSandboxBrainSnapshot,
   resolveAttachedRepositoryInstallations,
   runAmpCoderTool,
@@ -29,6 +33,7 @@ import {
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { publishTransientRuntimeEvent } from "./events";
+import { runFetchTranscriptTool } from "./fetch-transcript-tool";
 import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
@@ -36,18 +41,21 @@ import {
   type HostedToolUsage,
   MissingEnvError,
 } from "./hosted-tools";
+import { runInboxTool } from "./inbox-tool";
 import {
   appendRuntimeEventForLease,
   insertToolMessageForLease,
   requireLeaseWrite,
   StaleRunLeaseError,
 } from "./lease-writes";
+import { runMemoryTool } from "./memory-tool";
 import {
   buildToolModelMessage,
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
 import { runOpencodeCoderTool } from "./opencode-tool";
+import { runRecallTool } from "./recall-tool";
 import {
   RunAbortError,
   type RunControlCheck,
@@ -150,6 +158,9 @@ export function createToolSet(input: {
   internalMessages?: boolean;
   workspaceId: string;
   agentConfig: AgentConfig;
+  // True for the user's personal/default agent — selects the memory/ + personal-brain/ + work/
+  // sandbox layout and matching path whitelist for the file/memory tools.
+  personalAgent?: boolean;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -207,6 +218,7 @@ export function createToolSet(input: {
           ...(input.internalMessages ? { internalMessages: true } : {}),
           workspaceId: input.workspaceId,
           agentConfig: input.agentConfig,
+          personalAgent: input.personalAgent ?? false,
           toolCallId: options.toolCallId,
           definition,
           args: toolInput,
@@ -270,6 +282,7 @@ export function createToolSet(input: {
         ...(input.internalMessages ? { internalMessages: true } : {}),
         workspaceId: input.workspaceId,
         agentConfig: input.agentConfig,
+        personalAgent: input.personalAgent ?? false,
         toolCallId: options.toolCallId,
         args: toolInput,
         getSandbox: input.getSandbox,
@@ -325,6 +338,7 @@ export async function dispatchBuiltinUseTool(input: {
   internalMessages?: boolean;
   workspaceId: string;
   agentConfig: AgentConfig;
+  personalAgent?: boolean;
   toolCallId: string;
   args: unknown;
   getSandbox: () => Promise<SandboxHandle>;
@@ -409,6 +423,7 @@ export async function dispatchBuiltinUseTool(input: {
     ...(input.internalMessages ? { internalMessages: true } : {}),
     workspaceId: input.workspaceId,
     agentConfig: input.agentConfig,
+    personalAgent: input.personalAgent ?? false,
     toolCallId: input.toolCallId,
     definition,
     args: prepared.args,
@@ -537,6 +552,7 @@ export async function executeRuntimeTool(input: {
   internalMessages?: boolean;
   workspaceId?: string;
   agentConfig?: AgentConfig;
+  personalAgent?: boolean;
   toolCallId: string;
   definition: RuntimeToolDefinition;
   args: unknown;
@@ -583,6 +599,9 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
+          hasAttachedRepository:
+            Boolean(input.repository) ||
+            (input.agentConfig ? agentHasGitHubAccess(input.agentConfig) : false),
           googleContext: input.workspaceId
             ? {
                 workspaceId: input.workspaceId,
@@ -591,11 +610,40 @@ export async function executeRuntimeTool(input: {
                 clientSecret: input.env.googleOAuthClientSecret,
               }
             : undefined,
+          neonContext: input.workspaceId
+            ? {
+                workspaceId: input.workspaceId,
+                encryptionKey: input.env.integrationCredentialEncryptionKey,
+              }
+            : undefined,
         });
         usage = result.usage;
         return result.output;
       }
       if (input.definition.kind === "internal") {
+        if (input.definition.name === "recall") {
+          // Runner-side, no sandbox, no Gateway key: queries Postgres directly, scoped to this
+          // agent + user via the current session row, excluding the live session.
+          return runRecallTool({ sessionId: input.sessionId, args: input.args });
+        }
+        if (
+          input.definition.name === "inbox_list" ||
+          input.definition.name === "inbox_add" ||
+          input.definition.name === "inbox_update"
+        ) {
+          // Runner-side write to the user's personal inbox, scoped to this session's
+          // (workspace, user). Hard-gated to the personal agent at config resolution.
+          return runInboxTool({
+            name: input.definition.name,
+            sessionId: input.sessionId,
+            args: input.args,
+          });
+        }
+        if (input.definition.name === "fetch_transcript") {
+          // Runner-side, no sandbox: reads the full transcript of a session the caller is allowed
+          // to see (its own past sessions, or the parent it was spawned to review).
+          return runFetchTranscriptTool({ callerSessionId: input.sessionId, args: input.args });
+        }
         if (input.definition.name === "update_agent_file") {
           if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {
             return {
@@ -642,6 +690,7 @@ export async function executeRuntimeTool(input: {
         args: input.args,
         workdir: input.workdir,
         brainReferences: input.agentConfig?.brain ?? [],
+        personal: input.personalAgent ?? false,
       });
       const activeSandbox = await input.getSandbox();
       sandboxIdForCapture = activeSandbox.sandboxId;
@@ -697,6 +746,23 @@ export async function executeRuntimeTool(input: {
         }
         return opencodeResult;
       }
+      if (input.definition.name === "memory") {
+        const memoryResult = await runMemoryTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          env: input.env,
+          personal: input.personalAgent ?? false,
+          onOutput: async (stream, delta) => {
+            await input.checkAbort();
+            commandOutput.push(stream, delta);
+          },
+        });
+        if (memoryResult.usage) {
+          usage = memoryResult.usage;
+        }
+        return memoryResult.output;
+      }
       const brainSnapshotBefore =
         input.definition.name === "shell"
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
@@ -706,6 +772,7 @@ export async function executeRuntimeTool(input: {
           ? await resolveShellGitHubAuth({
               workspaceId: input.workspaceId,
               agentConfig: input.agentConfig,
+              args: input.args,
               toolCallId: input.toolCallId,
             })
           : null;
@@ -714,6 +781,7 @@ export async function executeRuntimeTool(input: {
         workdir: input.workdir,
         name: input.definition.name,
         args: input.args,
+        personal: input.personalAgent ?? false,
         ...(shellGitHubAuth
           ? { envs: shellGitHubAuth.env, redactOutput: shellGitHubAuth.redact }
           : {}),
@@ -1006,22 +1074,114 @@ function createCommandOutputPublisher(input: {
 }
 
 // Inject repo-scoped git + gh credentials into the explicit gh tool whenever the
-// agent has at least one attached GitHub repository. A broken integration
-// (e.g. needs-reauth) propagates and surfaces as a recoverable tool error. A single
-// installation token cannot span installations, so we scope the token to the repos
-// of the first attached repository's installation; cross-installation sessions get
-// auth for one installation at a time.
+// agent has attached GitHub access. A broken integration (e.g. needs-reauth)
+// propagates and surfaces as a recoverable tool error. A single installation token
+// cannot span installations, so explicit repositories are scoped to one installation.
+// With the live `@github` all-repositories scope, `gh --repo owner/repo ...` resolves
+// that repository's installation at call time so multi-installation workspaces use
+// the token for the requested repo instead of whichever connection was created first.
 async function resolveShellGitHubAuth(input: {
   workspaceId?: string | undefined;
   agentConfig?: AgentConfig | undefined;
+  args?: unknown;
   toolCallId: string;
 }) {
   if (!input.workspaceId || !input.agentConfig) return null;
 
-  const repositories = input.agentConfig.integrations.github.repositories;
+  const github = input.agentConfig.integrations.github;
+  if (github.allRepositories === true) {
+    const requestedRepository = readGhRepoArgument(input.args);
+    if (requestedRepository) {
+      const attachedRepository = github.repositories.find(
+        (repository) => repository.fullName.toLowerCase() === requestedRepository.toLowerCase(),
+      );
+      if (attachedRepository) {
+        return resolveAttachedGitHubCommandAuth({
+          workspaceId: input.workspaceId,
+          repositories: [attachedRepository],
+          toolCallId: input.toolCallId,
+        });
+      }
+
+      const resolved = await loadGitHubWorkRepositoryByFullName(
+        input.workspaceId,
+        requestedRepository,
+      );
+      if (!resolved) {
+        throw new Error(
+          `GitHub work repository ${requestedRepository} is not available to this workspace. Reconnect GitHub or grant the installation access to it.`,
+        );
+      }
+
+      const githubToken = await getGitHubWorkInstallationToken({
+        installationId: resolved.installationId,
+        repositoryFullName: resolved.repository.fullName,
+      });
+      if (!githubToken) return null;
+
+      const githubAuthHeader = gitAuthHeader(githubToken);
+      return {
+        env: buildGitHubCommandEnv({
+          githubAuthHeader,
+          githubToken,
+          toolCallId: input.toolCallId,
+          repositoryFullName: resolved.repository.fullName,
+        }),
+        redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+      };
+    }
+
+    if (github.repositories.length === 1) {
+      return resolveAttachedGitHubCommandAuth({
+        workspaceId: input.workspaceId,
+        repositories: github.repositories,
+        toolCallId: input.toolCallId,
+      });
+    }
+
+    const installation = await loadConnectedGitHubInstallation(input.workspaceId);
+    // GitHub not connected: same graceful no-auth behavior as an agent without repositories.
+    if (!installation) return null;
+
+    const githubToken = await getGitHubWorkInstallationToken({
+      installationId: installation.installationId,
+    });
+    if (!githubToken) return null;
+
+    const githubAuthHeader = gitAuthHeader(githubToken);
+    return {
+      env: buildGitHubCommandEnv({
+        githubAuthHeader,
+        githubToken,
+        toolCallId: input.toolCallId,
+        // No GH_REPO default: with installation-wide access the agent must pass --repo.
+        ...(github.repositories.length === 1
+          ? { repositoryFullName: github.repositories[0]!.fullName }
+          : {}),
+      }),
+      redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+    };
+  }
+
+  const repositories = github.repositories;
   if (repositories.length === 0) return null;
 
-  const resolved = await resolveAttachedRepositoryInstallations(input.workspaceId, repositories);
+  return resolveAttachedGitHubCommandAuth({
+    workspaceId: input.workspaceId,
+    repositories,
+    toolCallId: input.toolCallId,
+  });
+}
+
+async function resolveAttachedGitHubCommandAuth(input: {
+  workspaceId: string;
+  repositories: AgentConfig["integrations"]["github"]["repositories"];
+  toolCallId: string;
+}) {
+  const resolved = await resolveAttachedRepositoryInstallations(
+    input.workspaceId,
+    input.repositories,
+  );
   if (resolved.length === 0) return null;
 
   const installationId = resolved[0]!.installationId;
@@ -1047,6 +1207,32 @@ async function resolveShellGitHubAuth(input: {
   };
 }
 
+function readGhRepoArgument(args: unknown) {
+  const argv = isRecord(args) ? parseGitHubCliArgs(args.args) : null;
+  if (!argv) return null;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]!;
+    if (arg === "--") return null;
+    if (arg === "--repo" || arg === "-R") {
+      const value = argv[index + 1]?.trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+    if (arg.startsWith("--repo=")) {
+      const value = arg.slice("--repo=".length).trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+    if (arg.startsWith("-R") && arg.length > 2) {
+      const value = arg.slice(2).trim();
+      return value && isGitHubRepositoryFullName(value) ? value : null;
+    }
+  }
+  return null;
+}
+
+function isGitHubRepositoryFullName(value: string) {
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value);
+}
+
 function gitAuthHeader(token: string) {
   return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
     "base64",
@@ -1064,7 +1250,9 @@ export function preflightSandboxToolArgs(input: {
   args: unknown;
   workdir: string;
   brainReferences: AgentBrainReference[];
+  personal?: boolean;
 }) {
+  const personal = input.personal ?? false;
   if (
     input.name !== "read_file" &&
     input.name !== "write_file" &&
@@ -1087,13 +1275,13 @@ export function preflightSandboxToolArgs(input: {
 
   let brainRelativePath: string | null;
   try {
-    brainRelativePath = resolveSandboxBrainRelativePath(input.workdir, requestedPath);
+    brainRelativePath = resolveSandboxBrainRelativePath(input.workdir, requestedPath, personal);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
-    throw new RecoverableToolError(
-      `${message} Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.`,
-      "invalid_sandbox_path",
-    );
+    const hint = personal
+      ? "Use paths prefixed with work/ for scratch files, personal-brain/ for the user's private knowledge, memory/ for your structured memory, or agent/ for your private agent folder."
+      : "Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.";
+    throw new RecoverableToolError(`${message} ${hint}`, "invalid_sandbox_path");
   }
 
   // Enforce the agent's true Brain access scope. The root check above only

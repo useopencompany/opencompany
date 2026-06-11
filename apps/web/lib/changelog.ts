@@ -173,6 +173,12 @@ export function renderInline(text: string): InlineToken[] {
     build: (m: RegExpExecArray) => InlineToken;
   }> = [
     {
+      // Must come before the link pattern so `![alt](src)` is not consumed
+      // as a link with a stray leading `!`.
+      regex: /!\[([^\]]*)\]\(([^)\s]+)\)/,
+      build: (m) => ({ kind: "image", alt: m[1] ?? "", src: m[2] ?? "" }),
+    },
+    {
       regex: /\[([^\]]+)\]\(([^)\s]+)\)/,
       build: (m) => ({ kind: "link", text: m[1] ?? "", href: m[2] ?? "" }),
     },
@@ -220,4 +226,11 @@ export type InlineToken =
   | { kind: "text"; text: string }
   | { kind: "code"; text: string }
   | { kind: "strong"; text: string }
-  | { kind: "link"; text: string; href: string };
+  | { kind: "link"; text: string; href: string }
+  | { kind: "image"; alt: string; src: string };
+
+const VIDEO_SRC_PATTERN = /\.(mp4|webm|mov)([?#]|$)/i;
+
+export function isVideoSrc(src: string): boolean {
+  return VIDEO_SRC_PATTERN.test(src);
+}

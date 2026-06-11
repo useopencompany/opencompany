@@ -1,5 +1,6 @@
 import {
   type AgentConfig,
+  agentHasGitHubAccess,
   normalizeAgentConfig,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
@@ -42,6 +43,9 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "server" }
 export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   let sandbox: SandboxHandle | null = null;
   const agentConfig = normalizeAgentConfig(row.agent.config);
+  // The user's personal/default agent gets the memory/ + personal-brain/ + work/ sandbox layout and
+  // no company brain mount; company/workspace agents keep the original agent/ + brain/ + work/ tree.
+  const personal = row.agent.isDefault;
   const template = resolveSandboxTemplate(agentConfig, env);
   const existingSandbox = Boolean(row.session.e2bSandboxId);
   const readyStartedAt = performance.now();
@@ -66,6 +70,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
+      personal,
       agentFile: serializeAgentFile({
         title: agentConfig.title,
         body: agentConfig.instructions,
@@ -77,24 +82,29 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
         triggers: agentConfig.triggers,
       }),
     });
-    await materializeBrainForSession({
-      sandbox,
-      sessionId: row.session.id,
-      workspaceId: row.workspace.id,
-      workdir: row.session.workdir,
-      references: agentConfig.brain,
-    });
+    // Personal agents have no company brain mount — skip materializing ./brain for them.
+    if (!personal) {
+      await materializeBrainForSession({
+        sandbox,
+        sessionId: row.session.id,
+        workspaceId: row.workspace.id,
+        workdir: row.session.workdir,
+        references: agentConfig.brain,
+      });
+    }
     await materializeAgentBundleForSession({
       sandbox,
       sessionId: row.session.id,
       workspaceId: row.workspace.id,
       agentId: row.agent.id,
       workdir: row.session.workdir,
+      personal,
     });
     await materializeSkillsForSession({
       sandbox,
       workdir: row.session.workdir,
       workspaceId: row.workspace.id,
+      agentId: row.agent.id,
       config: agentConfig,
     });
     captureE2BSandboxLatency({
@@ -182,11 +192,12 @@ function errorName(error: unknown) {
 }
 
 // The richer sandbox template (with git, gh, and the coding-agent CLIs installed)
-// is used whenever the agent has at least one GitHub repository attached or a
-// coding-agent tool enabled; plain chat agents get the lighter default template.
+// is used whenever the agent has GitHub access (an attached repository or the live
+// `@github` all-repositories scope) or a coding-agent tool enabled; plain chat agents
+// get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
   const needsCodingTemplate =
-    agentConfig.integrations.github.repositories.length > 0 ||
+    agentHasGitHubAccess(agentConfig) ||
     agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode");
   return needsCodingTemplate ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
@@ -395,6 +406,88 @@ export async function createAfterSessionRun(input: {
   return run ?? null;
 }
 
+// Marks an after-session run as having spawned a dedicated memory-keeper session, linking to it for
+// auditability. The keeper then runs as its own session; this run record's job is done.
+export async function markAfterSessionRunSpawned(id: number, childSessionId: string) {
+  await getDb()
+    .update(agentSessionAfterSessionRuns)
+    .set({
+      status: "spawned",
+      childSessionId,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSessionAfterSessionRuns.id, id));
+}
+
+// Collapse a memory pass's closing note into a single short line safe to embed in the parent's
+// `after_session.completed` event payload (the web surfaces it as the memory card's result).
+export function summarizeAfterSessionNote(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > 280 ? `${collapsed.slice(0, 277)}...` : collapsed;
+}
+
+export async function completeSpawnedAfterSessionRunForChild(input: {
+  childSessionId: string;
+  status: "completed" | "failed";
+  lastError?: string;
+  // One-line summary of what the memory pass stored (the keeper's closing note).
+  summary?: string;
+}) {
+  const db = getDb();
+  const [run] = await db
+    .select({
+      id: agentSessionAfterSessionRuns.id,
+      sessionId: agentSessionAfterSessionRuns.sessionId,
+      lastUserMessageId: agentSessionAfterSessionRuns.lastUserMessageId,
+      status: agentSessionAfterSessionRuns.status,
+    })
+    .from(agentSessionAfterSessionRuns)
+    .where(eq(agentSessionAfterSessionRuns.childSessionId, input.childSessionId))
+    .limit(1);
+
+  if (!run || run.status === input.status) return null;
+  if (run.status !== "spawned" && run.status !== "running") return null;
+
+  await db
+    .update(agentSessionAfterSessionRuns)
+    .set({
+      status: input.status,
+      lastError: input.status === "failed" ? (input.lastError ?? null) : null,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSessionAfterSessionRuns.id, run.id));
+
+  if (input.status === "completed") {
+    await appendRuntimeEvent(db, {
+      sessionId: run.sessionId,
+      type: "after_session.completed",
+      payload: {
+        runId: run.id,
+        messageId: run.lastUserMessageId,
+        childSessionId: input.childSessionId,
+        ...(input.summary ? { summary: input.summary } : {}),
+      },
+    });
+  } else {
+    await appendRuntimeEvent(db, {
+      sessionId: run.sessionId,
+      type: "after_session.failed",
+      payload: {
+        runId: run.id,
+        messageId: run.lastUserMessageId,
+        childSessionId: input.childSessionId,
+        message: input.lastError ?? "Memory update failed.",
+      },
+    });
+  }
+
+  return run;
+}
+
 export async function completeAfterSessionRun(
   id: number,
   input: { status: "completed" | "skipped" | "failed"; skippedReason?: string; lastError?: string },
@@ -477,6 +570,7 @@ export async function startSession(sessionId: string, env: RunnerEnv) {
     .where(
       and(
         eq(agentSessions.id, sessionId),
+        eq(agentSessions.status, "provisioning"),
         isNull(agentSessions.archivedAt),
         isNull(agentSessions.runLeaseId),
       ),

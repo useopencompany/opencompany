@@ -1,11 +1,13 @@
 import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
-import type { NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { getWorkOSRedirectUri } from "@/lib/workos";
 
 // Next.js 16 renamed Middleware to Proxy; keep this file as proxy.ts.
 // https://nextjs.org/docs/app/getting-started/proxy
 
 const SIGN_UP_PATHS = ["/auth/sign-up"];
+const GOOGLE_OAUTH_BROKER_HOST = "oauth.opencompany.cloud";
+const GOOGLE_OAUTH_BROKER_PATH = "/api/google/callback";
 
 const UNAUTHENTICATED_PATHS = [
   "/",
@@ -17,6 +19,7 @@ const UNAUTHENTICATED_PATHS = [
   "/auth/sign-up",
   "/changelog",
   "/api/healthz",
+  GOOGLE_OAUTH_BROKER_PATH,
   "/api/inngest",
   "/api/stripe/webhook",
 ];
@@ -46,6 +49,13 @@ function screenHintFor(pathname: string) {
 }
 
 export default async function proxy(request: NextRequest) {
+  if (
+    request.nextUrl.hostname === GOOGLE_OAUTH_BROKER_HOST &&
+    request.nextUrl.pathname !== GOOGLE_OAUTH_BROKER_PATH
+  ) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   let refreshFailed = false;
   const { session, headers, authorizationUrl } = await authkit(request, {
     redirectUri: getWorkOSRedirectUri(),

@@ -269,6 +269,13 @@ Production runner logs are structured JSON on stdout and should be forwarded by 
 Better Stack source `opencompany-runner-production`. Do not add browser/client log capture to debug
 runner issues; search server logs by `session_id` first.
 
+Preview runner logs use the same structured JSON format. The shared Better Stack source is
+`opencompany-runner-preview`; its Render syslog endpoint and source token live in Infisical `dev` +
+`/release` as `PREVIEW_RENDER_LOG_ENDPOINT` and `PREVIEW_RENDER_LOG_TOKEN`. Search logs by both
+`preview_pr_number` and `session_id`, or run
+`bun run preview:debug-session -- --pr <number> --session <session_id>` with the preview database
+URL while the stack still exists.
+
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to
 `RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.

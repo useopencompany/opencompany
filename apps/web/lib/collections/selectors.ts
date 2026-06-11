@@ -6,7 +6,12 @@ import type {
 } from "@/lib/agent-sessions/payload";
 import { isSessionUnseen } from "@/lib/agent-sessions/payload";
 import { type AgentListItemPayload, normalizeAgentConfig } from "@/lib/agents/payload";
-import type { AgentRow, AgentSessionRow, SessionStarRow } from "@/lib/collections/types";
+import type {
+  AgentRow,
+  AgentSessionRow,
+  InboxItemRow,
+  SessionStarRow,
+} from "@/lib/collections/types";
 
 /**
  * Selectors map raw synced rows (snake_case Postgres columns) into the
@@ -69,6 +74,7 @@ export function deriveSidebarSessions(
       id: row.id,
       title: row.title,
       status: row.status,
+      source: row.source,
       modelName: row.model_name,
       lastError: row.last_error,
       createdAt: row.created_at,
@@ -81,6 +87,103 @@ export function deriveSidebarSessions(
   return visible.filter(
     (session, index) => index < SIDEBAR_RECENCY_LIMIT || session.starredAt !== null,
   );
+}
+
+/**
+ * Personal session list variant: scoped to a single default agent, includes WhatsApp
+ * sessions, and otherwise mirrors the workspace sidebar's pin-aware recency behavior.
+ */
+export function derivePersonalSidebarSessions(
+  agentId: string,
+  sessions: AgentSessionRow[],
+  stars: SessionStarRow[],
+): SidebarSessionPayload[] {
+  const starredAtBySession = new Map(stars.map((star) => [star.session_id, star.starred_at]));
+
+  const visible = sessions
+    .filter(
+      (row) =>
+        row.agent_id === agentId &&
+        (row.source === "user" || row.source === "whatsapp") &&
+        row.archived_at === null &&
+        !SIDEBAR_HIDDEN_STATUSES.has(row.status),
+    )
+    .map((row) => ({
+      id: row.id,
+      title: row.title,
+      status: row.status,
+      source: row.source === "whatsapp" ? ("whatsapp" as const) : ("user" as const),
+      modelName: row.model_name,
+      lastError: row.last_error,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      starredAt: starredAtBySession.get(row.id) ?? null,
+      unseen: isSessionUnseen(row.last_turn_finished_at, row.last_seen_at),
+    }))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+  return visible.filter(
+    (session, index) => index < SIDEBAR_RECENCY_LIMIT || session.starredAt !== null,
+  );
+}
+
+export type InboxItemPayload = {
+  id: string;
+  title: string;
+  body: string | null;
+  steps: string[];
+  priority: "urgent" | "high" | "med" | "low" | null;
+  dueAt: string | null;
+  status: InboxItemRow["status"];
+  snoozedUntil: string | null;
+  source: string | null;
+  sourceSessionId: string | null;
+  createdAt: string;
+};
+
+export function inboxRowToPayload(row: InboxItemRow): InboxItemPayload {
+  return {
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    steps: row.steps ?? [],
+    priority: row.priority,
+    dueAt: row.due_at,
+    status: row.status,
+    snoozedUntil: row.snoozed_until,
+    source: row.source,
+    sourceSessionId: row.source_session_id,
+    createdAt: row.created_at,
+  };
+}
+
+const INBOX_PRIORITY_RANK: Record<NonNullable<InboxItemRow["priority"]>, number> = {
+  urgent: 0,
+  high: 1,
+  med: 2,
+  low: 3,
+};
+
+/**
+ * Items the user should see in their inbox right now: open items, plus snoozed items whose
+ * snooze window has elapsed. A snoozed item with a future snoozed_until stays hidden (it is still
+ * synced so the agent can see it via inbox_list). Sorted by priority, then newest first. Pass the
+ * current time so the live query re-derives as a ticking clock advances past snooze windows.
+ */
+export function deriveVisibleInbox(rows: InboxItemRow[], now: number): InboxItemPayload[] {
+  return rows
+    .filter(
+      (row) =>
+        row.status === "open" ||
+        (row.status === "snoozed" && (!row.snoozed_until || Date.parse(row.snoozed_until) <= now)),
+    )
+    .map(inboxRowToPayload)
+    .sort((a, b) => {
+      const ra = a.priority ? INBOX_PRIORITY_RANK[a.priority] : 4;
+      const rb = b.priority ? INBOX_PRIORITY_RANK[b.priority] : 4;
+      if (ra !== rb) return ra - rb;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
 }
 
 // Aggregates are a recursive server-side rollup over the session tree (D2) and the
@@ -149,6 +252,7 @@ function sessionRowToRelated(
     id: row.id,
     title: row.title,
     status: row.status,
+    source: row.source,
     agentName: agent?.name ?? "",
     agentPath: agent?.path ?? null,
     parentMessageId: row.parent_message_id,
@@ -198,5 +302,6 @@ export function deriveSessionDetailPlaceholder(
     // This projection has no per-step usage rows to read; the live detail query supplies the
     // real context figure once it loads.
     currentContextTokens: 0,
+    latestEventId: 0,
   };
 }

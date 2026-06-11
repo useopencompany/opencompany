@@ -23,9 +23,11 @@ export async function interruptActiveRuns(reason: SessionInterruptReason = "runn
   const runs = listActiveRuns();
   const results = await Promise.allSettled(
     runs.map(async (run) => {
-      const interrupted = await interruptCurrentRun({ ...run, reason });
-      abortActiveRun(run.sessionId);
-      return interrupted;
+      try {
+        return await interruptCurrentRun({ ...run, reason });
+      } finally {
+        abortActiveRun(run.sessionId);
+      }
     }),
   );
   return results.filter((result) => result.status === "fulfilled" && result.value).length;
@@ -92,6 +94,7 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
       WHERE status = 'running'
         AND archived_at IS NULL
         AND run_lease_id IS NOT NULL
+        AND run_lease_owner IS NOT NULL
         AND run_heartbeat_at IS NOT NULL
         AND run_heartbeat_at < ${input.staleBefore}
     ),
@@ -108,7 +111,11 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
           updated_at = now()
       FROM candidates
       WHERE session.id = candidates.id
-      RETURNING candidates.id, candidates."leaseId", candidates."leaseOwner"
+        -- Re-checked on the post-lock row version: during a deploy the old and new
+        -- instances both run this sweep, and without this guard the loser of the row
+        -- lock would re-apply the update and emit duplicate interruption events.
+        AND session.status = 'running'
+      RETURNING session.id, candidates."leaseId", candidates."leaseOwner"
     ),
     status_events AS (
       INSERT INTO agent_session_events (session_id, message_id, type, payload)
@@ -122,7 +129,7 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
         id,
         NULL,
         'session.interrupted',
-        jsonb_build_object('reason', ${input.reason}, 'leaseId', "leaseId", 'leaseOwner', "leaseOwner")
+        jsonb_build_object('reason', ${input.reason}::text, 'leaseId', "leaseId", 'leaseOwner', "leaseOwner")
       FROM updated
       RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
     )

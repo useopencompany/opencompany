@@ -1,7 +1,7 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { userAvatars } from "@opencompany/db/schema";
+import { userAvatars, users } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
@@ -64,7 +64,52 @@ export async function updateAvatar(input: { dataBase64: string }) {
   }
 
   revalidatePath("/", "layout");
-  revalidatePath("/settings");
+  revalidatePath("/company/settings");
+  return { ok: true as const };
+}
+
+// Per-user "Pro mode" toggle, set from personal Settings. Persisted on `users.proMode` so the
+// /personal layout (and thus the sidebar) picks it up on the next load; the client also flips it
+// optimistically via PersonalAgentContext so the Memory row appears/disappears without a reload.
+export async function setProMode(next: boolean) {
+  const context = await currentWorkspace({ optional: true });
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  try {
+    await getDb()
+      .update(users)
+      .set({ proMode: next, updatedAt: new Date() })
+      .where(eq(users.id, context.user.id));
+  } catch {
+    return { ok: false as const, error: "Could not update Pro mode. Please try again." };
+  }
+
+  revalidatePath("/personal", "layout");
+  return { ok: true as const };
+}
+
+// Per-user opt-in to the legacy company/workspace surface, set from personal Settings. Persisted
+// on `users.companySurfaceEnabled` so the /personal layout picks it up on the next load; the
+// client also flips it optimistically via PersonalAgentContext so the space switcher
+// appears/disappears without a reload.
+export async function setCompanySurfaceEnabled(next: boolean) {
+  const context = await currentWorkspace({ optional: true });
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  try {
+    await getDb()
+      .update(users)
+      .set({ companySurfaceEnabled: next, updatedAt: new Date() })
+      .where(eq(users.id, context.user.id));
+  } catch {
+    return { ok: false as const, error: "Could not update company access. Please try again." };
+  }
+
+  revalidatePath("/personal", "layout");
   return { ok: true as const };
 }
 
@@ -82,6 +127,6 @@ export async function removeAvatar() {
   }
 
   revalidatePath("/", "layout");
-  revalidatePath("/settings");
+  revalidatePath("/company/settings");
   return { ok: true as const };
 }

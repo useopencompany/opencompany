@@ -1,5 +1,9 @@
-import { TOOL_APPROVAL_BACKSTOP_MS } from "@opencompany/agent-runtime";
+import {
+  AFTER_SESSION_IDLE_TRIGGER_SECONDS,
+  TOOL_APPROVAL_BACKSTOP_MS,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
+import { indexPendingMessageChunks, RECALL_INDEX_SWEEP_LIMIT } from "@opencompany/db/recall";
 import { agentSessionQuestions, agentToolApprovals } from "@opencompany/db/schema";
 import { and, eq, lt } from "drizzle-orm";
 import {
@@ -25,6 +29,12 @@ import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import { runProvisionSlackSupport } from "@/lib/inngest/provision-slack-support";
+import { runDeliverWhatsappReply, runWhatsappDeliverySweep } from "@/lib/messaging/delivery";
+import {
+  type DeliverWhatsappReplyInput,
+  WHATSAPP_DELIVER_REPLY_EVENT,
+  WHATSAPP_DELIVERY_SWEEP_CRON,
+} from "@/lib/messaging/events";
 import { SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT } from "@/lib/slack/events";
 import { runSlackSupportRecoverySweep, SLACK_SUPPORT_RECOVERY_CRON } from "@/lib/slack/recovery";
 import {
@@ -74,6 +84,37 @@ export const sweepWorkspaceSyncOutbox = inngest.createFunction(
   },
   async ({ step }) => {
     return runWorkspaceSyncOutboxSweep(step);
+  },
+);
+
+// Cross-session recall index. Chunks completed user/assistant messages into the searchable
+// agent_session_message_chunks projection (see @opencompany/db/recall) so the runner-side `recall`
+// tool can find them. The sweep is idempotent and re-entrant: it drains a fresh session's messages
+// within a minute and backfills history over successive runs. Each run loops a few batches so a
+// backlog catches up quickly without one cron tick doing unbounded work.
+const RECALL_INDEX_SWEEP_CRON = "* * * * *";
+const RECALL_INDEX_SWEEP_MAX_ITERATIONS = 5;
+
+export const sweepRecallIndex = inngest.createFunction(
+  {
+    id: "sweep-recall-index",
+    name: "Sweep cross-session recall index",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: RECALL_INDEX_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    const db = getDb();
+    let indexed = 0;
+    for (let iteration = 0; iteration < RECALL_INDEX_SWEEP_MAX_ITERATIONS; iteration += 1) {
+      const result = (await step.run(`index message chunks ${iteration}`, async () =>
+        indexPendingMessageChunks(db),
+      )) as Awaited<ReturnType<typeof indexPendingMessageChunks>>;
+      indexed += result.indexed;
+      // A non-full batch means the backlog is drained; stop until the next tick.
+      if (result.scanned < RECALL_INDEX_SWEEP_LIMIT) break;
+    }
+    return { indexed };
   },
 );
 
@@ -185,7 +226,11 @@ export const runAgentAfterSession = inngest.createFunction(
     triggers: { event: AGENT_AFTER_SESSION_CHECK_EVENT },
   },
   async ({ event, step }) => {
-    await step.sleep("wait for session idle", "180s");
+    const idleDelaySeconds =
+      typeof event.data.idleDelaySeconds === "number" && event.data.idleDelaySeconds > 0
+        ? event.data.idleDelaySeconds
+        : AFTER_SESSION_IDLE_TRIGGER_SECONDS;
+    await step.sleep("wait for session idle", `${idleDelaySeconds}s`);
 
     return step.run("run after-session hook if still idle", async () => {
       await callRunner(
@@ -465,6 +510,43 @@ export const provisionSlackSupportChannel = inngest.createFunction(
     >[0]),
 );
 
+// Outbound WhatsApp delivery, web-side only (the runner never learns about channels). Polls for the
+// completed assistant reply, then sends it over the Cloud API. Per-session concurrency preserves
+// reply ordering within a thread.
+export const deliverWhatsappReply = inngest.createFunction(
+  {
+    id: "deliver-whatsapp-reply",
+    name: "Deliver WhatsApp reply",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.sessionId",
+    },
+    triggers: { event: WHATSAPP_DELIVER_REPLY_EVENT },
+  },
+  // Cast at the Inngest adapter boundary: the runtime step is structurally compatible with the
+  // narrow WorkflowStep the handler accepts (which keeps it unit-testable).
+  async ({ event, step }) =>
+    runDeliverWhatsappReply({
+      data: event.data as DeliverWhatsappReplyInput,
+      step: step as unknown as Parameters<typeof runDeliverWhatsappReply>[0]["step"],
+    }),
+);
+
+// Backstop: re-deliver any recently-completed WhatsApp reply with no outbound row (a per-message job
+// that timed out or didn't run). The outbound-existence guard in deliverReply keeps this safe.
+export const sweepWhatsappDeliveries = inngest.createFunction(
+  {
+    id: "sweep-whatsapp-deliveries",
+    name: "Sweep WhatsApp deliveries",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: WHATSAPP_DELIVERY_SWEEP_CRON },
+  },
+  async ({ step }) =>
+    runWhatsappDeliverySweep(step as unknown as Parameters<typeof runWhatsappDeliverySweep>[0]),
+);
+
 // Hourly recovery: re-dispatch provisioning for workspaces stuck in `failed`/long-`pending`
 // so a transient failure (or onboarding before SLACK_SUPPORT_* was configured) self-heals.
 export const sweepFailedSlackSupportChannels = inngest.createFunction(
@@ -484,6 +566,7 @@ export const sweepFailedSlackSupportChannels = inngest.createFunction(
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
+  sweepRecallIndex,
   sweepOrphanedRunningSessions,
   startAgentSession,
   runAgentSessionMessage,
@@ -497,5 +580,7 @@ export const inngestFunctions = [
   sweepExpiredSessionQuestions,
   sendSignupWelcome,
   provisionSlackSupportChannel,
+  deliverWhatsappReply,
+  sweepWhatsappDeliveries,
   sweepFailedSlackSupportChannels,
 ];

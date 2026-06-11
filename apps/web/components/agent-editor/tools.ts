@@ -2,6 +2,7 @@ import type { ModelRatings, ModelRatingTier } from "@opencompany/agent-runtime";
 import {
   AFTER_SESSION_TAG,
   agentMentionIdForPath,
+  listAddableBuiltinSkills,
   repositoryIdForFullName,
 } from "@opencompany/agent-runtime";
 import type {
@@ -16,7 +17,9 @@ import {
   CalendarDays,
   Clock3,
   Code2,
+  Database,
   FileText,
+  FlaskConical,
   Folder,
   GitBranch,
   ListTodo,
@@ -24,6 +27,7 @@ import {
   Mail,
   MessageSquare,
   MessagesSquare,
+  Monitor,
   Music2,
   Plus,
   Search,
@@ -160,11 +164,14 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   youtube: SquarePlay,
   tiktok: Music2,
   instagram: InstagramIcon,
+  neon: Database,
   amp: Code2,
   opencode: Code2,
   linear: ListTodo,
   slack: MessageSquare,
   posthog: BarChart3,
+  betterstack: Monitor,
+  braintrust: FlaskConical,
   gmail: Mail,
   google_calendar: CalendarDays,
 };
@@ -276,8 +283,6 @@ export function buildAgentMentionItems(
   brainPaths: string[] = [],
   options: {
     enabledMcpToolIds?: AgentToolId[];
-    includeMcpTools?: boolean;
-    mcpEnabled?: boolean;
     agents?: AgentReference[];
     skills?: AgentSkillCatalogEntry[];
   } = {},
@@ -288,8 +293,8 @@ export function buildAgentMentionItems(
     kind: "integration",
     provider: "github",
     label: "github",
-    displayLabel: "GitHub",
-    description: "Workspace GitHub integration.",
+    displayLabel: "GitHub — all repositories",
+    description: "Access every repository the workspace GitHub connection can reach.",
     icon: GitBranch,
   };
   const repositoryItems: AgentIntegration[] = repositories.map((repository) => {
@@ -320,11 +325,16 @@ export function buildAgentMentionItems(
   ];
 }
 
-// Workspace external skills as @skill/<id> mentions, plus an "Add skill from GitHub URL"
-// action that opens the resolve dialog. The pill renders @skill/<id> in the body (so it
-// matches the runtime derivation); the dropdown shows the friendly skill name.
+// Addable built-in skills (shipped in code, off by default) plus the workspace's external
+// skills, all as @skill/<id> mentions, plus an "Add skill from GitHub URL" action that opens
+// the resolve dialog. The pill renders @skill/<id> in the body (so it matches the runtime
+// derivation); the dropdown shows the friendly skill name. Built-ins lead since they're always
+// available regardless of workspace setup.
 export function buildSkillMentionItems(skills: AgentSkillCatalogEntry[]): AgentSkillMention[] {
-  const items: AgentSkillMention[] = skills.map((skill) => ({
+  const builtin = listAddableBuiltinSkills();
+  const seen = new Set(builtin.map((skill) => skill.id));
+  const catalog = [...builtin, ...skills.filter((skill) => !seen.has(skill.id))];
+  const items: AgentSkillMention[] = catalog.map((skill) => ({
     id: `skill/${skill.id}`,
     mentionId: `skill/${skill.id}`,
     kind: "skill" as const,
@@ -345,21 +355,13 @@ export function buildSkillMentionItems(skills: AgentSkillCatalogEntry[]): AgentS
   return items;
 }
 
-// Non-MCP tools are always available. MCP-backed tools (Linear, Slack) are shown
-// whenever the workspace MCP beta is on: connected ones behave normally, while
-// not-yet-connected ones stay selectable but carry `needsSetup`/`connectUrl` so
-// the UI can flag them and link to the connect flow. With the beta off they are
-// hidden entirely (matching the runtime's "beta is off" guard).
-function buildToolMentionItems(options: {
-  enabledMcpToolIds?: AgentToolId[];
-  includeMcpTools?: boolean;
-  mcpEnabled?: boolean;
-}): AgentTool[] {
+// All tools are always available. MCP-backed tools (Linear, Slack) that are already
+// connected behave normally; not-yet-connected ones stay selectable but carry
+// `needsSetup`/`connectUrl` so the UI can flag them and link to the connect flow.
+function buildToolMentionItems(options: { enabledMcpToolIds?: AgentToolId[] }): AgentTool[] {
   return AGENT_TOOLS.flatMap((tool) => {
     if (tool.kind !== "tool" || !isMcpToolId(tool.id)) return [tool];
     const connected = Boolean(options.enabledMcpToolIds?.includes(tool.id));
-    const visible = options.includeMcpTools || options.mcpEnabled || connected;
-    if (!visible) return [];
     if (connected) return [tool];
     return [
       {
@@ -375,7 +377,7 @@ function buildToolMentionItems(options: {
 // Single source of truth for the MCP connect (OAuth start) URL, reused by the agent
 // inspector. The route issues an external OAuth redirect, so callers link to it with a
 // plain anchor (full-page navigation), not a client-side router.
-export function mcpConnectUrl(toolId: AgentToolId, returnTo = "/settings") {
+export function mcpConnectUrl(toolId: AgentToolId, returnTo = "/company/settings") {
   return `/api/mcp/${toolId}/start?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
@@ -403,7 +405,13 @@ function agentMentionId(path: string) {
 }
 
 function isMcpToolId(id: AgentToolId) {
-  return id === "linear" || id === "slack" || id === "posthog";
+  return (
+    id === "linear" ||
+    id === "slack" ||
+    id === "posthog" ||
+    id === "betterstack" ||
+    id === "braintrust"
+  );
 }
 
 function repositoryMentionId(repository: {

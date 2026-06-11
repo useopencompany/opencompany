@@ -21,12 +21,12 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  createBrainFile,
-  deleteBrainFile,
-  deleteBrainFolder,
-  renameBrainFile,
-  renameBrainFolder,
-  updateBrainFile,
+  createBrainFile as createWorkspaceBrainFile,
+  deleteBrainFile as deleteWorkspaceBrainFile,
+  deleteBrainFolder as deleteWorkspaceBrainFolder,
+  renameBrainFile as renameWorkspaceBrainFile,
+  renameBrainFolder as renameWorkspaceBrainFolder,
+  updateBrainFile as updateWorkspaceBrainFile,
 } from "@/lib/brain/actions";
 import {
   brainFileRenameSelectionEnd,
@@ -88,7 +88,7 @@ type InitialBrainSelection = {
 };
 
 // Resolves the file/folder the brain should open with based on the URL path
-// (`/brain/<initialPath>`). An exact file match opens that file; a folder prefix opens the
+// (`<urlBasePath>/<initialPath>`). An exact file match opens that file; a folder prefix opens the
 // first file inside it (with the folder expanded); anything else falls back to the first file.
 function resolveInitialBrainSelection(
   serverFiles: BrainFile[],
@@ -131,19 +131,61 @@ function resolveInitialBrainSelection(
 // Builds the URL that reflects the currently open brain file/folder, mirroring how the
 // agent editor keeps `/agents/<path>` in sync. Segments are encoded so spaces/special
 // characters round-trip through the `[[...path]]` route (which decodes each segment).
-function brainUrlForPath(path: string): string {
+// `basePath` is the surface root (e.g. `/company/brain`) so only URL-addressable surfaces sync.
+function brainUrlForPath(basePath: string, path: string): string {
   const normalized = path.replace(/^\/+|\/+$/g, "");
-  if (!normalized) return "/brain";
-  return `/brain/${normalized.split("/").map(encodeURIComponent).join("/")}`;
+  if (!normalized) return basePath;
+  return `${basePath}/${normalized.split("/").map(encodeURIComponent).join("/")}`;
 }
+
+// The Brain CRUD surface, injected so the same view serves both the workspace Brain (brainFiles,
+// GitHub-synced) and the personal Brain (the personal agent's bundle personal-brain/ subtree,
+// local-only). Defaults to the workspace actions so existing callers need no change.
+export type BrainActionResult = { ok: true; path: string } | { ok: false; error: string };
+export type BrainActions = {
+  createFile: (path: string, content?: string) => Promise<BrainActionResult>;
+  updateFile: (path: string, content: string) => Promise<BrainActionResult>;
+  renameFile: (fromPath: string, toPath: string) => Promise<BrainActionResult>;
+  renameFolder: (fromPath: string, toPath: string) => Promise<BrainActionResult>;
+  deleteFile: (path: string) => Promise<BrainActionResult>;
+  deleteFolder: (path: string) => Promise<BrainActionResult>;
+};
+
+const WORKSPACE_BRAIN_ACTIONS: BrainActions = {
+  createFile: createWorkspaceBrainFile,
+  updateFile: updateWorkspaceBrainFile,
+  renameFile: renameWorkspaceBrainFile,
+  renameFolder: renameWorkspaceBrainFolder,
+  deleteFile: deleteWorkspaceBrainFile,
+  deleteFolder: deleteWorkspaceBrainFolder,
+};
 
 export default function BrainView({
   files: serverFiles,
   initialPath = "",
+  urlBasePath,
+  actions = WORKSPACE_BRAIN_ACTIONS,
+  title = "Project brain",
+  emptyHint = "Create a Brain file to start adding long-lived context.",
 }: {
   files: BrainFile[];
   initialPath?: string;
+  // When set (e.g. "/company/brain"), the open file/folder is reflected in the URL bar so it can be
+  // linked to and restored on reload. Left undefined on surfaces that aren't URL-addressable
+  // (the personal Brain), where syncing would otherwise hijack their route.
+  urlBasePath?: string;
+  actions?: BrainActions;
+  title?: string;
+  emptyHint?: string;
 }) {
+  const {
+    createFile: createBrainFile,
+    updateFile: updateBrainFile,
+    renameFile: renameBrainFile,
+    renameFolder: renameBrainFolder,
+    deleteFile: deleteBrainFile,
+    deleteFolder: deleteBrainFolder,
+  } = actions;
   const router = useRouter();
   // Resolve the initial file/folder from the URL exactly once; later prop changes (e.g. a
   // background `router.refresh`) must not yank the user off whatever they have open.
@@ -166,7 +208,7 @@ export default function BrainView({
   const [draftContent, setDraftContent] = useState(initialSelection.draftContent);
   // Tracks the URL we last reflected so selection mutators can skip redundant history writes.
   // Seeded with the URL the server actually rendered (which may be a folder).
-  const lastSyncedUrlRef = useRef(brainUrlForPath(initialPath));
+  const lastSyncedUrlRef = useRef(urlBasePath ? brainUrlForPath(urlBasePath, initialPath) : "");
   const [renamingPath, setRenamingPath] = useState("");
   const [renamingName, setRenamingName] = useState("");
   const [renamingType, setRenamingType] = useState<"file" | "folder" | null>(null);
@@ -421,7 +463,8 @@ export default function BrainView({
   // reload) like the agent editor. Uses history.replaceState rather than router.replace so a
   // plain selection doesn't trigger a server roundtrip — every brain file is already loaded.
   function syncBrainUrl(path: string) {
-    const next = brainUrlForPath(path);
+    if (!urlBasePath) return;
+    const next = brainUrlForPath(urlBasePath, path);
     if (lastSyncedUrlRef.current === next) return;
     lastSyncedUrlRef.current = next;
     window.history.replaceState(window.history.state, "", next);
@@ -1061,6 +1104,7 @@ export default function BrainView({
   return (
     <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
       <BrainSidebar
+        title={title}
         files={files}
         tree={tree}
         query={query}
@@ -1165,7 +1209,7 @@ export default function BrainView({
           </div>
         ) : (
           <div className="flex flex-1 items-center justify-center px-6 text-[13px] text-ink-muted">
-            Create a Brain file to start adding long-lived context.
+            {emptyHint}
           </div>
         )}
       </section>
@@ -1187,6 +1231,7 @@ export default function BrainView({
 }
 
 function BrainSidebar({
+  title,
   files,
   tree,
   query,
@@ -1225,6 +1270,7 @@ function BrainSidebar({
   onAutoExpandFolder,
   onContextMenu,
 }: {
+  title: string;
   files: BrainFile[];
   tree: BrainTreeNode<BrainFile>;
   query: string;
@@ -1273,7 +1319,7 @@ function BrainSidebar({
             <FileText size={14} strokeWidth={1.9} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13px] font-medium text-ink">Project brain</div>
+            <div className="truncate text-[13px] font-medium text-ink">{title}</div>
             <div className="mt-0.5 text-[11.5px] text-ink-muted">{files.length} files</div>
           </div>
           <button

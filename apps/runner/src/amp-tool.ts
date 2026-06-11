@@ -1,17 +1,22 @@
-import { type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
+import { type AgentConfig, repositoryIdForFullName, shellQuote } from "@opencompany/agent-runtime";
 import type { AgentGitHubRepositoryConfig } from "@opencompany/agent-runtime/types";
 import {
   agentSessionArtifacts,
   workspaceIntegrationResources,
   workspaceIntegrations,
 } from "@opencompany/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
 import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
-import { cloneGitHubRepositoryIntoWorkdir, type SandboxHandle, sandboxLayout } from "./sandbox";
+import {
+  cloneGitHubRepositoryIntoWorkdir,
+  guardCommandStreamCallbacks,
+  type SandboxHandle,
+  sandboxLayout,
+} from "./sandbox";
 
 const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
 const AMP_API_BASE_URL = "https://ampcode.com";
@@ -46,15 +51,19 @@ export async function runAmpCoderTool(input: {
   if (!ampTool || ampTool.id !== "amp") {
     throw new Error("The amp_coder tool is not enabled for this agent.");
   }
-  const repository = resolveAmpTargetRepository({
+  const target = resolveAmpTargetRepository({
     repositories: input.agentConfig.integrations.github.repositories,
     requestedRepository: typeof args.repository === "string" ? args.repository : undefined,
+    allRepositories: input.agentConfig.integrations.github.allRepositories === true,
   });
 
   const ampApiKey = loadPlatformAmpApiKey(input.env);
-  const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
+  const { repository, installationId } = await resolveAmpWorkspaceRepository(
+    input.workspaceId,
+    target,
+  );
   const githubToken = await getGitHubWorkInstallationToken({
-    installationId: integrationRepository.installationId,
+    installationId,
     repositoryFullName: repository.fullName,
   });
   if (!githubToken) {
@@ -88,26 +97,32 @@ export async function runAmpCoderTool(input: {
   await input.sandbox.commands.run(`mkdir -p ${shellQuote(ampEnv.GH_CONFIG_DIR)}`, {
     timeoutMs: 30_000,
   });
+  // E2B fires these callbacks without awaiting them, so a rejection here (e.g. the
+  // run-control gate inside onOutput throwing RunAbortError on Stop) would escape as an
+  // unhandled rejection and kill the whole runner process. The guard captures the first
+  // callback error and rethrows it right after the awaited run.
+  const guardedRun = guardCommandStreamCallbacks({
+    envs: ampEnv,
+    timeoutMs: 600_000,
+    onStdout: async (data: string) => {
+      const redacted = redactAmpOutput(data);
+      ampStream.push(redacted);
+      const activity = ampActivity.push(redacted);
+      if (activity) await input.onOutput?.(activity);
+    },
+    onStderr: async (data: string) => {
+      await input.onOutput?.(redactAmpOutput(data));
+    },
+  });
   const result = await input.sandbox.commands.run(
     `cd ${shellQuote(layout.workRoot)} && ${buildAmpCommand({
       task,
       ampThreadId: requestedAmpThreadId,
       mode: ampMode,
     })}`,
-    {
-      envs: ampEnv,
-      timeoutMs: 600_000,
-      onStdout: async (data: string) => {
-        const redacted = redactAmpOutput(data);
-        ampStream.push(redacted);
-        const activity = ampActivity.push(redacted);
-        if (activity) await input.onOutput?.(activity);
-      },
-      onStderr: async (data: string) => {
-        await input.onOutput?.(redactAmpOutput(data));
-      },
-    },
+    guardedRun.options,
   );
+  await guardedRun.rethrow();
   const remainingActivity = ampActivity.finish();
   if (remainingActivity) await input.onOutput?.(remainingActivity);
   ampStream.finish();
@@ -193,7 +208,7 @@ export async function runAmpCoderTool(input: {
       isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
     );
     const pr = await createDraftPullRequest({
-      installationId: integrationRepository.installationId,
+      installationId,
       repositoryFullName: repository.fullName,
       title: commitMessage,
       head: branchName,
@@ -375,12 +390,20 @@ export function selectPublishBranch(input: {
   return `opencompany/amp-${input.sessionId.slice(-8)}-${input.now}`;
 }
 
+export type AmpTargetRepository =
+  | { kind: "attached"; repository: AgentGitHubRepositoryConfig }
+  | { kind: "workspace"; fullName: string };
+
 export function resolveAmpTargetRepository(input: {
   repositories: AgentGitHubRepositoryConfig[];
   requestedRepository?: string | undefined;
-}): AgentGitHubRepositoryConfig {
+  // Live `@github` all-repositories scope: a requested owner/repo that isn't attached
+  // resolves against the workspace's GitHub connection instead of failing.
+  allRepositories?: boolean;
+}): AmpTargetRepository {
   const { repositories } = input;
-  if (repositories.length === 0) {
+  const allRepositories = input.allRepositories === true;
+  if (repositories.length === 0 && !allRepositories) {
     throw new Error(
       "amp_coder needs at least one GitHub repository attached to the agent. Add a repository, then try again.",
     );
@@ -393,23 +416,58 @@ export function resolveAmpTargetRepository(input: {
       (repository) =>
         repository.id === requested || repository.fullName.toLowerCase() === requestedLower,
     );
-    if (!match) {
-      throw new Error(
-        `Requested repository "${requested}" is not attached to this agent. Attached repositories: ${repositories
-          .map((repository) => repository.fullName)
-          .join(", ")}.`,
-      );
+    if (match) return { kind: "attached", repository: match };
+    if (allRepositories && isGitHubRepositoryFullName(requested)) {
+      return { kind: "workspace", fullName: requested };
     }
-    return match;
+    throw new Error(
+      allRepositories
+        ? `Requested repository "${requested}" is not a valid owner/repo. Pass the repository as owner/repo.`
+        : `Requested repository "${requested}" is not attached to this agent. Attached repositories: ${repositories
+            .map((repository) => repository.fullName)
+            .join(", ")}.`,
+    );
   }
 
-  if (repositories.length === 1) return repositories[0]!;
+  if (repositories.length === 1) return { kind: "attached", repository: repositories[0]! };
+
+  if (repositories.length === 0) {
+    // allRepositories with nothing attached: there is no sensible default repo.
+    throw new Error(
+      "amp_coder needs the repository argument (owner/repo): this agent has integration-wide GitHub access with no default repository attached.",
+    );
+  }
 
   throw new Error(
     `More than one repository is attached. Set the repository argument (owner/repo or id) to choose one. Attached repositories: ${repositories
       .map((repository) => repository.fullName)
       .join(", ")}.`,
   );
+}
+
+// Resolve an amp target to a concrete repository + installation. Attached targets keep their
+// saved config (binding-aware); workspace targets (`@github` all-repositories scope) resolve
+// live against the workspace's synced GitHub resources, picking up the real default branch.
+async function resolveAmpWorkspaceRepository(
+  workspaceId: string,
+  target: AmpTargetRepository,
+): Promise<{ repository: AgentGitHubRepositoryConfig; installationId: string }> {
+  if (target.kind === "attached") {
+    const integrationRepository = await loadGitHubWorkRepository(workspaceId, target.repository);
+    return { repository: target.repository, installationId: integrationRepository.installationId };
+  }
+
+  const resolved = await loadGitHubWorkRepositoryByFullName(workspaceId, target.fullName);
+  if (!resolved) {
+    throw new Error(
+      `GitHub work repository ${target.fullName} is not available to this workspace. Reconnect GitHub or grant the installation access to it.`,
+    );
+  }
+  return resolved;
+}
+
+function isGitHubRepositoryFullName(value: string) {
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value);
 }
 
 /**
@@ -439,6 +497,76 @@ export async function loadGitHubWorkRepository(
   workspaceId: string,
   repository: AgentGitHubRepositoryConfig,
 ) {
+  const row = await loadGitHubWorkRepositoryRow(workspaceId, repository);
+  if (!row) {
+    throw new Error(
+      `GitHub work repository ${repository.fullName} is not available to this workspace.`,
+    );
+  }
+  return row;
+}
+
+/**
+ * Live lookup for integration-wide (`@github` all-repositories) targets: resolve any
+ * owner/repo the workspace's GitHub connection can reach without it being attached to the
+ * agent, picking up the synced default branch. Returns null when the repository is unknown
+ * to the workspace (so callers can fall back, e.g. opencode's public-clone path); a
+ * known-but-unusable repository still throws the actionable status errors.
+ */
+export async function loadGitHubWorkRepositoryByFullName(
+  workspaceId: string,
+  fullName: string,
+): Promise<{ repository: AgentGitHubRepositoryConfig; installationId: string } | null> {
+  const row = await loadGitHubWorkRepositoryRow(workspaceId, {
+    id: repositoryIdForFullName(fullName),
+    fullName,
+    defaultBranch: "main",
+  });
+  if (!row) return null;
+
+  return {
+    repository: {
+      id: repositoryIdForFullName(row.fullName),
+      fullName: row.fullName,
+      defaultBranch: row.defaultBranch,
+    },
+    installationId: row.installationId,
+  };
+}
+
+/**
+ * The workspace's connected GitHub installation, for integration-wide (`@github`) ambient
+ * auth. With multiple installations the first connected one wins — a single installation
+ * token cannot span installations; amp/opencode resolve installations per repository, so the
+ * coding tools still work across installations.
+ */
+export async function loadConnectedGitHubInstallation(
+  workspaceId: string,
+): Promise<{ installationId: string; connectionLabel: string | null } | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      installationId: workspaceIntegrations.externalId,
+      connectionLabel: workspaceIntegrations.connectionLabel,
+    })
+    .from(workspaceIntegrations)
+    .where(
+      and(
+        eq(workspaceIntegrations.workspaceId, workspaceId),
+        eq(workspaceIntegrations.provider, "github"),
+        eq(workspaceIntegrations.status, "connected"),
+      ),
+    )
+    .orderBy(asc(workspaceIntegrations.createdAt))
+    .limit(1);
+
+  return row ?? null;
+}
+
+async function loadGitHubWorkRepositoryRow(
+  workspaceId: string,
+  repository: AgentGitHubRepositoryConfig,
+) {
   const db = getDb();
   const baseQuery = db
     .select({
@@ -450,6 +578,7 @@ export async function loadGitHubWorkRepository(
       connectionStatusReason: workspaceIntegrations.statusReason,
       resourceStatus: workspaceIntegrationResources.status,
       resourceStatusReason: workspaceIntegrationResources.statusReason,
+      metadata: workspaceIntegrationResources.metadata,
     })
     .from(workspaceIntegrationResources)
     .innerJoin(
@@ -488,14 +617,21 @@ export async function loadGitHubWorkRepository(
     );
   }
   const row = usableRows[0] ?? rows[0];
-  if (!row) {
-    throw new Error(
-      `GitHub work repository ${repository.fullName} is not available to this workspace.`,
-    );
-  }
+  if (!row) return null;
   assertGitHubWorkRepositoryUsable(row, repository.fullName);
 
-  return row;
+  return {
+    ...row,
+    defaultBranch: readResourceDefaultBranch(row.metadata),
+  };
+}
+
+function readResourceDefaultBranch(metadata: unknown) {
+  const defaultBranch =
+    metadata && typeof metadata === "object"
+      ? (metadata as Record<string, unknown>).defaultBranch
+      : undefined;
+  return typeof defaultBranch === "string" && defaultBranch.trim() ? defaultBranch.trim() : "main";
 }
 
 function assertGitHubWorkRepositoryUsable(

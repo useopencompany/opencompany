@@ -1,15 +1,22 @@
 import {
+  agentBundleDir,
   BUILTIN_USE_TOOL_NAME,
+  MEMORY_KEEPER_SYSTEM_PROMPT,
+  MEMORY_SKILL_ID,
   newAgentSessionMessageId,
   normalizeAgentConfig,
+  type ResolvedSkillMetadata,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
+  resolveEnabledSkillMetadata,
+  restrictToolsForMemoryKeeper,
+  scanPersonalSkills,
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
-import { agentSessionMessages } from "@opencompany/db/schema";
+import { agentFiles, agentSessionMessages } from "@opencompany/db/schema";
 import {
   captureException,
   createLogger,
@@ -25,7 +32,7 @@ import {
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
 import type { ModelMessage } from "ai";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { syncAgentBundleFromSandbox } from "./agent-bundle";
 import { hydrateMessageAttachments } from "./attachment-hydration";
@@ -47,6 +54,7 @@ import {
   updateSandboxForLease,
 } from "./lease-writes";
 import { createMcpToolSet } from "./mcp-tools";
+import { spawnMemoryKeeperSession } from "./memory-keeper";
 import {
   appendAssistantTextPart,
   buildModelMessages,
@@ -84,6 +92,7 @@ import {
   appendAfterSessionSkipped,
   buildAfterSessionPrompt,
   completeAfterSessionRun,
+  completeSpawnedAfterSessionRunForChild,
   createAfterSessionRun,
   ensureSandbox,
   isSessionArchived,
@@ -93,9 +102,11 @@ import {
   loadNextSteerMessage,
   loadSession,
   loadUserMessage,
+  markAfterSessionRunSpawned,
   optionalUserContext,
   resolveSandboxBilling,
   setStatus,
+  summarizeAfterSessionNote,
 } from "./session-lifecycle";
 import {
   buildQuestionAnswerToolOutput,
@@ -142,6 +153,43 @@ export { createToolStartCoordinator } from "./tool-start-coordinator";
 export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
+
+// Load the session-start bundle context the runtime config needs: the agent's profile file
+// (agent/user.md) and its discovered personal skills (agent/skills/<id>/SKILL.md). We read from
+// agent_files (not the sandbox) because the runtime config is resolved before the bundle
+// materializes. This runs every turn, so an in-session edit (synced back to agent_files at the
+// end of a turn) surfaces on the agent's next turn in the same session — no new session needed.
+// A missing/never-written file resolves to undefined (empty-section path); malformed skills are
+// skipped.
+async function loadAgentBundleContext(
+  db: RunContext["db"],
+  workspaceId: string,
+  agentId: string,
+  agentPath: string | null,
+): Promise<{
+  userMemory?: string | undefined;
+  personalSkills?: ResolvedSkillMetadata[];
+}> {
+  if (!agentPath) return {};
+  const bundleDir = agentBundleDir(agentPath);
+  const rows = await db
+    .select({ path: agentFiles.path, content: agentFiles.content })
+    .from(agentFiles)
+    .where(and(eq(agentFiles.workspaceId, workspaceId), eq(agentFiles.agentId, agentId)));
+  const byPath = new Map(rows.map((row) => [row.path, row.content]));
+  const { skills, warnings } = scanPersonalSkills({ bundleFiles: rows, bundleDir });
+  if (warnings.length > 0) {
+    logger.warn("Skipped malformed personal skills during discovery", {
+      workspace_id: workspaceId,
+      agent_id: agentId,
+      warnings,
+    });
+  }
+  return {
+    userMemory: byPath.get(`${bundleDir}/user.md`),
+    personalSkills: skills.map((skill) => skill.metadata),
+  };
+}
 
 export async function runMessage(input: {
   sessionId: string;
@@ -216,10 +264,12 @@ async function runMessageWithContext(
   let outcome = "unknown";
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
   let nextSteerMessageId: string | undefined;
+  let memoryKeeperRun = false;
 
   try {
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     const agentConfig = normalizeAgentConfig(row.agent.config);
+    memoryKeeperRun = row.session.source === "memory";
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
       return;
@@ -243,6 +293,13 @@ async function runMessageWithContext(
       ))
     ) {
       outcome = "skipped_no_credits";
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "failed",
+          lastError: "Memory update skipped because workspace credits are exhausted.",
+        });
+      }
       await setStatus(input.sessionId, "ready");
       await appendRuntimeEvent(ctx.db, {
         sessionId: input.sessionId,
@@ -257,6 +314,13 @@ async function runMessageWithContext(
     );
     if (!userMessage) {
       outcome = "skipped_missing_user_message";
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "failed",
+          lastError: "Memory update could not find its kickoff message.",
+        });
+      }
       return;
     }
 
@@ -267,6 +331,12 @@ async function runMessageWithContext(
     );
     if (existingAssistantResponse?.status === "completed") {
       outcome = "skipped_duplicate";
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "completed",
+        });
+      }
       return;
     }
     if (existingAssistantResponse) {
@@ -280,21 +350,42 @@ async function runMessageWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable },
     });
+    // Memory-keeper mode: a `source: "memory"` session is an invisible background pass that runs
+    // under the personal agent's own bundle but with a platform-owned system prompt appended and a
+    // restricted toolset. The rest of `runtime` (file roots, profile, tool index) stays intact —
+    // only the framing and the tools change here. The model is already the pinned cheap keeper
+    // model (MEMORY_KEEPER_MODEL): the spawn path stored it as the session's modelName, which
+    // resolveAgentRuntimeConfig above applied as the model override.
+    const enabledTools = memoryKeeperRun
+      ? restrictToolsForMemoryKeeper(runtime.tools)
+      : runtime.tools;
+    const systemPrompt = memoryKeeperRun
+      ? `${runtime.systemPrompt}\n\n${MEMORY_KEEPER_SYSTEM_PROMPT}`
+      : runtime.systemPrompt;
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
     logBraintrustSpan(braintrustSpan, {
       metadata: {
         model_provider: modelProvider,
         model_name: modelName,
-        enabled_tools: runtime.tools,
+        enabled_tools: enabledTools,
+        ...(memoryKeeperRun ? { run_type: "memory_keeper" } : {}),
       },
     });
 
@@ -318,7 +409,7 @@ async function runMessageWithContext(
 
     const checkAbort = createLeaseAbortCheck(ctx);
     await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
-    validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
+    validateHostedToolEnvironment({ enabledTools, env: input.env });
 
     await requireLeaseWrite(
       timeAsync(ctx.trace, "append_running_status", () =>
@@ -387,7 +478,7 @@ async function runMessageWithContext(
     // overlaps the model's first tokens instead of stalling the first tool call by ~10s.
     // Gated on the turn actually exposing sandbox tools; never billed or synced unless a
     // tool truly uses it (see createSandboxAcquirer / wasUsed).
-    if (runtimeHasSandboxTools(runtime.tools)) {
+    if (runtimeHasSandboxTools(enabledTools)) {
       sandboxAcquirer.warm();
     }
 
@@ -399,10 +490,11 @@ async function runMessageWithContext(
       runLeaseOwner: ctx.leaseOwner,
       workspaceId: row.workspace.id,
       agentConfig,
+      personalAgent: row.agent.isDefault,
       getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
-      enabledTools: runtime.tools,
+      enabledTools,
       repository: row.repository,
       signal: ctx.controller.signal,
       checkAbort,
@@ -433,8 +525,8 @@ async function runMessageWithContext(
     const turn = await executeStreamingTurn({
       ctx,
       row,
-      runtime,
-      system: runtime.systemPrompt,
+      runtime: { ...runtime, tools: enabledTools },
+      system: systemPrompt,
       messages,
       tools,
       mcpContext: {
@@ -479,6 +571,18 @@ async function runMessageWithContext(
       return;
     }
     outcome = "completed";
+    if (memoryKeeperRun) {
+      // Forward the keeper's one-line closing note so the parent session's memory card can
+      // show what was actually stored instead of a bare "Memory updated".
+      const summary = summarizeAfterSessionNote(turn.assistantContent);
+      await observeRunStep(ctx, "complete_memory_keeper_parent_after_session", () =>
+        completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "completed",
+          ...(summary ? { summary } : {}),
+        }),
+      );
+    }
     // If the user steered mid-run, answer that message as the next turn. The lease
     // is already released, so the next turn acquires its own. See
     // docs/agent-turn-vocabulary.md.
@@ -556,6 +660,13 @@ async function runMessageWithContext(
           "Run aborted.",
         );
       }
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "failed",
+          lastError: "Memory update aborted.",
+        });
+      }
       logger.info("Runner session aborted", {
         event: "opencompany.runner_session_aborted",
         workspace_id: workspaceId,
@@ -611,6 +722,13 @@ async function runMessageWithContext(
           message,
         )
       : false;
+    if (memoryKeeperRun) {
+      await completeSpawnedAfterSessionRunForChild({
+        childSessionId: input.sessionId,
+        status: "failed",
+        lastError: message,
+      });
+    }
     if (!updated && (await isSessionArchived(input.sessionId))) return;
     outcome = "failed";
     logger.error("Runner session failed", {
@@ -726,11 +844,11 @@ async function executeStreamingTurn(input: {
   internal: boolean;
   brainStep: string;
   bundleStep: string;
-  appendCompletedEvent: () => Promise<boolean>;
+  appendCompletedEvent: (result: { assistantContent: string }) => Promise<boolean>;
   emptyOutputFallback?: string;
   beforeRelease?: () => Promise<void>;
   extraStopConditions?: Parameters<typeof streamAssistantResponse>[0]["extraStopConditions"];
-}): Promise<{ outcome: "completed" | "suspended" }> {
+}): Promise<{ outcome: "suspended" } | { outcome: "completed"; assistantContent: string }> {
   const { ctx, row, sandboxAcquirer, assistantMessageId } = input;
 
   let streamResult: Awaited<ReturnType<typeof streamAssistantResponse>>;
@@ -793,6 +911,7 @@ async function executeStreamingTurn(input: {
           workspaceId: row.workspace.id,
           agentId: row.agent.id,
           workdir: row.session.workdir,
+          personal: row.agent.isDefault,
         }),
       );
     } catch (error) {
@@ -866,7 +985,7 @@ async function executeStreamingTurn(input: {
     });
   }
 
-  await requireLeaseWrite(input.appendCompletedEvent());
+  await requireLeaseWrite(input.appendCompletedEvent({ assistantContent }));
 
   if (input.beforeRelease) await input.beforeRelease();
 
@@ -880,7 +999,7 @@ async function executeStreamingTurn(input: {
 
   await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
 
-  return { outcome: "completed" };
+  return { outcome: "completed", assistantContent };
 }
 
 export async function runAfterSession(input: {
@@ -945,7 +1064,21 @@ async function runAfterSessionWithContext(
       outcome = "skipped_archived";
       return;
     }
-    if (!afterSession?.enabled || !afterSession.prompt.trim()) {
+    // Recursion guard: only user-initiated sessions get a memory pass / after-session run. A
+    // memory-keeper session (source "memory") or a delegated child (source "agent") must never
+    // trigger one, or memory passes would spawn memory passes. (Such sessions are created inside the
+    // runner and never flow through the web dispatch sites either — this is defense in depth.)
+    if (row.session.source !== "user") {
+      outcome = "skipped_non_user_source";
+      return;
+    }
+    // The personal/default agent with memory enabled gets the dedicated memory-keeper pass even when
+    // it has no `#after-session` prompt. Any other agent falls back to the legacy in-session hook,
+    // which still requires an explicit prompt.
+    const memoryKeeperEligible =
+      row.agent.isDefault &&
+      resolveEnabledSkillMetadata(agentConfig).some((skill) => skill.id === MEMORY_SKILL_ID);
+    if (!memoryKeeperEligible && (!afterSession?.enabled || !afterSession.prompt.trim())) {
       outcome = "skipped_disabled";
       return;
     }
@@ -989,12 +1122,20 @@ async function runAfterSessionWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: false },
     });
     modelProvider = runtime.model.provider;
@@ -1048,6 +1189,63 @@ async function runAfterSessionWithContext(
     logBraintrustSpan(braintrustSpan, {
       metadata: { after_session_run_id: afterSessionRunId },
     });
+
+    // Memory-keeper path: instead of running an internal turn in this session, spawn a dedicated,
+    // invisible memory-keeper session (same agent/bundle, source "memory") that reads this session's
+    // transcript and updates memory. The brief parent lease + the after-session run record (deduped
+    // per parent message version) we just took ensure only one keeper spawns per idle message.
+    if (memoryKeeperEligible) {
+      // The idle window between dispatch and now (and the lease/credit steps above) leaves room for
+      // the user to archive the parent after load_session passed the archivedAt gate. Re-check fresh
+      // so the memory pass only ever runs for a non-archived session.
+      if (await observeRunStep(ctx, "recheck_archived", () => isSessionArchived(input.sessionId))) {
+        outcome = "skipped_archived";
+        await completeAfterSessionRun(afterSessionRunId, {
+          status: "skipped",
+          skippedReason: "archived_session",
+        });
+        await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+        return;
+      }
+      const { childSessionId } = await observeRunStep(ctx, "spawn_memory_keeper", () =>
+        spawnMemoryKeeperSession({
+          parentSessionId: input.sessionId,
+          parentTitle: row.session.title,
+          workspaceId: row.workspace.id,
+          userId: row.session.userId,
+          agentId: row.agent.id,
+        }),
+      );
+      await markAfterSessionRunSpawned(afterSessionRunId, childSessionId);
+      await appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "after_session.spawned",
+        payload: { runId: afterSessionRunId, messageId: input.messageId, childSessionId },
+      });
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      outcome = "spawned_memory_keeper";
+      logger.info("Runner memory-keeper spawned", {
+        event: "opencompany.memory_keeper_spawned",
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        session_id: input.sessionId,
+        message_id: input.messageId,
+        child_session_id: childSessionId,
+      });
+      return;
+    }
+
+    // Below: the legacy in-session after-session hook for non-default agents that declare an
+    // explicit `#after-session` prompt. `afterSession` is guaranteed enabled here.
+    if (!afterSession) {
+      outcome = "skipped_disabled";
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      return;
+    }
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -1127,6 +1325,7 @@ async function runAfterSessionWithContext(
       internalMessages: true,
       workspaceId: row.workspace.id,
       agentConfig,
+      personalAgent: row.agent.isDefault,
       getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
@@ -1149,7 +1348,7 @@ async function runAfterSessionWithContext(
         ...runtime,
         tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
       },
-      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward in your agent folder (agent/memory.md for durable learnings), and skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward: durable facts about who the user is in your profile (agent/user.md), kept tight (it loads into every future session, ~3KB cap); every other durable fact (people, companies, projects, decisions, lessons) into structured memory via the memory tool. Skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
       messages,
       tools,
       mcpContext: {
@@ -1172,15 +1371,21 @@ async function runAfterSessionWithContext(
       brainStep: "sync_brain_after_session",
       bundleStep: "sync_agent_bundle_after_session",
       emptyOutputFallback: "After-session run completed without changes.",
-      appendCompletedEvent: () =>
-        appendRuntimeEventForLease({
+      appendCompletedEvent: ({ assistantContent }) => {
+        const summary = summarizeAfterSessionNote(assistantContent);
+        return appendRuntimeEventForLease({
           sessionId: input.sessionId,
           messageId: null,
           leaseId: ctx.leaseId,
           leaseOwner: ctx.leaseOwner,
           type: "after_session.completed",
-          payload: { runId: completedRunId, messageId: input.messageId },
-        }),
+          payload: {
+            runId: completedRunId,
+            messageId: input.messageId,
+            ...(summary ? { summary } : {}),
+          },
+        });
+      },
       beforeRelease: async () => {
         await completeAfterSessionRun(completedRunId, { status: "completed" });
       },
@@ -1411,12 +1616,20 @@ async function resumeApprovalWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
@@ -1764,6 +1977,7 @@ async function continueTurnAfterToolResult(input: {
     runLeaseOwner: ctx.leaseOwner,
     workspaceId: row.workspace.id,
     agentConfig: input.agentConfig,
+    personalAgent: row.agent.isDefault,
     getSandbox: sandboxAcquirer.get,
     workdir: row.session.workdir,
     env: input.env,
@@ -1924,12 +2138,20 @@ async function resumeQuestionResponseWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
