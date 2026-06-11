@@ -452,6 +452,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const slashCommandInFlightRef = useRef<Set<string>>(new Set());
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // The inner transcript column. Observed (see the content-grow effect below) so we can
+  // keep the view pinned to the newest message as content grows after open.
+  const messageListRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
   // ID of the user message to scroll to the top of the viewport ONCE, right after a
   // send. The reserved space below it is held by CSS (min-height on the last turn),
@@ -1067,26 +1070,54 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // Open at bottom: when a chat is first opened (or switched to), land on the newest
   // message — once per session. Runs in useLayoutEffect (before paint) so there is no
   // visible top→bottom jump. Keyed on session.id and guarded by a ref so it never
-  // re-fires on later message/stream renders (the streaming follow owns those) and
-  // never fights the send-snap (which positions the view itself on send).
+  // re-fires on later renders (the streaming follow + the content-grow observer below
+  // own those) and never fights the send-snap (which positions the view itself on send).
+  // Deps use `hasMessages` (a boolean) not the visibleMessages array, so it fires on the
+  // first-content flip and on session change — not on every streamed delta.
+  const hasMessages = visibleMessages.length > 0;
   const initialScrollSessionRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (pendingScrollMessageId) return; // a send-snap owns this frame
     if (initialScrollSessionRef.current === session.id) return; // already snapped this chat
-    if (visibleMessages.length === 0) return; // wait until content exists
+    if (!hasMessages) return; // wait until content exists
     const container = scrollContainerRef.current;
     if (!container || typeof container.scrollTo !== "function") return;
     container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
     setPinnedAtBottom(true);
     initialScrollSessionRef.current = session.id;
-  }, [session.id, visibleMessages, pendingScrollMessageId]);
+  }, [session.id, hasMessages, pendingScrollMessageId]);
 
-  // Jump-to-bottom pill action: smooth-scroll to the newest message and re-pin so the
-  // streaming follow re-engages.
+  // Keep the view pinned to the newest message as the transcript's content GROWS after
+  // the one-shot open-snap — late image decode, async syntax highlight, tool-output
+  // expansion. Without this the open-snap lands above the true bottom and, because a
+  // content grow is a layout scroll (not a user scroll), pin-state stays stale-true and
+  // the jump-to-bottom pill never appears to rescue it. Gated on isPinnedAtBottomRef so
+  // it instantly yields the moment the user scrolls away; re-armed per session.
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    const content = messageListRef.current;
+    if (!container || !content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!isPinnedAtBottomRef.current) return;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (distanceFromBottom <= 1) return;
+      container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [session.id]);
+
+  // Jump-to-bottom pill action: scroll to the newest message and re-pin so the streaming
+  // follow re-engages. Instant while a turn is streaming (a smooth animation would be
+  // repeatedly teleported by the follow's instant scroll on each delta — a visible
+  // stutter); smooth when idle, where there's nothing to fight.
   const scrollToBottom = () => {
     const container = scrollContainerRef.current;
     if (!container || typeof container.scrollTo !== "function") return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    const behavior: ScrollBehavior =
+      hasRunningAssistantMessage || showWaitingForAssistant ? "auto" : "smooth";
+    container.scrollTo({ top: container.scrollHeight, behavior });
     setPinnedAtBottom(true);
   };
 
@@ -1424,7 +1455,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
+          className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
           onScroll={(event) => {
@@ -1481,7 +1512,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               </div>
             </div>
           ) : null}
-          <div className="mx-auto max-w-[960px] space-y-5">
+          <div ref={messageListRef} className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
                 <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
