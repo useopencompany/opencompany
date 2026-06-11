@@ -410,7 +410,12 @@ export async function runSandboxTool(input: {
 
   if (input.name === "shell") {
     const command = readString(args, "command");
-    const layout = sandboxLayout(input.workdir);
+    const layout = sandboxLayout(input.workdir, personal);
+    if (personalShellCommandReferencesMemory(command, layout)) {
+      throw new Error(
+        "Shell commands cannot access memory/ in personal sessions. Use the memory tool to read or write structured memory.",
+      );
+    }
     const result = await runCommandWithExitResult(input.sandbox, command, {
       cwd: layout.workspaceRoot,
       ...(input.envs ? { envs: input.envs } : {}),
@@ -636,6 +641,14 @@ export async function runSandboxTool(input: {
   throw new Error(`Unknown tool: ${input.name}`);
 }
 
+function personalShellCommandReferencesMemory(
+  command: string,
+  layout: ReturnType<typeof sandboxLayout>,
+) {
+  if (command.includes(layout.memoryRoot)) return true;
+  return /(^|[\s"'`|&;()<>])(?:\.\/)?memory(?:\/|$|[\s"'`|&;()<>])/.test(command);
+}
+
 async function runCommandWithExitResult(
   sandbox: SandboxHandle,
   command: string,
@@ -777,9 +790,7 @@ function gitDiffCommand(workRoot: string) {
 export function resolveSandboxToolPath(workdir: string, inputPath = "work", personal = false) {
   // Personal sessions mount memory/ for the dedicated memory CLI, but generic file tools must not
   // touch it because that bypasses structured-memory provenance and validation.
-  const allowedRoots = personal
-    ? ["work", "personal-brain", "agent"]
-    : ["work", "brain", "agent"];
+  const allowedRoots = personal ? ["work", "personal-brain", "agent"] : ["work", "brain", "agent"];
   const allowedRootsList = allowedRoots.map((root) => `${root}/`);
   // Oxford-"or" join so the company message stays "work/, brain/, or agent/".
   const allowedRootsMessage = `Path must be inside ${

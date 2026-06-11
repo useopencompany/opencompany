@@ -2544,7 +2544,7 @@ function renderRuntimeToolDefinition(
     return {
       ...definition,
       description:
-        "Run a shell command from the session workspace root, where ./work, ./personal-brain, ./agent, and ./skills are visible. Use the gh tool, not shell, for authenticated GitHub operations.",
+        "Run a shell command from the session workspace root, where ./work, ./personal-brain, ./agent, and ./skills are visible. Personal shell commands cannot access memory/; use the memory tool for structured memory. Use the gh tool, not shell, for authenticated GitHub operations.",
     };
   }
 
@@ -2570,7 +2570,9 @@ function renderRuntimeToolDefinition(
   return definition;
 }
 
-function renderPersonalFileToolDefinition(definition: RuntimeToolDefinition): RuntimeToolDefinition {
+function renderPersonalFileToolDefinition(
+  definition: RuntimeToolDefinition,
+): RuntimeToolDefinition {
   const pathDescription = "Relative path starting with work/, personal-brain/, or agent/.";
   const parameters = {
     ...definition.parameters,

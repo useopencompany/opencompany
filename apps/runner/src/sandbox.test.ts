@@ -567,6 +567,44 @@ describe("runSandboxTool", () => {
     });
   });
 
+  it("rejects personal shell commands that reference memory/", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "shell",
+        args: { command: "cat memory/profile.md" },
+        personal: true,
+      }),
+    ).rejects.toThrow(/Shell commands cannot access memory\/.*memory tool/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+  });
+
+  it("rejects personal shell commands that reference the absolute memory root", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "shell",
+        args: { command: "ls /home/user/workspace/memory" },
+        personal: true,
+      }),
+    ).rejects.toThrow(/Shell commands cannot access memory\/.*memory tool/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+  });
+
   it("returns shell nonzero exit output instead of throwing", async () => {
     const sandbox = {
       commands: {

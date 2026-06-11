@@ -446,6 +446,7 @@ describe("getRuntimeToolDefinition", () => {
     expect(JSON.stringify(readFile?.parameters.properties.path)).not.toContain("memory/");
     expect(listFiles?.description).toContain("generic file tools cannot access memory/");
     expect(shell?.description).toContain("./personal-brain");
+    expect(shell?.description).toContain("Personal shell commands cannot access memory/");
     expect(shell?.description).not.toContain("./brain");
   });
 

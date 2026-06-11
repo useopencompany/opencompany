@@ -1403,7 +1403,10 @@ export function preflightSandboxToolArgs(input: {
   }
 
   const requestedPath = typeof pathValue === "string" ? pathValue : undefined;
-  const requestedRoot = requestedPath?.trim().replace(/^\.?\//, "").split("/")[0];
+  const requestedRoot = requestedPath
+    ?.trim()
+    .replace(/^\.?\//, "")
+    .split("/")[0];
   if (personal && requestedRoot === "memory") {
     throw new RecoverableToolError(
       "Generic file tools cannot access memory/. Use the memory tool to read or write structured memory.",
