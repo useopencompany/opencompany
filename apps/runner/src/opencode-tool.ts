@@ -1,5 +1,6 @@
 import { AGENT_MODEL_CATALOG, type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
 import type { AgentGitHubRepositoryConfig, AgentModelId } from "@opencompany/agent-runtime/types";
+import { calculateModelUsageCost, type HostedToolCostSource } from "@opencompany/billing";
 import { agentSessionArtifacts } from "@opencompany/db/schema";
 import { loadGitHubWorkRepository, loadGitHubWorkRepositoryByFullName } from "./amp-tool";
 import {
@@ -28,6 +29,7 @@ import {
   cloneGitHubRepositoryIntoWorkdir,
   commandExitResult,
   githubRemoteMatches,
+  guardCommandStreamCallbacks,
   isCommandTimeoutError,
   type SandboxHandle,
   sandboxLayout,
@@ -198,19 +200,24 @@ export async function runOpencodeCoderTool(input: {
   )}`;
   let timedOut = false;
   let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
+  // E2B fires these callbacks without awaiting them, so a rejection here (e.g. the
+  // run-control gate inside onOutput throwing RunAbortError on Stop) would escape as an
+  // unhandled rejection and kill the whole runner process. The guard captures the first
+  // callback error and rethrows it below, at the awaited boundary.
+  const guardedRun = guardCommandStreamCallbacks({
+    envs: opencodeEnv,
+    timeoutMs: input.env.opencodeTimeoutMs,
+    onStdout: async (data: string) => {
+      const redacted = redact(data);
+      const activity = stream.push(redacted);
+      if (activity) await input.onOutput?.(activity);
+    },
+    onStderr: async (data: string) => {
+      await input.onOutput?.(redact(data));
+    },
+  });
   try {
-    result = await input.sandbox.commands.run(opencodeCommand, {
-      envs: opencodeEnv,
-      timeoutMs: input.env.opencodeTimeoutMs,
-      onStdout: async (data: string) => {
-        const redacted = redact(data);
-        const activity = stream.push(redacted);
-        if (activity) await input.onOutput?.(activity);
-      },
-      onStderr: async (data: string) => {
-        await input.onOutput?.(redact(data));
-      },
-    });
+    result = await input.sandbox.commands.run(opencodeCommand, guardedRun.options);
   } catch (error) {
     // Recover instead of failing the whole tool call: a non-zero opencode exit (CommandExitError)
     // still carries stdout/stderr, and a wall-clock timeout leaves the sandbox alive with files
@@ -229,6 +236,9 @@ export async function runOpencodeCoderTool(input: {
       throw error;
     }
   }
+  // Surface a stream-callback failure (typically RunAbortError) after the exit/timeout
+  // recovery above: an aborted run must fail the tool call, not snapshot partial state.
+  await guardedRun.rethrow();
   stream.finish();
   const summary = stream.summary({
     exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
@@ -380,7 +390,7 @@ export async function runOpencodeCoderTool(input: {
       },
     });
 
-  const usage = summary.usage;
+  const usage = opencodeHostedToolUsage({ modelId, summary });
   return {
     repository: repositoryFullName,
     repositoryTarget: target.kind,
@@ -396,26 +406,55 @@ export async function runOpencodeCoderTool(input: {
     branchName,
     pullRequestUrl,
     pullRequestSkippedReason,
-    ...(usage
-      ? {
-          usage: {
-            provider: "opencode",
-            operation: "session",
-            costUsdMicros: summary.costUsdMicros ?? 0,
-            rawUsage: {
-              input_tokens: usage.input_tokens,
-              output_tokens: usage.output_tokens,
-              ...(usage.cache_creation_input_tokens !== undefined
-                ? { cache_creation_input_tokens: usage.cache_creation_input_tokens }
-                : {}),
-              ...(usage.cache_read_input_tokens !== undefined
-                ? { cache_read_input_tokens: usage.cache_read_input_tokens }
-                : {}),
-            },
-          } satisfies HostedToolUsage,
-        }
-      : {}),
+    ...(usage ? { usage } : {}),
   };
+}
+
+// opencode prices its runs from its own public model catalog, which has no entry for the
+// platform's custom "gateway" provider — every gateway run self-reports cost 0 (OC-328).
+// The platform knows both the model and the streamed token counts, so the provider cost is
+// computed here with the same MODEL_PRICING rates the main agent loop bills (the platform
+// fee is added downstream by calculateHostedToolUsageCost, exactly like other hosted tools).
+// opencode's self-reported cost only backstops runs whose events carried no token counts.
+export function opencodeHostedToolUsage(input: {
+  modelId: AgentModelId;
+  summary: Pick<OpencodeStreamSummary, "usage" | "costUsdMicros">;
+}): HostedToolUsage | null {
+  const tokens = input.summary.usage;
+  const reportedCostUsdMicros = input.summary.costUsdMicros;
+  if (!tokens && !reportedCostUsdMicros) return null;
+
+  const computed = tokens
+    ? calculateModelUsageCost({
+        modelName: input.modelId,
+        inputTokens:
+          tokens.input_tokens +
+          (tokens.cache_read_input_tokens ?? 0) +
+          (tokens.cache_creation_input_tokens ?? 0),
+        inputNoCacheTokens: tokens.input_tokens,
+        inputCacheReadTokens: tokens.cache_read_input_tokens ?? 0,
+        inputCacheWriteTokens: tokens.cache_creation_input_tokens ?? 0,
+        outputTokens: tokens.output_tokens,
+      })
+    : null;
+  const platformCostUsdMicros = computed?.billable ? computed.providerCostUsdMicros : null;
+  const costSource: HostedToolCostSource =
+    platformCostUsdMicros != null ? "platform_model_pricing" : "provider_reported";
+
+  return {
+    provider: "opencode",
+    operation: "session",
+    costUsdMicros: platformCostUsdMicros ?? reportedCostUsdMicros ?? 0,
+    costSource,
+    rawUsage: {
+      ...(tokens ?? {}),
+      model: input.modelId,
+      cost_source: costSource,
+      ...(reportedCostUsdMicros != null
+        ? { opencode_reported_cost_usd_micros: reportedCostUsdMicros }
+        : {}),
+    },
+  } satisfies HostedToolUsage;
 }
 
 export function resolveOpencodeModel(value: unknown): AgentModelId {
@@ -842,10 +881,17 @@ function numberFrom(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+// Event payloads moved across opencode versions: older builds nested usage under
+// `info` (message events), current builds (>=1.17) under `part` (step_finish events).
+const EVENT_PAYLOAD_KEYS = ["info", "part"] as const;
+
 function findRecord(event: Record<string, unknown>, key: string): Record<string, unknown> | null {
   if (isRecord(event[key])) return event[key] as Record<string, unknown>;
-  if (isRecord(event.info) && isRecord((event.info as Record<string, unknown>)[key])) {
-    return (event.info as Record<string, unknown>)[key] as Record<string, unknown>;
+  for (const payloadKey of EVENT_PAYLOAD_KEYS) {
+    const payload = event[payloadKey];
+    if (isRecord(payload) && isRecord(payload[key])) {
+      return payload[key] as Record<string, unknown>;
+    }
   }
   return null;
 }
@@ -853,7 +899,13 @@ function findRecord(event: Record<string, unknown>, key: string): Record<string,
 function findNumber(event: Record<string, unknown>, key: string): number | null {
   const direct = numberFrom(event[key]);
   if (direct != null) return direct;
-  if (isRecord(event.info)) return numberFrom((event.info as Record<string, unknown>)[key]);
+  for (const payloadKey of EVENT_PAYLOAD_KEYS) {
+    const payload = event[payloadKey];
+    if (isRecord(payload)) {
+      const value = numberFrom(payload[key]);
+      if (value != null) return value;
+    }
+  }
   return null;
 }
 
