@@ -83,18 +83,26 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 await server.listen({ host: "0.0.0.0", port: env.port });
 
 // The runner is a single Bun process hosting every in-flight session on the instance, so a
-// stray unhandled rejection must not exit it — Bun (like Node ≥15) exits with code 1 by
-// default. That is exactly how prod crashed on 2026-06-10: an async e2b stream callback
-// rejected with RunAbortError outside any awaited chain and took down every other session
-// with it. Per-run failures are already handled at the run/tool boundaries; this backstop
-// logs + reports anything that escapes them and keeps the process serving.
+// stray unhandled rejection must not exit it. That is exactly how prod crashed on 2026-06-10:
+// an async e2b stream callback rejected with RunAbortError outside any awaited chain and took
+// down every other session with it. Per-run failures are already handled at the run/tool
+// boundaries; this backstop logs + reports anything that escapes them and keeps serving.
 function installProcessErrorBackstop() {
   process.on("unhandledRejection", (reason) => {
     reportProcessError("opencompany.runner_unhandled_rejection", reason);
   });
   process.on("uncaughtException", (error) => {
-    reportProcessError("opencompany.runner_uncaught_exception", error);
+    void reportFatalProcessError("opencompany.runner_uncaught_exception", error);
   });
+}
+
+async function reportFatalProcessError(event: string, error: unknown) {
+  reportProcessError(event, error);
+  try {
+    await Promise.allSettled([flushObservability(), flushBraintrust()]);
+  } finally {
+    process.exit(1);
+  }
 }
 
 function reportProcessError(event: string, error: unknown) {
