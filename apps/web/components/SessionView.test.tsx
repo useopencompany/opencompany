@@ -13,11 +13,12 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createAgentSession,
   continueInterruptedSession,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
-import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
+import { seedSessionQueries, type AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { TOOL_STEP_LIMIT_EXCEEDED_MESSAGE } from "@/lib/agent-sessions/resumable";
 import type {
   AssistantTurnPart,
@@ -44,8 +45,13 @@ vi.mock("next/link", () => ({
 
 // Mutable so surface-aware tests can render under /personal/... vs /company/... pages.
 const navigationMock = vi.hoisted(() => ({ pathname: "/" }));
+const routerMock = vi.hoisted(() => ({
+  prefetch: vi.fn(),
+  push: vi.fn(),
+  replace: vi.fn(),
+}));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ prefetch: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => routerMock,
   usePathname: () => navigationMock.pathname,
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -66,8 +72,12 @@ vi.mock("@/components/CollectionsProvider", () => ({
   useCollections: () => ({ agentSessions: {}, agents: {} }),
 }));
 
+const toastMock = vi.hoisted(() => ({
+  showError: vi.fn(),
+  showToast: vi.fn(),
+}));
 vi.mock("@/components/ToastProvider", () => ({
-  useToast: () => ({ showError: vi.fn() }),
+  useToast: () => toastMock,
 }));
 
 vi.mock("@opencompany/analytics/client", () => ({
@@ -107,6 +117,8 @@ const actionMocks = vi.hoisted(() => ({
   abortAgentSession: vi.fn(),
   cancelAgentSessionQuestion: vi.fn(),
   continueInterruptedSession: vi.fn(),
+  createAgentSession: vi.fn(),
+  createAgentSessionFromPrompt: vi.fn(),
   resolveToolApproval: vi.fn(),
   submitAgentSessionMessage: vi.fn(),
   submitAgentSessionQuestionResponse: vi.fn(),
@@ -116,14 +128,20 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
   abortAgentSession: actionMocks.abortAgentSession,
   cancelAgentSessionQuestion: actionMocks.cancelAgentSessionQuestion,
   continueInterruptedSession: actionMocks.continueInterruptedSession,
+  createAgentSession: actionMocks.createAgentSession,
+  createAgentSessionFromPrompt: actionMocks.createAgentSessionFromPrompt,
   markSessionSeen: vi.fn(),
   resolveToolApproval: actionMocks.resolveToolApproval,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
   submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,
 }));
 
+const payloadMocks = vi.hoisted(() => ({
+  seedSessionQueries: vi.fn(),
+}));
 vi.mock("@/lib/agent-sessions/payload", () => ({
   fetchAgentSession: vi.fn(async () => null),
+  seedSessionQueries: payloadMocks.seedSessionQueries,
   sessionQueryKeys: {
     detail: (workspaceId: string, id: string) => ["session-detail", workspaceId, id],
   },
@@ -133,9 +151,17 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
 afterEach(() => {
   actionMocks.cancelAgentSessionQuestion.mockReset();
   actionMocks.continueInterruptedSession.mockReset();
+  actionMocks.createAgentSession.mockReset();
+  actionMocks.createAgentSessionFromPrompt.mockReset();
   actionMocks.resolveToolApproval.mockReset();
   actionMocks.submitAgentSessionQuestionResponse.mockReset();
   actionMocks.submitAgentSessionMessage.mockReset();
+  payloadMocks.seedSessionQueries.mockReset();
+  routerMock.prefetch.mockReset();
+  routerMock.push.mockReset();
+  routerMock.replace.mockReset();
+  toastMock.showError.mockReset();
+  toastMock.showToast.mockReset();
   streamMock.status = "live";
   streamMock.state = emptyStreamState();
   streamMock.lastOptions = undefined;
@@ -698,6 +724,20 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
   };
 }
 
+function makeCreateSessionResult(sessionId: string) {
+  const detail = makeDetail({
+    session: makeSession({ id: sessionId, title: "New session", status: "created" }),
+  });
+  return {
+    result: {
+      ok: true,
+      session: { id: sessionId },
+      detail,
+    } as Awaited<ReturnType<typeof createAgentSession>>,
+    detail,
+  };
+}
+
 function emptyStreamState(overrides: Partial<SessionRuntimeState> = {}): SessionRuntimeState {
   return {
     events: [],
@@ -723,6 +763,12 @@ function renderSessionViewContent(
       <SessionViewContent detail={detail} workspaceId="wks_test" />
     </QueryClientProvider>,
   );
+}
+
+function setComposerValue(value: string) {
+  fireEvent.change(screen.getByPlaceholderText("Ask this agent to do something"), {
+    target: { value, selectionStart: value.length },
+  });
 }
 
 describe("SessionViewContent — stream-sourced pending turn", () => {
@@ -1760,6 +1806,72 @@ describe("SessionViewContent — surface-aware inspector links", () => {
 
     const childLink = screen.getByTitle("Child session");
     expect(childLink).toHaveAttribute("href", "/company/session/sess_child");
+  });
+});
+
+describe("SessionViewContent — surface-aware slash command navigation", () => {
+  it("keeps /clear-created sessions under /personal when invoked from a personal session", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/personal/session/sess_001";
+    const { result, detail: createdDetail } = makeCreateSessionResult("sess_clear");
+    vi.mocked(createAgentSession).mockResolvedValue(result);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    setComposerValue("/clear ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_clear");
+    });
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001");
+    expect(seedSessionQueries).toHaveBeenCalledWith(
+      expect.any(QueryClient),
+      "wks_test",
+      createdDetail,
+    );
+  });
+
+  it("keeps /clear-created sessions under /company when invoked from a company session", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/company/session/sess_001";
+    const { result } = makeCreateSessionResult("sess_clear");
+    vi.mocked(createAgentSession).mockResolvedValue(result);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    setComposerValue("/clear ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(routerMock.push).toHaveBeenCalledWith("/company/session/sess_clear");
+    });
+  });
+
+  it("opens /btw-created sessions under /personal from the toast action", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/personal/session/sess_001";
+    const { result } = makeCreateSessionResult("sess_btw");
+    vi.mocked(createAgentSession).mockResolvedValue(result);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    setComposerValue("/btw ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "Open" }),
+          title: "New session started",
+        }),
+      );
+    });
+
+    const toast = toastMock.showToast.mock.calls.at(-1)?.[0];
+    toast?.action?.onClick();
+
+    expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_btw");
   });
 });
 
