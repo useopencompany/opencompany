@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_PER_MESSAGE,
+  ATTACHMENT_TEXT_INLINE_MAX_BYTES,
   ATTACHMENT_TEXT_MAX_BYTES,
   attachmentKindForMime,
+  attachmentSandboxFilename,
+  attachmentSandboxPath,
+  COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   isAllowedAttachmentMime,
   modelSupportsAttachments,
   validateAttachmentCandidate,
@@ -62,6 +66,22 @@ describe("attachment validation", () => {
 
   it("exposes a per-message cap", () => {
     expect(ATTACHMENT_MAX_PER_MESSAGE).toBe(10);
+  });
+});
+
+describe("attachment sandbox paths", () => {
+  it("derives the sandbox filename from the blob pathname basename", () => {
+    expect(attachmentSandboxFilename("workspace/wsp_1/sessions/ses_1/att_9-server.log")).toBe(
+      "att_9-server.log",
+    );
+    expect(attachmentSandboxPath("workspace/wsp_1/sessions/ses_1/att_9-server.log")).toBe(
+      "work/attachments/att_9-server.log",
+    );
+  });
+
+  it("keeps the inline threshold below the upload cap and the paste threshold sane", () => {
+    expect(ATTACHMENT_TEXT_INLINE_MAX_BYTES).toBeLessThan(ATTACHMENT_TEXT_MAX_BYTES);
+    expect(COMPOSER_PASTE_ATTACHMENT_MIN_CHARS).toBeLessThan(ATTACHMENT_TEXT_INLINE_MAX_BYTES);
   });
 });
 
