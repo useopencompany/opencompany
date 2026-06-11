@@ -2,11 +2,12 @@
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, LoaderCircle } from "lucide-react";
+import { ArrowUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { Composer } from "@/components/Composer";
+import { PendingSessionView } from "@/components/personal/PendingSessionView";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { PersonalInbox } from "@/components/personal/PersonalInbox";
 import { useToast } from "@/components/ToastProvider";
@@ -19,8 +20,10 @@ const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "moonshotai/kimi-k2.6";
 
 // The /personal default view: the inbox attention-cards prototype stacked above a hero composer
-// locked to the single personal agent (no agent picker). On submit it creates a session and
-// navigates to its URL.
+// locked to the single personal agent (no agent picker). On submit it swaps to an optimistic
+// session view on the very next frame (see PendingSessionView), creates the session in the
+// background, and navigates to its URL behind that view — so Enter feels instant and the
+// route swap is invisible.
 export default function PersonalHome() {
   const { agent, userName } = usePersonalAgent();
   const { workspaceId } = useWorkspaceContext();
@@ -30,9 +33,16 @@ export default function PersonalHome() {
   const [input, setInput] = useState("");
   const [model, setModel] = useState<string>(agent.defaultModel || DEFAULT_MODEL_ID);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  // The just-submitted prompt, rendered as the optimistic session view until navigation to
+  // the created session completes (cleared only on failure, where the composer — with the
+  // input text untouched — comes back).
+  const [pendingSession, setPendingSession] = useState<{
+    content: string;
+    submittedAt: string;
+  } | null>(null);
+  const [, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const canSubmit = Boolean(input.trim() && !isPending);
+  const canSubmit = Boolean(input.trim() && !pendingSession);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -47,11 +57,13 @@ export default function PersonalHome() {
 
   const submit = () => {
     const content = input.trim();
-    if (!content || isPending) return;
+    if (!content || pendingSession) return;
     setError(null);
+    setPendingSession({ content, submittedAt: new Date().toISOString() });
     startTransition(async () => {
       const result = await createAgentSessionFromPrompt(agent.id, content, model || undefined);
       if (!result.ok) {
+        setPendingSession(null);
         if ("redirectTo" in result) {
           router.push(result.redirectTo);
           return;
@@ -59,10 +71,25 @@ export default function PersonalHome() {
         setError(result.error);
         return;
       }
+      // Seed the detail cache before navigating so SessionView paints synchronously from it —
+      // the pending view is then replaced by an identical frame and only the URL changes.
       seedSessionQueries(queryClient, workspaceId, result.detail);
       router.push(personalPaths.session(result.session.id));
     });
   };
+
+  if (pendingSession) {
+    return (
+      <PendingSessionView
+        agentId={agent.id}
+        agentName={agent.name}
+        modelName={model || DEFAULT_MODEL_ID}
+        fallbackModelId={DEFAULT_MODEL_ID}
+        content={pendingSession.content}
+        submittedAt={pendingSession.submittedAt}
+      />
+    );
+  }
 
   return (
     <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
@@ -127,13 +154,9 @@ export default function PersonalHome() {
                 type="submit"
                 disabled={!canSubmit}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label={isPending ? "Starting session…" : "Start session"}
+                aria-label="Start session"
               >
-                {isPending ? (
-                  <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
-                ) : (
-                  <ArrowUp size={13} strokeWidth={2} />
-                )}
+                <ArrowUp size={13} strokeWidth={2} />
               </button>
             }
           />
