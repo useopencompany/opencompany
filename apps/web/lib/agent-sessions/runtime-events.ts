@@ -641,9 +641,7 @@ export function isInspectableRuntimeEvent(event: RuntimeEvent) {
     event.type !== "message.reasoning_delta" &&
     // Debug-only model-request snapshot — large and noisy; kept in detail.events for the
     // "Copy Debug JSON" export but hidden from the inspector's recent-events list.
-    event.type !== "debug.model_request" &&
-    // Debug-only sandbox timing snapshot for production latency investigations.
-    event.type !== "debug.sandbox_hydration"
+    event.type !== "debug.model_request"
   );
 }
 

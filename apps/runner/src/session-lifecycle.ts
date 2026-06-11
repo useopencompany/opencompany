@@ -2,8 +2,6 @@ import {
   type AgentConfig,
   agentHasGitHubAccess,
   normalizeAgentConfig,
-  type SandboxHydrationTiming,
-  type SandboxHydrationTimingPayload,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
@@ -21,7 +19,11 @@ import {
   workspaces,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
-import { traceBraintrustStep } from "@opencompany/observability/braintrust";
+import {
+  type BraintrustSpan,
+  logBraintrustSpan,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
 import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
@@ -45,12 +47,20 @@ import { materializeSkillsForSession } from "./skills";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
+type SandboxHydrationTiming = {
+  totalMs: number;
+  e2bConnectOrCreateMs?: number;
+  prepareWorkspaceMs?: number;
+  materializeBrainMs?: number;
+  materializeAgentBundleMs?: number;
+  materializeSkillsMs?: number;
+  materializeAttachmentsMs?: number;
+};
+
 export async function ensureSandbox(
   row: LoadedSession,
   env: RunnerEnv,
-  options?: {
-    onHydrationTiming?: (observation: SandboxHydrationTimingPayload) => void | Promise<void>;
-  },
+  options?: { braintrustSpan?: BraintrustSpan | undefined },
 ) {
   let sandbox: SandboxHandle | null = null;
   const agentConfig = normalizeAgentConfig(row.agent.config);
@@ -174,7 +184,7 @@ export async function ensureSandbox(
       sandboxId: sandbox.sandboxId,
       ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
     });
-    emitSandboxHydrationTiming(options?.onHydrationTiming, {
+    logSandboxHydrationTiming(options?.braintrustSpan, {
       outcome: "success",
       existingSandbox,
       template: template ?? "default",
@@ -199,7 +209,7 @@ export async function ensureSandbox(
       ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
       ...(name ? { errorName: name } : {}),
     });
-    emitSandboxHydrationTiming(options?.onHydrationTiming, {
+    logSandboxHydrationTiming(options?.braintrustSpan, {
       outcome: "error",
       existingSandbox,
       template: template ?? "default",
@@ -265,7 +275,7 @@ function elapsedMs(startedAt: number) {
 
 async function recordSandboxHydrationStage<T>(
   timings: Partial<SandboxHydrationTiming>,
-  stage: Exclude<keyof SandboxHydrationTiming, "totalMs" | "updateSandboxForLeaseMs">,
+  stage: Exclude<keyof SandboxHydrationTiming, "totalMs">,
   run: () => Promise<T>,
 ) {
   const startedAt = performance.now();
@@ -276,17 +286,76 @@ async function recordSandboxHydrationStage<T>(
   }
 }
 
-function emitSandboxHydrationTiming(
-  onHydrationTiming:
-    | ((observation: SandboxHydrationTimingPayload) => void | Promise<void>)
-    | undefined,
-  observation: SandboxHydrationTimingPayload,
+function logSandboxHydrationTiming(
+  span: BraintrustSpan | undefined,
+  input: {
+    outcome: "success" | "error";
+    existingSandbox: boolean;
+    template: string;
+    timings: Partial<SandboxHydrationTiming> & Pick<SandboxHydrationTiming, "totalMs">;
+    e2bRequests: SandboxLatencyObservation[];
+    sandboxId?: string;
+    requestedSandboxId?: string;
+    errorName?: string;
+  },
 ) {
-  try {
-    void Promise.resolve(onHydrationTiming?.(observation)).catch(() => {});
-  } catch {
-    // Debug telemetry must not affect sandbox provisioning.
+  logBraintrustSpan(span, {
+    metrics: sandboxHydrationMetrics(input.timings, input.e2bRequests),
+    metadata: {
+      sandbox_hydration_outcome: input.outcome,
+      sandbox_existing: input.existingSandbox,
+      sandbox_template: input.template,
+      ...(input.sandboxId ? { sandbox_id: input.sandboxId } : {}),
+      ...(input.requestedSandboxId ? { requested_sandbox_id: input.requestedSandboxId } : {}),
+      ...(input.errorName ? { error_name: input.errorName } : {}),
+      ...(input.e2bRequests.length
+        ? {
+            sandbox_e2b_requests: input.e2bRequests.map((request) => ({
+              operation: request.operation,
+              outcome: request.outcome,
+              latency_ms: request.latencyMs,
+              ...(request.sandboxId ? { sandbox_id: request.sandboxId } : {}),
+              ...(request.requestedSandboxId
+                ? { requested_sandbox_id: request.requestedSandboxId }
+                : {}),
+              ...(request.errorName ? { error_name: request.errorName } : {}),
+            })),
+          }
+        : {}),
+    },
+  });
+}
+
+function sandboxHydrationMetrics(
+  timings: Partial<SandboxHydrationTiming> & Pick<SandboxHydrationTiming, "totalMs">,
+  e2bRequests: SandboxLatencyObservation[],
+) {
+  const metrics: Record<string, number> = {
+    sandbox_hydration_total_ms: timings.totalMs,
+  };
+  addMetric(metrics, "sandbox_hydration_e2b_connect_or_create_ms", timings.e2bConnectOrCreateMs);
+  addMetric(metrics, "sandbox_hydration_prepare_workspace_ms", timings.prepareWorkspaceMs);
+  addMetric(metrics, "sandbox_hydration_materialize_brain_ms", timings.materializeBrainMs);
+  addMetric(
+    metrics,
+    "sandbox_hydration_materialize_agent_bundle_ms",
+    timings.materializeAgentBundleMs,
+  );
+  addMetric(metrics, "sandbox_hydration_materialize_skills_ms", timings.materializeSkillsMs);
+  addMetric(
+    metrics,
+    "sandbox_hydration_materialize_attachments_ms",
+    timings.materializeAttachmentsMs,
+  );
+  for (const request of e2bRequests) {
+    addMetric(metrics, `sandbox_e2b_${request.operation}_ms`, request.latencyMs);
   }
+  return metrics;
+}
+
+function addMetric(metrics: Record<string, number>, name: string, value: number | undefined) {
+  if (value === undefined) return;
+  metrics[name] = value;
 }
 
 function errorName(error: unknown) {
