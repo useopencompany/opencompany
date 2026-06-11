@@ -14,6 +14,22 @@ export function encodeBrainPath(path: string): string {
   return trimmed ? trimmed.split("/").map(encodeURIComponent).join("/") : "";
 }
 
+// Inverse of encodeBrainPath: reconstructs the logical Brain path from a `[[...path]]` catch-all's
+// decoded segments. Tolerant of malformed percent-encoding (e.g. a bare `%`) so a bad URL falls back
+// to the raw segment instead of throwing a URIError before the page renders. Shared by every
+// URL-addressable Brain surface (company + personal catch-all routes).
+export function brainInitialPathFromSegments(segments?: string[]): string {
+  return (segments ?? [])
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join("/");
+}
+
 // Absolute href to a Brain file/folder on the company surface (or the Brain root for "").
 export function brainHref(path: string): string {
   const encoded = encodeBrainPath(path);
