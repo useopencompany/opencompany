@@ -105,6 +105,7 @@ import {
   mergeEvents,
   mergeLiveSessionAggregates,
   mergeMessages,
+  type RuntimeBrainFileReference,
   type RuntimeEvent,
   type RuntimeQuestionItem,
   type RuntimeToolCall,
@@ -803,17 +804,26 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
   const renderMessage = (message: SessionMessage) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
-    // Brain files this turn created or edited (write_file/edit_file set brainPath), deduped
+    // Brain files this turn created or edited (write_file/edit_file set brainFile), deduped
     // and kept in tool-call order so the footer can link straight to each one.
-    const brainFilePaths: string[] = [];
+    const brainFiles: RuntimeBrainFileReference[] = [];
     if (message.role === "assistant") {
-      const seenBrainPaths = new Set<string>();
+      const seenBrainFiles = new Set<string>();
       for (const part of assistantParts) {
         if (part.type !== "tool-call") continue;
-        const brainPath = part.toolCall.brainPath;
-        if (!brainPath || seenBrainPaths.has(brainPath)) continue;
-        seenBrainPaths.add(brainPath);
-        brainFilePaths.push(brainPath);
+        const brainFile =
+          part.toolCall.brainFile ??
+          (part.toolCall.brainPath
+            ? ({
+                scope: "company",
+                path: part.toolCall.brainPath,
+              } satisfies RuntimeBrainFileReference)
+            : null);
+        if (!brainFile) continue;
+        const key = `${brainFile.scope}:${brainFile.path}`;
+        if (seenBrainFiles.has(key)) continue;
+        seenBrainFiles.add(key);
+        brainFiles.push(brainFile);
       }
     }
     const copyText =
@@ -883,9 +893,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               ) : null}
             </div>
           )}
-          {(canCopy || brainFilePaths.length > 0) &&
-          message.status !== "running" &&
-          !awaitingInput ? (
+          {(canCopy || brainFiles.length > 0) && message.status !== "running" && !awaitingInput ? (
             <div
               className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
                 message.role === "assistant"
@@ -899,7 +907,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   {formatElapsed(Math.round(duration))}
                 </span>
               ) : null}
-              {brainFilePaths.length > 0 ? <BrainAttachments paths={brainFilePaths} /> : null}
+              {brainFiles.length > 0 ? <BrainAttachments files={brainFiles} /> : null}
             </div>
           ) : null}
         </div>
@@ -2018,28 +2026,28 @@ function CopyMessageButton({ text }: { text: string }) {
 
 const BRAIN_ATTACHMENT_VISIBLE_LIMIT = 3;
 
-// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links
-// straight to each file in the (URL-addressable) Brain editor; collapses the tail past 3.
-function BrainAttachments({ paths }: { paths: string[] }) {
-  const visible = paths.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
-  const overflow = paths.length - visible.length;
+// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links straight
+// to each file in the URL-addressable Brain editor (company or personal); collapses the tail past 3.
+function BrainAttachments({ files }: { files: RuntimeBrainFileReference[] }) {
+  const visible = files.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
+  const overflow = files.length - visible.length;
   return (
     <>
-      {visible.map((path) => (
+      {visible.map((file) => (
         <Link
-          key={path}
-          href={brainHref(path)}
-          title={`brain/${path}`}
+          key={`${file.scope}:${file.path}`}
+          href={brainFileHref(file)}
+          title={brainFileTitle(file)}
           className="inline-flex max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
           <Brain size={9} strokeWidth={1.9} className="shrink-0" />
-          <span className="truncate">{path}</span>
+          <span className="truncate">{file.path}</span>
         </Link>
       ))}
       {overflow > 0 ? (
         <Link
-          href={BRAIN_BASE_PATH}
-          title={`${overflow} more brain ${overflow === 1 ? "file" : "files"}`}
+          href={brainFileListHref(files)}
+          title={`${overflow} more Brain ${overflow === 1 ? "file" : "files"}`}
           className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
           +{overflow} others
@@ -2047,6 +2055,18 @@ function BrainAttachments({ paths }: { paths: string[] }) {
       ) : null}
     </>
   );
+}
+
+function brainFileHref(file: RuntimeBrainFileReference) {
+  return file.scope === "personal" ? personalPaths.brainFile(file.path) : brainHref(file.path);
+}
+
+function brainFileTitle(file: RuntimeBrainFileReference) {
+  return file.scope === "personal" ? `personal-brain/${file.path}` : `brain/${file.path}`;
+}
+
+function brainFileListHref(files: RuntimeBrainFileReference[]) {
+  return files.some((file) => file.scope === "personal") ? personalPaths.brain : BRAIN_BASE_PATH;
 }
 
 // One-click "copy the whole session as JSON" for debugging. Builds the snapshot lazily on
@@ -2571,9 +2591,15 @@ function ToolCallCardDefault({
           <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
             {toolCall.label || formatToolName(toolCall.name)}
           </span>
-          {toolCall.brainPath ? (
+          {toolCall.brainFile || toolCall.brainPath ? (
             <span
-              title={`Updated brain/${toolCall.brainPath}`}
+              title={`Updated ${brainFileTitle(
+                toolCall.brainFile ??
+                  ({
+                    scope: "company",
+                    path: toolCall.brainPath ?? "",
+                  } satisfies RuntimeBrainFileReference),
+              )}`}
               className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
             >
               <Brain size={9} strokeWidth={1.9} />
