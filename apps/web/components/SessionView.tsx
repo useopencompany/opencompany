@@ -164,6 +164,11 @@ const LAST_TURN_MIN_HEIGHT_FACTOR = 0.5;
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
+  // True for the primary (leftmost / route) pane. Only the primary pane owns
+  // page-global effects like the document title; secondary split panes skip them so
+  // they don't fight over a single shared resource. Defaults to true everywhere the
+  // chat is rendered standalone.
+  isPrimary?: boolean;
 };
 
 type OptimisticUserMessage = SessionMessage & {
@@ -190,7 +195,13 @@ const MARKDOWN_COMPONENTS: Components = {
 // without threading a prop through every intermediate render layer.
 const ToolApprovalContext = createContext<{ sessionId: string } | null>(null);
 
-export default function SessionView({ sessionId }: { sessionId: string }) {
+export default function SessionView({
+  sessionId,
+  isPrimary = true,
+}: {
+  sessionId: string;
+  isPrimary?: boolean;
+}) {
   // useLiveQuery is client-only and must not run during SSR / the first hydration
   // pass, so until hydrated we render the query view with no collection
   // placeholder — the server markup is the loading skeleton, matching SSR. Once
@@ -198,13 +209,14 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   // agent_sessions + agents collections so the session chrome paints with no
   // network round-trip.
   const hydrated = useHydrated();
-  if (!hydrated) return <SessionViewQuery sessionId={sessionId} placeholder={null} />;
-  return <SessionViewLive sessionId={sessionId} />;
+  if (!hydrated)
+    return <SessionViewQuery sessionId={sessionId} placeholder={null} isPrimary={isPrimary} />;
+  return <SessionViewLive sessionId={sessionId} isPrimary={isPrimary} />;
 }
 
 // Client-only: derives the instant session-detail placeholder (meta + related
 // tree) from the synced collections and hands it to the query view.
-function SessionViewLive({ sessionId }: { sessionId: string }) {
+function SessionViewLive({ sessionId, isPrimary }: { sessionId: string; isPrimary: boolean }) {
   const { agentSessions, agents } = useCollections();
   const { data: sessionRows } = useLiveQuery((q) => q.from({ session: agentSessions }));
   const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
@@ -212,15 +224,17 @@ function SessionViewLive({ sessionId }: { sessionId: string }) {
     () => deriveSessionDetailPlaceholder(sessionId, sessionRows ?? [], agentRows ?? []),
     [sessionId, sessionRows, agentRows],
   );
-  return <SessionViewQuery sessionId={sessionId} placeholder={placeholder} />;
+  return <SessionViewQuery sessionId={sessionId} placeholder={placeholder} isPrimary={isPrimary} />;
 }
 
 function SessionViewQuery({
   sessionId,
   placeholder,
+  isPrimary,
 }: {
   sessionId: string;
   placeholder: AgentSessionDetailPayload | null;
+  isPrimary: boolean;
 }) {
   const { workspaceId } = useWorkspaceContext();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
@@ -289,7 +303,14 @@ function SessionViewQuery({
     );
   }
 
-  return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
+  return (
+    <SessionViewContent
+      key={detail.session.id}
+      detail={detail}
+      workspaceId={workspaceId}
+      isPrimary={isPrimary}
+    />
+  );
 }
 
 export function SessionViewContent(props: SessionViewContentProps) {
@@ -300,7 +321,7 @@ export function SessionViewContent(props: SessionViewContentProps) {
   );
 }
 
-function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
+function SessionViewContentBody({ detail, workspaceId, isPrimary = true }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
@@ -623,15 +644,17 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     return () => document.removeEventListener("visibilitychange", markSeen);
   }, [session.id, runtime.currentStatus]);
   // Reflect the open session's title in the browser tab so it's easy to tell tabs
-  // apart. Restored to the default on unmount / navigation away.
+  // apart. Restored to the default on unmount / navigation away. Only the primary pane
+  // owns the document title — secondary split panes would otherwise clobber it.
   useEffect(() => {
+    if (!isPrimary) return;
     const previousTitle = document.title;
     const name = session.title.trim();
     document.title = name ? `${name} · opencompany` : "opencompany";
     return () => {
       document.title = previousTitle;
     };
-  }, [session.title]);
+  }, [session.title, isPrimary]);
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
