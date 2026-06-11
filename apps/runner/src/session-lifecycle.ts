@@ -32,8 +32,9 @@ import { materializeLargeTextAttachmentsForSession } from "./attachment-material
 import { materializeBrainForSession } from "./brain";
 import { getDb } from "./db";
 import { closeSessionStream } from "./durable-streams";
-import type { RunnerEnv } from "./env";
+import { brokerActive, type RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
+import { settleBrokerTokensForSession } from "./llm-broker-tokens";
 import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
@@ -83,10 +84,17 @@ export async function ensureSandbox(
           createOrConnectSandbox({
             sandboxId: row.session.e2bSandboxId,
             template,
-            envs: {
-              E2B_API_KEY: env.e2bApiKey,
-              VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
-            },
+            // With the LLM broker active nothing in the sandbox needs platform keys:
+            // tools that call models receive short-lived broker tokens per delegation
+            // (opencode-tool.ts, memory-tool.ts). The legacy global injection remains
+            // only for the non-brokered fallback (local dev, kill switch) — it is the
+            // exact exposure the broker exists to remove.
+            envs: brokerActive(env)
+              ? {}
+              : {
+                  E2B_API_KEY: env.e2bApiKey,
+                  VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
+                },
             idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
             onLatency: (observation) => {
               e2bRequests.push(observation);
@@ -836,6 +844,18 @@ export async function abortSession(sessionId: string) {
       },
     });
   }
+  // Revoke + settle any outstanding LLM-broker tokens so an aborted delegation's metered
+  // spend is billed now instead of waiting for the expiry sweeper. Best-effort: the
+  // settlement CAS makes a race with the tool's own finally block harmless.
+  try {
+    await settleBrokerTokensForSession(sessionId);
+  } catch (error) {
+    logger.warn("Failed to settle broker tokens on abort", {
+      event: "opencompany.llm_broker_abort_settle_failed",
+      session_id: sessionId,
+      error,
+    });
+  }
   await appendRuntimeEvent(db, {
     sessionId,
     type: "session.status",
@@ -865,6 +885,19 @@ export async function archiveSession(sessionId: string) {
     throw new Error(`Session not found: ${sessionId}`);
   }
   if (session.archivedAt) return;
+
+  // Settle outstanding LLM-broker tokens before the archive transaction so the billable
+  // settlement row + its session.tool_usage event land while the session (and its
+  // Durable Stream) are still open. CAS-idempotent against the tool's own finally block.
+  try {
+    await settleBrokerTokensForSession(sessionId);
+  } catch (error) {
+    logger.warn("Failed to settle broker tokens on archive", {
+      event: "opencompany.llm_broker_archive_settle_failed",
+      session_id: sessionId,
+      error,
+    });
+  }
 
   const previousSandboxId = session.e2bSandboxId;
   const sandboxKilled = previousSandboxId ? await killSandbox(previousSandboxId) : false;

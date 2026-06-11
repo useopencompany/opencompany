@@ -8,6 +8,20 @@ export type RunnerEnv = {
   streamTokenSecret: string;
   e2bApiKey: string;
   vercelAiGatewayApiKey: string;
+  // Platform OpenAI key for codex_coder runs, used only server-side by the LLM broker
+  // (llm-broker.ts) as the upstream credential for the "openai" provider. Never enters
+  // the sandbox.
+  openaiCodexApiKey: string | undefined;
+  // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
+  // RUNNER_LLM_BROKER_PUBLIC_URL to override). Sandboxed CLIs reach the LLM broker
+  // through it. Unset (local dev, where E2B cloud sandboxes cannot reach a laptop)
+  // disables the broker and falls back to direct provider-key injection. Deliberately
+  // NOT the web-side RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that
+  // var points at localhost in local dev and would wrongly activate the broker.
+  publicUrl: string | undefined;
+  // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
+  // direct key injection without a deploy.
+  llmBrokerEnabled: boolean;
   integrationCredentialEncryptionKey: Buffer;
   exaApiKey: string | undefined;
   xApiBearerToken: string | undefined;
@@ -52,6 +66,9 @@ export function loadEnv(): RunnerEnv {
     streamTokenSecret: requiredEnv("RUNNER_STREAM_TOKEN_SECRET"),
     e2bApiKey: requiredEnv("E2B_API_KEY"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
+    openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
+    publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
+    llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     xApiBearerToken: optionalEnv("X_API_BEARER_TOKEN"),
@@ -121,4 +138,16 @@ function optionalPositiveIntegerEnv(name: string, fallback: number) {
 
 function defaultInstanceId() {
   return `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
+}
+
+// Whether sandboxed CLIs route their model calls through the runner's LLM broker. Both
+// conditions matter: without a public URL the sandbox cannot reach the broker (local
+// dev), and the env flag is the no-deploy kill switch.
+export function brokerActive(env: Pick<RunnerEnv, "publicUrl" | "llmBrokerEnabled">): boolean {
+  return env.llmBrokerEnabled && Boolean(env.publicUrl);
+}
+
+// Base URL the sandbox-side CLI config points at for a given broker provider.
+export function brokerBaseUrl(publicUrl: string, provider: "gateway" | "openai"): string {
+  return `${publicUrl.replace(/\/+$/, "")}/broker/${provider}/v1`;
 }

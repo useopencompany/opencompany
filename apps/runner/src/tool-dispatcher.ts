@@ -828,6 +828,18 @@ async function executeRuntimeToolInner(
           args: input.args,
           env: input.env,
           personal: input.personalAgent ?? false,
+          // LLM-broker delegation context; without a workspace id the tool falls back
+          // to direct key injection (broker tokens are workspace-scoped).
+          ...(input.workspaceId
+            ? {
+                broker: {
+                  sessionId: input.sessionId,
+                  workspaceId: input.workspaceId,
+                  messageId: input.assistantMessageId,
+                  toolCallId: input.toolCallId,
+                },
+              }
+            : {}),
           onOutput: async (stream, delta) => {
             await input.checkAbort();
             commandOutput.push(stream, delta);

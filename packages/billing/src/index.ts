@@ -475,7 +475,32 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
 // How a hosted tool's providerCostUsdMicros was determined. Most tools pass through a
 // figure the provider itself reported; tools whose provider cannot price the platform's
 // gateway models (e.g. opencode, OC-328) compute it from token counts with MODEL_PRICING.
-export type HostedToolCostSource = "provider_reported" | "platform_model_pricing";
+// "broker_metered" rows were measured server-side by the runner's LLM broker from upstream
+// responses — the tamper-proof billable record for brokered delegations; the CLI's own
+// self-reported usage rows then carry cost 0 (display-only).
+export type HostedToolCostSource =
+  | "provider_reported"
+  | "platform_model_pricing"
+  | "broker_metered";
+
+// Pricing fallback for gateway models that are not part of the agent model catalog
+// (MODEL_PRICING), e.g. the memory CLI's embedding/nano retrieval models. Values are
+// USD-micros per million tokens. Consumers (memory tool, LLM broker) use this only when
+// the model is absent from MODEL_PRICING and no provider-reported cost exists; an unknown
+// model prices to 0 rather than guessing.
+export const AUX_GATEWAY_MODEL_PRICING: Record<
+  string,
+  { inputUsdMicrosPerMillion: number; outputUsdMicrosPerMillion: number }
+> = {
+  "openai/text-embedding-3-small": {
+    inputUsdMicrosPerMillion: 20_000,
+    outputUsdMicrosPerMillion: 0,
+  },
+  "openai/gpt-5.4-nano": {
+    inputUsdMicrosPerMillion: 200_000,
+    outputUsdMicrosPerMillion: 1_250_000,
+  },
+};
 
 export function calculateHostedToolUsageCost(input: {
   provider: string;
@@ -499,9 +524,10 @@ export function calculateHostedToolUsageCost(input: {
       operation: input.operation,
       costSource,
       // Platform-priced tool usage is billed from the same model catalog as model_usage
-      // rows, so it carries that catalog's version string.
+      // rows, so it carries that catalog's version string. Broker-metered usage is also
+      // priced from that catalog (per upstream request, at metering time).
       pricingVersion:
-        costSource === "platform_model_pricing"
+        costSource === "platform_model_pricing" || costSource === "broker_metered"
           ? "2026-05-22.standard"
           : "provider-reported.2026-05-22",
       platformFeeBps: PLATFORM_FEE_BPS,

@@ -227,6 +227,9 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
+| `RUNNER_LLM_BROKER_PUBLIC_URL` | No | Public base URL of the runner for the LLM broker (`/broker/*`). Defaults to Render's `RENDER_EXTERNAL_URL`; unset (local dev) disables the broker and falls back to direct provider-key injection into the sandbox. Distinct from the web-side `RUNNER_PUBLIC_URL`, which points at localhost in local dev. |
+| `RUNNER_LLM_BROKER_ENABLED` | No | Kill switch for the LLM broker, defaults to `true`. Set `false` to revert sandboxed CLIs to direct key injection without a deploy. |
+| `OPENAI_CODEX_API_KEY` | Codex only | Platform OpenAI key used only server-side as the LLM broker's upstream credential for the `openai` provider (codex_coder). Never enters the sandbox; use a budget-capped OpenAI project key. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP and Google (Gmail/Calendar) credentials. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Used by the runner to refresh Gmail/Calendar access tokens against Google's token endpoint. Must match Vercel. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |

@@ -277,12 +277,19 @@ repository directly into `work/` for that tool run. They share the repo-clone, d
 artifact, and secret-redaction plumbing in `apps/runner/src/coding-agent-shared.ts`.
 
 opencode runs headless as `opencode run --format json` inside the same coding sandbox template.
-It is configured to reach the platform's Vercel AI Gateway through a generated `opencode.json`
-(custom `@ai-sdk/openai-compatible` provider, `OPENCODE_CONFIG` env), so it reuses the existing
-`VERCEL_AI_GATEWAY_API_KEY` rather than provisioning raw provider keys into the sandbox. The model
-is chosen per tool call via the optional `model` argument (validated against `AGENT_MODEL_CATALOG`),
-defaulting to a fixed platform model when omitted. Cost is recorded from opencode's reported token
-usage; dollar attribution is tracked through gateway spend (opencode has no per-run cost API).
+It is configured through a generated `opencode.json` (custom `@ai-sdk/openai-compatible` provider,
+`OPENCODE_CONFIG` env). When the runner's **LLM broker** is active (prod/preview, where the runner
+has a public URL), that config points at the runner's `/broker/gateway/v1` reverse proxy and the
+subprocess receives only a short-lived per-delegation token (`OPENCOMPANY_LLM_BROKER_TOKEN`) — no
+raw provider key enters the sandbox, and the broker's server-side metering
+(`llm_broker_tokens`/`llm_broker_requests`, settled into one `agent_session_tool_usage` row with
+`costSource: "broker_metered"`) is the billable record; opencode's self-reported token usage is
+recorded display-only at cost 0. Without the broker (local dev, or the
+`RUNNER_LLM_BROKER_ENABLED=false` kill switch) it falls back to the legacy direct
+`VERCEL_AI_GATEWAY_API_KEY` injection and platform-priced self-reported usage. The model is chosen
+per tool call via the optional `model` argument (validated against `AGENT_MODEL_CATALOG`),
+defaulting to a fixed platform model when omitted. The memory CLI's model-backed retrieval routes
+through the same broker (`MEMORY_GATEWAY_BASE_URL` + token in place of the raw key).
 
 > Foundational note: opencode also speaks the Agent Client Protocol (`opencode acp`, JSON-RPC over
 > stdio). A future iteration can run harnesses through an in-runner ACP client to surface their

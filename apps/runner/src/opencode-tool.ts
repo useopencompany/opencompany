@@ -21,10 +21,11 @@ import {
   truncateText,
 } from "./coding-agent-shared";
 import { getDb } from "./db";
-import type { RunnerEnv } from "./env";
+import { brokerActive, brokerBaseUrl, type RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
 import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
+import { withBrokerDelegation } from "./llm-broker-tokens";
 import {
   cloneGitHubRepositoryIntoWorkdir,
   commandExitResult,
@@ -41,6 +42,9 @@ import {
 // string is `gateway/<modelId>`.
 const OPENCODE_PROVIDER_ID = "gateway";
 const VERCEL_AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1";
+// Distinct env name for the brokered path so a captured env dump makes it unambiguous
+// which credential mode the run used.
+const BROKER_TOKEN_ENV_VAR = "OPENCOMPANY_LLM_BROKER_TOKEN";
 const DEFAULT_OPENCODE_MODEL: AgentModelId = "anthropic/claude-sonnet-4.6";
 const SUPPORTED_MODEL_IDS = new Set<string>(AGENT_MODEL_CATALOG.map((model) => model.id));
 // Where the opencode installer drops the binary. Prepended to PATH for the run so
@@ -161,253 +165,301 @@ export async function runOpencodeCoderTool(input: {
     });
   }
 
-  const redact = createKnownSecretRedactor([gatewayApiKey, githubToken, githubAuthHeader]);
-  await input.sandbox.commands.run(
-    `git config --global --add safe.directory ${shellQuote(layout.workRoot)}`,
-  );
-
-  // Write an opencode config pointing at the platform AI gateway so opencode uses
-  // the same routed credentials as the rest of the runner (no raw provider keys
-  // in the sandbox, no interactive /connect). The config lives outside work/ so it
-  // never shows up in the repository diff.
-  const configDir = `/tmp/opencompany-opencode-${safePathSegment(input.toolCallId)}`;
-  const configPath = `${configDir}/opencode.json`;
-  await input.sandbox.commands.run(`mkdir -p ${shellQuote(configDir)}`, { timeoutMs: 30_000 });
-  await input.sandbox.files.write(configPath, buildOpencodeConfig(modelId));
-
-  const opencodeEnv = {
-    OPENCODE_CONFIG: configPath,
-    VERCEL_AI_GATEWAY_API_KEY: gatewayApiKey,
-    ...(target.kind === "attached" && githubToken && githubAuthHeader
-      ? buildGitHubCommandEnv({
-          githubAuthHeader,
-          githubToken,
-          repositoryFullName,
-          toolCallId: input.toolCallId,
-        })
-      : {}),
-  };
-
-  await ensureOpencodeInstalled(input.sandbox);
-
-  const stream = createOpencodeStreamAccumulator();
-  const opencodeCommand = `cd ${shellQuote(layout.workRoot)} && export PATH=${OPENCODE_BIN_PATH}:"$PATH" && ${buildOpencodeCommand(
-    {
-      task,
-      model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
-      sessionId: requestedSessionId,
-    },
-  )}`;
-  let timedOut = false;
-  let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
-  // E2B fires these callbacks without awaiting them, so a rejection here (e.g. the
-  // run-control gate inside onOutput throwing RunAbortError on Stop) would escape as an
-  // unhandled rejection and kill the whole runner process. The guard captures the first
-  // callback error and rethrows it below, at the awaited boundary.
-  const guardedRun = guardCommandStreamCallbacks({
-    envs: opencodeEnv,
-    timeoutMs: input.env.opencodeTimeoutMs,
-    onStdout: async (data: string) => {
-      const redacted = redact(data);
-      const activity = stream.push(redacted);
-      if (activity) await input.onOutput?.(activity);
-    },
-    onStderr: async (data: string) => {
-      await input.onOutput?.(redact(data));
-    },
-  });
-  try {
-    result = await input.sandbox.commands.run(opencodeCommand, guardedRun.options);
-  } catch (error) {
-    // Recover instead of failing the whole tool call: a non-zero opencode exit (CommandExitError)
-    // still carries stdout/stderr, and a wall-clock timeout leaves the sandbox alive with files
-    // written so far. Either way the streamed events were already parsed (so the resumable opencode
-    // session id is captured), and we fall through to snapshot the partial diff below.
-    const exitResult = commandExitResult(error);
-    if (exitResult) {
-      result = exitResult;
-    } else if (isCommandTimeoutError(error)) {
-      timedOut = true;
-      result = { stdout: "", stderr: "", exitCode: null };
-      await input.onOutput?.(
-        "opencode: timed out — capturing the partial diff and resumable session id.\n",
-      );
-    } else {
-      throw error;
-    }
-  }
-  // Surface a stream-callback failure (typically RunAbortError) after the exit/timeout
-  // recovery above: an aborted run must fail the tool call, not snapshot partial state.
-  await guardedRun.rethrow();
-  stream.finish();
-  const summary = stream.summary({
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-    stdout: redact(String(result.stdout ?? "")),
-    stderr: redact(String(result.stderr ?? "")),
-    timedOut,
-  });
-
-  await input.sandbox.commands.run(`cd ${shellQuote(layout.workRoot)} && git add -N .`, {
-    timeoutMs: 60_000,
-  });
-  const diffStatus = await input.sandbox.commands.run(
-    `cd ${shellQuote(layout.workRoot)} && git status --short`,
-    { timeoutMs: 60_000 },
-  );
-  const diffStat = await input.sandbox.commands.run(
-    `cd ${shellQuote(layout.workRoot)} && git diff HEAD --stat`,
-    { timeoutMs: 60_000 },
-  );
-  const diffPreview = await input.sandbox.commands.run(
-    `cd ${shellQuote(layout.workRoot)} && git diff HEAD -- | head -400`,
-    { timeoutMs: 60_000 },
-  );
-  const hasDiff = String(diffStatus.stdout ?? "").trim().length > 0;
-  const currentBranch = await readCurrentGitBranch(input.sandbox, layout.workRoot);
-  const localCommitCount = await readLocalCommitCount(
-    input.sandbox,
-    layout.workRoot,
-    defaultBranch,
-  );
-  let branchName: string | null = null;
-  let pullRequestUrl: string | null = null;
-
-  if (args.createPullRequest === true && target.kind === "public") {
-    pullRequestSkippedReason = "public_repository_without_workspace_installation";
-  }
-
-  if (args.createPullRequest === true && target.kind === "attached") {
-    if (!opencodeTool.prCapable) {
-      throw new Error("opencode is not configured for pull request creation.");
-    }
-    const existingPrUrl = await readPullRequestUrlForBranch(
-      input.sandbox,
-      layout.workRoot,
-      currentBranch,
-      opencodeEnv,
-    );
-    if (existingPrUrl) {
-      branchName = currentBranch;
-      pullRequestUrl = existingPrUrl;
-    }
-  }
-
-  // Never open a PR from a timed-out run: the work is partial and possibly mid-edit. Surface the
-  // diff + resumable session id instead and let a follow-up (resumed) call publish once complete.
-  if (
-    args.createPullRequest === true &&
-    target.kind === "attached" &&
-    timedOut &&
-    !pullRequestUrl
-  ) {
-    pullRequestSkippedReason = "coder_timed_out";
-  }
-
-  if (
-    args.createPullRequest === true &&
-    target.kind === "attached" &&
-    !timedOut &&
-    !pullRequestUrl &&
-    (hasDiff || localCommitCount > 0)
-  ) {
-    await requireLeaseWrite(
-      isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
-    );
-    branchName = selectPublishBranch({
-      currentBranch,
-      defaultBranch,
-      sessionId: input.sessionId,
-      now: Date.now(),
-      prefix: "opencode",
-    });
-    const commitMessage = normalizeCommitMessage(
-      typeof args.pullRequestTitle === "string" ? args.pullRequestTitle : task,
-      "Apply opencode changes",
-    );
-    const prepareCommands = [
-      `cd ${shellQuote(layout.workRoot)}`,
-      `git config user.name ${shellQuote("OpenCompany Agent")}`,
-      `git config user.email ${shellQuote("agents@opencompany.ai")}`,
-      ...(branchName === currentBranch ? [] : [`git checkout -b ${shellQuote(branchName)}`]),
-      ...(hasDiff ? ["git add -A", `git commit -m ${shellQuote(commitMessage)}`] : []),
-      `git remote set-url origin ${shellQuote(githubRemoteUrl(repositoryFullName))}`,
-    ];
-    await input.sandbox.commands.run(prepareCommands.join(" && "), { timeoutMs: 120_000 });
-    await requireLeaseWrite(
-      isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
-    );
+  // Everything from here runs under a model-call credential: a short-lived broker token
+  // when the LLM broker is active (the raw gateway key never enters the sandbox and the
+  // broker's server-side metering is the billable record), or the legacy direct gateway
+  // key when it isn't (local dev, kill switch).
+  const runWithModelAuth = async (auth: {
+    baseURL: string;
+    apiKeyEnvVar: string;
+    apiKeyValue: string;
+    brokered: boolean;
+  }) => {
+    const redact = createKnownSecretRedactor([
+      auth.apiKeyValue,
+      gatewayApiKey,
+      githubToken,
+      githubAuthHeader,
+    ]);
     await input.sandbox.commands.run(
-      `cd ${shellQuote(layout.workRoot)} && git ${gitAuthExtraHeaderArg()} push origin ${shellQuote(
-        branchName,
-      )}`,
-      { envs: { [GITHUB_AUTH_HEADER_ENV]: githubAuthHeader ?? "" }, timeoutMs: 180_000 },
+      `git config --global --add safe.directory ${shellQuote(layout.workRoot)}`,
     );
-    await requireLeaseWrite(
-      isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
-    );
-    if (!integrationRepository) {
-      throw new Error(
-        "Attached repository metadata is required to create an opencode pull request.",
-      );
-    }
-    const pr = await createDraftPullRequest({
-      installationId: integrationRepository.installationId,
-      repositoryFullName,
-      title: commitMessage,
-      head: branchName,
-      base: defaultBranch,
-      body: ["Created by OpenCompany opencode.", "", `Task: ${redact(task)}`].join("\n"),
-    });
-    pullRequestUrl = pr.html_url ?? null;
-  }
 
-  await requireLeaseWrite(
-    isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
-  );
-  await getDb()
-    .insert(agentSessionArtifacts)
-    .values({
-      sessionId: input.sessionId,
-      messageId: input.messageId,
-      toolCallId: input.toolCallId,
-      toolName: "opencode_coder",
-      kind: "opencode_run",
-      title: task,
-      url: pullRequestUrl,
-      externalId: summary.sessionId,
-      repositoryFullName,
-      branchName,
-      diffStat: truncateText(redact(formatDiffStat(diffStat.stdout, diffStatus.stdout)), 4000),
-      diffPreview: truncateText(redact(String(diffPreview.stdout ?? "")), 24_000),
-      metadata: {
-        continuedFromOpencodeSessionId: requestedSessionId,
-        repositoryTarget: target.kind,
-        model: modelId,
-        opencodeStatus: summary.status,
-        opencodeError: summary.error ? redact(summary.error) : null,
-        exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-        pullRequestSkippedReason,
+    // Write an opencode config pointing at the platform AI gateway so opencode uses
+    // the same routed credentials as the rest of the runner (no raw provider keys
+    // in the sandbox, no interactive /connect). The config lives outside work/ so it
+    // never shows up in the repository diff.
+    const configDir = `/tmp/opencompany-opencode-${safePathSegment(input.toolCallId)}`;
+    const configPath = `${configDir}/opencode.json`;
+    await input.sandbox.commands.run(`mkdir -p ${shellQuote(configDir)}`, { timeoutMs: 30_000 });
+    await input.sandbox.files.write(
+      configPath,
+      buildOpencodeConfig(modelId, { baseURL: auth.baseURL, apiKeyEnvVar: auth.apiKeyEnvVar }),
+    );
+
+    const opencodeEnv = {
+      OPENCODE_CONFIG: configPath,
+      [auth.apiKeyEnvVar]: auth.apiKeyValue,
+      ...(target.kind === "attached" && githubToken && githubAuthHeader
+        ? buildGitHubCommandEnv({
+            githubAuthHeader,
+            githubToken,
+            repositoryFullName,
+            toolCallId: input.toolCallId,
+          })
+        : {}),
+    };
+
+    await ensureOpencodeInstalled(input.sandbox);
+
+    const stream = createOpencodeStreamAccumulator();
+    const opencodeCommand = `cd ${shellQuote(layout.workRoot)} && export PATH=${OPENCODE_BIN_PATH}:"$PATH" && ${buildOpencodeCommand(
+      {
+        task,
+        model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
+        sessionId: requestedSessionId,
+      },
+    )}`;
+    let timedOut = false;
+    let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
+    // E2B fires these callbacks without awaiting them, so a rejection here (e.g. the
+    // run-control gate inside onOutput throwing RunAbortError on Stop) would escape as an
+    // unhandled rejection and kill the whole runner process. The guard captures the first
+    // callback error and rethrows it below, at the awaited boundary.
+    const guardedRun = guardCommandStreamCallbacks({
+      envs: opencodeEnv,
+      timeoutMs: input.env.opencodeTimeoutMs,
+      onStdout: async (data: string) => {
+        const redacted = redact(data);
+        const activity = stream.push(redacted);
+        if (activity) await input.onOutput?.(activity);
+      },
+      onStderr: async (data: string) => {
+        await input.onOutput?.(redact(data));
       },
     });
+    try {
+      result = await input.sandbox.commands.run(opencodeCommand, guardedRun.options);
+    } catch (error) {
+      // Recover instead of failing the whole tool call: a non-zero opencode exit (CommandExitError)
+      // still carries stdout/stderr, and a wall-clock timeout leaves the sandbox alive with files
+      // written so far. Either way the streamed events were already parsed (so the resumable opencode
+      // session id is captured), and we fall through to snapshot the partial diff below.
+      const exitResult = commandExitResult(error);
+      if (exitResult) {
+        result = exitResult;
+      } else if (isCommandTimeoutError(error)) {
+        timedOut = true;
+        result = { stdout: "", stderr: "", exitCode: null };
+        await input.onOutput?.(
+          "opencode: timed out — capturing the partial diff and resumable session id.\n",
+        );
+      } else {
+        throw error;
+      }
+    }
+    // Surface a stream-callback failure (typically RunAbortError) after the exit/timeout
+    // recovery above: an aborted run must fail the tool call, not snapshot partial state.
+    await guardedRun.rethrow();
+    stream.finish();
+    const summary = stream.summary({
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+      stdout: redact(String(result.stdout ?? "")),
+      stderr: redact(String(result.stderr ?? "")),
+      timedOut,
+    });
 
-  const usage = opencodeHostedToolUsage({ modelId, summary });
-  return {
-    repository: repositoryFullName,
-    repositoryTarget: target.kind,
-    model: modelId,
-    opencodeSessionId: summary.sessionId,
-    continuedFromOpencodeSessionId: requestedSessionId,
-    opencodeStatus: summary.status,
-    opencodeResult: truncateText(redact(summary.result), 24_000),
-    opencodeError: summary.error ? redact(summary.error) : null,
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-    diffStat: truncateText(redact(formatDiffStat(diffStat.stdout, diffStatus.stdout)), 4000),
-    diffPreview: truncateText(redact(String(diffPreview.stdout ?? "")), 24_000),
-    branchName,
-    pullRequestUrl,
-    pullRequestSkippedReason,
-    ...(usage ? { usage } : {}),
+    await input.sandbox.commands.run(`cd ${shellQuote(layout.workRoot)} && git add -N .`, {
+      timeoutMs: 60_000,
+    });
+    const diffStatus = await input.sandbox.commands.run(
+      `cd ${shellQuote(layout.workRoot)} && git status --short`,
+      { timeoutMs: 60_000 },
+    );
+    const diffStat = await input.sandbox.commands.run(
+      `cd ${shellQuote(layout.workRoot)} && git diff HEAD --stat`,
+      { timeoutMs: 60_000 },
+    );
+    const diffPreview = await input.sandbox.commands.run(
+      `cd ${shellQuote(layout.workRoot)} && git diff HEAD -- | head -400`,
+      { timeoutMs: 60_000 },
+    );
+    const hasDiff = String(diffStatus.stdout ?? "").trim().length > 0;
+    const currentBranch = await readCurrentGitBranch(input.sandbox, layout.workRoot);
+    const localCommitCount = await readLocalCommitCount(
+      input.sandbox,
+      layout.workRoot,
+      defaultBranch,
+    );
+    let branchName: string | null = null;
+    let pullRequestUrl: string | null = null;
+
+    if (args.createPullRequest === true && target.kind === "public") {
+      pullRequestSkippedReason = "public_repository_without_workspace_installation";
+    }
+
+    if (args.createPullRequest === true && target.kind === "attached") {
+      if (!opencodeTool.prCapable) {
+        throw new Error("opencode is not configured for pull request creation.");
+      }
+      const existingPrUrl = await readPullRequestUrlForBranch(
+        input.sandbox,
+        layout.workRoot,
+        currentBranch,
+        opencodeEnv,
+      );
+      if (existingPrUrl) {
+        branchName = currentBranch;
+        pullRequestUrl = existingPrUrl;
+      }
+    }
+
+    // Never open a PR from a timed-out run: the work is partial and possibly mid-edit. Surface the
+    // diff + resumable session id instead and let a follow-up (resumed) call publish once complete.
+    if (
+      args.createPullRequest === true &&
+      target.kind === "attached" &&
+      timedOut &&
+      !pullRequestUrl
+    ) {
+      pullRequestSkippedReason = "coder_timed_out";
+    }
+
+    if (
+      args.createPullRequest === true &&
+      target.kind === "attached" &&
+      !timedOut &&
+      !pullRequestUrl &&
+      (hasDiff || localCommitCount > 0)
+    ) {
+      await requireLeaseWrite(
+        isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+      );
+      branchName = selectPublishBranch({
+        currentBranch,
+        defaultBranch,
+        sessionId: input.sessionId,
+        now: Date.now(),
+        prefix: "opencode",
+      });
+      const commitMessage = normalizeCommitMessage(
+        typeof args.pullRequestTitle === "string" ? args.pullRequestTitle : task,
+        "Apply opencode changes",
+      );
+      const prepareCommands = [
+        `cd ${shellQuote(layout.workRoot)}`,
+        `git config user.name ${shellQuote("OpenCompany Agent")}`,
+        `git config user.email ${shellQuote("agents@opencompany.ai")}`,
+        ...(branchName === currentBranch ? [] : [`git checkout -b ${shellQuote(branchName)}`]),
+        ...(hasDiff ? ["git add -A", `git commit -m ${shellQuote(commitMessage)}`] : []),
+        `git remote set-url origin ${shellQuote(githubRemoteUrl(repositoryFullName))}`,
+      ];
+      await input.sandbox.commands.run(prepareCommands.join(" && "), { timeoutMs: 120_000 });
+      await requireLeaseWrite(
+        isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+      );
+      await input.sandbox.commands.run(
+        `cd ${shellQuote(layout.workRoot)} && git ${gitAuthExtraHeaderArg()} push origin ${shellQuote(
+          branchName,
+        )}`,
+        { envs: { [GITHUB_AUTH_HEADER_ENV]: githubAuthHeader ?? "" }, timeoutMs: 180_000 },
+      );
+      await requireLeaseWrite(
+        isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+      );
+      if (!integrationRepository) {
+        throw new Error(
+          "Attached repository metadata is required to create an opencode pull request.",
+        );
+      }
+      const pr = await createDraftPullRequest({
+        installationId: integrationRepository.installationId,
+        repositoryFullName,
+        title: commitMessage,
+        head: branchName,
+        base: defaultBranch,
+        body: ["Created by OpenCompany opencode.", "", `Task: ${redact(task)}`].join("\n"),
+      });
+      pullRequestUrl = pr.html_url ?? null;
+    }
+
+    await requireLeaseWrite(
+      isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+    );
+    await getDb()
+      .insert(agentSessionArtifacts)
+      .values({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        toolCallId: input.toolCallId,
+        toolName: "opencode_coder",
+        kind: "opencode_run",
+        title: task,
+        url: pullRequestUrl,
+        externalId: summary.sessionId,
+        repositoryFullName,
+        branchName,
+        diffStat: truncateText(redact(formatDiffStat(diffStat.stdout, diffStatus.stdout)), 4000),
+        diffPreview: truncateText(redact(String(diffPreview.stdout ?? "")), 24_000),
+        metadata: {
+          continuedFromOpencodeSessionId: requestedSessionId,
+          repositoryTarget: target.kind,
+          model: modelId,
+          opencodeStatus: summary.status,
+          opencodeError: summary.error ? redact(summary.error) : null,
+          exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+          pullRequestSkippedReason,
+        },
+      });
+
+    const usage = opencodeHostedToolUsage({ modelId, summary, brokered: auth.brokered });
+    return {
+      repository: repositoryFullName,
+      repositoryTarget: target.kind,
+      model: modelId,
+      opencodeSessionId: summary.sessionId,
+      continuedFromOpencodeSessionId: requestedSessionId,
+      opencodeStatus: summary.status,
+      opencodeResult: truncateText(redact(summary.result), 24_000),
+      opencodeError: summary.error ? redact(summary.error) : null,
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+      diffStat: truncateText(redact(formatDiffStat(diffStat.stdout, diffStatus.stdout)), 4000),
+      diffPreview: truncateText(redact(String(diffPreview.stdout ?? "")), 24_000),
+      branchName,
+      pullRequestUrl,
+      pullRequestSkippedReason,
+      ...(usage ? { usage } : {}),
+    };
   };
+
+  if (brokerActive(input.env) && input.env.publicUrl) {
+    return withBrokerDelegation(
+      {
+        sessionId: input.sessionId,
+        workspaceId: input.workspaceId,
+        messageId: input.messageId,
+        toolCallId: input.toolCallId,
+        toolName: "opencode_coder",
+        provider: "gateway",
+        // Slack past the wall-clock ceiling so the delegation's final requests (and the
+        // post-run diff/PR phase) never race token expiry.
+        ttlMs: input.env.opencodeTimeoutMs + 10 * 60 * 1000,
+      },
+      (minted) =>
+        runWithModelAuth({
+          baseURL: brokerBaseUrl(input.env.publicUrl as string, "gateway"),
+          apiKeyEnvVar: BROKER_TOKEN_ENV_VAR,
+          apiKeyValue: minted.token,
+          brokered: true,
+        }),
+    );
+  }
+  return runWithModelAuth({
+    baseURL: VERCEL_AI_GATEWAY_BASE_URL,
+    apiKeyEnvVar: "VERCEL_AI_GATEWAY_API_KEY",
+    apiKeyValue: gatewayApiKey,
+    brokered: false,
+  });
 }
 
 // opencode prices its runs from its own public model catalog, which has no entry for the
@@ -419,10 +471,32 @@ export async function runOpencodeCoderTool(input: {
 export function opencodeHostedToolUsage(input: {
   modelId: AgentModelId;
   summary: Pick<OpencodeStreamSummary, "usage" | "costUsdMicros">;
+  // Brokered runs are billed from the LLM broker's server-side metering at settlement
+  // (llm-broker-tokens.ts); the CLI's self-reported usage is then display-only and must
+  // carry zero cost so it never debits.
+  brokered?: boolean;
 }): HostedToolUsage | null {
   const tokens = input.summary.usage;
   const reportedCostUsdMicros = input.summary.costUsdMicros;
   if (!tokens && !reportedCostUsdMicros) return null;
+
+  if (input.brokered) {
+    return {
+      provider: "opencode",
+      operation: "session",
+      costUsdMicros: 0,
+      costSource: "broker_metered",
+      rawUsage: {
+        ...(tokens ?? {}),
+        model: input.modelId,
+        cost_source: "broker_metered",
+        display_only: true,
+        ...(reportedCostUsdMicros != null
+          ? { opencode_reported_cost_usd_micros: reportedCostUsdMicros }
+          : {}),
+      },
+    } satisfies HostedToolUsage;
+  }
 
   const computed = tokens
     ? calculateModelUsageCost({
@@ -672,7 +746,13 @@ export function buildOpencodeCommand(input: {
   return parts.join(" ");
 }
 
-export function buildOpencodeConfig(modelId: string) {
+export function buildOpencodeConfig(
+  modelId: string,
+  options: { baseURL: string; apiKeyEnvVar: string } = {
+    baseURL: VERCEL_AI_GATEWAY_BASE_URL,
+    apiKeyEnvVar: "VERCEL_AI_GATEWAY_API_KEY",
+  },
+) {
   return `${JSON.stringify(
     {
       $schema: "https://opencode.ai/config.json",
@@ -681,8 +761,8 @@ export function buildOpencodeConfig(modelId: string) {
           npm: "@ai-sdk/openai-compatible",
           name: "Vercel AI Gateway",
           options: {
-            baseURL: VERCEL_AI_GATEWAY_BASE_URL,
-            apiKey: "{env:VERCEL_AI_GATEWAY_API_KEY}",
+            baseURL: options.baseURL,
+            apiKey: `{env:${options.apiKeyEnvVar}}`,
           },
           models: { [modelId]: { name: modelId } },
         },
