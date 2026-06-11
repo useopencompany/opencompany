@@ -1876,7 +1876,9 @@ function ContextWindowMeter({
         <TooltipContent>
           <div>{contextDetail}</div>
           {totalCostUsdMicros !== undefined && totalCostUsdMicros > 0 ? (
-            <div className="mt-0.5 text-ink-muted">{formatUsdMicros(totalCostUsdMicros)} total cost</div>
+            <div className="mt-0.5 text-ink-muted">
+              {formatUsdMicros(totalCostUsdMicros)} total cost
+            </div>
           ) : null}
         </TooltipContent>
       </Tooltip>
