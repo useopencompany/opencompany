@@ -121,6 +121,7 @@ import {
   executeRuntimeTool,
   persistDeniedToolResult,
 } from "./tool-dispatcher";
+import { createToolLatencyCollector } from "./tool-latency";
 import { loadWorkspaceToolPolicy } from "./tool-policies";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -483,6 +484,15 @@ async function runMessageWithContext(
     }
 
     const toolStartCoordinator = createToolStartCoordinator();
+    // Aggregates each call's phase timings for the turn-completed latency rollup and emits
+    // tool_call_slow analytics for outliers as they happen.
+    const toolLatency = createToolLatencyCollector({
+      userId,
+      workspaceId,
+      agentId,
+      sessionId: input.sessionId,
+      assistantMessageId,
+    });
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
@@ -500,6 +510,7 @@ async function runMessageWithContext(
       checkAbort,
       toolStartCoordinator,
       observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+      onToolTimings: toolLatency.record,
       toolBudget: createHostedToolBudget(),
       delegateToAgent: createAgentDelegationHandler({
         parentSessionId: input.sessionId,
@@ -614,6 +625,7 @@ async function runMessageWithContext(
         assistantMessageId,
         modelProvider,
         modelName,
+        toolLatency: toolLatency.summary(),
       }).catch((error) => {
         logger.warn("Failed to capture turn analytics", {
           event: "opencompany.runner_turn_analytics_failed",
@@ -1970,6 +1982,15 @@ async function continueTurnAfterToolResult(input: {
   );
 
   const toolStartCoordinator = createToolStartCoordinator();
+  // The resumed turn has no turn-completed rollup of its own, but the collector still emits
+  // tool_call_slow analytics for outliers on this path.
+  const toolLatency = createToolLatencyCollector({
+    userId: input.observabilityContext.userId,
+    workspaceId: input.observabilityContext.workspaceId,
+    agentId: input.observabilityContext.agentId,
+    sessionId: input.sessionId,
+    assistantMessageId: continuationAssistantMessageId,
+  });
   const tools = createToolSet({
     sessionId: input.sessionId,
     assistantMessageId: continuationAssistantMessageId,
@@ -1988,6 +2009,7 @@ async function continueTurnAfterToolResult(input: {
     toolStartCoordinator,
     observabilityContext: input.observabilityContext,
     toolBudget: createHostedToolBudget(),
+    onToolTimings: toolLatency.record,
   });
 
   const turn = await executeStreamingTurn({

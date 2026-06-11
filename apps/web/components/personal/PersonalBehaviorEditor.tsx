@@ -1,12 +1,14 @@
 "use client";
 
-import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { useQuery } from "@tanstack/react-query";
 import { Check, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditorWithAddSkillDialog } from "@/components/agent-editor/AgentEditorWithAddSkillDialog";
+import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { mergeSkillCatalog } from "@/components/agent-editor/skillCatalog";
-import { buildAgentMentionItems } from "@/components/agent-editor/tools";
+import { buildAgentMentionItems, findModel } from "@/components/agent-editor/tools";
+import { PersonalAgentAvatar } from "@/components/personal/PersonalAgentAvatar";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -14,6 +16,8 @@ import { updatePersonalAgentBehavior } from "@/lib/personal/actions";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
 
 type SaveState = "idle" | "saving" | "saved";
+
+const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 
 // The behavior surface = the agent's editable `.agent` body. We reuse the shared Tiptap
 // AgentEditor (same one the full agent inspector uses) so @-mentioning a tool, skill, or
@@ -36,7 +40,7 @@ export function PersonalBehaviorEditor({
   onDraftChange: (body: string, content: TiptapDoc) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
-  const { githubRepositories } = usePersonalAgent();
+  const { agent, githubRepositories } = usePersonalAgent();
   const { showError } = useToast();
   const { data: workspaceSkills } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
@@ -44,7 +48,18 @@ export function PersonalBehaviorEditor({
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [, startTransition] = useTransition();
-  const pendingRef = useRef<{ body: string; content: TiptapDoc } | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
+    () => findModel(config.model.name)?.id ?? DEFAULT_MODEL_ID,
+  );
+  const pendingRef = useRef<{ body: string; content: TiptapDoc; model?: AgentModelId } | null>(
+    null,
+  );
+  // Latest editor body/content, whether or not a save is pending. A model-only change still has
+  // to send body+content (the action re-derives config from the body), so it reads from here.
+  const latestRef = useRef<{ body: string; content: TiptapDoc }>({
+    body: initialBody,
+    content: initialContent,
+  });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // External skills the agent already references stay mentionable; everything else
@@ -61,7 +76,11 @@ export function PersonalBehaviorEditor({
   // local state — but onConfigChange targets the still-mounted parent, so it stays safe).
   // Held in a ref so the unmount effect can call the latest version without re-subscribing.
   const persistRef = useRef<
-    ((patch: { body: string; content: TiptapDoc }, interactive: boolean) => Promise<void>) | null
+    | ((
+        patch: { body: string; content: TiptapDoc; model?: AgentModelId },
+        interactive: boolean,
+      ) => Promise<void>)
+    | null
   >(null);
 
   useEffect(() => {
@@ -117,12 +136,30 @@ export function PersonalBehaviorEditor({
 
   return (
     <div className="mx-auto w-full max-w-[680px] px-6 py-10">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">Behavior</h1>
-          <p className="mt-1 text-[13px] text-ink-muted">
-            Describe how your agent should work. Mention tools, skills, or repositories with @.
-          </p>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <PersonalAgentAvatar name={agent.name} size={34} />
+          <div>
+            <h1 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">{agent.name}</h1>
+            <div className="mt-1 -ml-1.5 flex items-center">
+              <ModelPicker
+                value={selectedModelId}
+                fallbackModelId={DEFAULT_MODEL_ID}
+                aria-label="Default model"
+                onChange={(modelId) => {
+                  setSelectedModelId(modelId);
+                  // A model-only change still needs body+content on the wire — the server action
+                  // re-derives the whole config from the body on every save.
+                  pendingRef.current = {
+                    body: pendingRef.current?.body ?? latestRef.current.body,
+                    content: pendingRef.current?.content ?? latestRef.current.content,
+                    model: modelId,
+                  };
+                  schedule();
+                }}
+              />
+            </div>
+          </div>
         </div>
         <SaveIndicator state={saveState} />
       </div>
@@ -135,7 +172,9 @@ export function PersonalBehaviorEditor({
           mentionItems={mentionItems}
           onChange={(body, content) => {
             const doc = content as TiptapDoc;
-            pendingRef.current = { body, content: doc };
+            latestRef.current = { body, content: doc };
+            // Keep a not-yet-flushed model change instead of clobbering it with a body edit.
+            pendingRef.current = { ...pendingRef.current, body, content: doc };
             onDraftChange(body, doc);
             schedule();
           }}

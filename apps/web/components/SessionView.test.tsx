@@ -26,7 +26,7 @@ import type {
   SessionRuntimeState,
 } from "@/lib/agent-sessions/runtime-events";
 import type { SessionStreamStatus } from "@/lib/agent-sessions/session-stream";
-import { AssistantMessageContent, SessionViewContent } from "./SessionView";
+import { AssistantMessageContent, pastedTextFile, SessionViewContent } from "./SessionView";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 
@@ -1716,6 +1716,26 @@ function makeRelatedChild(
 }
 
 describe("SessionViewContent — surface-aware inspector links", () => {
+  it("keeps runtime details collapsed by default for past personal sessions", () => {
+    navigationMock.pathname = "/personal/session/sess_001";
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps runtime details collapsed by default for company sessions without related sessions", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
   it("links child sessions under /personal when viewed on the personal surface", () => {
     navigationMock.pathname = "/personal/session/sess_001";
     const detail = makeDetail({
@@ -1740,5 +1760,21 @@ describe("SessionViewContent — surface-aware inspector links", () => {
 
     const childLink = screen.getByTitle("Child session");
     expect(childLink).toHaveAttribute("href", "/company/session/sess_child");
+  });
+});
+
+describe("pastedTextFile — oversized paste → attachment", () => {
+  it("wraps the pasted text in a plain-text File", async () => {
+    const file = pastedTextFile("a".repeat(5000), []);
+    expect(file.name).toBe("pasted-text.txt");
+    expect(file.type).toBe("text/plain");
+    expect(await file.text()).toBe("a".repeat(5000));
+  });
+
+  it("numbers subsequent pastes against pending pasted-text attachments", () => {
+    const pending = [{ filename: "pasted-text.txt" }, { filename: "notes.md" }] as Parameters<
+      typeof pastedTextFile
+    >[1];
+    expect(pastedTextFile("more text", pending).name).toBe("pasted-text-2.txt");
   });
 });

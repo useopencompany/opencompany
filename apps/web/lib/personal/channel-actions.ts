@@ -24,11 +24,11 @@ export async function connectWhatsappChannel(): Promise<
   }
 
   const { authUser, user, workspace } = await currentWorkspace();
-  const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
+  const userName = user.firstName?.trim() || authUser.email.split("@")[0] || "you";
   const agent = await ensurePersonalAgent({
     userId: user.id,
     workspaceId: workspace.id,
-    name: agentName,
+    userName,
   });
 
   const db = getDb();
