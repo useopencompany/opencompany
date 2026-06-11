@@ -116,9 +116,7 @@ export function BrainFolderPicker({ brainItems, onSelect, onClose }: Props) {
           className="max-h-[280px] overflow-y-auto p-1"
         >
           {filteredItems.length === 0 ? (
-            <div className="px-2.5 py-4 text-center text-[12px] text-ink-muted">
-              No matches
-            </div>
+            <div className="px-2.5 py-4 text-center text-[12px] text-ink-muted">No matches</div>
           ) : (
             filteredItems.map((item, index) => {
               const isFolder = item.path.endsWith("/") || item.path === "";
@@ -159,7 +157,8 @@ export function BrainFolderPicker({ brainItems, onSelect, onClose }: Props) {
 
         <div className="border-t border-border px-3 py-2 text-[10.5px] text-ink-subtle">
           {filteredItems.length} {filteredItems.length === 1 ? "result" : "results"} ·{" "}
-          <span className="font-medium">↵</span> to select · <span className="font-medium">esc</span> to close
+          <span className="font-medium">↵</span> to select ·{" "}
+          <span className="font-medium">esc</span> to close
         </div>
       </div>
     </div>

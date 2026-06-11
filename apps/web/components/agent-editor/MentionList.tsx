@@ -13,8 +13,8 @@ import {
   Sparkles,
   Wrench,
 } from "lucide-react";
-import { createPortal } from "react-dom";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { createPortal } from "react-dom";
 import { BrainFolderPicker } from "./BrainFolderPicker";
 import { ADD_SKILL_MENTION_ID, type AgentBrainMention, type AgentMentionItem } from "./tools";
 
