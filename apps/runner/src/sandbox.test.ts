@@ -243,7 +243,7 @@ describe("prepareWorkspace", () => {
     ).toBe(true);
   });
 
-  it("installs rg and bun on demand without blocking on failure", async () => {
+  it("does not install optional dev tooling during workspace preparation", async () => {
     const sandbox = {
       commands: {
         run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
@@ -259,11 +259,11 @@ describe("prepareWorkspace", () => {
       agentFile: "agent",
     });
 
-    const toolingCall = sandbox.commands.run.mock.calls.find(([command]) =>
-      String(command).includes("command -v rg"),
-    );
-    expect(toolingCall).toBeDefined();
-    expect(String(toolingCall?.[0])).toContain("command -v bun");
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands.some((command) => command.includes("command -v rg"))).toBe(false);
+    expect(commands.some((command) => command.includes("command -v bun"))).toBe(false);
+    expect(commands.some((command) => command.includes("apt-get install"))).toBe(false);
+    expect(commands.some((command) => command.includes("bun.sh/install"))).toBe(false);
   });
 
   it("matches tokenized GitHub remotes without exposing the token", () => {
@@ -450,6 +450,31 @@ describe("resolveSandboxToolPath", () => {
     );
   });
 
+  it("personal sessions allow memory/ and personal-brain/ and reject the company brain/", () => {
+    expect(resolveSandboxToolPath("/home/user/workspace", "memory/x.md", true)).toBe(
+      "/home/user/workspace/memory/x.md",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "personal-brain/note.md", true)).toBe(
+      "/home/user/workspace/personal-brain/note.md",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt", true)).toBe(
+      "/home/user/workspace/work/foo.txt",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "agent/user.md", true)).toBe(
+      "/home/user/workspace/agent/user.md",
+    );
+    expect(() => resolveSandboxToolPath("/home/user/workspace", "brain/foo.md", true)).toThrow(
+      /work\/, memory\/, personal-brain\/, or agent\//,
+    );
+  });
+
+  it("personal sessions treat personal-brain/ as a plain writable path, not a gated brain", () => {
+    expect(
+      resolveSandboxBrainRelativePath("/home/user/workspace", "personal-brain/note.md", true),
+    ).toBeNull();
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "memory/x.md", true)).toBeNull();
+  });
+
   it("resolves brain-relative paths and ignores non-brain roots", () => {
     expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain/wiki/page.md")).toBe(
       "wiki/page.md",
@@ -599,6 +624,54 @@ describe("runSandboxTool", () => {
     expect(result).toEqual({ stdout: "ok [redacted]", stderr: "", exitCode: 0 });
   });
 
+  it("does not attach a permissionHint to a successful gh command that merely echoes the 403 phrase", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({
+          // A successful `gh issue view`/`gh pr view` whose body quotes the phrase must not be
+          // mistaken for a permission denial.
+          stdout: "Body: we hit a 403 Resource not accessible by integration last week",
+          stderr: "",
+          exitCode: 0,
+        }),
+      },
+    };
+
+    const result = (await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "issue view 339" },
+    })) as { permissionHint?: string };
+
+    expect(result.permissionHint).toBeUndefined();
+  });
+
+  it("attaches a permissionHint when a gh command fails with the 403 permission error", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn(async () => {
+          throw Object.assign(new Error("exit status 1"), {
+            name: "CommandExitError",
+            stdout: "",
+            stderr: "GraphQL: Resource not accessible by integration (createIssue)",
+            exitCode: 1,
+          });
+        }),
+      },
+    };
+
+    const result = (await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "issue create --title T" },
+    })) as { exitCode: number | null; permissionHint?: string };
+
+    expect(result.exitCode).toBe(1);
+    expect(result.permissionHint).toMatch(/Issues: Read/);
+  });
+
   it("quotes parsed gh arguments before dispatching through the sandbox shell", async () => {
     const sandbox = {
       commands: {
@@ -663,6 +736,130 @@ describe("runSandboxTool", () => {
       stderr: "failed to determine repository\n",
       exitCode: 1,
     });
+  });
+
+  it("runs the memory CLI from the workspace root with the gateway key scoped to the subprocess", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "1. [company] acme", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: 'query "acme blockers" --limit 5' },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+      redactOutput: (value) => value.replaceAll("gw_secret_key", "[redacted]"),
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'acme blockers' '--limit' '5' --report-usage",
+      expect.objectContaining({
+        cwd: sandboxLayout("/home/user/workspace").workspaceRoot,
+        // MEMORY_ROOT pins the memory tree so an agent-supplied `--root` is ignored by the CLI.
+        envs: {
+          VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key",
+          MEMORY_ROOT: "/home/user/workspace/agent/memory",
+        },
+      }),
+    );
+  });
+
+  it("pins MEMORY_ROOT to the top-level memory/ tree for personal sessions", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query foo" },
+      personal: true,
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        envs: expect.objectContaining({ MEMORY_ROOT: "/home/user/workspace/memory" }),
+      }),
+    );
+  });
+
+  it("shell-quotes memory args so a crafted arg cannot break out or read the key", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query foo; env > /tmp/leak" },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+    });
+
+    const [command] = sandbox.commands.run.mock.calls[0] as [string, unknown];
+    // Each crafted token is quoted, so the shell never interprets ; or > as operators.
+    expect(command).toBe(
+      "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'foo;' 'env' '>' '/tmp/leak' --report-usage",
+    );
+    // The key only ever reaches the subprocess env, never the command string the agent shaped.
+    expect(command).not.toContain("gw_secret_key");
+  });
+
+  it("redacts the gateway key from streamed and returned memory output", async () => {
+    const onOutput = vi.fn();
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStderr?: (data: string) => void }) => {
+          options.onStderr?.("calling gateway gw_secret_key\n");
+          return { stdout: "ok gw_secret_key", stderr: "warn gw_secret_key", exitCode: 0 };
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query acme" },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+      redactOutput: (value) => value.replaceAll("gw_secret_key", "[redacted]"),
+      onOutput,
+    });
+
+    expect(onOutput).toHaveBeenCalledWith("stderr", "calling gateway [redacted]\n");
+    expect(result).toEqual({
+      stdout: "ok [redacted]",
+      stderr: "warn [redacted]",
+      exitCode: 0,
+    });
+  });
+
+  it("rejects malformed memory arguments before dispatching", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "memory",
+        args: { args: "query 'unterminated" },
+      }),
+    ).rejects.toThrow(/empty or malformed/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
   });
 
   it("creates parent directories before writing nested files", async () => {

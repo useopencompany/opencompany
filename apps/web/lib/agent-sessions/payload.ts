@@ -13,12 +13,19 @@ export type SidebarSessionPayload = {
   id: string;
   title: string;
   status: string;
+  // Where the session originated: "user" (web), "agent" (delegated), "memory" (memory-keeper pass),
+  // or "whatsapp" (messaging channel). Drives the source badge + which surface lists it.
+  source: "user" | "agent" | "memory" | "whatsapp";
   modelName: string;
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
   // ISO timestamp the current user starred this session, or null if unstarred.
   starredAt: string | null;
+  // True when the agent finished a turn (completed/failed/awaiting_*) more recently than
+  // the user last viewed this session. Drives the sidebar's "unseen" blue dot. Derived
+  // from agent_sessions.last_turn_finished_at vs last_seen_at via isSessionUnseen.
+  unseen: boolean;
 };
 
 export type AgentSessionPayload = {
@@ -28,7 +35,7 @@ export type AgentSessionPayload = {
   agentPath: string | null;
   title: string;
   status: string;
-  source: "user" | "agent";
+  source: "user" | "agent" | "memory" | "whatsapp";
   modelProvider: string;
   modelName: string;
   parentSessionId: string | null;
@@ -47,6 +54,9 @@ export type RelatedSessionPayload = {
   id: string;
   title: string;
   status: string;
+  // "memory" marks a background memory-keeper pass; the UI labels it distinctly from delegated
+  // ("agent") children. "user" never appears here (those are not related children).
+  source: "user" | "agent" | "memory" | "whatsapp";
   agentName: string;
   agentPath: string | null;
   parentMessageId: string | null;
@@ -76,6 +86,10 @@ export type AgentSessionDetailPayload = {
   // How full the model's context window currently is, in tokens: the latest model step's
   // input + output for this session (NOT the cumulative `usage` rollup, which only grows).
   currentContextTokens: number;
+  // Highest non-debug runtime event id included in the server aggregate snapshot. Live stream
+  // aggregate events above this id can be added to the snapshot without double-counting replayed
+  // history.
+  latestEventId: number;
   latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
@@ -109,6 +123,7 @@ export type AgentSessionDetailSerializable = {
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
   currentContextTokens: number;
+  latestEventId: number;
   latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
@@ -136,6 +151,23 @@ export function serializeSidebarSession(
   };
 }
 
+/**
+ * Single source of truth for the sidebar "unseen" rule: the agent has yielded a turn
+ * (lastTurnFinishedAt set) more recently than the user last viewed it (lastSeenAt).
+ * Accepts Date or ISO string so the SSR loader and the client Electric selector share
+ * one implementation; parsing via Date avoids any timestamp string-format assumption.
+ */
+export function isSessionUnseen(
+  lastTurnFinishedAt: Date | string | null,
+  lastSeenAt: Date | string | null,
+): boolean {
+  if (lastTurnFinishedAt == null) return false;
+  const finished = new Date(lastTurnFinishedAt).getTime();
+  if (Number.isNaN(finished)) return false;
+  if (lastSeenAt == null) return true;
+  return new Date(lastSeenAt).getTime() < finished;
+}
+
 export function serializeAgentSessionDetail(
   detail: AgentSessionDetailSerializable,
 ): AgentSessionDetailPayload {
@@ -160,6 +192,7 @@ export function serializeAgentSessionDetail(
     toolUsage: detail.toolUsage,
     cost: detail.cost,
     currentContextTokens: detail.currentContextTokens,
+    latestEventId: detail.latestEventId,
     // Omit the key entirely when absent so the parse round-trip stays exact for sessions with no
     // recorded model-request snapshot.
     ...(detail.latestModelRequest ? { latestModelRequest: detail.latestModelRequest } : {}),
@@ -193,6 +226,7 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
     id: detail.session.id,
     title: detail.session.title,
     status: detail.session.status,
+    source: detail.session.source,
     modelName: detail.session.modelName,
     lastError: detail.session.lastError,
     createdAt: detail.session.createdAt,
@@ -201,6 +235,9 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
     // from detail keeps whatever the cached sidebar entry already had (see
     // upsertSidebarSession), and is treated as unstarred when it is brand new.
     starredAt: null,
+    // Projected from detail only for freshly created/submitted sessions (about to run),
+    // never a finished-but-unseen turn; the live Electric row corrects this if it ever is.
+    unseen: false,
   };
 }
 
@@ -245,12 +282,25 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
     id: readStringField(record, "id"),
     title: readNonEmptyStringField(record, "title"),
     status: readNonEmptyStringField(record, "status"),
+    // Tolerant of payloads cached before `source` was carried on the sidebar shape.
+    source: readOptionalSessionSource(record, "source") ?? "user",
     modelName: readNonEmptyStringField(record, "modelName"),
     lastError: readNullableStringField(record, "lastError"),
     createdAt: readStringField(record, "createdAt"),
     updatedAt: readStringField(record, "updatedAt"),
     starredAt: readNullableStringField(record, "starredAt"),
+    // Tolerate payloads serialized before this field existed: absent ⇒ not unseen.
+    unseen: readOptionalBooleanField(record, "unseen") ?? false,
   };
+}
+
+function readOptionalSessionSource(
+  record: Record<string, unknown>,
+  field: string,
+): "user" | "agent" | "memory" | "whatsapp" | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  return readSessionSource(record, field);
 }
 
 export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDetailPayload {
@@ -266,10 +316,23 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
     cost: parseCostSummary(record.cost),
     // Tolerant of absence so payloads cached before this field shipped still parse.
     currentContextTokens: readOptionalNumberField(record, "currentContextTokens") ?? 0,
+    latestEventId:
+      readOptionalNumberField(record, "latestEventId") ??
+      maxRuntimeEventId(assertArray(record.events, "events")),
     // Conditionally included so payloads without a snapshot stay byte-for-byte equal across the
     // serialize/parse round trip (and so older cached payloads parse unchanged).
     ...(latestModelRequest ? { latestModelRequest } : {}),
   });
+}
+
+function maxRuntimeEventId(events: unknown[]) {
+  let max = 0;
+  for (const item of events) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const id = (item as Record<string, unknown>).id;
+    if (typeof id === "number" && Number.isFinite(id)) max = Math.max(max, id);
+  }
+  return max;
 }
 
 // Debug-only snapshot — accept any object verbatim (tolerant of legacy field names), reject
@@ -339,6 +402,9 @@ function parseRelatedSessionPayload(value: unknown): RelatedSessionPayload {
     id: readStringField(record, "id"),
     title: readNonEmptyStringField(record, "title"),
     status: readNonEmptyStringField(record, "status"),
+    // Tolerant: payloads cached before the memory-keeper feature lack `source`; treat those as the
+    // generic "user" (they predate any memory pass, so the Memory label simply won't show).
+    source: readSessionSourceOrDefault(record, "source", "user"),
     agentName: readNonEmptyStringField(record, "agentName"),
     agentPath: readNullableStringField(record, "agentPath"),
     parentMessageId: readNullableStringField(record, "parentMessageId"),
@@ -486,10 +552,27 @@ function readNonEmptyStringField(record: Record<string, unknown>, field: string)
   return value;
 }
 
-function readSessionSource(record: Record<string, unknown>, field: string): "user" | "agent" {
+function readSessionSource(
+  record: Record<string, unknown>,
+  field: string,
+): "user" | "agent" | "memory" | "whatsapp" {
   const value = readStringField(record, field);
-  if (value !== "user" && value !== "agent") throw new Error(`Invalid ${field}.`);
+  if (value !== "user" && value !== "agent" && value !== "memory" && value !== "whatsapp") {
+    throw new Error(`Invalid ${field}.`);
+  }
   return value;
+}
+
+function readSessionSourceOrDefault(
+  record: Record<string, unknown>,
+  field: string,
+  fallback: "user" | "agent" | "memory" | "whatsapp",
+): "user" | "agent" | "memory" | "whatsapp" {
+  const value = record[field];
+  if (value === "user" || value === "agent" || value === "memory" || value === "whatsapp") {
+    return value;
+  }
+  return fallback;
 }
 
 function readOptionalStringField(record: Record<string, unknown>, field: string) {

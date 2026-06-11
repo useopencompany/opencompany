@@ -28,7 +28,7 @@ test("public changelog page renders released versions only", async ({ page }) =>
 });
 
 test("protected routes redirect unauthenticated visitors", async ({ page }) => {
-  await page.goto("/agents", { waitUntil: "domcontentloaded" });
+  await page.goto("/company/agents", { waitUntil: "domcontentloaded" });
 
   await expect.poll(() => page.url()).not.toContain("/agents");
 });

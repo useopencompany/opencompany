@@ -59,6 +59,7 @@ Which AI model runs this agent. Pick one of:
 | `anthropic/claude-sonnet-4.6` | Smart and careful, especially good at code and structured writing. |
 | `anthropic/claude-opus-4.7` | Most capable Claude option for demanding work. |
 | `anthropic/claude-opus-4.8` | Latest, most capable Claude option for demanding work. |
+| `anthropic/claude-fable-5` | Mythos-class Claude for long-running, complex tasks where other models need more check-ins. |
 | `google/gemini-3-flash` | Fast, popular Gemini model with a long context window. |
 | `google/gemini-3.1-flash-lite-preview` | Very fast and low cost for simple high-volume tasks. |
 | `deepseek/deepseek-v4-flash` | High-throughput model for cost-sensitive work. |
@@ -106,12 +107,14 @@ tools:
     prCapable: true
 ```
 
-Attaching a GitHub repository (via `integrations.github.repositories`) is what grants
-repository access — not the `amp` tool. Any agent with an attached repository gets
-repo-scoped `git`/`gh` credentials in the `shell` tool plus a dedicated `gh` tool, and
-can clone on demand into `work/`. `amp` is just one consumer of attached repositories;
-when more than one is attached, pass the target to `amp_coder` via its `repository`
-argument.
+GitHub repository access is derived from body mentions, not the `amp` tool. A
+plain `@github` mention grants live access to any repository the workspace's
+GitHub connection can reach and serializes with
+`integrations.github.allRepositories: true`. Concrete mentions like `@owner/repo`
+or `@github/owner/repo` serialize to `integrations.github.repositories`. Agents
+with GitHub access get a dedicated `gh` tool and can clone on demand into
+`work/`; with live `@github` access, pass an explicit repository (`repository`
+for coding tools, `--repo owner/repo` for `gh` commands).
 
 | ID | What it does |
 | --- | --- |
@@ -152,9 +155,29 @@ agents:
 The body mention is `@agent/<slug>`, where `<slug>` is the agent folder name under `agents/`. During a run, these references expose a delegation tool. The child agent runs in an inspectable child session hidden from sidebar history, and its answer is returned to the parent as a tool result.
 The result also includes `childSessionId`; passing that id back as `sessionId` with a new prompt continues the same delegated child session.
 
+### `integrations.github`
+
+GitHub access is derived from body mentions. A plain `@github` mention enables
+live workspace-wide access:
+
+```yaml
+integrations:
+  github:
+    repositories: []
+    allRepositories: true
+```
+
+`allRepositories: true` is not a snapshot of repository names. At runtime,
+repository-aware coding tools resolve the requested `owner/repo` against the
+workspace's connected GitHub installations. Agents with this access must pass an
+explicit repository, such as the `repository` argument for coding tools or
+`--repo owner/repo` for `gh` commands.
+
 ### `integrations.github.repositories`
 
 A list of workspace-authorized GitHub repositories referenced by the body.
+Both `@owner/repo` and `@github/owner/repo` serialize to the same repository
+object.
 
 ```yaml
 integrations:
@@ -226,15 +249,19 @@ This is what mentions can be:
 
 If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
 
+### Profile
+
+Every session loads one small file from the agent folder straight into the agent's context, so it remembers durable context without looking it up: `agent/user.md` (who the user is — preferences, style, goals). It's created empty, edited by the agent as it learns, and kept small (capped at ~3 KB when loaded). The profile is not a general facts store — every other durable fact (people, companies, projects, decisions, lessons) goes into structured memory via the `memory` tool. The agent's edits sync at the end of a turn and are reloaded on its next turn in the same session — no new session needed.
+
 ### After-session memory
 
 Add `#after-session` to run a background memory pass after a session has been idle for 3 minutes:
 
 ```text
-Help with customer calls. #after-session Update agent/memory.md with durable preferences and decisions from the transcript.
+Help with customer calls. #after-session Update memory with durable preferences and decisions from the transcript.
 ```
 
-The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update `agent/memory.md` when there is useful long-lived context to save. Use Brain only for shared company knowledge.
+The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update the profile (`agent/user.md`) and structured memory (via the `memory` tool) when there is useful long-lived context to save — keeping the profile tight. Use Brain only for shared company knowledge.
 
 ### Tiptap content is not the contract
 

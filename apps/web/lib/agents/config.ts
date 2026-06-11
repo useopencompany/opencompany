@@ -1,4 +1,5 @@
 import {
+  type AgentConfigDerivationNeonDatabase,
   type AgentConfigDerivationRepository,
   type AgentConfigDerivationSkill,
   deriveAgentConfigFromBody,
@@ -25,6 +26,7 @@ export function derivePreviewConfigFromTiptapDoc(input: {
   content: unknown;
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
+  neonDatabases?: AgentConfigDerivationNeonDatabase[];
   agents?: AgentReference[];
   skills?: AgentConfigDerivationSkill[];
   preferredRepositories?: AgentConfigDerivationRepository[];
@@ -41,6 +43,7 @@ export function derivePreviewConfigFromTiptapDoc(input: {
     title: input.title,
     body,
     repositories: input.repositories,
+    neonDatabases: input.neonDatabases ?? [],
     agents: input.agents ?? [],
     skills: input.skills ?? [],
     preferredRepositories,

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
-import type { AgentRow, AgentSessionRow } from "@/lib/collections/types";
+import {
+  derivePersonalSidebarSessions,
+  deriveSessionDetailPlaceholder,
+} from "@/lib/collections/selectors";
+import type { AgentRow, AgentSessionRow, SessionStarRow } from "@/lib/collections/types";
 
 function makeSessionRow(overrides: Partial<AgentSessionRow> = {}): AgentSessionRow {
   return {
@@ -21,8 +24,19 @@ function makeSessionRow(overrides: Partial<AgentSessionRow> = {}): AgentSessionR
     last_error: null,
     abort_requested_at: null,
     archived_at: null,
+    last_turn_finished_at: null,
+    last_seen_at: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-02T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeStarRow(overrides: Partial<SessionStarRow> = {}): SessionStarRow {
+  return {
+    user_id: "usr_1",
+    session_id: "ses_1",
+    starred_at: "2026-01-03T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -104,5 +118,51 @@ describe("deriveSessionDetailPlaceholder", () => {
       "ses_child_a",
       "ses_child_b",
     ]);
+  });
+});
+
+describe("derivePersonalSidebarSessions", () => {
+  it("joins pin state and keeps personal web and WhatsApp sessions only", () => {
+    const sessions = [
+      makeSessionRow({ id: "web", title: "Web", source: "user" }),
+      makeSessionRow({ id: "whatsapp", title: "WhatsApp", source: "whatsapp" }),
+      makeSessionRow({ id: "delegated", title: "Delegated", source: "agent" }),
+      makeSessionRow({ id: "other-agent", title: "Other", agent_id: "agt_2" }),
+      makeSessionRow({
+        id: "archived",
+        title: "Archived",
+        archived_at: "2026-01-04T00:00:00.000Z",
+      }),
+    ];
+
+    const derived = derivePersonalSidebarSessions("agt_1", sessions, [
+      makeStarRow({ session_id: "whatsapp" }),
+    ]);
+
+    expect(derived.map((session) => session.id)).toEqual(["web", "whatsapp"]);
+    expect(derived.find((session) => session.id === "whatsapp")?.starredAt).toBe(
+      "2026-01-03T00:00:00.000Z",
+    );
+  });
+
+  it("keeps pinned sessions outside the recency window", () => {
+    const base = Date.parse("2026-01-02T00:00:00.000Z");
+    const sessions = Array.from({ length: 52 }, (_, index) =>
+      makeSessionRow({
+        id: `ses_${index}`,
+        updated_at: new Date(base - index * 60_000).toISOString(),
+      }),
+    );
+
+    const derived = derivePersonalSidebarSessions("agt_1", sessions, [
+      makeStarRow({
+        session_id: "ses_51",
+        starred_at: "2026-01-03T00:00:00.000Z",
+      }),
+    ]);
+
+    expect(derived).toHaveLength(51);
+    expect(derived.map((session) => session.id)).toContain("ses_51");
+    expect(derived.map((session) => session.id)).not.toContain("ses_50");
   });
 });

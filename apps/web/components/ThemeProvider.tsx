@@ -1,5 +1,6 @@
 "use client";
 
+import { useServerInsertedHTML } from "next/navigation";
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -17,6 +18,12 @@ const THEME_VALUES = new Set<ThemeMode>(["system", "light", "dark"]);
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 const themeListeners = new Set<() => void>();
+
+// Apply the stored theme before React hydrates so manual dark/light selections
+// do not flash back to the system preference on reload. Injected via
+// useServerInsertedHTML so React never renders a <script> in the component tree
+// (which React 19 refuses to execute on the client and warns about).
+const themeInitScript = `(()=>{try{var e="opencompany-theme",t={system:1,light:1,dark:1},m=localStorage.getItem(e);if(!t[m]){var r=document.cookie.match(/(?:^|; )opencompany-theme=([^;]*)/);m=r?decodeURIComponent(r[1]):"system"}if(!t[m])m="system";var o=m==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):m;document.documentElement.dataset.theme=m;document.documentElement.dataset.resolvedTheme=o}catch(e){}})();`;
 
 function isThemeMode(value: unknown): value is ThemeMode {
   return typeof value === "string" && THEME_VALUES.has(value as ThemeMode);
@@ -83,6 +90,11 @@ export function ThemeProvider({
   children: React.ReactNode;
   initialTheme: ThemeMode;
 }) {
+  useServerInsertedHTML(() => (
+    // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted inline anti-flash script
+    <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+  ));
+
   const theme = useSyncExternalStore(subscribeTheme, themeSnapshot, () => initialTheme);
   const resolvedTheme = useSyncExternalStore(
     subscribeTheme,

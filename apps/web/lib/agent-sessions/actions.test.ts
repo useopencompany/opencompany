@@ -11,11 +11,13 @@ import {
   triggerAgentApprovalResume,
   triggerAgentMessageRun,
 } from "@/lib/agent-sessions/message-runner";
+import { TOOL_STEP_LIMIT_EXCEEDED_MESSAGE } from "@/lib/agent-sessions/resumable";
 import { currentWorkspace } from "@/lib/auth";
 import {
   continueInterruptedSession,
   createAgentSession,
   createAgentSessionFromPrompt,
+  createPersonalOnboardingSession,
   resolveToolApproval,
   setSessionStar,
   submitAgentSessionMessage,
@@ -197,7 +199,7 @@ describe("createAgentSession", () => {
     expect(result).toEqual({
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     });
     expect(getDbMock).toHaveBeenCalled();
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
@@ -238,11 +240,13 @@ describe("createAgentSession", () => {
       id: "ses_123",
       title: "Ship it",
       status: "created",
+      source: "user",
       modelName: "openai/gpt-5.4-mini",
       lastError: null,
       createdAt: CREATED_AT.toISOString(),
       updatedAt: CREATED_AT.toISOString(),
       starredAt: null,
+      unseen: false,
     });
     expect(dispatchAgentSessionStartedMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
@@ -256,6 +260,37 @@ describe("createAgentSession", () => {
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
       source: "agent",
+    });
+  });
+});
+
+describe("createPersonalOnboardingSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+  });
+
+  it("skips the onboarding gate — the caller has not completed onboarding yet", async () => {
+    // Regression: without skipOnboarding, currentWorkspace() redirects the submit straight back
+    // to /onboarding/personal (the survey row that marks completion is only written inside this
+    // action), trapping the user in an onboarding loop.
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+
+    const result = await createPersonalOnboardingSession(
+      "agt_123",
+      { name: "Ada", website: "", role: "Founder" },
+      "Help me get started",
+    );
+
+    expect(currentWorkspaceMock).toHaveBeenCalledWith({ skipOnboarding: true });
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/company/settings?billing=insufficient",
     });
   });
 });
@@ -287,7 +322,7 @@ describe("createAgentSessionFromPrompt", () => {
     expect(result).toEqual({
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
@@ -547,6 +582,7 @@ describe("continueInterruptedSession", () => {
     agentId: "agt_123",
     status: "interrupted",
     runLeaseId: null,
+    lastError: null,
     modelProvider: "vercel-ai-gateway",
     modelName: "openai/gpt-5.4-mini",
   };
@@ -626,6 +662,64 @@ describe("continueInterruptedSession", () => {
       messageId: "msg_continue",
       workspaceId: "wks_123",
     });
+  });
+
+  it("continues failed sessions that stopped at the tool-step limit", async () => {
+    const { db, values } = dbForContinue({
+      ...interruptedSession,
+      status: "failed",
+      lastError: TOOL_STEP_LIMIT_EXCEEDED_MESSAGE,
+    });
+    getDbMock.mockReturnValue(db);
+
+    const result = await continueInterruptedSession("ses_123");
+
+    expect(result).toEqual({ ok: true, messageId: "msg_continue" });
+    const insertedMessage = values.mock.calls[0]?.[0];
+    expect(insertedMessage).toMatchObject({
+      content: "Continue",
+      modelMessage: {
+        role: "user",
+        content: expect.stringContaining("tool-step limit"),
+      },
+    });
+    expect(insertedMessage.modelMessage.content).toContain("Avoid repeating completed work");
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_continue",
+      workspaceId: "wks_123",
+    });
+  });
+
+  it("rejects ordinary failed sessions", async () => {
+    const { db } = dbForContinue({
+      ...interruptedSession,
+      status: "failed",
+      lastError: "Gateway down",
+    });
+    getDbMock.mockReturnValue(db);
+
+    await expect(continueInterruptedSession("ses_123")).resolves.toEqual({
+      ok: false,
+      error: "This session is not interrupted.",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects tool-step-limit sessions with an active lease", async () => {
+    const { db } = dbForContinue({
+      ...interruptedSession,
+      status: "failed",
+      lastError: TOOL_STEP_LIMIT_EXCEEDED_MESSAGE,
+      runLeaseId: "run_active",
+    });
+    getDbMock.mockReturnValue(db);
+
+    await expect(continueInterruptedSession("ses_123")).resolves.toEqual({
+      ok: false,
+      error: "This session is still running. Try again shortly.",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 });
 

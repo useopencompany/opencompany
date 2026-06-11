@@ -18,6 +18,7 @@ import {
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
+import { TOOL_STEP_LIMIT_EXCEEDED_MESSAGE } from "@/lib/agent-sessions/resumable";
 import type {
   AssistantTurnPart,
   RuntimeToolCall,
@@ -41,9 +42,11 @@ vi.mock("next/link", () => ({
   },
 }));
 
+// Mutable so surface-aware tests can render under /personal/... vs /company/... pages.
+const navigationMock = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ prefetch: vi.fn(), push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/",
+  usePathname: () => navigationMock.pathname,
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -113,6 +116,7 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
   abortAgentSession: actionMocks.abortAgentSession,
   cancelAgentSessionQuestion: actionMocks.cancelAgentSessionQuestion,
   continueInterruptedSession: actionMocks.continueInterruptedSession,
+  markSessionSeen: vi.fn(),
   resolveToolApproval: actionMocks.resolveToolApproval,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
   submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,
@@ -135,6 +139,7 @@ afterEach(() => {
   streamMock.status = "live";
   streamMock.state = emptyStreamState();
   streamMock.lastOptions = undefined;
+  navigationMock.pathname = "/";
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -688,6 +693,7 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       platformFeeUsdMicros: 0,
     },
     currentContextTokens: 0,
+    latestEventId: 0,
     ...overrides,
   };
 }
@@ -1050,6 +1056,35 @@ describe("SessionViewContent — interrupted continue", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+  });
+
+  it("shows a compact Continue action for failed sessions that reached the tool-step limit", () => {
+    renderSessionViewContent(
+      makeDetail({
+        session: makeSession({
+          status: "failed",
+          lastError: TOOL_STEP_LIMIT_EXCEEDED_MESSAGE,
+        }),
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.getByText("Step limit reached")).toBeInTheDocument();
+    expect(screen.queryByText(TOOL_STEP_LIMIT_EXCEEDED_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it("does not show Continue for ordinary failed sessions", () => {
+    renderSessionViewContent(
+      makeDetail({
+        session: makeSession({
+          status: "failed",
+          lastError: "Gateway down",
+        }),
+      }),
+    );
+
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Gateway down").length).toBeGreaterThan(0);
   });
 
   it("clicking Continue inserts an optimistic message and dispatches the action", async () => {
@@ -1655,5 +1690,55 @@ describe("ToolCallCardDefault — elapsed counter for long-running tool calls", 
     expect(screen.queryByText(/60s/)).not.toBeInTheDocument();
     // The step summary is shown (collapsed), but no running/elapsed chrome
     expect(screen.getByText("1 step")).toBeInTheDocument();
+  });
+});
+
+// ── Surface-aware inspector links ────────────────────────────────────────────
+// Session pages render under both /company and /personal; related-session and
+// session-page links must stay within the surface the user is on.
+
+function makeRelatedChild(
+  overrides: Partial<AgentSessionDetailPayload["related"]["children"][number]> = {},
+): AgentSessionDetailPayload["related"]["children"][number] {
+  return {
+    id: "sess_child",
+    title: "Child session",
+    status: "completed",
+    source: "agent",
+    agentName: "Test Agent",
+    agentPath: null,
+    parentMessageId: null,
+    parentToolCallId: null,
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("SessionViewContent — surface-aware inspector links", () => {
+  it("links child sessions under /personal when viewed on the personal surface", () => {
+    navigationMock.pathname = "/personal/session/sess_001";
+    const detail = makeDetail({
+      related: { parent: null, children: [makeRelatedChild()] },
+    });
+    renderSessionViewContent(detail);
+
+    const childLink = screen.getByTitle("Child session");
+    expect(childLink).toHaveAttribute("href", "/personal/session/sess_child");
+    expect(screen.getByText("Session page").parentElement?.querySelector("a")).toHaveAttribute(
+      "href",
+      "/personal/session/sess_001",
+    );
+  });
+
+  it("keeps child-session links under /company on the company surface", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    const detail = makeDetail({
+      related: { parent: null, children: [makeRelatedChild()] },
+    });
+    renderSessionViewContent(detail);
+
+    const childLink = screen.getByTitle("Child session");
+    expect(childLink).toHaveAttribute("href", "/company/session/sess_child");
   });
 });

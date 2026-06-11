@@ -1,14 +1,21 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { workspaceExperiments, workspaceMcpServers } from "@opencompany/db/schema";
+import type { WorkspaceMcpCredentialKind } from "@opencompany/db/schema";
+import { workspaceMcpServers } from "@opencompany/db/schema";
 import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
 import {
+  BETTERSTACK_MCP_ENDPOINT_URL,
+  BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND,
+  BETTERSTACK_MCP_SERVER_KEY,
+  BRAINTRUST_MCP_ENDPOINT_URL,
+  BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
+  BRAINTRUST_MCP_SERVER_KEY,
   LINEAR_MCP_ENDPOINT_URL,
+  LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
   LINEAR_MCP_SERVER_KEY,
-  MCP_EXPERIMENT_KEY,
   type McpProviderKey,
   POSTHOG_MCP_ENDPOINT_URL,
   POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
@@ -17,28 +24,39 @@ import {
   SLACK_MCP_OAUTH_CREDENTIAL_KIND,
   SLACK_MCP_SERVER_KEY,
 } from "@/lib/mcp/data";
-import { linearMcpOAuthCredentialKind } from "@/lib/mcp/linear-oauth";
 
-export async function setWorkspaceMcpExperimentEnabled(enabled: boolean) {
-  const { workspace } = await currentWorkspace({ requireAdmin: true });
-  const now = new Date();
+type McpServerStatus = "configured" | "missing_credential" | "error";
 
-  await getDb()
-    .insert(workspaceExperiments)
-    .values({
-      workspaceId: workspace.id,
-      key: MCP_EXPERIMENT_KEY,
-      enabled,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [workspaceExperiments.workspaceId, workspaceExperiments.key],
-      set: { enabled, updatedAt: now },
-    });
-
-  revalidateMcpPaths();
-  return { ok: true as const, enabled };
-}
+const MCP_SERVER_PRESETS: Record<
+  McpProviderKey,
+  { displayName: string; endpointUrl: string; oauthCredentialKind: WorkspaceMcpCredentialKind }
+> = {
+  [LINEAR_MCP_SERVER_KEY]: {
+    displayName: "Linear",
+    endpointUrl: LINEAR_MCP_ENDPOINT_URL,
+    oauthCredentialKind: LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
+  },
+  [SLACK_MCP_SERVER_KEY]: {
+    displayName: "Slack",
+    endpointUrl: SLACK_MCP_ENDPOINT_URL,
+    oauthCredentialKind: SLACK_MCP_OAUTH_CREDENTIAL_KIND,
+  },
+  [POSTHOG_MCP_SERVER_KEY]: {
+    displayName: "PostHog",
+    endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
+    oauthCredentialKind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
+  },
+  [BETTERSTACK_MCP_SERVER_KEY]: {
+    displayName: "Better Stack",
+    endpointUrl: BETTERSTACK_MCP_ENDPOINT_URL,
+    oauthCredentialKind: BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND,
+  },
+  [BRAINTRUST_MCP_SERVER_KEY]: {
+    displayName: "Braintrust",
+    endpointUrl: BRAINTRUST_MCP_ENDPOINT_URL,
+    oauthCredentialKind: BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
+  },
+};
 
 export async function saveLinearMcpToken(token: string) {
   const { workspace } = await currentWorkspace({ requireAdmin: true });
@@ -56,7 +74,7 @@ export async function saveLinearMcpToken(token: string) {
   await deleteMcpCredential({
     workspaceId: workspace.id,
     serverId: server.id,
-    kind: linearMcpOAuthCredentialKind(),
+    kind: LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
   });
 
   revalidateMcpPaths();
@@ -64,101 +82,107 @@ export async function saveLinearMcpToken(token: string) {
 }
 
 export async function removeLinearMcpToken() {
-  const { workspace } = await currentWorkspace({ requireAdmin: true });
-  const server = await upsertLinearMcpServer(
-    workspace.id,
-    "missing_credential",
-    "Linear MCP token was removed.",
-  );
-  await deleteMcpCredential({
-    workspaceId: workspace.id,
-    serverId: server.id,
-    kind: "bearer_token",
-  });
-  await deleteMcpCredential({
-    workspaceId: workspace.id,
-    serverId: server.id,
-    kind: linearMcpOAuthCredentialKind(),
-  });
-
-  revalidateMcpPaths();
-  return { ok: true as const };
+  return removeMcpCredentials(LINEAR_MCP_SERVER_KEY, "Linear MCP token was removed.", [
+    "bearer_token",
+    LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
+  ]);
 }
 
 export async function removeSlackMcpConnection() {
-  const { workspace } = await currentWorkspace({ requireAdmin: true });
-  const server = await upsertSlackMcpServer(
-    workspace.id,
-    "missing_credential",
-    "Slack MCP connection was removed.",
-  );
-  await deleteMcpCredential({
-    workspaceId: workspace.id,
-    serverId: server.id,
-    kind: SLACK_MCP_OAUTH_CREDENTIAL_KIND,
-  });
-
-  revalidateMcpPaths();
-  return { ok: true as const };
+  return removeMcpCredentials(SLACK_MCP_SERVER_KEY, "Slack MCP connection was removed.");
 }
 
 export async function removePostHogMcpConnection() {
-  const { workspace } = await currentWorkspace({ requireAdmin: true });
-  const server = await upsertPostHogMcpServer(
-    workspace.id,
-    "missing_credential",
-    "PostHog MCP connection was removed.",
-  );
-  await deleteMcpCredential({
-    workspaceId: workspace.id,
-    serverId: server.id,
-    kind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
-  });
+  return removeMcpCredentials(POSTHOG_MCP_SERVER_KEY, "PostHog MCP connection was removed.");
+}
 
-  revalidateMcpPaths();
-  return { ok: true as const };
+export async function removeBetterStackMcpConnection() {
+  return removeMcpCredentials(
+    BETTERSTACK_MCP_SERVER_KEY,
+    "Better Stack MCP connection was removed.",
+  );
+}
+
+export async function removeBraintrustMcpConnection() {
+  return removeMcpCredentials(BRAINTRUST_MCP_SERVER_KEY, "Braintrust MCP connection was removed.");
 }
 
 export async function upsertLinearMcpServer(
   workspaceId: string,
-  status: "configured" | "missing_credential" | "error",
+  status: McpServerStatus,
   statusReason: string | null,
 ) {
-  return upsertMcpServer({
-    workspaceId,
-    serverKey: LINEAR_MCP_SERVER_KEY,
-    displayName: "Linear",
-    endpointUrl: LINEAR_MCP_ENDPOINT_URL,
-    status,
-    statusReason,
-  });
+  return upsertProviderMcpServer(LINEAR_MCP_SERVER_KEY, workspaceId, status, statusReason);
 }
 
 export async function upsertSlackMcpServer(
   workspaceId: string,
-  status: "configured" | "missing_credential" | "error",
+  status: McpServerStatus,
   statusReason: string | null,
 ) {
-  return upsertMcpServer({
-    workspaceId,
-    serverKey: SLACK_MCP_SERVER_KEY,
-    displayName: "Slack",
-    endpointUrl: SLACK_MCP_ENDPOINT_URL,
-    status,
-    statusReason,
-  });
+  return upsertProviderMcpServer(SLACK_MCP_SERVER_KEY, workspaceId, status, statusReason);
 }
 
 export async function upsertPostHogMcpServer(
   workspaceId: string,
-  status: "configured" | "missing_credential" | "error",
+  status: McpServerStatus,
   statusReason: string | null,
 ) {
+  return upsertProviderMcpServer(POSTHOG_MCP_SERVER_KEY, workspaceId, status, statusReason);
+}
+
+export async function upsertBetterStackMcpServer(
+  workspaceId: string,
+  status: McpServerStatus,
+  statusReason: string | null,
+) {
+  return upsertProviderMcpServer(BETTERSTACK_MCP_SERVER_KEY, workspaceId, status, statusReason);
+}
+
+export async function upsertBraintrustMcpServer(
+  workspaceId: string,
+  status: McpServerStatus,
+  statusReason: string | null,
+) {
+  return upsertProviderMcpServer(BRAINTRUST_MCP_SERVER_KEY, workspaceId, status, statusReason);
+}
+
+async function removeMcpCredentials(
+  provider: McpProviderKey,
+  statusReason: string,
+  kinds?: WorkspaceMcpCredentialKind[],
+) {
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
+  const server = await upsertProviderMcpServer(
+    provider,
+    workspace.id,
+    "missing_credential",
+    statusReason,
+  );
+  for (const kind of kinds ?? [MCP_SERVER_PRESETS[provider].oauthCredentialKind]) {
+    await deleteMcpCredential({
+      workspaceId: workspace.id,
+      serverId: server.id,
+      kind,
+    });
+  }
+
+  revalidateMcpPaths();
+  return { ok: true as const };
+}
+
+async function upsertProviderMcpServer(
+  provider: McpProviderKey,
+  workspaceId: string,
+  status: McpServerStatus,
+  statusReason: string | null,
+) {
+  const preset = MCP_SERVER_PRESETS[provider];
   return upsertMcpServer({
     workspaceId,
-    serverKey: POSTHOG_MCP_SERVER_KEY,
-    displayName: "PostHog",
-    endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
+    serverKey: provider,
+    displayName: preset.displayName,
+    endpointUrl: preset.endpointUrl,
     status,
     statusReason,
   });
@@ -169,7 +193,7 @@ async function upsertMcpServer(input: {
   serverKey: McpProviderKey;
   displayName: string;
   endpointUrl: string;
-  status: "configured" | "missing_credential" | "error";
+  status: McpServerStatus;
   statusReason: string | null;
 }) {
   const now = new Date();
@@ -206,6 +230,6 @@ function newWorkspaceMcpServerId() {
 }
 
 function revalidateMcpPaths() {
-  revalidatePath("/settings");
-  revalidatePath("/agents");
+  revalidatePath("/company/settings");
+  revalidatePath("/company/agents");
 }

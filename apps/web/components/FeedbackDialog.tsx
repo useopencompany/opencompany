@@ -17,7 +17,9 @@ type Props = {
 };
 
 function sessionIdFromPathname(pathname: string | null) {
-  const [section, encodedSessionId] = pathname?.split("/").filter(Boolean) ?? [];
+  // Session pages live under both surfaces: /company/session/<id> and /personal/session/<id>.
+  const [surface, section, encodedSessionId] = pathname?.split("/").filter(Boolean) ?? [];
+  if (surface !== "company" && surface !== "personal") return "";
   if (section !== "session" || !encodedSessionId) return "";
 
   try {

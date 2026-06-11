@@ -77,7 +77,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       }
       setInput("");
       seedSessionQueries(queryClient, workspaceId, result.detail);
-      router.push(`/session/${result.session.id}`);
+      router.push(`/company/session/${result.session.id}`);
     },
   },
   {
@@ -114,7 +114,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
         title: prompt ? "Working on it in a new session" : "New session started",
         action: {
           label: "Open",
-          onClick: () => router.push(`/session/${sessionId}`),
+          onClick: () => router.push(`/company/session/${sessionId}`),
         },
       });
     },

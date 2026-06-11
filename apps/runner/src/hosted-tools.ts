@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  type AgentToolDefinition,
+  buildCapabilityDiscovery,
   getRuntimeToolHelp,
   type RuntimeToolName,
   searchRuntimeTools,
@@ -10,6 +12,7 @@ import {
   type GoogleToolContext,
   isGoogleHostedTool,
 } from "./google-tools";
+import { executeNeonHostedTool, isNeonHostedTool, type NeonToolContext } from "./neon-tools";
 
 export type HostedToolUsage = {
   provider: string;
@@ -30,6 +33,9 @@ type HostedToolHandler = {
     env: RunnerEnv;
     enabledTools: RuntimeToolName[];
     signal: AbortSignal;
+    // Whether the session has a GitHub repository attached. Only `discover_capabilities` reads it
+    // (to report repo-gated capabilities like amp as "needs setup"); other handlers ignore it.
+    hasAttachedRepository?: boolean;
   }) => HostedToolResult | Promise<HostedToolResult>;
   validateEnvironment?: (env: RunnerEnv) => void;
   failureContext?: (input: { args: unknown; error: unknown }) => Record<string, unknown>;
@@ -215,6 +221,8 @@ export async function executeHostedTool(input: {
   enabledTools: RuntimeToolName[];
   signal: AbortSignal;
   googleContext?: GoogleToolContext | undefined;
+  neonContext?: NeonToolContext | undefined;
+  hasAttachedRepository?: boolean;
 }): Promise<HostedToolResult> {
   // Google (Gmail + Calendar) tools resolve per-account workspace credentials rather than a
   // platform env var, so they take a different path with the credential context attached.
@@ -223,6 +231,14 @@ export async function executeHostedTool(input: {
       name: input.name,
       args: input.args,
       context: input.googleContext,
+      signal: input.signal,
+    });
+  }
+  if (isNeonHostedTool(input.name)) {
+    return executeNeonHostedTool({
+      name: input.name,
+      args: input.args,
+      context: input.neonContext,
       signal: input.signal,
     });
   }
@@ -247,6 +263,10 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
   },
   find_tools: {
     execute: ({ args, enabledTools }) => executeToolSearch(args, enabledTools),
+  },
+  discover_capabilities: {
+    execute: ({ args, env, enabledTools, hasAttachedRepository }) =>
+      executeDiscoverCapabilities(args, env, enabledTools, hasAttachedRepository ?? false),
   },
   exa_search: {
     execute: ({ args, env, signal }) => executeExaSearch(args, env, signal),
@@ -498,6 +518,49 @@ function executeToolSearch(args: unknown, enabledTools: RuntimeToolName[]): Host
       // pull a single tool's detailed usage instructions before invoking it via use_tool.
       toolHelp: "tool_help",
       tools,
+    },
+  };
+}
+
+// A catalog entry's platform credentials are available iff none of its runtime tools' environment
+// validators throw. This reuses the exact same `validateEnvironment` checks that gate execution, so
+// `discover_capabilities` and the actual run can never disagree about whether a credential is present.
+// Coding agents (amp/opencode) have no hosted env validator here, so they fall through as
+// credential-available and are gated instead on their attached-repository requirement (amp) — the
+// always-present gateway key makes this safe in practice.
+function capabilityCredentialAvailable(entry: AgentToolDefinition, env: RunnerEnv): boolean {
+  for (const name of entry.runtimeTools) {
+    const validate = HOSTED_TOOL_HANDLERS[name]?.validateEnvironment;
+    if (!validate) continue;
+    try {
+      validate(env);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function executeDiscoverCapabilities(
+  args: unknown,
+  env: RunnerEnv,
+  enabledTools: RuntimeToolName[],
+  hasAttachedRepository: boolean,
+): HostedToolResult {
+  const query = readOptionalString(asRecord(args), "query");
+  const capabilities = buildCapabilityDiscovery({
+    enabledTools,
+    hasAttachedRepository,
+    credentialAvailable: (entry) => capabilityCredentialAvailable(entry, env),
+    ...(query ? { query } : {}),
+  });
+  return {
+    output: {
+      capabilityCount: capabilities.length,
+      // How to act on a result: confirm with the user, then enable durably via self-edit.
+      howToEnable:
+        "To enable a capability, confirm with the user (ask_user_question), then add its @-mention to your behavior via self-edit (read the agent-self-edit skill, then update_agent_file). Discovering does not enable anything.",
+      capabilities,
     },
   };
 }

@@ -24,7 +24,17 @@ function formatTopUpName(amountCents: number) {
   return `$${amountCents / 100} Open Company credits`;
 }
 
-export async function createCreditCheckoutSession(amountCents: number) {
+// Checkout can start from either settings surface (/company/settings or
+// /personal/settings); callers pass where Stripe should send the user back to.
+// Only same-origin absolute paths are accepted ("//" would be protocol-relative).
+function safeReturnPath(returnPath: string | undefined) {
+  if (returnPath && returnPath.startsWith("/") && !returnPath.startsWith("//")) {
+    return returnPath;
+  }
+  return "/personal/settings";
+}
+
+export async function createCreditCheckoutSession(amountCents: number, returnPath?: string) {
   if (!isValidTopUpAmountCents(amountCents)) {
     return {
       ok: false as const,
@@ -70,8 +80,8 @@ export async function createCreditCheckoutSession(amountCents: number) {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer_email: authUser.email,
-      success_url: `${appUrl}/settings?billing=success`,
-      cancel_url: `${appUrl}/settings?billing=cancelled`,
+      success_url: `${appUrl}${safeReturnPath(returnPath)}?billing=success`,
+      cancel_url: `${appUrl}${safeReturnPath(returnPath)}?billing=cancelled`,
       metadata,
       payment_intent_data: { metadata },
       line_items: [
@@ -160,7 +170,7 @@ export async function redeemCreditCode(code: string) {
   });
 
   if (result.ok) {
-    revalidatePath("/settings");
+    revalidatePath("/company/settings");
     revalidatePath("/", "layout");
   }
 

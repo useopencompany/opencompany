@@ -38,6 +38,10 @@
     "release:inngest:sync": "node scripts/release-inngest-sync.mjs",
     "release:render": "node scripts/render-release.mjs",
     "release:smoke": "node scripts/release-smoke.mjs",
+    "preview:seed": "node scripts/preview-seed.mjs",
+    "preview:provision": "node scripts/preview-provision.mjs",
+    "preview:debug-session": "node scripts/preview-debug-session.mjs",
+    "preview:teardown": "node scripts/preview-teardown.mjs",
     "setup": "node scripts/setup.mjs",
     "setup:dev": "node scripts/setup.mjs --dev",
     "setup:personal": "node scripts/setup.mjs --personal-env",
@@ -54,6 +58,7 @@
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
     "dotenv": "^17.4.2",
+    "pg": "^8.13.1",
     "vercel": "^54.5.0"
   },
   "overrides": {

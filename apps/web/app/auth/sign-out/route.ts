@@ -9,7 +9,7 @@ function signOutSource(request: Request) {
   try {
     const pathname = new URL(referer).pathname;
     if (pathname === "/onboarding") return "onboarding_switch_email";
-    if (pathname === "/settings") return "settings";
+    if (pathname === "/company/settings") return "settings";
   } catch {
     return "direct";
   }

@@ -1,4 +1,5 @@
 import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { InboxItemArtifact } from "@opencompany/db/schema";
 
 /**
  * Raw rows as ElectricSQL syncs them out of Postgres. Keys are the Postgres
@@ -38,7 +39,7 @@ export type AgentSessionRow = {
   agent_id: string;
   title: string;
   status: string;
-  source: "user" | "agent";
+  source: "user" | "agent" | "memory" | "whatsapp";
   model_provider: string;
   model_name: string;
   parent_session_id: string | null;
@@ -49,6 +50,8 @@ export type AgentSessionRow = {
   last_error: string | null;
   abort_requested_at: string | null;
   archived_at: string | null;
+  last_turn_finished_at: string | null;
+  last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -57,4 +60,26 @@ export type SessionStarRow = {
   user_id: string;
   session_id: string;
   starred_at: string;
+};
+
+// Only live items (status open/snoozed) are synced into this shape; resolved items leave it.
+export type InboxItemRow = {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  source_session_id: string | null;
+  source: string | null;
+  title: string;
+  body: string | null;
+  steps: string[] | null;
+  priority: "urgent" | "high" | "med" | "low" | null;
+  due_at: string | null;
+  artifact: InboxItemArtifact | null;
+  status: "open" | "snoozed" | "done" | "dismissed";
+  snoozed_until: string | null;
+  dedup_key: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
 };

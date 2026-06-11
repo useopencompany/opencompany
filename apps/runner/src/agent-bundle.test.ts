@@ -102,7 +102,73 @@ describe("materializeAgentBundleForSession", () => {
     );
   });
 
-  it("creates empty memory.md and records a mount when no memory row exists", async () => {
+  it("promotes memory/ and personal-brain/ to top-level roots for personal sessions", async () => {
+    const db = createAgentBundleDb({
+      selectResults: [
+        [{ path: "agents/personal-abc/personal-abc.agent" }],
+        [
+          {
+            path: "agents/personal-abc/memory/notes.md",
+            content: "Memory notes",
+            contentHash: "hash_mem",
+            sizeBytes: 12,
+          },
+          {
+            path: "agents/personal-abc/personal-brain/idea.md",
+            content: "An idea",
+            contentHash: "hash_brain",
+            sizeBytes: 7,
+          },
+          {
+            path: "agents/personal-abc/soul.md",
+            content: "Soul",
+            contentHash: "hash_soul",
+            sizeBytes: 4,
+          },
+        ],
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const sandbox = createSandbox({ commandStdout: "", fileReads: {} });
+
+    await materializeAgentBundleForSession({
+      sandbox: sandbox as never,
+      sessionId: "ses_p",
+      workspaceId: "wsp_p",
+      agentId: "agt_personal",
+      workdir: "/home/user/workspace",
+      personal: true,
+    });
+
+    // memory/ and personal-brain/ land at the top level; everything else stays under agent/.
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/memory/notes.md",
+      "Memory notes",
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/personal-brain/idea.md",
+      "An idea",
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/workspace/agent/soul.md", "Soul");
+    expect(db.insertedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requestedPath: "memory/notes.md",
+          path: "agents/personal-abc/memory/notes.md",
+        }),
+        expect.objectContaining({
+          requestedPath: "personal-brain/idea.md",
+          path: "agents/personal-abc/personal-brain/idea.md",
+        }),
+        expect.objectContaining({
+          requestedPath: "agent/soul.md",
+          path: "agents/personal-abc/soul.md",
+        }),
+      ]),
+    );
+  });
+
+  it("creates the empty profile file (user.md) and records its mount when no rows exist", async () => {
     const db = createAgentBundleDb({
       selectResults: [[{ path: "agents/sales/sales.agent" }], []],
     });
@@ -120,12 +186,17 @@ describe("materializeAgentBundleForSession", () => {
       workdir: "/home/user/workspace",
     });
 
-    expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/workspace/agent/memory.md", "");
+    expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/workspace/agent/user.md", "");
+    // memory.md is no longer auto-created — durable facts live in structured memory.
+    expect(sandbox.files.write).not.toHaveBeenCalledWith(
+      "/home/user/workspace/agent/memory.md",
+      "",
+    );
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          requestedPath: "agent/memory.md",
-          path: "agents/sales/memory.md",
+          requestedPath: "agent/user.md",
+          path: "agents/sales/user.md",
           baseHash: expect.any(String),
           lastSyncedHash: expect.any(String),
         }),

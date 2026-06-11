@@ -206,7 +206,7 @@ export async function completeOnboarding(
         agent_id: scaffold.agentId,
         session_id: sessionId,
       });
-      redirect(`/session/${sessionId}`);
+      redirect(`/company/session/${sessionId}`);
     }
 
     logger.warn("Onboarding setup session was not created", {

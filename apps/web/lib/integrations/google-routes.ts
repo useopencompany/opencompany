@@ -10,6 +10,8 @@ import {
   fetchGoogleUserInfo,
   GOOGLE_PROVIDER_CONFIG,
   type GoogleIntegrationProvider,
+  googleOAuthRedirectUri,
+  googleOAuthTargetOriginForState,
   isGoogleIntegrationConfigured,
   verifyGoogleIntegrationState,
 } from "@/lib/integrations/google-oauth";
@@ -25,9 +27,14 @@ export async function handleGoogleOAuthStart(
   request: Request,
 ) {
   // Per-user connection: any workspace member can attach their own Google account.
-  const { user, workspace } = await currentWorkspace();
+  // skipOnboarding: the onboarding integrations step opens this in a popup before onboarding is
+  // marked complete; the default gate would render the onboarding stepper inside the popup.
+  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings/integrations";
+  const returnTo = url.searchParams.get("returnTo") ?? "/company/settings/integrations";
+  const config = GOOGLE_PROVIDER_CONFIG[provider];
+  const oauthRedirectUri = googleOAuthRedirectUri(config);
+  const targetOrigin = googleOAuthTargetOriginForState();
 
   if (!isGoogleIntegrationConfigured()) {
     return NextResponse.redirect(
@@ -40,18 +47,19 @@ export async function handleGoogleOAuthStart(
     workspaceId: workspace.id,
     userId: user.id,
     returnTo,
+    oauthRedirectUri,
+    ...(targetOrigin ? { targetOrigin } : {}),
   });
 
-  return NextResponse.redirect(
-    buildGoogleAuthorizationUrl(GOOGLE_PROVIDER_CONFIG[provider], state),
-  );
+  return NextResponse.redirect(buildGoogleAuthorizationUrl(config, state, oauthRedirectUri));
 }
 
 export async function handleGoogleOAuthCallback(
   provider: GoogleIntegrationProvider,
   request: Request,
 ) {
-  const current = await currentWorkspace();
+  // skipOnboarding: see handleGoogleOAuthStart — this popup flow runs mid-onboarding too.
+  const current = await currentWorkspace({ skipOnboarding: true });
   const url = new URL(request.url);
   const config = GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) =>
@@ -66,7 +74,7 @@ export async function handleGoogleOAuthCallback(
       reason: "invalid_state",
       provider,
     });
-    return errorRedirect("/settings/integrations");
+    return errorRedirect("/company/settings/integrations");
   }
 
   if (
@@ -113,7 +121,7 @@ export async function handleGoogleOAuthCallback(
   }
 
   try {
-    const { tokens, expiresAt } = await exchangeGoogleCode(config, code);
+    const { tokens, expiresAt } = await exchangeGoogleCode(config, code, state.oauthRedirectUri);
     const userInfo = await fetchGoogleUserInfo(tokens.access_token);
     const calendars = config.syncsCalendars
       ? await fetchGoogleCalendarList(tokens.access_token)

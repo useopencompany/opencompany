@@ -42,6 +42,7 @@ describe("calculateModelUsageCost", () => {
     ["openai/gpt-5.4-nano", 1_670],
     ["anthropic/claude-opus-4.7", 36_750],
     ["anthropic/claude-opus-4.8", 36_750],
+    ["anthropic/claude-fable-5", 73_500],
     ["google/gemini-3-flash", 4_050],
     ["google/gemini-3.1-flash-lite-preview", 2_030],
     ["deepseek/deepseek-v4-flash", 563],
