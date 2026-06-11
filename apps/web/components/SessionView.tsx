@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleStop,
+  Columns2,
   Copy,
   ExternalLink,
   LoaderCircle,
@@ -161,7 +162,27 @@ const SCROLL_TO_TOP_PADDING_PX = 24;
 // trade top-alignment for less trailing whitespace. 0.5 ≈ the common ChatGPT-style 50dvh.
 const LAST_TURN_MIN_HEIGHT_FACTOR = 0.5;
 
-type SessionViewContentProps = {
+// Pane controls supplied by the split-pane container when the chat is one of several
+// panes mounted side by side. All absent in the standalone single-chat page, where the
+// top bar and inspector behave exactly as before.
+type PaneControlProps = {
+  // When provided, the top bar shows a Split button that asks the container to open
+  // another pane next to this one.
+  onRequestSplit?: () => void;
+  // Disables the Split button (e.g. when the container is already at its pane cap).
+  splitDisabled?: boolean;
+  // When provided, the top bar shows a Close button that asks the container to remove
+  // this pane.
+  onClosePane?: () => void;
+  // When true, the inspector starts collapsed regardless of related-session count (split
+  // panes are narrow), and the auto-expand when the first related session appears is
+  // suppressed too — only an explicit user toggle opens the inspector. Assumed constant
+  // for the lifetime of the pane: it seeds a useState initializer, so flipping it on a
+  // live pane won't re-apply the initial state.
+  inspectorDefaultCollapsed?: boolean;
+};
+
+type SessionViewContentProps = PaneControlProps & {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
   // True for the primary (leftmost / route) pane. Only the primary pane owns
@@ -198,7 +219,8 @@ const ToolApprovalContext = createContext<{ sessionId: string } | null>(null);
 export default function SessionView({
   sessionId,
   isPrimary = true,
-}: {
+  ...paneControls
+}: PaneControlProps & {
   sessionId: string;
   isPrimary?: boolean;
 }) {
@@ -210,13 +232,24 @@ export default function SessionView({
   // network round-trip.
   const hydrated = useHydrated();
   if (!hydrated)
-    return <SessionViewQuery sessionId={sessionId} placeholder={null} isPrimary={isPrimary} />;
-  return <SessionViewLive sessionId={sessionId} isPrimary={isPrimary} />;
+    return (
+      <SessionViewQuery
+        sessionId={sessionId}
+        placeholder={null}
+        isPrimary={isPrimary}
+        {...paneControls}
+      />
+    );
+  return <SessionViewLive sessionId={sessionId} isPrimary={isPrimary} {...paneControls} />;
 }
 
 // Client-only: derives the instant session-detail placeholder (meta + related
 // tree) from the synced collections and hands it to the query view.
-function SessionViewLive({ sessionId, isPrimary }: { sessionId: string; isPrimary: boolean }) {
+function SessionViewLive({
+  sessionId,
+  isPrimary,
+  ...paneControls
+}: PaneControlProps & { sessionId: string; isPrimary: boolean }) {
   const { agentSessions, agents } = useCollections();
   const { data: sessionRows } = useLiveQuery((q) => q.from({ session: agentSessions }));
   const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
@@ -224,14 +257,22 @@ function SessionViewLive({ sessionId, isPrimary }: { sessionId: string; isPrimar
     () => deriveSessionDetailPlaceholder(sessionId, sessionRows ?? [], agentRows ?? []),
     [sessionId, sessionRows, agentRows],
   );
-  return <SessionViewQuery sessionId={sessionId} placeholder={placeholder} isPrimary={isPrimary} />;
+  return (
+    <SessionViewQuery
+      sessionId={sessionId}
+      placeholder={placeholder}
+      isPrimary={isPrimary}
+      {...paneControls}
+    />
+  );
 }
 
 function SessionViewQuery({
   sessionId,
   placeholder,
   isPrimary,
-}: {
+  ...paneControls
+}: PaneControlProps & {
   sessionId: string;
   placeholder: AgentSessionDetailPayload | null;
   isPrimary: boolean;
@@ -309,6 +350,7 @@ function SessionViewQuery({
       detail={detail}
       workspaceId={workspaceId}
       isPrimary={isPrimary}
+      {...paneControls}
     />
   );
 }
@@ -321,7 +363,15 @@ export function SessionViewContent(props: SessionViewContentProps) {
   );
 }
 
-function SessionViewContentBody({ detail, workspaceId, isPrimary = true }: SessionViewContentProps) {
+function SessionViewContentBody({
+  detail,
+  workspaceId,
+  isPrimary = true,
+  onRequestSplit,
+  splitDisabled,
+  onClosePane,
+  inspectorDefaultCollapsed,
+}: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
@@ -329,7 +379,9 @@ function SessionViewContentBody({ detail, workspaceId, isPrimary = true }: Sessi
   const session = detail.session;
   const relatedSessionCount = relatedCount(detail.related);
   const previousRelatedSessionCountRef = useRef(relatedSessionCount);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(relatedSessionCount === 0);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(
+    inspectorDefaultCollapsed ? true : relatedSessionCount === 0,
+  );
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -997,8 +1049,13 @@ function SessionViewContentBody({ detail, workspaceId, isPrimary = true }: Sessi
   useEffect(() => {
     const previousCount = previousRelatedSessionCountRef.current;
     previousRelatedSessionCountRef.current = relatedSessionCount;
+    // Panes that start collapsed (split view) stay collapsed even when the first related
+    // session appears — only an explicit toggle opens the inspector there. This return must
+    // stay below the ref update so count tracking continues while gated; otherwise a later
+    // ungated run would fire off a stale previousCount.
+    if (inspectorDefaultCollapsed) return;
     if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
-  }, [relatedSessionCount]);
+  }, [relatedSessionCount, inspectorDefaultCollapsed]);
 
   // One-shot snap: place the just-sent user message at the TOP of the viewport, exactly
   // once. Done in useLayoutEffect (before the browser paints) and INSTANTLY, so the very
@@ -1376,6 +1433,9 @@ function SessionViewContentBody({ detail, workspaceId, isPrimary = true }: Sessi
           totalCostUsdMicros={runtime.cost.totalCostUsdMicros}
           inspectorCollapsed={inspectorCollapsed}
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
+          onRequestSplit={onRequestSplit}
+          splitDisabled={splitDisabled}
+          onClosePane={onClosePane}
         />
 
         <div
@@ -1806,21 +1866,29 @@ function SessionViewContentBody({ detail, workspaceId, isPrimary = true }: Sessi
 }
 
 // Slim session header: agent name, the model (with its provider icon), the count of enabled
-// capabilities (tools + MCP + skills), and the runtime-sidebar toggle. The agent config — and
-// thus the capability count — is read live from the synced `agents` collection so it stays
-// reactive without threading extra fields through the session payload.
+// capabilities (tools + MCP + skills), and the runtime-sidebar toggle — plus optional
+// split/close pane buttons when the chat is rendered inside the split-pane container.
+// The agent config — and thus the capability count — is read live from the synced
+// `agents` collection so it stays reactive without threading extra fields through the
+// session payload.
 function SessionTopBar({
   session,
   currentContextTokens,
   totalCostUsdMicros,
   inspectorCollapsed,
   onToggleInspector,
+  onRequestSplit,
+  splitDisabled,
+  onClosePane,
 }: {
   session: AgentSessionDetailPayload["session"];
   currentContextTokens: number;
   totalCostUsdMicros: number;
   inspectorCollapsed: boolean;
   onToggleInspector: () => void;
+  onRequestSplit?: (() => void) | undefined;
+  splitDisabled?: boolean | undefined;
+  onClosePane?: (() => void) | undefined;
 }) {
   const { agents } = useCollections();
   const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
@@ -1875,6 +1943,17 @@ function SessionTopBar({
             totalCostUsdMicros={totalCostUsdMicros}
           />
         ) : null}
+        {onRequestSplit ? (
+          <button
+            type="button"
+            aria-label="Open a split pane"
+            onClick={onRequestSplit}
+            disabled={splitDisabled}
+            className="shrink-0 rounded-md p-1.5 text-ink/55 transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Columns2 size={15} strokeWidth={1.75} />
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
@@ -1884,6 +1963,16 @@ function SessionTopBar({
         >
           <PanelRight size={15} strokeWidth={1.75} />
         </button>
+        {onClosePane ? (
+          <button
+            type="button"
+            aria-label="Close this pane"
+            onClick={onClosePane}
+            className="shrink-0 rounded-md p-1.5 text-ink/55 transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <X size={15} strokeWidth={1.75} />
+          </button>
+        ) : null}
       </div>
     </header>
   );
