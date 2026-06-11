@@ -115,9 +115,13 @@ function buildGoogleDetail(
   const summary =
     accounts.length === 0
       ? null
-      : resourcesLabel
-        ? `${accounts[0]!.label} · ${pluralize(calendarCount, "calendar", "calendars")}`
-        : `${accounts[0]!.label} · read-only`;
+      : accounts.length > 1
+        ? resourcesLabel
+          ? `${accounts.length} accounts · ${pluralize(calendarCount, "calendar", "calendars")}`
+          : `${accounts.length} accounts · read-only`
+        : resourcesLabel
+          ? `${accounts[0]!.label} · ${pluralize(calendarCount, "calendar", "calendars")}`
+          : `${accounts[0]!.label} · read-only`;
 
   return {
     summary,

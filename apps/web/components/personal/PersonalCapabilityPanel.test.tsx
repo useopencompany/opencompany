@@ -206,10 +206,10 @@ describe("PersonalCapabilityPanel integrations", () => {
     expect(screen.getByTestId("tool-policy-linear")).toBeInTheDocument();
   });
 
-  it("opens the OAuth flow directly when adding a disconnected integration", async () => {
+  it("saves a disconnected integration before opening OAuth", async () => {
     const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
-    const onAddIntegration = vi.fn(async () => undefined);
+    const openSpy = vi.spyOn(window, "open").mockReturnValue({ closed: false } as Window);
+    const onAddIntegration = vi.fn(async () => true);
 
     render(
       <PersonalCapabilityPanel
@@ -241,6 +241,79 @@ describe("PersonalCapabilityPanel integrations", () => {
       expect.any(String),
     );
     expect(onAddIntegration).toHaveBeenCalledWith("linear");
+    expect(onAddIntegration.mock.invocationCallOrder[0]).toBeLessThan(
+      openSpy.mock.invocationCallOrder[0]!,
+    );
+
+    openSpy.mockRestore();
+  });
+
+  it("shows a recovery message when the connect popup is blocked", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    const onAddIntegration = vi.fn(async () => true);
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={baseConfig}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: false,
+          google_calendar: false,
+          linear: false,
+          slack: false,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+        }}
+        onAddIntegration={onAddIntegration}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    await user.click(screen.getByRole("button", { name: /Linear/i }));
+
+    expect(openSpy).toHaveBeenCalled();
+    expect(screen.getByText(/couldn't open the Linear connect window/i)).toBeInTheDocument();
+
+    openSpy.mockRestore();
+  });
+
+  it("does not open OAuth when adding the integration fails", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue({ closed: false } as Window);
+    const onAddIntegration = vi.fn(async () => false);
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={baseConfig}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: false,
+          google_calendar: false,
+          linear: false,
+          slack: false,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+        }}
+        onAddIntegration={onAddIntegration}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    await user.click(screen.getByRole("button", { name: /Linear/i }));
+
+    expect(onAddIntegration).toHaveBeenCalledWith("linear");
+    expect(openSpy).not.toHaveBeenCalled();
 
     openSpy.mockRestore();
   });
@@ -494,6 +567,11 @@ describe("PersonalCapabilityPanel integrations", () => {
 
     // First click arms the confirmation; nothing is disconnected yet.
     expect(disconnectGitHub).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Disconnect @acme from GitHub for this workspace? Agents using it will lose access.",
+      ),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Confirm disconnect" }));
 
@@ -574,6 +652,21 @@ describe("PersonalCapabilityPanel integrations", () => {
 
     expect(screen.getByText("Connecting grants your agent")).toBeInTheDocument();
     expect(screen.getByText("Read-only — cannot send, modify, or delete mail")).toBeInTheDocument();
+  });
+
+  it("uses a repository-specific GitHub CTA when repository access is missing", () => {
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={baseConfig}
+        personalSkills={[]}
+        githubRequested={true}
+        githubStatus="needs_repository_access"
+      />,
+    );
+
+    expect(screen.getByText("Connected, but no repositories are granted yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose repositories" })).toBeInTheDocument();
   });
 
   it("flags agent repositories whose workspace access is degraded", () => {

@@ -147,7 +147,7 @@ export function PersonalCapabilityPanel({
   details?: PersonalIntegrationDetails;
   toolPolicies?: WorkspaceToolPolicyOverrides;
   // Append an integration's @-mention to the agent body. Only wired for the integrations section.
-  onAddIntegration?: (integration: PersonalIntegrationId) => Promise<void>;
+  onAddIntegration?: (integration: PersonalIntegrationId) => Promise<boolean>;
   onAddTool?: (toolId: AgentToolId) => Promise<void>;
   onAddSkill?: (skillId: string) => Promise<void>;
 }) {
@@ -163,7 +163,7 @@ export function PersonalCapabilityPanel({
         })
       : buildRows(section, config, personalSkills);
 
-  const { connectingId, openConnectPopup } = useConnectPopup();
+  const { connectingId, connectError, openConnectPopup } = useConnectPopup();
 
   return (
     <div className="mx-auto w-full max-w-[680px] px-6 py-10">
@@ -188,6 +188,11 @@ export function PersonalCapabilityPanel({
       </div>
 
       <div className="mt-6">
+        {connectError && (
+          <div className="mb-3 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
+            {connectError}
+          </div>
+        )}
         {rows.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-surface/45 px-4 py-6 text-[13px] text-ink-muted">
             {meta.empty}
@@ -217,6 +222,7 @@ export function PersonalCapabilityPanel({
 function useConnectPopup() {
   const router = useRouter();
   const [connectingId, setConnectingId] = useState<PersonalIntegrationId | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const connectingRef = useRef<PersonalIntegrationId | null>(null);
 
   useEffect(() => {
@@ -242,7 +248,13 @@ function useConnectPopup() {
       "oc-personal-connect",
       `width=${width},height=${height},left=${left},top=${top}`,
     );
-    if (!popup) return;
+    setConnectError(null);
+    if (!popup) {
+      setConnectError(
+        `We couldn't open the ${entry.label} connect window. Allow pop-ups for this site, then try again.`,
+      );
+      return false;
+    }
     setConnectingId(entry.id);
     connectingRef.current = entry.id;
     // If the user closes the popup without finishing, clear the pending state so the row resets.
@@ -255,9 +267,10 @@ function useConnectPopup() {
         }
       }
     }, 500);
+    return true;
   };
 
-  return { connectingId, openConnectPopup };
+  return { connectingId, connectError, openConnectPopup };
 }
 
 const BADGE_TONE_CLASS: Record<NonNullable<IntegrationRow["badgeTone"]>, string> = {
@@ -350,6 +363,7 @@ function CapabilityRow({
           permissions={permissions}
           connected={connected}
           integrationId={integrationId}
+          integrationLabel={label}
           policyProviderKey={policyProviderKey}
           policyOverrides={policyOverrides}
         />
@@ -367,6 +381,7 @@ function IntegrationRowDetail({
   permissions,
   connected,
   integrationId,
+  integrationLabel,
   policyProviderKey,
   policyOverrides,
 }: {
@@ -374,6 +389,7 @@ function IntegrationRowDetail({
   permissions?: string[] | undefined;
   connected?: boolean | undefined;
   integrationId?: PersonalIntegrationId | undefined;
+  integrationLabel: string;
   policyProviderKey?: string | undefined;
   policyOverrides?: WorkspaceToolPolicyOverrides[string] | undefined;
 }) {
@@ -390,6 +406,7 @@ function IntegrationRowDetail({
           resourcesLabel={detail.resourcesLabel}
           now={now}
           integrationId={integrationId}
+          integrationLabel={integrationLabel}
         />
       ))}
 
@@ -411,9 +428,12 @@ function IntegrationRowDetail({
 
       {/* MCP connections have no per-account section, so their disconnect action lives here. */}
       {connected && integrationId && detail?.accounts.length === 0 && (
-        <IntegrationDetailActions integrationId={integrationId} />
+        <IntegrationDetailActions
+          integrationId={integrationId}
+          integrationLabel={integrationLabel}
+        />
       )}
-      {policyProviderKey ? (
+      {connected && policyProviderKey ? (
         <ToolPolicyEditor providerKey={policyProviderKey} overrides={policyOverrides} />
       ) : null}
     </div>
@@ -428,11 +448,13 @@ function IntegrationAccountDetail({
   resourcesLabel,
   now,
   integrationId,
+  integrationLabel,
 }: {
   account: PersonalIntegrationAccountDetail;
   resourcesLabel: string | null;
   now: number;
   integrationId?: PersonalIntegrationId | undefined;
+  integrationLabel: string;
 }) {
   return (
     <div>
@@ -481,7 +503,12 @@ function IntegrationAccountDetail({
         </div>
       )}
       {integrationId && (
-        <IntegrationDetailActions integrationId={integrationId} accountId={account.id} />
+        <IntegrationDetailActions
+          integrationId={integrationId}
+          integrationLabel={integrationLabel}
+          accountId={account.id}
+          accountLabel={account.label}
+        />
       )}
     </div>
   );
@@ -522,10 +549,14 @@ async function disconnectIntegration(
 // working connection. Errors render inline next to the action that failed.
 function IntegrationDetailActions({
   integrationId,
+  integrationLabel,
   accountId,
+  accountLabel,
 }: {
   integrationId: PersonalIntegrationId;
+  integrationLabel: string;
   accountId?: string | undefined;
+  accountLabel?: string | undefined;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<"refresh" | "disconnect" | null>(null);
@@ -569,6 +600,10 @@ function IntegrationDetailActions({
     void run("disconnect", () => disconnectIntegration(integrationId, accountId));
   };
 
+  const disconnectTarget = accountLabel
+    ? `${accountLabel} from ${integrationLabel}`
+    : integrationLabel;
+
   return (
     <div className="mt-2.5">
       <div className="flex items-center gap-3">
@@ -610,6 +645,11 @@ function IntegrationDetailActions({
               : "Disconnect"}
         </button>
       </div>
+      {confirming && !pending && (
+        <p className="mt-1.5 text-[11.5px] leading-4 text-danger">
+          Disconnect {disconnectTarget} for this workspace? Agents using it will lose access.
+        </p>
+      )}
       {error && <p className="mt-1.5 text-[11.5px] text-danger">{error}</p>}
     </div>
   );
@@ -652,8 +692,8 @@ function AddIntegrationButton({
   config: AgentConfig;
   githubRequested: boolean;
   connections?: PersonalIntegrationConnections | undefined;
-  onConnect: (entry: PersonalIntegrationCatalogEntry) => void;
-  onAdd: (integration: PersonalIntegrationId) => Promise<void>;
+  onConnect: (entry: PersonalIntegrationCatalogEntry) => boolean;
+  onAdd: (integration: PersonalIntegrationId) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -696,8 +736,8 @@ function AddIntegrationModal({
   config: AgentConfig;
   githubRequested: boolean;
   connections?: PersonalIntegrationConnections | undefined;
-  onConnect: (entry: PersonalIntegrationCatalogEntry) => void;
-  onAdd: (integration: PersonalIntegrationId) => Promise<void>;
+  onConnect: (entry: PersonalIntegrationCatalogEntry) => boolean;
+  onAdd: (integration: PersonalIntegrationId) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -732,10 +772,14 @@ function AddIntegrationModal({
     if (pending) return;
     if (isIntegrationAdded(entry.id, config, githubRequested)) return;
     const connected = Boolean(connections?.[entry.id]);
-    if (!connected) onConnect(entry);
     setPending(entry.id);
     try {
-      await onAdd(entry.id);
+      const added = await onAdd(entry.id);
+      if (!added) return;
+      if (!connected && !onConnect(entry)) {
+        onClose();
+        return;
+      }
       onClose();
     } finally {
       setPending(null);
@@ -1240,7 +1284,7 @@ export function buildPersonalIntegrationRows(
         permissions: entry.permissions,
         connected: input.githubStatus === "connected",
         integrationId: entry.id,
-        policyProviderKey: "github",
+        ...(input.githubStatus === "connected" ? { policyProviderKey: "github" } : {}),
         policyOverrides: input.toolPolicies?.github,
       });
       continue;
@@ -1258,7 +1302,7 @@ export function buildPersonalIntegrationRows(
       permissions: entry.permissions,
       connected,
       integrationId: entry.id,
-      policyProviderKey: entry.id,
+      ...(connected ? { policyProviderKey: entry.id } : {}),
       policyOverrides: input.toolPolicies?.[entry.id],
       ...(connected
         ? { badge: "Connected", badgeTone: "success" as const }
@@ -1311,9 +1355,13 @@ function githubRowStatus(
   }
   const description =
     status === "needs_repository_access"
-      ? "Connected, but no repositories granted yet — use Connect to choose them."
+      ? "Connected, but no repositories are granted yet."
       : "Connect GitHub before your agent can use repositories.";
-  return { description, badge: "Connect", connectEntry: entry };
+  return {
+    description,
+    badge: status === "needs_repository_access" ? "Choose repositories" : "Connect",
+    connectEntry: entry,
+  };
 }
 
 function isToolAdded(toolId: AgentToolId, config: AgentConfig) {

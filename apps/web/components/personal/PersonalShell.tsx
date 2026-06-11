@@ -135,11 +135,12 @@ export default function PersonalShell({
   const applyCapabilityResult = (result: AddCapabilityResult, title: string) => {
     if (!result.ok) {
       showError(result.error, title);
-      return;
+      return false;
     }
     setConfig(result.config);
     setGitHubRequested(hasPersonalGitHubIntegrationRequest(result.body));
     draftRef.current = { body: result.body, content: result.content };
+    return true;
   };
 
   // The manual "Add integration" path appends the integration's @-mention to the agent body
@@ -149,7 +150,7 @@ export default function PersonalShell({
   // single source of truth.
   const addIntegration = async (integration: PersonalIntegrationId) => {
     const result = await addPersonalAgentIntegration(agent.id, integration);
-    applyCapabilityResult(result, "Could not add integration");
+    return applyCapabilityResult(result, "Could not add integration");
   };
 
   const addTool = async (toolId: AgentToolId) => {

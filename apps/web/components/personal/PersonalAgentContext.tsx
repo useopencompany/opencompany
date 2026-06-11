@@ -67,7 +67,7 @@ export type PersonalAgentContextValue = {
   upsertFile: (file: AgentBundleFilePayload) => void;
 
   // Append an integration's @-mention to the agent body server-side, then re-seed config + draft.
-  addIntegration: (integration: PersonalIntegrationId) => Promise<void>;
+  addIntegration: (integration: PersonalIntegrationId) => Promise<boolean>;
   // Append a tool or skill @-mention to the personal agent body, then re-seed config + draft.
   addTool: (toolId: AgentToolId) => Promise<void>;
   addSkill: (skillId: string) => Promise<void>;
