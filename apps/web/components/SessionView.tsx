@@ -4,7 +4,6 @@ import {
   ATTACHMENT_MAX_PER_MESSAGE,
   ATTACHMENT_TEXT_MAX_BYTES,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
   listAddableBuiltinSkills,
   modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
@@ -64,7 +63,6 @@ import {
   type PendingAttachment,
   uploadAttachment,
 } from "@/components/composer-attachments";
-import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
 import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
@@ -1194,11 +1192,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     setSlashDismissed(false);
   }
 
-  const runSlashCommand = (command: SlashCommand, args = "") => {
+  const runSlashCommand = (
+    command: SlashCommand,
+    args = "",
+    options: { transition?: boolean } = {},
+  ) => {
     const commandKey = command.id;
     if (slashCommandInFlightRef.current.has(commandKey)) return;
     slashCommandInFlightRef.current.add(commandKey);
-    startTransition(async () => {
+
+    const run = async () => {
       try {
         await command.run({
           session,
@@ -1214,7 +1217,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       } finally {
         slashCommandInFlightRef.current.delete(commandKey);
       }
-    });
+    };
+
+    if (options.transition === false) {
+      void run();
+      return;
+    }
+
+    startTransition(run);
   };
 
   // Selecting a command from the menu inserts its trigger into the input (it does not
@@ -1277,7 +1287,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // and waits for the user to send (so `/clear <prompt>` etc. can take args).
   const selectSlashCommand = (command: SlashCommand) => {
     if (command.applyOnSelect) {
-      runSlashCommand(command);
+      runSlashCommand(command, "", { transition: false });
     } else {
       insertSlashCommand(command);
     }
