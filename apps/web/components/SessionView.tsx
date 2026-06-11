@@ -307,7 +307,7 @@ function SessionViewQuery({
 export function SessionViewContent(props: SessionViewContentProps) {
   return (
     <ToolApprovalContext.Provider value={{ sessionId: props.detail.session.id }}>
-      <SessionViewContentBody {...props} />
+      <SessionViewContentBody key={props.detail.session.id} {...props} />
     </ToolApprovalContext.Provider>
   );
 }
@@ -315,15 +315,10 @@ export function SessionViewContent(props: SessionViewContentProps) {
 function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const surface = useSessionSurface();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
-  const relatedSessionCount = relatedCount(detail.related);
-  const previousRelatedSessionCountRef = useRef(relatedSessionCount);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
-    defaultInspectorCollapsed(surface, relatedSessionCount),
-  );
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -1001,12 +996,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       document.removeEventListener("focusin", handleFocusIn);
     };
   }, [attachMenuOpen]);
-
-  useEffect(() => {
-    const previousCount = previousRelatedSessionCountRef.current;
-    previousRelatedSessionCountRef.current = relatedSessionCount;
-    if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
-  }, [relatedSessionCount]);
 
   // One-shot snap: place the just-sent user message at the TOP of the viewport, exactly
   // once. Done in useLayoutEffect (before the browser paints) and INSTANTLY, so the very
@@ -3668,11 +3657,6 @@ function InspectorRelatedSession({
 function useSessionSurface(): "personal" | "company" {
   const pathname = usePathname();
   return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
-}
-
-function defaultInspectorCollapsed(surface: "personal" | "company", relatedSessionCount: number) {
-  if (surface === "personal") return true;
-  return relatedSessionCount === 0;
 }
 
 function sessionHref(surface: "personal" | "company", sessionId: string) {
