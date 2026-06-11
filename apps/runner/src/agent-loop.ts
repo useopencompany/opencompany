@@ -2504,13 +2504,19 @@ function createSandboxAcquirer(input: {
     acquirePromise = (async () => {
       const hydrated = await traceBraintrustStep(
         "ensure_sandbox",
-        () =>
-          timeAsync(input.trace, "ensure_sandbox", () => ensureSandbox(input.row, input.env), {
-            existing_sandbox: Boolean(input.row.session.e2bSandboxId),
-          }),
+        (span) =>
+          timeAsync(
+            input.trace,
+            "ensure_sandbox",
+            () => ensureSandbox(input.row, input.env, { braintrustSpan: span }),
+            {
+              existing_sandbox: Boolean(input.row.session.e2bSandboxId),
+            },
+          ),
         { existing_sandbox: Boolean(input.row.session.e2bSandboxId) },
       );
       await input.checkAbort();
+      const updateStartedAt = performance.now();
       const updated = await traceBraintrustStep(
         "update_sandbox_for_lease",
         () =>
@@ -2524,11 +2530,15 @@ function createSandboxAcquirer(input: {
           ),
         { sandbox_id: hydrated.sandboxId },
       );
+      const updateSandboxForLeaseMs = elapsedMs(updateStartedAt);
       logBraintrustCurrentSpan({
         metadata: {
           sandbox_id: hydrated.sandboxId,
           sandbox_hydrated: true,
           existing_sandbox: Boolean(input.row.session.e2bSandboxId),
+        },
+        metrics: {
+          sandbox_update_for_lease_ms: updateSandboxForLeaseMs,
         },
       });
       if (!updated) {
@@ -2589,6 +2599,10 @@ function createSandboxAcquirer(input: {
       };
     },
   };
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
 // Whether a turn's enabled tools include any sandbox-backed tool, i.e. anything that can
