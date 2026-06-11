@@ -447,9 +447,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const slashCommandInFlightRef = useRef<Set<string>>(new Set());
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // The inner transcript column. Observed (see the content-grow effect below) so we can
-  // keep the view pinned to the newest message as content grows after open.
-  const messageListRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
   // ID of the user message to scroll to the top of the viewport ONCE, right after a
   // send. The reserved space below it is held by CSS (min-height on the last turn),
@@ -1059,8 +1056,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // Open at bottom: when a chat is first opened (or switched to), land on the newest
   // message — once per session. Runs in useLayoutEffect (before paint) so there is no
   // visible top→bottom jump. Keyed on session.id and guarded by a ref so it never
-  // re-fires on later renders (the streaming follow + the content-grow observer below
-  // own those) and never fights the send-snap (which positions the view itself on send).
+  // re-fires on later renders (the streaming follow owns those) and never fights the
+  // send-snap (which positions the view itself on send).
   // Deps use `hasMessages` (a boolean) not the visibleMessages array, so it fires on the
   // first-content flip and on session change — not on every streamed delta.
   const hasMessages = visibleMessages.length > 0;
@@ -1075,27 +1072,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     setPinnedAtBottom(true);
     initialScrollSessionRef.current = session.id;
   }, [session.id, hasMessages, pendingScrollMessageId]);
-
-  // Keep the view pinned to the newest message as the transcript's content GROWS after
-  // the one-shot open-snap — late image decode, async syntax highlight, tool-output
-  // expansion. Without this the open-snap lands above the true bottom and, because a
-  // content grow is a layout scroll (not a user scroll), pin-state stays stale-true and
-  // the jump-to-bottom pill never appears to rescue it. Gated on isPinnedAtBottomRef so
-  // it instantly yields the moment the user scrolls away; re-armed per session.
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    const content = messageListRef.current;
-    if (!container || !content || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (!isPinnedAtBottomRef.current) return;
-      const distanceFromBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight;
-      if (distanceFromBottom <= 1) return;
-      container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
-    });
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [session.id]);
 
   // Jump-to-bottom pill action: scroll to the newest message and re-pin so the streaming
   // follow re-engages. Instant while a turn is streaming (a smooth animation would be
@@ -1442,127 +1418,129 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         />
 
         <div className="relative flex min-h-0 flex-1 flex-col">
-        <div
-          ref={scrollContainerRef}
-          className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
-          onWheel={markUserScrollIntent}
-          onTouchMove={markUserScrollIntent}
-          onScroll={(event) => {
-            // Only a genuine user scroll (flagged by the wheel/touch handlers above)
-            // updates the pinned-at-bottom state. Programmatic scrolls (snap + follow),
-            // layout-driven scrolls (reflow, overflow-anchor) and non-scroll pointer
-            // interactions fire onScroll too, but without user intent — ignoring them is
-            // what keeps the snapped message at the top instead of being yanked by the
-            // follow. (Scrollbar-drag / keyboard scroll without wheel is an accepted edge.)
-            if (!userScrollIntentRef.current) return;
-            const el = event.currentTarget;
-            const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-            setPinnedAtBottom(distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX);
-          }}
-          onDragEnter={(event) => {
-            if (!attachmentsEnabled) return;
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-            dragCounterRef.current += 1;
-            setIsDragActive(true);
-          }}
-          onDragOver={(event) => {
-            if (!attachmentsEnabled) return;
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-          }}
-          onDragLeave={(event) => {
-            if (!attachmentsEnabled) return;
-            event.preventDefault();
-            dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
-            if (dragCounterRef.current === 0) {
+          <div
+            ref={scrollContainerRef}
+            className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
+            onWheel={markUserScrollIntent}
+            onTouchMove={markUserScrollIntent}
+            onScroll={(event) => {
+              // Only a genuine user scroll (flagged by the wheel/touch handlers above)
+              // updates the pinned-at-bottom state. Programmatic scrolls (snap + follow),
+              // layout-driven scrolls (reflow, overflow-anchor) and non-scroll pointer
+              // interactions fire onScroll too, but without user intent — ignoring them is
+              // what keeps the snapped message at the top instead of being yanked by the
+              // follow. (Scrollbar-drag / keyboard scroll without wheel is an accepted edge.)
+              if (!userScrollIntentRef.current) return;
+              const el = event.currentTarget;
+              const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+              setPinnedAtBottom(distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX);
+            }}
+            onDragEnter={(event) => {
+              if (!attachmentsEnabled) return;
+              if (!event.dataTransfer.types.includes("Files")) return;
+              event.preventDefault();
+              dragCounterRef.current += 1;
+              setIsDragActive(true);
+            }}
+            onDragOver={(event) => {
+              if (!attachmentsEnabled) return;
+              if (!event.dataTransfer.types.includes("Files")) return;
+              event.preventDefault();
+            }}
+            onDragLeave={(event) => {
+              if (!attachmentsEnabled) return;
+              event.preventDefault();
+              dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+              if (dragCounterRef.current === 0) {
+                setIsDragActive(false);
+              }
+            }}
+            onDrop={() => {
+              // The window-level drop handler (see effect above) preventDefaults + accepts, so a
+              // drop anywhere in the app attaches and the browser never opens the file. Here we
+              // only clear the hover overlay (avoids double-accepting the same drop).
+              dragCounterRef.current = 0;
               setIsDragActive(false);
-            }
-          }}
-          onDrop={() => {
-            // The window-level drop handler (see effect above) preventDefaults + accepts, so a
-            // drop anywhere in the app attaches and the browser never opens the file. Here we
-            // only clear the hover overlay (avoids double-accepting the same drop).
-            dragCounterRef.current = 0;
-            setIsDragActive(false);
-          }}
-        >
-          {isDragActive ? (
-            <div
-              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
-              aria-hidden="true"
-            >
-              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
-                <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
-                <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">
-                  Images, PDF, text &amp; code · or paste with ⌘V
-                </p>
-              </div>
-            </div>
-          ) : null}
-          <div ref={messageListRef} className="mx-auto max-w-[960px] space-y-5">
-            {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
-              <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
-                <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
-                <span>{runtime.lastError}</span>
+            }}
+          >
+            {isDragActive ? (
+              <div
+                className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+                aria-hidden="true"
+              >
+                <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
+                  <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
+                  <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
+                  <p className="text-[11.5px] text-ink-subtle">
+                    Images, PDF, text &amp; code · or paste with ⌘V
+                  </p>
+                </div>
               </div>
             ) : null}
+            <div className="mx-auto max-w-[960px] space-y-5">
+              {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
+                <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
+                  <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
+                  <span>{runtime.lastError}</span>
+                </div>
+              ) : null}
 
-            {visibleMessages.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
-                <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
-                <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
-                <p className="mt-1 text-[12.5px] text-ink-muted">Write a message to get started.</p>
-              </div>
-            ) : null}
+              {visibleMessages.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
+                  <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
+                  <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
+                  <p className="mt-1 text-[12.5px] text-ink-muted">
+                    Write a message to get started.
+                  </p>
+                </div>
+              ) : null}
 
-            {visibleMessages.slice(0, Math.max(lastUserTurnStart, 0)).map(renderMessageRow)}
+              {visibleMessages.slice(0, Math.max(lastUserTurnStart, 0)).map(renderMessageRow)}
 
-            {/* Active turn: the last user message + its reply + indicators, wrapped in a
+              {/* Active turn: the last user message + its reply + indicators, wrapped in a
                 min-height box so the just-sent message can sit at the top with a viewport
                 of room below it. The reserve is pure CSS (sized from --chat-vh by the
                 ResizeObserver), so it adapts to any viewport size and needs no per-frame
                 re-pin — the source of the old jitter and resize drift. */}
-            <div
-              className="space-y-5"
-              style={
-                lastUserTurnStart >= 0
-                  ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
-                  : undefined
-              }
-            >
-              {(lastUserTurnStart >= 0
-                ? visibleMessages.slice(lastUserTurnStart)
-                : visibleMessages
-              ).map(renderMessageRow)}
+              <div
+                className="space-y-5"
+                style={
+                  lastUserTurnStart >= 0
+                    ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
+                    : undefined
+                }
+              >
+                {(lastUserTurnStart >= 0
+                  ? visibleMessages.slice(lastUserTurnStart)
+                  : visibleMessages
+                ).map(renderMessageRow)}
 
-              {showWaitingForAssistant ? (
-                <div className="flex justify-start">
-                  <WorkingIndicator startedAt={lastVisibleMessage?.createdAt} thinking={false} />
-                </div>
-              ) : showStoppedAfterUser ? (
-                <div className="flex justify-start">
-                  <AssistantStoppedNotice elapsedSeconds={stoppedElapsedSeconds} />
-                </div>
-              ) : null}
+                {showWaitingForAssistant ? (
+                  <div className="flex justify-start">
+                    <WorkingIndicator startedAt={lastVisibleMessage?.createdAt} thinking={false} />
+                  </div>
+                ) : showStoppedAfterUser ? (
+                  <div className="flex justify-start">
+                    <AssistantStoppedNotice elapsedSeconds={stoppedElapsedSeconds} />
+                  </div>
+                ) : null}
 
-              {trailingBackgroundParts.length > 0
-                ? renderBackgroundParts(trailingBackgroundParts)
-                : null}
+                {trailingBackgroundParts.length > 0
+                  ? renderBackgroundParts(trailingBackgroundParts)
+                  : null}
+              </div>
             </div>
           </div>
-        </div>
-        {!isPinnedAtBottom ? (
-          <button
-            type="button"
-            aria-label="Scroll to bottom"
-            onClick={scrollToBottom}
-            className="absolute right-4 bottom-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-canvas/90 text-ink shadow-md backdrop-blur transition hover:bg-surface"
-          >
-            <ArrowDown size={16} strokeWidth={2} />
-          </button>
-        ) : null}
+          {!isPinnedAtBottom ? (
+            <button
+              type="button"
+              aria-label="Scroll to bottom"
+              onClick={scrollToBottom}
+              className="absolute right-4 bottom-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-canvas/90 text-ink shadow-md backdrop-blur transition hover:bg-surface"
+            >
+              <ArrowDown size={16} strokeWidth={2} />
+            </button>
+          ) : null}
         </div>
 
         {/* While the agent awaits a structured answer, the stepped QuestionComposer takes over the
