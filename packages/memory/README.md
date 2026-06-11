@@ -59,11 +59,15 @@ expansion, vector search, and rerank (engaged only when an AI Gateway key is pre
 
 ## Behaviors worth knowing
 
+- **`query` output.** Each hit includes capped compiled truth (not just a first-sentence preview)
+  and a `memory get <id>` hint for the full record/timeline. Empty compiled truth is shown as
+  `_No compiled truth yet._`.
 - **Merge keeps the old name.** `merge --from a --into b` keeps `a` as an alias on `b`, so the
   old id still resolves to the survivor, and re-points evidence subjects from `a` to `b`.
   Compiled truth is not auto-merged — re-synthesize it with `rewrite` so citations stay valid.
-- **`get --section`.** `truth | timeline | frontmatter | all` scopes both the human text and the
-  `--json` payload to that part (every section still returns `id`/`path`).
+- **`get` output.** `memory get <id>` renders a structured record with compiled truth and recent
+  timeline entries. `--section truth | timeline | frontmatter | all` scopes both the human text and
+  the `--json` payload to that part (every section still returns `id`/`path`).
 - **Concurrency.** Each file write is atomic, but read-modify-write has no locking: concurrent
   writes to the same object are last-write-wins. Don't run two writes against one object in
   parallel.

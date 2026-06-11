@@ -10,6 +10,7 @@ import { create } from "./create";
 import { del } from "./delete";
 import { doctor } from "./doctor";
 import { get } from "./get";
+import { HELP, helpResult, validateCommandArgs } from "./index";
 import type { CommandResult } from "./io";
 import { link } from "./link";
 import { merge } from "./merge";
@@ -42,6 +43,25 @@ function data(result: CommandResult): Record<string, unknown> {
 }
 
 describe("memory CLI", () => {
+  it("returns full help text for invalid command usage", () => {
+    const unknownCommand = helpResult('Unknown command "wat".');
+    expect(unknownCommand.code).toBe(1);
+    expect(unknownCommand.text).toContain('Unknown command "wat".');
+    expect(unknownCommand.text).toContain("Usage: memory <command> [options]");
+    expect(unknownCommand.text).toContain("Commands:");
+
+    const badFlag = validateCommandArgs("query", parseArgs(["acme", "--lmit", "5"]));
+    expect(badFlag).toBe('Unknown option "--lmit".');
+    expect(helpResult(badFlag ?? "").text).toContain(HELP);
+
+    const extraPositional = validateCommandArgs("get", parseArgs(["acme", "extra"]));
+    expect(extraPositional).toBe('Unexpected argument "extra"; get accepts 1 positional argument.');
+
+    expect(
+      validateCommandArgs("query", parseArgs(["acme", "blockers", "--limit", "5"])),
+    ).toBeNull();
+  });
+
   it("creates a canonical object and rejects duplicates / evidence types", async () => {
     const created = await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme Inc"]);
     expect(created.code).toBe(0);
@@ -165,6 +185,43 @@ describe("memory CLI", () => {
     expect(result.code).toBe(0);
     const hits = data(result).hits as Array<{ id: string }>;
     expect(hits[0]?.id).toBe("acme");
+  });
+
+  it("query returns capped compiled truth, not just the first sentence", async () => {
+    await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "open-company-gmbh",
+      "--truth",
+      "OpenCompany GmbH is the German legal entity. Billing address: c/o Invisible Advisory GmbH, Französische Straße 47, 10117 Berlin, Germany.",
+    ]);
+
+    const result = await run(query, ["billing address", "--lexical-only"]);
+    expect(result.code).toBe(0);
+    expect(result.text).toContain("Billing address: c/o Invisible Advisory GmbH");
+    expect(result.text).toContain("Next: memory get open-company-gmbh");
+    const hits = data(result).hits as Array<{ snippet: string }>;
+    expect(hits[0]?.snippet).toContain("Billing address: c/o Invisible Advisory GmbH");
+  });
+
+  it("query marks long compiled truth as truncated with a get hint", async () => {
+    const longTruth = `Acme billing details. ${"Long detail ".repeat(140)}`;
+    await run(create, ["--type", "company", "--id", "acme", "--truth", longTruth]);
+
+    const result = await run(query, ["billing", "--lexical-only"]);
+    const hits = data(result).hits as Array<{ snippet: string }>;
+    expect(hits[0]?.snippet).toContain("... [truncated; run memory get acme]");
+    expect(hits[0]?.snippet.length).toBeLessThan(longTruth.length);
+  });
+
+  it("query displays the no-truth placeholder for records without compiled truth", async () => {
+    await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme Inc"]);
+
+    const result = await run(query, ["Acme Inc", "--lexical-only"]);
+    expect(result.text).toContain("_No compiled truth yet._");
+    const hits = data(result).hits as Array<{ snippet: string }>;
+    expect(hits[0]?.snippet).toBe("_No compiled truth yet._");
   });
 
   it("merges a duplicate into the survivor and re-points evidence", async () => {
@@ -402,6 +459,56 @@ describe("memory CLI", () => {
     expect(all.frontmatter).toBeDefined();
     expect(all.compiledTruth).toBeDefined();
     expect(all.timeline).toBeDefined();
+  });
+
+  it("rejects unknown get sections", async () => {
+    await run(create, ["--type", "company", "--id", "acme"]);
+
+    const result = await run(get, ["acme", "--section", "summary"]);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain("`--section` must be one of");
+  });
+
+  it("renders default get as a structured record with recent timeline entries", async () => {
+    await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "acme",
+      "--truth",
+      "Acme is a logistics SaaS.",
+    ]);
+    for (let i = 1; i <= 6; i++) {
+      await run(appendEvidence, [
+        "--kind",
+        "meeting",
+        "--id",
+        `acme-call-${i}`,
+        "--subject",
+        "acme",
+        "--source-ref",
+        `gcal://abc-${i}`,
+        "--summary",
+        `Timeline entry ${i}`,
+      ]);
+    }
+
+    const result = await run(get, ["acme"]);
+    expect(result.text).toContain("Path: companies/acme.md");
+    expect(result.text).toContain("Type: company");
+    expect(result.text).toContain("Status: draft");
+    expect(result.text).toContain("## Compiled truth");
+    expect(result.text).toContain("## Recent timeline");
+    expect(result.text.match(/^### /gm)).toHaveLength(5);
+    expect(result.text).toContain("Showing 5 of 6 timeline entries");
+    expect(result.text).toContain("memory get acme --section timeline");
+
+    const payload = data(result);
+    expect((payload.timeline as unknown[]).length).toBe(6);
+    expect((payload.recentTimeline as unknown[]).length).toBe(5);
+
+    const timeline = await run(get, ["acme", "--section", "timeline"]);
+    expect(timeline.text.match(/^### /gm)).toHaveLength(6);
   });
 
   it("enforces the create/rewrite citation contract: uncited truth stays a draft", async () => {
