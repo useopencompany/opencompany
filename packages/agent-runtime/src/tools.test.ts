@@ -362,6 +362,19 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     expect(withMemory).toContain("fetch_transcript");
   });
 
+  it("guides broad time-bounded recap requests toward query-less recall", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("recall");
+    if (!definition) throw new Error("Expected recall runtime tool definition to exist");
+
+    expect(definition.description).toContain('omit query and pass only time_window');
+    expect(definition.description).toContain("what did we discuss today?");
+
+    const query = definition.parameters.properties.query as { description?: string };
+    expect(query.description).toContain("Omit when the user asks for a broad recap");
+    expect(definition.help).toContain("Mode 3, time-bounded recap");
+    expect(definition.help).toContain("pass time_window without query");
+  });
+
   it("hard-gates the inbox tools to the personal agent", () => {
     const teamAgent = resolveRuntimeToolNamesForConfigTools({ tools: [] });
     expect(teamAgent).not.toContain("inbox_add");

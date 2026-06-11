@@ -419,14 +419,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "recall",
     kind: "internal",
     description:
-      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges, optionally constrained to the past N hours or days. You can also omit query and provide a time_window to recall recent session snippets. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
+      "Recall your own past sessions with this user from the raw transcript. Use query for topic searches. For broad time-bounded recap questions like \"what did we discuss today?\", \"what happened yesterday?\", or \"catch me up on this week\", omit query and pass only time_window so results come back newest-first instead of keyword-filtered. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
           description:
-            "What to look for, in natural language or keywords. Optional when time_window is provided. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+            "Topic, entity, or decision to search for, in natural language or keywords. Omit when the user asks for a broad recap of a time period, such as today, yesterday, this morning, this week, or recent conversations. Typo-tolerant. Examples: 'pricing decision for acme', 'launch date'.",
         },
         time_window: {
           type: "object",
@@ -454,8 +454,10 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Searches the raw transcript of your previous sessions with this user (this agent only); the current session is excluded.",
-      "Pass query only to search all indexed history; pass query plus time_window to restrict the search to recent messages.",
-      "Pass time_window without query to recall recent session snippets, newest first.",
+      "Use exactly one mode unless the user gives both a real topic and a time bound.",
+      "Mode 1, topic search: pass query only to search all indexed history.",
+      "Mode 2, topic search within a recent period: pass query plus time_window only when the user names a topic/entity/decision and also bounds time, e.g. 'what did we decide about Acme today?'.",
+      "Mode 3, time-bounded recap: pass time_window without query for broad recap requests like 'what did we discuss today?', 'what happened yesterday?', or 'catch me up on this week'. Results are newest first.",
       "Returns each hit as a short window: the matching message plus the one before and after it for context.",
       "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
       "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
