@@ -81,7 +81,11 @@ export async function spawnMemoryKeeperSession(input: {
 }
 
 function memoryKeeperKickoff(parentSessionId: string) {
-  return `A session just went idle. Review session ${parentSessionId} and update memory per your instructions. Start by fetching its transcript.`;
+  return [
+    parentSessionId,
+    "",
+    `if you had to remember something from ${parentSessionId} for the future session to be more useful (focus especially on things the user said) - what would that be? reflect on that, then use the memory tool to properly update your memory.`,
+  ].join("\n");
 }
 
 function memoryKeeperTitle(parentTitle: string) {

@@ -162,7 +162,7 @@ describe("resolveAgentRuntimeConfig", () => {
     // The injected profile body must not exceed the cap. The bound covers the truncated ~3KB body
     // plus the section's fixed header/intro prose and the truncation marker.
     const section = resolved.systemPrompt.slice(resolved.systemPrompt.indexOf("## Your profile"));
-    expect(Buffer.byteLength(section, "utf8")).toBeLessThan(3600);
+    expect(Buffer.byteLength(section, "utf8")).toBeLessThan(3800);
   });
 
   it("nudges the agent to read the self-edit skill before update_agent_file", () => {

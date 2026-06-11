@@ -307,7 +307,7 @@ function SessionViewQuery({
 export function SessionViewContent(props: SessionViewContentProps) {
   return (
     <ToolApprovalContext.Provider value={{ sessionId: props.detail.session.id }}>
-      <SessionViewContentBody {...props} />
+      <SessionViewContentBody key={props.detail.session.id} {...props} />
     </ToolApprovalContext.Provider>
   );
 }
@@ -319,11 +319,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
-  const relatedSessionCount = relatedCount(detail.related);
-  const previousRelatedSessionCountRef = useRef(relatedSessionCount);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
-    defaultInspectorCollapsed(surface, relatedSessionCount),
-  );
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -1002,12 +998,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     };
   }, [attachMenuOpen]);
 
-  useEffect(() => {
-    const previousCount = previousRelatedSessionCountRef.current;
-    previousRelatedSessionCountRef.current = relatedSessionCount;
-    if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
-  }, [relatedSessionCount]);
-
   // One-shot snap: place the just-sent user message at the TOP of the viewport, exactly
   // once. Done in useLayoutEffect (before the browser paints) and INSTANTLY, so the very
   // first frame the user sees already has the message at the top — it never flashes at
@@ -1153,6 +1143,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           session,
           workspaceId,
           router,
+          sessionHref: (sessionId) => sessionHrefForSurface(surface, sessionId),
           queryClient,
           setInput,
           insertMention,
@@ -3414,7 +3405,7 @@ function SessionInspector({
         <div className="mt-4 space-y-4">
           <InspectorLink
             label="Session page"
-            href={sessionHref(surface, session.id)}
+            href={sessionHrefForSurface(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
@@ -3670,12 +3661,7 @@ function useSessionSurface(): "personal" | "company" {
   return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
 }
 
-function defaultInspectorCollapsed(surface: "personal" | "company", relatedSessionCount: number) {
-  if (surface === "personal") return true;
-  return relatedSessionCount === 0;
-}
-
-function sessionHref(surface: "personal" | "company", sessionId: string) {
+function sessionHrefForSurface(surface: "personal" | "company", sessionId: string) {
   return surface === "personal"
     ? personalPaths.session(sessionId)
     : `/company/session/${sessionId}`;
@@ -3689,7 +3675,7 @@ function RelatedSessionLink({
   const surface = useSessionSurface();
   return (
     <Link
-      href={sessionHref(surface, session.id)}
+      href={sessionHrefForSurface(surface, session.id)}
       target="_blank"
       rel="noreferrer"
       title={session.title}

@@ -17,8 +17,8 @@ import { buildPendingAgent, newAgentId } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 
-// The /personal experiment agent is a low-latency, capable default. Mirrors leo's choice.
-const PERSONAL_AGENT_MODEL: AgentModelId = "minimax/minimax-m2.7-highspeed";
+// The /personal experiment agent defaults to Kimi for long-horizon coding and agent workflows.
+const PERSONAL_AGENT_MODEL: AgentModelId = "moonshotai/kimi-k2.6";
 
 // Self-contained starter instructions. The /personal agent's richer operating guidance lives in
 // agent/soul.md (seeded at creation, see DEFAULT_PERSONAL_SOUL_MD). It has no @brain/ mounts, so
@@ -85,7 +85,7 @@ This is how I, ${FIXED_PERSONAL_AGENT_NAME}, operate for {{userName}}. I read it
 // short — it's the user's to edit and grow.
 export const DEFAULT_PERSONAL_BRAIN_README = `# {{userName}}'s Personal Brain
 
-This is your private knowledge space. Save notes, research, decisions, and reference material here — it persists across sessions and your agent can read from it.
+This is your private knowledge space. Save notes, research, decisions, and reference material here — it persists across sessions and your agent can read from it. Anything your agent produces for you (docs, reports, plans) is filed here too.
 
 This is different from Memory: Personal Brain holds your own files; Memory is what your agent distills about you over time.
 `;

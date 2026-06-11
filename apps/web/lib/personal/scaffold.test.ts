@@ -85,6 +85,8 @@ describe("ensurePersonalAgent", () => {
       // Local-only: never projected to GitHub.
       githubSyncStatus: "synced",
     });
+    expect(agentInsert.config.model.name).toBe("moonshotai/kimi-k2.6");
+    expect(result.defaultModel).toBe("moonshotai/kimi-k2.6");
 
     // The body's @-mentions are the source of truth for the default capability set: research
     // tools (exa/youtube/instagram), personal integrations (gmail/google_calendar/slack), and
@@ -149,7 +151,7 @@ describe("ensurePersonalAgent", () => {
           config: {
             title: "Leo",
             instructions: "You are Leo, Ada's personal agent.\n\nexisting body",
-            model: { name: "minimax/minimax-m2.7-highspeed" },
+            model: { name: "moonshotai/kimi-k2.6" },
           },
           version: 1,
         },
