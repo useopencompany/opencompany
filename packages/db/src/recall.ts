@@ -163,12 +163,57 @@ export async function recallSessions<TQuery extends PgQueryResultHKT>(
     excludeSessionId?: string;
     query: string;
     limit?: number;
+    createdAfter?: Date;
   },
 ): Promise<RecallResult[]> {
   const query = input.query.trim();
-  if (query.length === 0) return [];
+  if (query.length === 0 && !input.createdAfter) return [];
   const limit = Math.min(Math.max(input.limit ?? RECALL_DEFAULT_LIMIT, 1), RECALL_MAX_LIMIT);
   const excludeSessionId = input.excludeSessionId ?? "";
+  const createdAfterFilter = input.createdAfter
+    ? sql`AND c.message_created_at >= ${input.createdAfter}`
+    : sql``;
+
+  if (query.length === 0) {
+    const result = await db.execute(sql`
+      WITH ordered AS (
+        SELECT c.id, c.session_id, c.content, c.role, c.message_created_at,
+               row_number() OVER (
+                 PARTITION BY c.session_id ORDER BY c.message_created_at, c.sub_index
+               ) AS ord
+        FROM agent_session_message_chunks c
+        WHERE c.agent_id = ${input.agentId}
+          AND c.user_id = ${input.userId}
+          AND c.session_id <> ${excludeSessionId}
+          ${createdAfterFilter}
+          AND c.content <> ''
+      ),
+      latest AS (
+        SELECT o.id, o.session_id, o.ord, o.message_created_at,
+               row_number() OVER (
+                 PARTITION BY o.session_id ORDER BY o.message_created_at DESC, o.ord DESC
+               ) AS recent_rank
+        FROM ordered o
+      ),
+      top AS (
+        SELECT l.id, 0::double precision AS score, l.session_id, l.ord, l.message_created_at
+        FROM latest l
+        WHERE l.recent_rank = 1
+        ORDER BY l.message_created_at DESC, l.id DESC
+        LIMIT ${limit}
+      )
+      SELECT t.id AS match_id, t.score, t.session_id,
+             sess.title AS session_title,
+             t.message_created_at AS match_created_at,
+             w.role, w.content, (w.ord = t.ord) AS is_match
+      FROM top t
+      JOIN agent_sessions sess ON sess.id = t.session_id
+      JOIN ordered w ON w.session_id = t.session_id AND w.ord BETWEEN t.ord - 1 AND t.ord + 1
+      ORDER BY t.message_created_at DESC, t.id DESC, w.ord
+    `);
+
+    return recallResultsFromRows(rowsFrom<RecallRow>(result));
+  }
 
   // The scope filter (agent_id / user_id / not-the-live-session) is inlined into each search
   // subquery rather than factored into a shared `scoped` CTE on purpose: a CTE referenced more than
@@ -185,6 +230,7 @@ export async function recallSessions<TQuery extends PgQueryResultHKT>(
       WHERE c.agent_id = ${input.agentId}
         AND c.user_id = ${input.userId}
         AND c.session_id <> ${excludeSessionId}
+        ${createdAfterFilter}
         AND tsq.query @@ c.tsv
     ),
     trgm AS (
@@ -193,6 +239,7 @@ export async function recallSessions<TQuery extends PgQueryResultHKT>(
       WHERE c.agent_id = ${input.agentId}
         AND c.user_id = ${input.userId}
         AND c.session_id <> ${excludeSessionId}
+        ${createdAfterFilter}
         AND ${query} <% c.content
     ),
     matches AS (
@@ -210,6 +257,7 @@ export async function recallSessions<TQuery extends PgQueryResultHKT>(
       WHERE c.agent_id = ${input.agentId}
         AND c.user_id = ${input.userId}
         AND c.session_id <> ${excludeSessionId}
+        ${createdAfterFilter}
         AND c.content <> ''
     ),
     top AS (
@@ -229,8 +277,10 @@ export async function recallSessions<TQuery extends PgQueryResultHKT>(
     ORDER BY t.score DESC, t.message_created_at DESC, t.id, w.ord
   `);
 
-  const rows = rowsFrom<RecallRow>(result);
+  return recallResultsFromRows(rowsFrom<RecallRow>(result));
+}
 
+function recallResultsFromRows(rows: RecallRow[]): RecallResult[] {
   // Rows arrive grouped per match (contiguous, in score order) thanks to the ORDER BY; fold each
   // group's window into one result.
   const byMatch = new Map<number, RecallResult>();

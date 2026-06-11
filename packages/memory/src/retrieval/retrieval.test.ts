@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { appendEvidence } from "../cli/append-evidence";
 import { parseArgs } from "../cli/args";
 import { create } from "../cli/create";
 import { resolveRoot } from "../store";
@@ -19,6 +20,10 @@ afterEach(async () => {
 
 function seed(argv: string[]) {
   return create({ root: resolveRoot(root), json: true, args: parseArgs(argv) });
+}
+
+function evidence(argv: string[]) {
+  return appendEvidence({ root: resolveRoot(root), json: true, args: parseArgs(argv) });
 }
 
 describe("parseJsonStringArray", () => {
@@ -137,6 +142,44 @@ describe("full hybrid query (fake gateway)", () => {
     expect(hits.map((h) => h.id)).toContain("acme");
     // Rerank put acme first.
     expect(hits[0]?.id).toBe("acme");
+  });
+
+  it("caps record text passed to model-backed rerank", async () => {
+    const longTruth = `Acme billing details. ${"Long truth detail ".repeat(120)}`;
+    await seed(["--type", "company", "--id", "acme", "--truth", longTruth]);
+    await seed(["--type", "company", "--id", "globex", "--truth", "Globex billing details."]);
+    for (let i = 0; i < 12; i++) {
+      await evidence([
+        "--kind",
+        "meeting",
+        "--id",
+        `acme-call-${i}`,
+        "--subject",
+        "acme",
+        "--source-ref",
+        `gcal://acme-${i}`,
+        "--summary",
+        `Billing timeline ${i}. ${"Long timeline detail ".repeat(80)}TAIL_MARKER`,
+      ]);
+    }
+
+    let candidates: Array<{ id: string; text: string }> = [];
+    await query(
+      resolveRoot(root),
+      { text: "billing", limit: 5 },
+      {
+        async rerank(_query, records) {
+          candidates = records;
+          return records.map((record) => record.id);
+        },
+      },
+    );
+
+    const acme = candidates.find((candidate) => candidate.id === "acme");
+    expect(acme?.text).toContain("[truncated compiled truth]");
+    expect(acme?.text).toContain("[truncated timeline]");
+    expect(acme?.text.length).toBeLessThan(2300);
+    expect(acme?.text).not.toContain("TAIL_MARKER");
   });
 
   it("pulls in a linked neighbor with --hops that the text alone would not surface", async () => {

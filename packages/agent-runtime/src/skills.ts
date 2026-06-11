@@ -439,7 +439,7 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 ## Commands
 
 - **create** — a new canonical object.
-  \`memory create --type company --id acme --alias "Acme Inc" --truth "Logistics SaaS we sell to."\`
+  \`memory create --type company --id acme --alias "Acme Inc"\`
 - **append-evidence** — record immutable evidence and link it to canonical subjects.
   \`memory append-evidence --kind meeting --id acme-call-2026-06-06 --subject acme --subject jane-doe --source-ref "gcal://event/abc" --summary "Confirmed enterprise eval; SSO is the blocker."\`
   Provenance (\`--kind\` + \`--source-ref\`) and at least one existing \`--subject\` are required.
@@ -454,10 +454,11 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   (e.g. \`employs\`, \`works_at\`, \`depends_on\`, \`part_of\`; defaults to \`related\`). \`--to\` and
   \`--remove\` are repeatable; there's one edge per target, so re-linking updates its type. Edits
   only the named object's links; query can then expand along them (see \`--hops\` below).
-- **get** — read a file. \`memory get acme\` (add \`--section truth|timeline|frontmatter\`).
+- **get** — read a structured record with compiled truth and recent timeline entries. \`memory get acme\` (add \`--section truth|timeline|frontmatter|all\` to narrow output or read the raw file).
 - **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
   Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`. Add \`--hops N\` to also pull
   in objects reachable via \`related\` edges (e.g. \`--hops 1\` surfaces directly-linked neighbours).
+  Results include capped compiled truth and a \`memory get <id>\` hint for the full record/timeline.
 - **merge** — fold a duplicate canonical object into another, then re-synthesize. Aliases, related
   links and timeline move to the survivor; the source becomes a redirect stub.
   \`memory merge --from acme-corp --into acme\` (then \`memory rewrite acme ...\`). Use \`--dry-run\` first.
@@ -472,7 +473,8 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 
 - When you learn something durable about a person, company, project, customer, or decision,
   **capture it as evidence first**, then **rewrite** the relevant object's compiled truth citing it.
-- Before answering questions about people, companies, or past decisions, **query** memory.
+- Before answering questions about people, companies, or past decisions, **query** memory; use
+  **get** when the query result indicates a likely record and details or timeline matter.
 - When two objects are connected (a person at a company, a decision on a project), **link** them
   so future queries can hop between them with \`--hops\`. A well-linked graph retrieves better.
 - Keep compiled truth tight and current; let the timeline hold the history.

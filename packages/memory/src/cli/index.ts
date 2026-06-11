@@ -35,10 +35,11 @@ Commands:
   create           Create a canonical object (person|company|project|customer|decision|concept|theme).
                    New objects start as drafts; --status active with compiled truth requires citations.
   get              Fetch a memory file (--section truth|timeline|frontmatter|all, --follow).
-                   --section scopes both the text and the --json payload.
+                   Default output is structured; --section scopes both the text and the --json payload.
   query            Hybrid retrieval over the tree.
                    Filters: --type, --status, --folder, --since, --limit, --lexical-only.
                    --hops N follows related links + citations N steps out, pulling in neighbors.
+                   Results include capped compiled truth; run memory get <id> for the full record.
                    Hides merged stubs and invalid records by default; --include-merged / --include-invalid opt back in.
   append-evidence  Record immutable evidence and link it to canonical subjects.
   rewrite          Update compiled truth (requires [^ev:<id>] citations to linked evidence).

@@ -1,7 +1,7 @@
 import {
   BUILTIN_USE_TOOL_NAME,
+  getRuntimeToolDefinition,
   partitionRuntimeToolNames,
-  RUNTIME_TOOL_DEFINITION_BY_NAME,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
   type WorkspaceToolPolicyMap,
@@ -63,6 +63,7 @@ export async function streamAssistantResponse(input: {
     };
   };
   assistantMessageId: string;
+  personalAgent?: boolean;
   toolStartCoordinator: ToolStartCoordinator;
   checkAbort: RunControlCheck;
   policy: WorkspaceToolPolicyMap;
@@ -112,7 +113,9 @@ export async function streamAssistantResponse(input: {
   // `requireLeaseWrite`.
   try {
     const toSentToolEntry = (name: string) => {
-      const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName);
+      const definition = getRuntimeToolDefinition(name as RuntimeToolName, {
+        personalAgent: input.personalAgent ?? false,
+      });
       return {
         name,
         description: definition?.description ?? "",
@@ -121,7 +124,10 @@ export async function streamAssistantResponse(input: {
     };
     const toDeferredToolEntry = (name: string) => ({
       name,
-      description: RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName)?.description ?? "",
+      description:
+        getRuntimeToolDefinition(name as RuntimeToolName, {
+          personalAgent: input.personalAgent ?? false,
+        })?.description ?? "",
     });
     await appendRuntimeEventForLease({
       sessionId: input.ctx.sessionId,

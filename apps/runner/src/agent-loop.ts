@@ -1,14 +1,13 @@
 import {
   agentBundleDir,
   BUILTIN_USE_TOOL_NAME,
+  getRuntimeToolDefinition,
   MEMORY_KEEPER_SYSTEM_PROMPT,
   MEMORY_SKILL_ID,
   newAgentSessionMessageId,
   normalizeAgentConfig,
   type ResolvedSkillMetadata,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
-  RUNTIME_TOOL_DEFINITIONS,
-  type RuntimeToolDefinition,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
   resolveEnabledSkillMetadata,
@@ -873,6 +872,7 @@ async function executeStreamingTurn(input: {
       tools: input.tools,
       mcpContext: input.mcpContext,
       assistantMessageId,
+      personalAgent: row.agent.isDefault,
       toolStartCoordinator: input.toolStartCoordinator,
       checkAbort: input.checkAbort,
       policy: input.policy,
@@ -1802,6 +1802,7 @@ async function resumeApprovalWithContext(
             runLeaseOwner: ctx.leaseOwner,
             workspaceId: row.workspace.id,
             agentConfig,
+            personalAgent: row.agent.isDefault,
             toolCallId: input.toolCallId,
             args: toolArgs,
             getSandbox: sandboxAcquirer.get,
@@ -1815,9 +1816,9 @@ async function resumeApprovalWithContext(
             toolBudget: createHostedToolBudget(),
           });
         } else {
-          const definition = RUNTIME_TOOL_DEFINITIONS.find(
-            (candidate: RuntimeToolDefinition) => candidate.name === toolName,
-          );
+          const definition = getRuntimeToolDefinition(toolName as RuntimeToolName, {
+            personalAgent: row.agent.isDefault,
+          });
           if (!definition) {
             throw new Error(`Runtime tool ${toolName} is no longer available to resume.`);
           }
@@ -1828,6 +1829,7 @@ async function resumeApprovalWithContext(
             runLeaseOwner: ctx.leaseOwner,
             workspaceId: row.workspace.id,
             agentConfig,
+            personalAgent: row.agent.isDefault,
             toolCallId: input.toolCallId,
             definition,
             args: toolArgs,
