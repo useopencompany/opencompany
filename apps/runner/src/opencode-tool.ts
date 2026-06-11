@@ -1,6 +1,6 @@
 import { AGENT_MODEL_CATALOG, type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
 import type { AgentGitHubRepositoryConfig, AgentModelId } from "@opencompany/agent-runtime/types";
-import { calculateModelUsageCost } from "@opencompany/billing";
+import { calculateModelUsageCost, type HostedToolCostSource } from "@opencompany/billing";
 import { agentSessionArtifacts } from "@opencompany/db/schema";
 import { loadGitHubWorkRepository, loadGitHubWorkRepositoryByFullName } from "./amp-tool";
 import {
@@ -438,15 +438,18 @@ export function opencodeHostedToolUsage(input: {
       })
     : null;
   const platformCostUsdMicros = computed?.billable ? computed.providerCostUsdMicros : null;
+  const costSource: HostedToolCostSource =
+    platformCostUsdMicros != null ? "platform_model_pricing" : "provider_reported";
 
   return {
     provider: "opencode",
     operation: "session",
     costUsdMicros: platformCostUsdMicros ?? reportedCostUsdMicros ?? 0,
+    costSource,
     rawUsage: {
       ...(tokens ?? {}),
       model: input.modelId,
-      cost_source: platformCostUsdMicros != null ? "platform_model_pricing" : "opencode_reported",
+      cost_source: costSource,
       ...(reportedCostUsdMicros != null
         ? { opencode_reported_cost_usd_micros: reportedCostUsdMicros }
         : {}),

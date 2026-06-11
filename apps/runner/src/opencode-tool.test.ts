@@ -355,6 +355,7 @@ describe("opencodeHostedToolUsage", () => {
     });
     expect(usage).not.toBeNull();
     expect(usage?.costUsdMicros).toBeGreaterThan(0);
+    expect(usage?.costSource).toBe("platform_model_pricing");
     expect(usage?.rawUsage.cost_source).toBe("platform_model_pricing");
     expect(usage?.rawUsage.opencode_reported_cost_usd_micros).toBe(0);
   });
@@ -409,7 +410,8 @@ describe("opencodeHostedToolUsage", () => {
       summary: { usage: null, costUsdMicros: 250_000 },
     });
     expect(usage?.costUsdMicros).toBe(250_000);
-    expect(usage?.rawUsage.cost_source).toBe("opencode_reported");
+    expect(usage?.costSource).toBe("provider_reported");
+    expect(usage?.rawUsage.cost_source).toBe("provider_reported");
   });
 
   it("returns null when the run produced neither tokens nor a reported cost", () => {

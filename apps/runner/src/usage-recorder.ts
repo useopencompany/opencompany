@@ -156,6 +156,7 @@ export async function recordToolUsage(
     provider: input.usage.provider,
     operation: input.usage.operation,
     providerCostUsdMicros: input.usage.costUsdMicros,
+    ...(input.usage.costSource ? { costSource: input.usage.costSource } : {}),
   });
 
   const usagePayload = {
