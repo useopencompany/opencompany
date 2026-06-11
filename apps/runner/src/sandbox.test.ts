@@ -451,9 +451,9 @@ describe("resolveSandboxToolPath", () => {
     );
   });
 
-  it("personal sessions allow memory/ and personal-brain/ and reject the company brain/", () => {
-    expect(resolveSandboxToolPath("/home/user/workspace", "memory/x.md", true)).toBe(
-      "/home/user/workspace/memory/x.md",
+  it("personal sessions allow personal-brain/ but reject memory/ and the company brain/", () => {
+    expect(() => resolveSandboxToolPath("/home/user/workspace", "memory/x.md", true)).toThrow(
+      /work\/, personal-brain\/, or agent\//,
     );
     expect(resolveSandboxToolPath("/home/user/workspace", "personal-brain/note.md", true)).toBe(
       "/home/user/workspace/personal-brain/note.md",
@@ -465,7 +465,7 @@ describe("resolveSandboxToolPath", () => {
       "/home/user/workspace/agent/user.md",
     );
     expect(() => resolveSandboxToolPath("/home/user/workspace", "brain/foo.md", true)).toThrow(
-      /work\/, memory\/, personal-brain\/, or agent\//,
+      /work\/, personal-brain\/, or agent\//,
     );
   });
 
@@ -473,7 +473,9 @@ describe("resolveSandboxToolPath", () => {
     expect(
       resolveSandboxBrainRelativePath("/home/user/workspace", "personal-brain/note.md", true),
     ).toBeNull();
-    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "memory/x.md", true)).toBeNull();
+    expect(() =>
+      resolveSandboxBrainRelativePath("/home/user/workspace", "memory/x.md", true),
+    ).toThrow(/work\/, personal-brain\/, or agent\//);
   });
 
   it("resolves brain-relative paths and ignores non-brain roots", () => {
@@ -563,6 +565,44 @@ describe("runSandboxTool", () => {
       stderr: "err [redacted]",
       exitCode: 0,
     });
+  });
+
+  it("rejects personal shell commands that reference memory/", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "shell",
+        args: { command: "cat memory/profile.md" },
+        personal: true,
+      }),
+    ).rejects.toThrow(/Shell commands cannot access memory\/.*memory tool/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+  });
+
+  it("rejects personal shell commands that reference the absolute memory root", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "shell",
+        args: { command: "ls /home/user/workspace/memory" },
+        personal: true,
+      }),
+    ).rejects.toThrow(/Shell commands cannot access memory\/.*memory tool/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
   });
 
   it("returns shell nonzero exit output instead of throwing", async () => {
