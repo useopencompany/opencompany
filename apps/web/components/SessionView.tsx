@@ -315,6 +315,7 @@ export function SessionViewContent(props: SessionViewContentProps) {
 function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const surface = useSessionSurface();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
@@ -1142,6 +1143,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           session,
           workspaceId,
           router,
+          sessionHref: (sessionId) => sessionHrefForSurface(surface, sessionId),
           queryClient,
           setInput,
           insertMention,
@@ -2760,6 +2762,7 @@ function ToolCallCardDefault({
           {toolCall.activityPreview && !toolCall.outputPreview ? (
             <ToolCallPreview label="Activity" value={toolCall.activityPreview} />
           ) : null}
+          {toolCall.subagent ? <SubagentProgressView subagent={toolCall.subagent} /> : null}
           {toolCall.outputPreview ? (
             <ToolCallPreview label="Output" value={toolCall.outputPreview} />
           ) : null}
@@ -3344,6 +3347,58 @@ function ToolCallPreview({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SubagentProgressView({
+  subagent,
+}: {
+  subagent: NonNullable<RuntimeToolCall["subagent"]>;
+}) {
+  return (
+    <div className="py-1">
+      <div className="mb-1 text-[10px] font-medium uppercase text-ink-subtle">{subagent.label}</div>
+      <div className="space-y-1 rounded-md border border-border/70 bg-surface-muted/40 px-2 py-1.5">
+        {subagent.toolLines.length > 0 ? (
+          <div className="space-y-1">
+            {subagent.toolLines.map((line) => (
+              <div key={line.id} className="flex min-w-0 items-start gap-1.5 text-[10.5px]">
+                <span className="mt-0.5 flex h-3 w-3 shrink-0 items-center justify-center text-ink-subtle">
+                  {line.status === "running" ? (
+                    <LoaderCircle size={10} strokeWidth={2} className="animate-spin text-warning" />
+                  ) : line.status === "failed" || line.status === "denied" ? (
+                    <AlertCircle size={10} strokeWidth={1.9} className="text-danger" />
+                  ) : (
+                    <Check size={10} strokeWidth={1.9} className="text-success" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-ink/65" title={line.name}>
+                    {line.label}
+                  </div>
+                  {line.outputPreview ? (
+                    <div className="truncate text-ink-subtle" title={line.outputPreview}>
+                      {line.outputPreview}
+                    </div>
+                  ) : line.inputPreview ? (
+                    <div className="truncate text-ink-subtle" title={line.inputPreview}>
+                      {line.inputPreview}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {subagent.textPreview ? (
+          <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-ink/60">
+            {subagent.textPreview}
+          </pre>
+        ) : subagent.toolLines.length === 0 ? (
+          <div className="text-[10.5px] text-ink-subtle">Waiting for subagent activity</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function formatToolName(name: string) {
   const normalized = name.replace(/[_-]+/g, " ").trim();
   if (!normalized) return "Tool call";
@@ -3403,7 +3458,7 @@ function SessionInspector({
         <div className="mt-4 space-y-4">
           <InspectorLink
             label="Session page"
-            href={sessionHref(surface, session.id)}
+            href={sessionHrefForSurface(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
@@ -3659,7 +3714,7 @@ function useSessionSurface(): "personal" | "company" {
   return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
 }
 
-function sessionHref(surface: "personal" | "company", sessionId: string) {
+function sessionHrefForSurface(surface: "personal" | "company", sessionId: string) {
   return surface === "personal"
     ? personalPaths.session(sessionId)
     : `/company/session/${sessionId}`;
@@ -3673,7 +3728,7 @@ function RelatedSessionLink({
   const surface = useSessionSurface();
   return (
     <Link
-      href={sessionHref(surface, session.id)}
+      href={sessionHrefForSurface(surface, session.id)}
       target="_blank"
       rel="noreferrer"
       title={session.title}

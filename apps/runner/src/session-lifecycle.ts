@@ -109,6 +109,7 @@ export async function ensureSandbox(
           sandbox: readySandbox,
           workdir: row.session.workdir,
           personal,
+          configureGitCredentialHelper: needsAuthenticatedGit(agentConfig),
           agentFile: serializeAgentFile({
             title: agentConfig.title,
             body: agentConfig.instructions,
@@ -123,55 +124,65 @@ export async function ensureSandbox(
       ),
     );
     // Personal agents have no company brain mount — skip materializing ./brain for them.
+    const materializationTasks: Promise<unknown>[] = [];
     if (!personal) {
-      await traceBraintrustStep("sandbox_materialize_brain", () =>
-        recordSandboxHydrationStage(timings, "materializeBrainMs", () =>
-          materializeBrainForSession({
-            sandbox: readySandbox,
-            sessionId: row.session.id,
-            workspaceId: row.workspace.id,
-            workdir: row.session.workdir,
-            references: agentConfig.brain,
-          }),
+      materializationTasks.push(
+        traceBraintrustStep("sandbox_materialize_brain", () =>
+          recordSandboxHydrationStage(timings, "materializeBrainMs", () =>
+            materializeBrainForSession({
+              sandbox: readySandbox,
+              sessionId: row.session.id,
+              workspaceId: row.workspace.id,
+              workdir: row.session.workdir,
+              references: agentConfig.brain,
+            }),
+          ),
         ),
       );
     }
-    await traceBraintrustStep("sandbox_materialize_agent_bundle", () =>
-      recordSandboxHydrationStage(timings, "materializeAgentBundleMs", () =>
-        materializeAgentBundleForSession({
-          sandbox: readySandbox,
-          sessionId: row.session.id,
-          workspaceId: row.workspace.id,
-          agentId: row.agent.id,
-          workdir: row.session.workdir,
-          personal,
-        }),
+    materializationTasks.push(
+      traceBraintrustStep("sandbox_materialize_agent_bundle", () =>
+        recordSandboxHydrationStage(timings, "materializeAgentBundleMs", () =>
+          materializeAgentBundleForSession({
+            sandbox: readySandbox,
+            sessionId: row.session.id,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+            workdir: row.session.workdir,
+            personal,
+          }),
+        ),
       ),
     );
-    await traceBraintrustStep("sandbox_materialize_skills", () =>
-      recordSandboxHydrationStage(timings, "materializeSkillsMs", () =>
-        materializeSkillsForSession({
-          sandbox: readySandbox,
-          workdir: row.session.workdir,
-          workspaceId: row.workspace.id,
-          agentId: row.agent.id,
-          config: agentConfig,
-        }),
+    materializationTasks.push(
+      traceBraintrustStep("sandbox_materialize_skills", () =>
+        recordSandboxHydrationStage(timings, "materializeSkillsMs", () =>
+          materializeSkillsForSession({
+            sandbox: readySandbox,
+            workdir: row.session.workdir,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+            config: agentConfig,
+          }),
+        ),
       ),
     );
     // Above-threshold text attachments are path-referenced in the model history instead of
     // inlined, so they must exist in the workspace on every acquire (survives recycles).
     // Never throws — a failure degrades to the inline preview, not a failed sandbox.
-    await traceBraintrustStep("sandbox_materialize_attachments", () =>
-      recordSandboxHydrationStage(timings, "materializeAttachmentsMs", () =>
-        materializeLargeTextAttachmentsForSession({
-          sandbox: readySandbox,
-          sessionId: row.session.id,
-          workdir: row.session.workdir,
-          blobToken: env.blobReadWriteToken,
-        }),
+    materializationTasks.push(
+      traceBraintrustStep("sandbox_materialize_attachments", () =>
+        recordSandboxHydrationStage(timings, "materializeAttachmentsMs", () =>
+          materializeLargeTextAttachmentsForSession({
+            sandbox: readySandbox,
+            sessionId: row.session.id,
+            workdir: row.session.workdir,
+            blobToken: env.blobReadWriteToken,
+          }),
+        ),
       ),
     );
+    await waitForMaterializationTasks(materializationTasks);
     const totalMs = elapsedMs(readyStartedAt);
     captureE2BSandboxLatency({
       row,
@@ -286,6 +297,16 @@ async function recordSandboxHydrationStage<T>(
   }
 }
 
+async function waitForMaterializationTasks(tasks: Promise<unknown>[]) {
+  const results = await Promise.allSettled(tasks);
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failure) {
+    throw failure.reason;
+  }
+}
+
 function logSandboxHydrationTiming(
   span: BraintrustSpan | undefined,
   input: {
@@ -367,10 +388,14 @@ function errorName(error: unknown) {
 // `@github` all-repositories scope) or a coding-agent tool enabled; plain chat agents
 // get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
-  const needsCodingTemplate =
+  return needsAuthenticatedGit(agentConfig) ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
+}
+
+function needsAuthenticatedGit(agentConfig: AgentConfig) {
+  return (
     agentHasGitHubAccess(agentConfig) ||
-    agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode");
-  return needsCodingTemplate ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
+    agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode")
+  );
 }
 
 // Per-template resource overrides used to price sandbox compute. Both current templates
