@@ -53,7 +53,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { useCollections } from "@/components/CollectionsProvider";
@@ -65,6 +65,7 @@ import {
   uploadAttachment,
 } from "@/components/composer-attachments";
 import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
+import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
@@ -241,19 +242,6 @@ type OptimisticUserMessage = SessionMessage & {
   submittedAtMs: number;
   confirmedMessageId: string | null;
   existingMessageIds: string[];
-};
-
-const MARKDOWN_COMPONENTS: Components = {
-  a: ({ children, href }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70"
-    >
-      {children}
-    </a>
-  ),
 };
 
 // Lets the deeply-nested ToolCallCard reach the session id (for tool-approval actions)
