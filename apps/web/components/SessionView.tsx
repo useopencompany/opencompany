@@ -315,6 +315,7 @@ export function SessionViewContent(props: SessionViewContentProps) {
 function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const surface = useSessionSurface();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
@@ -1142,6 +1143,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           session,
           workspaceId,
           router,
+          sessionHref: (sessionId) => sessionHrefForSurface(surface, sessionId),
           queryClient,
           setInput,
           insertMention,
@@ -3403,7 +3405,7 @@ function SessionInspector({
         <div className="mt-4 space-y-4">
           <InspectorLink
             label="Session page"
-            href={sessionHref(surface, session.id)}
+            href={sessionHrefForSurface(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
@@ -3659,7 +3661,7 @@ function useSessionSurface(): "personal" | "company" {
   return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
 }
 
-function sessionHref(surface: "personal" | "company", sessionId: string) {
+function sessionHrefForSurface(surface: "personal" | "company", sessionId: string) {
   return surface === "personal"
     ? personalPaths.session(sessionId)
     : `/company/session/${sessionId}`;
@@ -3673,7 +3675,7 @@ function RelatedSessionLink({
   const surface = useSessionSurface();
   return (
     <Link
-      href={sessionHref(surface, session.id)}
+      href={sessionHrefForSurface(surface, session.id)}
       target="_blank"
       rel="noreferrer"
       title={session.title}
