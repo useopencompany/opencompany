@@ -46,9 +46,10 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
       ? "No matching memory found."
       : hits
           .map(
-            (hit, i) => `${i + 1}. [${hit.type}] ${hit.id} (score ${hit.score})\n   ${hit.snippet}`,
+            (hit, i) =>
+              `${i + 1}. [${hit.type}/${hit.status}] ${hit.id} (score ${hit.score})\n${hit.snippet}\nNext: memory get ${hit.id}`,
           )
-          .join("\n");
+          .join("\n\n");
 
   return { ...ok(text_, { count: hits.length, hits }), usage };
 }
