@@ -15,17 +15,11 @@ const RECALL_STATEMENT_TIMEOUT_MS = 5000;
 // (scope derived from the current session row) and excludes the live session, whose transcript is
 // already in the model's context.
 export async function runRecallTool(input: { sessionId: string; args: unknown }): Promise<unknown> {
-  const { query, limit } = parseRecallArgs(input.args);
-  if (!query) {
-    return {
-      ok: false,
-      error: {
-        message: "recall requires a non-empty `query` string describing what to look for.",
-        code: "invalid_tool_input",
-        recoverable: true,
-      },
-    };
+  const parsed = parseRecallArgs(input.args);
+  if (parsed.error) {
+    return invalidToolInput(parsed.error);
   }
+  const { query, limit, timeWindow } = parsed;
 
   const db = getDb();
   const sessionRows = await db
@@ -57,6 +51,7 @@ export async function runRecallTool(input: { sessionId: string; args: unknown })
         excludeSessionId: input.sessionId,
         query,
         ...(limit !== undefined ? { limit } : {}),
+        ...(timeWindow ? { createdAfter: timeWindow.createdAfter } : {}),
       });
     });
   } catch (error) {
@@ -73,17 +68,94 @@ export async function runRecallTool(input: { sessionId: string; args: unknown })
   return {
     ok: true,
     query,
+    ...(timeWindow
+      ? {
+          timeWindow: {
+            amount: timeWindow.amount,
+            unit: timeWindow.unit,
+            createdAfter: timeWindow.createdAfter.toISOString(),
+          },
+        }
+      : {}),
     resultCount: results.length,
     results,
   };
 }
 
-function parseRecallArgs(args: unknown): { query: string; limit?: number } {
-  if (!args || typeof args !== "object") return { query: "" };
+type RecallTimeWindowUnit = "hours" | "days";
+type NormalizedRecallTimeWindow = {
+  amount: number;
+  unit: RecallTimeWindowUnit;
+  createdAfter: Date;
+};
+type ParsedRecallArgs = {
+  query: string;
+  limit?: number;
+  timeWindow?: NormalizedRecallTimeWindow;
+  error?: string;
+};
+
+function invalidToolInput(message: string) {
+  return {
+    ok: false,
+    error: {
+      message,
+      code: "invalid_tool_input",
+      recoverable: true,
+    },
+  };
+}
+
+function parseRecallArgs(args: unknown): ParsedRecallArgs {
+  if (!args || typeof args !== "object") {
+    return { query: "", error: "recall requires either a non-empty `query` or `time_window`." };
+  }
   const record = args as Record<string, unknown>;
   const query = typeof record.query === "string" ? record.query.trim() : "";
   const rawLimit = record.limit;
   const limit =
     typeof rawLimit === "number" && Number.isFinite(rawLimit) ? Math.floor(rawLimit) : undefined;
-  return limit !== undefined ? { query, limit } : { query };
+  const timeWindow = parseTimeWindow(record.time_window);
+  if (timeWindow.error) {
+    return { query, ...(limit !== undefined ? { limit } : {}), error: timeWindow.error };
+  }
+  if (!query && !timeWindow.value) {
+    return {
+      query,
+      ...(limit !== undefined ? { limit } : {}),
+      error: "recall requires either a non-empty `query` or `time_window`.",
+    };
+  }
+  return {
+    query,
+    ...(limit !== undefined ? { limit } : {}),
+    ...(timeWindow.value ? { timeWindow: timeWindow.value } : {}),
+  };
+}
+
+function parseTimeWindow(value: unknown): { value?: NormalizedRecallTimeWindow; error?: string } {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "`time_window` must be an object with positive integer `amount` and unit." };
+  }
+  const record = value as Record<string, unknown>;
+  const amount = record.amount;
+  if (typeof amount !== "number" || !Number.isFinite(amount) || !Number.isInteger(amount)) {
+    return { error: "`time_window.amount` must be a positive integer." };
+  }
+  if (amount <= 0) {
+    return { error: "`time_window.amount` must be greater than 0." };
+  }
+  const unit = record.unit;
+  if (unit !== "hours" && unit !== "days") {
+    return { error: '`time_window.unit` must be either "hours" or "days".' };
+  }
+  const millisecondsPerUnit = unit === "hours" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return {
+    value: {
+      amount,
+      unit,
+      createdAfter: new Date(Date.now() - amount * millisecondsPerUnit),
+    },
+  };
 }

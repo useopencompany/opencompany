@@ -10,6 +10,7 @@ import { runRecallTool } from "./recall-tool";
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("runRecallTool", () => {
@@ -58,4 +59,126 @@ describe("runRecallTool", () => {
       limit: 3,
     });
   });
+
+  it("passes a createdAfter cutoff when query and time_window are provided", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-11T12:00:00.000Z"));
+    const tx = { execute: vi.fn(async () => {}) };
+    dbMocks.getDb.mockReturnValue(mockDb(tx));
+
+    const result = await runRecallTool({
+      sessionId: "session_live",
+      args: {
+        query: "launch date",
+        time_window: { amount: 6, unit: "hours" },
+        limit: 4,
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      query: "launch date",
+      timeWindow: {
+        amount: 6,
+        unit: "hours",
+        createdAfter: "2026-06-11T06:00:00.000Z",
+      },
+    });
+    expect(recallMocks.recallSessions).toHaveBeenCalledWith(tx, {
+      agentId: "agent_1",
+      userId: "user_1",
+      excludeSessionId: "session_live",
+      query: "launch date",
+      limit: 4,
+      createdAfter: new Date("2026-06-11T06:00:00.000Z"),
+    });
+  });
+
+  it("accepts time_window without a query for recent session recall", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-11T12:00:00.000Z"));
+    const tx = { execute: vi.fn(async () => {}) };
+    dbMocks.getDb.mockReturnValue(mockDb(tx));
+
+    const result = await runRecallTool({
+      sessionId: "session_live",
+      args: { time_window: { amount: 2, unit: "days" } },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      query: "",
+      timeWindow: {
+        amount: 2,
+        unit: "days",
+        createdAfter: "2026-06-09T12:00:00.000Z",
+      },
+    });
+    expect(recallMocks.recallSessions).toHaveBeenCalledWith(tx, {
+      agentId: "agent_1",
+      userId: "user_1",
+      excludeSessionId: "session_live",
+      query: "",
+      createdAfter: new Date("2026-06-09T12:00:00.000Z"),
+    });
+  });
+
+  it("rejects input with neither query nor time_window", async () => {
+    const result = await runRecallTool({
+      sessionId: "session_live",
+      args: { limit: 3 },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        message: "recall requires either a non-empty `query` or `time_window`.",
+        code: "invalid_tool_input",
+        recoverable: true,
+      },
+    });
+    expect(dbMocks.getDb).not.toHaveBeenCalled();
+    expect(recallMocks.recallSessions).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported time_window units and non-positive amounts", async () => {
+    const invalidUnit = await runRecallTool({
+      sessionId: "session_live",
+      args: { time_window: { amount: 1, unit: "weeks" } },
+    });
+    const invalidAmount = await runRecallTool({
+      sessionId: "session_live",
+      args: { time_window: { amount: 0, unit: "hours" } },
+    });
+
+    expect(invalidUnit).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_tool_input",
+        message: '`time_window.unit` must be either "hours" or "days".',
+      },
+    });
+    expect(invalidAmount).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_tool_input",
+        message: "`time_window.amount` must be greater than 0.",
+      },
+    });
+    expect(dbMocks.getDb).not.toHaveBeenCalled();
+    expect(recallMocks.recallSessions).not.toHaveBeenCalled();
+  });
 });
+
+function mockDb(tx: unknown) {
+  return {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ agentId: "agent_1", userId: "user_1" }],
+        }),
+      }),
+    }),
+    transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(tx)),
+  };
+}
