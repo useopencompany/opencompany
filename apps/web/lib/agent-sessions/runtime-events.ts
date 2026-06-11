@@ -248,6 +248,20 @@ export type RuntimeToolCall = {
   issueUrl?: string | undefined;
   approval?: RuntimeToolApprovalState | undefined;
   question?: RuntimeQuestionState | undefined;
+  subagent?:
+    | {
+        label: string;
+        textPreview: string;
+        toolLines: Array<{
+          id: string;
+          name: string;
+          label: string;
+          status: "running" | "completed" | "failed" | "denied";
+          inputPreview?: string | undefined;
+          outputPreview?: string | undefined;
+        }>;
+      }
+    | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
   // ISO timestamp from tool.started event, used to show an elapsed counter for long-running tools.
@@ -985,6 +999,56 @@ export function buildRuntimeToolCallsForMessage(
       continue;
     }
 
+    if (event.type === "subagent.progress") {
+      const toolCallId = readString(event.payload.toolCallId);
+      if (!toolCallId) continue;
+      const call = getCall(toolCallId);
+      const label = readString(event.payload.label) || call.subagent?.label || "Subagent";
+      const subagent =
+        call.subagent ??
+        ({
+          label,
+          textPreview: "",
+          toolLines: [],
+        } satisfies NonNullable<RuntimeToolCall["subagent"]>);
+      subagent.label = label;
+
+      const kind = readString(event.payload.kind);
+      if (kind === "text-delta") {
+        const delta = readString(event.payload.delta);
+        if (delta) {
+          subagent.textPreview = truncateRuntimePreview(`${subagent.textPreview}${delta}`);
+          call.activityPreview = truncateRuntimePreview(subagent.textPreview);
+        }
+      } else if (kind === "tool-call" || kind === "tool-result") {
+        const tool = isRecord(event.payload.tool) ? event.payload.tool : {};
+        const innerToolCallId = readString(tool.toolCallId);
+        const name = readString(tool.name);
+        if (innerToolCallId && name) {
+          let line = subagent.toolLines.find((item) => item.id === innerToolCallId);
+          if (!line) {
+            line = {
+              id: innerToolCallId,
+              name,
+              label: toolDisplayTitle(name) ?? formatToolNameFallback(name),
+              status: "running",
+            };
+            subagent.toolLines.push(line);
+          }
+          line.name = name;
+          line.label = toolDisplayTitle(name) ?? formatToolNameFallback(name);
+          line.status = readSubagentToolStatus(tool.status);
+          const inputPreview = formatRuntimePreview(tool.inputPreview);
+          const outputPreview = formatRuntimePreview(tool.outputPreview);
+          if (inputPreview) line.inputPreview = inputPreview;
+          if (outputPreview) line.outputPreview = outputPreview;
+        }
+      }
+
+      call.subagent = subagent;
+      continue;
+    }
+
     if (event.type === "file.changed") {
       const brainPath = normalizeBrainWorkspacePath(readString(event.payload.path));
       const call = brainPath ? findLatestToolCall(calls, "write_file") : null;
@@ -1368,6 +1432,11 @@ function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admi
     : undefined;
 }
 
+function readSubagentToolStatus(value: unknown): "running" | "completed" | "failed" | "denied" {
+  if (value === "completed" || value === "failed" || value === "denied") return value;
+  return "running";
+}
+
 function readQuestionPrompts(value: unknown): RuntimeQuestionItem[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((raw) => {
@@ -1595,6 +1664,12 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "git_diff":
       return "Reviewing changes";
+    case "run_subagent": {
+      const description = field("description");
+      return description
+        ? `Running subagent: ${truncateLabelText(description)}`
+        : "Running subagent";
+    }
     case "shell": {
       const command = field("command");
       return command ? `Running ${truncateLabelText(command)}` : "Running a command";
@@ -1757,6 +1832,10 @@ function truncateLabelText(value: string) {
   const maxLength = 80;
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, maxLength - 1)}…`;
+}
+
+function formatToolNameFallback(name: string) {
+  return name.replace(/_/g, " ");
 }
 
 function hostFromUrl(url: string) {

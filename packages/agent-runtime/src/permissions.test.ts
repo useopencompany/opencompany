@@ -74,6 +74,7 @@ describe("classifyRuntimeTool", () => {
   });
 
   it("treats delegation, discovery, and tool help as never gated", () => {
+    expect(classifyRuntimeTool("run_subagent")).toBeNull();
     expect(classifyRuntimeTool("delegate_to_agent")).toBeNull();
     expect(classifyRuntimeTool("tool_help")).toBeNull();
     expect(classifyRuntimeTool("find_tools")).toBeNull();

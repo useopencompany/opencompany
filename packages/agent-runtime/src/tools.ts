@@ -23,6 +23,7 @@ export type RuntimeToolName =
   | "write_file"
   | "list_files"
   | "git_diff"
+  | "run_subagent"
   | "delegate_to_agent"
   | "update_agent_file"
   | "ask_user_question"
@@ -726,6 +727,50 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       properties: {},
       additionalProperties: false,
     },
+  },
+  {
+    name: "run_subagent",
+    kind: "internal",
+    description:
+      "Run a focused, temporary subagent for a bounded task. Grant only the tools it needs; it returns one distilled answer and streams its progress inside this tool call.",
+    parameters: {
+      type: "object",
+      properties: {
+        description: {
+          type: "string",
+          description: "Short label for the subagent task, shown in the UI.",
+        },
+        prompt: {
+          type: "string",
+          description:
+            "Self-contained task prompt for the subagent. Include relevant context and the exact answer shape needed.",
+        },
+        tools: {
+          type: "array",
+          description:
+            "Optional subset of your enabled runtime tool names to grant. Omit for the default read/research set.",
+          items: { type: "string" },
+        },
+        model: {
+          type: "string",
+          enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+          description: "Optional model override. Defaults to your current model.",
+        },
+        max_steps: {
+          type: "number",
+          description: "Maximum inner model steps. Clamped from 4 to 24. Defaults to 16.",
+          default: 16,
+        },
+      },
+      required: ["description", "prompt"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use run_subagent when a focused parallel-style investigation would keep your own context cleaner.",
+      "The subagent is temporary and does not ask the user questions. Its final answer is returned as this tool's result.",
+      "Only grant tools needed for the task. If tools is omitted, a safe read/research-oriented set is used.",
+      "The subagent cannot spawn other agents, delegate, edit your agent file, use MCP tools, or use user-interaction tools.",
+    ].join("\n"),
   },
   {
     name: "delegate_to_agent",
@@ -2771,6 +2816,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   write_file: "Write file",
   list_files: "List files",
   git_diff: "Review changes",
+  run_subagent: "Run subagent",
   delegate_to_agent: "Delegate to agent",
   update_agent_file: "Update agent config",
   ask_user_question: "Ask a question",
@@ -2867,6 +2913,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "edit_file",
   "list_files",
   "git_diff",
+  "run_subagent",
   "shell",
   "read_skill",
   "gh",

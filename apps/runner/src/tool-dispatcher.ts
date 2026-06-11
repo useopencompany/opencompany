@@ -147,6 +147,15 @@ type DelegateToAgent = (input: {
   toolCallId: string;
 }) => Promise<unknown>;
 
+type RunSubagent = (input: {
+  description: string;
+  prompt: string;
+  tools?: string[] | undefined;
+  model?: string | undefined;
+  max_steps?: number | undefined;
+  toolCallId: string;
+}) => Promise<unknown>;
+
 // Wall-clock anchors for one tool call's phase breakdown (ToolCallTimings). Created at execute()
 // entry in createToolSet so the gate wait (waitForStarted: stream-loop scheduling + policy +
 // the blocking tool.started write) is included; executeRuntimeTool fills in the later phases.
@@ -187,6 +196,7 @@ export function createToolSet(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  runSubagent?: RunSubagent | undefined;
   // Receives each call's ToolCallTimings once measured (per-turn rollup + slow-call analytics).
   onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
 }) {
@@ -257,6 +267,7 @@ export function createToolSet(input: {
           observabilityContext: input.observabilityContext,
           toolBudget: input.toolBudget,
           delegateToAgent: input.delegateToAgent,
+          runSubagent: input.runSubagent,
         });
       },
     }) as ToolSet[string];
@@ -326,6 +337,7 @@ export function createToolSet(input: {
         observabilityContext: input.observabilityContext,
         toolBudget: input.toolBudget,
         delegateToAgent: input.delegateToAgent,
+        runSubagent: input.runSubagent,
       });
     },
   }) as ToolSet[string];
@@ -384,6 +396,7 @@ export async function dispatchBuiltinUseTool(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  runSubagent?: RunSubagent | undefined;
 }) {
   const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
   const definition = rawName
@@ -476,6 +489,7 @@ export async function dispatchBuiltinUseTool(input: {
     observabilityContext: input.observabilityContext,
     toolBudget: input.toolBudget,
     delegateToAgent: input.delegateToAgent,
+    runSubagent: input.runSubagent,
   });
 }
 
@@ -613,6 +627,7 @@ type ExecuteRuntimeToolInput = {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  runSubagent?: RunSubagent | undefined;
 };
 
 // Braintrust's `wrapAISDK` already traces tool execution as a tool-call/tool-result pair nested
@@ -741,6 +756,16 @@ async function executeRuntimeToolInner(
             reason:
               "You cannot ask the user a question in this context (no interactive session, or the questions were malformed). Proceed using your best judgment.",
           };
+        }
+        if (input.definition.name === "run_subagent") {
+          const args = readRunSubagentArgs(input.args);
+          if (!input.runSubagent) {
+            throw new RecoverableToolError(
+              "Subagents are not available in this run.",
+              "subagent_unavailable",
+            );
+          }
+          return input.runSubagent({ ...args, toolCallId: input.toolCallId });
         }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
@@ -1640,6 +1665,45 @@ function readDelegateToAgentArgs(args: unknown) {
     ...(agent ? { agent } : {}),
     ...(sessionId ? { sessionId } : {}),
     prompt,
+  };
+}
+
+function readRunSubagentArgs(args: unknown) {
+  const record = isRecord(args) ? args : {};
+  const description = typeof record.description === "string" ? record.description.trim() : "";
+  const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+  const model = typeof record.model === "string" ? record.model.trim() : "";
+  const rawTools = Array.isArray(record.tools) ? record.tools : undefined;
+  const tools = rawTools
+    ?.map((tool) => (typeof tool === "string" ? tool.trim() : ""))
+    .filter(Boolean);
+  const maxSteps = typeof record.max_steps === "number" ? record.max_steps : undefined;
+
+  if (!description) {
+    throw new RecoverableToolError(
+      "Tool argument description must be a non-empty string.",
+      "invalid_tool_input",
+    );
+  }
+  if (!prompt) {
+    throw new RecoverableToolError(
+      "Tool argument prompt must be a non-empty string.",
+      "invalid_tool_input",
+    );
+  }
+  if (rawTools && tools?.length !== rawTools.length) {
+    throw new RecoverableToolError(
+      "Tool argument tools must be an array of tool-name strings.",
+      "invalid_tool_input",
+    );
+  }
+
+  return {
+    description,
+    prompt,
+    ...(tools ? { tools } : {}),
+    ...(model ? { model } : {}),
+    ...(maxSteps !== undefined ? { max_steps: maxSteps } : {}),
   };
 }
 
