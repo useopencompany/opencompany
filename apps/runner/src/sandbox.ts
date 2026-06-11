@@ -641,13 +641,68 @@ async function runCommandWithExitResult(
   command: string,
   options: Parameters<SandboxHandle["commands"]["run"]>[1],
 ) {
-  try {
-    return await sandbox.commands.run(command, options);
-  } catch (error) {
+  const guarded = guardCommandStreamCallbacks(options ?? {});
+  const result = await sandbox.commands.run(command, guarded.options).catch(async (error) => {
+    // A captured stream-callback error (typically RunAbortError) outranks the command's
+    // own failure: it is the reason the run is unwinding.
+    await guarded.rethrow();
     const exitResult = commandExitResult(error);
-    if (exitResult) return exitResult;
-    throw error;
-  }
+    if (!exitResult) throw error;
+    return exitResult;
+  });
+  await guarded.rethrow();
+  return result;
+}
+
+type CommandStreamCallback = (data: string) => void | Promise<void>;
+
+/**
+ * E2B's `CommandHandle.handleEvents` invokes `onStdout`/`onStderr` WITHOUT awaiting them,
+ * so an async callback that rejects — e.g. the run-control gate throwing `RunAbortError`
+ * when the user hits Stop mid-stream — becomes an unhandled promise rejection detached
+ * from the awaited `commands.run` chain, which exits the whole multi-session Bun process
+ * (prod crash 2026-06-10). This wraps the stream callbacks so they can never reject: the
+ * first error is captured (later chunks are dropped) and surfaced via `rethrow()` at the
+ * awaited boundary, where the regular tool-failure/abort handling can see it.
+ */
+export function guardCommandStreamCallbacks<
+  T extends { onStdout?: CommandStreamCallback; onStderr?: CommandStreamCallback },
+>(options: T): { options: T; rethrow: () => Promise<void> } {
+  let failed = false;
+  let callbackError: unknown;
+  // Chain of in-flight callback invocations. `rethrow` waits for it so a rejection from
+  // the final chunk — which e2b fires without awaiting, possibly in the same tick the
+  // command result resolves — is still observed at the boundary. Links never reject
+  // (errors are captured below), so the chain itself is safe to await.
+  let settled: Promise<void> = Promise.resolve();
+
+  const guard = (callback: CommandStreamCallback | undefined) =>
+    callback &&
+    ((data: string): Promise<void> => {
+      if (failed) return Promise.resolve();
+      const invocation = (async () => {
+        try {
+          await callback(data);
+        } catch (error) {
+          failed = true;
+          callbackError = error;
+        }
+      })();
+      settled = settled.then(() => invocation);
+      return invocation;
+    });
+
+  return {
+    options: {
+      ...options,
+      onStdout: guard(options.onStdout),
+      onStderr: guard(options.onStderr),
+    } as T,
+    rethrow: async () => {
+      await settled;
+      if (failed) throw callbackError;
+    },
+  };
 }
 
 export function commandExitResult(error: unknown) {

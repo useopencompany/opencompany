@@ -28,6 +28,7 @@ import {
   cloneGitHubRepositoryIntoWorkdir,
   commandExitResult,
   githubRemoteMatches,
+  guardCommandStreamCallbacks,
   isCommandTimeoutError,
   type SandboxHandle,
   sandboxLayout,
@@ -198,19 +199,24 @@ export async function runOpencodeCoderTool(input: {
   )}`;
   let timedOut = false;
   let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
+  // E2B fires these callbacks without awaiting them, so a rejection here (e.g. the
+  // run-control gate inside onOutput throwing RunAbortError on Stop) would escape as an
+  // unhandled rejection and kill the whole runner process. The guard captures the first
+  // callback error and rethrows it below, at the awaited boundary.
+  const guardedRun = guardCommandStreamCallbacks({
+    envs: opencodeEnv,
+    timeoutMs: input.env.opencodeTimeoutMs,
+    onStdout: async (data: string) => {
+      const redacted = redact(data);
+      const activity = stream.push(redacted);
+      if (activity) await input.onOutput?.(activity);
+    },
+    onStderr: async (data: string) => {
+      await input.onOutput?.(redact(data));
+    },
+  });
   try {
-    result = await input.sandbox.commands.run(opencodeCommand, {
-      envs: opencodeEnv,
-      timeoutMs: input.env.opencodeTimeoutMs,
-      onStdout: async (data: string) => {
-        const redacted = redact(data);
-        const activity = stream.push(redacted);
-        if (activity) await input.onOutput?.(activity);
-      },
-      onStderr: async (data: string) => {
-        await input.onOutput?.(redact(data));
-      },
-    });
+    result = await input.sandbox.commands.run(opencodeCommand, guardedRun.options);
   } catch (error) {
     // Recover instead of failing the whole tool call: a non-zero opencode exit (CommandExitError)
     // still carries stdout/stderr, and a wall-clock timeout leaves the sandbox alive with files
@@ -229,6 +235,9 @@ export async function runOpencodeCoderTool(input: {
       throw error;
     }
   }
+  // Surface a stream-callback failure (typically RunAbortError) after the exit/timeout
+  // recovery above: an aborted run must fail the tool call, not snapshot partial state.
+  await guardedRun.rethrow();
   stream.finish();
   const summary = stream.summary({
     exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
