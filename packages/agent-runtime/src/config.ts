@@ -59,6 +59,8 @@ export type ResolvedAgentRuntimeConfig = {
   mcpServers: AgentMcpToolConfig[];
 };
 
+export const FIXED_PERSONAL_AGENT_NAME = "Leo";
+
 export function resolveAgentRuntimeConfig(input: {
   agent: AgentConfig;
   // Per-session model override (the session's stored modelName). When set to a

@@ -1716,6 +1716,26 @@ function makeRelatedChild(
 }
 
 describe("SessionViewContent — surface-aware inspector links", () => {
+  it("keeps runtime details collapsed by default for past personal sessions", () => {
+    navigationMock.pathname = "/personal/session/sess_001";
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("keeps runtime details collapsed by default for company sessions without related sessions", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    expect(screen.getByRole("button", { name: "Expand runtime details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
   it("links child sessions under /personal when viewed on the personal surface", () => {
     navigationMock.pathname = "/personal/session/sess_001";
     const detail = makeDetail({
