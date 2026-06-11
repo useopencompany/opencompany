@@ -1,4 +1,10 @@
-import { agentBundleDir } from "@opencompany/agent-runtime";
+import {
+  agentBundleDir,
+  FIRST_PRINCIPLES_SKILL_ID,
+  HUMANIZER_SKILL_ID,
+  ONBOARDING_SKILL_ID,
+} from "@opencompany/agent-runtime";
+import type { AgentConfig } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentFiles, agents, workspaceSyncJobs } from "@opencompany/db/schema";
@@ -50,26 +56,29 @@ describe("ensurePersonalAgent", () => {
     vi.clearAllMocks();
   });
 
-  it("creates a personal agent and seeds a personalized soul.md in the same batch", async () => {
+  it("creates Leo and seeds a personalized soul.md in the same batch", async () => {
     const { db, insertedValues, batch } = createDbMock([[]]);
     getDbMock.mockReturnValue(db as never);
 
     const result = await ensurePersonalAgent({
       userId: "usr_123",
       workspaceId: "wks_123",
-      name: "Ada",
+      userName: "Ada",
     });
 
     const agentInsert = insertedValues.find((entry) => entry.table === agents)?.value as {
       id: string;
+      name: string;
       workspaceId: string;
       userId: string;
       isDefault: boolean;
       path: string;
       githubSyncStatus: string;
+      config: AgentConfig;
     };
     expect(agentInsert).toMatchObject({
       id: result.id,
+      name: "Leo",
       workspaceId: "wks_123",
       userId: "usr_123",
       isDefault: true,
@@ -77,7 +86,24 @@ describe("ensurePersonalAgent", () => {
       githubSyncStatus: "synced",
     });
 
-    const expectedSoul = DEFAULT_PERSONAL_SOUL_MD.replaceAll("{{name}}", "Ada");
+    // The body's @-mentions are the source of truth for the default capability set: research
+    // tools (exa/youtube/instagram), personal integrations (gmail/google_calendar/slack), and
+    // the thinking/writing skills — plus the dormant onboarding skill appended in code.
+    expect(agentInsert.config.tools.map((tool) => tool.id)).toEqual([
+      "exa",
+      "youtube",
+      "instagram",
+      "gmail",
+      "google_calendar",
+      "slack",
+    ]);
+    expect(agentInsert.config.skills?.map((skill) => skill.id)).toEqual([
+      FIRST_PRINCIPLES_SKILL_ID,
+      HUMANIZER_SKILL_ID,
+      ONBOARDING_SKILL_ID,
+    ]);
+
+    const expectedSoul = DEFAULT_PERSONAL_SOUL_MD.replaceAll("{{userName}}", "Ada");
     const soulInsert = insertedValues.find((entry) => entry.table === agentFiles)?.value as {
       workspaceId: string;
       agentId: string;
@@ -93,9 +119,12 @@ describe("ensurePersonalAgent", () => {
       // Local-only too: no agent_file sync job, no GitHub projection.
       githubSyncStatus: "synced",
     });
-    // The soul content is personalized — no raw placeholder leaks through.
+    // The soul content is personalized for the user, while the agent identity stays fixed.
+    expect(result.name).toBe("Leo");
     expect(soulInsert.content).toContain("Ada");
-    expect(soulInsert.content).not.toContain("{{name}}");
+    expect(soulInsert.content).toContain("Leo");
+    expect(soulInsert.content).not.toContain("{{userName}}");
+    expect(DEFAULT_PERSONAL_SOUL_MD).not.toContain("Louis");
 
     // Agent row + soul.md are written atomically in one batch.
     expect(batch).toHaveBeenCalledOnce();
@@ -113,11 +142,16 @@ describe("ensurePersonalAgent", () => {
       [
         {
           id: "agt_existing",
-          name: "Ada",
+          name: "Leo",
           path: "agents/personal-existing/personal-existing.agent",
-          body: "existing body",
+          body: "You are Leo, Ada's personal agent.\n\nexisting body",
           content: null,
-          config: { model: { name: "minimax/minimax-m2.7-highspeed" } },
+          config: {
+            title: "Leo",
+            instructions: "You are Leo, Ada's personal agent.\n\nexisting body",
+            model: { name: "minimax/minimax-m2.7-highspeed" },
+          },
+          version: 1,
         },
       ],
     ]);
@@ -126,7 +160,7 @@ describe("ensurePersonalAgent", () => {
     const result = await ensurePersonalAgent({
       userId: "usr_123",
       workspaceId: "wks_123",
-      name: "Ada",
+      userName: "Ada",
     });
 
     expect(result.id).toBe("agt_existing");

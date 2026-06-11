@@ -29,13 +29,13 @@ import { personalPaths } from "@/lib/personal/paths";
 //   1. About you — role, team size, company URL. The URL is optional but we nudge once if skipped,
 //      since it lets the agent research the company.
 //   2. Agent familiarity — how much the user has used agents before.
-//   3. Name + preset — name the agent and pick a starting point (Co-founder / Executive Assistant /
-//      start from scratch). A preset pre-selects its integrations and seeds the first task.
+//   3. Preset — pick Leo's starting point (Co-founder / Executive Assistant / start from scratch).
+//      A preset pre-selects its integrations and seeds the first task.
 //   4. Integrations — connect tools INLINE: "Connect" opens the OAuth flow in a popup that reports
 //      back to this window (see /onboarding/connected), so the page never navigates. The checkbox
 //      enables the integration on the agent regardless of whether it's connected yet.
-//   5. Launch — a single "set up my agent" CTA. It persists the survey, names the agent, enables the
-//      selected integrations, and seeds the first session (which runs the agent's onboarding skill),
+//   5. Launch — a single setup CTA. It persists the survey, enables the selected integrations, and
+//      seeds the first session (which runs the agent's onboarding skill),
 //      then drops the user into /personal.
 //
 // The user no longer types a first task — the seeded session opens with the preset's starter task
@@ -64,8 +64,8 @@ const STEPS = [
   },
   {
     eyebrow: SETUP_EYEBROW,
-    title: "Name your agent and pick a starting point",
-    subtitle: "Give it a name and a role to start from. You can change all of this later.",
+    title: "Pick Leo's starting point",
+    subtitle: "Choose the role Leo should start from. You can change the behavior later.",
   },
   {
     eyebrow: SETUP_EYEBROW,
@@ -188,8 +188,7 @@ export function PersonalOnboardingChat({
   // Step 2 — familiarity.
   const [agentExperience, setAgentExperience] = useState("");
 
-  // Step 3 — name + preset.
-  const [agentName, setAgentName] = useState("");
+  // Step 3 — preset.
   const [presetChoice, setPresetChoice] = useState<string | null>(null);
 
   // Step 4 — integrations.
@@ -328,7 +327,6 @@ export function PersonalOnboardingChat({
       return advance();
     }
     if (step === 3) {
-      if (!agentName.trim()) return setError("Name your agent.");
       if (!presetChoice) return setError("Pick a starting point.");
       return advance();
     }
@@ -358,7 +356,6 @@ export function PersonalOnboardingChat({
         prompt,
         {
           integrations: [...selected],
-          agentName: agentName.trim(),
           survey: { heardFrom, heardFromDetail: heardFromDetail.trim() },
           ...(preset
             ? { setup: { id: preset.id, title: preset.title, intent: preset.soulIntent } }
@@ -499,17 +496,7 @@ export function PersonalOnboardingChat({
           ) : null}
 
           {step === 3 ? (
-            <div className="space-y-5">
-              <OnboardingField
-                label="Agent name"
-                value={agentName}
-                onChange={(value) => {
-                  setAgentName(value);
-                  setError(null);
-                }}
-                placeholder="Friday, Ada, Leo..."
-                autoFocus
-              />
+            <div>
               <div>
                 <span className="text-[12px] font-medium text-ink-subtle">Starting point</span>
                 <div className="mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -619,7 +606,7 @@ export function PersonalOnboardingChat({
 
           {step === LAST_STEP ? (
             <div className="space-y-2.5 rounded-lg border border-border bg-surface/55 px-4 py-3.5">
-              <SummaryRow label="Agent">{agentName.trim() || "Your agent"}</SummaryRow>
+              <SummaryRow label="Agent">Leo</SummaryRow>
               <SummaryRow label="Starting point">
                 {presetChoice && presetChoice !== SCRATCH
                   ? (ONBOARDING_SETUPS.find((p) => p.id === presetChoice)?.title ?? "From scratch")
@@ -649,7 +636,7 @@ export function PersonalOnboardingChat({
               {isPending ? (
                 <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
               ) : null}
-              <span>{isPending ? "Setting up" : `Set up ${agentName.trim() || "my agent"}`}</span>
+              <span>{isPending ? "Setting up" : "Set up Leo"}</span>
               {isPending ? null : <ArrowRight size={12} strokeWidth={2} />}
             </button>
           ) : (

@@ -472,14 +472,21 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
   };
 }
 
+// How a hosted tool's providerCostUsdMicros was determined. Most tools pass through a
+// figure the provider itself reported; tools whose provider cannot price the platform's
+// gateway models (e.g. opencode, OC-328) compute it from token counts with MODEL_PRICING.
+export type HostedToolCostSource = "provider_reported" | "platform_model_pricing";
+
 export function calculateHostedToolUsageCost(input: {
   provider: string;
   operation: string;
   providerCostUsdMicros: number;
+  costSource?: HostedToolCostSource;
 }): UsageCostResult {
   const providerCostUsdMicros = Math.max(Math.round(input.providerCostUsdMicros), 0);
   const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerCostUsdMicros);
   const totalCostUsdMicros = providerCostUsdMicros + platformFeeUsdMicros;
+  const costSource = input.costSource ?? "provider_reported";
 
   return {
     billable: totalCostUsdMicros > 0,
@@ -490,7 +497,13 @@ export function calculateHostedToolUsageCost(input: {
       kind: "tool_usage",
       provider: input.provider,
       operation: input.operation,
-      pricingVersion: "provider-reported.2026-05-22",
+      costSource,
+      // Platform-priced tool usage is billed from the same model catalog as model_usage
+      // rows, so it carries that catalog's version string.
+      pricingVersion:
+        costSource === "platform_model_pricing"
+          ? "2026-05-22.standard"
+          : "provider-reported.2026-05-22",
       platformFeeBps: PLATFORM_FEE_BPS,
     },
   };

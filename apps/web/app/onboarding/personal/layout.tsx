@@ -21,11 +21,11 @@ export default async function PersonalOnboardingLayout({
 }) {
   const { authUser, user, workspace } = await currentWorkspace({ skipOnboarding: true });
 
-  const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
+  const userName = user.firstName?.trim() || authUser.email.split("@")[0] || "you";
   await ensurePersonalAgent({
     userId: user.id,
     workspaceId: workspace.id,
-    name: agentName,
+    userName,
   });
 
   return (

@@ -27,11 +27,13 @@ import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 export default async function PersonalLayout({ children }: { children: React.ReactNode }) {
   const { authUser, user, workspace } = await currentWorkspace();
 
-  const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
+  // Short first-person name the scaffold templates into the agent's body/soul ("{{userName}}");
+  // distinct from the full display name derived below for the sidebar footer.
+  const scaffoldUserName = user.firstName?.trim() || authUser.email.split("@")[0] || "you";
   const agent = await ensurePersonalAgent({
     userId: user.id,
     workspaceId: workspace.id,
-    name: agentName,
+    userName: scaffoldUserName,
   });
 
   const [

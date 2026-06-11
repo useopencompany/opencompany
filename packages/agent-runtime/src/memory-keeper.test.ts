@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  MEMORY_KEEPER_MODEL,
   MEMORY_KEEPER_RUNTIME_TOOLS,
   MEMORY_KEEPER_SYSTEM_PROMPT,
   restrictToolsForMemoryKeeper,
 } from "./memory-keeper";
+import { getAgentModelDefinition } from "./models";
 import type { RuntimeToolName } from "./tools";
 
 describe("restrictToolsForMemoryKeeper", () => {
@@ -60,5 +62,27 @@ describe("MEMORY_KEEPER_SYSTEM_PROMPT", () => {
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).toMatch(/NO update|nothing durable|do nothing/i);
     // Corrections are prioritized.
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).toMatch(/correct/i);
+  });
+
+  it("embeds the memory CLI syntax so the keeper never relearns it mid-run", () => {
+    // The exact flags the audited prod passes fumbled (help lookups + 3-4 retries per pass).
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("append-evidence --kind");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("--source-ref");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("--subject");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("rewrite <id> --truth");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("link <id> --to");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("no `show` command");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toMatch(/do not run `memory help`/i);
+  });
+});
+
+describe("MEMORY_KEEPER_MODEL", () => {
+  it("pins a valid catalog model so the session-level override always applies", () => {
+    expect(MEMORY_KEEPER_MODEL).toEqual({
+      provider: "vercel-ai-gateway",
+      name: "google/gemini-3.1-flash-lite-preview",
+    });
+    // resolveAgentRuntimeConfig only honors overrides it can find in the catalog.
+    expect(getAgentModelDefinition(MEMORY_KEEPER_MODEL.name)).not.toBeNull();
   });
 });
