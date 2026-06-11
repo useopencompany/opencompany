@@ -2,7 +2,7 @@
 
 import { FileText, Folder, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentBrainMention, AgentMentionItem } from "./tools";
+import type { AgentBrainMention } from "./tools";
 
 type Props = {
   brainItems: AgentBrainMention[];
@@ -32,10 +32,7 @@ export function BrainFolderPicker({ brainItems, onSelect, onClose }: Props) {
     );
   }, [brainItems, normalizedQuery]);
 
-  // Reset selection when filter changes
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [normalizedQuery]);
+  const clampedIndex = Math.min(selectedIndex, Math.max(0, filteredItems.length - 1));
 
   // Auto-focus the search input on mount
   useEffect(() => {
@@ -46,9 +43,9 @@ export function BrainFolderPicker({ brainItems, onSelect, onClose }: Props) {
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    const active = list.querySelectorAll("[role='option']")[selectedIndex];
+    const active = list.querySelectorAll("[role='option']")[clampedIndex];
     active?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+  }, [clampedIndex]);
 
   function handleKeyDown(event: React.KeyboardEvent) {
     if (event.key === "Escape") {
@@ -68,7 +65,7 @@ export function BrainFolderPicker({ brainItems, onSelect, onClose }: Props) {
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      const item = filteredItems[selectedIndex];
+      const item = filteredItems[clampedIndex];
       if (item) {
         onSelect(item);
       }
@@ -121,7 +118,7 @@ export function BrainFolderPicker({ brainItems, onSelect, onClose }: Props) {
             filteredItems.map((item, index) => {
               const isFolder = item.path.endsWith("/") || item.path === "";
               const Icon = isFolder ? Folder : FileText;
-              const active = index === selectedIndex;
+              const active = index === clampedIndex;
               // Indent based on path depth (trailing slash = folder, so strip it for counting)
               const depth = item.path.replace(/\/$/, "").split("/").filter(Boolean).length;
               return (
