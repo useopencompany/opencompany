@@ -86,9 +86,6 @@ type InitialBrainSelection = {
   contextPath: string;
   expandedPaths: Set<string>;
   draftContent: string;
-  // Whether the URL we loaded actually resolves to the selected file/folder. False only when a
-  // non-empty path matched nothing and we fell back to the first file (a stale/deleted link).
-  addressed: boolean;
 };
 
 // Resolves the file/folder the brain should open with based on the URL path
@@ -99,14 +96,11 @@ function resolveInitialBrainSelection(
   initialPath: string,
 ): InitialBrainSelection {
   const fallback = serverFiles[0];
-  // A bare base URL (no path) intentionally opens the first file, so it counts as addressed; only a
-  // non-empty path that resolves to nothing falls through to the unaddressed return at the end.
   const fallbackSelection: InitialBrainSelection = {
     selectedPath: fallback?.path ?? "",
     contextPath: fallback ? parentFolderPath(fallback.path) : "",
     expandedPaths: new Set(fallback ? ancestorFolderPaths(fallback.path) : []),
     draftContent: fallback?.content ?? "",
-    addressed: true,
   };
   const normalized = initialPath.replace(/^\/+|\/+$/g, "");
   if (!normalized) return fallbackSelection;
@@ -118,7 +112,6 @@ function resolveInitialBrainSelection(
       contextPath: parentFolderPath(exact.path),
       expandedPaths: new Set(ancestorFolderPaths(exact.path)),
       draftContent: exact.content,
-      addressed: true,
     };
   }
 
@@ -130,11 +123,10 @@ function resolveInitialBrainSelection(
       contextPath: normalized,
       expandedPaths: new Set(ancestorFolderPaths(underFolder.path)),
       draftContent: underFolder.content,
-      addressed: true,
     };
   }
 
-  return { ...fallbackSelection, addressed: false };
+  return fallbackSelection;
 }
 
 // Builds the URL that reflects the currently open brain file/folder. `basePath` is the surface
@@ -213,9 +205,6 @@ export default function BrainView({
   const [treeHasFocus, setTreeHasFocus] = useState(false);
   const treeScrollRef = useRef<HTMLDivElement>(null);
   const [draftContent, setDraftContent] = useState(initialSelection.draftContent);
-  // Tracks the URL we last reflected so selection mutators can skip redundant history writes.
-  // Seeded with the URL the server actually rendered (which may be a folder).
-  const lastSyncedUrlRef = useRef(urlBasePath ? brainUrlForPath(urlBasePath, initialPath) : "");
   const [renamingPath, setRenamingPath] = useState("");
   const [renamingName, setRenamingName] = useState("");
   const [renamingType, setRenamingType] = useState<"file" | "folder" | null>(null);
@@ -257,14 +246,15 @@ export default function BrainView({
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
 
-  // If the URL we loaded didn't address the open file (a stale/deleted link that fell back to the
-  // first file), reflect the actually-open file so a copy/reload points at it. Valid file, folder,
-  // and bare-base URLs are left untouched. Mount-only; later selection changes sync via handlers.
+  // Re-assert the open file's URL whenever fresh server data lands. router.refresh() — including the
+  // 2.5s GitHub-sync poll below — re-runs the server component on Next's canonical route and resets
+  // the address bar to the base, because our history.replaceState runs outside the router. Re-syncing
+  // on each serverFiles update makes the deep link survive those refreshes, and on mount settles a
+  // stale/deleted initial URL onto the actually-open file. No-op when the URL already matches.
   useEffect(() => {
-    if (!urlBasePath || initialSelection.addressed) return;
     syncBrainUrl(selectedPathRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [serverFiles]);
 
   useEffect(() => {
     if (!focusedPath) return;
@@ -482,8 +472,11 @@ export default function BrainView({
   function syncBrainUrl(path: string) {
     if (!urlBasePath) return;
     const next = brainUrlForPath(urlBasePath, path);
-    if (lastSyncedUrlRef.current === next) return;
-    lastSyncedUrlRef.current = next;
+    // Compare against the live address bar, not a cached value: router.refresh() can reset the URL
+    // to the base route behind our back, so a cached "already synced" guard would wrongly skip
+    // re-applying the deep link. Brain paths are restricted to [A-Za-z0-9._/-], so the encoded form
+    // matches window.location.pathname verbatim.
+    if (window.location.pathname === next) return;
     window.history.replaceState(window.history.state, "", next);
   }
 
