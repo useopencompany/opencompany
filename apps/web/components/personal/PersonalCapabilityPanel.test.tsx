@@ -165,8 +165,46 @@ describe("PersonalCapabilityPanel integrations", () => {
     expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
   });
 
-  it("renders permission controls for attached integrations", async () => {
-    const user = userEvent.setup();
+  it("hides permission controls for attached integrations until connected", () => {
+    const config: AgentConfig = {
+      ...baseConfig,
+      tools: [
+        {
+          id: "linear",
+          type: "mcp",
+          server: "linear",
+          label: "Linear",
+          description: "Linear MCP",
+        },
+      ],
+    };
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={config}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: false,
+          google_calendar: false,
+          linear: false,
+          slack: false,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+        }}
+        toolPolicies={{ linear: { read: "ask" } }}
+      />,
+    );
+
+    expect(screen.queryByTestId("tool-policy-linear")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
+  });
+
+  it("renders permission controls for connected attached integrations", () => {
     const config: AgentConfig = {
       ...baseConfig,
       tools: [
@@ -200,8 +238,6 @@ describe("PersonalCapabilityPanel integrations", () => {
         toolPolicies={{ linear: { read: "ask" } }}
       />,
     );
-
-    await user.click(screen.getByRole("button", { name: "Expand Linear details" }));
 
     expect(screen.getByTestId("tool-policy-linear")).toBeInTheDocument();
   });
@@ -314,6 +350,56 @@ describe("PersonalCapabilityPanel integrations", () => {
 
     expect(onAddIntegration).toHaveBeenCalledWith("linear");
     expect(openSpy).not.toHaveBeenCalled();
+
+    openSpy.mockRestore();
+  });
+
+  it("lets an already-added connected Gmail integration connect another account from the picker", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue({ closed: false } as Window);
+    const onAddIntegration = vi.fn(async () => true);
+    const config: AgentConfig = {
+      ...baseConfig,
+      tools: [
+        {
+          id: "gmail",
+          type: "hosted_tool",
+          label: "Gmail",
+          description: "Read mail",
+        },
+      ],
+    };
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={config}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: true,
+          google_calendar: false,
+          linear: false,
+          slack: false,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+        }}
+        onAddIntegration={onAddIntegration}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    await user.click(screen.getByRole("button", { name: /Add account/i }));
+
+    expect(onAddIntegration).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/integrations/gmail/start?returnTo=%2Fonboarding%2Fconnected",
+      "oc-personal-connect",
+      expect.any(String),
+    );
 
     openSpy.mockRestore();
   });
@@ -652,6 +738,71 @@ describe("PersonalCapabilityPanel integrations", () => {
 
     expect(screen.getByText("Connecting grants your agent")).toBeInTheDocument();
     expect(screen.getByText("Read-only — cannot send, modify, or delete mail")).toBeInTheDocument();
+  });
+
+  it("lets a connected Gmail row connect another account from its details", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue({ closed: false } as Window);
+    const config: AgentConfig = {
+      ...baseConfig,
+      tools: [
+        {
+          id: "gmail",
+          type: "hosted_tool",
+          label: "Gmail",
+          description: "Read mail",
+        },
+      ],
+    };
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={config}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: true,
+          google_calendar: false,
+          linear: false,
+          slack: false,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+        }}
+        details={{
+          gmail: {
+            summary: "me@example.com · read-only",
+            accounts: [
+              {
+                id: "wint_gmail_1",
+                label: "me@example.com",
+                detail: "Me",
+                status: "connected",
+                statusReason: null,
+                updatedAt: new Date().toISOString(),
+                resources: [],
+              },
+            ],
+            resourcesLabel: null,
+            statusReason: null,
+          },
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Expand Gmail details" }));
+    await user.click(screen.getByRole("button", { name: "Connect another Gmail account" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/integrations/gmail/start?returnTo=%2Fonboarding%2Fconnected",
+      "oc-personal-connect",
+      expect.any(String),
+    );
+
+    openSpy.mockRestore();
   });
 
   it("uses a repository-specific GitHub CTA when repository access is missing", () => {

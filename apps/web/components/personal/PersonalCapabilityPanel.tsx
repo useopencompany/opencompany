@@ -97,6 +97,8 @@ type IntegrationRow = Row & {
   // When set, the badge renders as a "Connect" button that opens this integration's OAuth flow in a
   // popup window (rather than navigating the tab away). Takes precedence over badgeTone styling.
   connectEntry?: PersonalIntegrationCatalogEntry;
+  // Connected OAuth integrations can attach another account without adding another @-mention.
+  connectAnotherEntry?: PersonalIntegrationCatalogEntry;
   // Controls badge styling: "success" (green, default), "warning" (amber, used for setup prompts),
   // or "neutral" (muted, used to mark agent-authored personal skills).
   badgeTone?: "success" | "warning" | "neutral";
@@ -204,7 +206,15 @@ export function PersonalCapabilityPanel({
                 key={row.id}
                 {...row}
                 onConnect={row.connectEntry ? () => openConnectPopup(row.connectEntry!) : undefined}
-                connecting={Boolean(row.connectEntry && connectingId === row.connectEntry.id)}
+                onConnectAnother={
+                  row.connectAnotherEntry
+                    ? () => openConnectPopup(row.connectAnotherEntry!)
+                    : undefined
+                }
+                connecting={Boolean(
+                  (row.connectEntry && connectingId === row.connectEntry.id) ||
+                    (row.connectAnotherEntry && connectingId === row.connectAnotherEntry.id),
+                )}
               />
             ))}
           </div>
@@ -289,11 +299,17 @@ function CapabilityRow({
   permissions,
   connected,
   integrationId,
+  connectAnotherEntry,
   onConnect,
+  onConnectAnother,
   connecting,
   policyProviderKey,
   policyOverrides,
-}: IntegrationRow & { onConnect?: (() => void) | undefined; connecting?: boolean | undefined }) {
+}: IntegrationRow & {
+  onConnect?: (() => void) | undefined;
+  onConnectAnother?: (() => void) | undefined;
+  connecting?: boolean | undefined;
+}) {
   const [expanded, setExpanded] = useState(false);
   // Integration rows with connection detail or a permissions summary expand inline; plain rows
   // (tools, skills, agent-attached repositories) keep the flat layout.
@@ -357,6 +373,11 @@ function CapabilityRow({
           </button>
         )}
       </div>
+      {policyProviderKey && (
+        <div className="px-3.5 pb-3">
+          <ToolPolicyEditor providerKey={policyProviderKey} overrides={policyOverrides} />
+        </div>
+      )}
       {expanded && expandable && (
         <IntegrationRowDetail
           detail={detail}
@@ -364,8 +385,9 @@ function CapabilityRow({
           connected={connected}
           integrationId={integrationId}
           integrationLabel={label}
-          policyProviderKey={policyProviderKey}
-          policyOverrides={policyOverrides}
+          connectAnotherEntry={connectAnotherEntry}
+          onConnect={onConnectAnother}
+          connecting={Boolean(connectAnotherEntry && connecting)}
         />
       )}
     </div>
@@ -382,22 +404,40 @@ function IntegrationRowDetail({
   connected,
   integrationId,
   integrationLabel,
-  policyProviderKey,
-  policyOverrides,
+  connectAnotherEntry,
+  onConnect,
+  connecting,
 }: {
   detail?: PersonalIntegrationDetail | undefined;
   permissions?: string[] | undefined;
   connected?: boolean | undefined;
   integrationId?: PersonalIntegrationId | undefined;
   integrationLabel: string;
-  policyProviderKey?: string | undefined;
-  policyOverrides?: WorkspaceToolPolicyOverrides[string] | undefined;
+  connectAnotherEntry?: PersonalIntegrationCatalogEntry | undefined;
+  onConnect?: (() => void) | undefined;
+  connecting?: boolean | undefined;
 }) {
   // Captured once when the section is expanded — keeps render pure (same pattern as PersonalInbox).
   const [now] = useState(() => Date.now());
   return (
     <div className="space-y-3 border-t border-border/70 px-3.5 py-3">
       {detail?.statusReason && <p className="text-[12px] text-warning">{detail.statusReason}</p>}
+
+      {connected && connectAnotherEntry && onConnect && (
+        <button
+          type="button"
+          onClick={onConnect}
+          disabled={connecting}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-65"
+        >
+          {connecting ? (
+            <LoaderCircle size={12} strokeWidth={2} className="animate-spin" />
+          ) : (
+            <Plus size={12} strokeWidth={2} />
+          )}
+          {connecting ? "Connecting…" : `Connect another ${integrationLabel} account`}
+        </button>
+      )}
 
       {detail?.accounts.map((account) => (
         <IntegrationAccountDetail
@@ -433,9 +473,6 @@ function IntegrationRowDetail({
           integrationLabel={integrationLabel}
         />
       )}
-      {connected && policyProviderKey ? (
-        <ToolPolicyEditor providerKey={policyProviderKey} overrides={policyOverrides} />
-      ) : null}
     </div>
   );
 }
@@ -770,12 +807,19 @@ function AddIntegrationModal({
 
   const handleSelect = async (entry: PersonalIntegrationCatalogEntry) => {
     if (pending) return;
-    if (isIntegrationAdded(entry.id, config, githubRequested)) return;
+    const added = isIntegrationAdded(entry.id, config, githubRequested);
     const connected = Boolean(connections?.[entry.id]);
     setPending(entry.id);
     try {
-      const added = await onAdd(entry.id);
-      if (!added) return;
+      if (added) {
+        if (supportsMultipleAccounts(entry) || !connected) {
+          onConnect(entry);
+          onClose();
+        }
+        return;
+      }
+      const addResult = await onAdd(entry.id);
+      if (!addResult) return;
       if (!connected && !onConnect(entry)) {
         onClose();
         return;
@@ -826,11 +870,13 @@ function AddIntegrationModal({
               const added = isIntegrationAdded(entry.id, config, githubRequested);
               const connected = Boolean(connections?.[entry.id]);
               const loading = pending === entry.id;
+              const canConnectAgain = supportsMultipleAccounts(entry) || !connected;
+              const disabled = Boolean(pending) || (added && !canConnectAgain);
               return (
                 <button
                   key={entry.id}
                   type="button"
-                  disabled={added || Boolean(pending)}
+                  disabled={disabled}
                   onClick={() => handleSelect(entry)}
                   className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover disabled:cursor-default disabled:hover:bg-transparent"
                 >
@@ -860,8 +906,17 @@ function AddIntegrationModal({
                     />
                   ) : added ? (
                     <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-ink-subtle">
-                      <Check size={13} strokeWidth={2} className="text-success" />
-                      Added
+                      {canConnectAgain ? (
+                        <>
+                          <Plus size={13} strokeWidth={2} />
+                          {connected ? "Add account" : "Connect"}
+                        </>
+                      ) : (
+                        <>
+                          <Check size={13} strokeWidth={2} className="text-success" />
+                          Added
+                        </>
+                      )}
                     </span>
                   ) : (
                     <Plus size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
@@ -1284,7 +1339,9 @@ export function buildPersonalIntegrationRows(
         permissions: entry.permissions,
         connected: input.githubStatus === "connected",
         integrationId: entry.id,
-        ...(input.githubStatus === "connected" ? { policyProviderKey: "github" } : {}),
+        ...(input.githubStatus === "connected"
+          ? { policyProviderKey: "github", connectAnotherEntry: entry }
+          : {}),
         policyOverrides: input.toolPolicies?.github,
       });
       continue;
@@ -1305,7 +1362,11 @@ export function buildPersonalIntegrationRows(
       ...(connected ? { policyProviderKey: entry.id } : {}),
       policyOverrides: input.toolPolicies?.[entry.id],
       ...(connected
-        ? { badge: "Connected", badgeTone: "success" as const }
+        ? {
+            badge: "Connected",
+            badgeTone: "success" as const,
+            ...(supportsMultipleAccounts(entry) ? { connectAnotherEntry: entry } : {}),
+          }
         : { badge: "Connect", connectEntry: entry }),
     });
   }
@@ -1364,6 +1425,10 @@ function githubRowStatus(
     badge: status === "needs_repository_access" ? "Choose repositories" : "Connect",
     connectEntry: entry,
   };
+}
+
+function supportsMultipleAccounts(entry: PersonalIntegrationCatalogEntry) {
+  return entry.kind === "github" || entry.kind === "google";
 }
 
 function isToolAdded(toolId: AgentToolId, config: AgentConfig) {
