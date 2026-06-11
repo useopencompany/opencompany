@@ -56,6 +56,17 @@ describe("Sidebar status menu item", () => {
     vi.stubGlobal("fetch", vi.fn());
   });
 
+  it("keeps personal and workspace spaces visible", () => {
+    renderSidebar();
+
+    expect(screen.getByRole("navigation", { name: "Space" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Personal" })).toHaveAttribute("href", "/personal");
+    const workspaceLink = screen.getByRole("link", { name: "OpenCompany" });
+    expect(workspaceLink).toHaveAttribute("href", "/");
+    expect(workspaceLink).toHaveAttribute("title", "OpenCompany");
+    expect(workspaceLink).toHaveAttribute("aria-current", "page");
+  });
+
   it("links to the Better Stack status page from the account menu", async () => {
     mockStatusPageFetch("operational");
     const user = userEvent.setup();

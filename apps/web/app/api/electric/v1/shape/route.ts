@@ -30,7 +30,13 @@ type ShapeScope = {
 const SHAPE_SCOPES: Record<string, ShapeScope> = {
   agents: {
     table: "agents",
-    where: ({ workspaceId }) => ({ clause: `"workspace_id" = $1`, params: [workspaceId] }),
+    // Workspace-wide agents only. Private/personal agents (user_id set, e.g. the /personal
+    // experiment agent) are deliberately excluded from the synced collection so they never
+    // surface in workspace agent pickers/lists. /personal loads its agent via server fetch.
+    where: ({ workspaceId }) => ({
+      clause: `"workspace_id" = $1 AND "user_id" IS NULL`,
+      params: [workspaceId],
+    }),
   },
   agent_sessions: {
     table: "agent_sessions",
@@ -42,6 +48,15 @@ const SHAPE_SCOPES: Record<string, ShapeScope> = {
   session_stars: {
     table: "session_stars",
     where: ({ userId }) => ({ clause: `"user_id" = $1`, params: [userId] }),
+  },
+  // Only live items sync to the client; resolved (done/dismissed) items leave the shape. A snoozed
+  // item stays synced (the client hides it until snoozed_until elapses).
+  inbox_items: {
+    table: "inbox_items",
+    where: ({ workspaceId, userId }) => ({
+      clause: `"workspace_id" = $1 AND "user_id" = $2 AND "status" IN ('open', 'snoozed')`,
+      params: [workspaceId, userId],
+    }),
   },
 };
 
@@ -89,22 +104,35 @@ export async function GET(request: Request): Promise<Response> {
   resolved.params.forEach((param, index) => {
     originUrl.searchParams.set(`params[${index + 1}]`, param);
   });
-  // Electric Cloud source credentials, if used.
-  if (process.env.ELECTRIC_SOURCE_ID) {
-    originUrl.searchParams.set("source_id", process.env.ELECTRIC_SOURCE_ID);
+  // Authenticate to Electric, server-side only. Mutually-exclusive modes:
+  //  - Electric Cloud: source_id + secret (the source's secret).
+  //  - Self-hosted secure mode: ELECTRIC_SECRET passed as the `secret` query param.
+  //    Electric is secure-by-default and its HTTP API is public unless this is set;
+  //    the secret is injected here and never exposed to the browser (per the Electric
+  //    auth-proxy guidance, used for preview environments — see issue #351).
+  //  - Legacy/custom gatekeeper: ELECTRIC_TOKEN bearer header.
+  const sourceId = process.env.ELECTRIC_SOURCE_ID?.trim();
+  const sourceSecret = process.env.ELECTRIC_SOURCE_SECRET?.trim();
+  const electricSecret = process.env.ELECTRIC_SECRET?.trim();
+  // Electric Cloud needs source_id and secret together; one without the other is
+  // a misconfiguration that would send an invalid upstream auth combo, so fail
+  // loudly instead of silently falling back to a self-hosted secret.
+  if (Boolean(sourceId) !== Boolean(sourceSecret)) {
+    return new Response("Electric sync is misconfigured.", { status: 503 });
   }
-  if (process.env.ELECTRIC_SOURCE_SECRET) {
-    originUrl.searchParams.set("secret", process.env.ELECTRIC_SOURCE_SECRET);
+  if (sourceId && sourceSecret) {
+    originUrl.searchParams.set("source_id", sourceId);
+    originUrl.searchParams.set("secret", sourceSecret);
+  } else if (electricSecret) {
+    originUrl.searchParams.set("secret", electricSecret);
   }
 
+  const usesQuerySecret = Boolean((sourceId && sourceSecret) || electricSecret);
   const response = await fetch(originUrl, {
-    headers: process.env.ELECTRIC_SOURCE_SECRET
-      ? {}
-      : {
-          ...(process.env.ELECTRIC_TOKEN
-            ? { Authorization: `Bearer ${process.env.ELECTRIC_TOKEN}` }
-            : {}),
-        },
+    headers:
+      !usesQuerySecret && process.env.ELECTRIC_TOKEN
+        ? { Authorization: `Bearer ${process.env.ELECTRIC_TOKEN}` }
+        : {},
   });
 
   // Electric responses are gzipped/length-bound for its own origin; strip those

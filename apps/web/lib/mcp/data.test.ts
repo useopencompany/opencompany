@@ -24,22 +24,24 @@ beforeEach(() => {
 });
 
 describe("loadWorkspaceMcpSettingsForWorkspace", () => {
-  it("reports Linear and Slack MCP configured states independently", async () => {
+  it("reports MCP provider configured states independently", async () => {
     db.queryResults = [
-      [{ enabled: true }],
       [
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),
+        mcpServerRow("wmcps_posthog", "posthog", "configured"),
+        mcpServerRow("wmcps_betterstack", "betterstack", "configured"),
       ],
       [
         { serverKey: "linear", kind: "bearer_token" },
         { serverKey: "slack", kind: "oauth" },
+        { serverKey: "posthog", kind: "oauth" },
+        { serverKey: "betterstack", kind: "oauth" },
       ],
     ];
 
     const settings = await loadWorkspaceMcpSettingsForWorkspace("wks_123");
 
-    expect(settings.mcpEnabled).toBe(true);
     expect(settings.linear).toMatchObject({
       configured: true,
       serverId: "wmcps_linear",
@@ -50,11 +52,20 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
       serverId: "wmcps_slack",
       status: "configured",
     });
+    expect(settings.posthog).toMatchObject({
+      configured: true,
+      serverId: "wmcps_posthog",
+      status: "configured",
+    });
+    expect(settings.betterstack).toMatchObject({
+      configured: true,
+      serverId: "wmcps_betterstack",
+      status: "configured",
+    });
   });
 
   it("does not treat Linear credentials as Slack credentials", async () => {
     db.queryResults = [
-      [{ enabled: true }],
       [
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),
@@ -71,7 +82,7 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
 
 function mcpServerRow(
   id: string,
-  serverKey: "linear" | "slack",
+  serverKey: "linear" | "slack" | "posthog" | "betterstack",
   status: "configured" | "missing_credential" | "disabled" | "error",
 ) {
   return {

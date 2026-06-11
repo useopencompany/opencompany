@@ -281,6 +281,28 @@ describe("deriveAgentConfigFromBody", () => {
     expect(bodyResult.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
     expect(bodyResult.config.tools[0]).not.toHaveProperty("repository");
   });
+
+  it("enables a built-in skill from an @skill/<id> body mention without a catalog", () => {
+    const { body, config } = deriveAgentConfigFromBody({
+      title: "Strategist",
+      body: "Reason carefully.\n\n@skill/first-principles",
+      repositories: [],
+    });
+
+    expect(body).toBe("Reason carefully.\n\n@skill/first-principles");
+    // Built-ins resolve straight from code (no `skills` catalog passed) as bare references.
+    expect(config.skills).toEqual([{ id: "first-principles" }]);
+  });
+
+  it("drops an unknown @skill/<id> mention that matches no built-in or catalog entry", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Strategist",
+      body: "@skill/does-not-exist",
+      repositories: [],
+    });
+
+    expect(config.skills).toBeUndefined();
+  });
 });
 
 function doc(content: NonNullable<TiptapDoc["content"]>[number]["content"]): TiptapDoc {

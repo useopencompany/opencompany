@@ -55,7 +55,6 @@ describe("agent detail API route", () => {
       usableGitHubIntegrationRepositories: [],
       workspaceAgents: [],
       mcp: {
-        mcpEnabled: false,
         linearConfigured: false,
         slackConfigured: false,
       },

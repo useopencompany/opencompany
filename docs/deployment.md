@@ -263,3 +263,140 @@ bun run release:smoke
 - Render API deploy works for the runner service.
 - `bun run release:preflight -- --release` passes in GitHub Actions.
 - The first `Release Production` workflow finishes with smoke checks green.
+
+## PR preview environments
+
+A labeled PR can get a **full per-PR isolated stack** — its own Neon branch, runner,
+Electric, Durable Streams, and Vercel web deploy — created on label/push and destroyed on
+close. The load-bearing invariant: a preview runner must **never** poll the production
+database. Isolation is structural (DB-per-preview) and enforced at runner boot.
+
+This implements issue #351. Design notes live in the issue and the workspace plan
+(`.context/preview-environments-plan.md`).
+
+### Architecture (one stack per PR)
+
+GitHub Actions is the single orchestrator (mirrors `release-production.yml`):
+
+```text
+labeled PR ──► .github/workflows/pr-preview.yml
+                 ├─ await-ci: wait for the CI quality check (lint/typecheck/build/test) to pass — else skip
+                 │  scripts/preview-provision.mjs
+                 ├─ Neon branch  preview/pr-<n>  (forked from sanitized preview-seed, migrated, TTL)
+                 ├─ Render runner   oc-preview-pr-<n>-runner   (builds Dockerfile.runner @ PR branch)
+                 ├─ Render electric oc-preview-pr-<n>-electric (electricsql/electric image, secure)
+                 ├─ Render streams  oc-preview-pr-<n>-streams  (in-memory @durable-streams/server)
+                 └─ Vercel web deploy ──► alias pr-<n>.<PREVIEW_BASE_DOMAIN>, per-PR env injected
+closed / unlabeled ──► scripts/preview-teardown.mjs  (delete all + Neon branch → drops the replication slot)
+every 6h ─► .github/workflows/preview-reaper.yml  (desired = labeled-open PRs; destroys orphans/over-TTL)
+```
+
+- **Gating:** label-gated on `preview` (cost control). No label, no stack.
+- **Merge policy:** PR previews are advisory. Do not require `PR Preview`,
+  `Wait for CI to pass`, or `Provision preview stack` in branch protection/rulesets;
+  keep the CI quality check as the merge gate. Preview failures still update the PR
+  comment, plus GitHub Deployment status when a deployment record exists.
+- **Data:** previews fork from a sanitized `preview-seed` branch, **never** prod `main`
+  (no prod PII). The DB is seeded when the per-PR branch is first created and preserved
+  across preview updates.
+- **Base secrets:** Infisical `dev`; runner static runtime secrets currently reuse
+  Infisical `prod` + `/runner`; per-PR dynamic values are minted by the orchestrator.
+- **Safety gate:** `apps/runner/src/preview-guard.ts` refuses to boot a preview runner unless
+  the attached Neon endpoint is verified (Neon API) to belong to its `NEON_BRANCH_ID`, and
+  refuses to boot a prod runner that carries any preview identity.
+- **Electric:** secure-by-default (`ELECTRIC_SECRET`, injected server-side by the web proxy).
+  Its on-disk shape log is **not** disposable — set `PREVIEW_ELECTRIC_STORAGE_DIR` to a
+  persistent volume, or treat restarts as a full reprovision (the default).
+
+> ⚠️ **Render create-service payloads need a one-time live validation.** The exact
+> `POST /v1/services` body is centralized in `scripts/lib/preview-render.mjs`
+> (`build*ServiceSpec`). Run `node scripts/preview-provision.mjs --dry-run` (it prints every
+> payload) and confirm against the Render API before the first real provision; adjust field
+> names in that one file if Render rejects anything.
+
+### One-time setup
+
+Neon project **logical replication must be enabled** (project-wide, irreversible, restarts
+computes — already done for this project).
+
+1. **`preview-seed` Neon branch.** Fork from prod and sanitize (remove PII/secrets) with
+   the bundled tooling:
+
+   ```bash
+   NEON_PARENT_BRANCH=<prod-branch> bun run preview:seed                            # create the branch
+   psql "$SEED_DIRECT_URL" -v ON_ERROR_STOP=1 -f scripts/sql/preview-seed-sanitize.sql  # scrub PII/secrets (REQUIRED)
+   # or: NEON_PARENT_BRANCH=<prod-branch> bun run preview:seed -- --apply-sanitize
+   ```
+
+   The sanitizer deletes credential/billing/transient rows, scrubs every customer-authored
+   or identifying text/jsonb column, and ends with a **coverage guard**: it re-scans the live
+   schema and aborts (rolling back the whole run) if any unreviewed content column exists.
+   Run it with `ON_ERROR_STOP=1` so a guard failure is fatal — if it errors, classify the
+   reported column(s) in `scripts/sql/preview-seed-sanitize.sql` and re-run before using the
+   seed. This is why the seed must be re-sanitized after every schema change, not just every
+   re-fork.
+
+   Re-fork + re-sanitize on a cadence (`--refresh`) so the seed stays realistic. Electric
+   uses the branch owner role by default; `scripts/sql/preview-seed-electric-role.sql` is
+   an optional least-privilege hardening to apply + test later.
+2. **Vercel.** Attach `*.preview.opencompany.cloud` (wildcard) and
+   `oauth.opencompany.cloud` to the existing web project. Populate the Vercel **Preview**
+   environment base values from Infisical `dev` + `/web`.
+3. **Inngest.** Use the existing Inngest Cloud account with Branch Environments. Add the
+   branch-environment `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` to the Vercel Preview
+   environment base values (via Infisical/Vercel sync or the Inngest Vercel integration).
+   Keep `INNGEST_DEV` unset. The PR workflow injects `INNGEST_ENV=preview-pr-<n>` and
+   `INNGEST_SERVE_ORIGIN=https://pr-<n>.<preview-domain>`, then runs a `PUT /api/inngest`
+   sync against that deterministic custom domain after each web deploy, so every preview gets
+   isolated events, logs, delayed jobs, and function definitions. The Vercel project should keep
+   preview custom domains outside deployment protection, or Inngest function invocations will be
+   blocked. If you later install the Inngest Vercel integration and use protected deployment URLs
+   instead of the custom preview domain, configure Protection Bypass for Automation in the Inngest
+   Vercel integration settings.
+4. **GitHub.** Create the `preview` environment and label. Set repo `vars` (see
+   [env-vars.md → Preview Environments](./env-vars.md#preview-environments-per-pr)):
+   at minimum `PREVIEW_BASE_DOMAIN`, plus the Infisical OIDC `vars`.
+5. **Infisical.** In the provision path (`dev` + `/release` by default) add `NEON_API_KEY`,
+   `NEON_PROJECT_ID`, `RENDER_API_KEY`, and `VERCEL_TOKEN/ORG_ID/PROJECT_ID` (the same
+   `RENDER_API_KEY` / `VERCEL_*` model as the prod release CI; `RENDER_OWNER_ID` is
+   optional — auto-resolved from the API). Broaden the OIDC machine identity so the
+   `PR Preview` and `Preview Reaper` workflows may read it. The `PR Preview` workflow also
+   reads runner runtime secrets from `prod` + `/runner` by default
+   (`PREVIEW_RUNNER_INFISICAL_ENV_SLUG` / `PREVIEW_RUNNER_INFISICAL_SECRET_PATH`) so preview
+   runners can boot with E2B, AI Gateway, integration encryption, and GitHub App credentials.
+6. **Better Stack / Render logs.** Create one shared Better Stack Render log source for preview
+   runner logs, normally `opencompany-runner-preview`. Store its syslog endpoint and source token
+   in Infisical `dev` + `/release` as `PREVIEW_RENDER_LOG_ENDPOINT` and
+   `PREVIEW_RENDER_LOG_TOKEN` so `scripts/preview-provision.mjs` can apply a Render resource log
+   stream override to each preview runner. If using a workspace-level Render Log Stream instead,
+   point it at the same source and enable **Include logs from preview instances**. Search the shared
+   source by `preview_pr_number` and `session_id`.
+7. **WorkOS.** On the preview AuthKit env, register wildcard **login** and **sign-out**
+   redirects (`https://*.preview.opencompany.cloud/...`) and keep a concrete default (a
+   wildcard cannot be the default).
+8. **Google OAuth.** In Google Cloud Console, add
+   `https://oauth.opencompany.cloud/api/google/callback` as an authorized redirect URI.
+   Set `GOOGLE_OAUTH_CALLBACK_URL` to that same value in the Vercel/Infisical envs used by
+   previews, and in production if production should also route through the broker.
+9. **Shared services (guardrails).** Use capped preview E2B + AI Gateway keys (or accept
+   dev keys), and a sandbox GitHub org/App (or accept the dev org). Stripe can degrade
+   gracefully in preview; Inngest is required for delayed/background behavior such as the
+   5-minute memory pass.
+
+### Operating a preview
+
+- **Create / update:** add the `preview` label (or push to an already-labeled PR). The PR
+  gets a comment with the URL + stack links.
+- **Reset data:** remove the `preview` label or close the PR to tear down the stack, then
+  add the label/reopen to create a fresh branch from the seed.
+- **Destroy:** close the PR or remove the `preview` label. The reaper is the backstop.
+- **Local script use:** `bun run preview:provision` / `bun run preview:teardown`
+  (`--dry-run` supported); `node scripts/preview-reaper.mjs --dry-run` to preview cleanup.
+
+### First preview — verification checklist
+
+See the step-by-step in the PR review thread / plan. In short: confirm setup (§one-time
+setup), open a throwaway PR, add the `preview` label, watch `PR Preview` go green, then
+verify the alias loads + auth works, the runner `/healthz` and Electric `/v1/health`
+respond, a real agent session streams, and finally that closing the PR tears everything
+down (and that the prod runner still refuses any stray preview env).

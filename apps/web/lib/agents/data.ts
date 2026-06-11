@@ -7,7 +7,7 @@ import {
   workspaceIntegrationResources,
   workspaceIntegrations,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
 import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   type AgentDetailPayload,
@@ -34,7 +34,7 @@ async function loadBrainPathsForWorkspace(workspaceId: string): Promise<string[]
   return rows.map((row) => row.path);
 }
 
-async function loadGitHubIntegrationRepositoriesForWorkspace(
+export async function loadGitHubIntegrationRepositoriesForWorkspace(
   workspaceId: string,
 ): Promise<GitHubIntegrationRepositoryPayload[]> {
   const db = getDb();
@@ -94,7 +94,8 @@ async function loadAgentReferencesForWorkspace(workspaceId: string) {
   const rows = await db
     .select({ path: agents.path, name: agents.name })
     .from(agents)
-    .where(eq(agents.workspaceId, workspaceId))
+    // Workspace-wide agents only; private/personal agents (userId set) are excluded.
+    .where(and(eq(agents.workspaceId, workspaceId), isNull(agents.userId)))
     .orderBy(asc(agents.name));
 
   return rows.flatMap((row) => {
@@ -108,7 +109,8 @@ export async function loadAgentsForWorkspace(workspaceId: string): Promise<Agent
   const rows = await db
     .select()
     .from(agents)
-    .where(eq(agents.workspaceId, workspaceId))
+    // Workspace-wide agents only; private/personal agents (userId set) are excluded.
+    .where(and(eq(agents.workspaceId, workspaceId), isNull(agents.userId)))
     .orderBy(desc(agents.updatedAt));
 
   return rows.map((row) => serializeAgentListItem(row));
@@ -129,6 +131,9 @@ export async function loadAgentForWorkspace(
         .where(
           and(
             eq(agents.workspaceId, workspaceId),
+            // Private/personal agents (userId set) aren't reachable via the workspace agent
+            // detail route / API; they live only on the /personal experiment surface.
+            isNull(agents.userId),
             canonicalPath
               ? or(
                   eq(agents.id, idOrPath),
@@ -165,7 +170,6 @@ export async function loadAgentForWorkspace(
     usableRepositories,
     agentReferences.filter((reference) => reference.path !== agent.path),
     {
-      mcpEnabled: mcpSettings.mcpEnabled,
       linearConfigured: mcpSettings.linear.configured,
       slackConfigured: mcpSettings.slack.configured,
     },

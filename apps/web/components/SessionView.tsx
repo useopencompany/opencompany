@@ -37,9 +37,10 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -62,6 +63,7 @@ import {
   type PendingAttachment,
   uploadAttachment,
 } from "@/components/composer-attachments";
+import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -69,13 +71,14 @@ import { useToast } from "@/components/ToastProvider";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
-import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
+import { formatElapsed, useElapsedSeconds, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import {
   abortAgentSession,
   cancelAgentSessionQuestion,
   continueInterruptedSession,
+  markSessionSeen,
   resolveToolApproval,
   setAgentSessionModel,
   submitAgentSessionMessage,
@@ -89,6 +92,7 @@ import {
 } from "@/lib/agent-sessions/payload";
 import { isToolStepLimitResumable } from "@/lib/agent-sessions/resumable";
 import {
+  AFTER_SESSION_TOOL_NAME,
   type AssistantTurnPart,
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
@@ -96,6 +100,7 @@ import {
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
+  mergeLiveSessionAggregates,
   mergeMessages,
   type RuntimeEvent,
   type RuntimeQuestionItem,
@@ -107,6 +112,7 @@ import {
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { personalPaths } from "@/lib/personal/paths";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import {
   getSlashContext,
@@ -489,17 +495,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     },
   });
   const baseRuntime = useMemo(() => {
-    // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
-    // session-tree rollup isn't reproduced client-side (D2); refreshed on
-    // completion via the effect below.
-    const aggregates = {
-      usage: detail.usage,
-      toolUsage: detail.toolUsage,
-      cost: detail.cost,
-      // Server-sourced like the other aggregates (refreshed on turn completion); the context
-      // gauge in the top bar reads this rather than the cumulative `usage` total.
-      currentContextTokens: detail.currentContextTokens,
-    };
+    // Server aggregates are the floor. The stream may replay historical events, so only usage/cost
+    // events above the loader's high-water mark are layered on top. This gives immediate per-step
+    // model/tool/sandbox/delegated usage without double-counting replayed history.
+    const aggregates = mergeLiveSessionAggregates(
+      {
+        usage: detail.usage,
+        toolUsage: detail.toolUsage,
+        cost: detail.cost,
+        currentContextTokens: detail.currentContextTokens,
+      },
+      streamState.events,
+      detail.latestEventId,
+    );
     // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
     // Stream (`streamState`) is the live overlay. Union-merge the two so the
     // transcript paints instantly from the snapshot AND never drops a durable
@@ -600,6 +608,20 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       void queryClient.invalidateQueries({ queryKey: detailKey });
     }
   }, [runtime.currentStatus, detailKey, queryClient]);
+  // Clear this session's sidebar "unseen" dot while the user is actually looking at it:
+  // on open, on each status change (so watching a turn finish never leaves a stale dot),
+  // and when the tab regains focus. Visibility-gated so a session left open in a
+  // BACKGROUND tab still earns its dot when its turn finishes. Fire-and-forget — the
+  // cleared state streams back via Electric, and the sidebar already suppresses the dot
+  // for the active session, so there is no flash.
+  useEffect(() => {
+    const markSeen = () => {
+      if (document.visibilityState === "visible") void markSessionSeen(session.id);
+    };
+    markSeen();
+    document.addEventListener("visibilitychange", markSeen);
+    return () => document.removeEventListener("visibilitychange", markSeen);
+  }, [session.id, runtime.currentStatus]);
   // Reflect the open session's title in the browser tab so it's easy to tell tabs
   // apart. Restored to the default on unmount / navigation away.
   useEffect(() => {
@@ -614,8 +636,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
   );
-  const backgroundParts = useMemo(
-    () => buildBackgroundActivityParts(runtime.events, runtime.messages).slice(-8),
+  const backgroundActivity = useMemo(
+    () => buildBackgroundActivityParts(runtime.events, runtime.messages),
     [runtime.events, runtime.messages],
   );
   const visibleMessages = useMemo(
@@ -625,6 +647,42 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       ),
     [runtime.messages],
   );
+  // Interleave background passes (memory updates) at their true chronological position: each
+  // entry is anchored to the user message whose turn it followed, so it renders after that
+  // turn's last message — not pinned to the transcript bottom once the user keeps typing.
+  // Entries from the latest turn, or with no resolvable anchor, keep the old bottom placement.
+  const { backgroundPartsAfterMessageId, trailingBackgroundParts } = useMemo(() => {
+    const afterMessageId = new Map<string, AssistantTurnPart[]>();
+    const trailing: AssistantTurnPart[] = [];
+    for (const entry of backgroundActivity) {
+      const anchorIndex = entry.anchorMessageId
+        ? visibleMessages.findIndex((message) => message.id === entry.anchorMessageId)
+        : -1;
+      let nextUserIndex = -1;
+      for (let i = anchorIndex + 1; anchorIndex >= 0 && i < visibleMessages.length; i++) {
+        if (visibleMessages[i]?.role === "user") {
+          nextUserIndex = i;
+          break;
+        }
+      }
+      if (anchorIndex < 0 || nextUserIndex <= 0) {
+        trailing.push(entry.part);
+        continue;
+      }
+      const afterId = visibleMessages[nextUserIndex - 1]?.id;
+      if (!afterId) {
+        trailing.push(entry.part);
+        continue;
+      }
+      const list = afterMessageId.get(afterId) ?? [];
+      list.push(entry.part);
+      afterMessageId.set(afterId, list);
+    }
+    return {
+      backgroundPartsAfterMessageId: afterMessageId,
+      trailingBackgroundParts: trailing.slice(-8),
+    };
+  }, [backgroundActivity, visibleMessages]);
   const assistantPartsByMessageId = useMemo(() => {
     const partsByMessageId = new Map<string, AssistantTurnPart[]>();
     for (const message of runtime.messages) {
@@ -648,9 +706,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       const match = findPending(parts);
       if (match?.type === "tool-call") return match.toolCall;
     }
-    const background = findPending(backgroundParts);
+    const background = findPending(backgroundActivity.map((entry) => entry.part));
     return background?.type === "tool-call" ? background.toolCall : null;
-  }, [assistantPartsByMessageId, backgroundParts]);
+  }, [assistantPartsByMessageId, backgroundActivity]);
   const lastVisibleMessage = visibleMessages.at(-1);
   // Index of the last user message. Everything from here down (that message, its reply,
   // the working indicator, background tool cards) is the "active turn" and gets wrapped
@@ -774,6 +832,35 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           ) : null}
         </div>
       </div>
+    );
+  };
+
+  // A block of background-pass tool cards (memory updates). Shared between the interleaved
+  // per-turn placement and the trailing block at the bottom of the active turn.
+  const renderBackgroundParts = (parts: AssistantTurnPart[]) => (
+    <div className="space-y-1.5">
+      {parts.map((part) =>
+        part.type === "tool-call" ? (
+          <div key={part.toolCall.id} className="flex justify-start">
+            <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
+              <ToolCallCard toolCall={part.toolCall} sessionIsInterrupted={sessionIsInterrupted} />
+            </div>
+          </div>
+        ) : null,
+      )}
+    </div>
+  );
+
+  // A transcript row: the message plus any background passes anchored after it (a memory
+  // update that followed this turn renders here, at its true position in the conversation).
+  const renderMessageRow = (message: SessionMessage) => {
+    const anchoredParts = backgroundPartsAfterMessageId.get(message.id);
+    if (!anchoredParts?.length) return renderMessage(message);
+    return (
+      <Fragment key={`${message.id}-row`}>
+        {renderMessage(message)}
+        {renderBackgroundParts(anchoredParts)}
+      </Fragment>
     );
   };
 
@@ -1263,6 +1350,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         <SessionTopBar
           session={session}
           currentContextTokens={runtime.currentContextTokens}
+          totalCostUsdMicros={runtime.cost.totalCostUsdMicros}
           inspectorCollapsed={inspectorCollapsed}
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
         />
@@ -1342,7 +1430,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               </div>
             ) : null}
 
-            {visibleMessages.slice(0, Math.max(lastUserTurnStart, 0)).map(renderMessage)}
+            {visibleMessages.slice(0, Math.max(lastUserTurnStart, 0)).map(renderMessageRow)}
 
             {/* Active turn: the last user message + its reply + indicators, wrapped in a
                 min-height box so the just-sent message can sit at the top with a viewport
@@ -1360,7 +1448,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               {(lastUserTurnStart >= 0
                 ? visibleMessages.slice(lastUserTurnStart)
                 : visibleMessages
-              ).map(renderMessage)}
+              ).map(renderMessageRow)}
 
               {showWaitingForAssistant ? (
                 <div className="flex justify-start">
@@ -1372,22 +1460,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 </div>
               ) : null}
 
-              {backgroundParts.length > 0 ? (
-                <div className="space-y-1.5">
-                  {backgroundParts.map((part) =>
-                    part.type === "tool-call" ? (
-                      <div key={part.toolCall.id} className="flex justify-start">
-                        <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
-                          <ToolCallCard
-                            toolCall={part.toolCall}
-                            sessionIsInterrupted={sessionIsInterrupted}
-                          />
-                        </div>
-                      </div>
-                    ) : null,
-                  )}
-                </div>
-              ) : null}
+              {trailingBackgroundParts.length > 0
+                ? renderBackgroundParts(trailingBackgroundParts)
+                : null}
             </div>
           </div>
         </div>
@@ -1714,11 +1789,13 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 function SessionTopBar({
   session,
   currentContextTokens,
+  totalCostUsdMicros,
   inspectorCollapsed,
   onToggleInspector,
 }: {
   session: AgentSessionDetailPayload["session"];
   currentContextTokens: number;
+  totalCostUsdMicros: number;
   inspectorCollapsed: boolean;
   onToggleInspector: () => void;
 }) {
@@ -1737,9 +1814,16 @@ function SessionTopBar({
   const ModelIcon = model?.icon ?? Sparkles;
   const modelLabel = model?.label ?? session.modelName.split("/").at(-1) ?? session.modelName;
   const contextMax = model?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+  // On the /personal shell the "expand sidebar" button floats over this bar's top-left while the
+  // sidebar is collapsed; widen the left padding so the agent name clears it. (false elsewhere.)
+  const floatingNavInset = useFloatingNavInset();
 
   return (
-    <header className="flex items-center justify-between gap-3 px-6 py-2">
+    <header
+      className={`flex items-center justify-between gap-3 py-2 pr-6 ${
+        floatingNavInset ? "pl-14" : "pl-6"
+      }`}
+    >
       <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-muted">
         <span className="truncate font-medium text-ink">{session.agentName}</span>
         <span className="shrink-0 text-ink-subtle/60" aria-hidden>
@@ -1762,7 +1846,11 @@ function SessionTopBar({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {currentContextTokens > 0 ? (
-          <ContextWindowMeter used={currentContextTokens} max={contextMax} />
+          <ContextWindowMeter
+            used={currentContextTokens}
+            max={contextMax}
+            totalCostUsdMicros={totalCostUsdMicros}
+          />
         ) : null}
         <button
           type="button"
@@ -1790,21 +1878,33 @@ function formatCompactTokens(value: number): string {
 
 // A small ring that fills to the share of the model's context window in use. The exact
 // "used / max" figure stays out of the chrome and is surfaced only on hover (native title),
-// keeping the top bar quiet.
-function ContextWindowMeter({ used, max }: { used: number; max: number }) {
+// keeping the top bar quiet. When a cost total is available it appears below the context line.
+function ContextWindowMeter({
+  used,
+  max,
+  totalCostUsdMicros,
+}: {
+  used: number;
+  max: number;
+  totalCostUsdMicros?: number;
+}) {
   const fraction = max > 0 ? Math.min(1, used / max) : 0;
   const size = 14;
   const strokeWidth = 2;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const detail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
+  const contextDetail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
     fraction * 100,
   )}%`;
+  const ariaLabel =
+    totalCostUsdMicros !== undefined && totalCostUsdMicros > 0
+      ? `Context window usage: ${contextDetail} · ${formatUsdMicros(totalCostUsdMicros)} total cost`
+      : `Context window usage: ${contextDetail}`;
   return (
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger
-          aria-label={`Context window usage: ${detail}`}
+          aria-label={ariaLabel}
           className="flex shrink-0 items-center rounded-full text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
@@ -1831,7 +1931,14 @@ function ContextWindowMeter({ used, max }: { used: number; max: number }) {
             />
           </svg>
         </TooltipTrigger>
-        <TooltipContent>{detail}</TooltipContent>
+        <TooltipContent>
+          <div>{contextDetail}</div>
+          {totalCostUsdMicros !== undefined && totalCostUsdMicros > 0 ? (
+            <div className="mt-0.5 text-ink-muted">
+              {formatUsdMicros(totalCostUsdMicros)} total cost
+            </div>
+          ) : null}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -2450,6 +2557,11 @@ function ToolCallCardDefault({
   const isCompleted = toolCall.status === "completed";
   const activityLine = latestActivityLine(toolCall.activityPreview);
   const isFailed = toolCall.status === "failed";
+  // Only count elapsed time for running tool calls — completed/failed/interrupted never need it.
+  const isRunning = toolCall.status === "running";
+  const elapsedSeconds = useElapsedSeconds(isRunning ? toolCall.startedAt : undefined);
+  // Show the live counter only after 20s so it stays quiet for normal-length tool calls.
+  const showElapsedCounter = isRunning && elapsedSeconds >= 20;
   const awaitingApproval = toolCall.approval?.status === "required" && optimisticDecision === null;
   const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
   const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
@@ -2485,7 +2597,11 @@ function ToolCallCardDefault({
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-            <Wrench size={11} strokeWidth={1.75} />
+            {toolCall.name === AFTER_SESSION_TOOL_NAME ? (
+              <Brain size={11} strokeWidth={1.75} />
+            ) : (
+              <Wrench size={11} strokeWidth={1.75} />
+            )}
           </span>
           <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
             {toolCall.label || formatToolName(toolCall.name)}
@@ -2524,7 +2640,13 @@ function ToolCallCardDefault({
           ) : !isCompleted ? (
             <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
               <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
-              running
+              {showElapsedCounter ? (
+                <>
+                  running · <span className="tabular-nums">{formatElapsed(elapsedSeconds)}</span>
+                </>
+              ) : (
+                "running"
+              )}
             </span>
           ) : null}
         </button>
@@ -2550,7 +2672,11 @@ function ToolCallCardDefault({
           onDeny={() => submitDecision("denied")}
         />
       ) : null}
-      {activityLine && !expanded && !toolCall.outputPreview ? (
+      {/* Memory passes keep their one-line summary visible when collapsed (it IS the result);
+          other tools hide stale activity once the output preview exists. */}
+      {activityLine &&
+      !expanded &&
+      (!toolCall.outputPreview || toolCall.name === AFTER_SESSION_TOOL_NAME) ? (
         <div
           title={activityLine}
           className="ml-6 mt-0.5 max-w-[min(520px,calc(100vw-112px))] truncate text-[11px] leading-4 text-ink-subtle"
@@ -3191,7 +3317,13 @@ function SessionInspector({
   isPending: boolean;
   onAbort: () => void;
 }) {
-  const agentHref = `/agents/${session.agentPath ?? session.agentId}`;
+  const surface = useSessionSurface();
+  // The personal surface has a single agent page (no per-agent route), so the agent link
+  // collapses to /personal/agent there.
+  const agentHref =
+    surface === "personal"
+      ? personalPaths.agent
+      : `/company/agents/${session.agentPath ?? session.agentId}`;
 
   return (
     <div className="space-y-8">
@@ -3201,7 +3333,11 @@ function SessionInspector({
           Session
         </div>
         <div className="mt-4 space-y-4">
-          <InspectorLink label="Session page" href={`/session/${session.id}`} value={session.id} />
+          <InspectorLink
+            label="Session page"
+            href={sessionHref(surface, session.id)}
+            value={session.id}
+          />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
           <InspectorField label="Title" value={session.title} />
           <InspectorStatusField status={currentStatus} lastError={lastError} />
@@ -3448,14 +3584,28 @@ function InspectorRelatedSession({
   );
 }
 
+// Session pages render under both surfaces (/company/session/<id> and /personal/session/<id>);
+// inspector links must stay within whichever surface the user is on.
+function useSessionSurface(): "personal" | "company" {
+  const pathname = usePathname();
+  return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
+}
+
+function sessionHref(surface: "personal" | "company", sessionId: string) {
+  return surface === "personal"
+    ? personalPaths.session(sessionId)
+    : `/company/session/${sessionId}`;
+}
+
 function RelatedSessionLink({
   session,
 }: {
   session: AgentSessionDetailPayload["related"]["children"][number];
 }) {
+  const surface = useSessionSurface();
   return (
     <Link
-      href={`/session/${session.id}`}
+      href={sessionHref(surface, session.id)}
       target="_blank"
       rel="noreferrer"
       title={session.title}
@@ -3466,6 +3616,11 @@ function RelatedSessionLink({
         <span className="block truncate font-medium">{session.title}</span>
         <span className="block truncate text-[11px] text-ink-subtle">{session.agentName}</span>
       </span>
+      {session.source === "memory" ? (
+        <span className="shrink-0 rounded-sm bg-surface px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
+          Memory
+        </span>
+      ) : null}
       <ExternalLink size={11} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
     </Link>
   );
@@ -3581,13 +3736,14 @@ function formatRuntimeDate(value: string) {
 }
 
 function summarizeEvent(event: RuntimeEvent) {
-  if (event.type === "after_session.started") return "After-session started";
-  if (event.type === "after_session.completed") return "After-session completed";
+  if (event.type === "after_session.started") return "Updating memory started";
+  if (event.type === "after_session.spawned") return "Updating memory started";
+  if (event.type === "after_session.completed") return "Updating memory completed";
   if (event.type === "after_session.skipped") {
-    return `After-session skipped: ${readString(event.payload.reason)}`;
+    return `Updating memory skipped: ${readString(event.payload.reason)}`;
   }
   if (event.type === "after_session.failed") {
-    return `After-session failed: ${readString(event.payload.message)}`;
+    return `Updating memory failed: ${readString(event.payload.message)}`;
   }
   if (event.type === "message.reasoning_started") return "Thinking started";
   if (event.type === "message.reasoning_completed") return "Thinking completed";

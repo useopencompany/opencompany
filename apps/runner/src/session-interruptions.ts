@@ -1,4 +1,3 @@
-import { agentSessionEvents } from "@opencompany/db/schema";
 import { sql } from "drizzle-orm";
 import { type ActiveRunSnapshot, abortActiveRun, listActiveRuns } from "./active-runs";
 import { getDb } from "./db";
@@ -10,11 +9,6 @@ export type SessionInterruptReason = "runner_shutdown" | "stale_heartbeat";
 
 type PersistedRuntimeEventRow = Omit<PersistedRuntimeEvent, "createdAt"> & {
   createdAt: Date | string;
-};
-type InterruptedRunRow = {
-  sessionId: string;
-  leaseId: string;
-  leaseOwner: string;
 };
 
 export async function interruptCurrentRun(
@@ -93,18 +87,18 @@ async function interruptRunSql(input: ActiveRunSnapshot & { reason: SessionInter
 }
 
 async function interruptStaleRunsSql(input: { staleBefore: Date; reason: SessionInterruptReason }) {
-  return getDb().transaction(async (tx) => {
-    const updatedResult = await tx.execute(sql`
-      WITH candidates AS (
-        SELECT id, run_lease_id AS "leaseId", run_lease_owner AS "leaseOwner"
-        FROM agent_sessions
-        WHERE status = 'running'
-          AND archived_at IS NULL
-          AND run_lease_id IS NOT NULL
-          AND run_lease_owner IS NOT NULL
-          AND run_heartbeat_at IS NOT NULL
-          AND run_heartbeat_at < ${input.staleBefore}
-      )
+  const result = await getDb().execute(sql`
+    WITH candidates AS (
+      SELECT id, run_lease_id AS "leaseId", run_lease_owner AS "leaseOwner"
+      FROM agent_sessions
+      WHERE status = 'running'
+        AND archived_at IS NULL
+        AND run_lease_id IS NOT NULL
+        AND run_lease_owner IS NOT NULL
+        AND run_heartbeat_at IS NOT NULL
+        AND run_heartbeat_at < ${input.staleBefore}
+    ),
+    updated AS (
       UPDATE agent_sessions AS session
       SET status = 'interrupted',
           run_lease_id = NULL,
@@ -121,38 +115,30 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
         -- instances both run this sweep, and without this guard the loser of the row
         -- lock would re-apply the update and emit duplicate interruption events.
         AND session.status = 'running'
-      RETURNING
-        session.id AS "sessionId",
-        candidates."leaseId",
-        candidates."leaseOwner"
-    `);
-    const interrupted = rowsFromExecute<InterruptedRunRow>(updatedResult);
-    if (interrupted.length === 0) return [];
+      RETURNING session.id, candidates."leaseId", candidates."leaseOwner"
+    ),
+    status_events AS (
+      INSERT INTO agent_session_events (session_id, message_id, type, payload)
+      SELECT id, NULL, 'session.status', '{"status":"interrupted"}'::jsonb
+      FROM updated
+      RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
+    ),
+    audit_events AS (
+      INSERT INTO agent_session_events (session_id, message_id, type, payload)
+      SELECT
+        id,
+        NULL,
+        'session.interrupted',
+        jsonb_build_object('reason', ${input.reason}::text, 'leaseId', "leaseId", 'leaseOwner', "leaseOwner")
+      FROM updated
+      RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
+    )
+    SELECT * FROM status_events
+    UNION ALL
+    SELECT * FROM audit_events
+  `);
 
-    return tx
-      .insert(agentSessionEvents)
-      .values(
-        interrupted.flatMap((run) => [
-          {
-            sessionId: run.sessionId,
-            messageId: null,
-            type: "session.status",
-            payload: { status: "interrupted" },
-          },
-          {
-            sessionId: run.sessionId,
-            messageId: null,
-            type: "session.interrupted",
-            payload: {
-              reason: input.reason,
-              leaseId: run.leaseId,
-              leaseOwner: run.leaseOwner,
-            },
-          },
-        ]),
-      )
-      .returning();
-  });
+  return normalizeRows(rowsFromExecute<PersistedRuntimeEventRow>(result));
 }
 
 function publishEvents(events: PersistedRuntimeEvent[]) {

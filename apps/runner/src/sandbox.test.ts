@@ -21,6 +21,7 @@ import {
   cloneGitHubRepositoryIntoWorkdir,
   createOrConnectSandbox,
   githubRemoteMatches,
+  guardCommandStreamCallbacks,
   prepareWorkspace,
   resolveSandboxBrainRelativePath,
   resolveSandboxSkillPath,
@@ -243,7 +244,7 @@ describe("prepareWorkspace", () => {
     ).toBe(true);
   });
 
-  it("installs rg and bun on demand without blocking on failure", async () => {
+  it("does not install optional dev tooling during workspace preparation", async () => {
     const sandbox = {
       commands: {
         run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
@@ -259,11 +260,11 @@ describe("prepareWorkspace", () => {
       agentFile: "agent",
     });
 
-    const toolingCall = sandbox.commands.run.mock.calls.find(([command]) =>
-      String(command).includes("command -v rg"),
-    );
-    expect(toolingCall).toBeDefined();
-    expect(String(toolingCall?.[0])).toContain("command -v bun");
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands.some((command) => command.includes("command -v rg"))).toBe(false);
+    expect(commands.some((command) => command.includes("command -v bun"))).toBe(false);
+    expect(commands.some((command) => command.includes("apt-get install"))).toBe(false);
+    expect(commands.some((command) => command.includes("bun.sh/install"))).toBe(false);
   });
 
   it("matches tokenized GitHub remotes without exposing the token", () => {
@@ -450,6 +451,31 @@ describe("resolveSandboxToolPath", () => {
     );
   });
 
+  it("personal sessions allow memory/ and personal-brain/ and reject the company brain/", () => {
+    expect(resolveSandboxToolPath("/home/user/workspace", "memory/x.md", true)).toBe(
+      "/home/user/workspace/memory/x.md",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "personal-brain/note.md", true)).toBe(
+      "/home/user/workspace/personal-brain/note.md",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt", true)).toBe(
+      "/home/user/workspace/work/foo.txt",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "agent/user.md", true)).toBe(
+      "/home/user/workspace/agent/user.md",
+    );
+    expect(() => resolveSandboxToolPath("/home/user/workspace", "brain/foo.md", true)).toThrow(
+      /work\/, memory\/, personal-brain\/, or agent\//,
+    );
+  });
+
+  it("personal sessions treat personal-brain/ as a plain writable path, not a gated brain", () => {
+    expect(
+      resolveSandboxBrainRelativePath("/home/user/workspace", "personal-brain/note.md", true),
+    ).toBeNull();
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "memory/x.md", true)).toBeNull();
+  });
+
   it("resolves brain-relative paths and ignores non-brain roots", () => {
     expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain/wiki/page.md")).toBe(
       "wiki/page.md",
@@ -565,6 +591,36 @@ describe("runSandboxTool", () => {
       stderr: "fatal: not a git repository\n",
       exitCode: 1,
     });
+  });
+
+  it("rejects with the stream-callback error instead of leaking an unhandled rejection", async () => {
+    // Regression for the 2026-06-10 prod crash: e2b fires onStdout WITHOUT awaiting it,
+    // so a rejecting async callback (the run-control gate throwing RunAbortError on Stop)
+    // became an unhandled rejection that exited the whole runner process. The guarded
+    // callbacks must never reject; the error must surface from the awaited tool call.
+    const abortError = Object.assign(new Error("Run aborted."), { name: "RunAbortError" });
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStdout?: (data: string) => void }) => {
+          // Fire-and-forget, exactly like e2b's CommandHandle.handleEvents. If this
+          // returned promise could reject, the test run itself would crash.
+          options.onStdout?.("chunk\n");
+          return { stdout: "done", stderr: "", exitCode: 0 };
+        }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "shell",
+        args: { command: "sleep 5" },
+        onOutput: async () => {
+          throw abortError;
+        },
+      }),
+    ).rejects.toBe(abortError);
   });
 
   it("runs gh commands from the work directory with injected auth and redaction", async () => {
@@ -711,6 +767,130 @@ describe("runSandboxTool", () => {
       stderr: "failed to determine repository\n",
       exitCode: 1,
     });
+  });
+
+  it("runs the memory CLI from the workspace root with the gateway key scoped to the subprocess", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "1. [company] acme", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: 'query "acme blockers" --limit 5' },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+      redactOutput: (value) => value.replaceAll("gw_secret_key", "[redacted]"),
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'acme blockers' '--limit' '5' --report-usage",
+      expect.objectContaining({
+        cwd: sandboxLayout("/home/user/workspace").workspaceRoot,
+        // MEMORY_ROOT pins the memory tree so an agent-supplied `--root` is ignored by the CLI.
+        envs: {
+          VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key",
+          MEMORY_ROOT: "/home/user/workspace/agent/memory",
+        },
+      }),
+    );
+  });
+
+  it("pins MEMORY_ROOT to the top-level memory/ tree for personal sessions", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query foo" },
+      personal: true,
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        envs: expect.objectContaining({ MEMORY_ROOT: "/home/user/workspace/memory" }),
+      }),
+    );
+  });
+
+  it("shell-quotes memory args so a crafted arg cannot break out or read the key", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query foo; env > /tmp/leak" },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+    });
+
+    const [command] = sandbox.commands.run.mock.calls[0] as [string, unknown];
+    // Each crafted token is quoted, so the shell never interprets ; or > as operators.
+    expect(command).toBe(
+      "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'foo;' 'env' '>' '/tmp/leak' --report-usage",
+    );
+    // The key only ever reaches the subprocess env, never the command string the agent shaped.
+    expect(command).not.toContain("gw_secret_key");
+  });
+
+  it("redacts the gateway key from streamed and returned memory output", async () => {
+    const onOutput = vi.fn();
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStderr?: (data: string) => void }) => {
+          options.onStderr?.("calling gateway gw_secret_key\n");
+          return { stdout: "ok gw_secret_key", stderr: "warn gw_secret_key", exitCode: 0 };
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query acme" },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+      redactOutput: (value) => value.replaceAll("gw_secret_key", "[redacted]"),
+      onOutput,
+    });
+
+    expect(onOutput).toHaveBeenCalledWith("stderr", "calling gateway [redacted]\n");
+    expect(result).toEqual({
+      stdout: "ok [redacted]",
+      stderr: "warn [redacted]",
+      exitCode: 0,
+    });
+  });
+
+  it("rejects malformed memory arguments before dispatching", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "memory",
+        args: { args: "query 'unterminated" },
+      }),
+    ).rejects.toThrow(/empty or malformed/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
   });
 
   it("creates parent directories before writing nested files", async () => {
@@ -1130,6 +1310,60 @@ describe("runSandboxTool", () => {
     expect(diff).toContain("--- work/app/ ---");
     expect(diff).toContain("?? new.txt");
     expect(diff).toContain("nested");
+  });
+});
+
+describe("guardCommandStreamCallbacks", () => {
+  it("captures the first callback rejection, drops later chunks, and rethrows at the boundary", async () => {
+    const seen: string[] = [];
+    const failure = new Error("Run aborted.");
+    const guarded = guardCommandStreamCallbacks({
+      onStdout: async (data: string) => {
+        if (data === "boom") throw failure;
+        seen.push(data);
+      },
+    });
+
+    // The wrapped callback must never reject — that is the whole point.
+    await expect(guarded.options.onStdout?.("a")).resolves.toBeUndefined();
+    await expect(guarded.options.onStdout?.("boom")).resolves.toBeUndefined();
+    await expect(guarded.options.onStdout?.("b")).resolves.toBeUndefined();
+
+    expect(seen).toEqual(["a"]);
+    await expect(guarded.rethrow()).rejects.toBe(failure);
+  });
+
+  it("observes a rejection from a fire-and-forget invocation still in flight", async () => {
+    // e2b invokes the callback without awaiting it, possibly in the same tick the command
+    // result resolves — rethrow must wait for in-flight invocations before deciding.
+    const failure = new Error("Run aborted.");
+    const guarded = guardCommandStreamCallbacks({
+      onStdout: async (_data: string) => {
+        await Promise.resolve();
+        throw failure;
+      },
+    });
+
+    void guarded.options.onStdout?.("chunk");
+    await expect(guarded.rethrow()).rejects.toBe(failure);
+  });
+
+  it("captures stderr failures too and is a no-op when callbacks succeed", async () => {
+    const failure = new Error("stderr failed");
+    const failing = guardCommandStreamCallbacks({
+      onStdout: async (_data: string) => undefined,
+      onStderr: async (_data: string) => {
+        throw failure;
+      },
+    });
+    await failing.options.onStderr?.("err");
+    await expect(failing.rethrow()).rejects.toBe(failure);
+
+    const healthy = guardCommandStreamCallbacks({
+      onStdout: async (_data: string) => undefined,
+    });
+    await healthy.options.onStdout?.("ok");
+    await expect(healthy.rethrow()).resolves.toBeUndefined();
   });
 });
 

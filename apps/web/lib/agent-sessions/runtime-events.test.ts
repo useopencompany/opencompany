@@ -12,6 +12,7 @@ import {
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
+  mergeLiveSessionAggregates,
   mergeMessages,
   type RuntimeEvent,
   resolveToolDisplay,
@@ -79,6 +80,205 @@ describe("mergeEvents", () => {
     const merged = mergeEvents(snapshot, overlay);
 
     expect(merged.map((e) => e.id)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("mergeLiveSessionAggregates", () => {
+  it("adds only usage and cost events newer than the server high-water mark", () => {
+    const snapshot = {
+      usage: {
+        inputTokens: 100,
+        inputNoCacheTokens: 90,
+        inputCacheReadTokens: 10,
+        inputCacheWriteTokens: 0,
+        outputTokens: 20,
+        outputTextTokens: 18,
+        outputReasoningTokens: 2,
+        totalTokens: 120,
+      },
+      toolUsage: { totalCostUsdMicros: 500, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 1000,
+        platformFeeUsdMicros: 100,
+        totalCostUsdMicros: 1100,
+        modelCostUsdMicros: 1100,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 120,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        event(3, "session.usage", {
+          inputTokens: 1_000,
+          outputTokens: 250,
+          totalTokens: 1_250,
+          providerCostUsdMicros: 10_000,
+          platformFeeUsdMicros: 1_000,
+          chargedCostUsdMicros: 11_000,
+        }),
+        event(4, "session.usage", {
+          inputTokens: 40,
+          inputNoCacheTokens: 35,
+          inputCacheReadTokens: 5,
+          outputTokens: 10,
+          outputTextTokens: 8,
+          outputReasoningTokens: 2,
+          totalTokens: 50,
+          providerCostUsdMicros: 400,
+          platformFeeUsdMicros: 40,
+          chargedCostUsdMicros: 440,
+        }),
+        event(5, "session.tool_usage", {
+          provider: "exa",
+          operation: "search",
+          costUsdMicros: 700,
+          providerCostUsdMicros: 700,
+          chargedCostUsdMicros: 700,
+        }),
+      ],
+      3,
+    );
+
+    expect(merged.usage.totalTokens).toBe(170);
+    expect(merged.cost.totalCostUsdMicros).toBe(2240);
+    expect(merged.cost.modelCostUsdMicros).toBe(1540);
+    expect(merged.cost.toolCostUsdMicros).toBe(700);
+    expect(merged.toolUsage).toEqual({
+      totalCostUsdMicros: 1200,
+      byProviderOperation: [{ provider: "exa", operation: "search", costUsdMicros: 700, calls: 1 }],
+    });
+    expect(merged.currentContextTokens).toBe(50);
+  });
+
+  it("uses the highest-id session.usage event for currentContextTokens when events arrive out of order", () => {
+    // Event id 5 (higher) arrives before event id 4 (lower) in the overlay array.
+    // currentContextTokens must reflect the tokens from id 5, not the stale id 4 that follows it.
+    const snapshot = {
+      usage: {
+        inputTokens: 0,
+        inputNoCacheTokens: 0,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 0,
+        outputTextTokens: 0,
+        outputReasoningTokens: 0,
+        totalTokens: 0,
+      },
+      toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        modelCostUsdMicros: 0,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 0,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        // Higher-id event arrives first in iteration order (stream replay out-of-order).
+        event(5, "session.usage", { inputTokens: 800, outputTokens: 200 }),
+        // Lower-id event arrives second — must NOT overwrite currentContextTokens.
+        event(4, "session.usage", { inputTokens: 100, outputTokens: 50 }),
+      ],
+      3,
+    );
+
+    // currentContextTokens must come from the higher-id event (id 5): 800 + 200 = 1000.
+    expect(merged.currentContextTokens).toBe(1000);
+  });
+
+  it("updates currentContextTokens from a session.delegated_usage event", () => {
+    const snapshot = {
+      usage: {
+        inputTokens: 0,
+        inputNoCacheTokens: 0,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 0,
+        outputTextTokens: 0,
+        outputReasoningTokens: 0,
+        totalTokens: 0,
+      },
+      toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        modelCostUsdMicros: 0,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 0,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        event(5, "session.delegated_usage", {
+          childSessionId: "ses_child",
+          usage: { inputTokens: 300, outputTokens: 100, totalTokens: 400 },
+          cost: { providerCostUsdMicros: 500, platformFeeUsdMicros: 50, totalCostUsdMicros: 550 },
+          toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+        }),
+      ],
+      3,
+    );
+
+    // currentContextTokens = inputTokens + outputTokens from the delegated usage payload.
+    expect(merged.currentContextTokens).toBe(400);
+    expect(merged.usage.totalTokens).toBe(400);
+  });
+
+  it("applies the highest-id guard across mixed session.usage and session.delegated_usage events", () => {
+    // A session.delegated_usage (id 4) and a session.usage (id 6) both arrive.
+    // The session.usage has the higher id so it wins for currentContextTokens.
+    const snapshot = {
+      usage: {
+        inputTokens: 0,
+        inputNoCacheTokens: 0,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 0,
+        outputTextTokens: 0,
+        outputReasoningTokens: 0,
+        totalTokens: 0,
+      },
+      toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        modelCostUsdMicros: 0,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 0,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        // Delegated usage arrives first with a lower id — sets currentContextTokens initially.
+        event(4, "session.delegated_usage", {
+          usage: { inputTokens: 200, outputTokens: 50, totalTokens: 250 },
+          cost: {},
+          toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+        }),
+        // Direct session.usage with a higher id must win for currentContextTokens.
+        event(6, "session.usage", { inputTokens: 500, outputTokens: 100 }),
+      ],
+      3,
+    );
+
+    // currentContextTokens must come from the higher-id event (id 6): 500 + 100 = 600.
+    expect(merged.currentContextTokens).toBe(600);
   });
 });
 
@@ -1022,6 +1222,9 @@ describe("describeToolCall", () => {
     expect(describeToolCall("delegate_to_agent", { agent: "research" })).toBe(
       "Delegating to research",
     );
+    expect(describeToolCall("memory", { args: 'query "acme blockers" --limit 5' })).toBe(
+      "Looking in memory for “acme blockers”",
+    );
   });
 
   it("falls back to a generic phrase when the primary input is missing", () => {
@@ -1040,6 +1243,21 @@ describe("describeToolCall", () => {
     expect(describeToolCall("x_search_posts", { query: "AI agents" })).toBe(
       "Searching X for “AI agents”",
     );
+  });
+
+  it("derives action-oriented one-liners for memory commands", () => {
+    expect(
+      describeToolCall("memory", { args: 'create --type company --id acme --alias "Acme Inc"' }),
+    ).toBe("Saving acme to memory");
+    expect(
+      describeToolCall("memory", {
+        args: "append-evidence --kind conversation --id acme-call --subject acme",
+      }),
+    ).toBe("Saving evidence to memory for acme");
+    expect(describeToolCall("memory", { args: 'rewrite acme --truth "Updated [^ev:x]"' })).toBe(
+      "Updating memory for acme",
+    );
+    expect(describeToolCall("memory", { args: "doctor" })).toBe("Checking memory consistency");
   });
 });
 
@@ -2145,16 +2363,54 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(parts).toEqual([
       {
-        type: "tool-call",
-        toolCall: {
-          id: "after-session:12",
-          name: "after_session",
-          status: "completed",
-          inputPreview: "",
-          activityPreview: "",
-          outputPreview: "Completed",
-          startedEventId: 1,
-          completedEventId: 2,
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            label: "Updated memory",
+            status: "completed",
+            inputPreview: "",
+            activityPreview: "",
+            outputPreview: "Memory updated",
+            startedEventId: 1,
+            completedEventId: 2,
+          },
+        },
+      },
+    ]);
+  });
+
+  it("surfaces the memory pass summary as the tool call's result", () => {
+    const parts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+        event(2, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+          summary: "Remembered the integration-connection-pill product idea.",
+        }),
+      ],
+      [],
+    );
+
+    expect(parts).toMatchObject([
+      {
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            label: "Updated memory",
+            status: "completed",
+            activityPreview: "Remembered the integration-connection-pill product idea.",
+            outputPreview: "Remembered the integration-connection-pill product idea.",
+          },
         },
       },
     ]);
@@ -2191,13 +2447,78 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(parts).toHaveLength(1);
     expect(parts[0]).toMatchObject({
-      type: "tool-call",
-      toolCall: {
-        status: "completed",
-        startedEventId: 1,
-        completedEventId: 2,
+      anchorMessageId: "msg_user",
+      part: {
+        type: "tool-call",
+        toolCall: {
+          name: "updating_memory",
+          status: "completed",
+          startedEventId: 1,
+          completedEventId: 2,
+        },
       },
     });
+  });
+
+  it("keeps spawned memory-keeper passes running until the child reports completion", () => {
+    const runningParts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+      ],
+      [],
+    );
+
+    expect(runningParts).toMatchObject([
+      {
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            status: "running",
+            startedEventId: 1,
+          },
+        },
+      },
+    ]);
+
+    const completedParts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+        event(9, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+      ],
+      [],
+    );
+
+    expect(completedParts).toMatchObject([
+      {
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            status: "completed",
+            outputPreview: "Memory updated",
+            startedEventId: 1,
+            completedEventId: 9,
+          },
+        },
+      },
+    ]);
   });
 
   it("reuses assistant tool-call rendering data for internal after-session tool calls", () => {
@@ -2254,20 +2575,26 @@ describe("buildBackgroundActivityParts", () => {
 
     expect(parts).toMatchObject([
       {
-        type: "tool-call",
-        toolCall: {
-          id: "after-session:12",
-          name: "after_session",
-          status: "completed",
+        anchorMessageId: "msg_user",
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "after-session:12",
+            name: "updating_memory",
+            status: "completed",
+          },
         },
       },
       {
-        type: "tool-call",
-        toolCall: {
-          id: "call_1",
-          name: "write_file",
-          status: "completed",
-          brainPath: "memory.md",
+        anchorMessageId: null,
+        part: {
+          type: "tool-call",
+          toolCall: {
+            id: "call_1",
+            name: "write_file",
+            status: "completed",
+            brainPath: "memory.md",
+          },
         },
       },
     ]);

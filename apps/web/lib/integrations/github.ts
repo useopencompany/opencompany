@@ -321,7 +321,7 @@ function isGitHubIntegrationStatePayload(value: unknown): value is GitHubIntegra
 }
 
 function sanitizeReturnTo(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//")) return "/settings/integrations";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/company/settings/integrations";
   return value;
 }
 

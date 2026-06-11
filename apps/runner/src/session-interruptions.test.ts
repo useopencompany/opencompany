@@ -21,47 +21,59 @@ afterEach(() => {
 
 describe("session interruption cleanup", () => {
   it("interrupts stale running sessions and publishes status plus audit events", async () => {
+    const createdAt = new Date("2026-06-09T12:00:00.000Z");
     const execute = vi.fn(async () => ({
       rows: [
         {
+          id: 1,
           sessionId: "ses_stale",
-          leaseId: "run_stale",
-          leaseOwner: "runner-old",
+          messageId: null,
+          type: "session.status",
+          payload: { status: "interrupted" },
+          createdAt,
         },
         {
+          id: 2,
+          sessionId: "ses_stale",
+          messageId: null,
+          type: "session.interrupted",
+          payload: {
+            reason: "stale_heartbeat",
+            leaseId: "run_stale",
+            leaseOwner: "runner-old",
+          },
+          createdAt,
+        },
+        {
+          id: 3,
           sessionId: "ses_stale_2",
-          leaseId: "run_stale_2",
-          leaseOwner: "runner-old",
+          messageId: null,
+          type: "session.status",
+          payload: { status: "interrupted" },
+          createdAt,
+        },
+        {
+          id: 4,
+          sessionId: "ses_stale_2",
+          messageId: null,
+          type: "session.interrupted",
+          payload: {
+            reason: "stale_heartbeat",
+            leaseId: "run_stale_2",
+            leaseOwner: "runner-old",
+          },
+          createdAt,
         },
       ],
     }));
-    const insert = vi.fn(() => ({
-      values: (
-        values: Array<{ sessionId: string; type: string; payload: Record<string, unknown> }>,
-      ) => ({
-        returning: async () =>
-          values.map((value, index) => ({
-            id: index + 1,
-            sessionId: value.sessionId,
-            messageId: null,
-            type: value.type,
-            payload: value.payload,
-            createdAt: new Date("2026-06-09T12:00:00.000Z"),
-          })),
-      }),
-    }));
     dbRef.current = {
-      transaction: async (
-        callback: (tx: { execute: typeof execute; insert: typeof insert }) => unknown,
-      ) => callback({ execute, insert }),
+      execute,
     };
 
     const count = await interruptStaleActiveRuns(new Date("2026-06-09T12:10:00.000Z"));
 
     expect(count).toBe(2);
     expect(execute).toHaveBeenCalledOnce();
-    // All sessions' events land in a single batched insert inside the transaction.
-    expect(insert).toHaveBeenCalledOnce();
     expect(publishRuntimeEvent).toHaveBeenCalledTimes(4);
     expect(publishRuntimeEvent).toHaveBeenNthCalledWith(
       1,

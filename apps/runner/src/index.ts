@@ -1,5 +1,6 @@
 import "./load-env";
 import {
+  captureException,
   createLogger,
   flushObservability,
   isObservabilityEnabled,
@@ -12,6 +13,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { startRunnerJobWorker } from "./jobs";
+import { assertPreviewIdentity } from "./preview-guard";
 import { createServer } from "./server";
 import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
 
@@ -27,9 +29,14 @@ const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 240_000;
 const RENDER_SHUTDOWN_POST_INTERRUPT_WAIT_MS = 30_000;
 
 initializeExceptionReporting();
+installProcessErrorBackstop();
 
 const env = loadEnv();
 assertRunnerDbConfig();
+// Refuse to boot a preview runner that can't prove its DB belongs to its preview branch,
+// and refuse to boot a prod runner carrying stray preview identity. This makes "preview
+// runner polling the prod job queue" structurally impossible (issue #351 §6).
+await assertPreviewIdentity();
 const jobWorker = startRunnerJobWorker(env, {
   concurrency: env.workerConcurrency,
   staleRunSweep: interruptStaleActiveRuns,
@@ -83,6 +90,43 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 await server.listen({ host: "0.0.0.0", port: env.port });
+
+// The runner is a single Bun process hosting every in-flight session on the instance, so a
+// stray unhandled rejection must not exit it. That is exactly how prod crashed on 2026-06-10:
+// an async e2b stream callback rejected with RunAbortError outside any awaited chain and took
+// down every other session with it. Per-run failures are already handled at the run/tool
+// boundaries; this backstop logs + reports anything that escapes them and keeps serving.
+function installProcessErrorBackstop() {
+  process.on("unhandledRejection", (reason) => {
+    reportProcessError("opencompany.runner_unhandled_rejection", reason);
+  });
+  process.on("uncaughtException", (error) => {
+    void reportFatalProcessError("opencompany.runner_uncaught_exception", error);
+  });
+}
+
+async function reportFatalProcessError(event: string, error: unknown) {
+  reportProcessError(event, error);
+  try {
+    await Promise.allSettled([flushObservability(), flushBraintrust()]);
+  } finally {
+    process.exit(1);
+  }
+}
+
+function reportProcessError(event: string, error: unknown) {
+  try {
+    logger.error("Runner trapped a process-level error", {
+      event,
+      error_name: error instanceof Error ? error.name : undefined,
+      error_message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    captureException(error, { event });
+  } catch {
+    // Never let the backstop itself crash the process.
+  }
+}
 
 function initializeExceptionReporting() {
   const dsn = process.env.BETTER_STACK_ERRORS_DSN?.trim();

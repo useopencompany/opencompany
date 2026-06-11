@@ -12,10 +12,14 @@ view.
 | Local `.env.override.local` | Developer-owned local overrides | `bun run setup:personal`; never committed |
 | Local `.env.local` | Developer machine and agent worktrees | `bun run setup`, backed by Infisical dev shared values |
 | Vercel Development | Optional Vercel dev/preview runtime target | Infisical `dev` + `/web` sync |
-| Vercel Preview | Preview web deployments | Infisical `staging` + `/web` sync |
+| Vercel Preview | Per-PR preview web base env | Infisical `dev` + `/web` sync; per-PR dynamic values injected at deploy time by `pr-preview.yml` |
 | Vercel Production | Production web app and Inngest endpoint | Infisical `prod` + `/web` sync |
 | Render Production | Production runner service | Infisical `prod` + `/runner` sync |
+| Render Preview (per-PR) | Ephemeral per-PR runner / Electric / Durable Streams | Created by `scripts/preview-provision.mjs`; env minted by the orchestrator (not a static sync) |
 | GitHub Actions `production` | Release workflow migrations/deploy orchestration | Infisical OIDC fetch from `prod` + `/release` |
+| GitHub Actions `preview` | PR-preview provision/teardown + reaper | Infisical OIDC fetch from `dev` + `/release` (configurable) |
+
+> **Preview environments** are a full per-PR isolated stack (Neon branch + runner + Electric + Durable Streams + Vercel web), label-gated on `preview`. See [deployment.md → PR preview environments](./deployment.md#pr-preview-environments) and the dedicated section below.
 
 See [secret-management.md](./secret-management.md) for the Infisical setup and sync checklist.
 
@@ -30,6 +34,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `RUNNER_PUBLIC_URL` | Vercel, GitHub Actions | Browser-reachable Render URL. |
 | `RUNNER_ALLOWED_ORIGINS` | Render, production web domain | Must include the exact Vercel production origin if browser-origin runner requests are enabled. |
 | `DURABLE_STREAMS_URL` / `DURABLE_STREAMS_TOKEN` | Vercel, Render | Web owns the read proxy and web-authored appends; runner owns model/tool appends. |
+| `BLOB_READ_WRITE_TOKEN` | Vercel, Render | Token for the private `opencompany-attachments` Blob store. Web mints client upload tokens and serves attachments; the runner downloads attachment bytes for model calls. See [Vercel Blob stores](#vercel-blob-stores). |
 | `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner Brain sync. |
 | `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Managed workspace-state installation target used for workspace repo writes and runner Brain sync. |
 | `GITHUB_APP_PRIVATE_KEY` | Vercel, Render | Same private key, with newlines preserved or escaped as `\n`. |
@@ -40,11 +45,32 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Vercel web envs | Integration GitHub App OAuth client secret. |
 | `GITHUB_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign GitHub integration OAuth state. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Vercel web envs | Base64-encoded 32-byte key used to encrypt workspace provider credentials stored in Neon. |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel, Render | Google OAuth client shared by the Gmail and Google Calendar integrations. Redirect URIs: `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback` and `.../api/integrations/google-calendar/callback`. The runner also needs these to refresh access tokens. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel, Render | Google OAuth client shared by the Gmail and Google Calendar integrations. Direct redirect URIs are `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback` and `.../api/integrations/google-calendar/callback`; hosted previews should use `GOOGLE_OAUTH_CALLBACK_URL` instead. The runner also needs these to refresh access tokens. |
+| `GOOGLE_OAUTH_CALLBACK_URL` | Vercel web envs | Optional stable Google callback broker, e.g. `https://oauth.opencompany.cloud/api/google/callback`. When set, Google authorization and token exchange both use this exact redirect URI. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign Google integration OAuth state. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
+
+## Vercel Blob stores
+
+Blob access mode is **per-store and immutable**, so we run two stores on the team:
+
+| Store | Access | Used by | Token (Infisical `prod`) |
+|---|---|---|---|
+| `opencompany-attachments` | Private | Web (`/api/upload`, `/api/attachments/[id]`) and runner (attachment hydration) | `BLOB_READ_WRITE_TOKEN` in `/web` and `/runner` |
+| `opencompany-changelog` | Public | Changelog screen recordings, uploaded at authoring time ([changelog-media.md](./changelog-media.md)) | `CHANGELOG_BLOB_READ_WRITE_TOKEN` in `/release` |
+
+As with everything else, **Infisical is the source of truth** for the tokens the
+apps read: the `/web` and `/runner` syncs deliver `BLOB_READ_WRITE_TOKEN` to
+Vercel and Render.
+
+The Vercel project additionally carries two **Vercel-managed** env vars,
+`ATTACHMENTS_BLOB_READ_WRITE_TOKEN` and `CHANGELOG_BLOB_READ_WRITE_TOKEN`,
+created by the store↔project connections (custom env prefixes were chosen so
+they never collide with the Infisical-synced `BLOB_READ_WRITE_TOKEN`). They are
+the token anchors — **do not delete the store connections or these vars**, that
+revokes the tokens. No app code reads them directly.
 
 ## Vercel Web
 
@@ -53,6 +79,7 @@ Set these in Vercel Production.
 | Var | Required | Purpose |
 |---|---:|---|
 | `DATABASE_URL` | Hosted only | Hosted Neon pooled connection string. Do not store this in Infisical `dev`; local setup writes branch DB URLs to `.env.local`. |
+| `VERCEL_AI_GATEWAY_API_KEY` | Yes | Fast-model calls made directly from web (e.g. tailored example pills on `/onboarding/personal`). Same key the runner uses. |
 | `WORKOS_CLIENT_ID` | Yes | WorkOS AuthKit client id. |
 | `WORKOS_API_KEY` | Yes | WorkOS server API key. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. |
@@ -71,6 +98,7 @@ Set these in Vercel Production.
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Base64-encoded 32-byte key used to encrypt workspace provider and MCP credentials in Neon. Generate with `openssl rand -base64 32`. |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google only | Google OAuth client id (Gmail + Calendar integrations). |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth client secret. |
+| `GOOGLE_OAUTH_CALLBACK_URL` | Google only | Optional stable callback broker URL for hosted previews, normally `https://oauth.opencompany.cloud/api/google/callback`. Leave unset for direct local callback behavior. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Google only | Dedicated secret used to sign Google OAuth setup state. Generate a separate 32+ character value. |
 | `MCP_OAUTH_STATE_SECRET` | MCP only | Dedicated secret used to sign MCP OAuth setup state. Generate a separate 32+ character value with `openssl rand -base64 32`. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Callback URL: `${NEXT_PUBLIC_APP_URL}/api/mcp/slack/callback`. |
@@ -80,6 +108,8 @@ Set these in Vercel Production.
 | `SLACK_SUPPORT_MEMBER_IDS` | Slack Connect only | Comma-separated `U…` ids of OC support members auto-invited to each channel. |
 | `INNGEST_EVENT_KEY` | Hosted only | Sends events to Inngest Cloud. Not needed for local dev. |
 | `INNGEST_SIGNING_KEY` | Hosted only | Verifies Inngest requests to `/api/inngest`. Not needed for local dev. |
+| `INNGEST_ENV` | Hosted preview only | Inngest branch environment name. PR previews set this dynamically to `preview-pr-<n>`. Leave unset in production. |
+| `INNGEST_SERVE_ORIGIN` | Hosted preview only | Public origin Inngest should call for this deployment. PR previews set this dynamically to the deterministic preview custom domain. |
 | `INNGEST_DEV` | No | Do not set in hosted envs. Local dev only. |
 | `RUNNER_PUBLIC_URL` | Yes | Browser-reachable Render runner URL. |
 | `RUNNER_INTERNAL_URL` | No | Server-to-server runner URL. Defaults to `RUNNER_PUBLIC_URL`. |
@@ -90,6 +120,7 @@ Set these in Vercel Production.
 | `ELECTRIC_TOKEN` | Self-hosted Electric only | Bearer token for protected self-hosted Electric. |
 | `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for session transcript reads and web-authored appends. |
 | `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Server-only; never exposed to the browser. |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Mints client upload tokens (`/api/upload`) and serves attachments (`/api/attachments/[id]`). Must match Render. |
 | `LINEAR_API_KEY` | No | Enables feedback intake. |
 | `LINEAR_TEAM_ID` | No | Linear team for feedback. |
 | `LINEAR_FEEDBACK_PROJECT_ID` | No | Optional project routing for feedback. |
@@ -112,6 +143,7 @@ Set these in Vercel Production.
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
 | `BETTER_STACK_ERRORS_DSN` | No | Server-side error capture DSN override. |
+| `BETTER_STACK_PREVIEW_SOURCE_NAME` | No | Local/operator override for `bun run preview:debug-session` output. Defaults to `opencompany-runner-preview`; not a source token. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENABLED` | No | Browser observability toggle. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENV` | No | Browser observability environment. |
 | `NEXT_PUBLIC_OBSERVABILITY_RELEASE` | No | Browser release tag. Production release workflow sets this from the released commit during build. |
@@ -142,11 +174,11 @@ Setup checklist:
 If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
 and the workspace-home card degrades to the booking fallback (onboarding never breaks).
 
-Channel naming: each customer channel is `<customer-slug>-<id8>-x-opencompany` (the
-`-x-opencompany` convention plus a short per-workspace suffix so two same-named customers
-practically never collide). Ownership is also stamped in the channel purpose
-(`opencompany-support:<workspaceId>`) and checked before adopting on a retry, so a channel is
-never hijacked across workspaces.
+Channel naming: each customer channel is `<customer-slug>-x-opencompany-<id8>` — the customer
+name leads so the channel reads cleanly in Slack's sidebar, and the short per-workspace suffix
+at the end keeps two same-named customers from colliding. Ownership is also stamped in the
+channel purpose (`opencompany-support:<workspaceId>`) and checked before adopting on a retry,
+so a channel is never hijacked across workspaces.
 
 Recovery: an hourly Inngest cron (`sweep-failed-slack-support-channels`) re-dispatches
 provisioning for workspaces stuck in `failed` or `pending` — so a transient failure, or a
@@ -185,6 +217,7 @@ Set these in the Render `opencompany-runner` service.
 | `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for runner requests. |
 | `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for model/tool transcript appends. Must match Vercel. |
 | `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Must match Vercel. |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Downloads attachment bytes (images/PDFs) to inline into model calls. Must match Vercel. |
 | `E2B_API_KEY` | Yes | Creates/connects E2B sandboxes. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
 | `EXA_API_KEY` | No | Required only for agents that enable Exa. |
@@ -237,6 +270,7 @@ Infisical `prod` + `/release` secrets:
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
+| `CHANGELOG_BLOB_READ_WRITE_TOKEN` | Public `opencompany-changelog` Blob store token. Authoring-time credential for uploading changelog screen recordings (see [changelog-media.md](./changelog-media.md)); not read by CI or any runtime. |
 
 GitHub environment variables:
 
@@ -260,6 +294,78 @@ Release-only script vars:
 | `SMOKE_WEB_ATTEMPTS` | No | Web health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
 | `SMOKE_RUNNER_ATTEMPTS` | No | Runner health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
 | `SMOKE_DELAY_MS` | No | Delay between retries. Defaults to `10000`. |
+
+## Preview Environments (per-PR)
+
+These power the label-gated per-PR preview stack (issue #351). They are read by the
+`pr-preview.yml` / `preview-reaper.yml` workflows and the `scripts/preview-*.mjs` scripts.
+Provision/orchestration credentials are fetched from Infisical (`dev` + `/release` by
+default, configurable). Runner static runtime secrets are fetched separately from
+Infisical (`prod` + `/runner` by default while previews reuse production service keys).
+The web/runner/electric preview-specific runtime values are minted per-PR by the
+orchestrator and are not stored anywhere long-term.
+
+### GitHub Actions `preview` environment — repo variables (`vars.*`)
+
+| Var | Required | Notes |
+|---|---|---|
+| `PREVIEW_BASE_DOMAIN` | Yes | Wildcard preview domain attached to the Vercel project, e.g. `preview.opencompany.cloud`. Alias = `pr-<n>.<domain>`. |
+| `PREVIEW_INFISICAL_ENV_SLUG` | No | Infisical env for provision creds. Defaults to `dev`. |
+| `PREVIEW_INFISICAL_SECRET_PATH` | No | Infisical path for provision creds. Defaults to `/release`. |
+| `PREVIEW_RUNNER_INFISICAL_ENV_SLUG` | No | Infisical env for runner runtime secrets. Defaults to `prod`. |
+| `PREVIEW_RUNNER_INFISICAL_SECRET_PATH` | No | Infisical path for runner runtime secrets. Defaults to `/runner`. |
+| `PREVIEW_SEED_BRANCH` | No | Neon branch to fork previews from. Defaults to `preview-seed`. |
+| `PREVIEW_NEON_TTL_HOURS` | No | Neon branch TTL backstop. Defaults to `24`. |
+| `PREVIEW_MAX_AGE_HOURS` | No | Reaper hard max age for any preview resource. Defaults to `24`. |
+| `PREVIEW_RENDER_REGION` | No | Render region for per-PR services. Defaults to `frankfurt`. |
+| `PREVIEW_RENDER_PLAN` | No | Render instance plan. Defaults to `starter`. |
+| `PREVIEW_ELECTRIC_STORAGE_DIR` | No | Persistent volume mount for Electric's shape log. Unset = ephemeral (reprovision-on-restart). |
+| `INFISICAL_MACHINE_IDENTITY_ID`, `INFISICAL_PROJECT_SLUG` | Yes | OIDC identity for the preview env (same as production env vars). |
+
+### Provision credentials (Infisical `dev` + `/release`, fetched via OIDC)
+
+| Var | Used by | Notes |
+|---|---|---|
+| `NEON_API_KEY`, `NEON_PROJECT_ID` | provision/teardown/reaper | Branch create/delete + endpoint verification. |
+| `RENDER_API_KEY` | provision/teardown/reaper | Create/destroy per-PR Render services. Same key model as the prod release CI. |
+| `RENDER_OWNER_ID` | provision (optional) | Workspace/owner id for create-service. Auto-resolved from the API when the key has a single workspace; only set it if the key spans multiple. |
+| `PREVIEW_RENDER_LOG_ENDPOINT`, `PREVIEW_RENDER_LOG_TOKEN` | preview log stream automation | Shared Better Stack Render syslog endpoint and source token for preview runner logs. Keep the token secret. |
+| `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | pr-preview.yml | Vercel build/deploy/alias. |
+
+### Runner runtime credentials (Infisical `prod` + `/runner`, fetched via OIDC)
+
+| Var | Used by | Notes |
+|---|---|---|
+| `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | runner | Required at runner boot. The encryption key must match web so preview runners can read seeded encrypted integration credentials. |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | runner | Enables runner Brain sync. |
+| `GITHUB_INTEGRATION_APP_ID`, `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | runner | Enables connected-repository GitHub operations. |
+| Optional runner tool/provider keys | runner | `EXA_API_KEY`, `APIFY_API_TOKEN`, `X_API_BEARER_TOKEN`, `SUPADATA_API_KEY`, `AMP_API_KEY`, Google/Slack OAuth keys, and observability settings are passed through when present. |
+
+### Per-PR runtime values (minted by the orchestrator, injected — never stored)
+
+| Var | Target | Notes |
+|---|---|---|
+| `DATABASE_URL` | web (pooled), runner (direct) | This PR's Neon branch. Web pooled, runner/Electric direct endpoint. |
+| `PREVIEW_ENV` = `true` | runner | Activates the boot-time preview-identity gate (`apps/runner/src/preview-guard.ts`). |
+| `NEON_BRANCH_ID` | runner | Verified against the attached endpoint via the Neon API at boot. |
+| `PREVIEW_PR_NUMBER` | runner, web | The PR number. |
+| `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` / `RUNNER_INTERNAL_TOKEN` | web ↔ runner | Per-PR runner URL + a freshly minted shared token. |
+| `ELECTRIC_URL` / `ELECTRIC_SECRET` | web ↔ electric | Per-PR Electric URL + secret; the web proxy injects the secret server-side. |
+| `DURABLE_STREAMS_URL` | web, runner | Per-PR Durable Streams service URL. |
+| `INNGEST_ENV` | web | `preview-pr-<n>`, routing events and function syncs into the isolated Inngest branch environment. |
+| `INNGEST_SERVE_ORIGIN` | web | `https://pr-<n>.<domain>`, ensuring Inngest calls the deterministic preview custom domain rather than a protected Vercel deployment URL. |
+| `NEXT_PUBLIC_APP_URL` | web (build-time + runtime) | `https://pr-<n>.<domain>`. Used in signed OAuth state so the stable Google broker can forward back to the right preview. |
+| `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | web (build-time) | `https://pr-<n>.<domain>/auth/callback`. |
+| `GOOGLE_OAUTH_CALLBACK_URL` | web | Optional pass-through from the provision environment. Set to `https://oauth.opencompany.cloud/api/google/callback` to use the stable Google OAuth broker for previews. |
+| `PREVIEW_ALLOW_UNVERIFIED_ENDPOINT` | runner | Emergency escape hatch for the boot gate. Leave unset. |
+
+The prod runner carries **none** of `PREVIEW_ENV` / `NEON_BRANCH_ID` / `PREVIEW_PR_NUMBER`;
+the boot gate refuses to start if it sees a partial preview identity (symmetric guard).
+
+Preview Render logs use the shared Better Stack Render source, normally
+`opencompany-runner-preview`. Store its syslog endpoint and source token in Infisical `dev` +
+`/release` as `PREVIEW_RENDER_LOG_ENDPOINT` and `PREVIEW_RENDER_LOG_TOKEN`; the token must never be
+committed or printed.
 
 ## Local Development
 

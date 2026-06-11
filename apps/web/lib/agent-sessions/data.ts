@@ -11,6 +11,7 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
+  isSessionUnseen,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
@@ -34,11 +35,14 @@ export async function loadSidebarSessionsForWorkspace(
     id: agentSessions.id,
     title: agentSessions.title,
     status: agentSessions.status,
+    source: agentSessions.source,
     modelName: agentSessions.modelName,
     lastError: agentSessions.lastError,
     createdAt: agentSessions.createdAt,
     updatedAt: agentSessions.updatedAt,
     starredAt: sessionStars.starredAt,
+    lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+    lastSeenAt: agentSessions.lastSeenAt,
   };
 
   const visibilityFilter = and(
@@ -79,7 +83,74 @@ export async function loadSidebarSessionsForWorkspace(
 
   return Array.from(byId.values())
     .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
-    .map(serializeSidebarSession);
+    .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+      serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
+    );
+}
+
+// Personal sessions are the user's sessions against their private default agent. Same
+// shape as the sidebar list, but scoped to a single agent and including WhatsApp-originated
+// threads. Fetch starred sessions explicitly so pinned stale sessions still render.
+export async function loadPersonalSessionsForAgent(
+  userId: string,
+  workspaceId: string,
+  agentId: string,
+): Promise<SidebarSessionPayload[]> {
+  const db = getDb();
+
+  const baseColumns = {
+    id: agentSessions.id,
+    title: agentSessions.title,
+    status: agentSessions.status,
+    source: agentSessions.source,
+    modelName: agentSessions.modelName,
+    lastError: agentSessions.lastError,
+    createdAt: agentSessions.createdAt,
+    updatedAt: agentSessions.updatedAt,
+    starredAt: sessionStars.starredAt,
+    lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+    lastSeenAt: agentSessions.lastSeenAt,
+  };
+
+  const visibilityFilter = and(
+    eq(agentSessions.workspaceId, workspaceId),
+    eq(agentSessions.userId, userId),
+    eq(agentSessions.agentId, agentId),
+    // Unified personal list: web-originated AND WhatsApp-originated threads (not delegated).
+    inArray(agentSessions.source, ["user", "whatsapp"]),
+    isNull(agentSessions.archivedAt),
+  );
+
+  const starJoin = and(
+    eq(sessionStars.sessionId, agentSessions.id),
+    eq(sessionStars.userId, userId),
+  );
+
+  const [recent, starred] = await Promise.all([
+    db
+      .select(baseColumns)
+      .from(agentSessions)
+      .leftJoin(sessionStars, starJoin)
+      .where(visibilityFilter)
+      .orderBy(desc(agentSessions.updatedAt))
+      .limit(SIDEBAR_RECENCY_LIMIT),
+    db
+      .select(baseColumns)
+      .from(agentSessions)
+      .innerJoin(sessionStars, starJoin)
+      .where(and(visibilityFilter, isNotNull(sessionStars.starredAt)))
+      .orderBy(desc(agentSessions.updatedAt)),
+  ]);
+
+  const byId = new Map<string, (typeof recent)[number]>();
+  for (const row of recent) byId.set(row.id, row);
+  for (const row of starred) byId.set(row.id, row);
+
+  return Array.from(byId.values())
+    .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+      serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
+    );
 }
 
 export async function loadAgentSessionDetailForWorkspace(
@@ -129,6 +200,7 @@ export async function loadAgentSessionDetailForWorkspace(
     children,
     messages,
     events,
+    latestEventRows,
     usageRows,
     rollupRows,
     latestModelRequestRows,
@@ -140,6 +212,7 @@ export async function loadAgentSessionDetailForWorkspace(
             id: agentSessions.id,
             title: agentSessions.title,
             status: agentSessions.status,
+            source: agentSessions.source,
             agentName: agents.name,
             agentPath: agents.path,
             parentMessageId: agentSessions.parentMessageId,
@@ -164,6 +237,7 @@ export async function loadAgentSessionDetailForWorkspace(
         id: agentSessions.id,
         title: agentSessions.title,
         status: agentSessions.status,
+        source: agentSessions.source,
         agentName: agents.name,
         agentPath: agents.path,
         parentMessageId: agentSessions.parentMessageId,
@@ -178,7 +252,9 @@ export async function loadAgentSessionDetailForWorkspace(
           eq(agentSessions.parentSessionId, sessionId),
           eq(agentSessions.workspaceId, workspaceId),
           eq(agentSessions.userId, userId),
-          eq(agentSessions.source, "agent"),
+          // Both delegated children ("agent") and memory-keeper passes ("memory") are grouped
+          // under their parent; the live session list filters to source "user" so neither clutters it.
+          inArray(agentSessions.source, ["agent", "memory"]),
           isNull(agentSessions.archivedAt),
         ),
       )
@@ -203,6 +279,17 @@ export async function loadAgentSessionDetailForWorkspace(
       )
       .orderBy(asc(agentSessionEvents.id))
       .limit(300),
+    db
+      .select({
+        latestEventId: sql<number>`COALESCE(MAX(${agentSessionEvents.id}), 0)`,
+      })
+      .from(agentSessionEvents)
+      .where(
+        and(
+          eq(agentSessionEvents.sessionId, sessionId),
+          ne(agentSessionEvents.type, "debug.model_request"),
+        ),
+      ),
     db
       .select({
         messageId: agentSessionUsage.messageId,
@@ -337,6 +424,7 @@ export async function loadAgentSessionDetailForWorkspace(
   ]);
   const rollup = parseSessionTreeRollup(rowsFromExecute<Record<string, unknown>>(rollupRows)[0]);
   const usage = rollup.usage;
+  const latestEventId = readNumber(latestEventRows[0]?.latestEventId);
   const latestUsage = latestUsageRows[0];
   const currentContextTokens = latestUsage ? latestUsage.inputTokens + latestUsage.outputTokens : 0;
   const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
@@ -406,7 +494,14 @@ export async function loadAgentSessionDetailForWorkspace(
   const cost = rollup.cost;
   const serializedSession = {
     ...session,
-    source: session.source === "agent" ? ("agent" as const) : ("user" as const),
+    source:
+      session.source === "agent"
+        ? ("agent" as const)
+        : session.source === "memory"
+          ? ("memory" as const)
+          : session.source === "whatsapp"
+            ? ("whatsapp" as const)
+            : ("user" as const),
   };
 
   return serializeAgentSessionDetail({
@@ -421,6 +516,7 @@ export async function loadAgentSessionDetailForWorkspace(
     toolUsage,
     cost,
     currentContextTokens,
+    latestEventId,
     latestModelRequest: latestModelRequestRows[0]?.payload ?? null,
   });
 }
@@ -524,6 +620,7 @@ export function buildCreatedSessionDetail(input: {
     cost: EMPTY_COST,
     // A just-created session has no model steps yet, so the context window is empty.
     currentContextTokens: 0,
+    latestEventId: input.events.reduce((max, event) => Math.max(max, event.id), 0),
   });
 }
 

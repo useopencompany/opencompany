@@ -80,6 +80,7 @@ describe("session payload cache helpers", () => {
       toolUsage: base.toolUsage,
       cost: base.cost,
       currentContextTokens: base.currentContextTokens,
+      latestEventId: base.latestEventId,
       related: { parent: null, children: [] },
       session: {
         ...base.session,
@@ -112,6 +113,7 @@ describe("session payload cache helpers", () => {
       toolUsage: base.toolUsage,
       cost: base.cost,
       currentContextTokens: 14_200,
+      latestEventId: base.latestEventId,
       related: { parent: null, children: [] },
       session: {
         ...base.session,
@@ -133,6 +135,52 @@ describe("session payload cache helpers", () => {
     const { currentContextTokens: _omitted, ...legacy } = detail();
 
     expect(parseAgentSessionDetailResponse({ detail: legacy }).detail.currentContextTokens).toBe(0);
+  });
+
+  it("round-trips latestEventId through serialize and parse", () => {
+    const base = detail();
+    const serialized = serializeAgentSessionDetail({
+      usage: base.usage,
+      toolUsage: base.toolUsage,
+      cost: base.cost,
+      currentContextTokens: base.currentContextTokens,
+      latestEventId: 42,
+      related: { parent: null, children: [] },
+      session: {
+        ...base.session,
+        abortRequestedAt: null,
+        createdAt: new Date("2026-05-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-05-24T10:00:02.000Z"),
+      },
+      messages: [],
+      events: [],
+    });
+
+    expect(serialized.latestEventId).toBe(42);
+    expect(parseAgentSessionDetailResponse({ detail: serialized }).detail.latestEventId).toBe(42);
+  });
+
+  it("defaults latestEventId to the max event id for legacy payloads", () => {
+    const { latestEventId: _omitted, ...legacy } = detail({
+      events: [
+        {
+          id: 7,
+          type: "session.status",
+          messageId: null,
+          payload: { status: "running" },
+          createdAt: "2026-05-24T10:00:01.000Z",
+        },
+        {
+          id: 11,
+          type: "session.usage",
+          messageId: "msg_asst",
+          payload: {},
+          createdAt: "2026-05-24T10:00:02.000Z",
+        },
+      ],
+    });
+
+    expect(parseAgentSessionDetailResponse({ detail: legacy }).detail.latestEventId).toBe(11);
   });
 
   it("rejects invalid session detail payloads", () => {
@@ -189,6 +237,18 @@ describe("session payload cache helpers", () => {
               createdAt: "2026-05-24T10:00:00.000Z",
               updatedAt: "2026-05-24T10:01:00.000Z",
             },
+            {
+              id: "ses_memory",
+              title: "Memory pass: Parent",
+              status: "completed",
+              source: "memory",
+              agentName: "Leo",
+              agentPath: "agents/leo/leo.agent",
+              parentMessageId: null,
+              parentToolCallId: null,
+              createdAt: "2026-05-24T10:05:00.000Z",
+              updatedAt: "2026-05-24T10:06:00.000Z",
+            },
           ],
         },
       },
@@ -196,6 +256,9 @@ describe("session payload cache helpers", () => {
 
     expect(parsed.detail.related.parent?.id).toBe("ses_parent");
     expect(parsed.detail.related.children[0]?.parentToolCallId).toBe("call_delegate");
+    // Missing `source` on older payloads falls back to "user"; the memory pass carries "memory".
+    expect(parsed.detail.related.children[0]?.source).toBe("user");
+    expect(parsed.detail.related.children[1]?.source).toBe("memory");
   });
 
   it("round-trips the latest model-request debug snapshot", () => {
@@ -244,11 +307,13 @@ function sidebarSession(id: string, title: string) {
     id,
     title,
     status: "completed",
+    source: "user" as const,
     modelName: "model",
     lastError: null,
     createdAt: "2026-05-24T10:00:00.000Z",
     updatedAt: "2026-05-24T10:00:00.000Z",
     starredAt: null,
+    unseen: false,
   };
 }
 
@@ -300,5 +365,6 @@ function detail(
       sandboxCostUsdMicros: 0,
     },
     currentContextTokens: 0,
+    latestEventId: 0,
   };
 }

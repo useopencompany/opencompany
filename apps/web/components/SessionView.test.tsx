@@ -42,9 +42,11 @@ vi.mock("next/link", () => ({
   },
 }));
 
+// Mutable so surface-aware tests can render under /personal/... vs /company/... pages.
+const navigationMock = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ prefetch: vi.fn(), push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/",
+  usePathname: () => navigationMock.pathname,
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -114,6 +116,7 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
   abortAgentSession: actionMocks.abortAgentSession,
   cancelAgentSessionQuestion: actionMocks.cancelAgentSessionQuestion,
   continueInterruptedSession: actionMocks.continueInterruptedSession,
+  markSessionSeen: vi.fn(),
   resolveToolApproval: actionMocks.resolveToolApproval,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
   submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,
@@ -136,6 +139,7 @@ afterEach(() => {
   streamMock.status = "live";
   streamMock.state = emptyStreamState();
   streamMock.lastOptions = undefined;
+  navigationMock.pathname = "/";
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -689,6 +693,7 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       platformFeeUsdMicros: 0,
     },
     currentContextTokens: 0,
+    latestEventId: 0,
     ...overrides,
   };
 }
@@ -1563,5 +1568,177 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     await waitFor(() => {
       expect(scrollToSpy).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ── Tool-call elapsed counter ─────────────────────────────────────────────
+
+describe("ToolCallCardDefault — elapsed counter for long-running tool calls", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function makeRunningToolCallPartWithStartedAt(startedAt: string): AssistantTurnPart {
+    return {
+      type: "tool-call",
+      toolCall: {
+        id: "call_long",
+        name: "search_files",
+        status: "running",
+        inputPreview: '{"pattern":"*.ts"}',
+        activityPreview: "",
+        outputPreview: "",
+        startedEventId: 1,
+        completedEventId: null,
+        startedAt,
+      },
+    };
+  }
+
+  it("does NOT show the elapsed counter when the tool call has been running for less than 20s", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    // Tool started 10s ago — under the 20s threshold
+    const startedAt = new Date(now.getTime() - 10_000).toISOString();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeRunningToolCallPartWithStartedAt(startedAt)];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // Running badge shows plain "running" without elapsed suffix
+    expect(screen.getByText("running")).toBeInTheDocument();
+    // No time text in the badge (no "10s" or "·")
+    expect(screen.queryByText(/running · /)).not.toBeInTheDocument();
+  });
+
+  it("shows the elapsed counter once the tool call crosses 20s", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    // Tool started 19s ago — just under threshold
+    const startedAt = new Date(now.getTime() - 19_000).toISOString();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeRunningToolCallPartWithStartedAt(startedAt)];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // Before threshold: no counter
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument();
+
+    // Advance 1s to hit 20s total
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    // After threshold: counter appears
+    expect(screen.getByText("20s")).toBeInTheDocument();
+  });
+
+  it("increments the elapsed counter every second after it appears", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    // Tool started 20s ago — right at threshold
+    const startedAt = new Date(now.getTime() - 20_000).toISOString();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeRunningToolCallPartWithStartedAt(startedAt)];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // At 20s the counter is shown
+    expect(screen.getByText("20s")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByText("21s")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(9000);
+    });
+    expect(screen.getByText("30s")).toBeInTheDocument();
+  });
+
+  it("does NOT show the elapsed counter for a completed tool call", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    const message = makeMessage({ status: "completed" });
+    // Even with a startedAt 60s ago, completed calls must not show the counter
+    const parts: AssistantTurnPart[] = [
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "call_done",
+          name: "search_files",
+          status: "completed",
+          inputPreview: '{"pattern":"*.ts"}',
+          activityPreview: "",
+          outputPreview: "3 files found",
+          startedEventId: 1,
+          completedEventId: 2,
+          startedAt: new Date(now.getTime() - 60_000).toISOString(),
+        },
+      },
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.queryByText(/running/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/60s/)).not.toBeInTheDocument();
+    // The step summary is shown (collapsed), but no running/elapsed chrome
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+  });
+});
+
+// ── Surface-aware inspector links ────────────────────────────────────────────
+// Session pages render under both /company and /personal; related-session and
+// session-page links must stay within the surface the user is on.
+
+function makeRelatedChild(
+  overrides: Partial<AgentSessionDetailPayload["related"]["children"][number]> = {},
+): AgentSessionDetailPayload["related"]["children"][number] {
+  return {
+    id: "sess_child",
+    title: "Child session",
+    status: "completed",
+    source: "agent",
+    agentName: "Test Agent",
+    agentPath: null,
+    parentMessageId: null,
+    parentToolCallId: null,
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("SessionViewContent — surface-aware inspector links", () => {
+  it("links child sessions under /personal when viewed on the personal surface", () => {
+    navigationMock.pathname = "/personal/session/sess_001";
+    const detail = makeDetail({
+      related: { parent: null, children: [makeRelatedChild()] },
+    });
+    renderSessionViewContent(detail);
+
+    const childLink = screen.getByTitle("Child session");
+    expect(childLink).toHaveAttribute("href", "/personal/session/sess_child");
+    expect(screen.getByText("Session page").parentElement?.querySelector("a")).toHaveAttribute(
+      "href",
+      "/personal/session/sess_001",
+    );
+  });
+
+  it("keeps child-session links under /company on the company surface", () => {
+    navigationMock.pathname = "/company/session/sess_001";
+    const detail = makeDetail({
+      related: { parent: null, children: [makeRelatedChild()] },
+    });
+    renderSessionViewContent(detail);
+
+    const childLink = screen.getByTitle("Child session");
+    expect(childLink).toHaveAttribute("href", "/company/session/sess_child");
   });
 });

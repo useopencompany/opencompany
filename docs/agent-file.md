@@ -36,8 +36,12 @@ Some frontmatter fields are **derived from body mentions** rather than authored 
 
 - Unique supported `@tool` mentions → written to `tools:`.
 - Unique supported `@brain/<path>` mentions → written to `brain:`.
-- A supported GitHub repository mention, such as `@owner/repo`, is written to
-  `integrations.github.repositories` and used by repository-aware coding tools.
+- A plain `@github` mention writes `integrations.github.allRepositories: true`.
+  This gives repository-aware coding tools live access to any repository the
+  workspace's GitHub connection can reach.
+- A supported GitHub repository mention, such as `@owner/repo` or its
+  `@github/owner/repo` alias, is written to `integrations.github.repositories`
+  and used by repository-aware coding tools.
 - Unique supported `@agent/<slug>` mentions → written to `agents:`.
 - The title input → written to `title:`.
 
@@ -70,6 +74,7 @@ The model the agent runs on. Must be one of:
 | `anthropic/claude-sonnet-4.6`              | High-capability Claude for coding-heavy and professional tasks. |
 | `anthropic/claude-opus-4.7`                | Highest-capability Claude for demanding agent workflows.        |
 | `anthropic/claude-opus-4.8`                | Latest highest-capability Claude for demanding agent workflows. |
+| `anthropic/claude-fable-5`                 | Mythos-class Claude for long-running, complex agent tasks.      |
 | `google/gemini-3-flash`                    | Popular Gemini model with strong speed and long context.        |
 | `google/gemini-3.1-flash-lite-preview`     | Very fast, low-cost Gemini for simple high-volume tasks.        |
 | `deepseek/deepseek-v4-flash`               | High-throughput DeepSeek for cost-sensitive work.               |
@@ -232,9 +237,29 @@ As a guardrail, the runner rejects `update_agent_file` until the agent has read 
 `agent-self-edit` SKILL.md (via `read_skill`) in the current session, so the edit is always
 made with the skill's guidance in context.
 
+### `integrations.github` — GitHub access object
+
+GitHub access is derived from body mentions. A plain `@github` mention enables
+live workspace-wide access:
+
+```yaml
+integrations:
+  github:
+    repositories: []
+    allRepositories: true
+```
+
+`allRepositories: true` is not a snapshot of repository names. At runtime,
+repository-aware coding tools resolve the requested `owner/repo` against the
+workspace's connected GitHub installations. Agents with this access must pass an
+explicit repository, such as the `repository` argument for coding tools or
+`--repo owner/repo` for `gh` commands.
+
 ### `integrations.github.repositories` — list of repository objects
 
 Each entry binds a workspace-authorized GitHub repository referenced by the body.
+Both `@owner/repo` and `@github/owner/repo` serialize to the same repository
+object.
 
 ```yaml
 integrations:
@@ -309,15 +334,30 @@ Ask @agent/sales-research.       ← @agent/sales-research (workspace agent)
 
 Unknown `@text` that doesn't match a tool, Brain path, repository, or workspace agent stays in the body as plain text — no error, no contribution to frontmatter.
 
+### Profile (`agent/user.md`)
+
+Every session injects one small "profile" file from the agent folder directly into the system
+prompt, so the agent carries durable context into each session without having to retrieve it:
+
+- **`agent/user.md`** — who the user is: identity, preferences, communication style, goals.
+
+It is auto-created empty on first use and edited by the agent with ordinary file tools as it
+learns. It is deliberately small: hard-capped at ~3 KB when injected (content beyond the cap is
+truncated with a visible marker). The profile is **not** a general facts store — every other
+durable fact (specific people, companies, projects, decisions, lessons, conventions) belongs in
+structured memory (`agent/memory/`, via the `memory` tool). Because the prompt is built at session
+start, edits take effect on the **next** session (a frozen snapshot per session). This applies to
+any agent that has this file — it is not specific to the personal agent.
+
 ### After-session memory hook
 
 Add `#after-session` inside the body to enable a background pass after a session has been idle for 3 minutes. The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. The marker remains part of the normal instructions, but the runtime also uses the parsed prompt for an internal after-session run.
 
 ```text
-Help the user during the session. #after-session Update agent/memory.md with durable preferences and decisions from the transcript.
+Help the user during the session. #after-session Update memory with durable preferences and decisions from the transcript.
 ```
 
-The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should capture anything worth carrying forward in the agent folder (`agent/memory.md` for durable learnings) when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
+The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should capture anything worth carrying forward — durable facts about who the user is into the profile (`agent/user.md`, kept tight given the ~3 KB cap), and every other durable fact into structured memory via the `memory` tool — when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
 
 ## Storage layout
 
@@ -435,7 +475,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
   ],
   afterSession: {
     enabled: true,
-    prompt: "Update agent/memory.md with durable preferences and decisions from the transcript.",
+    prompt: "Update memory with durable preferences and decisions from the transcript.",
     idleDelaySeconds: 180,
   },
   integrations: {

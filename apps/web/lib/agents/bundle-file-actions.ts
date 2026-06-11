@@ -100,8 +100,8 @@ export async function updateAgentBundleFile(
     ]);
 
     scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-    revalidatePath(`/agents/${agent.path}`);
-    revalidatePath(`/agents/${agent.id}`);
+    revalidatePath(`/company/agents/${agent.path}`);
+    revalidatePath(`/company/agents/${agent.id}`);
 
     const [updated] = await db
       .select()

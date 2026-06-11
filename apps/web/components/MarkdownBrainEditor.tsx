@@ -11,9 +11,13 @@ import { useState } from "react";
 export function MarkdownBrainEditor({
   content,
   onChange,
+  editable = true,
 }: {
   content: string;
   onChange: (content: string) => void;
+  // When false the document renders read-only (no caret, no editing) — used by the Memory
+  // inspector, which surfaces tool-managed files the user must not hand-edit.
+  editable?: boolean;
 }) {
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
@@ -38,6 +42,7 @@ export function MarkdownBrainEditor({
   const editor = useEditor(
     {
       immediatelyRender: false,
+      editable,
       extensions: [
         StarterKit,
         Markdown.configure({
@@ -70,7 +75,7 @@ export function MarkdownBrainEditor({
 
   return (
     <div className="relative">
-      {editor ? (
+      {editor && editable ? (
         <BubbleMenu
           editor={editor}
           className="flex items-center gap-0.5 rounded-lg border border-black/[0.08] bg-surface-raised p-1 shadow-[0_12px_28px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
@@ -115,7 +120,7 @@ export function MarkdownBrainEditor({
       ) : null}
 
       <div className="relative">
-        {isEmpty ? (
+        {isEmpty && editable ? (
           <div className="pointer-events-none absolute left-0 top-0 text-[15px] leading-7 text-ink-subtle/70">
             Start writing...
           </div>

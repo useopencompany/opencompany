@@ -35,7 +35,7 @@ export function assertRunnerDbConfig(): void {
   resolvePoolMax();
 }
 
-function resolveRunnerDatabaseUrl(): string {
+export function resolveRunnerDatabaseUrl(): string {
   const explicit = process.env.RUNNER_DATABASE_URL?.trim();
   if (explicit) return explicit;
 

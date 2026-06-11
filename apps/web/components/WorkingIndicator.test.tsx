@@ -1,6 +1,12 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatElapsed, WorkingIndicator } from "./WorkingIndicator";
+import { formatElapsed, useElapsedSeconds, WorkingIndicator } from "./WorkingIndicator";
+
+// Minimal wrapper that renders the hook's value as text so tests can assert on it.
+function ElapsedDisplay({ startedAt }: { startedAt?: string }) {
+  const elapsed = useElapsedSeconds(startedAt);
+  return <span data-testid="elapsed">{elapsed}</span>;
+}
 
 describe("formatElapsed", () => {
   it("formats 0 seconds as '0s'", () => {
@@ -126,5 +132,61 @@ describe("WorkingIndicator", () => {
     rerender(<WorkingIndicator />);
 
     expect(screen.getByText("15s")).toBeInTheDocument();
+  });
+});
+
+describe("useElapsedSeconds", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts at 0 with no startedAt", () => {
+    render(<ElapsedDisplay />);
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("0");
+  });
+
+  it("increments every second", () => {
+    render(<ElapsedDisplay />);
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("0");
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("1");
+
+    act(() => {
+      vi.advanceTimersByTime(19000);
+    });
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("20");
+  });
+
+  it("uses a provided ISO timestamp as the start anchor", () => {
+    const start = new Date("2026-05-28T10:00:00.000Z");
+    vi.setSystemTime(new Date(start.getTime() + 25000));
+    render(<ElapsedDisplay startedAt={start.toISOString()} />);
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("25");
+  });
+
+  it("corrects upward when a server timestamp is earlier than mount time", () => {
+    const mountedAt = new Date("2026-05-28T10:00:10.000Z");
+    vi.setSystemTime(mountedAt);
+    const { rerender } = render(<ElapsedDisplay />);
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    // 5s since mount
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("5");
+
+    // Server says tool started 5s before mount — elapsed should jump to 10s
+    rerender(<ElapsedDisplay startedAt={new Date(mountedAt.getTime() - 5000).toISOString()} />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("10");
   });
 });

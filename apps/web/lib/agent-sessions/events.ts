@@ -29,6 +29,9 @@ export function dispatchAgentAfterSessionCheck(input: {
   sessionId: string;
   messageId: string;
   workspaceId: string;
+  // Optional override for how long the session must stay idle before the check fires. Omit to use
+  // the platform default (AFTER_SESSION_IDLE_TRIGGER_SECONDS).
+  idleDelaySeconds?: number;
 }) {
   return inngest.send({
     name: AGENT_AFTER_SESSION_CHECK_EVENT,

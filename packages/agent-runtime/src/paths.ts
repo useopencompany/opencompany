@@ -1,6 +1,9 @@
 import path from "node:path";
 
-export function resolveWorkspacePath(workdir: string, inputPath = ".") {
+// Personal sessions use the memory/ + personal-brain/ + work/ tree (agent/ retained for the agent's
+// private profile/soul/skill authoring, skills/ for the read-only skill mount); company sessions use
+// work/ + brain/ + agent/ + skills/. `personal` selects the allowed top-level roots.
+export function resolveWorkspacePath(workdir: string, inputPath = ".", personal = false) {
   if (inputPath.includes("\0")) {
     throw new Error("Path contains an invalid character.");
   }
@@ -13,18 +16,18 @@ export function resolveWorkspacePath(workdir: string, inputPath = ".") {
     throw new Error("Path must stay inside the session workspace.");
   }
 
+  const allowedRoots = personal
+    ? ["work", "memory", "personal-brain", "agent", "skills"]
+    : ["work", "brain", "agent", "skills"];
   const workspaceRelative = path.posix.relative(normalizedWorkdir, resolved);
-  if (
-    workspaceRelative !== "work" &&
-    !workspaceRelative.startsWith("work/") &&
-    workspaceRelative !== "brain" &&
-    !workspaceRelative.startsWith("brain/") &&
-    workspaceRelative !== "agent" &&
-    !workspaceRelative.startsWith("agent/") &&
-    workspaceRelative !== "skills" &&
-    !workspaceRelative.startsWith("skills/")
-  ) {
-    throw new Error("Path must be inside work/, brain/, agent/, or skills/ for this session.");
+  const inAllowedRoot = allowedRoots.some(
+    (root) => workspaceRelative === root || workspaceRelative.startsWith(`${root}/`),
+  );
+  if (!inAllowedRoot) {
+    const list = allowedRoots.map((root) => `${root}/`);
+    throw new Error(
+      `Path must be inside ${list.slice(0, -1).join(", ")}, or ${list.at(-1)} for this session.`,
+    );
   }
 
   return resolved;

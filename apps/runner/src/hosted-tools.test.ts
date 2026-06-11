@@ -1,3 +1,4 @@
+import type { RuntimeToolName } from "@opencompany/agent-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import {
@@ -1950,6 +1951,80 @@ describe("validateHostedToolEnvironment", () => {
         env: env({ apifyApiToken: undefined }),
       }),
     ).toThrow(MissingEnvError);
+  });
+});
+
+describe("executeHostedTool (discover_capabilities)", () => {
+  type DiscoverOutput = {
+    capabilityCount: number;
+    howToEnable: string;
+    capabilities: Array<{
+      id: string;
+      status: "enabled" | "available" | "needs_setup";
+      reason?: string;
+      howToEnable: string;
+    }>;
+  };
+
+  const discover = async (
+    opts: {
+      env?: RunnerEnv;
+      enabledTools?: RuntimeToolName[];
+      hasAttachedRepository?: boolean;
+      args?: unknown;
+    } = {},
+  ): Promise<DiscoverOutput> => {
+    const result = await executeHostedTool({
+      name: "discover_capabilities",
+      args: opts.args ?? {},
+      env: opts.env ?? env(),
+      enabledTools: opts.enabledTools ?? ["discover_capabilities"],
+      signal: new AbortController().signal,
+      hasAttachedRepository: opts.hasAttachedRepository ?? false,
+    });
+    return result.output as DiscoverOutput;
+  };
+
+  const status = (output: DiscoverOutput, id: string) =>
+    output.capabilities.find((capability) => capability.id === id)?.status;
+
+  it("reports platform capabilities as available when their credentials are present", async () => {
+    const output = await discover();
+    expect(status(output, "exa")).toBe("available");
+    expect(status(output, "x")).toBe("available");
+    expect(output.capabilityCount).toBe(output.capabilities.length);
+    expect(output.howToEnable).toContain("ask_user_question");
+    // Workspace-OAuth capabilities are excluded from v1 discovery.
+    expect(output.capabilities.map((capability) => capability.id)).not.toContain("gmail");
+    expect(output.capabilities.map((capability) => capability.id)).not.toContain("linear");
+  });
+
+  it("reports a capability as needs_setup when its platform credential is missing", async () => {
+    const output = await discover({ env: env({ xApiBearerToken: undefined }) });
+    expect(status(output, "x")).toBe("needs_setup");
+    // exa is unaffected — its own credential is still present.
+    expect(status(output, "exa")).toBe("available");
+  });
+
+  it("gates amp on an attached repository and leaves opencode available without one", async () => {
+    const noRepo = await discover({ hasAttachedRepository: false });
+    expect(status(noRepo, "amp")).toBe("needs_setup");
+    expect(status(noRepo, "opencode")).toBe("available");
+
+    const withRepo = await discover({ hasAttachedRepository: true });
+    expect(status(withRepo, "amp")).toBe("available");
+  });
+
+  it("reports an already-enabled capability as enabled", async () => {
+    const output = await discover({ enabledTools: ["discover_capabilities", "exa_search"] });
+    expect(status(output, "exa")).toBe("enabled");
+  });
+
+  it("filters by query", async () => {
+    const output = await discover({ args: { query: "video" } });
+    expect(output.capabilities.length).toBeGreaterThan(0);
+    expect(output.capabilities.map((capability) => capability.id)).toContain("youtube");
+    expect(output.capabilities.map((capability) => capability.id)).not.toContain("exa");
   });
 });
 
