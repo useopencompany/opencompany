@@ -6,13 +6,13 @@ import {
   BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
   formatBrainReferenceDisplay,
+  getRuntimeToolDefinition,
+  getRuntimeToolDefinitions,
   isBrainListingAllowed,
   isBrainPathAllowed,
   isDeferrableRuntimeTool,
   newAgentSessionMessageId,
   parseGitHubCliArgs,
-  RUNTIME_TOOL_DEFINITION_BY_NAME,
-  RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
   type ToolArgResolution,
@@ -192,7 +192,9 @@ export function createToolSet(input: {
 }) {
   const tools: ToolSet = {};
 
-  for (const definition of RUNTIME_TOOL_DEFINITIONS) {
+  for (const definition of getRuntimeToolDefinitions({
+    personalAgent: input.personalAgent ?? false,
+  })) {
     tools[definition.name] = tool({
       description: definition.description,
       inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
@@ -385,7 +387,9 @@ export async function dispatchBuiltinUseTool(input: {
 }) {
   const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
   const definition = rawName
-    ? RUNTIME_TOOL_DEFINITION_BY_NAME.get(rawName as RuntimeToolName)
+    ? getRuntimeToolDefinition(rawName as RuntimeToolName, {
+        personalAgent: input.personalAgent ?? false,
+      })
     : undefined;
   if (
     !definition ||
@@ -664,6 +668,7 @@ async function executeRuntimeToolInner(
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
+          personalAgent: input.personalAgent ?? false,
           hasAttachedRepository:
             Boolean(input.repository) ||
             (input.agentConfig ? agentHasGitHubAccess(input.agentConfig) : false),
@@ -1398,6 +1403,13 @@ export function preflightSandboxToolArgs(input: {
   }
 
   const requestedPath = typeof pathValue === "string" ? pathValue : undefined;
+  const requestedRoot = requestedPath?.trim().replace(/^\.?\//, "").split("/")[0];
+  if (personal && requestedRoot === "memory") {
+    throw new RecoverableToolError(
+      "Generic file tools cannot access memory/. Use the memory tool to read or write structured memory.",
+      "invalid_sandbox_path",
+    );
+  }
 
   let brainRelativePath: string | null;
   try {
@@ -1405,7 +1417,7 @@ export function preflightSandboxToolArgs(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
     const hint = personal
-      ? "Use paths prefixed with work/ for scratch files, personal-brain/ for the user's private knowledge, memory/ for your structured memory, or agent/ for your private agent folder."
+      ? "Use paths prefixed with work/ for scratch files, personal-brain/ for the user's private knowledge, or agent/ for your private agent folder. Use the memory tool for structured memory."
       : "Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.";
     throw new RecoverableToolError(`${message} ${hint}`, "invalid_sandbox_path");
   }

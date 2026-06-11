@@ -158,7 +158,11 @@ export function resolveAgentRuntimeConfig(input: {
             ", ",
           )}. Use delegate_to_agent for focused subtasks that should be handled by one of these agents. The tool returns a childSessionId; pass that id as sessionId in a later delegate_to_agent call to continue the same delegated session when continuity matters.`
       : null,
-    buildToolsIndexSection({ agentTools: input.agent.tools, mcpServerKeys }),
+    buildToolsIndexSection({
+      agentTools: input.agent.tools,
+      mcpServerKeys,
+      ghEnabled: repositories.length > 0 || githubAllRepositories,
+    }),
     buildSkillsIndexSection(skills),
     skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID)
       ? `You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first. update_agent_file is not preloaded: after reading the skill, discover its schema with find_tools({ query: "update_agent_file" }) and run it with ${BUILTIN_USE_TOOL_NAME}({ tool: "update_agent_file", arguments }).`
@@ -263,6 +267,7 @@ function formatUserContext(input: {
 function buildToolsIndexSection(input: {
   agentTools: AgentConfigTool[];
   mcpServerKeys: string[];
+  ghEnabled: boolean;
 }): string | null {
   const builtinCapabilities: AgentToolDefinition[] = [];
   const seen = new Set<AgentToolId>();
@@ -278,12 +283,21 @@ function buildToolsIndexSection(input: {
 
   const lines: string[] = [
     "## Tools",
-    "Core file and shell tools (read_file, write_file, edit_file, list_files, git_diff, shell, read_skill) are available directly.",
+    `Core tools (${[
+      "read_file",
+      "write_file",
+      "edit_file",
+      "list_files",
+      "git_diff",
+      "shell",
+      "read_skill",
+      ...(input.ghEnabled ? ["gh"] : []),
+    ].join(", ")}) are available directly.`,
     "This list is only what's enabled now — more opinionated capabilities are available to add. When a task needs something you can't currently do, call discover_capabilities to see what you could enable; if one fits, confirm with the user (ask_user_question), then enable it durably via self-edit (update_agent_file).",
   ];
   if (builtinCapabilities.length > 0) {
     lines.push(
-      `Other tools are not preloaded. To use a capability below, call find_tools({ capability }) to list its tools and input schemas, then ${BUILTIN_USE_TOOL_NAME}({ tool, arguments }) to run one. find_tools returns compact entries (name, description, schema); when a tool is non-trivial or you are unsure how to call it, first call tool_help({ tool }) for its detailed usage instructions, then ${BUILTIN_USE_TOOL_NAME} with arguments matching its schema. Permissions are enforced per underlying tool, so a write or destructive tool may still require approval.`,
+      `Other built-in capability tools are not preloaded, and find_tools does not list the core tools above. To use a capability below, call find_tools({ capability }) to list its tools and input schemas, then ${BUILTIN_USE_TOOL_NAME}({ tool, arguments }) to run one. find_tools returns compact entries (name, description, schema); when a tool is non-trivial or you are unsure how to call it, first call tool_help({ tool }) for its detailed usage instructions, then ${BUILTIN_USE_TOOL_NAME} with arguments matching its schema. Permissions are enforced per underlying tool, so a write or destructive tool may still require approval.`,
       "Built-in capabilities:",
       ...builtinCapabilities.map((capability) => `- ${capability.id} — ${capability.description}`),
     );

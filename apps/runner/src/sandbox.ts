@@ -775,10 +775,10 @@ function gitDiffCommand(workRoot: string) {
 }
 
 export function resolveSandboxToolPath(workdir: string, inputPath = "work", personal = false) {
-  // Personal sessions use the memory/ + personal-brain/ + work/ tree (agent/ retained for the
-  // agent's private profile/soul/skill authoring); company sessions use work/ + brain/ + agent/.
+  // Personal sessions mount memory/ for the dedicated memory CLI, but generic file tools must not
+  // touch it because that bypasses structured-memory provenance and validation.
   const allowedRoots = personal
-    ? ["work", "memory", "personal-brain", "agent"]
+    ? ["work", "personal-brain", "agent"]
     : ["work", "brain", "agent"];
   const allowedRootsList = allowedRoots.map((root) => `${root}/`);
   // Oxford-"or" join so the company message stays "work/, brain/, or agent/".
