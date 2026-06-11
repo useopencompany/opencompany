@@ -7,6 +7,7 @@ export type ParsedArgs = {
   get(name: string): string | undefined;
   getAll(name: string): string[];
   has(name: string): boolean;
+  names(): string[];
   number(name: string): number | undefined;
 };
 
@@ -41,6 +42,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     get: (name) => flags.get(name)?.[0],
     getAll: (name) => flags.get(name) ?? [],
     has: (name) => flags.has(name),
+    names: () => [...flags.keys()],
     number: (name) => {
       const raw = flags.get(name)?.[0];
       if (raw === undefined) return undefined;

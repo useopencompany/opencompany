@@ -10,6 +10,7 @@ import { create } from "./create";
 import { del } from "./delete";
 import { doctor } from "./doctor";
 import { get } from "./get";
+import { HELP, helpResult, validateCommandArgs } from "./index";
 import type { CommandResult } from "./io";
 import { link } from "./link";
 import { merge } from "./merge";
@@ -42,6 +43,25 @@ function data(result: CommandResult): Record<string, unknown> {
 }
 
 describe("memory CLI", () => {
+  it("returns full help text for invalid command usage", () => {
+    const unknownCommand = helpResult('Unknown command "wat".');
+    expect(unknownCommand.code).toBe(1);
+    expect(unknownCommand.text).toContain('Unknown command "wat".');
+    expect(unknownCommand.text).toContain("Usage: memory <command> [options]");
+    expect(unknownCommand.text).toContain("Commands:");
+
+    const badFlag = validateCommandArgs("query", parseArgs(["acme", "--lmit", "5"]));
+    expect(badFlag).toBe('Unknown option "--lmit".');
+    expect(helpResult(badFlag ?? "").text).toContain(HELP);
+
+    const extraPositional = validateCommandArgs("get", parseArgs(["acme", "extra"]));
+    expect(extraPositional).toBe('Unexpected argument "extra"; get accepts 1 positional argument.');
+
+    expect(
+      validateCommandArgs("query", parseArgs(["acme", "blockers", "--limit", "5"])),
+    ).toBeNull();
+  });
+
   it("creates a canonical object and rejects duplicates / evidence types", async () => {
     const created = await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme Inc"]);
     expect(created.code).toBe(0);
