@@ -93,6 +93,20 @@ describe("preflightSandboxToolArgs brain scope", () => {
       ).not.toThrow();
     }
   });
+
+  it("rejects personal memory/ paths for generic file tools with a memory-tool hint", () => {
+    for (const name of ["read_file", "write_file", "edit_file", "list_files"] as const) {
+      expect(() =>
+        preflightSandboxToolArgs({
+          name,
+          args: { path: "memory/profile.md" },
+          workdir: WORKDIR,
+          brainReferences: [],
+          personal: true,
+        }),
+      ).toThrow(/Generic file tools cannot access memory\/\. Use the memory tool/);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

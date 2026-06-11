@@ -36,6 +36,7 @@ type HostedToolHandler = {
     env: RunnerEnv;
     enabledTools: RuntimeToolName[];
     signal: AbortSignal;
+    personalAgent?: boolean;
     // Whether the session has a GitHub repository attached. Only `discover_capabilities` reads it
     // (to report repo-gated capabilities like amp as "needs setup"); other handlers ignore it.
     hasAttachedRepository?: boolean;
@@ -226,6 +227,7 @@ export async function executeHostedTool(input: {
   googleContext?: GoogleToolContext | undefined;
   neonContext?: NeonToolContext | undefined;
   hasAttachedRepository?: boolean;
+  personalAgent?: boolean;
 }): Promise<HostedToolResult> {
   // Google (Gmail + Calendar) tools resolve per-account workspace credentials rather than a
   // platform env var, so they take a different path with the credential context attached.
@@ -262,10 +264,12 @@ export function validateHostedToolEnvironment(input: {
 
 const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> = {
   tool_help: {
-    execute: ({ args, enabledTools }) => executeToolHelp(args, enabledTools),
+    execute: ({ args, enabledTools, personalAgent }) =>
+      executeToolHelp(args, enabledTools, { personalAgent: personalAgent ?? false }),
   },
   find_tools: {
-    execute: ({ args, enabledTools }) => executeToolSearch(args, enabledTools),
+    execute: ({ args, enabledTools, personalAgent }) =>
+      executeToolSearch(args, enabledTools, { personalAgent: personalAgent ?? false }),
   },
   discover_capabilities: {
     execute: ({ args, env, enabledTools, hasAttachedRepository }) =>
@@ -483,9 +487,13 @@ function validateYoutubeEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
   }
 }
 
-function executeToolHelp(args: unknown, enabledTools: RuntimeToolName[]): HostedToolResult {
+function executeToolHelp(
+  args: unknown,
+  enabledTools: RuntimeToolName[],
+  context: { personalAgent?: boolean },
+): HostedToolResult {
   const toolName = readString(asRecord(args), "tool");
-  const help = getRuntimeToolHelp(toolName, enabledTools);
+  const help = getRuntimeToolHelp(toolName, enabledTools, context);
   if (!help) {
     return {
       output: {
@@ -499,7 +507,11 @@ function executeToolHelp(args: unknown, enabledTools: RuntimeToolName[]): Hosted
   return { output: help };
 }
 
-function executeToolSearch(args: unknown, enabledTools: RuntimeToolName[]): HostedToolResult {
+function executeToolSearch(
+  args: unknown,
+  enabledTools: RuntimeToolName[],
+  context: { personalAgent?: boolean },
+): HostedToolResult {
   const record = asRecord(args);
   // Both are optional in the find_tools schema — omitting them lists every tool. readString throws
   // on a missing key, so use readOptionalString to avoid rejecting a valid capability-only (or
@@ -512,6 +524,7 @@ function executeToolSearch(args: unknown, enabledTools: RuntimeToolName[]): Host
       ...(query ? { query } : {}),
     },
     enabledTools,
+    context,
   );
   return {
     output: {

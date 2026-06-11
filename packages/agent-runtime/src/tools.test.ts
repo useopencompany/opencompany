@@ -3,6 +3,7 @@ import {
   AGENT_TOOL_CATALOG,
   AGENT_TOOL_DEFINITION_BY_ID,
   buildCapabilityDiscovery,
+  getRuntimeToolDefinition,
   isDeferrableRuntimeTool,
   partitionRuntimeToolNames,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
@@ -428,6 +429,34 @@ describe("partitionRuntimeToolNames", () => {
     // ask_user_question stays direct so its durable turn-suspend (keyed on the literal call name)
     // is not wrapped behind use_tool.
     expect(isDeferrableRuntimeTool("ask_user_question")).toBe(false);
+  });
+});
+
+describe("getRuntimeToolDefinition", () => {
+  it("renders personal file tool descriptions without brain/ or memory/ file access", () => {
+    const readFile = getRuntimeToolDefinition("read_file", { personalAgent: true });
+    const listFiles = getRuntimeToolDefinition("list_files", { personalAgent: true });
+    const shell = getRuntimeToolDefinition("shell", { personalAgent: true });
+
+    expect(readFile?.description).toContain("./personal-brain");
+    expect(readFile?.description).not.toContain("./brain");
+    expect(readFile?.parameters.properties.path).toMatchObject({
+      description: expect.stringContaining("personal-brain/"),
+    });
+    expect(JSON.stringify(readFile?.parameters.properties.path)).not.toContain("memory/");
+    expect(listFiles?.description).toContain("generic file tools cannot access memory/");
+    expect(shell?.description).toContain("./personal-brain");
+    expect(shell?.description).toContain("Personal shell commands cannot access memory/");
+    expect(shell?.description).not.toContain("./brain");
+  });
+
+  it("keeps company file tool descriptions on brain/", () => {
+    const readFile = getRuntimeToolDefinition("read_file");
+
+    expect(readFile?.description).toContain("./brain");
+    expect(readFile?.parameters.properties.path).toMatchObject({
+      description: expect.stringContaining("brain/"),
+    });
   });
 });
 
