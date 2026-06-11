@@ -2,6 +2,8 @@ import {
   type AgentConfig,
   agentHasGitHubAccess,
   normalizeAgentConfig,
+  type SandboxHydrationTiming,
+  type SandboxHydrationTimingPayload,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
@@ -36,13 +38,20 @@ import {
   killSandbox,
   prepareWorkspace,
   type SandboxHandle,
+  type SandboxLatencyObservation,
   sandboxPreparationErrorFields,
 } from "./sandbox";
 import { materializeSkillsForSession } from "./skills";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
-export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
+export async function ensureSandbox(
+  row: LoadedSession,
+  env: RunnerEnv,
+  options?: {
+    onHydrationTiming?: (observation: SandboxHydrationTimingPayload) => void | Promise<void>;
+  },
+) {
   let sandbox: SandboxHandle | null = null;
   const agentConfig = normalizeAgentConfig(row.agent.config);
   // The user's personal/default agent gets the memory/ + personal-brain/ + work/ sandbox layout and
@@ -51,6 +60,8 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   const template = resolveSandboxTemplate(agentConfig, env);
   const existingSandbox = Boolean(row.session.e2bSandboxId);
   const readyStartedAt = performance.now();
+  const timings: Partial<SandboxHydrationTiming> = {};
+  const e2bRequests: SandboxLatencyObservation[] = [];
   try {
     // Each hydration stage gets its own Braintrust child span (under the caller's
     // ensure_sandbox span) so a slow first tool call is attributable to connect/resume vs the
@@ -58,85 +69,100 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     sandbox = await traceBraintrustStep(
       "sandbox_connect_or_create",
       () =>
-        createOrConnectSandbox({
-          sandboxId: row.session.e2bSandboxId,
-          template,
-          envs: {
-            E2B_API_KEY: env.e2bApiKey,
-            VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
-          },
-          idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
-          onLatency: (observation) =>
-            captureE2BSandboxLatency({
-              row,
-              template,
-              existingSandbox,
-              phase: "e2b_request",
-              ...observation,
-            }),
-        }),
+        recordSandboxHydrationStage(timings, "e2bConnectOrCreateMs", () =>
+          createOrConnectSandbox({
+            sandboxId: row.session.e2bSandboxId,
+            template,
+            envs: {
+              E2B_API_KEY: env.e2bApiKey,
+              VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
+            },
+            idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
+            onLatency: (observation) => {
+              e2bRequests.push(observation);
+              captureE2BSandboxLatency({
+                row,
+                template,
+                existingSandbox,
+                phase: "e2b_request",
+                ...observation,
+              });
+            },
+          }),
+        ),
       { existing_sandbox: existingSandbox, template: template ?? "default" },
     );
     const readySandbox = sandbox;
     await traceBraintrustStep("sandbox_prepare_workspace", () =>
-      prepareWorkspace({
-        sandbox: readySandbox,
-        workdir: row.session.workdir,
-        personal,
-        agentFile: serializeAgentFile({
-          title: agentConfig.title,
-          body: agentConfig.instructions,
-          model: agentConfig.model.name,
-          tools: agentConfig.tools,
-          brain: agentConfig.brain,
-          skills: agentConfig.skills ?? [],
-          integrations: agentConfig.integrations,
-          triggers: agentConfig.triggers,
+      recordSandboxHydrationStage(timings, "prepareWorkspaceMs", () =>
+        prepareWorkspace({
+          sandbox: readySandbox,
+          workdir: row.session.workdir,
+          personal,
+          agentFile: serializeAgentFile({
+            title: agentConfig.title,
+            body: agentConfig.instructions,
+            model: agentConfig.model.name,
+            tools: agentConfig.tools,
+            brain: agentConfig.brain,
+            skills: agentConfig.skills ?? [],
+            integrations: agentConfig.integrations,
+            triggers: agentConfig.triggers,
+          }),
         }),
-      }),
+      ),
     );
     // Personal agents have no company brain mount — skip materializing ./brain for them.
     if (!personal) {
       await traceBraintrustStep("sandbox_materialize_brain", () =>
-        materializeBrainForSession({
-          sandbox: readySandbox,
-          sessionId: row.session.id,
-          workspaceId: row.workspace.id,
-          workdir: row.session.workdir,
-          references: agentConfig.brain,
-        }),
+        recordSandboxHydrationStage(timings, "materializeBrainMs", () =>
+          materializeBrainForSession({
+            sandbox: readySandbox,
+            sessionId: row.session.id,
+            workspaceId: row.workspace.id,
+            workdir: row.session.workdir,
+            references: agentConfig.brain,
+          }),
+        ),
       );
     }
     await traceBraintrustStep("sandbox_materialize_agent_bundle", () =>
-      materializeAgentBundleForSession({
-        sandbox: readySandbox,
-        sessionId: row.session.id,
-        workspaceId: row.workspace.id,
-        agentId: row.agent.id,
-        workdir: row.session.workdir,
-        personal,
-      }),
+      recordSandboxHydrationStage(timings, "materializeAgentBundleMs", () =>
+        materializeAgentBundleForSession({
+          sandbox: readySandbox,
+          sessionId: row.session.id,
+          workspaceId: row.workspace.id,
+          agentId: row.agent.id,
+          workdir: row.session.workdir,
+          personal,
+        }),
+      ),
     );
     await traceBraintrustStep("sandbox_materialize_skills", () =>
-      materializeSkillsForSession({
-        sandbox: readySandbox,
-        workdir: row.session.workdir,
-        workspaceId: row.workspace.id,
-        agentId: row.agent.id,
-        config: agentConfig,
-      }),
+      recordSandboxHydrationStage(timings, "materializeSkillsMs", () =>
+        materializeSkillsForSession({
+          sandbox: readySandbox,
+          workdir: row.session.workdir,
+          workspaceId: row.workspace.id,
+          agentId: row.agent.id,
+          config: agentConfig,
+        }),
+      ),
     );
     // Above-threshold text attachments are path-referenced in the model history instead of
     // inlined, so they must exist in the workspace on every acquire (survives recycles).
     // Never throws — a failure degrades to the inline preview, not a failed sandbox.
     await traceBraintrustStep("sandbox_materialize_attachments", () =>
-      materializeLargeTextAttachmentsForSession({
-        sandbox: readySandbox,
-        sessionId: row.session.id,
-        workdir: row.session.workdir,
-        blobToken: env.blobReadWriteToken,
-      }),
+      recordSandboxHydrationStage(timings, "materializeAttachmentsMs", () =>
+        materializeLargeTextAttachmentsForSession({
+          sandbox: readySandbox,
+          sessionId: row.session.id,
+          workdir: row.session.workdir,
+          blobToken: env.blobReadWriteToken,
+        }),
+      ),
     );
+    const totalMs = elapsedMs(readyStartedAt);
     captureE2BSandboxLatency({
       row,
       template,
@@ -144,13 +170,23 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       phase: "sandbox_ready",
       operation: "hydrate",
       outcome: "success",
-      latencyMs: elapsedMs(readyStartedAt),
+      latencyMs: totalMs,
+      sandboxId: sandbox.sandboxId,
+      ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
+    });
+    emitSandboxHydrationTiming(options?.onHydrationTiming, {
+      outcome: "success",
+      existingSandbox,
+      template: template ?? "default",
+      timings: { ...timings, totalMs },
+      e2bRequests,
       sandboxId: sandbox.sandboxId,
       ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
     });
     return sandbox;
   } catch (error) {
     const name = errorName(error);
+    const totalMs = elapsedMs(readyStartedAt);
     captureE2BSandboxLatency({
       row,
       template,
@@ -158,7 +194,17 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       phase: "sandbox_ready",
       operation: "hydrate",
       outcome: "error",
-      latencyMs: elapsedMs(readyStartedAt),
+      latencyMs: totalMs,
+      ...(sandbox ? { sandboxId: sandbox.sandboxId } : {}),
+      ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
+      ...(name ? { errorName: name } : {}),
+    });
+    emitSandboxHydrationTiming(options?.onHydrationTiming, {
+      outcome: "error",
+      existingSandbox,
+      template: template ?? "default",
+      timings: { ...timings, totalMs },
+      e2bRequests,
       ...(sandbox ? { sandboxId: sandbox.sandboxId } : {}),
       ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
       ...(name ? { errorName: name } : {}),
@@ -215,6 +261,32 @@ function captureE2BSandboxLatency(input: {
 
 function elapsedMs(startedAt: number) {
   return Math.max(0, Math.round(performance.now() - startedAt));
+}
+
+async function recordSandboxHydrationStage<T>(
+  timings: Partial<SandboxHydrationTiming>,
+  stage: Exclude<keyof SandboxHydrationTiming, "totalMs" | "updateSandboxForLeaseMs">,
+  run: () => Promise<T>,
+) {
+  const startedAt = performance.now();
+  try {
+    return await run();
+  } finally {
+    timings[stage] = elapsedMs(startedAt);
+  }
+}
+
+function emitSandboxHydrationTiming(
+  onHydrationTiming:
+    | ((observation: SandboxHydrationTimingPayload) => void | Promise<void>)
+    | undefined,
+  observation: SandboxHydrationTimingPayload,
+) {
+  try {
+    void Promise.resolve(onHydrationTiming?.(observation)).catch(() => {});
+  } catch {
+    // Debug telemetry must not affect sandbox provisioning.
+  }
 }
 
 function errorName(error: unknown) {

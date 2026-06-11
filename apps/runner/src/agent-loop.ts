@@ -13,6 +13,7 @@ import {
   resolveAgentRuntimeConfig,
   resolveEnabledSkillMetadata,
   restrictToolsForMemoryKeeper,
+  type SandboxHydrationTimingPayload,
   scanPersonalSkills,
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
@@ -469,6 +470,7 @@ async function runMessageWithContext(
       trace: ctx.trace,
       leaseId: ctx.leaseId,
       leaseOwner: ctx.leaseOwner,
+      assistantMessageId,
       checkAbort,
       onHydrated: (sandbox) => {
         sandboxRef.id = sandbox.sandboxId;
@@ -1322,6 +1324,7 @@ async function runAfterSessionWithContext(
       trace: ctx.trace,
       leaseId: ctx.leaseId,
       leaseOwner: ctx.leaseOwner,
+      assistantMessageId,
       checkAbort,
       onHydrated: (sandbox) => {
         sandboxRef.id = sandbox.sandboxId;
@@ -1703,6 +1706,7 @@ async function resumeApprovalWithContext(
       trace: ctx.trace,
       leaseId: ctx.leaseId,
       leaseOwner: ctx.leaseOwner,
+      assistantMessageId: suspendedAssistantMessageId || undefined,
       checkAbort,
       onHydrated: () => {},
     });
@@ -2239,6 +2243,7 @@ async function resumeQuestionResponseWithContext(
       trace: ctx.trace,
       leaseId: ctx.leaseId,
       leaseOwner: ctx.leaseOwner,
+      assistantMessageId: suspendedAssistantMessageId || undefined,
       checkAbort,
       onHydrated: () => {},
     });
@@ -2484,12 +2489,14 @@ function createSandboxAcquirer(input: {
   trace: ReturnType<typeof startTimingTrace>;
   leaseId: string;
   leaseOwner: string;
+  assistantMessageId?: string | undefined;
   checkAbort: RunControlCheck;
   onHydrated: (sandbox: SandboxHandle) => void;
 }): SandboxAcquirer {
   let sandbox: SandboxHandle | null = null;
   let acquirePromise: Promise<SandboxHandle> | null = null;
   let hydratedAt: Date | null = null;
+  let hydrationTiming: SandboxHydrationTimingPayload | null = null;
   const billing = resolveSandboxBilling(input.row, input.env);
 
   // Create/connect the sandbox, materialize the workspace, and claim it under the run
@@ -2503,12 +2510,23 @@ function createSandboxAcquirer(input: {
       const hydrated = await traceBraintrustStep(
         "ensure_sandbox",
         () =>
-          timeAsync(input.trace, "ensure_sandbox", () => ensureSandbox(input.row, input.env), {
-            existing_sandbox: Boolean(input.row.session.e2bSandboxId),
-          }),
+          timeAsync(
+            input.trace,
+            "ensure_sandbox",
+            () =>
+              ensureSandbox(input.row, input.env, {
+                onHydrationTiming: (observation) => {
+                  hydrationTiming = observation;
+                },
+              }),
+            {
+              existing_sandbox: Boolean(input.row.session.e2bSandboxId),
+            },
+          ),
         { existing_sandbox: Boolean(input.row.session.e2bSandboxId) },
       );
       await input.checkAbort();
+      const updateStartedAt = performance.now();
       const updated = await traceBraintrustStep(
         "update_sandbox_for_lease",
         () =>
@@ -2522,6 +2540,7 @@ function createSandboxAcquirer(input: {
           ),
         { sandbox_id: hydrated.sandboxId },
       );
+      const updateSandboxForLeaseMs = elapsedMs(updateStartedAt);
       logBraintrustCurrentSpan({
         metadata: {
           sandbox_id: hydrated.sandboxId,
@@ -2533,6 +2552,14 @@ function createSandboxAcquirer(input: {
         await killSandbox(hydrated.sandboxId);
         throw new StaleRunLeaseError();
       }
+      void appendSandboxHydrationDebugEvent({
+        sessionId: input.row.session.id,
+        messageId: input.assistantMessageId,
+        leaseId: input.leaseId,
+        leaseOwner: input.leaseOwner,
+        hydrationTiming,
+        updateSandboxForLeaseMs,
+      });
       sandbox = hydrated;
       input.onHydrated(hydrated);
       return hydrated;
@@ -2587,6 +2614,40 @@ function createSandboxAcquirer(input: {
       };
     },
   };
+}
+
+async function appendSandboxHydrationDebugEvent(input: {
+  sessionId: string;
+  messageId?: string | undefined;
+  leaseId: string;
+  leaseOwner: string;
+  hydrationTiming: SandboxHydrationTimingPayload | null;
+  updateSandboxForLeaseMs: number;
+}) {
+  if (!input.hydrationTiming) return;
+
+  try {
+    await appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      ...(input.messageId ? { messageId: input.messageId } : {}),
+      leaseId: input.leaseId,
+      leaseOwner: input.leaseOwner,
+      type: "debug.sandbox_hydration",
+      payload: {
+        ...input.hydrationTiming,
+        timings: {
+          ...input.hydrationTiming.timings,
+          updateSandboxForLeaseMs: input.updateSandboxForLeaseMs,
+        },
+      },
+    });
+  } catch {
+    // Debug telemetry must not affect the run.
+  }
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
 // Whether a turn's enabled tools include any sandbox-backed tool, i.e. anything that can

@@ -41,6 +41,37 @@ export type ToolCallTimings = {
   totalMs?: number;
 };
 
+export type SandboxHydrationTiming = {
+  totalMs: number;
+  e2bConnectOrCreateMs?: number;
+  prepareWorkspaceMs?: number;
+  materializeBrainMs?: number;
+  materializeAgentBundleMs?: number;
+  materializeSkillsMs?: number;
+  materializeAttachmentsMs?: number;
+  updateSandboxForLeaseMs?: number;
+};
+
+export type SandboxHydrationE2BRequest = {
+  operation: "create" | "connect";
+  outcome: "success" | "not_found" | "error";
+  latencyMs: number;
+  sandboxId?: string;
+  requestedSandboxId?: string;
+  errorName?: string;
+};
+
+export type SandboxHydrationTimingPayload = {
+  outcome: "success" | "error";
+  existingSandbox: boolean;
+  template: string;
+  timings: SandboxHydrationTiming;
+  e2bRequests: SandboxHydrationE2BRequest[];
+  sandboxId?: string;
+  requestedSandboxId?: string;
+  errorName?: string;
+};
+
 export type AgentRuntimeEvent =
   | {
       type: "session.status";
@@ -99,6 +130,12 @@ export type AgentRuntimeEvent =
         toolsSentToModel: Array<{ name: string; description: string; parameters: unknown }>;
         deferredToolsNotSent?: Array<{ name: string; description: string }>;
       };
+    }
+  | {
+      // Debug-only timing breakdown for sandbox hydration. Hidden from the UI event inspector, but
+      // kept in the durable event log so production tail latency can be diagnosed from Postgres.
+      type: "debug.sandbox_hydration";
+      payload: SandboxHydrationTimingPayload;
     }
   | {
       type: "message.reasoning_summary";
