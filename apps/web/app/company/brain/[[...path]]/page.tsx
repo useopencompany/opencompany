@@ -3,21 +3,11 @@ import { brainFiles } from "@opencompany/db/schema";
 import { asc, eq } from "drizzle-orm";
 import BrainView from "@/components/BrainView";
 import { currentWorkspace } from "@/lib/auth";
-import { BRAIN_BASE_PATH } from "@/lib/brain/paths";
-
-// Decodes a single path segment, falling back to the raw value when the segment carries a malformed
-// percent-encoding (e.g. a bare `%`) so a bad URL never throws a URIError before the page renders.
-function safeDecodeSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
-}
+import { BRAIN_BASE_PATH, brainInitialPathFromSegments } from "@/lib/brain/paths";
 
 export default async function BrainPage({ params }: { params: Promise<{ path?: string[] }> }) {
   const { path } = await params;
-  const initialPath = (path ?? []).map(safeDecodeSegment).join("/");
+  const initialPath = brainInitialPathFromSegments(path);
   const { workspace } = await currentWorkspace();
   const files = await getDb()
     .select()
