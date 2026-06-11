@@ -17,6 +17,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  ArrowDown,
   ArrowUp,
   Bot,
   Brain,
@@ -1080,6 +1081,15 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     initialScrollSessionRef.current = session.id;
   }, [session.id, visibleMessages, pendingScrollMessageId]);
 
+  // Jump-to-bottom pill action: smooth-scroll to the newest message and re-pin so the
+  // streaming follow re-engages.
+  const scrollToBottom = () => {
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    setPinnedAtBottom(true);
+  };
+
   // Keep the reserved-space height (--chat-vh) in sync with the scroll container's own
   // height. A single ResizeObserver means the CSS min-height on the last turn recomputes
   // on every viewport/container resize (window resize, sidebar toggle, devtools), so the
@@ -1411,6 +1421,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
         />
 
+        <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scrollContainerRef}
           className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
@@ -1521,6 +1532,17 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 : null}
             </div>
           </div>
+        </div>
+        {!isPinnedAtBottom ? (
+          <button
+            type="button"
+            aria-label="Scroll to bottom"
+            onClick={scrollToBottom}
+            className="absolute bottom-4 left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-canvas/90 text-ink shadow-md backdrop-blur transition hover:bg-surface"
+          >
+            <ArrowDown size={16} strokeWidth={2} />
+          </button>
+        ) : null}
         </div>
 
         {/* While the agent awaits a structured answer, the stepped QuestionComposer takes over the
