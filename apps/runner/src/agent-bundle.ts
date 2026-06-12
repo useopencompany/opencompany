@@ -3,14 +3,17 @@ import { agentFiles, agentSessionBundleMounts, agents } from "@opencompany/db/sc
 import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
-import { MAX_BRAIN_FILE_BYTES, MAX_BRAIN_MOUNT_BYTES, MAX_BRAIN_MOUNT_FILES } from "./brain";
+import { MAX_BRAIN_FILE_BYTES, MAX_BRAIN_MOUNT_BYTES } from "./brain";
 import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
 import { conflictPath, hashContent } from "./repo-files";
 import { type SandboxHandle, sandboxLayout, writeSandboxTextFiles } from "./sandbox";
 
 const MAX_AGENT_BUNDLE_FILE_BYTES = MAX_BRAIN_FILE_BYTES;
-const MAX_AGENT_BUNDLE_MOUNT_FILES = MAX_BRAIN_MOUNT_FILES;
+// Deliberately decoupled from MAX_BRAIN_MOUNT_FILES (80): structured memory creates many small
+// files by design, so the byte budget is the real bound here. Sync cost stays O(changed files)
+// because hashing happens in-sandbox (see syncAgentBundleFromSandbox).
+const MAX_AGENT_BUNDLE_MOUNT_FILES = 1000;
 const MAX_AGENT_BUNDLE_MOUNT_BYTES = MAX_BRAIN_MOUNT_BYTES;
 // Profile file: always-present so the agent can read/edit it and so the runtime can inject it
 // into the system prompt every session (see resolveAgentRuntimeConfig). Created empty when
@@ -39,6 +42,21 @@ function sandboxRelativeToBundleRelative(sandboxPath: string, personal: boolean)
   }
   if (personal && isTopLevelPersonalRoot(sandboxPath)) return sandboxPath;
   return null;
+}
+
+// Ordering used when the bundle caps force drops (both at materialization and sync): keep
+// personal-brain notes and the agent's own files (user.md, soul.md, skill authoring) ahead of
+// memory, and bulk memory evidence last — so growth in memory/evidence/ can never starve a
+// personal-brain write or a canonical memory object. Alphabetical within each tier.
+function bundleMountPriority(relativePath: string): number {
+  if (relativePath === "personal-brain" || relativePath.startsWith("personal-brain/")) return 0;
+  if (!(relativePath === "memory" || relativePath.startsWith("memory/"))) return 1;
+  if (relativePath.startsWith("memory/evidence/")) return 3;
+  return 2;
+}
+
+function compareBundleMountOrder(a: string, b: string): number {
+  return bundleMountPriority(a) - bundleMountPriority(b) || a.localeCompare(b);
 }
 
 function isTopLevelPersonalRoot(path: string): boolean {
@@ -90,8 +108,17 @@ export async function materializeAgentBundleForSession(input: {
   const files = rows
     .map((row) => toMountedAgentFile(row, bundle.dir))
     .filter((file): file is MountedAgentFile => Boolean(file))
-    .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-  const limitedFiles = limitMountedAgentFiles(files);
+    .sort((a, b) => compareBundleMountOrder(a.relativePath, b.relativePath));
+  const { mounted: limitedFiles, dropped } = limitMountedAgentFiles(files);
+  if (dropped.length > 0) {
+    logger.warn("Agent bundle materialization dropped files over bundle caps", {
+      session_id: input.sessionId,
+      workspace_id: input.workspaceId,
+      agent_id: input.agentId,
+      dropped_count: dropped.length,
+      sample_paths: dropped.slice(0, 10).map((file) => file.repoPath),
+    });
+  }
   const layout = sandboxLayout(input.workdir, personal);
   const roots = bundleSandboxRoots(layout);
 
@@ -170,35 +197,65 @@ export async function syncAgentBundleFromSandbox(input: {
   if (mounts.length === 0) return;
 
   // Personal sessions write to memory/ + personal-brain/ + agent/; company sessions to agent/ only.
-  // List all writable bundle roots that exist, then map each file back to its bundle-relative path.
+  // List and hash all writable bundle roots in one round-trip (hashContent is sha256-hex over the
+  // file bytes, so in-sandbox `sha256sum` output is directly comparable to the recorded mount
+  // hashes). Per-turn cost then scales with the number of *changed* files — only those are read
+  // back individually — not with bundle size.
   const listRoots = personal ? ["memory", "personal-brain", "agent"] : ["agent"];
   const findClause = listRoots
     .map(
-      (root) => `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -type f -print; fi`,
+      (root) => `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -type f -print0; fi`,
     )
     .join("; ");
   const result = await input.sandbox.commands.run(
-    `cd ${shellQuote(input.workdir)} && { ${findClause}; } | sort`,
-    { timeoutMs: 30_000 },
+    `cd ${shellQuote(input.workdir)} && { ${findClause}; } | sort -z | xargs -0 -r sha256sum --`,
+    { timeoutMs: 60_000 },
   );
   // Each entry keeps the raw sandbox path (for reading) alongside its bundle-relative path.
-  const entries = String(result.stdout ?? "")
-    .split("\n")
-    .filter(Boolean)
-    .map((sandboxPath) => {
+  // Priority order mirrors materialization so cap-driven drops hit bulk memory evidence first,
+  // never personal-brain or the agent's own files.
+  const entries = parseSandboxHashLines(String(result.stdout ?? ""))
+    .map(({ sandboxPath, hash }) => {
       const bundleRelative = sandboxRelativeToBundleRelative(sandboxPath, personal);
       const normalized = bundleRelative ? normalizeAgentBundlePath(bundleRelative) : null;
-      return normalized ? { sandboxPath, relativePath: normalized } : null;
+      return normalized ? { sandboxPath, relativePath: normalized, sandboxHash: hash } : null;
     })
-    .filter((entry): entry is { sandboxPath: string; relativePath: string } => Boolean(entry));
+    .filter((entry): entry is { sandboxPath: string; relativePath: string; sandboxHash: string } =>
+      Boolean(entry),
+    )
+    .sort((a, b) => compareBundleMountOrder(a.relativePath, b.relativePath));
   const sandboxPathSet = new Set(entries.map((entry) => entry.relativePath));
   const fileMounts = mounts.filter((mount) => mount.referenceType === "file");
-  let syncedFiles = 0;
-  let syncedBytes = 0;
+  const mountByPath = new Map(fileMounts.map((mount) => [mount.path, mount]));
+  // One snapshot of the persisted bundle: sizes for cap accounting of unchanged files, and the
+  // current rows for conflict detection (replaces the old per-file SELECTs).
+  const currentRows = await db
+    .select()
+    .from(agentFiles)
+    .where(
+      and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.agentId, input.agentId)),
+    );
+  const currentByPath = new Map(currentRows.map((row) => [row.path, row]));
+  // The caps bound the whole persisted bundle, so unchanged files count toward them too — but
+  // a file over the cap is dropped loudly (logged below) instead of the old silent `break`.
+  let bundleFiles = 0;
+  let bundleBytes = 0;
+  const droppedPaths: string[] = [];
 
-  for (const { sandboxPath, relativePath } of entries) {
+  for (const { sandboxPath, relativePath, sandboxHash } of entries) {
     const repoPath = repoPathFor(bundle.dir, relativePath);
     assertInsideBundle(repoPath, bundle.dir);
+    const mount = mountByPath.get(repoPath);
+    if (mount?.lastSyncedHash === sandboxHash) {
+      // Unchanged since the last sync — already persisted, nothing to read or write.
+      bundleFiles += 1;
+      bundleBytes += currentByPath.get(repoPath)?.sizeBytes ?? 0;
+      continue;
+    }
+    if (bundleFiles >= MAX_AGENT_BUNDLE_MOUNT_FILES) {
+      droppedPaths.push(repoPath);
+      continue;
+    }
     // A file can be deleted/become unreadable between the listing above and
     // this read. Skip it rather than aborting the whole sync.
     let content: string;
@@ -214,20 +271,21 @@ export async function syncAgentBundleFromSandbox(input: {
       continue;
     }
     const sizeBytes = Buffer.byteLength(content, "utf8");
-    if (sizeBytes > MAX_AGENT_BUNDLE_FILE_BYTES) continue;
-    if (syncedFiles >= MAX_AGENT_BUNDLE_MOUNT_FILES) break;
-    if (syncedBytes + sizeBytes > MAX_AGENT_BUNDLE_MOUNT_BYTES) break;
-    syncedFiles += 1;
-    syncedBytes += sizeBytes;
+    if (
+      sizeBytes > MAX_AGENT_BUNDLE_FILE_BYTES ||
+      bundleBytes + sizeBytes > MAX_AGENT_BUNDLE_MOUNT_BYTES
+    ) {
+      droppedPaths.push(repoPath);
+      continue;
+    }
+    bundleFiles += 1;
+    bundleBytes += sizeBytes;
     const hash = hashContent(content);
-    const mount = fileMounts.find((item) => item.path === repoPath);
+    // Re-hash after reading: the decoded content is authoritative (and e.g. non-UTF-8 bytes can
+    // hash differently in-sandbox than after decoding).
     if (mount?.lastSyncedHash === hash) continue;
 
-    const [current] = await db
-      .select()
-      .from(agentFiles)
-      .where(and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.path, repoPath)))
-      .limit(1);
+    const current = currentByPath.get(repoPath);
     const targetPath =
       current &&
       mount?.baseHash &&
@@ -286,11 +344,7 @@ export async function syncAgentBundleFromSandbox(input: {
     if (!mount.path.startsWith(`${bundle.dir}/`)) continue;
     const relativePath = stripBundlePrefix(mount.path, bundle.dir);
     if (!relativePath || sandboxPathSet.has(relativePath)) continue;
-    const [current] = await db
-      .select()
-      .from(agentFiles)
-      .where(and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.path, mount.path)))
-      .limit(1);
+    const current = currentByPath.get(mount.path);
     if (current && current.contentHash !== mount.baseHash) {
       await appendRuntimeEvent(db, {
         sessionId: input.sessionId,
@@ -318,6 +372,31 @@ export async function syncAgentBundleFromSandbox(input: {
       payload: { path: mount.path, operation: "delete" },
     });
   }
+
+  if (droppedPaths.length > 0) {
+    logger.warn("Agent bundle sync dropped files over bundle caps", {
+      session_id: input.sessionId,
+      workspace_id: input.workspaceId,
+      agent_id: input.agentId,
+      dropped_count: droppedPaths.length,
+      sample_paths: droppedPaths.slice(0, 10),
+    });
+  }
+}
+
+// `sha256sum` emits "<64-hex>  <path>" (or " *<path>" in binary mode) per file. Lines that do
+// not parse (e.g. coreutils' backslash-escaped form for filenames with newlines) are skipped —
+// such names can't round-trip through the bundle anyway.
+const SHA256_LINE = /^([0-9a-f]{64}) [ *](.+)$/;
+
+function parseSandboxHashLines(stdout: string): Array<{ sandboxPath: string; hash: string }> {
+  return stdout
+    .split("\n")
+    .map((line) => {
+      const match = SHA256_LINE.exec(line);
+      return match ? { hash: match[1] as string, sandboxPath: match[2] as string } : null;
+    })
+    .filter((entry): entry is { sandboxPath: string; hash: string } => Boolean(entry));
 }
 
 async function loadAgentBundle(workspaceId: string, agentId: string) {
@@ -441,17 +520,23 @@ function toMountedAgentFile(row: AgentFileRow, bundleDir: string): MountedAgentF
 
 function limitMountedAgentFiles(files: MountedAgentFile[]) {
   const mounted: MountedAgentFile[] = [];
+  const dropped: MountedAgentFile[] = [];
   let bytes = 0;
 
   for (const file of files) {
-    if (file.sizeBytes > MAX_AGENT_BUNDLE_FILE_BYTES) continue;
-    if (mounted.length >= MAX_AGENT_BUNDLE_MOUNT_FILES) break;
-    if (bytes + file.sizeBytes > MAX_AGENT_BUNDLE_MOUNT_BYTES) break;
+    if (
+      file.sizeBytes > MAX_AGENT_BUNDLE_FILE_BYTES ||
+      mounted.length >= MAX_AGENT_BUNDLE_MOUNT_FILES ||
+      bytes + file.sizeBytes > MAX_AGENT_BUNDLE_MOUNT_BYTES
+    ) {
+      dropped.push(file);
+      continue;
+    }
     mounted.push(file);
     bytes += file.sizeBytes;
   }
 
-  return mounted;
+  return { mounted, dropped };
 }
 
 function repoPathFor(bundleDir: string, relativePath: string) {
