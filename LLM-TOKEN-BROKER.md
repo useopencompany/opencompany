@@ -1,0 +1,149 @@
+# LLM Token Broker — Plan & Progress
+
+> Status tracker for the V2 key architecture: sandboxed CLIs never see raw provider
+> keys; the runner brokers every model call and meters it server-side as the billable
+> record. Started 2026-06-11 off the PR #424 (codex) "no API key" problem.
+
+## The problem
+
+Agent sessions execute in agent-controlled E2B cloud sandboxes. Anything in the
+sandbox process env is readable by the agent and by prompt-injected repo content.
+Before this work:
+
+1. `VERCEL_AI_GATEWAY_API_KEY` **and** `E2B_API_KEY` were injected globally into every
+   sandbox at creation (`session-lifecycle.ts` → `ensureSandbox`), and per-command for
+   the opencode tool and the memory CLI subprocess.
+2. The codex tool (PR #424) would have added a third raw key (`OPENAI_CODEX_API_KEY` →
+   `CODEX_API_KEY` in the sandbox).
+3. Billing for hosted-tool runs was parsed from the CLI's own JSONL output —
+   self-reported by a process inside the sandbox, i.e. honest-actor accounting. A
+   leaked key allows spend that never appears in our books.
+
+## The concept
+
+A runner-hosted **reverse proxy ("LLM broker")** plus **per-delegation tokens**:
+
+```
+E2B sandbox (CLI: opencode / codex / memory)
+   │   Bearer ocbt_<random>            ← short-lived, per tool call, worthless after revoke
+   ▼
+Runner  /broker/:provider/v1/*         ← Fastify plugin, public URL (Render)
+   │   validate token (DB, multi-instance) → 401/402/403
+   │   attach real key server-side; upstream pinned per provider
+   │   tee() response stream → client (byte-identical) + usage scanner
+   │   recordSpend per request (llm_broker_requests + token counters)
+   ▼
+Upstream: gateway → ai-gateway.vercel.sh/v1   (VERCEL_AI_GATEWAY_API_KEY)
+          openai  → api.openai.com/v1         (OPENAI_CODEX_API_KEY)
+```
+
+**Billing model.** Broker metering is the source of truth: each token settles into
+exactly one `agent_session_tool_usage` row (`operation: "brokered"`,
+`costSource: "broker_metered"`) debited through the existing ledger idempotency. The
+CLI's self-reported JSONL usage stays for activity display but bills 0 — no double
+counting, no trust in sandbox output. Settlement deliberately bypasses the run-lease
+guard (upstream spend must bill even after a lease reclaim); the atomic `settled_at`
+CAS is the single-winner defense. Unpriceable requests record zero cost with
+`usageParsed=false` — billing never guesses.
+
+**Token lifecycle.** Mint at hosted-tool start (TTL = tool timeout + slack) →
+revoke + settle in the tool's `finally` → backstops at `archiveSession`/`abortSession`
+→ leftover sweeper piggybacked on the 60s stale-run sweep (runner-death coverage).
+
+**Activation.** Broker is on iff `RUNNER_LLM_BROKER_PUBLIC_URL ?? RENDER_EXTERNAL_URL`
+is set AND `RUNNER_LLM_BROKER_ENABLED !== false`. Local dev has no E2B-reachable URL →
+legacy direct key injection, byte-for-byte unchanged. The env flag is a no-deploy kill
+switch. (Deliberately NOT the web-side `RUNNER_PUBLIC_URL`, which is localhost in the
+local `.env` the runner also loads.)
+
+## Decisions (locked)
+
+| Decision | Choice |
+| --- | --- |
+| Billable source of truth | Broker metering; JSONL display-only at cost 0 |
+| Amp | **Out of scope** — own backend (ampcode.com) + reliable `provider_reported` per-thread cost; keeps direct `AMP_API_KEY` injection |
+| Local dev | Fallback to direct key injection when no public URL |
+| Global sandbox keys | Removed on the brokered path (kept on legacy fallback for one release) |
+| Token format | Opaque `ocbt_` + 48 hex, SHA-256 hash at rest, DB-validated (multi-instance) |
+| Per-request pricing | Gateway-reported cost → `MODEL_PRICING` → `AUX_GATEWAY_MODEL_PRICING` → zero (never estimate) |
+| Budgets | Schema supports `budgetUsdMicros` per token (402 on exhaustion); not set in v1 |
+
+## Progress
+
+### ✅ Phase 1 — Broker infrastructure (PR [#439](https://github.com/useopencompany/opencompany-experimental/pull/439))
+
+- [x] Migration `0055`: `llm_broker_tokens` (auth, lifecycle, denormalized totals) +
+      `llm_broker_requests` (per-upstream-request audit rows)
+- [x] `apps/runner/src/llm-broker.ts` — routes, auth matrix, upstream pinning,
+      `include_usage` injection, `tee()` SSE passthrough (proven byte-identical under test)
+- [x] `llm-broker-tokens.ts` — mint/validate/spend/revoke/settle store + `settled_at` CAS,
+      `withBrokerDelegation` wrapper
+- [x] `llm-broker-usage.ts` — usage parsers (chat SSE, Responses API `response.completed`,
+      embeddings, gateway cost field) + pricing
+- [x] Billing: `HostedToolCostSource` += `broker_metered`; `AUX_GATEWAY_MODEL_PRICING`
+      shared by memory tool + broker
+- [x] opencode wired (config → `/broker/gateway/v1`, `OPENCOMPANY_LLM_BROKER_TOKEN` env)
+- [x] memory CLI wired (`MEMORY_GATEWAY_BASE_URL` + token; CLI bundle regenerated)
+- [x] Global sandbox env injection of `E2B_API_KEY` + `VERCEL_AI_GATEWAY_API_KEY`
+      removed when broker active
+- [x] Lifecycle: tool `finally`, archive/abort settlement, leftover sweeper
+- [x] Env/docs: `.env.example`, `docs/env-vars.md`, `docs/runner.md`,
+      `docs/secret-management.md`, `docs/stack/ai-and-agent-runtime.md`, `render.yaml`
+- [x] Tests: 38 new broker tests + extended opencode/memory/billing suites; full
+      lint/typecheck/build/test/format green
+
+### ⬜ Phase 2 — Codex through the broker (PR B, on top of #424 + #439)
+
+- [ ] Rebase `louismorgner/codex-tool-plan` (PR #424) onto the broker infra
+- [ ] Write `${CODEX_HOME}/config.toml` custom provider:
+      `model_provider = "opencompany"`, `base_url = <publicUrl>/broker/openai/v1`,
+      `env_key = "CODEX_API_KEY"`, `wire_api = "responses"` — **verify exact config
+      schema against the pinned `@openai/codex@0.132.0` first**
+- [ ] `CODEX_API_KEY` env carries the broker token; relax the key-required guard to
+      "broker active OR raw key present"
+- [ ] `codexHostedToolUsage` → display-only (cost 0, `broker_metered`) when brokered
+- [ ] Infisical `prod` `/runner`: add `OPENAI_CODEX_API_KEY` as a **budget-capped
+      OpenAI project key** (blast-radius cap + leak detector via project-spend
+      reconciliation)
+
+### ⬜ Phase 3 — Preview verification (after #439 deploys to a preview)
+
+Run an opencode delegation + a memory query on a PR preview (preview runner gets
+`RENDER_EXTERNAL_URL` automatically → broker auto-active), then assert:
+
+- [ ] `llm_broker_requests` rows exist with `usage_parsed = true`
+- [ ] Exactly **one** `workspace_credit_ledger` debit per delegation, with
+      `metadata.brokerTokenId`
+- [ ] The JSONL display row records cost 0 (`broker_metered`)
+- [ ] Inside the sandbox: `env | grep -c 'VERCEL\|E2B'` → 0
+- [ ] Session cost UI shows the brokered cost exactly once
+- [ ] Watch opencode TTFT / long-SSE behavior through Render's proxy (latency hop)
+
+### ⬜ Phase 4 — Cleanup (PR C, after prod soak)
+
+- [ ] Drop the legacy *global* sandbox key injection unconditionally (the per-tool
+      direct-injection fallback stays as the documented local-dev path)
+- [ ] Consider per-delegation budgets (`budgetUsdMicros` at mint — one-line change)
+- [ ] Optional: label `operation: "brokered"` nicely in the web tool-usage breakdown
+
+## Open risks / watch items
+
+- **Codex config.toml schema** unverified against the pinned CLI version (Phase 2 gate).
+- **Render proxy + long SSE**: model streams emit continuously so idle timeouts should
+  not trigger; verify on preview with a long opencode run.
+- **Gateway `stream_options.include_usage`** for non-OpenAI routed models (e.g.
+  Anthropic via the OpenAI-compat endpoint): broker injects it; confirm the gateway
+  honors it across providers. Fallback is the zero-cost + `usageParsed=false` path.
+- **`agent_session_tool_usage.cost_usd_micros` is `integer`** (~$2,147 cap per row) —
+  fine per delegation; revisit if budgets grow.
+- **Rollback**: `RUNNER_LLM_BROKER_ENABLED=false` in Infisical reverts everything to
+  direct injection + legacy billing without a deploy.
+
+## Out of scope (explicitly)
+
+- **Amp** — brokering it would be key-concealment only; depends on an unverified CLI
+  server-URL override and its billing is already reliable per-thread.
+- **Main agent loop** — already calls the gateway from the runner process
+  (`model-turn.ts`); key never entered the sandbox.
+- **GitHub installation tokens in the sandbox** — separate trust problem, not an LLM
+  key; unchanged here.
