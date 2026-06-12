@@ -18,6 +18,12 @@ export type PendingAttachment = {
   error?: string;
 };
 
+// `accept` for the composer's hidden file input. Text/code files often have no registered MIME,
+// so the extension list keeps them pickable; the broad set lets any file through and the
+// validation gate rejects unsupported ones with a toast. Shared by every composer (session + home).
+export const ATTACHMENT_FILE_INPUT_ACCEPT =
+  "image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,application/xml,text/css,text/yaml,.txt,.md,.markdown,.html,.htm,.csv,.tsv,.json,.jsonc,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.scss,.sass,.less";
+
 export async function uploadAttachment(input: {
   id: string;
   file: File;

@@ -141,7 +141,13 @@ export async function createAgentSessionFromPrompt(
     return { ok: false, error: attachmentCheck.error } as const;
   }
 
-  const { session, statusEvent, message, createdEvent } = await insertAgentSessionWithUserMessage({
+  const {
+    session,
+    statusEvent,
+    message,
+    createdEvent,
+    attachments: messageAttachments,
+  } = await insertAgentSessionWithUserMessage({
     agent,
     title: titleFromPrompt(trimmed),
     userId: user.id,
@@ -188,6 +194,7 @@ export async function createAgentSessionFromPrompt(
     session,
     messages: [message],
     events: [statusEvent, createdEvent],
+    attachments: messageAttachments,
   });
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
@@ -1275,6 +1282,14 @@ async function insertAgentSessionWithUserMessage(input: {
       payload,
       createdAt: createdEventRow.createdAt,
     },
+    // Client-safe attachment metadata for the synthesized detail so the destination session paints
+    // the image on first render (served via /api/attachments — the rows above already persisted).
+    attachments: attachmentRows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      mediaType: row.mediaType,
+      filename: row.filename,
+    })),
   };
 }
 

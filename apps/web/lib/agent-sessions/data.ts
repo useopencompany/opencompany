@@ -567,6 +567,14 @@ export function buildCreatedSessionDetail(input: {
   session: CreatedSessionRow;
   messages: CreatedMessageRow[];
   events: CreatedEventRow[];
+  // Client-safe attachment metadata for the (single) first user message, so a session created
+  // with attachments paints them on first render instead of waiting for the first refetch.
+  attachments?: Array<{
+    id: string;
+    kind: "image" | "pdf" | "text";
+    mediaType: string;
+    filename: string;
+  }>;
 }): AgentSessionDetailPayload {
   return serializeAgentSessionDetail({
     session: {
@@ -591,7 +599,7 @@ export function buildCreatedSessionDetail(input: {
       updatedAt: input.session.updatedAt,
     },
     related: { parent: null, children: [] },
-    messages: input.messages.map((message) => ({
+    messages: input.messages.map((message, index) => ({
       id: message.id,
       role: message.role,
       content: message.content,
@@ -607,6 +615,10 @@ export function buildCreatedSessionDetail(input: {
       thinkingDurationSeconds: 0,
       createdAt: message.createdAt,
       completedAt: message.completedAt,
+      // Attachments belong to the first (user) message of a freshly-created session.
+      ...(index === 0 && input.attachments && input.attachments.length > 0
+        ? { attachments: input.attachments }
+        : {}),
     })),
     events: input.events.map((event) => ({
       id: event.id,
