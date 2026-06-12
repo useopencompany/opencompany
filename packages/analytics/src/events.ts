@@ -110,7 +110,7 @@ export type AnalyticsEventPropertiesByName = {
     message_id: string;
     tool_call_id: string;
     tool_name: string;
-    tool_kind: "hosted" | "internal" | "sandbox";
+    tool_kind: "hosted" | "internal" | "sandbox" | "device";
     failed: boolean;
     total_ms: number;
     exec_ms: number;

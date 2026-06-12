@@ -652,6 +652,10 @@ export async function resolveToolApproval(input: {
   sessionId: string;
   toolCallId: string;
   decision: "approved" | "denied";
+  // Local-device approvals carry how long the grant lives on the user's device:
+  // "once" (this call only), "session" (until the session ends), or "always"
+  // (persisted into the device's local settings file). Ignored for denials.
+  scope?: "once" | "session" | "always";
 }) {
   const { user, workspace } = await currentWorkspace();
   const db = getDb();
@@ -679,6 +683,7 @@ export async function resolveToolApproval(input: {
       decidedAt: new Date(),
       decidedByUserId: user.id,
       decisionSource: "user",
+      decisionScope: input.decision === "approved" ? (input.scope ?? null) : null,
       updatedAt: new Date(),
     })
     .where(

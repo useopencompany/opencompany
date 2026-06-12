@@ -6,6 +6,7 @@ import {
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   listAddableBuiltinSkills,
+  LOCAL_DEVICE_PROVIDER_KEY,
   modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
@@ -2531,7 +2532,10 @@ function ToolCallCardDefault({
   const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
   const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
 
-  const submitDecision = (decision: "approved" | "denied") => {
+  const submitDecision = (
+    decision: "approved" | "denied",
+    scope?: "once" | "session" | "always",
+  ) => {
     if (!approvalContext) return;
     setOptimisticDecision(decision);
     startResolve(async () => {
@@ -2539,6 +2543,7 @@ function ToolCallCardDefault({
         sessionId: approvalContext.sessionId,
         toolCallId: toolCall.id,
         decision,
+        ...(scope ? { scope } : {}),
       });
       if (!result.ok) {
         setOptimisticDecision(null);
@@ -2633,7 +2638,7 @@ function ToolCallCardDefault({
           inputPreview={toolCall.inputPreview}
           disabled={isResolving || resolvingApproval || !approvalContext}
           optimisticDecision={optimisticDecision}
-          onApprove={() => submitDecision("approved")}
+          onApprove={(scope) => submitDecision("approved", scope)}
           onDeny={() => submitDecision("denied")}
         />
       ) : null}
@@ -3156,7 +3161,7 @@ function ToolApprovalPrompt({
   inputPreview: string | undefined;
   disabled: boolean;
   optimisticDecision: "approved" | "denied" | null;
-  onApprove: () => void;
+  onApprove: (scope?: "once" | "session" | "always") => void;
   onDeny: () => void;
 }) {
   const providerName = approval
@@ -3170,6 +3175,10 @@ function ToolApprovalPrompt({
   const permissionDescription = approval?.permissionGroup
     ? permissionDescriptionFor(approval.providerKey, approval.permissionGroup)
     : "";
+  // Local-device approvals act on the user's own computer, so the grant has a lifetime:
+  // once, this session, or always (the daemon persists "always" into its local settings
+  // file). Other providers keep the plain Approve/Deny pair.
+  const isLocalDevice = approval?.providerKey === LOCAL_DEVICE_PROVIDER_KEY;
   const pendingMessage =
     optimisticDecision === "approved"
       ? "Approved, starting..."
@@ -3180,12 +3189,25 @@ function ToolApprovalPrompt({
   return (
     <div className="ml-6 mt-1 rounded-md border border-warning-border bg-warning-bg/40 px-2.5 py-2">
       <div className="text-[11px] leading-4 text-ink/75">
-        This agent wants to use{" "}
-        <span className="font-medium text-ink">
-          {providerName}
-          {groupLabel ? ` · ${groupLabel}` : ""}
-        </span>
-        . Approve this action?
+        {isLocalDevice ? (
+          <>
+            This agent wants to act on{" "}
+            <span className="font-medium text-ink">
+              your computer
+              {groupLabel ? ` · ${groupLabel}` : ""}
+            </span>
+            . Allow it?
+          </>
+        ) : (
+          <>
+            This agent wants to use{" "}
+            <span className="font-medium text-ink">
+              {providerName}
+              {groupLabel ? ` · ${groupLabel}` : ""}
+            </span>
+            . Approve this action?
+          </>
+        )}
       </div>
       {permissionDescription ? (
         <div className="mt-0.5 text-[11px] leading-4 text-ink/60">{permissionDescription}.</div>
@@ -3198,25 +3220,63 @@ function ToolApprovalPrompt({
           {inputPreview}
         </pre>
       ) : null}
-      <div className="mt-2 flex items-center gap-1.5">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onApprove}
-          className="inline-flex h-6 items-center gap-1 rounded-md bg-ink px-2.5 text-[11px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Check size={10} strokeWidth={2.2} />
-          Approve
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onDeny}
-          className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2.5 text-[11px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Deny
-        </button>
-      </div>
+      {isLocalDevice ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onApprove("once")}
+            className="inline-flex h-6 items-center gap-1 rounded-md bg-ink px-2.5 text-[11px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Check size={10} strokeWidth={2.2} />
+            Allow once
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onApprove("session")}
+            className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2.5 text-[11px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            This session
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onApprove("always")}
+            className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2.5 text-[11px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Always allow
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onDeny}
+            className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2.5 text-[11px] font-medium text-danger transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Deny
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onApprove()}
+            className="inline-flex h-6 items-center gap-1 rounded-md bg-ink px-2.5 text-[11px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Check size={10} strokeWidth={2.2} />
+            Approve
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onDeny}
+            className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2.5 text-[11px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Deny
+          </button>
+        </div>
+      )}
     </div>
   );
 }

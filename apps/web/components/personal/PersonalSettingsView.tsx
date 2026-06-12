@@ -1,6 +1,7 @@
 "use client";
 
-import { LogOut, Monitor, Moon, RotateCcw, Sun } from "lucide-react";
+import { Laptop, LogOut, Monitor, Moon, RotateCcw, Sun } from "lucide-react";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { type BillingData, BillingPanel } from "@/components/billing/BillingPanel";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -139,6 +140,19 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
           <LogOut size={13} strokeWidth={1.9} />
           Log out
         </a>
+      </Section>
+
+      <Section
+        title="Devices"
+        description="Pair your own computer so your agent can act on it with your approval."
+      >
+        <Link
+          href="/personal/settings/devices"
+          className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <Laptop size={13} strokeWidth={1.9} />
+          Open devices
+        </Link>
       </Section>
 
       <Section title="Billing" description="Your credit balance, usage, and top-ups.">

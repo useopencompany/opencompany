@@ -343,6 +343,17 @@ async function dispatchSubagentTool(
     });
   }
 
+  // Local-device tools are never exposed to subagents: they run on the user's own
+  // computer and their approval flow needs a suspendable, user-facing session.
+  if (input.definition.kind === "device") {
+    return buildDeniedToolOutput({
+      toolName: input.definition.name,
+      providerKey: decision.providerKey,
+      group: decision.group,
+      source: "policy",
+    });
+  }
+
   if (input.definition.kind === "hosted") {
     const releaseBudget = input.toolBudget.reserve(input.definition);
     let usage: HostedToolUsage | undefined;

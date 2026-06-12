@@ -1,9 +1,12 @@
 import {
+  LOCAL_DEVICE_PROVIDER_KEY,
   newAgentSessionMessageId,
   resolveToolDecision,
+  type ToolDecision,
   type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
+import { checkDevicePermission, isBridgeToolName } from "./device-bridge";
 import { publishTransientRuntimeEvent } from "./events";
 import {
   appendRuntimeEventForLease,
@@ -35,6 +38,44 @@ import { recordStepUsage } from "./usage-recorder";
 
 // Live assistant text is transient-only, so publish model deltas as they arrive.
 // The database only stores durable message boundaries and final content.
+
+// The device gate for local_* tools. The workspace policy never gates these (their
+// provider is ungated); instead the user's paired daemon answers from its local rulebook:
+// allow runs immediately, ask suspends the run for the in-chat approval (Once / This
+// session / Always / Deny), deny blocks. An unreachable device maps to "allow" so the
+// execute path fails with a clean, visible error instead of a confusing approval card.
+// The daemon re-evaluates at execute time, so a stale verdict here can never over-grant.
+async function resolveLocalDeviceDecision(input: {
+  sessionId: string;
+  toolName: string;
+  toolInput: unknown;
+  suspendable: boolean;
+  classified: ToolDecision;
+}): Promise<ToolDecision> {
+  // Unwrap the built-in `use_tool` dispatcher: the real action is in its `tool` argument
+  // (that is also what the classification keyed on to reach this branch).
+  const record =
+    input.toolInput && typeof input.toolInput === "object" && !Array.isArray(input.toolInput)
+      ? (input.toolInput as Record<string, unknown>)
+      : null;
+  const effective =
+    input.toolName === "use_tool" && record
+      ? { name: typeof record.tool === "string" ? record.tool : "", args: record.arguments }
+      : { name: input.toolName, args: input.toolInput };
+  if (!isBridgeToolName(effective.name)) return input.classified;
+
+  const result = await checkDevicePermission({
+    sessionId: input.sessionId,
+    tool: effective.name,
+    args: effective.args,
+  });
+  if (result.kind === "unreachable") {
+    return { ...input.classified, decision: "allow" };
+  }
+  const decision =
+    result.verdict === "ask" && !input.suspendable ? "deny" : result.verdict;
+  return { ...input.classified, decision };
+}
 
 export async function collectAssistantStream(input: {
   stream: AsyncIterable<TextStreamPart<ToolSet>>;
@@ -270,7 +311,7 @@ export async function collectAssistantStream(input: {
         // Evaluate the workspace permission policy for this tool call. This is the
         // hard gate: the tool's execute() is parked on waitForStarted() and only the
         // verdict we attach via markStarted() decides whether the real body runs.
-        const { decision, providerKey, group } = resolveToolDecision({
+        let toolDecision = resolveToolDecision({
           toolName: toolStart.name,
           // Gate the lazy MCP invoke tool by the real action in its `tool` argument, not
           // the generic `{server}__use_tool` name (which carries no verb to classify).
@@ -278,6 +319,21 @@ export async function collectAssistantStream(input: {
           policy: input.policy,
           suspendable: input.suspendable,
         });
+        // Local-device tools answer to the user's device daemon, not the workspace
+        // policy: ask the daemon whether its local rulebook allows this exact call and
+        // substitute that verdict (allow runs, ask suspends for the in-chat approval,
+        // deny blocks). The daemon re-checks at execute time, so a stale verdict here
+        // can never over-grant.
+        if (toolDecision.providerKey === LOCAL_DEVICE_PROVIDER_KEY) {
+          toolDecision = await resolveLocalDeviceDecision({
+            sessionId: input.sessionId,
+            toolName: toolStart.name,
+            toolInput: toolStart.input,
+            suspendable: input.suspendable,
+            classified: toolDecision,
+          });
+        }
+        const { decision, providerKey, group } = toolDecision;
 
         const toolCallReplayPart = buildToolCallReplayPart(part, toolStart);
 

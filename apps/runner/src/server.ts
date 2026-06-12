@@ -1,6 +1,12 @@
 import { createLogger } from "@opencompany/observability";
+import fastifyWebsocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
+import {
+  authenticateDeviceConnection,
+  disconnectDevice,
+  registerDeviceConnection,
+} from "./device-bridge";
 import type { RunnerEnv } from "./env";
 import { enqueueRunnerJob } from "./jobs";
 
@@ -171,6 +177,46 @@ export function createServer(env: RunnerEnv, options: { onJobEnqueued?: () => vo
     const { id } = request.params as { id: string };
     await archiveSession(id);
     reply.send({ ok: true });
+  });
+
+  app.post("/internal/devices/:id/disconnect", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { id } = request.params as { id: string };
+    const dropped = disconnectDevice(id);
+    reply.send({ ok: true, dropped });
+  });
+
+  // The local-bridge daemon's outbound WebSocket. The daemon authenticates with its
+  // device secret (only the hash is stored server-side); a failed auth closes with 4401.
+  // Note the asymmetry to /internal routes: devices belong to end users, not the web
+  // backend, so this is deliberately NOT behind the internal token.
+  app.register(fastifyWebsocket);
+  app.register(async (scope) => {
+    scope.get("/bridge/ws", { websocket: true }, async (socket, request) => {
+      const identity = await authenticateDeviceConnection({
+        authorizationHeader: request.headers.authorization,
+        deviceIdHeader: request.headers["x-device-id"] as string | undefined,
+      });
+      if (!identity) {
+        logger.warn("Rejected device bridge connection", {
+          event: "opencompany.device_bridge_auth_failed",
+        });
+        socket.close(4401, "Unauthorized device.");
+        return;
+      }
+      const handlers = registerDeviceConnection({
+        ...identity,
+        socket: {
+          send: (data) => socket.send(data),
+          close: (code, reason) => socket.close(code, reason),
+        },
+      });
+      socket.on("message", (data: Buffer | string) => {
+        handlers.onMessage(typeof data === "string" ? data : data.toString("utf8"));
+      });
+      socket.on("close", () => handlers.onClose());
+      socket.on("error", () => handlers.onClose());
+    });
   });
 
   return app;

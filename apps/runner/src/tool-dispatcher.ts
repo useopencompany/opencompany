@@ -37,6 +37,7 @@ import {
   runAmpCoderTool,
 } from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
+import { DeviceBridgeError, executeDeviceTool, isBridgeToolName } from "./device-bridge";
 import type { RunnerEnv } from "./env";
 import { publishTransientRuntimeEvent } from "./events";
 import { runFetchTranscriptTool } from "./fetch-transcript-tool";
@@ -675,6 +676,28 @@ async function executeRuntimeToolInner(
     releaseToolBudget = input.toolBudget?.reserve(input.definition);
     output = await withRunControlChecks(input.checkAbort, async () => {
       throwIfAborted(input.signal);
+
+      if (input.definition.kind === "device") {
+        // Runs on the user's own paired computer via the bridge daemon. The daemon
+        // re-evaluates its local rulebook before executing (the cloud can ask, never
+        // grant); device errors surface as recoverable failures the model can relay.
+        if (!isBridgeToolName(input.definition.name)) {
+          throw new RecoverableToolError("Unknown device tool.", "unknown_device_tool");
+        }
+        try {
+          return await executeDeviceTool({
+            sessionId: input.sessionId,
+            toolCallId: input.toolCallId,
+            name: input.definition.name,
+            args: input.args,
+          });
+        } catch (error) {
+          if (error instanceof DeviceBridgeError) {
+            throw new RecoverableToolError(error.message, error.code);
+          }
+          throw error;
+        }
+      }
 
       if (input.definition.kind === "hosted") {
         const result = await executeHostedTool({

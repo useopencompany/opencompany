@@ -1493,6 +1493,10 @@ export const agentToolApprovals = pgTable(
       onDelete: "set null",
     }),
     decisionSource: text("decision_source").$type<"user" | "timeout" | "abort">(),
+    // Approval scope for local-device tools: how long the grant lives on the user's
+    // device ("once" = this call only, "session" = until the session ends, "always" =
+    // persisted into the device's local settings file). Null for non-device approvals.
+    decisionScope: text("decision_scope").$type<"once" | "session" | "always">(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1516,6 +1520,10 @@ export const agentToolApprovals = pgTable(
     decisionSourceCheck: check(
       "agent_tool_approvals_decision_source_check",
       sql`${table.decisionSource} IS NULL OR ${table.decisionSource} IN ('user', 'timeout', 'abort')`,
+    ),
+    decisionScopeCheck: check(
+      "agent_tool_approvals_decision_scope_check",
+      sql`${table.decisionScope} IS NULL OR ${table.decisionScope} IN ('once', 'session', 'always')`,
     ),
   }),
 );
@@ -2106,6 +2114,110 @@ export const onboardingResponsesRelations = relations(onboardingResponses, ({ on
   }),
 }));
 
+// A user's paired local machine (the "local bridge" daemon). The device authenticates its
+// outbound WebSocket to the runner with a daemon-generated secret; only the SHA-256 hash is
+// stored here. Permission grants are NOT stored server-side — the daemon's local settings
+// file is the sole permission authority; the cloud can ask, never grant.
+export const workspaceDevices = pgTable(
+  "workspace_devices",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    platform: text("platform").notNull(),
+    secretHash: text("secret_hash").notNull(),
+    status: text("status").$type<"active" | "revoked">().notNull().default("active"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceUserIdx: index("workspace_devices_workspace_user_idx").on(
+      table.workspaceId,
+      table.userId,
+    ),
+    secretHashIdx: uniqueIndex("workspace_devices_secret_hash_idx").on(table.secretHash),
+    statusCheck: check(
+      "workspace_devices_status_check",
+      sql`${table.status} IN ('active', 'revoked')`,
+    ),
+  }),
+);
+
+// In-flight device pairing handshake (OAuth-device-flow style). The daemon POSTs a
+// daemon-generated secret hash + metadata, receives a short user-facing code, and polls.
+// A logged-in user confirms the code in the browser, which creates the workspace_devices
+// row; the daemon's next poll picks up the device id. The secret never transits or
+// persists in plaintext — the daemon proves possession by hashing on every poll.
+export const devicePairingRequests = pgTable(
+  "device_pairing_requests",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    secretHash: text("secret_hash").notNull(),
+    deviceName: text("device_name").notNull(),
+    platform: text("platform").notNull(),
+    status: text("status").$type<"pending" | "confirmed" | "expired">().notNull().default("pending"),
+    deviceId: text("device_id").references(() => workspaceDevices.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    codeIdx: index("device_pairing_requests_code_idx").on(table.code),
+    statusCheck: check(
+      "device_pairing_requests_status_check",
+      sql`${table.status} IN ('pending', 'confirmed', 'expired')`,
+    ),
+  }),
+);
+
+// Audit log of every tool action the runner routed to a paired device, including denials.
+// Written by the runner at execution time; rendered read-only in the Devices settings UI.
+export const deviceActions = pgTable(
+  "device_actions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => workspaceDevices.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    tool: text("tool").notNull(),
+    summary: text("summary").notNull(),
+    decision: text("decision")
+      .$type<
+        | "allowed_by_rule"
+        | "allowed_by_mode"
+        | "approved_once"
+        | "approved_session"
+        | "approved_always"
+        | "denied_by_rule"
+        | "denied_by_user"
+        | "denied_timeout"
+      >()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    deviceCreatedIdx: index("device_actions_device_created_idx").on(
+      table.deviceId,
+      table.createdAt,
+    ),
+    workspaceCreatedIdx: index("device_actions_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
@@ -2139,3 +2251,6 @@ export type AgentToolApproval = typeof agentToolApprovals.$inferSelect;
 export type AgentSessionQuestion = typeof agentSessionQuestions.$inferSelect;
 export type MessagingChannel = typeof messagingChannels.$inferSelect;
 export type MessagingMessage = typeof messagingMessages.$inferSelect;
+export type WorkspaceDevice = typeof workspaceDevices.$inferSelect;
+export type DevicePairingRequest = typeof devicePairingRequests.$inferSelect;
+export type DeviceAction = typeof deviceActions.$inferSelect;

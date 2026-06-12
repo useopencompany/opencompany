@@ -12,7 +12,9 @@
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.44",
     "@durable-streams/client": "^0.2.6",
+    "@fastify/websocket": "^11.2.0",
     "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/bridge": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
     "@opencompany/crypto": "workspace:*",

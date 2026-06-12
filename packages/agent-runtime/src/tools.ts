@@ -80,11 +80,17 @@ export type RuntimeToolName =
   | "web_fetch"
   | "tool_help"
   | "find_tools"
-  | "discover_capabilities";
+  | "discover_capabilities"
+  | "local_shell"
+  | "local_read_file"
+  | "local_write_file"
+  | "local_list_files";
 
 export type RuntimeToolDefinition = {
   name: RuntimeToolName;
-  kind: "sandbox" | "hosted" | "internal";
+  // "device" tools run on the user's own paired computer via the local bridge daemon,
+  // not in the cloud sandbox; the daemon's local rulebook is their permission authority.
+  kind: "sandbox" | "hosted" | "internal" | "device";
   configToolId?: AgentToolId;
   sharedConfigToolIds?: AgentToolId[];
   requiresAttachedRepository?: boolean;
@@ -2572,6 +2578,77 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  // Local-device tools: run on the user's own paired computer (the oc-bridge daemon),
+  // not in the cloud sandbox. Only enabled when the session owner has an active paired
+  // device (localDeviceEnabled in resolveRuntimeToolNamesForConfigTools). The device's
+  // local permission rules decide allow/ask/deny per call — an "ask" pauses the run for
+  // the user's in-chat approval, exactly like workspace tool-policy gates.
+  {
+    name: "local_shell",
+    kind: "device",
+    description:
+      "Run a shell command on the user's own computer (their paired device) — NOT in the cloud sandbox. Use this for actions that must happen on the user's machine, like installing software, running local scripts, or inspecting their local environment. The device's local permission rules decide whether the command runs immediately, pauses for the user's approval, or is denied; a denial is the user's choice, not an error.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Shell command to run on the user's machine." },
+        cwd: {
+          type: "string",
+          description:
+            "Working directory on the user's machine (absolute or ~-relative). Defaults to their home directory.",
+        },
+      },
+      required: ["command"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "local_read_file",
+    kind: "device",
+    description:
+      "Read a file from the user's own computer (their paired device). Paths are absolute or ~-relative on THEIR machine (e.g. ~/Projects/app/README.md) — sandbox prefixes like work/ do not apply. Subject to the device's local permission rules.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path on the user's machine." },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "local_write_file",
+    kind: "device",
+    description:
+      "Write a file on the user's own computer (their paired device). Creates parent folders as needed and overwrites existing content. Paths are absolute or ~-relative on THEIR machine. Subject to the device's local permission rules and may pause for the user's approval.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path on the user's machine." },
+        content: { type: "string", description: "Full file content to write." },
+      },
+      required: ["path", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "local_list_files",
+    kind: "device",
+    description:
+      "List the files in a folder on the user's own computer (their paired device). Paths are absolute or ~-relative on THEIR machine. Subject to the device's local permission rules.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Folder path on the user's machine." },
+        recursive: {
+          type: "boolean",
+          description: "Walk subfolders too (skips .git and node_modules).",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export const RUNTIME_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
@@ -2697,6 +2774,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   // The inbox tools are hard-gated to the user's personal/default agent so team agents never
   // post to a personal inbox. The runner passes `row.agent.isDefault`.
   personalInboxEnabled?: boolean;
+  // Local-device tools are only exposed when the session owner has an active paired
+  // device (oc-bridge daemon). The runner passes this from a workspace_devices lookup.
+  localDeviceEnabled?: boolean;
 }) {
   const hasAttachedRepository =
     (input.repositories ?? []).length > 0 || input.allRepositories === true;
@@ -2711,7 +2791,8 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
       tool.name === "inbox_list" ||
       tool.name === "inbox_add" ||
       tool.name === "inbox_update" ||
-      tool.name === "fetch_transcript"
+      tool.name === "fetch_transcript" ||
+      tool.kind === "device"
     ) {
       continue;
     }
@@ -2736,6 +2817,12 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
     names.add("inbox_list");
     names.add("inbox_add");
     names.add("inbox_update");
+  }
+  if (input.localDeviceEnabled) {
+    names.add("local_shell");
+    names.add("local_read_file");
+    names.add("local_write_file");
+    names.add("local_list_files");
   }
 
   const selectedToolIds = new Set(
@@ -2806,6 +2893,10 @@ export const BUILTIN_USE_TOOL_NAME = "use_tool";
 // lives with the registry, not in a separate frontend switch that drifts out of sync.
 export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   shell: "Run command",
+  local_shell: "Run command on your computer",
+  local_read_file: "Read file on your computer",
+  local_write_file: "Write file on your computer",
+  local_list_files: "List files on your computer",
   gh: "GitHub CLI",
   memory: "Memory",
   recall: "Recall past sessions",

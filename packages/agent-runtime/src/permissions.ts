@@ -59,6 +59,13 @@ export type ProviderPermissionSpec = {
 // in v1 — the sandbox is ephemeral and isolated, so the blast radius is local.
 export const SYSTEM_PROVIDER_KEY = "system";
 
+// Provider key for the local-device tools (the user's own paired computer). NOT gated by
+// the workspace tool policy: the device's local rulebook (the oc-bridge daemon) is the
+// sole permission authority, and the runner consults it per call before the tool starts
+// (see the device gate in model-stream-runner). resolveToolDecision therefore
+// short-circuits these to "allow" like other ungated providers.
+export const LOCAL_DEVICE_PROVIDER_KEY = "local_device";
+
 // Provider key for tool names that cannot be classified at all. Deliberately has no
 // PROVIDER_PERMISSION_REGISTRY entry: resolveToolDecision then applies the workspace
 // policy gate with the admin-group default stance (ask → deny when non-suspendable).
@@ -376,6 +383,19 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
     groups: ["read", "modify", "admin"],
     gated: false,
   },
+  [LOCAL_DEVICE_PROVIDER_KEY]: {
+    providerKey: LOCAL_DEVICE_PROVIDER_KEY,
+    displayName: "Your computer",
+    groups: ["read", "modify", "admin"],
+    // Ungated by workspace policy: the paired device's local rulebook decides, enforced
+    // by the runner's device gate per call.
+    gated: false,
+    permissionDescriptions: {
+      read: "Read files and folders on your computer",
+      modify: "Write files on your computer",
+      admin: "Run shell commands on your computer",
+    },
+  },
 };
 
 export function permissionDescriptionFor(providerKey: string, group: PermissionGroup) {
@@ -478,6 +498,13 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   gh: { providerKey: "github", group: "admin" },
   amp_coder: { providerKey: "github", group: "modify" },
   opencode_coder: { providerKey: "github", group: "modify" },
+  // Local-device tools: classified for event/UI labeling, but the workspace policy gate
+  // short-circuits (provider is ungated). The real gate is the device daemon's verdict,
+  // resolved per call by the runner before the tool starts.
+  local_shell: { providerKey: LOCAL_DEVICE_PROVIDER_KEY, group: "admin" },
+  local_read_file: { providerKey: LOCAL_DEVICE_PROVIDER_KEY, group: "read" },
+  local_write_file: { providerKey: LOCAL_DEVICE_PROVIDER_KEY, group: "modify" },
+  local_list_files: { providerKey: LOCAL_DEVICE_PROVIDER_KEY, group: "read" },
   // Never gated.
   run_subagent: null,
   delegate_to_agent: null,

@@ -92,6 +92,10 @@ export function resolveAgentRuntimeConfig(input: {
   // True when this is the user's personal/default agent (agents.isDefault). Hard-gates the
   // inbox tools so only the personal agent can post to a user's personal inbox.
   personalAgent?: boolean;
+  // The session owner's paired local devices (oc-bridge daemons). Presence of at least one
+  // enables the local_* tools and injects the local-device context section. The runner
+  // passes this from a workspace_devices lookup at session start.
+  connectedDevices?: { name: string; online: boolean }[] | undefined;
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   // The personal/default agent runs in the memory/ + personal-brain/ + work/ sandbox layout with no
@@ -168,6 +172,7 @@ export function resolveAgentRuntimeConfig(input: {
       ? `You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first. update_agent_file is not preloaded: after reading the skill, discover its schema with find_tools({ query: "update_agent_file" }) and run it with ${BUILTIN_USE_TOOL_NAME}({ tool: "update_agent_file", arguments }).`
       : null,
     toolPolicyContext,
+    buildLocalDeviceSection(input.connectedDevices),
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
     // The personal agent presents no company identity, so omit the workspace line for it.
     !isPersonal && input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
@@ -199,6 +204,7 @@ export function resolveAgentRuntimeConfig(input: {
       selfEditEnabled: skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID),
       memorySkillEnabled: skills.some((skill) => skill.id === MEMORY_SKILL_ID),
       personalInboxEnabled: input.personalAgent ?? false,
+      localDeviceEnabled: (input.connectedDevices ?? []).length > 0,
     }),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };
@@ -242,6 +248,24 @@ function buildProfileSection(input: { userMemory: string | undefined }): string 
     "Who your user is: identity, preferences, communication style, goals. Edit it with file tools as you learn; edits apply from your next turn in this same session. This is a cache, not a store: structured memory (the `memory` tool) is the canonical home of every durable fact, and anything written here should also live there. Promote into this file only what you need in literally every turn, and demote whatever stops earning its ~3KB — it stays safe in memory.",
     "",
     body,
+  ].join("\n");
+}
+
+// The local-device context block: tells the agent the user's own computer is reachable
+// through the local_* tools and how those differ from sandbox tools (real machine, device
+// paths, device-side permission rules that may pause for approval or deny).
+function buildLocalDeviceSection(
+  devices: { name: string; online: boolean }[] | undefined,
+): string | null {
+  if (!devices || devices.length === 0) return null;
+  const deviceList = devices
+    .map((device) => `${device.name} (${device.online ? "online" : "offline"})`)
+    .join(", ");
+  return [
+    `Local device: the user has paired their own computer: ${deviceList}.`,
+    "The local_shell, local_read_file, local_write_file, and local_list_files tools run THERE — on the user's real machine — not in your cloud sandbox. Use them only for actions that must happen on the user's computer (installing software, editing their local files, running local scripts); keep ordinary work in the sandbox.",
+    "Device paths are absolute or ~-relative on their machine (e.g. ~/Projects/app) — sandbox prefixes like work/ do not apply there.",
+    "The device's own permission rules govern every call: a call may run immediately, pause for the user's in-chat approval, or be denied. A denial is the user's choice, not an error — explain what you wanted to do instead of retrying. When the device is offline, these tools return an error; tell the user to start their bridge (oc-bridge start).",
   ].join("\n");
 }
 

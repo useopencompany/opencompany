@@ -37,6 +37,7 @@ import { syncAgentBundleFromSandbox } from "./agent-bundle";
 import { hydrateMessageAttachments } from "./attachment-hydration";
 import { syncBrainFromSandbox } from "./brain";
 import { createAgentDelegationHandler } from "./delegation";
+import { loadConnectedDevices } from "./device-bridge";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { validateHostedToolEnvironment } from "./hosted-tools";
@@ -357,6 +358,11 @@ async function runMessageWithContext(
       row.agent.id,
       row.agent.path,
     );
+    // Local-device tools only make sense on suspendable runs (their "ask" verdicts pause
+    // for the in-chat approval); delegated children never see them.
+    const connectedDevices = suspendable
+      ? await loadConnectedDevices({ workspaceId: row.workspace.id, userId: row.user.id })
+      : [];
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       personalAgent: row.agent.isDefault,
@@ -366,6 +372,7 @@ async function runMessageWithContext(
       ...optionalUserContext(row.user),
       ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable },
+      connectedDevices,
     });
     // Memory-keeper mode: a `source: "memory"` session is an invisible background pass that runs
     // under the personal agent's own bundle but with a platform-owned system prompt appended and a
@@ -1678,6 +1685,10 @@ async function resumeApprovalWithContext(
       ...optionalUserContext(row.user),
       ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: true },
+      connectedDevices: await loadConnectedDevices({
+        workspaceId: row.workspace.id,
+        userId: row.user.id,
+      }),
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -2229,6 +2240,10 @@ async function resumeQuestionResponseWithContext(
       ...optionalUserContext(row.user),
       ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: true },
+      connectedDevices: await loadConnectedDevices({
+        workspaceId: row.workspace.id,
+        userId: row.user.id,
+      }),
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;

@@ -43,7 +43,11 @@ function isUnauthenticatedPath(pathname: string) {
   return (
     UNAUTHENTICATED_PATHS.includes(pathname) ||
     pathname === "/docs" ||
-    pathname.startsWith("/docs/")
+    pathname.startsWith("/docs/") ||
+    // The oc-bridge daemon's device-code pairing flow: the daemon has no browser session
+    // by definition. These routes grant nothing — confirmation happens in the
+    // authenticated settings page; see app/api/bridge/pairing/*.
+    pathname.startsWith("/api/bridge/pairing/")
   );
 }
 
