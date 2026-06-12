@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-11
+
+### Added
+- Brain files created or edited by agents now show as clickable attachments under assistant turns, and the company Brain can be opened directly at `/brain/<path>` deep links (#356) — @louis.
+- The personal Brain is now URL-addressable too, with nested file links restoring the selected file on reload and keeping the Brain navigation active (#426) — @jasper.
+- The personal Integrations tab now expands inline with connected account details, permission summaries, degraded-access warnings, disconnect actions, and GitHub repository refresh (#390) — @louis.
+- Personal recall can now be constrained by time windows, including query-less recent-session snippets, so agents can ask for memory from a specific lookback period (#416) — @louis.
+- Large pasted text is captured through the attachment pipeline, and oversized text attachments are materialized as sandbox file references instead of being inlined into every model call (#410) — @louis.
+- Session usage now updates live during streaming, long-running tool calls show an elapsed counter, and the context-window tooltip includes session cost (#395, #376, #399) — @louis.
+- Runner observability now records per-tool-call phase timings, Braintrust spans, PostHog rollups, and hidden sandbox hydration timing events for production latency diagnosis (#411, #417) — @louis.
+
+### Changed
+- New personal agents now default to Leo on Kimi K2.6, with updated default capabilities, model selection, settings reset, and personal agent source normalization (#409, #425) — @louis.
+- Memory tooling now returns richer `memory query` and `memory get` output, clearer invalid-usage help, a tighter keeper kickoff prompt, and canonical guidance that durable facts belong in structured memory while `agent/user.md` is the always-loaded digest (#413, #418, #422, #428) — @louis.
+- Memory keeper passes now use Gemini 3.1 Flash Lite, surface what they stored, and appear in the transcript near the turn they followed instead of pinned to the bottom (#401, #397) — @louis.
+- Runtime details now stay collapsed by default for new sessions, including sessions with related parent or child metadata (#423) — @louis.
+- Slack support channel names now keep the per-workspace suffix at the end, for example `<customer>-x-opencompany-<id8>` (#394) — @jasper.
+
+### Fixed
+- Personal-session inspector links now stay inside the personal surface instead of opening related sessions, session pages, or agent links under `/company` (#391) — @louis.
+- Personal runtime tool guidance now advertises the correct `work/`, `personal-brain/`, and `agent/` roots and blocks generic file tools from editing structured memory paths (#414) — @louis.
+- OpenCode tool usage is now parsed from current `step_finish` events and charged back to the spawning session instead of silently appearing as zero-cost work (#402) — @jasper.
+- Runner shutdown and interruption handling now drains in-flight runs, persists abort/failure state more reliably, and avoids replaying interrupted deploy-time work (#378) — @louis.
+- E2B stream callbacks are guarded against detached rejections so stopping an `opencode_coder` command no longer crashes the runner process (#400) — @louis.
+
 ## [0.11.0] - 2026-06-10
 
 ### Added
