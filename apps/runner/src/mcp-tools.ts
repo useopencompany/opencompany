@@ -83,7 +83,7 @@ const SLACK_READ_SCOPES = [
 const ENCRYPTION_KEY_VERSION = 1;
 const logger = createLogger({ service: "opencompany-runner" });
 
-type McpProviderKey =
+export type McpProviderKey =
   | typeof LINEAR_MCP_SERVER_KEY
   | typeof SLACK_MCP_SERVER_KEY
   | typeof POSTHOG_MCP_SERVER_KEY
@@ -348,6 +348,66 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
     };
   } catch (error) {
     await closeMcpClients(clients);
+    throw error;
+  }
+}
+
+export type WorkspaceMcpToolClient = {
+  // Invoke an MCP tool on the connected server by its raw name (e.g. "save_issue").
+  callTool: (name: string, args: unknown) => Promise<unknown>;
+  // Raw tool names the connected server exposes (for capability checks).
+  listToolNames: () => string[];
+  close: () => Promise<void>;
+};
+
+// Connect to a single workspace-configured MCP provider (e.g. Linear) and return a thin client for
+// calling its tools programmatically from a runner-side tool handler — reusing the exact
+// credential-decrypt + OAuth transport path that powers the agent's `{server}__use_tool`. Unlike
+// createMcpToolSet, this registers no meta-tools and persists no tool messages; the caller owns the
+// result. Throws if the provider is not configured/connected for the workspace (the caller turns
+// that into a recoverable "connect <provider>" message). Always `close()` it when done.
+export async function connectWorkspaceMcpClient(input: {
+  workspaceId: string;
+  provider: McpProviderKey;
+  integrationCredentialEncryptionKey: Buffer;
+  signal: AbortSignal;
+}): Promise<WorkspaceMcpToolClient> {
+  const provider = MCP_PROVIDER_CATALOG[input.provider];
+  const connection = await loadMcpConnection(input, provider);
+  const client = await createMCPClient({
+    clientName: "opencompany-runner",
+    version: "0.2.0",
+    transport: mcpTransportForConnection({
+      workspaceId: input.workspaceId,
+      provider,
+      integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
+      connection,
+    }),
+  });
+  try {
+    const definitions = await client.listTools({ options: { signal: input.signal } });
+    const rawTools = client.toolsFromDefinitions(definitions);
+    // Extract each tool's executable body the same way createMcpToolSet does (cast through unknown,
+    // since the SDK's ToolExecutionOptions is wider than the { toolCallId } the body actually uses).
+    const bodyByName = new Map<string, McpToolBody>();
+    for (const [rawName, rawTool] of Object.entries(rawTools)) {
+      bodyByName.set(rawName, (rawTool as unknown as { execute?: McpToolBody }).execute);
+    }
+    return {
+      async callTool(name, args) {
+        const body = bodyByName.get(name);
+        if (!body) {
+          throw new Error(
+            `${provider.displayName} MCP tool "${name}" is not available on this connection.`,
+          );
+        }
+        return body(args, { toolCallId: `runner_internal_${name}` });
+      },
+      listToolNames: () => [...bodyByName.keys()],
+      close: () => closeMcpClient(client),
+    };
+  } catch (error) {
+    await closeMcpClient(client);
     throw error;
   }
 }
@@ -856,7 +916,10 @@ function isMcpFailedToolOutput(
   );
 }
 
-async function loadMcpConnection(input: McpToolContext, provider: McpProvider) {
+async function loadMcpConnection(
+  input: Pick<McpToolContext, "workspaceId" | "integrationCredentialEncryptionKey">,
+  provider: McpProvider,
+) {
   const db = getDb();
   const { workspaceId } = input;
   const [server] = await db
