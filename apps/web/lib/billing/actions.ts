@@ -18,6 +18,7 @@ import {
   newStripeCheckoutRecordId,
   redeemCreditCodeForWorkspace,
 } from "@/lib/billing/service";
+import { verifyCreditCheckoutSessionReturn as verifyCreditCheckoutSessionReturnForCurrentWorkspace } from "@/lib/billing/checkout-return";
 import { getAppUrl, getStripe } from "@/lib/billing/stripe";
 
 function formatTopUpName(amountCents: number) {
@@ -32,6 +33,12 @@ function safeReturnPath(returnPath: string | undefined) {
     return returnPath;
   }
   return "/personal/settings";
+}
+
+function checkoutReturnUrl(appUrl: string, returnPath: string | undefined, query: string) {
+  const path = safeReturnPath(returnPath);
+  const separator = path.includes("?") ? "&" : "?";
+  return `${appUrl}${path}${separator}${query}`;
 }
 
 export async function createCreditCheckoutSession(amountCents: number, returnPath?: string) {
@@ -80,8 +87,12 @@ export async function createCreditCheckoutSession(amountCents: number, returnPat
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer_email: authUser.email,
-      success_url: `${appUrl}${safeReturnPath(returnPath)}?billing=success`,
-      cancel_url: `${appUrl}${safeReturnPath(returnPath)}?billing=cancelled`,
+      success_url: checkoutReturnUrl(
+        appUrl,
+        returnPath,
+        "billing=success&stripe_checkout_session_id={CHECKOUT_SESSION_ID}",
+      ),
+      cancel_url: checkoutReturnUrl(appUrl, returnPath, "billing=cancelled"),
       metadata,
       payment_intent_data: { metadata },
       line_items: [
@@ -154,6 +165,10 @@ export async function createCreditCheckoutSession(amountCents: number, returnPat
   }
 
   redirect(checkoutUrl);
+}
+
+export async function verifyCreditCheckoutSessionReturn(stripeCheckoutSessionId: string) {
+  return verifyCreditCheckoutSessionReturnForCurrentWorkspace(stripeCheckoutSessionId);
 }
 
 export async function redeemCreditCode(code: string) {

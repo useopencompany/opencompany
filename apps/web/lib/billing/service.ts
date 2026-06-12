@@ -8,7 +8,7 @@ import {
   workspaceCreditBalances,
   workspaceCreditLedger,
 } from "@opencompany/db/schema";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import { normalizeCreditCode } from "@/lib/billing/constants";
 
@@ -374,7 +374,26 @@ export async function fulfillCheckoutSession(
   }>(result);
 
   if (!rows[0]) {
-    return { ok: false as const, reason: "already_fulfilled_or_mismatch" };
+    const [fulfilledSession] = await db
+      .select({ id: stripeCheckoutSessions.id })
+      .from(stripeCheckoutSessions)
+      .where(
+        and(
+          eq(stripeCheckoutSessions.id, checkoutRecordId),
+          eq(stripeCheckoutSessions.stripeCheckoutSessionId, session.id),
+          eq(stripeCheckoutSessions.workspaceId, workspaceId),
+          eq(stripeCheckoutSessions.userId, userId),
+          eq(stripeCheckoutSessions.amountCents, amountCents),
+          isNotNull(stripeCheckoutSessions.fulfilledAt),
+        ),
+      )
+      .limit(1);
+
+    if (fulfilledSession) {
+      return { ok: false as const, reason: "already_fulfilled" };
+    }
+
+    return { ok: false as const, reason: "mismatch" };
   }
 
   return { ok: true as const, ...rows[0] };

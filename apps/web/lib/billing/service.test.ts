@@ -342,8 +342,11 @@ describe("fulfillCheckoutSession", () => {
     });
   });
 
-  it("does not double-credit fulfilled or mismatched sessions", async () => {
-    mockDb({ executeRows: [] });
+  it("treats an exactly matched fulfilled session as already fulfilled", async () => {
+    mockDb({
+      executeRows: [],
+      selectRows: [[{ id: "chk_123" }]],
+    });
 
     const result = await fulfillCheckoutSession({
       id: "cs_test_123",
@@ -356,6 +359,23 @@ describe("fulfillCheckoutSession", () => {
       },
     } as never);
 
-    expect(result).toEqual({ ok: false, reason: "already_fulfilled_or_mismatch" });
+    expect(result).toEqual({ ok: false, reason: "already_fulfilled" });
+  });
+
+  it("rejects mismatched fulfilled sessions", async () => {
+    mockDb({ executeRows: [], selectRows: [[]] });
+
+    const result = await fulfillCheckoutSession({
+      id: "cs_test_123",
+      payment_status: "paid",
+      metadata: {
+        checkoutRecordId: "chk_123",
+        workspaceId: "wks_123",
+        userId: "usr_123",
+        amountCents: "2500",
+      },
+    } as never);
+
+    expect(result).toEqual({ ok: false, reason: "mismatch" });
   });
 });

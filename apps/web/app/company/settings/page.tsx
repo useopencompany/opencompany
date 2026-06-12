@@ -3,6 +3,7 @@ import { userAvatars } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
+import { verifyCreditCheckoutSessionReturn } from "@/lib/billing/checkout-return";
 import { loadBillingOverview } from "@/lib/billing/service";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
@@ -30,7 +31,31 @@ function formatDate(date: Date) {
   }).format(date);
 }
 
-export default async function SettingsPage() {
+type SettingsPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+function readSearchParam(
+  params: Record<string, string | string[] | undefined>,
+  key: string,
+) {
+  const value = params[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function verifyBillingReturn(searchParams: SettingsPageProps["searchParams"]) {
+  const params = searchParams ? await searchParams : {};
+  if (readSearchParam(params, "billing") !== "success") return;
+
+  const stripeCheckoutSessionId = readSearchParam(params, "stripe_checkout_session_id");
+  if (stripeCheckoutSessionId) {
+    await verifyCreditCheckoutSessionReturn(stripeCheckoutSessionId);
+  }
+}
+
+export default async function SettingsPage({ searchParams }: SettingsPageProps) {
+  await verifyBillingReturn(searchParams);
+
   const { authUser, user, workspace } = await currentWorkspace();
   const db = getDb();
   const [syncStatus, [avatar], billing, mcp, toolPolicies] = await Promise.all([

@@ -1,4 +1,5 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
+import { captureException } from "@opencompany/observability";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fulfillCheckoutSession } from "@/lib/billing/service";
 import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
@@ -6,6 +7,10 @@ import { POST } from "./route";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/service", () => ({
@@ -28,6 +33,7 @@ vi.mock("next/server", async (importOriginal) => {
 });
 
 const captureServerEventMock = vi.mocked(captureServerEvent);
+const captureExceptionMock = vi.mocked(captureException);
 const fulfillCheckoutSessionMock = vi.mocked(fulfillCheckoutSession);
 const getStripeMock = vi.mocked(getStripe);
 const getStripeWebhookSecretMock = vi.mocked(getStripeWebhookSecret);
@@ -66,6 +72,9 @@ describe("Stripe webhook route", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "signature mismatch" });
+    expect(captureExceptionMock).toHaveBeenCalledWith(errorMatching("signature mismatch"), {
+      event: "opencompany.stripe_webhook_verification_failed",
+    });
   });
 
   it("fulfills completed Checkout Sessions", async () => {
@@ -103,11 +112,48 @@ describe("Stripe webhook route", () => {
     });
   });
 
-  it("does not capture analytics for completed Checkout Sessions that are not fulfilled", async () => {
+  it("returns 500 and captures completed Checkout Sessions that fail fulfillment", async () => {
     const session = { id: "cs_test_123", payment_status: "paid", metadata: {} };
     fulfillCheckoutSessionMock.mockResolvedValue({
       ok: false,
-      reason: "already_fulfilled_or_mismatch",
+      reason: "mismatch",
+    });
+    getStripeMock.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_123",
+          type: "checkout.session.completed",
+          data: { object: session },
+        })),
+      },
+    } as never);
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Stripe checkout fulfillment failed.",
+      reason: "mismatch",
+    });
+    expect(fulfillCheckoutSessionMock).toHaveBeenCalledWith(session, { eventId: "evt_123" });
+    expect(captureServerEventMock).not.toHaveBeenCalled();
+    expect(captureExceptionMock).toHaveBeenCalledWith(
+      errorMatching("Stripe checkout fulfillment failed: mismatch"),
+      {
+        event: "opencompany.stripe_checkout_fulfillment_failed",
+        stripe_event_id: "evt_123",
+        stripe_event_type: "checkout.session.completed",
+        stripe_checkout_session_id: "cs_test_123",
+        fulfillment_reason: "mismatch",
+      },
+    );
+  });
+
+  it("acknowledges duplicate completed Checkout Sessions without analytics", async () => {
+    const session = { id: "cs_test_123", payment_status: "paid", metadata: {} };
+    fulfillCheckoutSessionMock.mockResolvedValue({
+      ok: false,
+      reason: "already_fulfilled",
     });
     getStripeMock.mockReturnValue({
       webhooks: {
@@ -124,6 +170,34 @@ describe("Stripe webhook route", () => {
     expect(response.status).toBe(200);
     expect(fulfillCheckoutSessionMock).toHaveBeenCalledWith(session, { eventId: "evt_123" });
     expect(captureServerEventMock).not.toHaveBeenCalled();
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it("fulfills async payment succeeded Checkout Sessions", async () => {
+    const session = { id: "cs_test_123", payment_status: "paid", metadata: {} };
+    fulfillCheckoutSessionMock.mockResolvedValue({
+      ok: true,
+      checkoutRecordId: "chk_123",
+      workspaceId: "wks_123",
+      userId: "usr_123",
+      amountCents: 2500,
+      balanceCents: 5000,
+      ledgerId: 22,
+    });
+    getStripeMock.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_123",
+          type: "checkout.session.async_payment_succeeded",
+          data: { object: session },
+        })),
+      },
+    } as never);
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(fulfillCheckoutSessionMock).toHaveBeenCalledWith(session, { eventId: "evt_123" });
   });
 
   it("ignores unrelated event types", async () => {
@@ -144,3 +218,7 @@ describe("Stripe webhook route", () => {
     expect(captureServerEventMock).not.toHaveBeenCalled();
   });
 });
+
+function errorMatching(message: string) {
+  return expect.objectContaining({ message });
+}

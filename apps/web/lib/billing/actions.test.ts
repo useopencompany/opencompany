@@ -1,15 +1,17 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { captureException } from "@opencompany/observability";
+import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentWorkspace } from "@/lib/auth";
 import {
   createPendingCheckoutRecord,
+  fulfillCheckoutSession,
   markCheckoutRecordFailed,
   markCheckoutRecordOpen,
   newStripeCheckoutRecordId,
 } from "@/lib/billing/service";
 import { getAppUrl, getStripe } from "@/lib/billing/stripe";
-import { createCreditCheckoutSession } from "./actions";
+import { createCreditCheckoutSession, verifyCreditCheckoutSessionReturn } from "./actions";
 
 const redirectMock = vi.hoisted(() => vi.fn());
 
@@ -50,6 +52,7 @@ vi.mock("@/lib/billing/service", async (importOriginal) => {
   return {
     ...actual,
     createPendingCheckoutRecord: vi.fn(),
+    fulfillCheckoutSession: vi.fn(),
     markCheckoutRecordFailed: vi.fn(),
     markCheckoutRecordOpen: vi.fn(),
     newStripeCheckoutRecordId: vi.fn(),
@@ -60,11 +63,13 @@ const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const getStripeMock = vi.mocked(getStripe);
 const getAppUrlMock = vi.mocked(getAppUrl);
 const createPendingCheckoutRecordMock = vi.mocked(createPendingCheckoutRecord);
+const fulfillCheckoutSessionMock = vi.mocked(fulfillCheckoutSession);
 const markCheckoutRecordFailedMock = vi.mocked(markCheckoutRecordFailed);
 const markCheckoutRecordOpenMock = vi.mocked(markCheckoutRecordOpen);
 const newStripeCheckoutRecordIdMock = vi.mocked(newStripeCheckoutRecordId);
 const captureExceptionMock = vi.mocked(captureException);
 const captureServerEventMock = vi.mocked(captureServerEvent);
+const revalidatePathMock = vi.mocked(revalidatePath);
 
 describe("createCreditCheckoutSession", () => {
   beforeEach(() => {
@@ -127,7 +132,8 @@ describe("createCreditCheckoutSession", () => {
     expect(create).toHaveBeenCalledWith({
       mode: "payment",
       customer_email: "user@example.com",
-      success_url: "https://app.example.com/personal/settings?billing=success",
+      success_url:
+        "https://app.example.com/personal/settings?billing=success&stripe_checkout_session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://app.example.com/personal/settings?billing=cancelled",
       metadata: {
         workspaceId: "wks_123",
@@ -186,7 +192,8 @@ describe("createCreditCheckoutSession", () => {
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        success_url: "https://app.example.com/company/settings?billing=success",
+        success_url:
+          "https://app.example.com/company/settings?billing=success&stripe_checkout_session_id={CHECKOUT_SESSION_ID}",
         cancel_url: "https://app.example.com/company/settings?billing=cancelled",
       }),
     );
@@ -205,7 +212,8 @@ describe("createCreditCheckoutSession", () => {
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        success_url: "https://app.example.com/personal/settings?billing=success",
+        success_url:
+          "https://app.example.com/personal/settings?billing=success&stripe_checkout_session_id={CHECKOUT_SESSION_ID}",
         cancel_url: "https://app.example.com/personal/settings?billing=cancelled",
       }),
     );
@@ -304,6 +312,136 @@ describe("createCreditCheckoutSession", () => {
         user_id: "usr_123",
         amount_cents: 1000,
         checkout_stage: "initialize",
+      }),
+    );
+  });
+});
+
+describe("verifyCreditCheckoutSessionReturn", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      authUser: { email: "user@example.com" },
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  it("retrieves and fulfills the returned Stripe Checkout Session", async () => {
+    const session = {
+      id: "cs_test_123",
+      payment_status: "paid",
+      metadata: {
+        workspaceId: "wks_123",
+        userId: "usr_123",
+        checkoutRecordId: "chk_123",
+        amountCents: "2500",
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(session);
+    getStripeMock.mockReturnValue({ checkout: { sessions: { retrieve } } } as never);
+    fulfillCheckoutSessionMock.mockResolvedValue({
+      ok: true,
+      checkoutRecordId: "chk_123",
+      workspaceId: "wks_123",
+      userId: "usr_123",
+      amountCents: 2500,
+      balanceCents: 5000,
+      ledgerId: 22,
+    });
+
+    const result = await verifyCreditCheckoutSessionReturn("cs_test_123");
+
+    expect(result).toEqual({ ok: true, status: "fulfilled" });
+    expect(retrieve).toHaveBeenCalledWith("cs_test_123");
+    expect(fulfillCheckoutSessionMock).toHaveBeenCalledWith(session);
+    expect(captureServerEventMock).toHaveBeenCalledWith("credit_top_up_completed", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      checkout_record_id: "chk_123",
+      ledger_id: 22,
+      amount_cents: 2500,
+      balance_cents: 5000,
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith("/company/settings");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/personal/settings");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("treats an already fulfilled returned Checkout Session as verified", async () => {
+    const session = {
+      id: "cs_test_123",
+      payment_status: "paid",
+      metadata: {
+        workspaceId: "wks_123",
+        userId: "usr_123",
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(session);
+    getStripeMock.mockReturnValue({ checkout: { sessions: { retrieve } } } as never);
+    fulfillCheckoutSessionMock.mockResolvedValue({
+      ok: false,
+      reason: "already_fulfilled",
+    });
+
+    const result = await verifyCreditCheckoutSessionReturn("cs_test_123");
+
+    expect(result).toEqual({ ok: true, status: "already_fulfilled" });
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it("captures returned Checkout Sessions for the wrong workspace or user", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      id: "cs_test_123",
+      payment_status: "paid",
+      metadata: {
+        workspaceId: "wks_other",
+        userId: "usr_other",
+      },
+    });
+    getStripeMock.mockReturnValue({ checkout: { sessions: { retrieve } } } as never);
+
+    const result = await verifyCreditCheckoutSessionReturn("cs_test_123");
+
+    expect(result).toEqual({ ok: false, error: "Could not verify checkout." });
+    expect(fulfillCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(captureExceptionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Stripe Checkout Session return metadata mismatch." }),
+      expect.objectContaining({
+        event: "opencompany.billing_checkout_return_mismatch",
+        workspace_id: "wks_123",
+        user_id: "usr_123",
+        stripe_checkout_session_id: "cs_test_123",
+      }),
+    );
+  });
+
+  it("captures returned Checkout Sessions that cannot be fulfilled", async () => {
+    const session = {
+      id: "cs_test_123",
+      payment_status: "paid",
+      metadata: {
+        workspaceId: "wks_123",
+        userId: "usr_123",
+      },
+    };
+    const retrieve = vi.fn().mockResolvedValue(session);
+    getStripeMock.mockReturnValue({ checkout: { sessions: { retrieve } } } as never);
+    fulfillCheckoutSessionMock.mockResolvedValue({
+      ok: false,
+      reason: "missing_metadata",
+    });
+
+    const result = await verifyCreditCheckoutSessionReturn("cs_test_123");
+
+    expect(result).toEqual({ ok: false, error: "Could not verify checkout." });
+    expect(captureExceptionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Stripe checkout return fulfillment failed: missing_metadata",
+      }),
+      expect.objectContaining({
+        event: "opencompany.billing_checkout_return_fulfillment_failed",
+        fulfillment_reason: "missing_metadata",
       }),
     );
   });
