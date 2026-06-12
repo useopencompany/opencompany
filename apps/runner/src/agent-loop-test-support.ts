@@ -59,7 +59,7 @@ export type ToolApprovalState = {
   toolCallId: string;
   toolName: string;
   providerKey: string;
-  permissionGroup: "read" | "post" | "modify" | "admin";
+  permissionGroup: "read" | "post" | "modify" | "merge" | "admin";
   status: "pending" | "approved" | "denied";
   inputPreview: string | null;
 };

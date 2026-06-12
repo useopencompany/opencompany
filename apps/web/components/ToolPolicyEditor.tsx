@@ -2,12 +2,12 @@
 
 import {
   DEFAULT_GROUP_STANCE,
-  PERMISSION_GROUP_LABELS,
   type PermissionGroup,
   POLICY_DECISIONS,
   type PolicyDecision,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  permissionLabelFor,
 } from "@opencompany/agent-runtime";
 import { useState, useTransition } from "react";
 import { useToast } from "@/components/ToastProvider";
@@ -65,7 +65,7 @@ export function ToolPolicyEditor({ providerKey, overrides }: ToolPolicyEditorPro
         <div key={group} className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[12.5px] font-medium text-ink">
-              {PERMISSION_GROUP_LABELS[group]}
+              {permissionLabelFor(providerKey, group)}
             </div>
             <div className="text-[11px] leading-4 text-ink-subtle">
               {permissionDescriptionFor(providerKey, group)}
@@ -73,7 +73,7 @@ export function ToolPolicyEditor({ providerKey, overrides }: ToolPolicyEditorPro
           </div>
           <div
             role="radiogroup"
-            aria-label={`${PERMISSION_GROUP_LABELS[group]} permission`}
+            aria-label={`${permissionLabelFor(providerKey, group)} permission`}
             className="inline-flex shrink-0 overflow-hidden rounded-md border border-border"
           >
             {POLICY_DECISIONS.map((decision) => {
