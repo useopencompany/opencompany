@@ -3,6 +3,7 @@
 import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { fileNameFromPath } from "@/lib/brain/file-names";
+import { encodeBrainPath } from "@/lib/brain/paths";
 import { formatBrainRelativeTime } from "@/lib/brain/relative-time";
 import {
   ancestorFolderPaths,
@@ -13,24 +14,77 @@ import {
 import type { PersonalBrainFile } from "@/lib/personal/brain";
 import { MarkdownBrainEditor } from "./MarkdownBrainEditor";
 
+// Resolves the file the memory inspector opens with based on the URL path
+// (`<urlBasePath>/<initialPath>`). An exact file match opens that file; a folder prefix opens the
+// first file inside it (with ancestors expanded); anything else falls back to the first file.
+// Mirrors BrainView's resolveInitialBrainSelection, trimmed to what the read-only view needs.
+function resolveInitialMemorySelection(
+  files: PersonalBrainFile[],
+  initialPath: string,
+): { selectedPath: string; expandedPaths: Set<string> } {
+  const fallback = files[0];
+  const fallbackSelection = {
+    selectedPath: fallback?.path ?? "",
+    expandedPaths: new Set(fallback ? ancestorFolderPaths(fallback.path) : []),
+  };
+  const normalized = initialPath.replace(/^\/+|\/+$/g, "");
+  if (!normalized) return fallbackSelection;
+
+  const exact = files.find((file) => file.path === normalized);
+  if (exact) {
+    return { selectedPath: exact.path, expandedPaths: new Set(ancestorFolderPaths(exact.path)) };
+  }
+
+  const underFolder = files.find((file) => file.path.startsWith(`${normalized}/`));
+  if (underFolder) {
+    return {
+      selectedPath: underFolder.path,
+      expandedPaths: new Set(ancestorFolderPaths(underFolder.path)),
+    };
+  }
+
+  return fallbackSelection;
+}
+
 // A read-only inspector for the personal agent's Memory (`memory/` bundle subtree). Memory is
 // tool-managed — the agent writes it, the user only reads it — so this is a trimmed BrainView with
 // no create/rename/delete/drag affordances and a non-editable content pane. It reuses the Brain
 // tree utilities for the folder layout to stay visually consistent with Personal Brain.
 export default function PersonalMemoryView({
   files,
+  initialPath = "",
+  urlBasePath,
   title = "Agent memory",
   emptyHint = "Your agent hasn't recorded any memory yet. As it works with you it will save what it learns here.",
 }: {
   files: PersonalBrainFile[];
+  // Logical path from the `[[...path]]` catch-all route; opens that file/folder on load.
+  initialPath?: string;
+  // Surface root (e.g. `/personal/memory`) so only URL-addressable surfaces sync the URL bar.
+  urlBasePath?: string;
   title?: string;
   emptyHint?: string;
 }) {
-  const [query, setQuery] = useState("");
-  const [selectedPath, setSelectedPath] = useState(files[0]?.path ?? "");
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
-    () => new Set(files[0] ? ancestorFolderPaths(files[0].path) : []),
+  const initialSelection = useMemo(
+    () => resolveInitialMemorySelection(files, initialPath),
+    [files, initialPath],
   );
+  const [query, setQuery] = useState("");
+  const [selectedPath, setSelectedPath] = useState(initialSelection.selectedPath);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(initialSelection.expandedPaths);
+
+  // Reflects the open file in the URL bar so it can be linked to (and restored on reload), mirroring
+  // Personal Brain. history.replaceState (not router.replace) keeps it a client-only selection — every
+  // memory file is already loaded. Memory paths are restricted to [A-Za-z0-9._/-], so the encoded form
+  // matches window.location.pathname verbatim.
+  function selectPath(path: string) {
+    setSelectedPath(path);
+    if (!urlBasePath) return;
+    const encoded = encodeBrainPath(path);
+    const next = encoded ? `${urlBasePath}/${encoded}` : urlBasePath;
+    if (window.location.pathname === next) return;
+    window.history.replaceState(window.history.state, "", next);
+  }
 
   const tree = useMemo(() => buildBrainTree(files, query), [files, query]);
   const isSearching = Boolean(query.trim());
@@ -86,7 +140,7 @@ export default function PersonalMemoryView({
                   depth={0}
                   selectedPath={selected?.path ?? ""}
                   expandedPaths={visibleExpandedPaths}
-                  onSelect={setSelectedPath}
+                  onSelect={selectPath}
                   onToggleFolder={toggleFolder}
                 />
               ))}
