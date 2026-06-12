@@ -411,7 +411,7 @@ function PersonalSidebarView({
   inboxCount?: number;
 }) {
   const router = useRouter();
-  const { userId } = useWorkspaceContext();
+  const { userId, workspaceId } = useWorkspaceContext();
   const { agentSessions, sessionStars } = useCollections();
   const { showError } = useToast();
   const {
@@ -691,6 +691,7 @@ function PersonalSidebarView({
           userEmail={userEmail}
           subtitle={`${agent.name} · Personal`}
           settingsHref={personalPaths.settings}
+          workspaceId={workspaceId}
         />
       </div>
     </aside>

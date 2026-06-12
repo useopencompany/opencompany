@@ -2,6 +2,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { usePathname } from "next/navigation";
 import { describe, expect, it, vi } from "vitest";
 import { submitFeedback } from "@/lib/feedback/actions";
+import { uploadFeedbackImage } from "@/lib/feedback/upload-image";
 import FeedbackDialog from "./FeedbackDialog";
 
 vi.mock("next/navigation", () => ({
@@ -10,6 +11,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/feedback/actions", () => ({
   submitFeedback: vi.fn(),
+}));
+
+vi.mock("@/lib/feedback/upload-image", () => ({
+  uploadFeedbackImage: vi.fn(),
 }));
 
 const usePathnameMock = vi.mocked(usePathname);
@@ -40,6 +45,44 @@ describe("FeedbackDialog", () => {
     const { container } = render(<FeedbackDialog open onClose={vi.fn()} />);
 
     expect(container.querySelector('input[name="sessionId"]')).toBeNull();
+  });
+
+  it("offers image attachment when a workspace id is provided", () => {
+    usePathnameMock.mockReturnValue("/company");
+
+    const { getByRole } = render(<FeedbackDialog open onClose={vi.fn()} workspaceId="wks_123" />);
+
+    expect(getByRole("button", { name: /attach image/i })).toBeInTheDocument();
+  });
+
+  it("stays text-only when no workspace id is provided", () => {
+    usePathnameMock.mockReturnValue("/company");
+
+    const { queryByRole } = render(<FeedbackDialog open onClose={vi.fn()} />);
+
+    expect(queryByRole("button", { name: /attach image/i })).toBeNull();
+  });
+
+  it("warns and keeps Send enabled when an image upload fails", async () => {
+    usePathnameMock.mockReturnValue("/company");
+    URL.createObjectURL = vi.fn(() => "blob:mock");
+    URL.revokeObjectURL = vi.fn();
+    vi.mocked(uploadFeedbackImage).mockRejectedValue(new Error("upload failed"));
+
+    const { container, getByRole, findByText } = render(
+      <FeedbackDialog open onClose={vi.fn()} workspaceId="wks_123" />,
+    );
+
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput) throw new Error("file input not found");
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["x"], "shot.png", { type: "image/png" })] },
+    });
+
+    // A failed upload must be surfaced, not silently dropped...
+    await findByText(/failed to upload/i);
+    // ...and it must not block sending the rest of the feedback.
+    expect(getByRole("button", { name: /send/i })).not.toBeDisabled();
   });
 
   it("auto-closes the dialog after a successful submit", async () => {
