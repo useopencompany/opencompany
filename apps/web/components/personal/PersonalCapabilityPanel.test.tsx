@@ -56,6 +56,7 @@ vi.mock("@/lib/mcp/actions", () => ({
   removePostHogMcpConnection: vi.fn(async () => ({ ok: true })),
   removeBetterStackMcpConnection: vi.fn(async () => ({ ok: true })),
   removeBraintrustMcpConnection: vi.fn(async () => ({ ok: true })),
+  removeNotionMcpConnection: vi.fn(async () => ({ ok: true })),
 }));
 
 vi.mock("@/components/agent-editor/AddSkillDialog", () => ({
@@ -155,6 +156,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
       />,
     );
@@ -195,6 +197,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         toolPolicies={{ linear: { read: "ask" } }}
       />,
@@ -234,6 +237,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         toolPolicies={{ linear: { read: "ask" } }}
       />,
@@ -263,6 +267,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         onAddIntegration={onAddIntegration}
       />,
@@ -305,6 +310,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         onAddIntegration={onAddIntegration}
       />,
@@ -340,6 +346,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         onAddIntegration={onAddIntegration}
       />,
@@ -386,6 +393,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         onAddIntegration={onAddIntegration}
       />,
@@ -696,6 +704,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         details={{
           linear: { summary: null, accounts: [], resourcesLabel: null, statusReason: null },
@@ -771,6 +780,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           posthog: false,
           betterstack: false,
           braintrust: false,
+          notion: false,
         }}
         details={{
           gmail: {

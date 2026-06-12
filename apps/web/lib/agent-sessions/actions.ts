@@ -218,6 +218,7 @@ export type PersonalOnboardingContext = {
 // the survey + context are persisted best-effort and never block the session.
 export type PersonalOnboardingOptions = {
   integrations: PersonalIntegrationId[];
+  skipBillingCheck?: boolean;
   setup?: { id: string; title: string; intent: string };
   survey?: { heardFrom: string; heardFromDetail: string };
 };
@@ -271,8 +272,8 @@ async function persistPersonalOnboardingSurvey(
   }
 }
 
-// V2 onboarding (/onboarding/personal): the visible first message is the user's "what do you want to
-// get done today?" answer. We seed it as a normal user message (so it reads naturally in the
+// Personal onboarding session creation: the visible first message is the user's "what do you want
+// to get done today?" answer. We seed it as a normal user message (so it reads naturally in the
 // transcript) but the model-only content also carries (a) the background context the user gave on
 // the first screen and (b) a thin pointer to the `onboarding` skill, so the agent runs the
 // first-session procedure (read context → save to memory → name itself + tune its soul → start the
@@ -285,13 +286,16 @@ export async function createPersonalOnboardingSession(
 ) {
   // skipOnboarding: this action IS the final onboarding step — the caller has not completed
   // onboarding yet (the survey row that marks completion is persisted below), so the default
-  // gate would bounce the submit straight back to /onboarding/personal.
+  // gate would bounce the submit straight back to /onboarding.
   const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const trimmed = prompt.trim();
   if (!trimmed) {
     return { ok: false, error: "Tell the agent what you'd like to get done." } as const;
   }
-  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+  if (
+    !options.skipBillingCheck &&
+    !(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))
+  ) {
     return {
       ok: false,
       error: "Add workspace credits to start a session.",

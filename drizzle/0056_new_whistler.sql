@@ -1,0 +1,1 @@
+ALTER TABLE "onboarding_responses" ADD COLUMN "goal" text;

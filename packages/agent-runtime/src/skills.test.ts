@@ -18,6 +18,7 @@ import {
   resolveEnabledSkillMetadata,
   SKILL_CREATOR_SKILL_ID,
   scanPersonalSkills,
+  Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
 } from "./skills";
 import type { AgentConfig, AgentExternalSkillReference } from "./types";
 
@@ -178,6 +179,7 @@ describe("first-principles skill (addable built-in)", () => {
     expect(skillMd).toContain("@skill/");
     expect(skillMd).toContain(`@skill/${FIRST_PRINCIPLES_SKILL_ID}`);
     expect(skillMd).toContain(`@skill/${HUMANIZER_SKILL_ID}`);
+    expect(skillMd).toContain(`@skill/${Y_COMBINATOR_KNOWLEDGE_SKILL_ID}`);
   });
 });
 
@@ -207,6 +209,38 @@ describe("humanizer skill (addable built-in)", () => {
 
   test("listAddableBuiltinSkills offers it", () => {
     expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(HUMANIZER_SKILL_ID);
+  });
+});
+
+describe("y-combinator-knowledge skill (addable built-in)", () => {
+  test("is a known built-in but off by default", () => {
+    expect(isKnownAgentSkillId(Y_COMBINATOR_KNOWLEDGE_SKILL_ID)).toBe(true);
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((s) => s.id)).not.toContain(
+      Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
+    );
+    expect(resolveEnabledSkillMetadata(baseConfig()).map((s) => s.id)).not.toContain(
+      Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
+    );
+  });
+
+  test("materializes once listed in config.skills as a bare built-in ref", () => {
+    const config = baseConfig({ skills: [{ id: Y_COMBINATOR_KNOWLEDGE_SKILL_ID }] });
+    const skill = resolveEnabledBuiltinSkillFiles(config).find(
+      (s) => s.id === Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
+    );
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    expect(skillMd).toContain("Office-hours loop");
+    expect(skillMd).toContain("https://www.ycombinator.com/library");
+    expect(skillMd).toContain("https://www.paulgraham.com/ds.html");
+    expect(skillMd).toMatch(/default alive/i);
+    expect(
+      resolveEnabledSkillMetadata(config).find((s) => s.id === Y_COMBINATOR_KNOWLEDGE_SKILL_ID)
+        ?.origin,
+    ).toBe("builtin");
+  });
+
+  test("listAddableBuiltinSkills offers it", () => {
+    expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(Y_COMBINATOR_KNOWLEDGE_SKILL_ID);
   });
 });
 

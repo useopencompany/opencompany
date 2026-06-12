@@ -172,6 +172,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   posthog: BarChart3,
   betterstack: Monitor,
   braintrust: FlaskConical,
+  notion: FileText,
   gmail: Mail,
   google_calendar: CalendarDays,
 };
@@ -410,7 +411,8 @@ function isMcpToolId(id: AgentToolId) {
     id === "slack" ||
     id === "posthog" ||
     id === "betterstack" ||
-    id === "braintrust"
+    id === "braintrust" ||
+    id === "notion"
   );
 }
 
