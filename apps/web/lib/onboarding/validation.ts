@@ -1,9 +1,9 @@
-import {
-  agentExperienceValues,
-  heardFromValues,
-  helpAreaValues,
-  teamSizeValues,
-} from "@/lib/onboarding/options";
+import { agentExperienceValues, heardFromValues, teamSizeValues } from "@/lib/onboarding/options";
+import type { PersonalIntegrationId } from "@/lib/personal/actions";
+import { type PersonalBrainFolder, personalBrainFolderValues } from "@/lib/personal/brain-folders";
+import { PERSONAL_INTEGRATIONS_CATALOG } from "@/lib/personal/integrations-catalog";
+
+export const GOAL_MAX_LENGTH = 2000;
 
 export type FieldErrors = Partial<
   Record<
@@ -13,7 +13,9 @@ export type FieldErrors = Partial<
     | "teamSize"
     | "companyUrl"
     | "agentExperience"
-    | "helpAreas",
+    | "goal"
+    | "personalBrainFolders"
+    | "personalIntegrations",
     string
   >
 >;
@@ -25,8 +27,12 @@ export type OnboardingValues = {
   teamSize: string;
   companyUrl: string;
   agentExperience: string;
-  helpAreas: string[];
+  goal: string;
+  personalBrainFolders: string[];
+  personalIntegrations: string[];
 };
+
+const personalIntegrationValues = PERSONAL_INTEGRATIONS_CATALOG.map((entry) => entry.id);
 
 function isKnownValue(value: string, values: readonly string[]) {
   return values.includes(value);
@@ -79,16 +85,33 @@ export function validateOnboardingValues(values: OnboardingValues) {
     errors.agentExperience = "Choose your experience level.";
   }
 
-  const helpAreas = values.helpAreas.filter((value) => isKnownValue(value, helpAreaValues));
-  if (helpAreas.length === 0) {
-    errors.helpAreas = "Choose at least one area.";
+  // The goal is optional — only guard against an unreasonably long answer.
+  const goal = values.goal.trim();
+  if (goal.length > GOAL_MAX_LENGTH) {
+    errors.goal = `Keep your answer under ${GOAL_MAX_LENGTH} characters.`;
+  }
+
+  const personalBrainFolders = Array.from(new Set(values.personalBrainFolders));
+  if (personalBrainFolders.some((folder) => !isKnownValue(folder, personalBrainFolderValues))) {
+    errors.personalBrainFolders = "Choose only supported Personal Brain folders.";
+  }
+
+  const personalIntegrations = Array.from(new Set(values.personalIntegrations));
+  if (
+    personalIntegrations.some(
+      (integration) => !isKnownValue(integration, personalIntegrationValues),
+    )
+  ) {
+    errors.personalIntegrations = "Choose only supported integrations.";
   }
 
   return {
     errors,
     normalized: {
       companyUrl,
-      helpAreas,
+      goal: goal || null,
+      personalBrainFolders: personalBrainFolders as PersonalBrainFolder[],
+      personalIntegrations: personalIntegrations as PersonalIntegrationId[],
     },
   };
 }

@@ -1,9 +1,11 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { startSeededAgentSession } from "@/lib/agent-sessions/start-session";
+import { createPersonalOnboardingSession } from "@/lib/agent-sessions/actions";
 import { currentWorkspace } from "@/lib/auth";
-import { ensureUserOnboardingScaffold } from "@/lib/onboarding/scaffold";
+import { ONBOARDING_FIRST_SESSION_PROMPT } from "@/lib/onboarding/first-session";
+import { ensurePersonalAgent } from "@/lib/personal/scaffold";
+import { dispatchSlackSupportChannelRequested } from "@/lib/slack/events";
 import { completeOnboarding, type OnboardingActionState } from "./actions";
 
 vi.mock("@opencompany/analytics/server", () => ({
@@ -35,19 +37,24 @@ vi.mock("@/lib/auth", () => ({
   currentWorkspace: vi.fn(),
 }));
 
-vi.mock("@/lib/onboarding/scaffold", () => ({
-  ensureUserOnboardingScaffold: vi.fn(),
+vi.mock("@/lib/personal/scaffold", () => ({
+  ensurePersonalAgent: vi.fn(),
 }));
 
-vi.mock("@/lib/agent-sessions/start-session", () => ({
-  startSeededAgentSession: vi.fn(),
+vi.mock("@/lib/agent-sessions/actions", () => ({
+  createPersonalOnboardingSession: vi.fn(),
+}));
+
+vi.mock("@/lib/slack/events", () => ({
+  dispatchSlackSupportChannelRequested: vi.fn(),
 }));
 
 const getDbMock = vi.mocked(getDb);
 const captureServerEventMock = vi.mocked(captureServerEvent);
 const currentWorkspaceMock = vi.mocked(currentWorkspace);
-const ensureUserOnboardingScaffoldMock = vi.mocked(ensureUserOnboardingScaffold);
-const startSeededAgentSessionMock = vi.mocked(startSeededAgentSession);
+const ensurePersonalAgentMock = vi.mocked(ensurePersonalAgent);
+const createPersonalOnboardingSessionMock = vi.mocked(createPersonalOnboardingSession);
+const dispatchSlackSupportChannelRequestedMock = vi.mocked(dispatchSlackSupportChannelRequested);
 
 const previousState: OnboardingActionState = {
   errors: {},
@@ -58,19 +65,27 @@ const previousState: OnboardingActionState = {
     teamSize: "",
     companyUrl: "",
     agentExperience: "",
-    helpAreas: [],
+    goal: "",
+    personalBrainFolders: [],
+    personalIntegrations: [],
   },
 };
 
-function validFormData() {
+function validFormData(options: { forceOnboarding?: boolean } = {}) {
   const formData = new FormData();
   formData.set("heardFrom", "linkedin");
   formData.set("role", "Founder");
   formData.set("teamSize", "2_10");
   formData.set("companyUrl", "opencompany.ai");
   formData.set("agentExperience", "medium");
-  formData.append("helpAreas", "product_building");
-  formData.append("helpAreas", "operations");
+  formData.set("goal", "Win back my time");
+  formData.append("personalBrainFolders", "meetings");
+  formData.append("personalBrainFolders", "projects");
+  formData.append("personalIntegrations", "github");
+  formData.append("personalIntegrations", "gmail");
+  if (options.forceOnboarding) {
+    formData.set("forceOnboarding", "1");
+  }
   return formData;
 }
 
@@ -94,66 +109,97 @@ function createDbMock() {
 describe("completeOnboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ensureUserOnboardingScaffoldMock.mockResolvedValue({
-      created: true,
-      agentId: "agt_123",
-      path: "agents/leo/leo.agent",
+    ensurePersonalAgentMock.mockResolvedValue({
+      id: "agt_personal",
+      name: "Leo",
+      defaultModel: "moonshotai/kimi-k2.6",
+      path: "agents/personal/personal.agent",
+      config: {} as never,
+      body: "",
+      content: { type: "doc", content: [] },
     });
-    startSeededAgentSessionMock.mockResolvedValue("ses_123");
+    createPersonalOnboardingSessionMock.mockResolvedValue({
+      ok: true,
+      session: { id: "ses_123" },
+    } as never);
+    dispatchSlackSupportChannelRequestedMock.mockResolvedValue(undefined);
   });
 
-  it("scaffolds, starts the onboarding session, and redirects into it on first onboarding", async () => {
+  it("creates the personal agent, starts the first session, and redirects into it", async () => {
     const { db } = createDbMock();
     getDbMock.mockReturnValue(db as never);
     currentWorkspaceMock.mockResolvedValue({
-      user: { id: "usr_123" },
+      user: { id: "usr_123", email: "ada@example.com", firstName: "Ada" },
       workspace: { id: "wks_123" },
     } as never);
 
     await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow(
-      "redirect:/company/session/ses_123",
+      "redirect:/personal/session/ses_123",
     );
 
-    expect(ensureUserOnboardingScaffoldMock).toHaveBeenCalledWith({
+    expect(ensurePersonalAgentMock).toHaveBeenCalledWith({
       userId: "usr_123",
       workspaceId: "wks_123",
+      userName: "Ada",
+      personalBrainFolders: ["meetings", "projects"],
     });
-    expect(startSeededAgentSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: "agt_123",
-        userId: "usr_123",
-        workspaceId: "wks_123",
-        source: "onboarding",
-        prompt: expect.stringContaining("set up OpenCompany"),
-      }),
+    expect(createPersonalOnboardingSessionMock).toHaveBeenCalledWith(
+      "agt_personal",
+      {
+        name: "Ada",
+        website: "https://opencompany.ai/",
+        role: "Founder",
+        teamSize: "2_10",
+        agentExperience: "medium",
+      },
+      ONBOARDING_FIRST_SESSION_PROMPT,
+      {
+        integrations: ["github", "gmail"],
+        skipBillingCheck: true,
+        survey: {
+          heardFrom: "linkedin",
+          heardFromDetail: "",
+        },
+      },
     );
+    expect(dispatchSlackSupportChannelRequestedMock).toHaveBeenCalledWith({
+      workspaceId: "wks_123",
+      userId: "usr_123",
+      customerEmail: "ada@example.com",
+      firstName: "Ada",
+    });
     expect(captureServerEventMock).toHaveBeenCalledWith("onboarding_completed", "usr_123", {
       user_id: "usr_123",
       workspace_id: "wks_123",
       heard_from: "linkedin",
       team_size: "2_10",
       agent_experience: "medium",
-      help_areas: ["product_building", "operations"],
-      help_area_count: 2,
+      goal_provided: true,
     });
   });
 
-  it("does not start a session and redirects home when leo already exists", async () => {
+  it("redirects home when first-session creation returns an error", async () => {
     const { db } = createDbMock();
     getDbMock.mockReturnValue(db as never);
     currentWorkspaceMock.mockResolvedValue({
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
-    ensureUserOnboardingScaffoldMock.mockResolvedValue({
-      created: false,
-      agentId: "agt_existing",
-      path: "agents/leo/leo.agent",
+    createPersonalOnboardingSessionMock.mockResolvedValue({
+      ok: false,
+      error: "Agent not found.",
     });
 
     await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow("redirect:/");
 
-    expect(startSeededAgentSessionMock).not.toHaveBeenCalled();
+    expect(createPersonalOnboardingSessionMock).toHaveBeenCalled();
+    expect(loggerMock.warn).toHaveBeenCalledWith("Onboarding first session was not created", {
+      event: "opencompany.onboarding_first_session_missing",
+      workspace_id: "wks_123",
+      user_id: "usr_123",
+      agent_id: "agt_personal",
+      error: "Agent not found.",
+    });
   });
 
   it("skips setup when onboarding was already completed by a concurrent submit", async () => {
@@ -168,8 +214,8 @@ describe("completeOnboarding", () => {
     await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow("redirect:/");
 
     expect(update).not.toHaveBeenCalled();
-    expect(ensureUserOnboardingScaffoldMock).not.toHaveBeenCalled();
-    expect(startSeededAgentSessionMock).not.toHaveBeenCalled();
+    expect(ensurePersonalAgentMock).not.toHaveBeenCalled();
+    expect(createPersonalOnboardingSessionMock).not.toHaveBeenCalled();
     expect(captureServerEventMock).not.toHaveBeenCalledWith(
       "onboarding_completed",
       expect.anything(),
@@ -182,25 +228,45 @@ describe("completeOnboarding", () => {
     });
   });
 
-  it("redirects home when first-run session startup fails", async () => {
+  it("starts the first session for a forced onboarding retry when the survey row already exists", async () => {
+    const { db, returning } = createDbMock();
+    returning.mockResolvedValue([]);
+    getDbMock.mockReturnValue(db as never);
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123", email: "ada@example.com", firstName: "Ada" },
+      workspace: { id: "wks_123" },
+    } as never);
+
+    await expect(
+      completeOnboarding(previousState, validFormData({ forceOnboarding: true })),
+    ).rejects.toThrow("redirect:/personal/session/ses_123");
+
+    expect(ensurePersonalAgentMock).toHaveBeenCalled();
+    expect(createPersonalOnboardingSessionMock).toHaveBeenCalledWith(
+      "agt_personal",
+      expect.any(Object),
+      ONBOARDING_FIRST_SESSION_PROMPT,
+      expect.objectContaining({ skipBillingCheck: true }),
+    );
+    expect(loggerMock.info).toHaveBeenCalledWith("Retrying duplicate onboarding completion", {
+      event: "opencompany.onboarding_completion_duplicate_retry",
+      workspace_id: "wks_123",
+      user_id: "usr_123",
+    });
+  });
+
+  it("redirects home when first-session startup throws", async () => {
     const { db } = createDbMock();
     getDbMock.mockReturnValue(db as never);
     currentWorkspaceMock.mockResolvedValue({
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
-    startSeededAgentSessionMock.mockRejectedValue(new Error("session failed"));
+    createPersonalOnboardingSessionMock.mockRejectedValue(new Error("session failed"));
 
     await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow("redirect:/");
 
-    expect(startSeededAgentSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: "agt_123",
-        userId: "usr_123",
-        workspaceId: "wks_123",
-        source: "onboarding",
-      }),
-    );
+    expect(createPersonalOnboardingSessionMock).toHaveBeenCalled();
   });
 
   it("does not scaffold when onboarding values are invalid", async () => {
@@ -211,9 +277,9 @@ describe("completeOnboarding", () => {
       role: "Enter your role.",
       teamSize: "Choose your team size.",
       agentExperience: "Choose your experience level.",
-      helpAreas: "Choose at least one area.",
     });
     expect(getDbMock).not.toHaveBeenCalled();
-    expect(ensureUserOnboardingScaffoldMock).not.toHaveBeenCalled();
+    expect(ensurePersonalAgentMock).not.toHaveBeenCalled();
+    expect(createPersonalOnboardingSessionMock).not.toHaveBeenCalled();
   });
 });

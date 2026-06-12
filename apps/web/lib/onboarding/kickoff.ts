@@ -1,23 +1,16 @@
-import { helpAreaOptions, teamSizeOptions } from "@/lib/onboarding/options";
+import { teamSizeOptions } from "@/lib/onboarding/options";
 
 export type OnboardingKickoffInput = {
   role: string;
   teamSize: string;
   companyUrl: string | null;
-  helpAreas: string[];
+  goal: string | null;
 };
 
 const TEAM_SIZE_LABELS = new Map(teamSizeOptions.map((option) => [option.value, option.label]));
-const HELP_AREA_LABELS = new Map(helpAreaOptions.map((option) => [option.value, option.label]));
 
 function labelFor(map: Map<string, string>, value: string) {
   return map.get(value) ?? value;
-}
-
-function joinWithAnd(items: string[]) {
-  if (items.length <= 1) return items[0] ?? "";
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
 /**
@@ -33,10 +26,7 @@ export function buildOnboardingKickoffPrompt(input: OnboardingKickoffInput): str
   if (input.role) details.push(`- My role: ${input.role}`);
   if (input.companyUrl) details.push(`- Company: ${input.companyUrl}`);
   if (input.teamSize) details.push(`- Team size: ${labelFor(TEAM_SIZE_LABELS, input.teamSize)}`);
-  if (input.helpAreas.length > 0) {
-    const areas = joinWithAnd(input.helpAreas.map((area) => labelFor(HELP_AREA_LABELS, area)));
-    details.push(`- I'd most like help with: ${areas}`);
-  }
+  if (input.goal) details.push(`- What I want to accomplish: ${input.goal}`);
 
   if (details.length > 0) {
     lines.push("", "A bit about me:", ...details);

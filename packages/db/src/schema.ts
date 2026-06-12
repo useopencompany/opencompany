@@ -1699,6 +1699,9 @@ export const onboardingResponses = pgTable(
     role: text("role").notNull(),
     agentExperience: text("agent_experience").notNull(),
     helpAreas: text("help_areas").array().notNull().default(sql`'{}'::text[]`),
+    // Free-text answer to "what do you want to accomplish with opencompany?".
+    // Optional — users may leave it empty.
+    goal: text("goal"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
