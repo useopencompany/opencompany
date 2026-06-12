@@ -7,32 +7,33 @@ describe("buildOnboardingKickoffPrompt", () => {
       role: "Founder",
       teamSize: "2_10",
       companyUrl: "https://opencompany.ai/",
-      helpAreas: ["product_building", "operations"],
+      goal: "Win back my time and stay on top of customers",
     });
 
     expect(prompt).toContain("I just signed up");
     expect(prompt).toContain("set up OpenCompany");
     expect(prompt).toContain("My role: Founder");
     expect(prompt).toContain("Company: https://opencompany.ai/");
-    // team size / help areas use human labels, not raw option values.
+    // team size uses a human label, not the raw option value.
     expect(prompt).toContain("Team size: 2-10");
-    expect(prompt).toContain("Building the product");
-    expect(prompt).toContain("Operations");
-    expect(prompt).not.toContain("product_building");
+    expect(prompt).toContain(
+      "What I want to accomplish: Win back my time and stay on top of customers",
+    );
     expect(prompt).toContain("one focused set of setup questions");
     // With a company URL present, nudge leo to ground itself with a quick research pass.
     expect(prompt).toContain("take a quick look first");
   });
 
-  it("joins multiple help areas with 'and'", () => {
+  it("omits the goal line when none was provided", () => {
     const prompt = buildOnboardingKickoffPrompt({
       role: "PM",
       teamSize: "1",
       companyUrl: null,
-      helpAreas: ["decisions", "deep_research", "hiring"],
+      goal: null,
     });
 
-    expect(prompt).toContain("Thinking through decisions, Deep web research, and Hiring");
+    expect(prompt).not.toContain("What I want to accomplish");
+    expect(prompt).toContain("My role: PM");
   });
 
   it("omits the company line when no URL was provided", () => {
@@ -40,7 +41,7 @@ describe("buildOnboardingKickoffPrompt", () => {
       role: "Engineer",
       teamSize: "11_50",
       companyUrl: null,
-      helpAreas: ["product_building"],
+      goal: null,
     });
 
     expect(prompt).not.toContain("Company:");

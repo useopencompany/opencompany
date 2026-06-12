@@ -393,6 +393,13 @@
       "when": 1781265490758,
       "tag": "0055_permission_group_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1781268927234,
+      "tag": "0056_new_whistler",
+      "breakpoints": true
     }
   ]
 }

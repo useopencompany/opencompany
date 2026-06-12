@@ -64,6 +64,7 @@ describe("ensurePersonalAgent", () => {
       userId: "usr_123",
       workspaceId: "wks_123",
       userName: "Ada",
+      personalBrainFolders: ["meetings", "strategy"],
     });
 
     const agentInsert = insertedValues.find((entry) => entry.table === agents)?.value as {
@@ -128,7 +129,17 @@ describe("ensurePersonalAgent", () => {
     expect(soulInsert.content).not.toContain("{{userName}}");
     expect(DEFAULT_PERSONAL_SOUL_MD).not.toContain("Louis");
 
-    // Agent row + soul.md are written atomically in one batch.
+    const agentFilePaths = insertedValues
+      .filter((entry) => entry.table === agentFiles)
+      .map((entry) => (entry.value as { path: string }).path);
+    expect(agentFilePaths).toEqual([
+      `${agentBundleDir(agentInsert.path)}/soul.md`,
+      `${agentBundleDir(agentInsert.path)}/personal-brain/README.md`,
+      `${agentBundleDir(agentInsert.path)}/personal-brain/meetings/README.md`,
+      `${agentBundleDir(agentInsert.path)}/personal-brain/strategy/README.md`,
+    ]);
+
+    // Agent row + starter files are written atomically in one batch.
     expect(batch).toHaveBeenCalledOnce();
     // Local-only: nothing is enqueued for GitHub projection.
     expect(insertedValues.some((entry) => entry.table === workspaceSyncJobs)).toBe(false);
