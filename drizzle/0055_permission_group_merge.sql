@@ -1,0 +1,4 @@
+ALTER TABLE "agent_tool_approvals" DROP CONSTRAINT "agent_tool_approvals_group_check";--> statement-breakpoint
+ALTER TABLE "workspace_tool_policies" DROP CONSTRAINT "workspace_tool_policies_group_check";--> statement-breakpoint
+ALTER TABLE "agent_tool_approvals" ADD CONSTRAINT "agent_tool_approvals_group_check" CHECK ("agent_tool_approvals"."permission_group" IN ('read', 'post', 'modify', 'merge', 'admin'));--> statement-breakpoint
+ALTER TABLE "workspace_tool_policies" ADD CONSTRAINT "workspace_tool_policies_group_check" CHECK ("workspace_tool_policies"."permission_group" IN ('read', 'post', 'modify', 'merge', 'admin'));

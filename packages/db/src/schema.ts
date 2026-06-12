@@ -1444,7 +1444,7 @@ export const workspaceToolPolicies = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     providerKey: text("provider_key").notNull(),
     permissionGroup: text("permission_group")
-      .$type<"read" | "post" | "modify" | "admin">()
+      .$type<"read" | "post" | "modify" | "merge" | "admin">()
       .notNull(),
     decision: text("decision").$type<"allow" | "ask" | "deny">().notNull(),
     updatedByUserId: text("updated_by_user_id").references(() => users.id, {
@@ -1462,7 +1462,7 @@ export const workspaceToolPolicies = pgTable(
     workspaceIdx: index("workspace_tool_policies_workspace_idx").on(table.workspaceId),
     groupCheck: check(
       "workspace_tool_policies_group_check",
-      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'merge', 'admin')`,
     ),
     decisionCheck: check(
       "workspace_tool_policies_decision_check",
@@ -1483,7 +1483,7 @@ export const agentToolApprovals = pgTable(
     toolName: text("tool_name").notNull(),
     providerKey: text("provider_key").notNull(),
     permissionGroup: text("permission_group")
-      .$type<"read" | "post" | "modify" | "admin">()
+      .$type<"read" | "post" | "modify" | "merge" | "admin">()
       .notNull(),
     status: text("status").$type<"pending" | "approved" | "denied">().notNull().default("pending"),
     inputPreview: text("input_preview"),
@@ -1507,7 +1507,7 @@ export const agentToolApprovals = pgTable(
     ),
     groupCheck: check(
       "agent_tool_approvals_group_check",
-      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'merge', 'admin')`,
     ),
     statusCheck: check(
       "agent_tool_approvals_status_check",
@@ -1699,6 +1699,9 @@ export const onboardingResponses = pgTable(
     role: text("role").notNull(),
     agentExperience: text("agent_experience").notNull(),
     helpAreas: text("help_areas").array().notNull().default(sql`'{}'::text[]`),
+    // Free-text answer to "what do you want to accomplish with opencompany?".
+    // Optional — users may leave it empty.
+    goal: text("goal"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

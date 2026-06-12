@@ -169,18 +169,28 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   const returning = vi.fn(() => ({}));
   const values = vi.fn(() => ({ returning }));
   const insert = vi.fn(() => ({ values }));
-  // insertAgentSession reads back [sessionRow, statusEvent]. The prompt path combines
-  // session/status/message/message.created into one batch and synthesizes the detail payload
-  // from those rows.
-  const batch = vi
-    .fn()
-    .mockResolvedValueOnce([
-      [fakeSessionRow()],
-      [statusEventRow],
-      [fakeMessageRow()],
-      [{ id: 2, createdAt: CREATED_AT }],
-    ]);
-  return { select, insert, batch } as never;
+  const updateWhere = vi.fn();
+  const set = vi.fn(() => ({ where: updateWhere }));
+  const update = vi.fn(() => ({ set }));
+  // The prompt path combines session/status/message/message.created into one batch. The personal
+  // onboarding path writes the session first, then the visible first message in a second batch.
+  let twoQueryBatchCount = 0;
+  const batch = vi.fn(async (queries: unknown[]) => {
+    if (queries.length === 4) {
+      return [
+        [fakeSessionRow()],
+        [statusEventRow],
+        [fakeMessageRow()],
+        [{ id: 2, createdAt: CREATED_AT }],
+      ];
+    }
+
+    twoQueryBatchCount += 1;
+    return twoQueryBatchCount === 1
+      ? [[fakeSessionRow()], [statusEventRow]]
+      : [[fakeMessageRow()], [{ id: 2, createdAt: CREATED_AT }]];
+  });
+  return { select, insert, update, batch } as never;
 }
 
 describe("createAgentSession", () => {
@@ -280,7 +290,7 @@ describe("createPersonalOnboardingSession", () => {
 
   it("skips the onboarding gate — the caller has not completed onboarding yet", async () => {
     // Regression: without skipOnboarding, currentWorkspace() redirects the submit straight back
-    // to /onboarding/personal (the survey row that marks completion is only written inside this
+    // to /onboarding (the survey row that marks completion is only written inside this
     // action), trapping the user in an onboarding loop.
     hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
 
@@ -295,6 +305,29 @@ describe("createPersonalOnboardingSession", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
+    });
+  });
+
+  it("can start the first onboarding session before the workspace has credits", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+    newAgentSessionIdMock.mockReturnValue("ses_123");
+    newAgentSessionMessageIdMock.mockReturnValue("msg_123");
+
+    const result = await createPersonalOnboardingSession(
+      "agt_123",
+      { name: "Ada", website: "", role: "Founder" },
+      "Help me get started",
+      { integrations: [], skipBillingCheck: true },
+    );
+
+    if (!result.ok) throw new Error("expected ok result");
+    expect(hasPositiveWorkspaceBalanceMock).not.toHaveBeenCalled();
+    expect(result.session).toMatchObject({ id: "ses_123", status: "created" });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      workspaceId: "wks_123",
     });
   });
 });
