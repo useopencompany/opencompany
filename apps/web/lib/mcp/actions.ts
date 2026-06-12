@@ -17,6 +17,9 @@ import {
   LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
   LINEAR_MCP_SERVER_KEY,
   type McpProviderKey,
+  NOTION_MCP_ENDPOINT_URL,
+  NOTION_MCP_OAUTH_CREDENTIAL_KIND,
+  NOTION_MCP_SERVER_KEY,
   POSTHOG_MCP_ENDPOINT_URL,
   POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
   POSTHOG_MCP_SERVER_KEY,
@@ -55,6 +58,11 @@ const MCP_SERVER_PRESETS: Record<
     displayName: "Braintrust",
     endpointUrl: BRAINTRUST_MCP_ENDPOINT_URL,
     oauthCredentialKind: BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
+  },
+  [NOTION_MCP_SERVER_KEY]: {
+    displayName: "Notion",
+    endpointUrl: NOTION_MCP_ENDPOINT_URL,
+    oauthCredentialKind: NOTION_MCP_OAUTH_CREDENTIAL_KIND,
   },
 };
 
@@ -107,6 +115,10 @@ export async function removeBraintrustMcpConnection() {
   return removeMcpCredentials(BRAINTRUST_MCP_SERVER_KEY, "Braintrust MCP connection was removed.");
 }
 
+export async function removeNotionMcpConnection() {
+  return removeMcpCredentials(NOTION_MCP_SERVER_KEY, "Notion MCP connection was removed.");
+}
+
 export async function upsertLinearMcpServer(
   workspaceId: string,
   status: McpServerStatus,
@@ -145,6 +157,14 @@ export async function upsertBraintrustMcpServer(
   statusReason: string | null,
 ) {
   return upsertProviderMcpServer(BRAINTRUST_MCP_SERVER_KEY, workspaceId, status, statusReason);
+}
+
+export async function upsertNotionMcpServer(
+  workspaceId: string,
+  status: McpServerStatus,
+  statusReason: string | null,
+) {
+  return upsertProviderMcpServer(NOTION_MCP_SERVER_KEY, workspaceId, status, statusReason);
 }
 
 async function removeMcpCredentials(

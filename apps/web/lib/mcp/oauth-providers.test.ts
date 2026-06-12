@@ -5,6 +5,7 @@ import {
   betterstackMcpOAuth,
   braintrustMcpOAuth,
   linearMcpOAuth,
+  notionMcpOAuth,
   posthogMcpOAuth,
   slackMcpOAuth,
 } from "@/lib/mcp/oauth-providers";
@@ -51,6 +52,7 @@ describe.each([
   ["PostHog", posthogMcpOAuth, "https://mcp.posthog.com/mcp"],
   ["Better Stack", betterstackMcpOAuth, "https://mcp.betterstack.com"],
   ["Braintrust", braintrustMcpOAuth, "https://api.braintrust.dev/mcp"],
+  ["Notion", notionMcpOAuth, "https://mcp.notion.com/mcp"],
 ])("%s MCP OAuth", (_name, provider, endpointUrl) => {
   it("uses dynamic client registration and persists OAuth state", async () => {
     const result = await provider.start({

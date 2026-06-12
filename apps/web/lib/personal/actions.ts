@@ -242,6 +242,7 @@ const PERSONAL_INTEGRATION_MENTIONS = {
   posthog: "@posthog",
   betterstack: "@betterstack",
   braintrust: "@braintrust",
+  notion: "@notion",
 } as const;
 
 export type PersonalIntegrationId = keyof typeof PERSONAL_INTEGRATION_MENTIONS;
@@ -260,6 +261,7 @@ const PERSONAL_TOOL_EXCLUDED_TOOL_IDS = new Set<AgentToolId>([
   "posthog",
   "betterstack",
   "braintrust",
+  "notion",
 ]);
 
 const PERSONAL_ADDABLE_TOOL_IDS = new Set(

@@ -2,7 +2,8 @@
 
 import type { AttachmentKind } from "@opencompany/agent-runtime";
 import { upload } from "@vercel/blob/client";
-import { FileText, X } from "lucide-react";
+import { FileText, Upload, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 // (AttachmentCard is also imported by SessionView for the sent-message thread render.)
 
 export type PendingAttachment = {
@@ -18,14 +19,70 @@ export type PendingAttachment = {
   error?: string;
 };
 
+// The "Drop files to attach" overlay shown over a composer's drop zone while a file drag is
+// active. Shared by every composer (session + the two home composers) so the copy/icon stay in
+// one place; `className` only tweaks the card's border-radius to match each composer's chrome.
+export function ComposerDropOverlay({ className }: { className?: string }) {
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+      aria-hidden="true"
+    >
+      <div
+        className={cn(
+          "flex flex-col items-center gap-2 border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm",
+          className ?? "rounded-lg",
+        )}
+      >
+        <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
+        <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
+        <p className="text-[11.5px] text-ink-subtle">
+          Images, PDF, text &amp; code · or paste with ⌘V
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Map the composer's ready attachments to the server-action attachment payload. Callers pass a
+// list already filtered to status==="ready" with blob pointers present (the send gate guarantees
+// it), so the non-null assertions hold; centralizing this keeps the shape in one place.
+export function toSubmitAttachments(ready: PendingAttachment[]): Array<{
+  blobPathname: string;
+  blobUrl: string;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+}> {
+  return ready.map((a) => ({
+    // biome-ignore lint/style/noNonNullAssertion: caller filtered to ready attachments with blob fields
+    blobPathname: a.blobPathname!,
+    // biome-ignore lint/style/noNonNullAssertion: caller filtered to ready attachments with blob fields
+    blobUrl: a.blobUrl!,
+    mediaType: a.mediaType,
+    filename: a.filename,
+    sizeBytes: a.sizeBytes,
+  }));
+}
+
+// `accept` for the composer's hidden file input. Text/code files often have no registered MIME,
+// so the extension list keeps them pickable; the broad set lets any file through and the
+// validation gate rejects unsupported ones with a toast. Shared by every composer (session + home).
+export const ATTACHMENT_FILE_INPUT_ACCEPT =
+  "image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,application/xml,text/css,text/yaml,.txt,.md,.markdown,.html,.htm,.csv,.tsv,.json,.jsonc,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.scss,.sass,.less";
+
 export async function uploadAttachment(input: {
   id: string;
   file: File;
   workspaceId: string;
-  sessionId: string;
+  // Absent on the home composer: the session does not exist yet (it is created on submit), so
+  // the upload lands in a sessionless `pending/` folder. The DB row written at submit time
+  // only stores the pointer, so the path scope is purely organizational.
+  sessionId?: string;
 }): Promise<{ blobPathname: string; blobUrl: string }> {
   const safeName = input.file.name.replace(/[^\w.\-]+/g, "_") || "file";
-  const pathname = `workspace/${input.workspaceId}/sessions/${input.sessionId}/${input.id}-${safeName}`;
+  const scope = input.sessionId ? `sessions/${input.sessionId}` : "pending";
+  const pathname = `workspace/${input.workspaceId}/${scope}/${input.id}-${safeName}`;
   // PRIVATE Blob store: `access` is required (BlobAccessType = "public" | "private")
   // in @vercel/blob@2.4.0. The token is minted by /api/upload (handleUpload).
   const blob = await upload(pathname, input.file, {
