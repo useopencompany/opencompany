@@ -1,0 +1,6 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "bun install"
+run = "PORT=${CONDUCTOR_PORT:-3000} OPENCOMPANY_NGROK_DISABLED=1 bun run dev:stream"
+run_mode = "nonconcurrent"

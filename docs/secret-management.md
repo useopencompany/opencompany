@@ -132,8 +132,8 @@ For Infisical `dev`, `/runner` should include:
 - `RUNNER_ALLOWED_ORIGINS`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
-- `OPENAI_CODEX_API_KEY` (optional; LLM-broker upstream for codex_coder, and local-dev
-  direct fallback — use a budget-capped OpenAI project key)
+- `OPENAI_CODEX_API_KEY` (LLM-broker upstream for codex_coder, and local-dev direct fallback
+  — use a budget-capped OpenAI project key)
 - GitHub workspace app vars
 - GitHub integration app vars: `GITHUB_INTEGRATION_APP_ID` and
   `GITHUB_INTEGRATION_APP_PRIVATE_KEY`

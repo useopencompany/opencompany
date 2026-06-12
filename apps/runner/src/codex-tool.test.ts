@@ -1,3 +1,7 @@
+import { execFileSync, execSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildCodexCommand,
@@ -5,6 +9,7 @@ import {
   buildCodexHome,
   buildCodexWorkRoot,
   codexHostedToolUsage,
+  codexIntentToAddCommand,
   createCodexStreamAccumulator,
   resolveCodexTarget,
 } from "./codex-tool";
@@ -132,11 +137,33 @@ describe("buildCodexConfig", () => {
     });
 
     expect(config).toContain('model_provider = "opencompany"');
+    expect(config).toContain('model_verbosity = "medium"');
     expect(config).toContain("[model_providers.opencompany]");
     expect(config).toContain('name = "OpenCompany"');
     expect(config).toContain('base_url = "https://runner.example.com/broker/openai/v1"');
     expect(config).toContain('env_key = "OPENCOMPANY_LLM_BROKER_TOKEN"');
     expect(config).toContain('wire_api = "responses"');
+  });
+});
+
+describe("codexIntentToAddCommand", () => {
+  it("adds real untracked files without failing on the ignored Codex state directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codex-intent-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: dir });
+      mkdirSync(join(dir, ".codex"));
+      writeFileSync(join(dir, ".codex", "state"), "ignored");
+      writeFileSync(join(dir, "new.txt"), "hello");
+      writeFileSync(join(dir, ".git", "info", "exclude"), "/.codex/\n");
+
+      execSync(codexIntentToAddCommand(), { cwd: dir, shell: "/bin/sh" });
+
+      expect(execFileSync("git", ["status", "--short"], { cwd: dir, encoding: "utf8" })).toBe(
+        " A new.txt\n",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

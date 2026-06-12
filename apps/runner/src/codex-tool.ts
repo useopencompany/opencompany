@@ -255,7 +255,7 @@ export async function runCodexCoderTool(input: {
     });
 
     await input.sandbox.commands.run(
-      `cd ${shellQuote(codexWorkRoot)} && git add -N ${codexGitPathspecArgs()}`,
+      `cd ${shellQuote(codexWorkRoot)} && ${codexIntentToAddCommand()}`,
       {
         timeoutMs: 60_000,
       },
@@ -509,9 +509,19 @@ function codexGitPathspecArgs() {
   return `-- . ${shellQuote(CODEX_GIT_EXCLUDE_PATHSPEC)}`;
 }
 
+export function codexIntentToAddCommand() {
+  return [
+    "tmp=$(mktemp)",
+    'git ls-files --others --exclude-standard -z > "$tmp"',
+    'if [ -s "$tmp" ]; then xargs -0 git add -N -- < "$tmp"; fi',
+    'rm -f "$tmp"',
+  ].join(" && ");
+}
+
 export function buildCodexConfig(input: { baseUrl: string; apiKeyEnvVar: string }) {
   return [
     `model_provider = ${tomlString(CODEX_PROVIDER_ID)}`,
+    `model_verbosity = "medium"`,
     "",
     `[model_providers.${CODEX_PROVIDER_ID}]`,
     `name = ${tomlString(CODEX_PROVIDER_NAME)}`,
