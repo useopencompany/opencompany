@@ -4,6 +4,15 @@ import { ChevronRight, CreditCard, ExternalLink, Gift, WalletCards } from "lucid
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { createCreditCheckoutSession, redeemCreditCode } from "@/lib/billing/actions";
 import {
   isValidTopUpAmountCents,
@@ -18,6 +27,14 @@ export type BillingData = {
   balanceUsdMicros: number;
   spendLast7UsdMicros: number;
   spendLast30UsdMicros: number;
+  dailySpend: Array<{
+    date: string;
+    totalUsdMicros: number;
+    modelUsdMicros: number;
+    toolUsdMicros: number;
+    computeUsdMicros: number;
+    platformFeeUsdMicros: number;
+  }>;
   recentSessionCharges: Array<{
     sessionId: string;
     title: string;
@@ -73,6 +90,14 @@ function formatDateTime(value: string) {
   }).format(new Date(value));
 }
 
+function formatDay(value: string) {
+  return new Intl.DateTimeFormat(FORMAT_LOCALE, {
+    month: "short",
+    day: "numeric",
+    timeZone: FORMAT_TIME_ZONE,
+  }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
 function shortSessionId(sessionId: string) {
   if (sessionId.length <= 16) return sessionId;
   return `${sessionId.slice(0, 8)}...${sessionId.slice(-5)}`;
@@ -94,6 +119,161 @@ function CostLine({ label, value }: { label: string; value: number }) {
     <div className="flex items-center justify-between gap-3">
       <span className="text-ink-muted">{label}</span>
       <span className="font-medium text-ink">{formatUsdMicros(value)}</span>
+    </div>
+  );
+}
+
+const spendChartSegments = [
+  {
+    key: "modelUsdMicros",
+    label: "Model usage",
+    color: "var(--color-info)",
+  },
+  {
+    key: "computeUsdMicros",
+    label: "Compute",
+    color: "var(--color-success)",
+  },
+  {
+    key: "toolUsdMicros",
+    label: "Tools",
+    color: "var(--color-warning)",
+  },
+  {
+    key: "platformFeeUsdMicros",
+    label: "Platform fee",
+    color: "var(--color-accent)",
+  },
+] as const;
+
+function SpendChartTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{
+    color?: string;
+    dataKey?: string | number;
+    value?: number | string;
+  }>;
+  label?: string | number;
+}) {
+  if (!active || !payload?.length) return null;
+
+  const rows = payload
+    .map((entry) => {
+      const segment = spendChartSegments.find((item) => item.key === entry.dataKey);
+      const value =
+        typeof entry.value === "number" ? entry.value : Number.parseFloat(String(entry.value ?? 0));
+      return segment ? { ...segment, value } : null;
+    })
+    .filter((entry): entry is (typeof spendChartSegments)[number] & { value: number } =>
+      Boolean(entry),
+    )
+    .reverse();
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+
+  return (
+    <div className="min-w-[168px] rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-[0_8px_24px_rgba(15,15,15,0.12)]">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <span className="font-medium text-ink">
+          {typeof label === "string" ? formatDay(label) : label}
+        </span>
+        <span className="font-medium text-ink">{formatUsdMicros(total)}</span>
+      </div>
+      <div className="space-y-1">
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-center justify-between gap-4 text-ink-muted">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span
+                className="h-2 w-2 shrink-0 rounded-[2px]"
+                style={{ backgroundColor: row.color }}
+              />
+              <span className="truncate">{row.label}</span>
+            </span>
+            <span className="shrink-0 text-ink">{formatUsdMicros(row.value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DailySpendChart({ data }: { data: BillingData["dailySpend"] }) {
+  const hasSpend = data.some((entry) => entry.totalUsdMicros > 0);
+
+  return (
+    <div className="mt-4 border-t border-border-subtle pt-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+          Daily spend
+        </div>
+        <div className="text-[12px] font-medium text-ink">
+          {formatUsdMicros(data.reduce((sum, entry) => sum + entry.totalUsdMicros, 0))}
+        </div>
+      </div>
+
+      {hasSpend ? (
+        <>
+          <div className="h-[160px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                accessibilityLayer
+                data={data}
+                margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
+                barCategoryGap={10}
+              >
+                <CartesianGrid vertical={false} stroke="var(--color-border-subtle)" />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={formatDay}
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  minTickGap={4}
+                  stroke="var(--color-ink-subtle)"
+                  fontSize={11}
+                />
+                <YAxis hide domain={[0, "dataMax"]} />
+                <Tooltip
+                  content={<SpendChartTooltip />}
+                  cursor={{ fill: "var(--color-surface-muted)" }}
+                />
+                {spendChartSegments.map((segment) => (
+                  <Bar
+                    key={segment.key}
+                    dataKey={segment.key}
+                    stackId="daily-spend"
+                    fill={segment.color}
+                    radius={segment.key === "platformFeeUsdMicros" ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                    isAnimationActive={false}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
+            {spendChartSegments.map((segment) => (
+              <div
+                key={segment.key}
+                className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-muted"
+              >
+                <span
+                  className="h-2 w-2 rounded-[2px]"
+                  style={{ backgroundColor: segment.color }}
+                  aria-hidden
+                />
+                {segment.label}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="rounded-md border border-dashed border-border bg-surface/35 px-3 py-3 text-[12px] leading-5 text-ink-muted">
+          No spend over the last 7 days.
+        </div>
+      )}
     </div>
   );
 }
@@ -329,6 +509,8 @@ export function BillingPanel({
             </div>
           </div>
         </div>
+
+        <DailySpendChart data={billing.dailySpend} />
 
         <div className="mt-4 flex flex-wrap gap-2">
           {TOP_UP_AMOUNTS_CENTS.map((amountCents) => (

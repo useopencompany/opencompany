@@ -77,6 +77,7 @@ export default async function SettingsPage() {
         balanceUsdMicros: billing.balanceUsdMicros,
         spendLast7UsdMicros: billing.spendLast7UsdMicros,
         spendLast30UsdMicros: billing.spendLast30UsdMicros,
+        dailySpend: billing.dailySpend,
         recentSessionCharges: billing.recentSessionCharges.map((entry) => ({
           ...entry,
           createdAt: entry.createdAt.toISOString(),

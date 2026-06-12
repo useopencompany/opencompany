@@ -55,6 +55,16 @@ describe("loadBillingOverview", () => {
         [{ spendLast7UsdMicros: "1250000", spendLast30UsdMicros: "2500000" }],
         [
           {
+            date: "2026-05-22",
+            totalUsdMicros: "13500",
+            modelUsdMicros: "7500",
+            toolUsdMicros: "2500",
+            computeUsdMicros: "900",
+            platformFeeUsdMicros: "2600",
+          },
+        ],
+        [
+          {
             sessionId: "ses_123",
             title: "Billing test",
             agentName: "Research agent",
@@ -101,6 +111,16 @@ describe("loadBillingOverview", () => {
     expect(result.recentSessionCharges[0]?.sandboxCostUsdMicros).toBe(1_000);
     expect(result.recentSessionCharges[0]?.providerCostUsdMicros).toBe(10_900);
     expect(result.recentSessionCharges[0]?.platformFeeUsdMicros).toBe(2_600);
+    expect(result.dailySpend).toEqual([
+      {
+        date: "2026-05-22",
+        totalUsdMicros: 13_500,
+        modelUsdMicros: 7_500,
+        toolUsdMicros: 2_500,
+        computeUsdMicros: 900,
+        platformFeeUsdMicros: 2_600,
+      },
+    ]);
     expect(result.ledger[0]?.createdAt).toBeInstanceOf(Date);
     expect(result.ledger[0]?.createdAt.toISOString()).toBe("2026-05-22T13:00:00.000Z");
   });
@@ -109,6 +129,7 @@ describe("loadBillingOverview", () => {
     mockDb({
       executeRowSets: [
         [{ spendLast7UsdMicros: "1200", spendLast30UsdMicros: "1200" }],
+        [],
         [
           {
             sessionId: "ses_parent",

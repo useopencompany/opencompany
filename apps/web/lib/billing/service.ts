@@ -38,6 +38,15 @@ export type BillingSessionChargeSummary = {
   createdAt: Date;
 };
 
+export type BillingDailySpendSummary = {
+  date: string;
+  totalUsdMicros: number;
+  modelUsdMicros: number;
+  toolUsdMicros: number;
+  computeUsdMicros: number;
+  platformFeeUsdMicros: number;
+};
+
 type ExecuteResultRow = Record<string, unknown>;
 
 export const DEFAULT_SIGNUP_CREDIT_AMOUNT_CENTS = 300;
@@ -61,7 +70,7 @@ export function newStripeCheckoutRecordId() {
 
 export async function loadBillingOverview(workspaceId: string) {
   const db = getDb();
-  const [balanceRow, ledgerRows, spendRows, sessionChargeRows] = await Promise.all([
+  const [balanceRow, ledgerRows, spendRows, dailySpendRows, sessionChargeRows] = await Promise.all([
     db
       .select({
         balanceCents: workspaceCreditBalances.balanceCents,
@@ -97,6 +106,51 @@ export async function loadBillingOverview(workspaceId: string) {
         ), 0) AS "spendLast30UsdMicros"
       FROM workspace_credit_ledger
       WHERE workspace_id = ${workspaceId}
+    `),
+    db.execute(sql`
+      WITH utc_bounds AS (
+        SELECT (now() AT TIME ZONE 'UTC')::date AS today
+      ),
+      days AS (
+        SELECT generate_series(
+          utc_bounds.today - interval '6 days',
+          utc_bounds.today,
+          interval '1 day'
+        )::date AS day
+        FROM utc_bounds
+      ),
+      daily_spend AS (
+        SELECT
+          (created_at AT TIME ZONE 'UTC')::date AS day,
+          COALESCE(SUM(-amount_usd_micros), 0) AS total_usd_micros,
+          COALESCE(SUM(GREATEST(-amount_usd_micros - platform_fee_usd_micros, 0)) FILTER (
+            WHERE source = 'model_usage'
+          ), 0) AS model_usd_micros,
+          COALESCE(SUM(GREATEST(-amount_usd_micros - platform_fee_usd_micros, 0)) FILTER (
+            WHERE source = 'tool_usage'
+          ), 0) AS tool_usd_micros,
+          COALESCE(SUM(GREATEST(-amount_usd_micros - platform_fee_usd_micros, 0)) FILTER (
+            WHERE source = 'sandbox_usage'
+          ), 0) AS compute_usd_micros,
+          COALESCE(SUM(platform_fee_usd_micros), 0) AS platform_fee_usd_micros
+        FROM workspace_credit_ledger
+        CROSS JOIN utc_bounds
+        WHERE workspace_id = ${workspaceId}
+          AND amount_usd_micros < 0
+          AND created_at >= ((utc_bounds.today - interval '6 days') AT TIME ZONE 'UTC')
+          AND created_at < ((utc_bounds.today + interval '1 day') AT TIME ZONE 'UTC')
+        GROUP BY (created_at AT TIME ZONE 'UTC')::date
+      )
+      SELECT
+        to_char(days.day, 'YYYY-MM-DD') AS date,
+        COALESCE(daily_spend.total_usd_micros, 0) AS "totalUsdMicros",
+        COALESCE(daily_spend.model_usd_micros, 0) AS "modelUsdMicros",
+        COALESCE(daily_spend.tool_usd_micros, 0) AS "toolUsdMicros",
+        COALESCE(daily_spend.compute_usd_micros, 0) AS "computeUsdMicros",
+        COALESCE(daily_spend.platform_fee_usd_micros, 0) AS "platformFeeUsdMicros"
+      FROM days
+      LEFT JOIN daily_spend ON daily_spend.day = days.day
+      ORDER BY days.day ASC
     `),
     db.execute(sql`
       WITH RECURSIVE session_tree(id, root_id, path) AS (
@@ -152,6 +206,21 @@ export async function loadBillingOverview(workspaceId: string) {
     balanceCents: usdMicrosToCents(balanceUsdMicros),
     spendLast7UsdMicros: readMicros(spend?.spendLast7UsdMicros),
     spendLast30UsdMicros: readMicros(spend?.spendLast30UsdMicros),
+    dailySpend: rowsFromExecute<{
+      date: string;
+      totalUsdMicros: number | string;
+      modelUsdMicros: number | string;
+      toolUsdMicros: number | string;
+      computeUsdMicros: number | string;
+      platformFeeUsdMicros: number | string;
+    }>(dailySpendRows).map((row) => ({
+      date: row.date,
+      totalUsdMicros: readMicros(row.totalUsdMicros),
+      modelUsdMicros: readMicros(row.modelUsdMicros),
+      toolUsdMicros: readMicros(row.toolUsdMicros),
+      computeUsdMicros: readMicros(row.computeUsdMicros),
+      platformFeeUsdMicros: readMicros(row.platformFeeUsdMicros),
+    })) satisfies BillingDailySpendSummary[],
     recentSessionCharges: rowsFromExecute<BillingSessionChargeSummary>(sessionChargeRows)
       .filter((row): row is typeof row & { sessionId: string } => Boolean(row.sessionId))
       .map((row) => ({

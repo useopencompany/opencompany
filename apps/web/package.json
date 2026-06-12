@@ -59,6 +59,7 @@
     "react-dom": "19.2.6",
     "react-markdown": "^10.1.0",
     "react-splitkit": "0.1.0",
+    "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
     "resend": "^6.12.4",
     "stripe": "^22.1.1",
