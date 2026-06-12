@@ -341,7 +341,7 @@ orchestrator and are not stored anywhere long-term.
 
 | Var | Used by | Notes |
 |---|---|---|
-| `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | runner | Required at runner boot. The encryption key must match web so preview runners can read seeded encrypted integration credentials. |
+| `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `OPENAI_CODEX_API_KEY`, `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | runner | Required at runner boot. `OPENAI_CODEX_API_KEY` is the broker upstream for `codex_coder`; the encryption key must match web so preview runners can read seeded encrypted integration credentials. |
 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | runner | Enables runner Brain sync. |
 | `GITHUB_INTEGRATION_APP_ID`, `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | runner | Enables connected-repository GitHub operations. |
 | Optional runner tool/provider keys | runner | `EXA_API_KEY`, `APIFY_API_TOKEN`, `X_API_BEARER_TOKEN`, `SUPADATA_API_KEY`, `AMP_API_KEY`, Google/Slack OAuth keys, and observability settings are passed through when present. |

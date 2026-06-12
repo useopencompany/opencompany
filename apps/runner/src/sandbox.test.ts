@@ -19,6 +19,7 @@ vi.mock("e2b", () => ({
 import {
   armSandboxIdleTimeout,
   cloneGitHubRepositoryIntoWorkdir,
+  commandExitResult,
   createOrConnectSandbox,
   githubRemoteMatches,
   guardCommandStreamCallbacks,
@@ -1463,6 +1464,41 @@ describe("guardCommandStreamCallbacks", () => {
     });
     await healthy.options.onStdout?.("ok");
     await expect(healthy.rethrow()).resolves.toBeUndefined();
+  });
+});
+
+describe("commandExitResult", () => {
+  it("normalizes nested E2B command exit results", () => {
+    expect(
+      commandExitResult({
+        name: "CommandExitError",
+        message: "exit status 1",
+        result: {
+          exitCode: 1,
+          stdout: '{"type":"error","message":"upstream_not_configured"}\n',
+          stderr: "Reading additional input from stdin...\n",
+        },
+      }),
+    ).toEqual({
+      exitCode: 1,
+      stdout: '{"type":"error","message":"upstream_not_configured"}\n',
+      stderr: "Reading additional input from stdin...\n",
+    });
+  });
+
+  it("keeps compatibility with flat command exit results", () => {
+    expect(
+      commandExitResult({
+        name: "CommandExitError",
+        exitCode: 2,
+        stdout: "out",
+        stderr: "err",
+      }),
+    ).toEqual({
+      exitCode: 2,
+      stdout: "out",
+      stderr: "err",
+    });
   });
 });
 
