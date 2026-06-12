@@ -12,6 +12,10 @@ vi.mock("@/lib/feedback/actions", () => ({
   submitFeedback: vi.fn(),
 }));
 
+vi.mock("@/lib/feedback/upload-image", () => ({
+  uploadFeedbackImage: vi.fn(),
+}));
+
 const usePathnameMock = vi.mocked(usePathname);
 const submitFeedbackMock = vi.mocked(submitFeedback);
 
@@ -40,6 +44,22 @@ describe("FeedbackDialog", () => {
     const { container } = render(<FeedbackDialog open onClose={vi.fn()} />);
 
     expect(container.querySelector('input[name="sessionId"]')).toBeNull();
+  });
+
+  it("offers image attachment when a workspace id is provided", () => {
+    usePathnameMock.mockReturnValue("/company");
+
+    const { getByRole } = render(<FeedbackDialog open onClose={vi.fn()} workspaceId="wks_123" />);
+
+    expect(getByRole("button", { name: /attach image/i })).toBeInTheDocument();
+  });
+
+  it("stays text-only when no workspace id is provided", () => {
+    usePathnameMock.mockReturnValue("/company");
+
+    const { queryByRole } = render(<FeedbackDialog open onClose={vi.fn()} />);
+
+    expect(queryByRole("button", { name: /attach image/i })).toBeNull();
   });
 
   it("auto-closes the dialog after a successful submit", async () => {
