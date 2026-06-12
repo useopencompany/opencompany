@@ -16,7 +16,6 @@ import {
   readCurrentGitBranch,
   readLocalCommitCount,
   readPullRequestUrlForBranch,
-  safePathSegment,
   selectPublishBranch,
   truncateText,
 } from "./coding-agent-shared";
@@ -49,6 +48,9 @@ const CODEX_DIRECT_API_KEY_ENV_VAR = "CODEX_API_KEY";
 const BROKER_TOKEN_ENV_VAR = "OPENCOMPANY_LLM_BROKER_TOKEN";
 const DEFAULT_CODEX_MODEL = "gpt-5.2-codex";
 const DEFAULT_CODEX_BILLING_MODEL: AgentModelId = "openai/gpt-5.2-codex";
+const CODEX_WORK_DIR = "codex";
+const CODEX_STATE_DIR = ".codex";
+const CODEX_GIT_EXCLUDE_PATHSPEC = ":(exclude).codex";
 
 type CodexTarget =
   | {
@@ -94,6 +96,10 @@ export async function runCodexCoderTool(input: {
   const args = isRecord(input.args) ? input.args : {};
   const task = typeof args.task === "string" ? args.task.trim() : "";
   if (!task) throw new Error("Codex task is required.");
+  const requestedSessionId =
+    typeof args.codexSessionId === "string" && args.codexSessionId.trim()
+      ? args.codexSessionId.trim()
+      : null;
 
   const codexTool = input.agentConfig.tools.find((tool) => tool.id === "codex");
   if (!codexTool || codexTool.id !== "codex") {
@@ -108,6 +114,7 @@ export async function runCodexCoderTool(input: {
   const target = await materializeCodexWorkspaceTarget(input.workspaceId, requestedTarget);
 
   const layout = sandboxLayout(input.workdir);
+  const codexWorkRoot = buildCodexWorkRoot(layout.workRoot);
   const repositoryFullName =
     target.kind === "attached" ? target.repository.fullName : target.repositoryFullName;
   let defaultBranch: string;
@@ -131,7 +138,7 @@ export async function runCodexCoderTool(input: {
     githubAuthHeader = gitAuthHeader(githubToken);
     await cloneGitHubRepositoryIntoWorkdir({
       sandbox: input.sandbox,
-      workdir: layout.workRoot,
+      workdir: codexWorkRoot,
       repositoryFullName,
       defaultBranch,
       githubToken,
@@ -140,7 +147,7 @@ export async function runCodexCoderTool(input: {
     defaultBranch = await resolvePublicGitHubDefaultBranch(input.sandbox, repositoryFullName);
     await clonePublicGitHubRepositoryIntoWorkdir({
       sandbox: input.sandbox,
-      workdir: layout.workRoot,
+      workdir: codexWorkRoot,
       repositoryFullName,
       defaultBranch,
     });
@@ -161,17 +168,26 @@ export async function runCodexCoderTool(input: {
       githubAuthHeader,
     ]);
     await input.sandbox.commands.run(
-      `git config --global --add safe.directory ${shellQuote(layout.workRoot)}`,
+      `git config --global --add safe.directory ${shellQuote(codexWorkRoot)}`,
     );
 
     await ensureCodexInstalled(input.sandbox);
 
-    const codexHome = `/tmp/opencompany-codex-${safePathSegment(input.toolCallId)}`;
+    const codexHome = buildCodexHome(codexWorkRoot);
     const configPath = `${codexHome}/config.toml`;
-    await input.sandbox.commands.run(`mkdir -p ${shellQuote(codexHome)}`, { timeoutMs: 30_000 });
+    await input.sandbox.commands.run(`mkdir -p ${shellQuote(codexHome)}`, {
+      timeoutMs: 30_000,
+    });
+    await input.sandbox.commands.run(
+      `cd ${shellQuote(codexWorkRoot)} && grep -qxF '/${CODEX_STATE_DIR}/' .git/info/exclude || printf '\\n/${CODEX_STATE_DIR}/\\n' >> .git/info/exclude`,
+      { timeoutMs: 30_000 },
+    );
     await input.sandbox.files.write(
       configPath,
-      buildCodexConfig({ baseUrl: auth.baseUrl, apiKeyEnvVar: auth.apiKeyEnvVar }),
+      buildCodexConfig({
+        baseUrl: auth.baseUrl,
+        apiKeyEnvVar: auth.apiKeyEnvVar,
+      }),
     );
 
     const codexEnv = {
@@ -188,15 +204,20 @@ export async function runCodexCoderTool(input: {
     };
 
     const stream = createCodexStreamAccumulator();
-    const codexCommand = `cd ${shellQuote(layout.workRoot)} && export PATH=${CODEX_BIN_PATH}:"$PATH" && ${buildCodexCommand(
+    const codexCommand = `cd ${shellQuote(codexWorkRoot)} && export PATH=${CODEX_BIN_PATH}:"$PATH" && ${buildCodexCommand(
       {
         task,
-        workRoot: layout.workRoot,
+        workRoot: codexWorkRoot,
         model,
+        sessionId: requestedSessionId,
       },
     )}`;
     let timedOut = false;
-    let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
+    let result: {
+      stdout?: unknown;
+      stderr?: unknown;
+      exitCode?: number | null;
+    };
     const guardedRun = guardCommandStreamCallbacks({
       envs: codexEnv,
       timeoutMs: input.env.codexTimeoutMs,
@@ -233,26 +254,29 @@ export async function runCodexCoderTool(input: {
       timedOut,
     });
 
-    await input.sandbox.commands.run(`cd ${shellQuote(layout.workRoot)} && git add -N .`, {
-      timeoutMs: 60_000,
-    });
+    await input.sandbox.commands.run(
+      `cd ${shellQuote(codexWorkRoot)} && git add -N ${codexGitPathspecArgs()}`,
+      {
+        timeoutMs: 60_000,
+      },
+    );
     const diffStatus = await input.sandbox.commands.run(
-      `cd ${shellQuote(layout.workRoot)} && git status --short`,
+      `cd ${shellQuote(codexWorkRoot)} && git status --short ${codexGitPathspecArgs()}`,
       { timeoutMs: 60_000 },
     );
     const diffStat = await input.sandbox.commands.run(
-      `cd ${shellQuote(layout.workRoot)} && git diff HEAD --stat`,
+      `cd ${shellQuote(codexWorkRoot)} && git diff HEAD --stat ${codexGitPathspecArgs()}`,
       { timeoutMs: 60_000 },
     );
     const diffPreview = await input.sandbox.commands.run(
-      `cd ${shellQuote(layout.workRoot)} && git diff HEAD -- | head -400`,
+      `cd ${shellQuote(codexWorkRoot)} && git diff HEAD ${codexGitPathspecArgs()} | head -400`,
       { timeoutMs: 60_000 },
     );
     const hasDiff = String(diffStatus.stdout ?? "").trim().length > 0;
-    const currentBranch = await readCurrentGitBranch(input.sandbox, layout.workRoot);
+    const currentBranch = await readCurrentGitBranch(input.sandbox, codexWorkRoot);
     const localCommitCount = await readLocalCommitCount(
       input.sandbox,
-      layout.workRoot,
+      codexWorkRoot,
       defaultBranch,
     );
     let branchName: string | null = null;
@@ -268,7 +292,7 @@ export async function runCodexCoderTool(input: {
       }
       const existingPrUrl = await readPullRequestUrlForBranch(
         input.sandbox,
-        layout.workRoot,
+        codexWorkRoot,
         currentBranch,
         codexEnv,
       );
@@ -309,22 +333,29 @@ export async function runCodexCoderTool(input: {
         "Apply Codex changes",
       );
       const prepareCommands = [
-        `cd ${shellQuote(layout.workRoot)}`,
+        `cd ${shellQuote(codexWorkRoot)}`,
         `git config user.name ${shellQuote("OpenCompany Agent")}`,
         `git config user.email ${shellQuote("agents@opencompany.ai")}`,
         ...(branchName === currentBranch ? [] : [`git checkout -b ${shellQuote(branchName)}`]),
-        ...(hasDiff ? ["git add -A", `git commit -m ${shellQuote(commitMessage)}`] : []),
+        ...(hasDiff
+          ? [`git add -A ${codexGitPathspecArgs()}`, `git commit -m ${shellQuote(commitMessage)}`]
+          : []),
         `git remote set-url origin ${shellQuote(githubRemoteUrl(repositoryFullName))}`,
       ];
-      await input.sandbox.commands.run(prepareCommands.join(" && "), { timeoutMs: 120_000 });
+      await input.sandbox.commands.run(prepareCommands.join(" && "), {
+        timeoutMs: 120_000,
+      });
       await requireLeaseWrite(
         isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
       );
       await input.sandbox.commands.run(
-        `cd ${shellQuote(layout.workRoot)} && git ${gitAuthExtraHeaderArg()} push origin ${shellQuote(
+        `cd ${shellQuote(codexWorkRoot)} && git ${gitAuthExtraHeaderArg()} push origin ${shellQuote(
           branchName,
         )}`,
-        { envs: { [GITHUB_AUTH_HEADER_ENV]: githubAuthHeader ?? "" }, timeoutMs: 180_000 },
+        {
+          envs: { [GITHUB_AUTH_HEADER_ENV]: githubAuthHeader ?? "" },
+          timeoutMs: 180_000,
+        },
       );
       await requireLeaseWrite(
         isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
@@ -379,7 +410,11 @@ export async function runCodexCoderTool(input: {
         },
       });
 
-    const usage = codexHostedToolUsage({ model, summary, brokered: auth.brokered });
+    const usage = codexHostedToolUsage({
+      model,
+      summary,
+      brokered: auth.brokered,
+    });
     return {
       repository: repositoryFullName,
       repositoryTarget: target.kind,
@@ -432,8 +467,13 @@ export async function runCodexCoderTool(input: {
   });
 }
 
-export function buildCodexCommand(input: { task: string; workRoot: string; model: string }) {
-  return [
+export function buildCodexCommand(input: {
+  task: string;
+  workRoot: string;
+  model: string;
+  sessionId?: string | null;
+}) {
+  const parts = [
     "codex",
     "exec",
     "--json",
@@ -441,12 +481,32 @@ export function buildCodexCommand(input: { task: string; workRoot: string; model
     shellQuote(input.workRoot),
     "--sandbox",
     "workspace-write",
-    "--ask-for-approval",
-    "never",
-    "-m",
-    shellQuote(input.model),
-    shellQuote(input.task),
-  ].join(" ");
+  ];
+  const sessionId = input.sessionId?.trim();
+  if (sessionId) {
+    parts.push(
+      "resume",
+      "-m",
+      shellQuote(input.model),
+      shellQuote(sessionId),
+      shellQuote(input.task),
+    );
+    return parts.join(" ");
+  }
+  parts.push("-m", shellQuote(input.model), shellQuote(input.task));
+  return parts.join(" ");
+}
+
+export function buildCodexWorkRoot(workRoot: string) {
+  return `${workRoot}/${CODEX_WORK_DIR}`;
+}
+
+export function buildCodexHome(workRoot: string) {
+  return `${workRoot}/${CODEX_STATE_DIR}`;
+}
+
+function codexGitPathspecArgs() {
+  return `-- . ${shellQuote(CODEX_GIT_EXCLUDE_PATHSPEC)}`;
 }
 
 export function buildCodexConfig(input: { baseUrl: string; apiKeyEnvVar: string }) {
@@ -486,7 +546,10 @@ export function resolveCodexTarget(input: {
       if (attachedByRepositoryName)
         return { kind: "attached", repository: attachedByRepositoryName };
       if (allRepositories)
-        return { kind: "workspace", repositoryFullName: publicRepositoryFullName };
+        return {
+          kind: "workspace",
+          repositoryFullName: publicRepositoryFullName,
+        };
       return { kind: "public", repositoryFullName: publicRepositoryFullName };
     }
 

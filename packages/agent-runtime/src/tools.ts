@@ -1078,7 +1078,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     kind: "sandbox",
     configToolId: "codex",
     description:
-      "Delegate coding work to Codex in an attached GitHub repository or a public GitHub repository. Codex clones the repository into ./work on demand. Use for multi-file implementation, debugging, refactors, and PR-ready code changes. When more than one repository is attached, set the repository argument.",
+      "Delegate coding work to Codex in an attached GitHub repository or a public GitHub repository. Codex clones the repository into ./work/codex on demand. Use for multi-file implementation, debugging, refactors, and PR-ready code changes. When more than one repository is attached, set the repository argument.",
     parameters: {
       type: "object",
       properties: {
@@ -1101,6 +1101,11 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           type: "string",
           description: "Optional draft pull request title when createPullRequest is true.",
         },
+        codexSessionId: {
+          type: "string",
+          description:
+            "Existing codexSessionId from a previous codex_coder result to continue instead of starting a new Codex session.",
+        },
       },
       required: ["task"],
       additionalProperties: false,
@@ -1110,6 +1115,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Give Codex a concrete task and any constraints from the user or agent instructions.",
       "Set the repository argument (owner/repo or id) when more than one repository is attached so Codex targets the right one. If no repository is attached, set repository to a public GitHub owner/repo or https://github.com/owner/repo URL.",
       "Do not pass a model argument; the platform selects the Codex model for v1.",
+      "When the user asks for a follow-up to prior Codex work, pass the previous codexSessionId so Codex continues that session with its existing context.",
       "The tool output includes codexResult, codexStatus, codexSessionId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on codexResult when present.",
       "Codex has repository-scoped GitHub CLI and git push access for attached repositories. Public repositories are cloned without workspace GitHub credentials and return sandbox diffs only.",
       "Set createPullRequest=true only when the instructions call for a reviewable PR. If Codex leaves publishable local work behind, the runner creates the draft PR after Codex finishes. Public repositories do not support platform-created pull requests.",

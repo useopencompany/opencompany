@@ -194,6 +194,19 @@ describe("runtime tool definitions", () => {
     expect(definition.help).toContain("childSessionId");
   });
 
+  it("lets codex_coder continue prior Codex sessions by session id", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("codex_coder");
+
+    if (!definition) {
+      throw new Error("Expected codex_coder runtime tool definition to exist");
+    }
+
+    expect(definition.parameters.required).toEqual(["task"]);
+    expect(definition.parameters.properties).toHaveProperty("codexSessionId");
+    expect(definition.description).toContain("./work/codex");
+    expect(definition.help).toContain("previous codexSessionId");
+  });
+
   it("exposes read_skill for mounted skill files and keeps generic file tools out of skills", () => {
     const readSkill = RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_skill");
     const readFile = RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_file");

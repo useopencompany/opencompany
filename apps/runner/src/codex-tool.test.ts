@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildCodexCommand,
   buildCodexConfig,
+  buildCodexHome,
+  buildCodexWorkRoot,
   codexHostedToolUsage,
   createCodexStreamAccumulator,
   resolveCodexTarget,
@@ -22,14 +24,27 @@ describe("resolveCodexTarget", () => {
   });
 
   it("matches an attached repository by id, full name, or single-repo name", () => {
-    expect(resolveCodexTarget({ repositories: [repo], requestedRepository: "repo_1" })).toEqual({
+    expect(
+      resolveCodexTarget({
+        repositories: [repo],
+        requestedRepository: "repo_1",
+      }),
+    ).toEqual({
       kind: "attached",
       repository: repo,
     });
     expect(
-      resolveCodexTarget({ repositories: [repo], requestedRepository: "opencompany/web" }),
+      resolveCodexTarget({
+        repositories: [repo],
+        requestedRepository: "opencompany/web",
+      }),
     ).toEqual({ kind: "attached", repository: repo });
-    expect(resolveCodexTarget({ repositories: [repo], requestedRepository: "other/web" })).toEqual({
+    expect(
+      resolveCodexTarget({
+        repositories: [repo],
+        requestedRepository: "other/web",
+      }),
+    ).toEqual({
       kind: "attached",
       repository: repo,
     });
@@ -75,10 +90,37 @@ describe("buildCodexCommand", () => {
     expect(command).toContain("codex exec --json");
     expect(command).toContain("--cd '/tmp/work root'");
     expect(command).toContain("--sandbox workspace-write");
-    expect(command).toContain("--ask-for-approval never");
+    expect(command).not.toContain("--ask-for-approval");
+    expect(command).not.toContain("resume");
     expect(command).toContain("-m 'gpt-5.2-codex'");
     expect(command).toContain(`'edit "README.md"; echo $CODEX_API_KEY'`);
     expect(command).not.toContain("OPENAI_CODEX_API_KEY");
+  });
+
+  it("continues an existing Codex session when an id is provided", () => {
+    const command = buildCodexCommand({
+      task: "follow up",
+      workRoot: "/home/user/workspace/work/codex",
+      model: "gpt-5.2-codex",
+      sessionId: "codex-session-1",
+    });
+
+    expect(command).toContain("codex exec --json");
+    expect(command).toContain("--cd '/home/user/workspace/work/codex'");
+    expect(command).toContain("--sandbox workspace-write");
+    expect(command).toContain("resume -m 'gpt-5.2-codex' 'codex-session-1' 'follow up'");
+  });
+});
+
+describe("buildCodexHome", () => {
+  it("places Codex work under the agent work directory", () => {
+    expect(buildCodexWorkRoot("/home/user/workspace/work")).toBe("/home/user/workspace/work/codex");
+  });
+
+  it("keeps Codex state under the Codex work directory instead of /tmp", () => {
+    expect(buildCodexHome("/home/user/workspace/work/codex")).toBe(
+      "/home/user/workspace/work/codex/.codex",
+    );
   });
 });
 
@@ -104,7 +146,10 @@ describe("createCodexStreamAccumulator", () => {
 
     stream.push(
       [
-        JSON.stringify({ type: "session.started", session_id: "codex-session-1" }),
+        JSON.stringify({
+          type: "session.started",
+          session_id: "codex-session-1",
+        }),
         JSON.stringify({ type: "assistant_message_delta", delta: "Done" }),
         JSON.stringify({
           type: "usage",
@@ -135,7 +180,14 @@ describe("createCodexStreamAccumulator", () => {
     stream.push(`${JSON.stringify({ type: "assistant_message_delta", delta: "Partial" })}\n`);
     stream.finish();
 
-    expect(stream.summary({ exitCode: null, stdout: "", stderr: "", timedOut: true })).toEqual({
+    expect(
+      stream.summary({
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        timedOut: true,
+      }),
+    ).toEqual({
       sessionId: null,
       status: "timeout",
       result: "Partial",
