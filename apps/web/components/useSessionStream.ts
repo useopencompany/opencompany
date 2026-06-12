@@ -18,6 +18,15 @@ import {
  * `onEvent` fires once per reduced event (durable + transient), for per-event
  * side effects like the felt-TTFT analytics timer; it's ref'd so passing a fresh
  * closure each render doesn't re-open the stream.
+ *
+ * Death recovery: the client reconnects internally, but a subscription can still
+ * die for good — the hidden-tab pause/resume race, an exhausted retry budget, or
+ * a silent close (status flips to "error", see subscribeSessionStream). A dead
+ * stream must not strand the transcript on its last state (the "frozen thinking
+ * spinner" after returning to a backgrounded tab), so when the tab regains
+ * visibility/focus or the network comes back while dead, the hook resets the
+ * overlay and re-subscribes from "-1" — replaying the full stream rebuilds
+ * everything missed, including the turn's completion.
  */
 export function useSessionStream(
   sessionId: string,
@@ -37,6 +46,11 @@ export function useSessionStream(
   const enabled = options?.enabled ?? true;
   const [state, setState] = useState<SessionRuntimeState>(createEmptySessionRuntimeState);
   const [status, setStatus] = useState<SessionStreamStatus>("connecting");
+  // Bumped to tear down a DEAD subscription and open a fresh one (recovery only —
+  // never while the stream is healthy). Recovery replays from "-1" regardless of
+  // seedFromEnd: the overlay is reset to empty and the snapshot floor may be stale,
+  // so only a full replay is guaranteed to rebuild what the dead stream missed.
+  const [generation, setGeneration] = useState(0);
 
   const onEventRef = useRef(options?.onEvent);
   const seedFromEndRef = useRef(options?.seedFromEnd);
@@ -44,6 +58,12 @@ export function useSessionStream(
     onEventRef.current = options?.onEvent;
     seedFromEndRef.current = options?.seedFromEnd;
   });
+  // Latest status for the recovery listeners (they must read it without
+  // re-registering on every status change).
+  const statusRef = useRef(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   // Reset to an empty transcript when the session changes, adjusting state during
   // render (the React-endorsed pattern) rather than in the effect — the new
@@ -53,6 +73,7 @@ export function useSessionStream(
     setStreamedSessionId(sessionId);
     setState(createEmptySessionRuntimeState());
     setStatus("connecting");
+    setGeneration(0);
   }
 
   useEffect(() => {
@@ -65,10 +86,34 @@ export function useSessionStream(
         onStatus: setStatus,
         onEvent: (event) => onEventRef.current?.(event),
       },
-      { seedFromEnd: seedFromEndRef.current },
+      { seedFromEnd: generation === 0 ? seedFromEndRef.current : false },
     );
     return unsubscribe;
-  }, [sessionId, enabled]);
+  }, [sessionId, enabled, generation]);
+
+  // Recover a dead subscription when the user (or the network) comes back. The
+  // primary repro is a backgrounded tab: the client pauses while hidden and its
+  // resume can kill the subscription, so on the next visibility/focus/online signal
+  // a dead stream is rebuilt from scratch. Gated on status === "error" — a healthy
+  // or still-retrying stream is never torn down, so this can't loop or thrash.
+  useEffect(() => {
+    if (!enabled) return;
+    const recoverIfDead = () => {
+      if (document.visibilityState !== "visible") return;
+      if (statusRef.current !== "error") return;
+      setState(createEmptySessionRuntimeState());
+      setStatus("connecting");
+      setGeneration((current) => current + 1);
+    };
+    document.addEventListener("visibilitychange", recoverIfDead);
+    window.addEventListener("focus", recoverIfDead);
+    window.addEventListener("online", recoverIfDead);
+    return () => {
+      document.removeEventListener("visibilitychange", recoverIfDead);
+      window.removeEventListener("focus", recoverIfDead);
+      window.removeEventListener("online", recoverIfDead);
+    };
+  }, [enabled]);
 
   return { state, status };
 }
