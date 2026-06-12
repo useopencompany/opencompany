@@ -509,6 +509,38 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: null,
     };
   }, [baseRuntime, optimisticUserMessages]);
+
+  // Once a just-sent optimistic message is backed by its durable server message (which serves the
+  // image via /api/attachments), its local object-URL previews are no longer needed: revoke them
+  // and drop the optimistic copy so the URLs don't leak.
+  useEffect(() => {
+    const durable = optimisticUserMessages.filter((message) =>
+      hasDurableUserMessage(baseRuntime.messages, message),
+    );
+    if (durable.length === 0) return;
+    for (const message of durable) {
+      message.attachments?.forEach((att) => {
+        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      });
+    }
+    setOptimisticUserMessages((current) => current.filter((message) => !durable.includes(message)));
+  }, [baseRuntime.messages, optimisticUserMessages]);
+
+  // Revoke any optimistic-message previews still outstanding when the view unmounts (e.g.
+  // navigating away right after a send, before the durable message arrives) so they don't leak.
+  const optimisticMessagesRef = useRef(optimisticUserMessages);
+  useEffect(() => {
+    optimisticMessagesRef.current = optimisticUserMessages;
+  }, [optimisticUserMessages]);
+  useEffect(() => {
+    return () => {
+      for (const message of optimisticMessagesRef.current) {
+        message.attachments?.forEach((att) => {
+          if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+        });
+      }
+    };
+  }, []);
   // Full-detail debug snapshot for the "Copy session JSON" affordance. Assembled lazily
   // (only when the button is clicked) so we never stringify the whole transcript on
   // every render. Pulls from the merged `runtime` so it includes live stream state, and
@@ -780,21 +812,28 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               {message.content ? <div>{message.content}</div> : null}
               {message.attachments && message.attachments.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {message.attachments.map((att) => (
-                    <a
-                      key={att.id}
-                      href={`/api/attachments/${att.id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block"
-                    >
-                      <AttachmentCard
-                        kind={att.kind}
-                        filename={att.filename}
-                        src={att.kind === "image" ? `/api/attachments/${att.id}` : undefined}
-                      />
-                    </a>
-                  ))}
+                  {message.attachments.map((att) => {
+                    // Optimistic just-sent messages carry a local object-URL preview so the image
+                    // shows instantly; the served `/api/attachments/{id}` row doesn't exist yet.
+                    // Server-loaded messages have no previewUrl and use the served URL.
+                    const servedUrl = `/api/attachments/${att.id}`;
+                    const imageSrc = att.previewUrl ?? servedUrl;
+                    return (
+                      <a
+                        key={att.id}
+                        href={att.previewUrl ?? servedUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block"
+                      >
+                        <AttachmentCard
+                          kind={att.kind}
+                          filename={att.filename}
+                          src={att.kind === "image" ? imageSrc : undefined}
+                        />
+                      </a>
+                    );
+                  })}
                 </div>
               ) : null}
             </div>
@@ -1227,6 +1266,20 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       status: "completed",
       createdAt: new Date(submittedAtMs).toISOString(),
       completedAt: new Date(submittedAtMs).toISOString(),
+      // Carry the sent attachments so the bubble shows them immediately. Images use their local
+      // object-URL preview (the served /api/attachments row doesn't exist yet); the revoke is
+      // deferred until the durable server message replaces this optimistic one (see effect below).
+      ...(ready.length > 0
+        ? {
+            attachments: ready.map((a) => ({
+              id: a.id,
+              kind: a.kind,
+              mediaType: a.mediaType,
+              filename: a.filename,
+              ...(a.previewUrl ? { previewUrl: a.previewUrl } : {}),
+            })),
+          }
+        : {}),
     };
     setOptimisticUserMessages((current) => [...current, optimisticMessage]);
     setInput("");
@@ -1250,9 +1303,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
-        // Sent successfully — drop the previews and clear the tray. Revoke the object
-        // URLs so the not-yet-uploaded local-file previews don't leak.
-        attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+        // Sent successfully — clear the tray. The sent attachments' object-URL previews are now
+        // owned by the optimistic message (revoked when its durable server message arrives), so
+        // only revoke previews that were NOT carried over (defensive — the send gate means all
+        // tray attachments are `ready`, so this set is normally empty).
+        const carried = new Set(ready.map((a) => a.id));
+        attachments.forEach((a) => {
+          if (a.previewUrl && !carried.has(a.id)) URL.revokeObjectURL(a.previewUrl);
+        });
         setAttachments([]);
         setOptimisticUserMessages((current) =>
           current.map((message) =>
