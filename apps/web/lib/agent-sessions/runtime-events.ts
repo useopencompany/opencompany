@@ -1752,8 +1752,12 @@ function describeMemoryToolCall(args: string) {
   const command = argv[0];
   switch (command) {
     case "query": {
-      const query = findMemoryPositionalArg(argv, 1);
-      return query ? `Looking in memory for “${truncateLabelText(query)}”` : "Looking in memory";
+      const query = findMemoryPositionalArg(argv, 1) || firstCliOptionValue(argv, "--text");
+      if (query) return `Looking in memory for “${truncateLabelText(query)}”`;
+      // A text-less query with --since is a recency listing, not a search.
+      return firstCliOptionValue(argv, "--since")
+        ? "Reviewing recent memory updates"
+        : "Looking in memory";
     }
     case "get": {
       const id = findMemoryPositionalArg(argv, 1);
@@ -1832,6 +1836,7 @@ const MEMORY_CLI_VALUE_OPTIONS = new Set([
   "--status",
   "--subject",
   "--summary",
+  "--text",
   "--to",
   "--truth",
   "--type",
