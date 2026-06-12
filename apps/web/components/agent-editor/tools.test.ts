@@ -181,6 +181,20 @@ describe("agent editor mention tools", () => {
     );
   });
 
+  test("offers the addable built-in Y Combinator knowledge skill in the mention menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skill",
+          mentionId: "skill/y-combinator-knowledge",
+          label: "skill/y-combinator-knowledge",
+          displayLabel: "Y Combinator knowledge",
+        }),
+      ]),
+    );
+  });
+
   test("exposes workspace agents as stable agent slug mentions", () => {
     const items = buildWorkspaceAgentMentionItems([
       { path: "agents/research/research.agent", name: "Research" },
