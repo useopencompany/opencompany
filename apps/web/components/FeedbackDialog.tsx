@@ -82,7 +82,9 @@ function FeedbackForm({
       setAttachments((prev) => {
         const next = [...prev];
         for (const file of files) {
-          if (next.length >= MAX_FEEDBACK_IMAGES) {
+          // Failed uploads don't count toward the cap — otherwise a few transient errors would
+          // wedge the user into a dead end where no new image can be added.
+          if (next.filter((a) => a.status !== "error").length >= MAX_FEEDBACK_IMAGES) {
             setAttachError(`Up to ${MAX_FEEDBACK_IMAGES} images.`);
             break;
           }
@@ -165,6 +167,10 @@ function FeedbackForm({
 
   const isUploading = attachments.some((a) => a.status === "uploading");
   const readyImages = attachments.filter((a) => a.status === "ready");
+  // Failed uploads are excluded from both the cap and the submitted FormData, so surface them
+  // explicitly — otherwise a user could send feedback believing a screenshot was attached.
+  const failedCount = attachments.filter((a) => a.status === "error").length;
+  const activeCount = attachments.length - failedCount;
 
   return (
     <form
@@ -308,7 +314,7 @@ function FeedbackForm({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isPending || attachments.length >= MAX_FEEDBACK_IMAGES}
+                disabled={isPending || activeCount >= MAX_FEEDBACK_IMAGES}
                 className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <ImagePlus size={13} strokeWidth={1.9} />
@@ -320,6 +326,14 @@ function FeedbackForm({
               <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
             )}
             {attachError && <p className="text-[11.5px] text-danger">{attachError}</p>}
+            {failedCount > 0 && (
+              <p className="text-[11.5px] text-danger">
+                {failedCount === 1
+                  ? "1 image failed to upload"
+                  : `${failedCount} images failed to upload`}{" "}
+                and won&apos;t be included — remove or re-add to retry.
+              </p>
+            )}
           </div>
         ) : null}
 

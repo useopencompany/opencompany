@@ -484,31 +484,35 @@ async function uploadImageToLinear(image: {
   return uploadFile.assetUrl;
 }
 
-// Reads each screenshot back from the transit store and pushes it to Linear. A single image
-// failing must NOT block the feedback (same philosophy as label creation) — we skip it, count it,
-// and surface the count in the issue body.
+// Reads each screenshot back from the transit store and pushes it to Linear. The images are
+// independent, so they run concurrently (capped at MAX_FEEDBACK_IMAGES) rather than serializing
+// three blob-read + Linear-upload round-trips on the submit path. A single image failing must NOT
+// block the feedback (same philosophy as label creation) — we skip it, count it, and surface the
+// count in the issue body. Promise.all preserves order, so embeds stay in attach order.
 async function uploadFeedbackImages(images: FeedbackImageRef[]): Promise<{
   uploaded: Array<{ filename: string; assetUrl: string }>;
   failedCount: number;
 }> {
-  const uploaded: Array<{ filename: string; assetUrl: string }> = [];
-  let failedCount = 0;
+  const results = await Promise.all(
+    images.map(async (image) => {
+      try {
+        const bytes = await readFeedbackBlob(image.blobUrl);
+        const assetUrl = await uploadImageToLinear({
+          bytes,
+          contentType: image.mediaType,
+          filename: image.filename,
+        });
+        return { filename: image.filename, assetUrl };
+      } catch {
+        return null;
+      }
+    }),
+  );
 
-  for (const image of images) {
-    try {
-      const bytes = await readFeedbackBlob(image.blobUrl);
-      const assetUrl = await uploadImageToLinear({
-        bytes,
-        contentType: image.mediaType,
-        filename: image.filename,
-      });
-      uploaded.push({ filename: image.filename, assetUrl });
-    } catch {
-      failedCount += 1;
-    }
-  }
-
-  return { uploaded, failedCount };
+  const uploaded = results.filter(
+    (result): result is { filename: string; assetUrl: string } => result !== null,
+  );
+  return { uploaded, failedCount: results.length - uploaded.length };
 }
 
 export async function submitFeedback(
