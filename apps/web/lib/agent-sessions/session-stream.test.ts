@@ -99,6 +99,9 @@ describe("subscribeSessionStream", () => {
     expect(message?.content).toBe("Hello");
     // The durable + transient events both landed in the materialized state.
     expect(latest?.events.length).toBe(4);
+    // Delivery time is stamped — the view's staleness check (dead stream vs fresher
+    // snapshot) depends on it.
+    expect(latest?.lastEventReceivedAt).toBeGreaterThan(0);
 
     unsubscribe();
   });
@@ -271,5 +274,60 @@ describe("subscribeSessionStream", () => {
     expect(latest?.statusObserved).toBe(true);
 
     unsubscribe();
+  });
+
+  it("reports status 'error' when the subscription ends without an unsubscribe", async () => {
+    // A session stream is never legitimately EOF'd while viewable (only archive
+    // closes it), and the client can also kill a subscription internally (the
+    // hidden-tab pause/resume race, an exhausted retry budget). Either way the
+    // consumer must hear about it — useSessionStream re-subscribes off this status
+    // when the tab next becomes visible. Closing the stream server-side is the
+    // deterministic way to end the subscription from the outside.
+    const sessionId = "dies-unexpectedly";
+    const stream = await producer(sessionId);
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_u",
+      payload: { messageId: "msg_u", role: "user", content: "hi", status: "completed" },
+    });
+
+    const statuses: string[] = [];
+    let latest: SessionRuntimeState | null = null;
+    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), {
+      onState: (state) => (latest = state),
+      onStatus: (status) => statuses.push(status),
+    });
+
+    // Wait for the live tail to be up and the history reduced, then close the
+    // stream out from under the subscription.
+    await expect.poll(() => findMessage(latest, "msg_u")?.content, { timeout: 15000 }).toBe("hi");
+    await DurableStream.connect({ url: streamUrl(sessionId) }).then((handle) => handle.close());
+
+    await expect.poll(() => statuses.at(-1), { timeout: 15000 }).toBe("error");
+
+    unsubscribe();
+  });
+
+  it("stays silent when the consumer unsubscribes deliberately", async () => {
+    const sessionId = "clean-unsubscribe";
+    const stream = await producer(sessionId);
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_u",
+      payload: { messageId: "msg_u", role: "user", content: "hi", status: "completed" },
+    });
+
+    const statuses: string[] = [];
+    let latest: SessionRuntimeState | null = null;
+    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), {
+      onState: (state) => (latest = state),
+      onStatus: (status) => statuses.push(status),
+    });
+    await expect.poll(() => findMessage(latest, "msg_u")?.content, { timeout: 15000 }).toBe("hi");
+
+    unsubscribe();
+    // Give the closed promise a tick to settle; no "error" may be reported.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(statuses.at(-1)).toBe("live");
   });
 });

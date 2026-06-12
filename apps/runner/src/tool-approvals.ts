@@ -14,7 +14,7 @@ export type ToolApprovalRow = {
   messageId: string | null;
   toolName: string;
   providerKey: string;
-  permissionGroup: "read" | "post" | "modify" | "admin";
+  permissionGroup: "read" | "post" | "modify" | "merge" | "admin";
 };
 
 export async function loadToolApproval(

@@ -44,7 +44,7 @@ export class RunSuspendedError extends Error {
   readonly reason: "approval" | "question";
   readonly toolCallId: string;
   readonly providerKey: string;
-  readonly group: "read" | "post" | "modify" | "admin";
+  readonly group: "read" | "post" | "modify" | "merge" | "admin";
   readonly questions: AgentSessionQuestionPrompt[] | undefined;
   readonly assistantContent: string;
   readonly assistantReplayParts: AssistantReplayPart[];
@@ -55,7 +55,7 @@ export class RunSuspendedError extends Error {
     reason?: "approval" | "question";
     toolCallId: string;
     providerKey: string;
-    group: "read" | "post" | "modify" | "admin";
+    group: "read" | "post" | "modify" | "merge" | "admin";
     questions?: AgentSessionQuestionPrompt[];
     assistantContent: string;
     assistantReplayParts: AssistantReplayPart[];

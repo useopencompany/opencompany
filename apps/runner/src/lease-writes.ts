@@ -89,7 +89,7 @@ type ToolApprovalInsert = {
   toolCallId: string;
   toolName: string;
   providerKey: string;
-  permissionGroup: "read" | "post" | "modify" | "admin";
+  permissionGroup: "read" | "post" | "modify" | "merge" | "admin";
   inputPreview: string | null;
 };
 
@@ -569,7 +569,7 @@ export async function insertToolApprovalForLease(
     toolCallId: string;
     toolName: string;
     providerKey: string;
-    permissionGroup: "read" | "post" | "modify" | "admin";
+    permissionGroup: "read" | "post" | "modify" | "merge" | "admin";
     inputPreview?: string | null;
     leaseId: string;
     leaseOwner: string;
