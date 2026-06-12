@@ -57,6 +57,10 @@ describe("agent detail API route", () => {
       mcp: {
         linearConfigured: false,
         slackConfigured: false,
+        posthogConfigured: false,
+        betterstackConfigured: false,
+        braintrustConfigured: false,
+        notionConfigured: false,
       },
     });
 
