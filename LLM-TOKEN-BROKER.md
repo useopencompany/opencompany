@@ -30,7 +30,7 @@ E2B sandbox (CLI: opencode / codex / memory)
 Runner  /broker/:provider/v1/*         ← Fastify plugin, public URL (Render)
    │   validate token (DB, multi-instance), provider + tool endpoint scope → 401/402/403
    │   attach real key server-side; upstream pinned per provider
-   │   tee() response stream → client (byte-identical) + usage scanner
+   │   stream response → client (byte-identical) while usage scanner settles before close
    │   recordSpend per request (llm_broker_requests + token counters)
    ▼
 Upstream: gateway → ai-gateway.vercel.sh/v1   (VERCEL_AI_GATEWAY_API_KEY)
@@ -103,7 +103,7 @@ traffic, Postgres remains the accounting source of truth.**
 - [x] Migration `0055`: `llm_broker_tokens` (auth, lifecycle, denormalized totals) +
       `llm_broker_requests` (per-upstream-request audit rows)
 - [x] `apps/runner/src/llm-broker.ts` — routes, auth matrix, upstream pinning,
-      `include_usage` injection, `tee()` SSE passthrough (proven byte-identical under test)
+      `include_usage` injection, SSE passthrough with finalizer metering (byte-identical under test)
 - [x] `llm-broker-tokens.ts` — mint/validate/spend/revoke/settle store + `settled_at` CAS,
       `withBrokerDelegation` wrapper, default `$5` token budget
 - [x] Tool-scoped endpoint authorization (`codex_coder` → Responses, `opencode_coder` → chat,

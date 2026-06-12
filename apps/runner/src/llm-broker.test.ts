@@ -47,7 +47,10 @@ const env = {
 
 type FakeToken = ValidatedBrokerToken & { tokenHash: string };
 
-function createFakeStore(tokens: FakeToken[]) {
+function createFakeStore(
+  tokens: FakeToken[],
+  options: { onRecordSpend?: (input: BrokerSpendInput) => Promise<void> | void } = {},
+) {
   const spends: BrokerSpendInput[] = [];
   const store: BrokerTokenStore = {
     async insertToken() {},
@@ -59,6 +62,7 @@ function createFakeStore(tokens: FakeToken[]) {
     },
     async recordSpend(input) {
       spends.push(input);
+      await options.onRecordSpend?.(input);
     },
     async revokeToken() {},
     async revokeTokensForSession() {
@@ -76,6 +80,19 @@ function createFakeStore(tokens: FakeToken[]) {
     async linkSettledToolUsage() {},
   };
   return { store, spends };
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!predicate() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(predicate()).toBe(true);
+}
+
+async function waitForSpend(spends: BrokerSpendInput[], expectedLength = 1): Promise<void> {
+  await waitUntil(() => spends.length === expectedLength);
+  expect(spends).toHaveLength(expectedLength);
 }
 
 const GATEWAY_TOKEN = "ocbt_gateway_token";
@@ -112,8 +129,12 @@ function createBrokerApp(options: {
   tokens?: FakeToken[];
   fetchImpl?: typeof fetch;
   env?: RunnerEnv;
+  onRecordSpend?: (input: BrokerSpendInput) => Promise<void> | void;
 }) {
-  const { store, spends } = createFakeStore(options.tokens ?? defaultTokens());
+  const { store, spends } = createFakeStore(
+    options.tokens ?? defaultTokens(),
+    options.onRecordSpend ? { onRecordSpend: options.onRecordSpend } : {},
+  );
   const app = Fastify({ logger: false });
   app.register(async (instance) => {
     registerLlmBrokerRoutes(instance, {
@@ -295,7 +316,7 @@ describe("LLM broker proxying", () => {
     const headers = init.headers as Record<string, string>;
     expect(headers.authorization).toBe("Bearer gateway-upstream-key");
 
-    await vi.waitFor(() => expect(spends).toHaveLength(1));
+    await waitForSpend(spends);
     expect(spends[0]).toMatchObject({
       tokenId: "token-gateway",
       sessionId: "session-1",
@@ -382,7 +403,7 @@ describe("LLM broker proxying", () => {
     expect(response.headers["content-type"]).toContain("text/event-stream");
     expect(response.body).toBe(chunks.join(""));
 
-    await vi.waitFor(() => expect(spends).toHaveLength(1));
+    await waitForSpend(spends);
     expect(spends[0]).toMatchObject({
       streamed: true,
       inputTokens: 7,
@@ -391,6 +412,62 @@ describe("LLM broker proxying", () => {
       // Gateway-reported $0.25 wins over catalog pricing.
       costUsdMicros: 250_000,
     });
+  });
+
+  it("keeps a streamed response open until the spend write completes", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"ok"}}],"usage":null}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}\n\n',
+      "data: [DONE]\n\n",
+    ];
+    const encoder = new TextEncoder();
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    ) as unknown as typeof fetch;
+
+    let releaseSpendWrite: () => void = () => {};
+    let spendWriteStarted = false;
+    const spendWriteGate = new Promise<void>((resolve) => {
+      releaseSpendWrite = resolve;
+    });
+    const { app, spends } = createBrokerApp({
+      fetchImpl,
+      onRecordSpend: async () => {
+        spendWriteStarted = true;
+        await spendWriteGate;
+      },
+    });
+
+    let responseSettled = false;
+    const responsePromise = app
+      .inject({
+        method: "POST",
+        url: "/broker/gateway/v1/chat/completions",
+        headers: { authorization: `Bearer ${GATEWAY_TOKEN}` },
+        payload: { model: "anthropic/claude-sonnet-4.6", stream: true },
+      })
+      .finally(() => {
+        responseSettled = true;
+      });
+
+    await waitUntil(() => spendWriteStarted);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(responseSettled).toBe(false);
+
+    releaseSpendWrite();
+    const response = await responsePromise;
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(chunks.join(""));
+    expect(spends).toHaveLength(1);
   });
 
   it("passes upstream errors through and records an unparsed request", async () => {
@@ -406,7 +483,7 @@ describe("LLM broker proxying", () => {
 
     expect(response.statusCode).toBe(429);
     expect(response.json().error.message).toBe("rate limited");
-    await vi.waitFor(() => expect(spends).toHaveLength(1));
+    await waitForSpend(spends);
     expect(spends[0]).toMatchObject({
       upstreamStatus: 429,
       usageParsed: false,

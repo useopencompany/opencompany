@@ -292,12 +292,14 @@ async function handleBrokerRequest(input: {
     return;
   }
 
-  // Streaming: tee the upstream body — one branch feeds the client untouched, the other
-  // feeds the usage scanner. Metering must never block or fail the proxied stream.
-  const [clientBranch, meterBranch] = upstreamResponse.body.tee();
-  void scanStreamUsage(meterBranch)
-    .then((usage) =>
-      recordSpendSafely(store, {
+  // Streaming: scan the exact bytes flowing to the client and record spend in the
+  // stream's finalizer. Chunks still pass through immediately, but the response does
+  // not fully close until metering has been written; otherwise a fast CLI exit could
+  // revoke + settle the token before the detached meter write lands.
+  const meteredStream = createMeteredResponseStream(
+    upstreamResponse.body,
+    async (usage) => {
+      await recordSpendSafely(store, {
         token,
         endpoint,
         model,
@@ -305,9 +307,9 @@ async function handleBrokerRequest(input: {
         upstreamStatus: upstreamResponse.status,
         usage,
         latencyMs: Date.now() - startedAt,
-      }),
-    )
-    .catch((error) => {
+      });
+    },
+    (error) => {
       logger.warn("LLM broker stream metering failed", {
         event: "opencompany.llm_broker_metering_failed",
         provider,
@@ -315,13 +317,14 @@ async function handleBrokerRequest(input: {
         session_id: token.sessionId,
         error,
       });
-    });
+    },
+  );
 
   reply
     .status(upstreamResponse.status)
     .header("content-type", contentType)
     .header("cache-control", "no-cache");
-  return reply.send(Readable.fromWeb(clientBranch as Parameters<typeof Readable.fromWeb>[0]));
+  return reply.send(Readable.fromWeb(meteredStream as Parameters<typeof Readable.fromWeb>[0]));
 }
 
 function brokerPathFor(endpoint: BrokerEndpoint): string {
@@ -345,17 +348,29 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-async function scanStreamUsage(stream: ReadableStream<Uint8Array>): Promise<ParsedBrokerUsage> {
+function createMeteredResponseStream(
+  stream: ReadableStream<Uint8Array>,
+  recordUsage: (usage: ParsedBrokerUsage) => Promise<void>,
+  onMeteringError: (error: unknown) => void,
+): ReadableStream<Uint8Array> {
   const scanner = createSseUsageScanner();
   const decoder = new TextDecoder();
-  const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    scanner.push(decoder.decode(value, { stream: true }));
-  }
-  scanner.push(decoder.decode());
-  return scanner.finish();
+  return stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        scanner.push(decoder.decode(chunk, { stream: true }));
+        controller.enqueue(chunk);
+      },
+      async flush() {
+        try {
+          scanner.push(decoder.decode());
+          await recordUsage(scanner.finish());
+        } catch (error) {
+          onMeteringError(error);
+        }
+      },
+    }),
+  );
 }
 
 async function recordSpendSafely(
