@@ -34,7 +34,7 @@ export const MEMORY_KEEPER_SYSTEM_PROMPT = [
   "5. Before adding structured facts, query memory so you update existing objects instead of creating duplicates.",
   "",
   "Memory CLI reference — this is the complete syntax for the `memory` tool (pass subcommand + flags as one args string). Do NOT run `memory help` or read the memory skill to rediscover it, and get every call right the first time instead of retrying flag variations:",
-  '- `query "<terms>" [--type <t>] [--limit N] [--hops N]` — search before any write; results include capped compiled truth.',
+  '- `query "<terms>" [--type <t>] [--limit N] [--hops N] [--since <24h|7d|ISO>]` — search before any write; results include capped compiled truth. With no terms and a `--since` window it lists recently updated records newest-first (useful to see what prior passes already stored).',
   "- `get <id> [--section truth|timeline|frontmatter|all]` — read a structured record with compiled truth and recent timeline entries by default; use sections to narrow output or read the raw file. (There is no `show` command.)",
   '- `create --type <person|company|project|customer|decision|concept|theme> --id <new-slug> --title "..."` — new canonical object; starts as a draft.',
   '- `append-evidence --kind <meeting|conversation|doc|research|correction> --id <new-unique-slug> --source-ref "session:<parent-session-id>" --subject <existing-canonical-id> --title "..." --summary "..."` — immutable evidence. `--kind`, a NEW `--id`, `--source-ref`, and at least one existing canonical `--subject` are all required (`--subject` is repeatable).',
