@@ -3,6 +3,7 @@ import {
   type BrokerSpendInput,
   type BrokerTokenStore,
   type BrokerTokenTotals,
+  DEFAULT_BROKER_TOKEN_BUDGET_USD_MICROS,
   hashBrokerToken,
   mintBrokerToken,
   settleBrokerToken,
@@ -61,6 +62,7 @@ function createFakeStore() {
           id: token.row.id,
           sessionId: token.row.sessionId,
           workspaceId: token.row.workspaceId,
+          toolName: token.row.toolName,
           provider: token.row.provider,
           budgetUsdMicros: token.row.budgetUsdMicros,
           spentUsdMicros: token.totals.spentUsdMicros,
@@ -155,13 +157,34 @@ describe("mintBrokerToken / validateBrokerToken", () => {
     const stored = tokens.get(minted.tokenId);
     expect(stored?.row.tokenHash).toBe(hashBrokerToken(minted.token));
     expect(stored?.row.tokenHash).not.toContain(minted.token);
+    expect(stored?.row.budgetUsdMicros).toBe(DEFAULT_BROKER_TOKEN_BUDGET_USD_MICROS);
     expect(minted.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
     expect(await validateBrokerToken(minted.token, store)).toMatchObject({
       id: minted.tokenId,
       sessionId: "session-1",
+      toolName: "opencode_coder",
       provider: "gateway",
     });
+  });
+
+  it("allows a caller to set a lower explicit budget", async () => {
+    const { store, tokens } = createFakeStore();
+    const minted = await mintBrokerToken({ ...MINT_INPUT, budgetUsdMicros: 50_000 }, store);
+
+    expect(tokens.get(minted.tokenId)?.row.budgetUsdMicros).toBe(50_000);
+    expect(await validateBrokerToken(minted.token, store)).toMatchObject({
+      budgetUsdMicros: 50_000,
+    });
+  });
+
+  it("caps explicit budgets at the hard-coded default", async () => {
+    const { store, tokens } = createFakeStore();
+    const minted = await mintBrokerToken({ ...MINT_INPUT, budgetUsdMicros: 10_000_000 }, store);
+
+    expect(tokens.get(minted.tokenId)?.row.budgetUsdMicros).toBe(
+      DEFAULT_BROKER_TOKEN_BUDGET_USD_MICROS,
+    );
   });
 
   it("rejects tokens without the prefix and revoked tokens", async () => {

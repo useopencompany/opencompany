@@ -118,6 +118,19 @@ function bearerToken(header: string | undefined): string | null {
   return token.length > 0 ? token : null;
 }
 
+function tokenAllowsEndpoint(token: ValidatedBrokerToken, endpoint: BrokerEndpoint): boolean {
+  switch (token.toolName) {
+    case "codex_coder":
+      return endpoint === "responses" || endpoint === "models";
+    case "opencode_coder":
+      return endpoint === "chat.completions" || endpoint === "models";
+    case "memory":
+      return endpoint === "chat.completions" || endpoint === "embeddings";
+    default:
+      return false;
+  }
+}
+
 async function handleBrokerRequest(input: {
   request: FastifyRequest;
   reply: FastifyReply;
@@ -152,6 +165,14 @@ async function handleBrokerRequest(input: {
       403,
       "provider_mismatch",
       "The broker token is not valid for this provider.",
+    );
+  }
+  if (!tokenAllowsEndpoint(token, endpoint)) {
+    return sendBrokerError(
+      reply,
+      403,
+      "endpoint_not_allowed",
+      "The broker token is not valid for this endpoint.",
     );
   }
   if (token.budgetUsdMicros != null && token.spentUsdMicros >= token.budgetUsdMicros) {

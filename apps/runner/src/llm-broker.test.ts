@@ -88,6 +88,7 @@ function defaultTokens(): FakeToken[] {
       tokenHash: hashBrokerToken(GATEWAY_TOKEN),
       sessionId: "session-1",
       workspaceId: "workspace-1",
+      toolName: "opencode_coder",
       provider: "gateway",
       budgetUsdMicros: null,
       spentUsdMicros: 0,
@@ -97,6 +98,7 @@ function defaultTokens(): FakeToken[] {
       tokenHash: hashBrokerToken(OPENAI_TOKEN),
       sessionId: "session-1",
       workspaceId: "workspace-1",
+      toolName: "codex_coder",
       provider: "openai",
       budgetUsdMicros: null,
       spentUsdMicros: 0,
@@ -174,6 +176,36 @@ describe("LLM broker auth", () => {
     });
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe("provider_mismatch");
+  });
+
+  it("rejects a token used against the wrong endpoint for its tool", async () => {
+    const { app } = createBrokerApp({});
+    const response = await app.inject({
+      method: "POST",
+      url: "/broker/gateway/v1/embeddings",
+      headers: { authorization: `Bearer ${GATEWAY_TOKEN}` },
+      payload: { model: "openai/text-embedding-3-small", input: "hello" },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe("endpoint_not_allowed");
+  });
+
+  it("allows memory tokens to call embeddings without opening that endpoint to coding tools", async () => {
+    const tokens = defaultTokens();
+    tokens[0] = { ...tokens[0]!, toolName: "memory" };
+    const fetchImpl = jsonUpstream({
+      data: [{ embedding: [0.1] }],
+      usage: { prompt_tokens: 10, completion_tokens: 0 },
+    });
+    const { app } = createBrokerApp({ tokens, fetchImpl });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/broker/gateway/v1/embeddings",
+      headers: { authorization: `Bearer ${GATEWAY_TOKEN}` },
+      payload: { model: "openai/text-embedding-3-small", input: "hello" },
+    });
+    expect(response.statusCode).toBe(200);
   });
 
   it("rejects an exhausted budget with 402", async () => {

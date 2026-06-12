@@ -28,7 +28,7 @@ E2B sandbox (CLI: opencode / codex / memory)
    │   Bearer ocbt_<random>            ← short-lived, per tool call, worthless after revoke
    ▼
 Runner  /broker/:provider/v1/*         ← Fastify plugin, public URL (Render)
-   │   validate token (DB, multi-instance) → 401/402/403
+   │   validate token (DB, multi-instance), provider + tool endpoint scope → 401/402/403
    │   attach real key server-side; upstream pinned per provider
    │   tee() response stream → client (byte-identical) + usage scanner
    │   recordSpend per request (llm_broker_requests + token counters)
@@ -46,9 +46,16 @@ guard (upstream spend must bill even after a lease reclaim); the atomic `settled
 CAS is the single-winner defense. Unpriceable requests record zero cost with
 `usageParsed=false` — billing never guesses.
 
-**Token lifecycle.** Mint at hosted-tool start (TTL = tool timeout + slack) →
-revoke + settle in the tool's `finally` → backstops at `archiveSession`/`abortSession`
-→ leftover sweeper piggybacked on the 60s stale-run sweep (runner-death coverage).
+**Token lifecycle.** Mint at hosted-tool start (TTL = tool timeout + slack, default
+budget = $5/delegation) → revoke + settle in the tool's `finally` → backstops at
+`archiveSession`/`abortSession` → leftover sweeper piggybacked on the 60s stale-run
+sweep (runner-death coverage).
+
+**Compatibility posture.** Tokens are scoped to provider + tool endpoint family, not to
+one exact model string. That means a `codex_coder` token can call OpenAI Responses API
+routes but not Gateway chat/embeddings; a future Codex model rename should not require a
+broker release. If Codex starts using a new endpoint, we want an explicit 403 + smoke-test
+failure rather than silently opening arbitrary OpenAI routes.
 
 **Activation.** Broker is on iff `RUNNER_LLM_BROKER_PUBLIC_URL ?? RENDER_EXTERNAL_URL`
 is set AND `RUNNER_LLM_BROKER_ENABLED !== false`. Local dev has no E2B-reachable URL →
@@ -65,8 +72,29 @@ local `.env` the runner also loads.)
 | Local dev | Fallback to direct key injection when no public URL |
 | Global sandbox keys | Removed on the brokered path (kept on legacy fallback for one release) |
 | Token format | Opaque `ocbt_` + 48 hex, SHA-256 hash at rest, DB-validated (multi-instance) |
+| Token scope | Provider + tool endpoint family; no exact model binding in v1 |
 | Per-request pricing | Gateway-reported cost → `MODEL_PRICING` → `AUX_GATEWAY_MODEL_PRICING` → zero (never estimate) |
-| Budgets | Schema supports `budgetUsdMicros` per token (402 on exhaustion); not set in v1 |
+| Budgets | Hard-coded `$5` default per broker token/delegation; explicit lower overrides allowed |
+| Codex broker env var | `OPENCOMPANY_LLM_BROKER_TOKEN` via Codex provider `env_key`, not `CODEX_API_KEY` |
+| Infra placement | Keep broker in the runner for v1; split only if broker traffic/ownership becomes independently scaling |
+
+## Infra placement
+
+The runner is the right home for v1.
+
+- It already owns the session execution lease, sandbox lifecycle, tool timeouts, abort/archive
+  paths, and the DB writes that settle model/tool/sandbox usage. Putting the broker here keeps
+  the token lifecycle and the billable row in one data plane.
+- It is long-lived on Render, which is what streaming model calls and E2B command streams need.
+  The Next.js API layer is the wrong fit: serverless request duration, streaming behavior,
+  deployment coupling, and public web auth concerns would all become harder.
+- A dedicated broker service is a good future extraction only if broker traffic needs independent
+  scaling, multi-region routing, or provider governance separate from session execution. Today it
+  would add another deployable, DB client, secret surface, and cross-service settlement protocol
+  before the product has proven Codex volume.
+
+So the boundary is: **web starts sessions, runner executes and brokers session-owned model
+traffic, Postgres remains the accounting source of truth.**
 
 ## Progress
 
@@ -77,7 +105,9 @@ local `.env` the runner also loads.)
 - [x] `apps/runner/src/llm-broker.ts` — routes, auth matrix, upstream pinning,
       `include_usage` injection, `tee()` SSE passthrough (proven byte-identical under test)
 - [x] `llm-broker-tokens.ts` — mint/validate/spend/revoke/settle store + `settled_at` CAS,
-      `withBrokerDelegation` wrapper
+      `withBrokerDelegation` wrapper, default `$5` token budget
+- [x] Tool-scoped endpoint authorization (`codex_coder` → Responses, `opencode_coder` → chat,
+      `memory` → chat/embeddings) without exact model binding
 - [x] `llm-broker-usage.ts` — usage parsers (chat SSE, Responses API `response.completed`,
       embeddings, gateway cost field) + pricing
 - [x] Billing: `HostedToolCostSource` += `broker_metered`; `AUX_GATEWAY_MODEL_PRICING`
@@ -97,14 +127,13 @@ local `.env` the runner also loads.)
 - [ ] Rebase `louismorgner/codex-tool-plan` (PR #424) onto the broker infra
 - [ ] Write `${CODEX_HOME}/config.toml` custom provider:
       `model_provider = "opencompany"`, `base_url = <publicUrl>/broker/openai/v1`,
-      `env_key = "CODEX_API_KEY"`, `wire_api = "responses"` — **verify exact config
+      `env_key = "OPENCOMPANY_LLM_BROKER_TOKEN"`, `wire_api = "responses"` — **verify exact config
       schema against the pinned `@openai/codex@0.132.0` first**
-- [ ] `CODEX_API_KEY` env carries the broker token; relax the key-required guard to
+- [ ] `OPENCOMPANY_LLM_BROKER_TOKEN` env carries the broker token; relax the key-required guard to
       "broker active OR raw key present"
 - [ ] `codexHostedToolUsage` → display-only (cost 0, `broker_metered`) when brokered
 - [ ] Infisical `prod` `/runner`: add `OPENAI_CODEX_API_KEY` as a **budget-capped
-      OpenAI project key** (blast-radius cap + leak detector via project-spend
-      reconciliation)
+      OpenAI project key** (blast-radius cap; reconciliation/alerts can follow after v1)
 
 ### ⬜ Phase 3 — Preview verification (after #439 deploys to a preview)
 
@@ -116,6 +145,8 @@ Run an opencode delegation + a memory query on a PR preview (preview runner gets
       `metadata.brokerTokenId`
 - [ ] The JSONL display row records cost 0 (`broker_metered`)
 - [ ] Inside the sandbox: `env | grep -c 'VERCEL\|E2B'` → 0
+- [ ] During Codex invocation, `OPENCOMPANY_LLM_BROKER_TOKEN` is present and `CODEX_API_KEY`
+      / `OPENAI_CODEX_API_KEY` are absent
 - [ ] Session cost UI shows the brokered cost exactly once
 - [ ] Watch opencode TTFT / long-SSE behavior through Render's proxy (latency hop)
 
@@ -123,12 +154,16 @@ Run an opencode delegation + a memory query on a PR preview (preview runner gets
 
 - [ ] Drop the legacy *global* sandbox key injection unconditionally (the per-tool
       direct-injection fallback stays as the documented local-dev path)
-- [ ] Consider per-delegation budgets (`budgetUsdMicros` at mint — one-line change)
 - [ ] Optional: label `operation: "brokered"` nicely in the web tool-usage breakdown
+- [ ] Optional: project-spend reconciliation alert: OpenAI project spend vs
+      `llm_broker_requests` totals, unparsed usage count, and record-spend failures
 
 ## Open risks / watch items
 
-- **Codex config.toml schema** unverified against the pinned CLI version (Phase 2 gate).
+- **Codex config.toml smoke** still required against the pinned CLI version (Phase 2 gate).
+  Official docs and package strings confirm the relevant custom-provider keys
+  (`model_providers`, `base_url`, `env_key`, `wire_api = "responses"`), but only a live
+  `codex exec` proves streaming + usage shape end-to-end.
 - **Render proxy + long SSE**: model streams emit continuously so idle timeouts should
   not trigger; verify on preview with a long opencode run.
 - **Gateway `stream_options.include_usage`** for non-OpenAI routed models (e.g.

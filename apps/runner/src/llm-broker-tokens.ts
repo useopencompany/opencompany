@@ -23,6 +23,7 @@ const brokerLogger = createLogger({ service: "opencompany-runner", runtime: "llm
 export type BrokerProvider = "gateway" | "openai";
 
 const TOKEN_PREFIX = "ocbt_";
+export const DEFAULT_BROKER_TOKEN_BUDGET_USD_MICROS = 5_000_000;
 
 export type MintBrokerTokenInput = {
   sessionId: string;
@@ -47,6 +48,7 @@ export type ValidatedBrokerToken = {
   id: string;
   sessionId: string;
   workspaceId: string;
+  toolName: string;
   provider: BrokerProvider;
   budgetUsdMicros: number | null;
   spentUsdMicros: number;
@@ -128,6 +130,13 @@ export function hashBrokerToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+function brokerTokenBudgetUsdMicros(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_BROKER_TOKEN_BUDGET_USD_MICROS;
+  }
+  return Math.min(Math.round(value), DEFAULT_BROKER_TOKEN_BUDGET_USD_MICROS);
+}
+
 const TOTALS_COLUMNS = sql`
   id,
   session_id AS "sessionId",
@@ -167,6 +176,7 @@ export function createDbBrokerTokenStore(): BrokerTokenStore {
           id,
           session_id AS "sessionId",
           workspace_id AS "workspaceId",
+          tool_name AS "toolName",
           provider,
           budget_usd_micros AS "budgetUsdMicros",
           spent_usd_micros AS "spentUsdMicros"
@@ -324,7 +334,7 @@ export async function mintBrokerToken(
     toolCallId: input.toolCallId,
     toolName: input.toolName,
     provider: input.provider,
-    budgetUsdMicros: input.budgetUsdMicros ?? null,
+    budgetUsdMicros: brokerTokenBudgetUsdMicros(input.budgetUsdMicros),
     expiresAt,
   });
   return { tokenId, token, expiresAt };
