@@ -233,6 +233,12 @@ const LAST_TURN_MIN_HEIGHT_FACTOR = 0.5;
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
+  // When the snapshot was last fetched (react-query `dataUpdatedAt`, epoch ms). The
+  // stream/snapshot authority rule reads it: an overlay that has delivered nothing
+  // since this time AND is behind on durable events is a dead stream's leftovers and
+  // must not override the snapshot. Defaults to 0 ("snapshot age unknown"), which
+  // keeps the stream authoritative — the pre-existing behavior.
+  detailUpdatedAt?: number;
 };
 
 type OptimisticUserMessage = SessionMessage & {
@@ -282,6 +288,7 @@ function SessionViewQuery({
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
   const {
     data: detail,
+    dataUpdatedAt,
     isPending,
     error,
     refetch,
@@ -293,6 +300,12 @@ function SessionViewQuery({
     // and is refetched on turn completion to refresh those aggregates.
     queryFn: () => fetchAgentSession(sessionId),
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
+    // Overrides the app-wide `refetchOnWindowFocus: false`: the open session is the
+    // one place a stale snapshot actively misleads. If the Durable Stream died while
+    // the tab was hidden (see useSessionStream), this focus refetch is what brings
+    // back the turn's true outcome — the authority rule in SessionViewContentBody
+    // then lets the fresher snapshot beat the dead stream's frozen "running" state.
+    refetchOnWindowFocus: true,
     // Instant paint from TanStack DB: while the server detail (transcript history
     // floor + usage/cost aggregates) is in flight, render the session chrome from
     // the synced collections. placeholderData (not initialData) keeps the query
@@ -345,7 +358,14 @@ function SessionViewQuery({
     );
   }
 
-  return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
+  return (
+    <SessionViewContent
+      key={detail.session.id}
+      detail={detail}
+      workspaceId={workspaceId}
+      detailUpdatedAt={dataUpdatedAt}
+    />
+  );
 }
 
 export function SessionViewContent(props: SessionViewContentProps) {
@@ -356,7 +376,11 @@ export function SessionViewContent(props: SessionViewContentProps) {
   );
 }
 
-function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
+function SessionViewContentBody({
+  detail,
+  workspaceId,
+  detailUpdatedAt = 0,
+}: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const surface = useSessionSurface();
@@ -571,24 +595,50 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // deltas still flow.
     //
     // Status/error are scalars, not a union, so they need an explicit authority
-    // rule. The stream's scalar status/lastError become authoritative only once it
-    // has actually reduced a status-bearing event (`statusObserved`) — NOT merely
-    // once it has emitted any event. The distinction matters because, with
-    // `seedFromEnd`, the stream tails from the current end without replaying history,
-    // so its scalars start at the empty seed (`"created"` / `null`); a lone token or
-    // usage delta would otherwise flip authority to that seed and momentarily blank
-    // out (or wrongly clear) the snapshot's real status/error — the start-of-session
-    // flicker. Until the stream genuinely knows the status, the snapshot stays the
-    // source of truth; once it does, the live stream wins (e.g. a brand-new turn, or
-    // an error and its recovery).
+    // rule, in two parts:
+    //
+    // 1. The stream's scalars become authoritative only once it has actually reduced
+    //    a status-bearing event (`statusObserved`) — NOT merely once it has emitted
+    //    any event. With `seedFromEnd` the stream tails from the current end without
+    //    replaying history, so its scalars start at the empty seed (`"created"` /
+    //    `null`); a lone token or usage delta would otherwise flip authority to that
+    //    seed and momentarily blank out (or wrongly clear) the snapshot's real
+    //    status/error — the start-of-session flicker.
+    //
+    // 2. The stream keeps that authority only while it is NOT provably stale. A
+    //    subscription can die (hidden-tab pause/resume race, exhausted retry budget,
+    //    zombie connection after sleep) and freeze on its last observed state —
+    //    typically "running" mid-turn. Without a staleness check, the focus refetch
+    //    bringing the finished turn would be ignored forever (the frozen "thinking"
+    //    spinner). The stream is stale exactly when the snapshot has seen a NEWER
+    //    durable event (latestEventId beyond the overlay's durable high-water) AND
+    //    the stream has delivered nothing since that snapshot was fetched. The
+    //    delivery-time clause protects the live path: web/reaper appends ride with
+    //    id null, so a healthy stream can be "behind" on durable ids while clearly
+    //    ahead in time (e.g. the just-sent user message before the runner's first
+    //    durable event) — it stays authoritative. A stale overlay also loses the
+    //    per-message merge preference, so a frozen partial assistant message yields
+    //    to the snapshot's final content.
+    let overlayLatestEventId = 0;
+    for (const event of streamState.events) {
+      if (typeof event.id === "number" && event.id > overlayLatestEventId) {
+        overlayLatestEventId = event.id;
+      }
+    }
+    const streamIsStale =
+      detail.latestEventId > overlayLatestEventId &&
+      (streamState.lastEventReceivedAt ?? 0) < detailUpdatedAt;
+    const streamIsAuthoritative = streamState.statusObserved && !streamIsStale;
     return {
       events: mergeEvents(detail.events, streamState.events),
-      messages: mergeMessages(detail.messages, streamState.messages),
+      messages: streamIsStale
+        ? mergeMessages(streamState.messages, detail.messages)
+        : mergeMessages(detail.messages, streamState.messages),
       ...aggregates,
-      currentStatus: streamState.statusObserved ? streamState.currentStatus : detail.session.status,
-      lastError: streamState.statusObserved ? streamState.lastError : detail.session.lastError,
+      currentStatus: streamIsAuthoritative ? streamState.currentStatus : detail.session.status,
+      lastError: streamIsAuthoritative ? streamState.lastError : detail.session.lastError,
     };
-  }, [detail, streamState]);
+  }, [detail, streamState, detailUpdatedAt]);
   const runtime = useMemo(() => {
     const pendingOptimisticMessages = optimisticUserMessages.filter(
       (message) => !hasDurableUserMessage(baseRuntime.messages, message),
@@ -1021,9 +1071,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     };
   }, [acceptFiles]);
 
-  // The Durable Stream self-recovers (the client reconnects + resumes from its
-  // offset) and refresh/visibility recovery is no longer needed — a refresh
-  // replays the whole transcript from the stream.
+  // Durable Stream recovery lives in useSessionStream: the client reconnects +
+  // resumes from its offset on transient failures, and a DEAD subscription (the
+  // hidden-tab pause/resume race, an exhausted retry budget) is re-opened when the
+  // tab regains visibility/focus. The detail query's refetchOnWindowFocus plus the
+  // staleness-gated authority rule in baseRuntime cover the gap until that
+  // re-subscription catches up.
 
   useEffect(() => {
     if (!attachMenuOpen) return;
@@ -1095,6 +1148,26 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     hasRunningAssistantMessage,
     showWaitingForAssistant,
   ]);
+
+  // Open at bottom: when a chat is first opened (or switched to), land on the newest
+  // message — once per session. Runs in useLayoutEffect (before paint) so there is no
+  // visible top→bottom jump. Keyed on session.id and guarded by a ref so it never
+  // re-fires on later renders (the streaming follow owns those) and never fights the
+  // send-snap (which positions the view itself on send).
+  // Deps use `hasMessages` (a boolean) not the visibleMessages array, so it fires on the
+  // first-content flip and on session change — not on every streamed delta.
+  const hasMessages = visibleMessages.length > 0;
+  const initialScrollSessionRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (pendingScrollMessageId) return; // a send-snap owns this frame
+    if (initialScrollSessionRef.current === session.id) return; // already snapped this chat
+    if (!hasMessages) return; // wait until content exists
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    isPinnedAtBottomRef.current = true;
+    initialScrollSessionRef.current = session.id;
+  }, [session.id, hasMessages, pendingScrollMessageId]);
 
   // Keep the reserved-space height (--chat-vh) in sync with the scroll container's own
   // height. A single ResizeObserver means the CSS min-height on the last turn recomputes

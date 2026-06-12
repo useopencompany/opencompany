@@ -835,12 +835,24 @@ function renderSessionViewContent(
   options: {
     personalAgent?: PersonalAgentContextValue;
     workspaceSkills?: AgentSkillCatalogEntry[];
+    // Snapshot fetch time (react-query dataUpdatedAt) for the stream-staleness
+    // authority rule. Omitted (0) = "snapshot age unknown" → stream stays
+    // authoritative, matching the pre-staleness behavior most tests assume.
+    detailUpdatedAt?: number;
   } = {},
 ) {
   streamMock.status = streamStatus;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(["workspace-skills", "wks_test"], options.workspaceSkills ?? []);
-  const content = <SessionViewContent detail={detail} workspaceId="wks_test" />;
+  const content = (
+    <SessionViewContent
+      detail={detail}
+      workspaceId="wks_test"
+      {...(options.detailUpdatedAt !== undefined
+        ? { detailUpdatedAt: options.detailUpdatedAt }
+        : {})}
+    />
+  );
   return render(
     <QueryClientProvider client={queryClient}>
       {options.personalAgent ? (
@@ -1096,6 +1108,102 @@ describe("SessionViewContent — #306: startup-status snapshot must not seedFrom
 
     expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
     expect(screen.getByText("Here's what I'll do.")).toBeInTheDocument();
+  });
+});
+
+// A Durable Stream subscription can die while the tab is hidden (the client's
+// pause/resume race, an exhausted retry budget) and freeze on its last observed
+// state — typically "running" mid-turn. On return, the focus refetch brings the
+// finished turn in the snapshot; the merge must let that strictly-fresher snapshot
+// beat the dead overlay (scalars AND message copies) instead of showing the frozen
+// thinking spinner forever. A LIVE stream that is merely behind on durable ids
+// (web appends ride with id null) must keep authority, or the just-sent-message
+// flow would regress to "Stopped before finishing".
+describe("SessionViewContent — dead-stream overlay vs fresher snapshot", () => {
+  const userMessage = {
+    id: "msg_user",
+    role: "user",
+    content: "run the report",
+    status: "completed",
+    createdAt: "2026-06-04T10:00:00.000Z",
+  };
+
+  function fresherCompletedDetail() {
+    return makeDetail({
+      session: makeSession({ id: "sess_frozen", status: "completed", lastError: null }),
+      messages: [
+        userMessage,
+        {
+          id: "msg_assistant",
+          role: "assistant",
+          content: "All done — here is the report.",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:01:30.000Z",
+        },
+      ],
+      // The snapshot has seen durable events beyond the overlay's high-water (5).
+      latestEventId: 9,
+    });
+  }
+
+  function frozenRunningOverlay(lastEventReceivedAt: number) {
+    return emptyStreamState({
+      events: [
+        {
+          id: 5,
+          type: "message.created",
+          messageId: "msg_assistant",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          payload: { messageId: "msg_assistant", role: "assistant", status: "running" },
+        },
+      ],
+      messages: [
+        userMessage,
+        makeRunningAssistantMessage({
+          id: "msg_assistant",
+          content: "Working on it",
+          status: "running",
+          createdAt: "2026-06-04T10:00:01.000Z",
+        }),
+      ],
+      currentStatus: "running",
+      statusObserved: true,
+      lastEventReceivedAt,
+    });
+  }
+
+  it("renders the snapshot's finished turn when the overlay is dead (behind AND silent since the fetch)", () => {
+    // Overlay last delivered at t=1000; snapshot fetched at t=2000 with newer events.
+    streamMock.state = frozenRunningOverlay(1_000);
+    renderSessionViewContent(fresherCompletedDetail(), "error", { detailUpdatedAt: 2_000 });
+
+    // The final assistant content (snapshot copy) wins over the frozen partial.
+    expect(screen.getByText("All done — here is the report.")).toBeInTheDocument();
+    expect(screen.queryByText("Working on it")).not.toBeInTheDocument();
+    // No thinking spinner, no misread stop notice.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+  });
+
+  it("keeps a live-but-id-behind overlay authoritative (delivered since the snapshot fetch)", () => {
+    // Same id gap, but the overlay delivered AFTER the snapshot was fetched — it is
+    // live (e.g. the id-null web append path), so its running state must win.
+    streamMock.state = frozenRunningOverlay(3_000);
+    renderSessionViewContent(fresherCompletedDetail(), "live", { detailUpdatedAt: 2_000 });
+
+    expect(screen.getByText("Working on it")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("keeps stream authority when the snapshot fetch time is unknown (default prop)", () => {
+    // Without detailUpdatedAt the staleness clause must never fire — pre-existing
+    // behavior for callers that do not thread the fetch time through.
+    streamMock.state = frozenRunningOverlay(0);
+    renderSessionViewContent(fresherCompletedDetail(), "live");
+
+    expect(screen.getByText("Working on it")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 });
 
@@ -2116,5 +2224,66 @@ describe("pastedTextFile — oversized paste → attachment", () => {
       typeof pastedTextFile
     >[1];
     expect(pastedTextFile("more text", pending).name).toBe("pasted-text-2.txt");
+  });
+});
+
+// ── Open chat scrolled to the bottom ────────────────────────────────────────
+describe("SessionViewContent — opens a chat scrolled to the bottom", () => {
+  let scrollToSpy: ReturnType<typeof vi.fn>;
+  let originalScrollTo: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    scrollToSpy = vi.fn();
+    originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo");
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollToSpy,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 2000,
+    });
+  });
+
+  afterEach(() => {
+    if (originalScrollTo) {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
+    } else {
+      // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+      delete (HTMLElement.prototype as unknown as { scrollTo?: unknown }).scrollTo;
+    }
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { clientHeight?: unknown }).clientHeight;
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { scrollHeight?: unknown }).scrollHeight;
+    vi.clearAllMocks();
+  });
+
+  it("snaps an idle session with existing messages to the bottom on open", async () => {
+    const detail = makeDetail({
+      messages: [
+        { id: "m_user", role: "user", content: "Question", status: "completed" },
+        { id: "m_assistant", role: "assistant", content: "Answer", status: "completed" },
+      ],
+    });
+    streamMock.status = "live";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      const wentToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(wentToBottom).toBe(true);
+    });
   });
 });

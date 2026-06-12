@@ -423,6 +423,7 @@ function SidebarContent({
   onArchive: (sessionId: string, active: boolean) => void;
 }) {
   const pathname = usePathname();
+  const { workspaceId } = useWorkspaceContext();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
@@ -606,6 +607,7 @@ function SidebarContent({
             userName={userName}
             userEmail={userEmail}
             subtitle={workspaceName}
+            workspaceId={workspaceId}
             trailing={
               <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
                 <button

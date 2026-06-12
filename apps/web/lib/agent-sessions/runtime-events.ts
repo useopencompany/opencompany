@@ -82,6 +82,12 @@ export type SessionRuntimeState = {
   // token/usage delta alone leaves it false), so the displayed status/error can
   // never momentarily regress to the seed and flicker. See the merge in SessionView.
   statusObserved: boolean;
+  // Wall-clock (epoch ms) of the last batch the stream consumer delivered. Stamped by
+  // subscribeSessionStream (NOT the pure reducer), so the view can tell a live overlay
+  // from a dead/stalled one: if the server snapshot was fetched after the stream last
+  // delivered anything AND carries newer durable events, the snapshot — not the stale
+  // overlay — is authoritative. Absent on states never touched by the stream consumer.
+  lastEventReceivedAt?: number;
 };
 
 export type SessionAggregateSnapshot = {
@@ -1752,8 +1758,12 @@ function describeMemoryToolCall(args: string) {
   const command = argv[0];
   switch (command) {
     case "query": {
-      const query = findMemoryPositionalArg(argv, 1);
-      return query ? `Looking in memory for “${truncateLabelText(query)}”` : "Looking in memory";
+      const query = findMemoryPositionalArg(argv, 1) || firstCliOptionValue(argv, "--text");
+      if (query) return `Looking in memory for “${truncateLabelText(query)}”`;
+      // A text-less query with --since is a recency listing, not a search.
+      return firstCliOptionValue(argv, "--since")
+        ? "Reviewing recent memory updates"
+        : "Looking in memory";
     }
     case "get": {
       const id = findMemoryPositionalArg(argv, 1);
@@ -1832,6 +1842,7 @@ const MEMORY_CLI_VALUE_OPTIONS = new Set([
   "--status",
   "--subject",
   "--summary",
+  "--text",
   "--to",
   "--truth",
   "--type",
