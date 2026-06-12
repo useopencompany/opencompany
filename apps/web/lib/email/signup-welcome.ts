@@ -10,7 +10,7 @@ import { renderSignupWelcomeEmail } from "@/lib/email/templates/signup-welcome";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
-const DEFAULT_WELCOME_FROM = "Louis from OpenCompany <louis@updates.opencompany.cloud>";
+const DEFAULT_WELCOME_FROM = "Louis from opencompany <louis@updates.opencompany.cloud>";
 const DEFAULT_REPLY_TO = "louis@opencompany.cloud";
 
 export type SignupWelcomeEmailInput = {

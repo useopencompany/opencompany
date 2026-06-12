@@ -1,4 +1,4 @@
-const SIGNUP_WELCOME_SUBJECT = "Welcome to OpenCompany";
+const SIGNUP_WELCOME_SUBJECT = "Welcome to opencompany";
 
 function normalizeName(value: string | null | undefined) {
   const next = value?.trim();
@@ -21,7 +21,7 @@ export function renderSignupWelcomeEmail(input: { firstName?: string | null | un
   const text = [
     greeting,
     "",
-    "Thanks for signing up for OpenCompany.",
+    "Thanks for signing up for opencompany.",
     "",
     "I wanted to send a quick personal note: every piece of feedback you submit through the app goes straight to me, and I will move fast on it.",
     "",
@@ -35,7 +35,7 @@ export function renderSignupWelcomeEmail(input: { firstName?: string | null | un
     '<html lang="en">',
     "<body>",
     `<p>${escapeHtml(greeting)}</p>`,
-    "<p>Thanks for signing up for OpenCompany.</p>",
+    "<p>Thanks for signing up for opencompany.</p>",
     "<p>I wanted to send a quick personal note: every piece of feedback you submit through the app goes straight to me, and I will move fast on it.</p>",
     "<p>You can also just reply to this email any time.</p>",
     "<p>Louis</p>",

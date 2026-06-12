@@ -57,7 +57,7 @@ describe("renderSignupWelcomeEmail", () => {
   it("uses the first name when available", () => {
     const email = renderSignupWelcomeEmail({ firstName: "Ada" });
 
-    expect(email.subject).toBe("Welcome to OpenCompany");
+    expect(email.subject).toBe("Welcome to opencompany");
     expect(email.text).toContain("Hi Ada,");
     expect(email.html).toContain("<p>Hi Ada,</p>");
   });
@@ -76,7 +76,7 @@ describe("sendSignupWelcomeEmail", () => {
     process.env = { ...originalEnv };
     process.env.RESEND_API_KEY = "re_test";
     process.env.RESEND_REGISTERED_USERS_SEGMENT_ID = "seg_registered";
-    process.env.RESEND_WELCOME_FROM = "Louis from OpenCompany <louis@updates.opencompany.cloud>";
+    process.env.RESEND_WELCOME_FROM = "Louis from opencompany <louis@updates.opencompany.cloud>";
     process.env.RESEND_REPLY_TO = "louis@opencompany.cloud";
   });
 
@@ -106,9 +106,9 @@ describe("sendSignupWelcomeEmail", () => {
     expect(client.contacts.segments.add).not.toHaveBeenCalled();
     expect(client.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: "Louis from OpenCompany <louis@updates.opencompany.cloud>",
+        from: "Louis from opencompany <louis@updates.opencompany.cloud>",
         to: "ada@example.com",
-        subject: "Welcome to OpenCompany",
+        subject: "Welcome to opencompany",
         replyTo: "louis@opencompany.cloud",
         text: expect.stringContaining("feedback you submit through the app"),
         html: expect.stringContaining("feedback you submit through the app"),
