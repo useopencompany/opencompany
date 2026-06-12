@@ -546,19 +546,23 @@ function PersonalSidebarView({
               </span>
             ) : null}
           </button>
-          {/* The agent's identity row: avatar + name, right under Home, so the agent reads as a
-              persistent "who" rather than a config panel buried in settings. */}
           <button
             type="button"
-            onClick={() => router.push(personalPaths.agent)}
+            onClick={() => router.push(personalPaths.brain)}
             className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-              activePanel === "agent"
+              activePanel === "brain"
                 ? "bg-surface-active text-ink"
                 : "text-ink/90 hover:bg-surface-hover hover:text-ink"
             }`}
           >
-            <PersonalAgentAvatar name={agent.name} size={14} />
-            <span className="truncate tracking-[-0.005em]">{agent.name}</span>
+            <Brain
+              size={14}
+              strokeWidth={1.75}
+              className={
+                activePanel === "brain" ? "text-ink" : "text-ink/60 group-hover:text-ink/80"
+              }
+            />
+            <span className="truncate tracking-[-0.005em]">Personal Brain</span>
           </button>
         </nav>
 
@@ -589,6 +593,18 @@ function PersonalSidebarView({
           )}
 
           <Section title="Configuration">
+            <button
+              type="button"
+              onClick={() => router.push(personalPaths.agent)}
+              className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                activePanel === "agent"
+                  ? "bg-surface-active text-ink"
+                  : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+              }`}
+            >
+              <PersonalAgentAvatar name={agent.name} size={14} />
+              <span className="truncate tracking-[-0.005em]">Behavior</span>
+            </button>
             <CapabilityNavRow
               icon={ScrollText}
               label="Soul"
@@ -604,12 +620,6 @@ function PersonalSidebarView({
                 onClick={() => router.push(personalPaths.memory)}
               />
             )}
-            <CapabilityNavRow
-              icon={Brain}
-              label="Personal Brain"
-              active={activePanel === "brain"}
-              onClick={() => router.push(personalPaths.brain)}
-            />
             <CapabilityGroupRow
               icon={Blocks}
               label="Capabilities"
