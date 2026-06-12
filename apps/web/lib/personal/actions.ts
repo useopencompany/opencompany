@@ -184,9 +184,9 @@ type ResetPersonalAgentResult = { ok: true } | { ok: false; error: string };
  * files, and its messaging channels. Inbox items aren't FK-tied to the agent (they're scoped to
  * the user), so they're cleared separately.
  *
- * On the next `/personal` (or `/onboarding/personal`) load, `ensurePersonalAgent` provisions a
- * fresh agent with a new id/path and the default behavior — callers should follow up with a full
- * navigation so the layout re-scaffolds. We intentionally do NOT reuse `deleteAgent` — it
+ * On the next `/personal` load, `ensurePersonalAgent` provisions a fresh agent with a new id/path
+ * and the default behavior — callers should follow up with a full navigation so the layout
+ * re-scaffolds. We intentionally do NOT reuse `deleteAgent` — it
  * requires admin role and enqueues GitHub sync jobs + E2B sandbox archival, none of which apply
  * to the local-only personal agent. Any live E2B sandbox for a deleted session is simply left to
  * expire on its own.
@@ -242,6 +242,7 @@ const PERSONAL_INTEGRATION_MENTIONS = {
   posthog: "@posthog",
   betterstack: "@betterstack",
   braintrust: "@braintrust",
+  notion: "@notion",
 } as const;
 
 export type PersonalIntegrationId = keyof typeof PERSONAL_INTEGRATION_MENTIONS;
@@ -260,6 +261,7 @@ const PERSONAL_TOOL_EXCLUDED_TOOL_IDS = new Set<AgentToolId>([
   "posthog",
   "betterstack",
   "braintrust",
+  "notion",
 ]);
 
 const PERSONAL_ADDABLE_TOOL_IDS = new Set(

@@ -115,6 +115,21 @@ const betterStackAgentConfig: AgentConfig = {
   ],
 };
 
+const notionAgentConfig: AgentConfig = {
+  ...agentConfig,
+  title: "Notion",
+  instructions: "Use @notion.",
+  tools: [
+    {
+      id: "notion",
+      type: "mcp",
+      server: "notion",
+      label: "notion",
+      description: "Use workspace-configured Notion MCP tools.",
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", credentialKey());
@@ -646,6 +661,43 @@ describe("createMcpToolSet", () => {
 
     await mcpTools.close();
   });
+
+  it("loads Notion MCP OAuth tools with dynamic client credentials", async () => {
+    db.queryResults = [[notionServerRow()], [notionOAuthConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({
+      tools: [{ name: "notion-search", description: "Search Notion" }],
+    } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      "notion-search": { description: "Search Notion", execute: vi.fn() },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput(notionAgentConfig));
+
+    expect((mcpTools.tools as ToolSet).notion__search_tools).toBeDefined();
+    expect((mcpTools.tools as ToolSet).notion__use_tool).toBeDefined();
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          type: "http",
+          url: "https://mcp.notion.com/mcp",
+          authProvider: expect.any(Object),
+        }),
+      }),
+    );
+    const call = vi.mocked(createMCPClient).mock.calls.at(-1)?.[0] as {
+      transport?: { authProvider?: { tokens: () => unknown; clientInformation: () => unknown } };
+    };
+    expect(call.transport?.authProvider?.tokens()).toEqual({
+      access_token: "notion_access",
+      refresh_token: "notion_refresh",
+      token_type: "Bearer",
+    });
+    expect(call.transport?.authProvider?.clientInformation()).toEqual({
+      client_id: "notion_client",
+    });
+
+    await mcpTools.close();
+  });
 });
 
 function baseInput(
@@ -759,6 +811,34 @@ function betterStackOAuthConnectionRow() {
       },
       "oauth",
       "wmcps_betterstack",
+    ),
+  };
+}
+
+function notionServerRow() {
+  return {
+    id: "wmcps_notion",
+    endpointUrl: "https://mcp.notion.com/mcp",
+    status: "configured",
+  };
+}
+
+function notionOAuthConnectionRow() {
+  return {
+    serverId: "wmcps_notion",
+    credentialKind: "oauth",
+    encryptionKeyVersion: 1,
+    encryptedPayload: encryptPayload(
+      {
+        clientInformation: { client_id: "notion_client" },
+        tokens: {
+          access_token: "notion_access",
+          refresh_token: "notion_refresh",
+          token_type: "Bearer",
+        },
+      },
+      "oauth",
+      "wmcps_notion",
     ),
   };
 }

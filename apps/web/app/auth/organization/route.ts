@@ -5,7 +5,6 @@ import {
   provisionDefaultOrganization,
   refreshIntoWorkspaceOrganization,
 } from "@/lib/auth";
-import { isPersonalFirst } from "@/lib/flags/personalFirst";
 
 export async function GET() {
   const session = await withAuth({ ensureSignedIn: true });
@@ -23,5 +22,5 @@ export async function GET() {
     redirect("/");
   }
 
-  redirect(isPersonalFirst(context.user) ? "/onboarding/personal" : "/onboarding");
+  redirect("/onboarding");
 }

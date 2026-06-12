@@ -2,18 +2,28 @@ import { BUILTIN_USE_TOOL_NAME, type RuntimeToolName } from "./tools";
 
 // Human-readable permission groups exposed to users, ordered from least to most
 // dangerous. Every concrete tool/action a provider exposes maps to exactly one group.
-export type PermissionGroup = "read" | "post" | "modify" | "admin";
+// "merge" is the shipping tier — actions that land changes on a production surface
+// (merging a PR, merging branches). It sits apart from "admin" so a workspace can
+// allow repo housekeeping while still gating every merge, or the reverse.
+export type PermissionGroup = "read" | "post" | "modify" | "merge" | "admin";
 
 // Per-group decision a workspace sets for a provider. "ask" pauses the run for an
 // in-chat approval; "deny" blocks the tool body from ever running.
 export type PolicyDecision = "allow" | "ask" | "deny";
 
-export const PERMISSION_GROUPS: readonly PermissionGroup[] = ["read", "post", "modify", "admin"];
+export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
+  "read",
+  "post",
+  "modify",
+  "merge",
+  "admin",
+];
 
 export const PERMISSION_GROUP_LABELS: Record<PermissionGroup, string> = {
   read: "Read",
   post: "Post",
   modify: "Modify",
+  merge: "Merge",
   admin: "Admin",
 };
 
@@ -21,6 +31,7 @@ export const PERMISSION_GROUP_DESCRIPTIONS: Record<PermissionGroup, string> = {
   read: "View and search data",
   post: "Create and send new content",
   modify: "Edit or update existing items",
+  merge: "Merge or ship changes",
   admin: "Manage settings, members, or delete",
 };
 
@@ -34,6 +45,7 @@ export const DEFAULT_GROUP_STANCE: Record<PermissionGroup, PolicyDecision> = {
   read: "allow",
   post: "ask",
   modify: "ask",
+  merge: "ask",
   admin: "ask",
 };
 
@@ -53,6 +65,10 @@ export type ProviderPermissionSpec = {
   // Anything not listed falls back to the verb heuristic.
   toolGroups?: Record<string, PermissionGroup>;
   permissionDescriptions?: Partial<Record<PermissionGroup, string>>;
+  // Per-provider display-label overrides for a group (e.g. GitHub renders the "post"
+  // tier as "Contribute"). The policy key stays the platform group; only the label
+  // shown to users and the model changes.
+  permissionLabels?: Partial<Record<PermissionGroup, string>>;
 };
 
 // Provider key used for sandbox-internal/built-in tools (file IO, shell). Not gated
@@ -306,12 +322,66 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       generate_permalink: "read",
     },
   },
+  notion: {
+    providerKey: "notion",
+    displayName: "Notion",
+    groups: ["read", "post", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      read: "Search and fetch pages, databases, comments, teamspaces, and users",
+      post: "Create pages, databases, views, and comments",
+      modify: "Update or move pages, data sources, and views",
+      admin: "Run unclassified Notion tools",
+    },
+    toolGroups: {
+      notion_search: "read",
+      notion_fetch: "read",
+      notion_query_data_sources: "read",
+      notion_query_database_view: "read",
+      notion_get_comments: "read",
+      notion_get_teams: "read",
+      notion_get_users: "read",
+      notion_get_user: "read",
+      notion_get_self: "read",
+      notion_create_pages: "post",
+      notion_duplicate_page: "post",
+      notion_create_database: "post",
+      notion_create_view: "post",
+      notion_create_comment: "post",
+      notion_update_page: "modify",
+      notion_move_pages: "modify",
+      notion_update_data_source: "modify",
+      notion_update_view: "modify",
+    },
+  },
   github: {
     providerKey: "github",
     displayName: "GitHub",
-    groups: ["read", "modify", "admin"],
+    // GitHub groups are risk tiers, not literal CRUD:
+    // - read:   anything that only views state.
+    // - post:   additive, reviewable contributions (push branches, open PRs/issues,
+    //           comment). Rendered as "Contribute" — this is the tier a coding agent
+    //           needs to do its job end to end without being able to ship anything.
+    // - modify: mutate existing items (edit/close/reopen/review) without shipping.
+    // - merge:  land code on a target branch (merging PRs/branches). Its own tier so a
+    //           workspace can gate every merge while still allowing housekeeping, or
+    //           allow merges without handing over settings/members/delete.
+    // - admin:  destroy or reconfigure — publishing a release is a supply-chain act,
+    //           dispatching a workflow is remote code execution, plus settings,
+    //           members, secrets, and deletion.
+    groups: ["read", "post", "modify", "merge", "admin"],
     gated: true,
-    // gh CLI and amp_coder map statically in classifyRuntimeTool; toolGroups is
+    permissionLabels: {
+      post: "Contribute",
+    },
+    permissionDescriptions: {
+      read: "View code, pull requests, issues, releases, and CI runs",
+      post: "Push branches, open pull requests and issues, and comment",
+      modify: "Edit, close, reopen, or review existing PRs and issues",
+      merge: "Merge pull requests into target branches",
+      admin: "Publish releases, run workflows, manage settings, or delete",
+    },
+    // gh CLI and the coder tools map statically in classifyRuntimeTool; toolGroups is
     // unused for GitHub since it is reached via first-party runtime tools.
   },
   exa: {
@@ -405,6 +475,13 @@ export function permissionDescriptionFor(providerKey: string, group: PermissionG
   );
 }
 
+export function permissionLabelFor(providerKey: string, group: PermissionGroup) {
+  return (
+    PROVIDER_PERMISSION_REGISTRY[providerKey]?.permissionLabels?.[group] ??
+    PERMISSION_GROUP_LABELS[group]
+  );
+}
+
 // First-party / built-in runtime tools mapped to a provider + group. Returning null
 // means the tool is never gated (always allowed) — e.g. delegation and tool help.
 // Exhaustive over RuntimeToolName so adding a runtime tool fails the build until it is
@@ -494,10 +571,12 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   // gate) lives in the tool itself, not the policy gate.
   update_agent_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // GitHub-effecting tools. gh is conservatively admin unless resolveToolDecision
-  // can classify the concrete CLI args; amp_coder writes code → modify.
+  // can classify the concrete CLI args. The coder tools push work branches and open
+  // draft PRs — additive, reviewable contributions that can never merge or change
+  // settings — so they sit in the "post" (Contribute) tier with `pr create`.
   gh: { providerKey: "github", group: "admin" },
-  amp_coder: { providerKey: "github", group: "modify" },
-  opencode_coder: { providerKey: "github", group: "modify" },
+  amp_coder: { providerKey: "github", group: "post" },
+  opencode_coder: { providerKey: "github", group: "post" },
   // Local-device tools: classified for event/UI labeling, but the workspace policy gate
   // short-circuits (provider is ungated). The real gate is the device daemon's verdict,
   // resolved per call by the runner before the tool starts.
@@ -810,19 +889,56 @@ function stripSqlComments(sql: string) {
   return sql.replace(/--[^\n\r]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
+// gh commands by risk tier. Anything not listed (and anything unparseable) falls
+// through to admin, which defaults to ask — notable fall-throughs by design:
+// `pr lock`, `release create/upload/delete` (publishing is supply chain),
+// `workflow run/enable/disable` and `repo sync` (remote code execution / ref writes),
+// `secret|variable set/delete`, `repo create/edit/delete/archive/rename`,
+// `label delete`, `cache delete`, and all of auth/config/alias/extension/ssh-key.
 const GH_READ_COMMANDS: Record<string, readonly string[]> = {
   pr: ["view", "list", "diff", "status", "checks"],
   issue: ["view", "list", "status"],
-  release: ["view", "list"],
-  repo: ["view", "list"],
+  release: ["view", "list", "download"],
+  repo: ["view", "list", "clone"],
+  run: ["view", "list", "watch", "download"],
+  workflow: ["view", "list"],
+  gist: ["view", "list"],
+  search: ["repos", "issues", "prs", "code", "commits"],
+  label: ["list"],
+  cache: ["list"],
+  secret: ["list"],
+  variable: ["list"],
+  org: ["list"],
+  project: ["view", "list", "item-list", "field-list"],
+  auth: ["status"],
 };
 
+// Bare top-level commands (no subcommand) that only view state, e.g. `gh status`.
+const GH_READ_BARE_COMMANDS = new Set(["status"]);
+
+// Additive, reviewable contributions: nothing here can change or ship existing work.
+const GH_POST_COMMANDS: Record<string, readonly string[]> = {
+  pr: ["create", "comment"],
+  issue: ["create", "comment", "develop"],
+  gist: ["create"],
+  repo: ["fork"],
+  label: ["create"],
+};
+
+// Mutations of existing items that still cannot land code on a protected surface.
+// `pr review` lives here (not post): an approval can satisfy branch protection.
 const GH_MODIFY_COMMANDS: Record<string, readonly string[]> = {
-  pr: ["create", "edit", "comment", "close", "reopen", "merge", "review"],
-  issue: ["create", "edit", "comment", "close", "reopen"],
-  release: ["create", "edit", "upload"],
-  gist: ["create", "edit"],
-  repo: ["fork", "clone"],
+  pr: ["edit", "close", "reopen", "ready", "review", "update-branch"],
+  issue: ["edit", "close", "reopen", "transfer", "pin", "unpin"],
+  release: ["edit"],
+  gist: ["edit", "rename"],
+  label: ["edit", "clone"],
+  run: ["rerun", "cancel"],
+};
+
+// Shipping: lands code on a target branch.
+const GH_MERGE_COMMANDS: Record<string, readonly string[]> = {
+  pr: ["merge"],
 };
 
 const GH_GLOBAL_OPTIONS_WITH_VALUE = new Set(["--config", "--hostname", "--repo", "-R"]);
@@ -837,13 +953,17 @@ export function classifyGitHubCliArgs(args: unknown): PermissionGroup {
   if (!command) return "admin";
 
   const [resource, action] = command;
-  if (resource === "api") return classifyGhApi(argv);
-  if (!action) return "admin";
-
   const normalizedResource = resource.toLowerCase();
+  if (normalizedResource === "api") return classifyGhApi(argv, action);
+  if (!action || action.startsWith("-")) {
+    return GH_READ_BARE_COMMANDS.has(normalizedResource) ? "read" : "admin";
+  }
+
   const normalizedAction = action.toLowerCase();
   if (GH_READ_COMMANDS[normalizedResource]?.includes(normalizedAction)) return "read";
+  if (GH_POST_COMMANDS[normalizedResource]?.includes(normalizedAction)) return "post";
   if (GH_MODIFY_COMMANDS[normalizedResource]?.includes(normalizedAction)) return "modify";
+  if (GH_MERGE_COMMANDS[normalizedResource]?.includes(normalizedAction)) return "merge";
   return "admin";
 }
 
@@ -867,11 +987,56 @@ function readGhCommand(argv: string[]): [string, string | undefined] | null {
   return null;
 }
 
-function classifyGhApi(argv: string[]): PermissionGroup {
-  const method = readGhApiMethod(argv);
-  if (!method) return hasGhApiRequestBody(argv) ? "modify" : "read";
+// REST path segments whose non-GET endpoints land code on a branch (PR merge, branch
+// merges). Routed to the dedicated "merge" tier so `api -X PUT repos/o/r/pulls/1/merge`
+// follows the same policy as `pr merge`.
+const GH_API_MERGE_SEGMENTS = new Set(["merge", "merges"]);
+
+// REST path segments whose non-GET endpoints touch security surfaces (secrets,
+// webhooks, deploy keys, collaborators, workflow dispatches, branch protection,
+// release publishing, repo transfer). Without this, `api -X POST repos/o/r/hooks`
+// would ride the post tier while the equivalent first-class command is admin. The
+// scan covers every argv token (including flag values) — a false positive only
+// escalates to a stricter tier, never the other way.
+const GH_API_SENSITIVE_SEGMENTS = new Set([
+  "secrets",
+  "hooks",
+  "keys",
+  "collaborators",
+  "dispatches",
+  "protection",
+  "releases",
+  "transfer",
+  "memberships",
+  "invitations",
+  "graphql",
+]);
+
+function ghApiTouchesSegments(argv: string[], segments: ReadonlySet<string>) {
+  return argv.some((arg) =>
+    arg
+      .toLowerCase()
+      .split(/[/?&=]/)
+      .some((segment) => segments.has(segment)),
+  );
+}
+
+function classifyGhApi(argv: string[], endpoint: string | undefined): PermissionGroup {
+  // Canonical GraphQL form (`gh api graphql ...`): queries are reads; anything carrying
+  // a `mutation` operation can express arbitrary writes (including merging PRs), so it
+  // classifies as admin. Non-canonical forms hit the sensitive-segment scan below.
+  if (endpoint?.toLowerCase() === "graphql") {
+    return argv.some((arg) => /\bmutation\b/i.test(arg)) ? "admin" : "read";
+  }
+  // gh defaults to GET without a body and POST with one.
+  const method = readGhApiMethod(argv) ?? (hasGhApiRequestBody(argv) ? "POST" : "GET");
   if (method === "GET") return "read";
-  if (method === "POST" || method === "PUT" || method === "PATCH") return "modify";
+  if (ghApiTouchesSegments(argv, GH_API_SENSITIVE_SEGMENTS)) return "admin";
+  if (method === "POST" || method === "PUT" || method === "PATCH") {
+    if (ghApiTouchesSegments(argv, GH_API_MERGE_SEGMENTS)) return "merge";
+    return method === "POST" ? "post" : "modify";
+  }
+  // DELETE and anything unrecognized — including DELETE on a merge path.
   return "admin";
 }
 
@@ -1007,7 +1172,7 @@ export function formatWorkspaceToolPolicyContext(input: {
           policy: input.policy,
           suspendable: input.suspendable,
         });
-        return `${PERMISSION_GROUP_LABELS[group]}=${formatPolicyDecision(decision)}`;
+        return `${permissionLabelFor(providerKey, group)}=${formatPolicyDecision(decision)}`;
       })
       .join(", ");
     return `- ${spec.displayName}: ${decisions}.`;
@@ -1154,7 +1319,7 @@ export function buildDeniedToolOutput(input: {
     error: {
       code: "permission_denied",
       recoverable: false,
-      message: `${reason} to run "${input.toolName}" (${provider} · ${PERMISSION_GROUP_LABELS[input.group]}). Do not retry this tool. Explain what you intended to do and ask the user to enable it in workspace settings, or take a different approach.`,
+      message: `${reason} to run "${input.toolName}" (${provider} · ${permissionLabelFor(input.providerKey, input.group)}). Do not retry this tool. Explain what you intended to do and ask the user to enable it in workspace settings, or take a different approach.`,
     },
   };
 }

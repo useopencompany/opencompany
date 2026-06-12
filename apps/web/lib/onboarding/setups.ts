@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
 
-// The catalogs that drive the personal-agent setup screens (/onboarding/personal):
+// The catalogs that drive personal-agent setup surfaces:
 //
 //  - ONBOARDING_SETUPS — the preset "starting points" shown on the agent-setup step. Picking one
 //    pre-selects its integrations, gives the first session a starter task, and feeds a "mode" intent
@@ -21,8 +21,8 @@ import type { PersonalIntegrationId } from "@/lib/personal/actions";
 //    scratch" is offered alongside these in the UI (it simply selects no preset).
 //  - ONBOARDING_INTEGRATIONS — the integrations/MCPs we support, shown as a connect step. Each row's
 //    checkbox enables it on the agent (writes its @mention at submit); `connectHref` is opened in a
-//    popup (target /onboarding/connected) so the user can authorize inline without the onboarding
-//    page itself ever navigating away.
+//    popup (target /onboarding/connected) so the user can authorize inline without the current page
+//    ever navigating away.
 
 export type OnboardingSetup = {
   id: string;
@@ -85,7 +85,7 @@ export type OnboardingIntegration = {
   icon: LucideIcon;
   // OAuth start route, opened in a popup window from the integrations step. Every start route lands
   // back on /onboarding/connected (a tiny page that messages the opener and closes itself), so the
-  // user authorizes inline without the onboarding page navigating. See PersonalOnboardingChat.
+  // user authorizes inline without the current page navigating.
   connectHref: string;
 };
 

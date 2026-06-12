@@ -43,6 +43,7 @@ import {
   removeBetterStackMcpConnection,
   removeBraintrustMcpConnection,
   removeLinearMcpToken,
+  removeNotionMcpConnection,
   removePostHogMcpConnection,
   removeSlackMcpConnection,
 } from "@/lib/mcp/actions";
@@ -227,8 +228,7 @@ export function PersonalCapabilityPanel({
 // Opens an integration's OAuth flow in a popup window and reports back when it lands on the
 // popup-closer page (/onboarding/connected, which postMessages the opener and closes itself). On a
 // successful connection we router.refresh() so the server re-derives connection state and the row
-// flips to "Connected" — without the integrations tab ever navigating away. Mirrors the inline
-// connect flow on /onboarding/personal (see PersonalOnboardingChat).
+// flips to "Connected" — without the integrations tab ever navigating away.
 function useConnectPopup() {
   const router = useRouter();
   const [connectingId, setConnectingId] = useState<PersonalIntegrationId | null>(null);
@@ -562,6 +562,7 @@ const MCP_DISCONNECT_ACTIONS: Partial<
   posthog: removePostHogMcpConnection,
   betterstack: removeBetterStackMcpConnection,
   braintrust: removeBraintrustMcpConnection,
+  notion: removeNotionMcpConnection,
 };
 
 async function disconnectIntegration(

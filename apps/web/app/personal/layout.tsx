@@ -78,6 +78,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     posthog: mcpSettings.posthog.configured,
     betterstack: mcpSettings.betterstack.configured,
     braintrust: mcpSettings.braintrust.configured,
+    notion: mcpSettings.notion.configured,
   };
 
   // Richer per-integration detail (accounts, repositories/calendars, MCP endpoints) for the

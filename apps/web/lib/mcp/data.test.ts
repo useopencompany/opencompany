@@ -31,12 +31,16 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
         mcpServerRow("wmcps_slack", "slack", "configured"),
         mcpServerRow("wmcps_posthog", "posthog", "configured"),
         mcpServerRow("wmcps_betterstack", "betterstack", "configured"),
+        mcpServerRow("wmcps_braintrust", "braintrust", "configured"),
+        mcpServerRow("wmcps_notion", "notion", "configured"),
       ],
       [
         { serverKey: "linear", kind: "bearer_token" },
         { serverKey: "slack", kind: "oauth" },
         { serverKey: "posthog", kind: "oauth" },
         { serverKey: "betterstack", kind: "oauth" },
+        { serverKey: "braintrust", kind: "oauth" },
+        { serverKey: "notion", kind: "oauth" },
       ],
     ];
 
@@ -62,6 +66,16 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
       serverId: "wmcps_betterstack",
       status: "configured",
     });
+    expect(settings.braintrust).toMatchObject({
+      configured: true,
+      serverId: "wmcps_braintrust",
+      status: "configured",
+    });
+    expect(settings.notion).toMatchObject({
+      configured: true,
+      serverId: "wmcps_notion",
+      status: "configured",
+    });
   });
 
   it("does not treat Linear credentials as Slack credentials", async () => {
@@ -82,7 +96,7 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
 
 function mcpServerRow(
   id: string,
-  serverKey: "linear" | "slack" | "posthog" | "betterstack",
+  serverKey: "linear" | "slack" | "posthog" | "betterstack" | "braintrust" | "notion",
   status: "configured" | "missing_credential" | "disabled" | "error",
 ) {
   return {

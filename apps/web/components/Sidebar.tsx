@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
+import { SidebarPreviewBadge } from "@/components/SidebarPreviewBadge";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
@@ -423,6 +424,7 @@ function SidebarContent({
   onArchive: (sessionId: string, active: boolean) => void;
 }) {
   const pathname = usePathname();
+  const { workspaceId } = useWorkspaceContext();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
@@ -476,6 +478,7 @@ function SidebarContent({
             >
               <PanelLeft size={15} strokeWidth={1.75} />
             </button>
+            <SidebarPreviewBadge />
             <SpaceSwitcher
               activeSpace="workspace"
               workspaceName={workspaceName}
@@ -606,6 +609,7 @@ function SidebarContent({
             userName={userName}
             userEmail={userEmail}
             subtitle={workspaceName}
+            workspaceId={workspaceId}
             trailing={
               <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
                 <button

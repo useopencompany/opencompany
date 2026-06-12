@@ -24,6 +24,10 @@ export type SessionMessage = {
     kind: "image" | "pdf" | "text";
     mediaType: string;
     filename: string;
+    // Client-only, never persisted or serialized: a local object-URL set on an OPTIMISTIC
+    // just-sent message so the image renders instantly, before the `/api/attachments/{id}` row
+    // exists. Server-loaded messages omit it and fall back to the served URL.
+    previewUrl?: string;
   }>;
 };
 
@@ -82,6 +86,12 @@ export type SessionRuntimeState = {
   // token/usage delta alone leaves it false), so the displayed status/error can
   // never momentarily regress to the seed and flicker. See the merge in SessionView.
   statusObserved: boolean;
+  // Wall-clock (epoch ms) of the last batch the stream consumer delivered. Stamped by
+  // subscribeSessionStream (NOT the pure reducer), so the view can tell a live overlay
+  // from a dead/stalled one: if the server snapshot was fetched after the stream last
+  // delivered anything AND carries newer durable events, the snapshot — not the stale
+  // overlay — is authoritative. Absent on states never touched by the stream consumer.
+  lastEventReceivedAt?: number;
 };
 
 export type SessionAggregateSnapshot = {
@@ -244,6 +254,9 @@ export type RuntimeToolCall = {
   inputPreview: string;
   activityPreview: string;
   outputPreview: string;
+  brainFile?: RuntimeBrainFileReference | undefined;
+  // Legacy company-Brain shortcut. New UI should prefer `brainFile`, which also
+  // identifies Personal Brain writes from `personal-brain/`.
   brainPath?: string | undefined;
   issueUrl?: string | undefined;
   approval?: RuntimeToolApprovalState | undefined;
@@ -266,6 +279,11 @@ export type RuntimeToolCall = {
   completedEventId: number | null;
   // ISO timestamp from tool.started event, used to show an elapsed counter for long-running tools.
   startedAt?: string | undefined;
+};
+
+export type RuntimeBrainFileReference = {
+  scope: "company" | "personal";
+  path: string;
 };
 
 export type AssistantTurnPart =
@@ -736,7 +754,10 @@ export function buildAssistantTurnParts(
       const toolCallId = readString(part.toolCallId);
       if (!toolCallId) continue;
       const matchingToolCall = toolCallsById.get(toolCallId);
-      const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
+      const brainFile =
+        matchingToolCall?.brainFile ??
+        brainFileReferenceFromLegacyPath(matchingToolCall?.brainPath) ??
+        brainFileForToolCallPart(part);
       const issueUrl =
         matchingToolCall?.issueUrl ??
         linearIssueUrlFromToolCallPart(part) ??
@@ -758,7 +779,8 @@ export function buildAssistantTurnParts(
           activityPreview: matchingToolCall?.activityPreview ?? "",
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
-          ...(brainPath ? { brainPath } : {}),
+          ...(brainFile ? { brainFile } : {}),
+          ...(brainFile?.scope === "company" ? { brainPath: brainFile.path } : {}),
           ...(issueUrl ? { issueUrl } : {}),
           ...(matchingToolCall?.approval ? { approval: matchingToolCall.approval } : {}),
           ...(matchingToolCall?.question ? { question: matchingToolCall.question } : {}),
@@ -1050,10 +1072,10 @@ export function buildRuntimeToolCallsForMessage(
     }
 
     if (event.type === "file.changed") {
-      const brainPath = normalizeBrainWorkspacePath(readString(event.payload.path));
-      const call = brainPath ? findLatestToolCall(calls, "write_file") : null;
-      if (brainPath && call) {
-        call.brainPath = brainPath;
+      const brainFile = normalizeBrainWorkspaceFile(readString(event.payload.path));
+      const call = brainFile ? findLatestFileMutationToolCall(calls) : null;
+      if (brainFile && call) {
+        setToolCallBrainFile(call, brainFile);
       }
       continue;
     }
@@ -1159,9 +1181,9 @@ export function buildRuntimeToolCallsForMessage(
           decisionSource: "user",
         };
       }
-      const brainPath = brainPathForToolPayload(call.name, display.input);
-      if (brainPath) {
-        call.brainPath = brainPath;
+      const brainFile = brainFileForToolPayload(call.name, display.input);
+      if (brainFile) {
+        setToolCallBrainFile(call, brainFile);
       }
       const issueUrl = linearIssueUrlFromPayload(event.payload.input);
       if (issueUrl) {
@@ -1186,9 +1208,9 @@ export function buildRuntimeToolCallsForMessage(
               event.payload.outputPreview || event.payload.error || event.payload.output,
             )
           : formatRuntimePreview(event.payload.outputPreview || event.payload.output);
-      const brainPath = brainPathForToolPayload(call.name, event.payload.output);
-      if (brainPath) {
-        call.brainPath = brainPath;
+      const brainFile = brainFileForToolPayload(call.name, event.payload.output);
+      if (brainFile) {
+        setToolCallBrainFile(call, brainFile);
       }
       // Output carries the canonical issue URL, so let it win over any input-derived value.
       const issueUrl =
@@ -1314,6 +1336,23 @@ function findLatestToolCall(calls: RuntimeToolCall[], name: string) {
   return null;
 }
 
+function findLatestFileMutationToolCall(calls: RuntimeToolCall[]) {
+  const isFileMutation = (call: RuntimeToolCall | undefined) =>
+    call?.name === "write_file" || call?.name === "edit_file";
+
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index];
+    if (call?.status === "running" && isFileMutation(call)) return call;
+  }
+
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index];
+    if (isFileMutation(call)) return call;
+  }
+
+  return null;
+}
+
 function buildToolResultsByCallId(messages: SessionMessage[]) {
   const resultsByCallId = new Map<string, string>();
 
@@ -1351,26 +1390,47 @@ function readToolResultPreview(modelMessage: Record<string, unknown> | null | un
   return "";
 }
 
-function brainPathForToolCallPart(part: Record<string, unknown>) {
+function brainFileForToolCallPart(part: Record<string, unknown>) {
   const name = readString(part.toolName);
   return (
-    brainPathForToolPayload(name, part.input) ||
-    brainPathForToolPayload(name, part.args) ||
+    brainFileForToolPayload(name, part.input) ||
+    brainFileForToolPayload(name, part.args) ||
     undefined
   );
 }
 
-function brainPathForToolPayload(name: string, payload: unknown) {
+function brainFileForToolPayload(name: string, payload: unknown) {
   if ((name !== "write_file" && name !== "edit_file") || !isRecord(payload)) return undefined;
-  return normalizeBrainWorkspacePath(payload.path);
+  return normalizeBrainWorkspaceFile(payload.path);
 }
 
-function normalizeBrainWorkspacePath(value: unknown) {
+function normalizeBrainWorkspaceFile(value: unknown): RuntimeBrainFileReference | undefined {
   if (typeof value !== "string") return undefined;
   const path = value.trim().replace(/^\.?\//, "");
-  if (!path.startsWith("brain/")) return undefined;
-  const brainPath = path.slice("brain/".length);
-  return brainPath || undefined;
+  if (path.startsWith("brain/")) {
+    const brainPath = path.slice("brain/".length);
+    return brainPath ? { scope: "company", path: brainPath } : undefined;
+  }
+  if (path.startsWith("personal-brain/")) {
+    const brainPath = path.slice("personal-brain/".length);
+    return brainPath ? { scope: "personal", path: brainPath } : undefined;
+  }
+  return undefined;
+}
+
+function brainFileReferenceFromLegacyPath(
+  path: string | undefined,
+): RuntimeBrainFileReference | undefined {
+  return path ? { scope: "company", path } : undefined;
+}
+
+function setToolCallBrainFile(call: RuntimeToolCall, brainFile: RuntimeBrainFileReference) {
+  call.brainFile = brainFile;
+  if (brainFile.scope === "company") {
+    call.brainPath = brainFile.path;
+  } else {
+    delete call.brainPath;
+  }
 }
 
 // Linear surfaces the canonical issue URL in tool output (and sometimes input). Pull it so the
@@ -1702,8 +1762,12 @@ function describeMemoryToolCall(args: string) {
   const command = argv[0];
   switch (command) {
     case "query": {
-      const query = findMemoryPositionalArg(argv, 1);
-      return query ? `Looking in memory for “${truncateLabelText(query)}”` : "Looking in memory";
+      const query = findMemoryPositionalArg(argv, 1) || firstCliOptionValue(argv, "--text");
+      if (query) return `Looking in memory for “${truncateLabelText(query)}”`;
+      // A text-less query with --since is a recency listing, not a search.
+      return firstCliOptionValue(argv, "--since")
+        ? "Reviewing recent memory updates"
+        : "Looking in memory";
     }
     case "get": {
       const id = findMemoryPositionalArg(argv, 1);
@@ -1782,6 +1846,7 @@ const MEMORY_CLI_VALUE_OPTIONS = new Set([
   "--status",
   "--subject",
   "--summary",
+  "--text",
   "--to",
   "--truth",
   "--type",

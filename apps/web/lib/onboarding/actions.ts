@@ -6,15 +6,16 @@ import { onboardingResponses, workspaces } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { startSeededAgentSession } from "@/lib/agent-sessions/start-session";
+import { createPersonalOnboardingSession } from "@/lib/agent-sessions/actions";
 import { currentWorkspace } from "@/lib/auth";
-import { buildOnboardingKickoffPrompt } from "@/lib/onboarding/kickoff";
-import { ensureUserOnboardingScaffold } from "@/lib/onboarding/scaffold";
+import { ONBOARDING_FIRST_SESSION_PROMPT } from "@/lib/onboarding/first-session";
 import {
   type FieldErrors,
   type OnboardingValues,
   validateOnboardingValues,
 } from "@/lib/onboarding/validation";
+import { personalPaths } from "@/lib/personal/paths";
+import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 import { dispatchSlackSupportChannelRequested } from "@/lib/slack/events";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
@@ -27,6 +28,14 @@ export type OnboardingActionState = {
 function readString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readStringList(formData: FormData, key: string) {
+  return formData
+    .getAll(key)
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function errorLogFields(error: unknown) {
@@ -54,10 +63,11 @@ export async function completeOnboarding(
     teamSize: readString(formData, "teamSize"),
     companyUrl: readString(formData, "companyUrl"),
     agentExperience: readString(formData, "agentExperience"),
-    helpAreas: formData
-      .getAll("helpAreas")
-      .filter((value): value is string => typeof value === "string"),
+    goal: readString(formData, "goal"),
+    personalBrainFolders: readStringList(formData, "personalBrainFolders"),
+    personalIntegrations: readStringList(formData, "personalIntegrations"),
   };
+  const forceOnboarding = readString(formData, "forceOnboarding") === "1";
 
   const { errors, normalized } = validateOnboardingValues(values);
 
@@ -84,7 +94,7 @@ export async function completeOnboarding(
       heardFromDetail: values.heardFrom === "other" ? values.heardFromDetail : null,
       role: values.role,
       agentExperience: values.agentExperience,
-      helpAreas: normalized.helpAreas,
+      goal: normalized.goal,
       updatedAt: now,
     })
     .onConflictDoNothing({
@@ -92,13 +102,21 @@ export async function completeOnboarding(
     })
     .returning({ userId: onboardingResponses.userId });
 
-  if (!insertedOnboarding) {
+  if (!insertedOnboarding && !forceOnboarding) {
     logger.info("Skipping duplicate onboarding completion", {
       event: "opencompany.onboarding_completion_duplicate",
       workspace_id: workspace.id,
       user_id: user.id,
     });
     redirect("/");
+  }
+
+  if (!insertedOnboarding) {
+    logger.info("Retrying duplicate onboarding completion", {
+      event: "opencompany.onboarding_completion_duplicate_retry",
+      workspace_id: workspace.id,
+      user_id: user.id,
+    });
   }
 
   await db
@@ -110,17 +128,11 @@ export async function completeOnboarding(
     })
     .where(eq(workspaces.id, workspace.id));
 
-  const scaffold = await ensureUserOnboardingScaffold({
+  const personalAgent = await ensurePersonalAgent({
     userId: user.id,
     workspaceId: workspace.id,
-  });
-
-  logger.info("Resolved onboarding scaffold", {
-    event: "opencompany.onboarding_scaffold_resolved",
-    workspace_id: workspace.id,
-    user_id: user.id,
-    agent_id: scaffold.agentId,
-    created: scaffold.created,
+    userName: user.firstName?.trim() || user.email?.split("@")[0] || "you",
+    personalBrainFolders: normalized.personalBrainFolders,
   });
 
   await captureServerEvent("onboarding_completed", user.id, {
@@ -129,91 +141,100 @@ export async function completeOnboarding(
     heard_from: values.heardFrom,
     team_size: values.teamSize,
     agent_experience: values.agentExperience,
-    help_areas: normalized.helpAreas,
-    help_area_count: normalized.helpAreas.length,
+    goal_provided: Boolean(normalized.goal),
   });
 
-  // On a user's very first onboarding, kick off their agent's first run seeded with a visible
-  // message so they land directly in a live setup conversation. Skip when leo already exists
-  // (re-submits) so we never spawn duplicate onboarding sessions.
-  if (scaffold.created) {
-    // First onboarding only: kick off Slack Connect support-channel provisioning.
-    // Fire-and-forget — Slack must never block or crash onboarding, and the
-    // Inngest function is idempotent per workspace.
-    try {
-      await dispatchSlackSupportChannelRequested({
-        workspaceId: workspace.id,
-        userId: user.id,
-        customerEmail: user.email,
-        firstName: user.firstName,
-      });
-    } catch (error) {
-      captureException(error, {
-        event: "opencompany.slack_support_dispatch_failed",
-        workspace_id: workspace.id,
-        user_id: user.id,
-      });
-      logger.error("Failed to dispatch Slack support provisioning", {
-        event: "opencompany.slack_support_dispatch_failed",
-        workspace_id: workspace.id,
-        user_id: user.id,
-        ...errorLogFields(error),
-      });
-    }
-
-    let sessionId: string | null = null;
-
-    try {
-      logger.info("Starting onboarding setup session", {
-        event: "opencompany.onboarding_setup_session_starting",
-        workspace_id: workspace.id,
-        user_id: user.id,
-        agent_id: scaffold.agentId,
-      });
-      sessionId = await startSeededAgentSession({
-        agentId: scaffold.agentId,
-        userId: user.id,
-        workspaceId: workspace.id,
-        prompt: buildOnboardingKickoffPrompt({
-          role: values.role,
-          teamSize: values.teamSize,
-          companyUrl: normalized.companyUrl,
-          helpAreas: normalized.helpAreas,
-        }),
-        source: "onboarding",
-      });
-    } catch (error) {
-      captureException(error, {
-        event: "opencompany.onboarding_seeded_session_start_failed",
-        workspace_id: workspace.id,
-        user_id: user.id,
-        agent_id: scaffold.agentId,
-      });
-      logger.error("Failed to start onboarding seeded session", {
-        event: "opencompany.onboarding_seeded_session_start_failed",
-        workspace_id: workspace.id,
-        user_id: user.id,
-        agent_id: scaffold.agentId,
-        ...errorLogFields(error),
-      });
-    }
-
-    if (sessionId) {
-      logger.info("Started onboarding setup session", {
-        event: "opencompany.onboarding_setup_session_started",
-        workspace_id: workspace.id,
-        user_id: user.id,
-        agent_id: scaffold.agentId,
-        session_id: sessionId,
-      });
-      redirect(`/company/session/${sessionId}`);
-    }
-
-    logger.warn("Onboarding setup session was not created", {
-      event: "opencompany.onboarding_setup_session_missing",
+  // First onboarding only: kick off Slack Connect support-channel provisioning.
+  // Fire-and-forget — Slack must never block or crash onboarding, and the
+  // Inngest function is idempotent per workspace.
+  try {
+    await dispatchSlackSupportChannelRequested({
+      workspaceId: workspace.id,
+      userId: user.id,
+      customerEmail: user.email,
+      firstName: user.firstName,
+    });
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.slack_support_dispatch_failed",
       workspace_id: workspace.id,
       user_id: user.id,
-      agent_id: scaffold.agentId,
+    });
+    logger.error("Failed to dispatch Slack support provisioning", {
+      event: "opencompany.slack_support_dispatch_failed",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      ...errorLogFields(error),
+    });
+  }
+
+  let firstSessionResult: Awaited<ReturnType<typeof createPersonalOnboardingSession>> | null = null;
+
+  try {
+    logger.info("Starting onboarding first session", {
+      event: "opencompany.onboarding_first_session_starting",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      agent_id: personalAgent.id,
+    });
+
+    firstSessionResult = await createPersonalOnboardingSession(
+      personalAgent.id,
+      {
+        name: user.firstName?.trim() || user.email?.split("@")[0] || "",
+        website: normalized.companyUrl ?? "",
+        role: values.role,
+        teamSize: values.teamSize,
+        agentExperience: values.agentExperience,
+      },
+      ONBOARDING_FIRST_SESSION_PROMPT,
+      {
+        integrations: normalized.personalIntegrations,
+        skipBillingCheck: true,
+        survey: {
+          heardFrom: values.heardFrom,
+          heardFromDetail: values.heardFromDetail,
+        },
+      },
+    );
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.onboarding_first_session_start_failed",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      agent_id: personalAgent.id,
+    });
+    logger.error("Failed to start onboarding first session", {
+      event: "opencompany.onboarding_first_session_start_failed",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      agent_id: personalAgent.id,
+      ...errorLogFields(error),
+    });
+  }
+
+  if (firstSessionResult?.ok) {
+    logger.info("Started onboarding first session", {
+      event: "opencompany.onboarding_first_session_started",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      agent_id: personalAgent.id,
+      session_id: firstSessionResult.session.id,
+    });
+    redirect(personalPaths.session(firstSessionResult.session.id));
+  }
+
+  if (firstSessionResult && !firstSessionResult.ok) {
+    if (firstSessionResult.redirectTo) {
+      redirect(firstSessionResult.redirectTo);
+    }
+
+    logger.warn("Onboarding first session was not created", {
+      event: "opencompany.onboarding_first_session_missing",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      agent_id: personalAgent.id,
+      error: firstSessionResult.error,
     });
   }
 

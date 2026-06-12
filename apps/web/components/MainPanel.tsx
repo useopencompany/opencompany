@@ -3,13 +3,18 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, LoaderCircle } from "lucide-react";
+import { ArrowUp, LoaderCircle, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
-import { useToast } from "@/components/ToastProvider";
+import {
+  ATTACHMENT_FILE_INPUT_ACCEPT,
+  ComposerAttachments,
+  ComposerDropOverlay,
+  toSubmitAttachments,
+} from "@/components/composer-attachments";
 import {
   Select,
   SelectContent,
@@ -17,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
@@ -38,7 +44,6 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const router = useRouter();
-  const { showToast } = useToast();
   const [input, setInput] = useState("");
   const [selectedAgentIdOverride, setSelectedAgentIdOverride] = useState("");
   // An explicit model pick, scoped to the agent it was made for. Scoping it this way means a
@@ -50,6 +55,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents.at(0);
   // The model used for the new session: an explicit pick for THIS agent wins, otherwise the
@@ -58,7 +64,33 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     (modelOverride?.agentId === selectedAgentId ? modelOverride.modelId : null) ??
     selectedAgent?.defaultModel ??
     "";
-  const canSubmit = Boolean(input.trim() && selectedAgentId && !isPending);
+  // Image/file attachments via the shared composer hook. No session exists yet — uploads land in
+  // a sessionless "pending/" path and the pointers ride into createAgentSessionFromPrompt.
+  const {
+    attachments,
+    setAttachments,
+    acceptFiles,
+    removeAttachment,
+    isDragActive,
+    isUploading,
+    handlePasteFiles,
+    dragHandlers,
+  } = useComposerAttachments({
+    workspaceId,
+    modelName: selectedModel,
+    uploadScope: { kind: "pending" },
+  });
+  const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
+  const hasUploadError = attachments.some((a) => a.status === "error");
+  // Submit needs text OR a ready attachment, and is blocked while any upload is in flight or
+  // errored (so an image is never silently dropped, and a broken upload can't be sent).
+  const canSubmit = Boolean(
+    (input.trim() || ready.length > 0) &&
+      selectedAgentId &&
+      !isPending &&
+      !isUploading &&
+      !hasUploadError,
+  );
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -73,7 +105,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
   const submit = () => {
     const content = input.trim();
-    if (!content || isPending) return;
+    if ((!content && ready.length === 0) || isPending || isUploading || hasUploadError) return;
     if (!selectedAgentId) {
       setError("Create an agent first before starting a session.");
       return;
@@ -85,6 +117,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         selectedAgentId,
         content,
         selectedModel || undefined,
+        toSubmitAttachments(ready),
       );
       if (!result.ok) {
         if ("redirectTo" in result) {
@@ -94,6 +127,10 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         setError(result.error);
         return;
       }
+      // Sent — the destination session paints the image from the persisted attachment (served via
+      // /api/attachments), so the local blob previews aren't needed there: revoke + clear the tray.
+      attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+      setAttachments([]);
       seedSessionQueries(queryClient, workspaceId, result.detail);
       router.push(`/company/session/${result.session.id}`);
     });
@@ -105,7 +142,22 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         event.preventDefault();
         submit();
       }}
+      className="relative"
+      {...dragHandlers}
     >
+      {isDragActive ? <ComposerDropOverlay className="rounded-2xl" /> : null}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
+        className="hidden"
+        onChange={(event) => {
+          acceptFiles(Array.from(event.target.files ?? []));
+          event.target.value = "";
+        }}
+      />
+      <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
       <Composer
         variant="expanded"
         error={error}
@@ -121,22 +173,9 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
               }
             }}
             onPaste={(event) => {
-              const items = event.clipboardData?.items;
-              if (!items) return;
-              const itemArray = Array.from(items);
-              const hasImage = itemArray.some(
-                (item) => item.kind === "file" && item.type.startsWith("image/"),
-              );
-              if (!hasImage) return;
-              const hasText = itemArray.some((item) => item.kind === "string");
-              if (!hasText) event.preventDefault();
-              showToast({
-                title: "Image upload coming soon",
-                description: hasText
-                  ? "The text was pasted; the image was ignored."
-                  : "Image attachments aren't supported yet.",
-                tone: "default",
-              });
+              // Files in the clipboard (e.g. a screenshot) attach via the shared hook, which also
+              // stops the browser pasting them into the textarea. Text pastes fall through.
+              handlePasteFiles(event);
             }}
             rows={1}
             placeholder="Ask Open Company to build, fix bugs, explore"
@@ -146,6 +185,14 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         }
         leftControls={
           <>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach file"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+            >
+              <Plus size={15} strokeWidth={1.75} />
+            </button>
             <Select
               disabled={agents.length === 0}
               value={selectedAgentId}

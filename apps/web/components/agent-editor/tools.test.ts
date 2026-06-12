@@ -135,6 +135,9 @@ describe("agent editor mention tools", () => {
     expect(
       buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:betterstack"),
     ).toBe(true);
+    expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:notion")).toBe(
+      true,
+    );
   });
 
   test("shows not-connected MCP tools with a needs-setup badge", () => {
@@ -144,6 +147,7 @@ describe("agent editor mention tools", () => {
     const linear = items.find((item) => item.mentionId === "tool:linear");
     const slack = items.find((item) => item.mentionId === "tool:slack");
     const betterstack = items.find((item) => item.mentionId === "tool:betterstack");
+    const notion = items.find((item) => item.mentionId === "tool:notion");
 
     // Connected provider behaves normally.
     expect(linear).toBeDefined();
@@ -158,6 +162,9 @@ describe("agent editor mention tools", () => {
     expect(betterstack?.connectUrl).toBe(
       "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fsettings",
     );
+    expect(notion).toBeDefined();
+    expect(notion?.needsSetup).toBe(true);
+    expect(notion?.connectUrl).toBe("/api/mcp/notion/start?returnTo=%2Fcompany%2Fsettings");
   });
 
   test("offers the addable built-in first-principles skill in the mention menu", () => {
@@ -169,6 +176,20 @@ describe("agent editor mention tools", () => {
           mentionId: "skill/first-principles",
           label: "skill/first-principles",
           displayLabel: "First-principles thinking",
+        }),
+      ]),
+    );
+  });
+
+  test("offers the addable built-in Y Combinator knowledge skill in the mention menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skill",
+          mentionId: "skill/y-combinator-knowledge",
+          label: "skill/y-combinator-knowledge",
+          displayLabel: "Y Combinator knowledge",
         }),
       ]),
     );

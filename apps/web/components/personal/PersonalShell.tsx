@@ -14,6 +14,7 @@ import {
   hasPersonalGitHubIntegrationRequest,
   type PersonalGitHubIntegrationStatus,
 } from "@/components/personal/PersonalCapabilityPanel";
+import { PersonalSplitProvider } from "@/components/session-split/PersonalSessionSplit";
 import { useToast } from "@/components/ToastProvider";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
@@ -222,40 +223,45 @@ export default function PersonalShell({
 
   return (
     <PersonalAgentProvider value={contextValue}>
-      <div className="flex h-screen w-screen overflow-hidden bg-sidebar">
-        <PersonalSidebar
-          collapsed={collapsed}
-          onToggleCollapsed={() => persistSidebarCollapsed(!collapsed)}
-        />
+      {/* Split-pane layout store. Lives here (not in the session page) so the pane
+          arrangement survives navigation between personal sub-routes, and so the
+          sidebar can act as a drag source into the session canvas. */}
+      <PersonalSplitProvider>
+        <div className="flex h-screen w-screen overflow-hidden bg-sidebar">
+          <PersonalSidebar
+            collapsed={collapsed}
+            onToggleCollapsed={() => persistSidebarCollapsed(!collapsed)}
+          />
 
-        {/* When the sidebar is expanded the main view floats as a rounded panel so the
+          {/* When the sidebar is expanded the main view floats as a rounded panel so the
             sidebar canvas peeks around its edges; collapsed, it bleeds to full screen. */}
-        <div
-          className={`relative flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas transition-[margin,border-radius] duration-200 ease-out ${
-            collapsed
-              ? "m-0 rounded-none border-0"
-              : "my-2 mr-2 rounded-xl border border-border shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
-          }`}
-        >
-          {collapsed && (
-            <button
-              type="button"
-              aria-label="Expand sidebar"
-              aria-expanded={false}
-              onClick={() => persistSidebarCollapsed(false)}
-              // top-[7px] (not top-3) so the button's center lines up with the session top bar's
-              // text + right-side icons, which sit ~21.5px down (py-2 over ~27px content). The
-              // button's own border makes it 2px taller, so it needs to ride slightly higher.
-              className="fixed left-2 top-[7px] z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-            >
-              <PanelLeft size={15} strokeWidth={1.75} />
-            </button>
-          )}
-          {/* While collapsed the floating expand button sits over the top-left of this panel, so
+          <div
+            className={`relative flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas transition-[margin,border-radius] duration-200 ease-out ${
+              collapsed
+                ? "m-0 rounded-none border-0"
+                : "my-2 mr-2 rounded-xl border border-border shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+            }`}
+          >
+            {collapsed && (
+              <button
+                type="button"
+                aria-label="Expand sidebar"
+                aria-expanded={false}
+                onClick={() => persistSidebarCollapsed(false)}
+                // top-[7px] (not top-3) so the button's center lines up with the session top bar's
+                // text + right-side icons, which sit ~21.5px down (py-2 over ~27px content). The
+                // button's own border makes it 2px taller, so it needs to ride slightly higher.
+                className="fixed left-2 top-[7px] z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                <PanelLeft size={15} strokeWidth={1.75} />
+              </button>
+            )}
+            {/* While collapsed the floating expand button sits over the top-left of this panel, so
               tell the panel chrome (e.g. SessionView's top bar) to reserve left padding for it. */}
-          <FloatingNavInsetProvider value={collapsed}>{children}</FloatingNavInsetProvider>
+            <FloatingNavInsetProvider value={collapsed}>{children}</FloatingNavInsetProvider>
+          </div>
         </div>
-      </div>
+      </PersonalSplitProvider>
     </PersonalAgentProvider>
   );
 }

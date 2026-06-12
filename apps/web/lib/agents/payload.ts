@@ -46,6 +46,10 @@ export type AgentDetailPayload = AgentListItemPayload & {
   mcp: {
     linearConfigured: boolean;
     slackConfigured: boolean;
+    posthogConfigured: boolean;
+    betterstackConfigured: boolean;
+    braintrustConfigured: boolean;
+    notionConfigured: boolean;
   };
 };
 
@@ -74,6 +78,10 @@ export function serializeAgentDetail(
   mcp: AgentDetailPayload["mcp"] = {
     linearConfigured: false,
     slackConfigured: false,
+    posthogConfigured: false,
+    betterstackConfigured: false,
+    braintrustConfigured: false,
+    notionConfigured: false,
   },
   bundleFiles: AgentBundleFilePayload[] = [],
 ): AgentDetailPayload {

@@ -16,8 +16,7 @@ export type AnalyticsEventPropertiesByName = {
     heard_from: string;
     team_size: string;
     agent_experience: string;
-    help_areas: string[];
-    help_area_count: number;
+    goal_provided: boolean;
   };
   agent_created: {
     user_id: string;
@@ -191,8 +190,7 @@ export const analyticsEvents = {
       "heard_from",
       "team_size",
       "agent_experience",
-      "help_areas",
-      "help_area_count",
+      "goal_provided",
     ],
   },
   agent_created: {

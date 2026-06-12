@@ -59,6 +59,8 @@ const BETTERSTACK_MCP_SERVER_KEY = "betterstack";
 const BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const BRAINTRUST_MCP_SERVER_KEY = "braintrust";
 const BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const NOTION_MCP_SERVER_KEY = "notion";
+const NOTION_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_READ_SCOPES = [
   "search:read.public",
   "search:read.private",
@@ -86,7 +88,8 @@ type McpProviderKey =
   | typeof SLACK_MCP_SERVER_KEY
   | typeof POSTHOG_MCP_SERVER_KEY
   | typeof BETTERSTACK_MCP_SERVER_KEY
-  | typeof BRAINTRUST_MCP_SERVER_KEY;
+  | typeof BRAINTRUST_MCP_SERVER_KEY
+  | typeof NOTION_MCP_SERVER_KEY;
 
 type McpProvider = {
   key: McpProviderKey;
@@ -137,6 +140,13 @@ const MCP_PROVIDER_CATALOG: Record<McpProviderKey, McpProvider> = {
     displayName: "Braintrust",
     oauthCredentialKind: BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
     // OAuth-only with Dynamic Client Registration (no static client) — same as Linear/PostHog.
+    supportsBearerToken: false,
+  },
+  notion: {
+    key: NOTION_MCP_SERVER_KEY,
+    displayName: "Notion",
+    oauthCredentialKind: NOTION_MCP_OAUTH_CREDENTIAL_KIND,
+    // OAuth-only with Dynamic Client Registration (no static client) — same as Braintrust.
     supportsBearerToken: false,
   },
 };
@@ -602,7 +612,8 @@ function isMcpProviderKey(value: string): value is McpProviderKey {
     value === SLACK_MCP_SERVER_KEY ||
     value === POSTHOG_MCP_SERVER_KEY ||
     value === BETTERSTACK_MCP_SERVER_KEY ||
-    value === BRAINTRUST_MCP_SERVER_KEY
+    value === BRAINTRUST_MCP_SERVER_KEY ||
+    value === NOTION_MCP_SERVER_KEY
   );
 }
 

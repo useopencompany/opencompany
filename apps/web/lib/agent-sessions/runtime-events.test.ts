@@ -1149,9 +1149,44 @@ describe("buildRuntimeToolCallsForMessage", () => {
       {
         id: "call_1",
         name: "write_file",
+        brainFile: { scope: "company", path: "foo.md" },
         brainPath: "foo.md",
       },
     ]);
+  });
+
+  it("marks write_file calls that update personal brain paths", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          input: { path: "personal-brain/foo.md", content: "Updated notes" },
+        }),
+        event(2, "file.changed", {
+          messageId: "msg_assistant",
+          path: "personal-brain/foo.md",
+          operation: "write",
+        }),
+        event(3, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          output: { path: "personal-brain/foo.md", bytes: 13 },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls).toMatchObject([
+      {
+        id: "call_1",
+        name: "write_file",
+        brainFile: { scope: "personal", path: "foo.md" },
+      },
+    ]);
+    expect(calls[0]?.brainPath).toBeUndefined();
   });
 
   it("leaves normal write_file calls unmarked", () => {
@@ -1208,9 +1243,51 @@ describe("buildRuntimeToolCallsForMessage", () => {
       {
         id: "call_1",
         name: "edit_file",
+        brainFile: { scope: "company", path: "foo.md" },
         brainPath: "foo.md",
       },
     ]);
+  });
+
+  it("attaches file.changed brain metadata to the latest file mutation tool", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          input: { path: "work/draft.md", content: "Draft" },
+        }),
+        event(2, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          output: { path: "work/draft.md", bytes: 5 },
+        }),
+        event(3, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_2",
+          name: "edit_file",
+          input: {
+            path: "personal-brain/foo.md",
+            edits: [{ oldString: "Old", newString: "New" }],
+          },
+        }),
+        event(4, "file.changed", {
+          messageId: "msg_assistant",
+          path: "personal-brain/foo.md",
+          operation: "write",
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls[0]?.brainFile).toBeUndefined();
+    expect(calls[1]).toMatchObject({
+      id: "call_2",
+      name: "edit_file",
+      brainFile: { scope: "personal", path: "foo.md" },
+    });
   });
 
   it("links a Linear tool call to its issue from the output URL", () => {
@@ -1338,6 +1415,13 @@ describe("describeToolCall", () => {
       "Updating memory for acme",
     );
     expect(describeToolCall("memory", { args: "doctor" })).toBe("Checking memory consistency");
+    // A text-less query with --since is a recency listing, not a search.
+    expect(describeToolCall("memory", { args: "query --since 24h" })).toBe(
+      "Reviewing recent memory updates",
+    );
+    expect(describeToolCall("memory", { args: 'query --text "acme blockers" --since 24h' })).toBe(
+      "Looking in memory for “acme blockers”",
+    );
   });
 });
 
@@ -2417,10 +2501,48 @@ describe("buildAssistantTurnParts", () => {
         toolCall: {
           id: "call_1",
           name: "write_file",
+          brainFile: { scope: "company", path: "foo.md" },
           brainPath: "foo.md",
         },
       },
     ]);
+  });
+
+  it("marks persisted write_file model parts for personal brain paths", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_1",
+              toolName: "write_file",
+              input: { path: "personal-brain/foo.md", content: "Updated notes" },
+            },
+          ],
+        },
+      },
+      [],
+    );
+
+    expect(parts).toMatchObject([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "call_1",
+          name: "write_file",
+          brainFile: { scope: "personal", path: "foo.md" },
+        },
+      },
+    ]);
+    expect(
+      parts[0]?.type === "tool-call" ? parts[0].toolCall.brainPath : undefined,
+    ).toBeUndefined();
   });
 });
 

@@ -134,6 +134,10 @@ export function subscribeSessionStream(
       state = applyRuntimeEventToState(state, item);
       handlers.onEvent?.(item);
     }
+    // Stamp the delivery time (consumer-side, NOT part of the pure reducer): the view
+    // uses it to decide whether the overlay is fresher than a refetched snapshot — a
+    // dead/zombie stream stops stamping, so a later snapshot wins scalar authority.
+    state = { ...state, lastEventReceivedAt: Date.now() };
     handlers.onState(state);
   };
 
@@ -202,6 +206,26 @@ export function subscribeSessionStream(
         live.cancel();
       };
       if (stopped) cancelLive();
+      // A subscription can die AFTER a healthy connect — the client's hidden-tab
+      // pause/resume machinery can error or silently close the response stream, a
+      // sustained outage exhausts the retry budget, and a session stream is never
+      // legitimately EOF'd while viewable (only archive closes it). `closed` settling
+      // is the ONLY post-connect death signal the client exposes, so surface it as
+      // "error"; useSessionStream re-subscribes on the next visibility/focus/online
+      // signal. A deliberate unsubscribe sets `stopped` first and stays silent.
+      void live.closed.then(
+        () => {
+          if (stopped) return;
+          debugLog("stream closed unexpectedly", { url, offset });
+          handlers.onStatus?.("error");
+        },
+        (error: unknown) => {
+          if (stopped) return;
+          debugLog("stream died", { url, code: streamErrorCode(error) });
+          handlers.onStatus?.("error");
+          handlers.onError?.(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
     } catch (error) {
       if (stopped) return;
       debugLog("error", { url, code: streamErrorCode(error) });

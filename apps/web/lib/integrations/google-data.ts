@@ -48,6 +48,12 @@ const GOOGLE_PROVIDERS: GoogleIntegrationProvider[] = ["gmail", "google_calendar
 
 export async function loadGoogleIntegrationState(): Promise<GoogleIntegrationState> {
   const { workspace } = await currentWorkspace();
+  return loadGoogleIntegrationStateForWorkspace(workspace.id);
+}
+
+export async function loadGoogleIntegrationStateForWorkspace(
+  workspaceId: string,
+): Promise<GoogleIntegrationState> {
   const db = getDb();
   const configured = isGoogleIntegrationConfigured();
 
@@ -56,7 +62,7 @@ export async function loadGoogleIntegrationState(): Promise<GoogleIntegrationSta
     .from(workspaceIntegrations)
     .where(
       and(
-        eq(workspaceIntegrations.workspaceId, workspace.id),
+        eq(workspaceIntegrations.workspaceId, workspaceId),
         inArray(workspaceIntegrations.provider, GOOGLE_PROVIDERS),
       ),
     )
@@ -72,7 +78,7 @@ export async function loadGoogleIntegrationState(): Promise<GoogleIntegrationSta
         .from(workspaceIntegrationResources)
         .where(
           and(
-            eq(workspaceIntegrationResources.workspaceId, workspace.id),
+            eq(workspaceIntegrationResources.workspaceId, workspaceId),
             eq(workspaceIntegrationResources.provider, "google_calendar"),
             eq(workspaceIntegrationResources.resourceType, GOOGLE_CALENDAR_RESOURCE_TYPE),
             inArray(workspaceIntegrationResources.integrationId, calendarIntegrationIds),

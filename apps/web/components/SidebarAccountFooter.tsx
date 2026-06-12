@@ -31,6 +31,9 @@ type Props = {
   // Where the "Settings" menu item links. Defaults to the workspace settings; the personal surface
   // overrides it to its own lightweight settings page.
   settingsHref?: string;
+  // Enables screenshot attachments in the feedback dialog. Supplied by render sites that sit inside
+  // a WorkspaceProvider; omitted elsewhere (feedback then stays text-only).
+  workspaceId?: string | undefined;
 };
 
 async function fetchStatusPageAggregateState(): Promise<StatusPageAggregateState> {
@@ -266,6 +269,7 @@ export function SidebarAccountFooter({
   subtitle,
   trailing,
   settingsHref = "/company/settings",
+  workspaceId,
 }: Props) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -337,7 +341,11 @@ export function SidebarAccountFooter({
         </button>
         {trailing}
       </div>
-      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+      <FeedbackDialog
+        open={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        workspaceId={workspaceId}
+      />
     </>
   );
 }

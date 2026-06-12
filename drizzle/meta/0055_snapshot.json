@@ -1,5 +1,5 @@
 {
-  "id": "9a0731ab-4690-405f-9219-fedf45573887",
+  "id": "f5fc6db6-d57e-4675-861e-9b8ba48d4fa5",
   "prevId": "4a96f4fb-8f43-4509-b745-9b22cc618abd",
   "version": "7",
   "dialect": "postgresql",
@@ -3263,12 +3263,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "decision_scope": {
-          "name": "decision_scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3362,7 +3356,7 @@
       "checkConstraints": {
         "agent_tool_approvals_group_check": {
           "name": "agent_tool_approvals_group_check",
-          "value": "\"agent_tool_approvals\".\"permission_group\" IN ('read', 'post', 'modify', 'admin')"
+          "value": "\"agent_tool_approvals\".\"permission_group\" IN ('read', 'post', 'modify', 'merge', 'admin')"
         },
         "agent_tool_approvals_status_check": {
           "name": "agent_tool_approvals_status_check",
@@ -3371,10 +3365,6 @@
         "agent_tool_approvals_decision_source_check": {
           "name": "agent_tool_approvals_decision_source_check",
           "value": "\"agent_tool_approvals\".\"decision_source\" IS NULL OR \"agent_tool_approvals\".\"decision_source\" IN ('user', 'timeout', 'abort')"
-        },
-        "agent_tool_approvals_decision_scope_check": {
-          "name": "agent_tool_approvals_decision_scope_check",
-          "value": "\"agent_tool_approvals\".\"decision_scope\" IS NULL OR \"agent_tool_approvals\".\"decision_scope\" IN ('once', 'session', 'always')"
         }
       },
       "isRLSEnabled": false
@@ -3978,262 +3968,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.device_actions": {
-      "name": "device_actions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tool": {
-          "name": "tool",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "summary": {
-          "name": "summary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "decision": {
-          "name": "decision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "device_actions_device_created_idx": {
-          "name": "device_actions_device_created_idx",
-          "columns": [
-            {
-              "expression": "device_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "device_actions_workspace_created_idx": {
-          "name": "device_actions_workspace_created_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "device_actions_workspace_id_workspaces_id_fk": {
-          "name": "device_actions_workspace_id_workspaces_id_fk",
-          "tableFrom": "device_actions",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "device_actions_device_id_workspace_devices_id_fk": {
-          "name": "device_actions_device_id_workspace_devices_id_fk",
-          "tableFrom": "device_actions",
-          "tableTo": "workspace_devices",
-          "columnsFrom": [
-            "device_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "device_actions_session_id_agent_sessions_id_fk": {
-          "name": "device_actions_session_id_agent_sessions_id_fk",
-          "tableFrom": "device_actions",
-          "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.device_pairing_requests": {
-      "name": "device_pairing_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "code": {
-          "name": "code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "secret_hash": {
-          "name": "secret_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_name": {
-          "name": "device_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "device_pairing_requests_code_idx": {
-          "name": "device_pairing_requests_code_idx",
-          "columns": [
-            {
-              "expression": "code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "device_pairing_requests_device_id_workspace_devices_id_fk": {
-          "name": "device_pairing_requests_device_id_workspace_devices_id_fk",
-          "tableFrom": "device_pairing_requests",
-          "tableTo": "workspace_devices",
-          "columnsFrom": [
-            "device_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "device_pairing_requests_status_check": {
-          "name": "device_pairing_requests_status_check",
-          "value": "\"device_pairing_requests\".\"status\" IN ('pending', 'confirmed', 'expired')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.inbox_items": {
@@ -5859,151 +5593,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.workspace_devices": {
-      "name": "workspace_devices",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "secret_hash": {
-          "name": "secret_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'active'"
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "workspace_devices_workspace_user_idx": {
-          "name": "workspace_devices_workspace_user_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "workspace_devices_secret_hash_idx": {
-          "name": "workspace_devices_secret_hash_idx",
-          "columns": [
-            {
-              "expression": "secret_hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "workspace_devices_workspace_id_workspaces_id_fk": {
-          "name": "workspace_devices_workspace_id_workspaces_id_fk",
-          "tableFrom": "workspace_devices",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "workspace_devices_user_id_users_id_fk": {
-          "name": "workspace_devices_user_id_users_id_fk",
-          "tableFrom": "workspace_devices",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "workspace_devices_status_check": {
-          "name": "workspace_devices_status_check",
-          "value": "\"workspace_devices\".\"status\" IN ('active', 'revoked')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.workspace_experiments": {
@@ -7832,7 +7421,7 @@
       "checkConstraints": {
         "workspace_tool_policies_group_check": {
           "name": "workspace_tool_policies_group_check",
-          "value": "\"workspace_tool_policies\".\"permission_group\" IN ('read', 'post', 'modify', 'admin')"
+          "value": "\"workspace_tool_policies\".\"permission_group\" IN ('read', 'post', 'modify', 'merge', 'admin')"
         },
         "workspace_tool_policies_decision_check": {
           "name": "workspace_tool_policies_decision_check",
