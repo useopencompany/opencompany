@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Brain files created or edited by agents now show as clickable attachments under assistant turns, and the company Brain can be opened directly at `/brain/<path>` deep links (#356) — @louis.
 - The personal Brain is now URL-addressable too, with nested file links restoring the selected file on reload and keeping the Brain navigation active (#426) — @jasper.
+- Personal Brain files created or edited during agent turns now link directly from the session transcript into the matching personal Brain path (#442) — @louis.
+- Personal sessions now support split-screen panes, so multiple chats can stay visible and be arranged side by side (#441) — @louis.
+- Agents can now start scoped subagents with selected tool grants, with subagent lifecycle events shown in the parent session transcript (#421) — @louis.
 - The personal Integrations tab now expands inline with connected account details, permission summaries, degraded-access warnings, disconnect actions, and GitHub repository refresh (#390) — @louis.
 - Personal recall can now be constrained by time windows, including query-less recent-session snippets, so agents can ask for memory from a specific lookback period (#416) — @louis.
 - Large pasted text is captured through the attachment pipeline, and oversized text attachments are materialized as sandbox file references instead of being inlined into every model call (#410) — @louis.
@@ -19,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runner observability now records per-tool-call phase timings, Braintrust spans, PostHog rollups, and hidden sandbox hydration timing events for production latency diagnosis (#411, #417) — @louis.
 
 ### Changed
+- Starting a session from the personal home prompt now switches to an optimistic session view immediately while creation and navigation finish in the background (#420) — @louis.
+- Runner sandbox hydration now overlaps bundle, skill, and setup work to reduce startup latency for sessions that need a sandbox (#434) — @louis.
+- Personal inbox cards now render markdown in their body and step text, matching the markdown contract used by the inbox tool (#438) — @louis.
+- Recall recap guidance is tighter, with cleaner formatting for recalled memories and follow-up summaries (#436) — @louis.
+- Preview deployment PR comments now include `?skipOnboarding`, letting reviewers test fresh preview accounts without going through onboarding (#435) — @louis.
 - New personal agents now default to Leo on Kimi K2.6, with updated default capabilities, model selection, settings reset, and personal agent source normalization (#409, #425) — @louis.
 - Memory tooling now returns richer `memory query` and `memory get` output, clearer invalid-usage help, a tighter keeper kickoff prompt, and canonical guidance that durable facts belong in structured memory while `agent/user.md` is the always-loaded digest (#413, #418, #422, #428) — @louis.
 - Memory keeper passes now use Gemini 3.1 Flash Lite, surface what they stored, and appear in the transcript near the turn they followed instead of pinned to the bottom (#401, #397) — @louis.
@@ -26,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slack support channel names now keep the per-workspace suffix at the end, for example `<customer>-x-opencompany-<id8>` (#394) — @jasper.
 
 ### Fixed
+- Slash command session starts now route to the intended personal or company surface instead of opening the wrong session view (#432) — @louis.
+- Session lists now consistently sort by creation time across the company and personal sidebars (#437) — @louis.
+- Personal agent skill slash commands are available again in the composer slash menu and insert the right skill mention (#440) — @louis.
 - Personal-session inspector links now stay inside the personal surface instead of opening related sessions, session pages, or agent links under `/company` (#391) — @louis.
 - Personal runtime tool guidance now advertises the correct `work/`, `personal-brain/`, and `agent/` roots and blocks generic file tools from editing structured memory paths (#414) — @louis.
 - OpenCode tool usage is now parsed from current `step_finish` events and charged back to the spawning session instead of silently appearing as zero-cost work (#402) — @jasper.

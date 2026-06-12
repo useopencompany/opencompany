@@ -23,6 +23,7 @@ export type RuntimeToolName =
   | "write_file"
   | "list_files"
   | "git_diff"
+  | "run_subagent"
   | "delegate_to_agent"
   | "update_agent_file"
   | "ask_user_question"
@@ -409,6 +410,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Status lifecycle: objects start as draft (uncited scratch) and become active once rewrite backs their compiled truth with evidence citations. create --status active requires the truth to already be cited; the normal path is create → append-evidence → rewrite.",
       'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
       'Query before answering questions about people, companies, projects, or past decisions: query "topic" --type company --limit 5. Results include capped compiled truth; use the shown `memory get <id>` hint when you need the full record or timeline. For relationship questions add --hops 1 to pull in linked objects. query hides merged stubs and invalid records by default.',
+      'For "what\'s recent" recaps, query with no text and a --since window: query --since 24h lists everything updated in the last day, newest first. --since takes a relative window (30m, 24h, 7d, 2w) or an ISO-8601 timestamp — prefer the relative form over computing timestamps yourself. It matches updated_at (the last write, not when the fact was first learned).',
       "get renders a structured record with compiled truth and recent timeline entries by default; get --section truth|timeline|frontmatter|all scopes both the text and the --json payload to that part.",
       "Writes are last-write-wins — do not issue two memory writes against the same object in parallel.",
       "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
@@ -418,14 +420,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "recall",
     kind: "internal",
     description:
-      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges, optionally constrained to the past N hours or days. You can also omit query and provide a time_window to recall recent session snippets. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
+      'Recall your own past sessions with this user from the raw transcript. Use query for topic searches. For broad time-bounded recap questions like "what did we discuss today?", "what happened yesterday?", or "catch me up on this week", omit query and pass only time_window so results come back newest-first instead of keyword-filtered. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.',
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
           description:
-            "What to look for, in natural language or keywords. Optional when time_window is provided. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+            "Topic, entity, or decision to search for, in natural language or keywords. Omit when the user asks for a broad recap of a time period, such as today, yesterday, this morning, this week, or recent conversations. Typo-tolerant. Examples: 'pricing decision for acme', 'launch date'.",
         },
         time_window: {
           type: "object",
@@ -453,8 +455,10 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Searches the raw transcript of your previous sessions with this user (this agent only); the current session is excluded.",
-      "Pass query only to search all indexed history; pass query plus time_window to restrict the search to recent messages.",
-      "Pass time_window without query to recall recent session snippets, newest first.",
+      "Use exactly one mode unless the user gives both a real topic and a time bound.",
+      "Mode 1, topic search: pass query only to search all indexed history.",
+      "Mode 2, topic search within a recent period: pass query plus time_window only when the user names a topic/entity/decision and also bounds time, e.g. 'what did we decide about Acme today?'.",
+      "Mode 3, time-bounded recap: pass time_window without query for broad recap requests like 'what did we discuss today?', 'what happened yesterday?', or 'catch me up on this week'. Results are newest first.",
       "Returns each hit as a short window: the matching message plus the one before and after it for context.",
       "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
       "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
@@ -726,6 +730,51 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       properties: {},
       additionalProperties: false,
     },
+  },
+  {
+    name: "run_subagent",
+    kind: "internal",
+    description:
+      "Run a focused, temporary subagent for a bounded task. Grant only the tools it needs; it returns one distilled answer and streams its progress inside this tool call.",
+    parameters: {
+      type: "object",
+      properties: {
+        description: {
+          type: "string",
+          description: "Short label for the subagent task, shown in the UI.",
+        },
+        prompt: {
+          type: "string",
+          description:
+            "Self-contained task prompt for the subagent. Include relevant context and the exact answer shape needed.",
+        },
+        tools: {
+          type: "array",
+          description:
+            'Optional tools to grant: underlying runtime tool names (e.g. "exa_search") and/or capability ids (e.g. "exa") that expand to their tools. Never use_tool or find_tools — the subagent calls its granted tools directly. Omit for the default read/research set.',
+          items: { type: "string" },
+        },
+        model: {
+          type: "string",
+          enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+          description: "Optional model override. Defaults to your current model.",
+        },
+        max_steps: {
+          type: "number",
+          description: "Maximum inner model steps. Clamped from 4 to 24. Defaults to 16.",
+          default: 16,
+        },
+      },
+      required: ["description", "prompt"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use run_subagent when a focused parallel-style investigation would keep your own context cleaner.",
+      "The subagent is temporary and does not ask the user questions. Its final answer is returned as this tool's result.",
+      "Only grant tools needed for the task. If tools is omitted, a safe read/research-oriented set is used.",
+      'Grant a whole capability by its id (e.g. "exa", "youtube") or individual underlying tool names. The subagent calls its granted tools directly — never grant use_tool, find_tools, or tool_help.',
+      "The subagent cannot spawn other agents, delegate, edit your agent file, use MCP tools, or use user-interaction tools.",
+    ].join("\n"),
   },
   {
     name: "delegate_to_agent",
@@ -2771,6 +2820,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   write_file: "Write file",
   list_files: "List files",
   git_diff: "Review changes",
+  run_subagent: "Run subagent",
   delegate_to_agent: "Delegate to agent",
   update_agent_file: "Update agent config",
   ask_user_question: "Ask a question",
@@ -2867,6 +2917,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "edit_file",
   "list_files",
   "git_diff",
+  "run_subagent",
   "shell",
   "read_skill",
   "gh",

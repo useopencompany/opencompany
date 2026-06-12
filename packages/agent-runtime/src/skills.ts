@@ -1,5 +1,5 @@
 import { parse as parseYaml } from "yaml";
-import { validateSkillFiles } from "./skill-resolver";
+import { normalizeSkillCommand, validateSkillFiles } from "./skill-resolver";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import {
   type AgentConfig,
@@ -458,6 +458,9 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 - **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
   Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`. Add \`--hops N\` to also pull
   in objects reachable via \`related\` edges (e.g. \`--hops 1\` surfaces directly-linked neighbours).
+  \`--since\` takes a relative window (\`30m\`, \`24h\`, \`7d\`, \`2w\`) or an ISO-8601 timestamp, matched
+  against \`updated_at\`. Run query with no text for a recency listing — \`memory query --since 24h\`
+  lists everything updated in the last day, newest first.
   Results include capped compiled truth and a \`memory get <id>\` hint for the full record/timeline.
 - **merge** — fold a duplicate canonical object into another, then re-synthesize. Aliases, related
   links and timeline move to the survivor; the source becomes a redirect stub.
@@ -475,6 +478,9 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   **capture it as evidence first**, then **rewrite** the relevant object's compiled truth citing it.
 - Before answering questions about people, companies, or past decisions, **query** memory; use
   **get** when the query result indicates a likely record and details or timeline matter.
+- For "what's new" / "catch me up" questions about memory itself, list recent updates with
+  \`memory query --since 24h\` (or \`7d\`) and no search text. For what was *said* recently, the
+  recall tool over past transcripts is the better source.
 - When two objects are connected (a person at a company, a decision on a project), **link** them
   so future queries can hop between them with \`--hops\`. A well-linked graph retrieves better.
 - Keep compiled truth tight and current; let the timeline hold the history.
@@ -967,6 +973,7 @@ export type ResolvedSkillMetadata = {
   id: string;
   name: string;
   description: string;
+  command?: string;
   origin: "builtin" | "external" | "personal";
   source?: AgentSkillSource;
   provenance?: "agent" | "user";
@@ -1162,7 +1169,7 @@ export type PersonalSkillScanResult = {
 // `description`, and additionally reads the optional `provenance` marker (agent- vs user-authored).
 function parsePersonalSkillFrontmatter(
   content: string,
-): { name: string; description: string; provenance?: "agent" | "user" } | null {
+): { name: string; description: string; command?: string; provenance?: "agent" | "user" } | null {
   const normalized = content.replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) return null;
   const end = normalized.indexOf("\n---", 4);
@@ -1181,7 +1188,13 @@ function parsePersonalSkillFrontmatter(
   const rawProvenance = typeof record.provenance === "string" ? record.provenance.trim() : "";
   const provenance =
     rawProvenance === "agent" || rawProvenance === "user" ? rawProvenance : undefined;
-  return { name, description, ...(provenance ? { provenance } : {}) };
+  const command = normalizeSkillCommand(record.command);
+  return {
+    name,
+    description,
+    ...(command ? { command } : {}),
+    ...(provenance ? { provenance } : {}),
+  };
 }
 
 // Discover the agent's personal skills from its bundle files. Pure: no DB, no files, no network —
@@ -1252,6 +1265,7 @@ export function scanPersonalSkills(input: {
         id,
         name: parsed.name,
         description: parsed.description,
+        ...(parsed.command ? { command: parsed.command } : {}),
         origin: "personal",
         ...(parsed.provenance ? { provenance: parsed.provenance } : {}),
       },

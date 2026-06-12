@@ -90,6 +90,10 @@ Commands:
                    Default output is structured; --section scopes both the text and the --json payload.
   query            Hybrid retrieval over the tree.
                    Filters: --type, --status, --folder, --since, --limit, --lexical-only.
+                   --since takes a relative window (30m, 24h, 7d, 2w) or an ISO-8601 timestamp,
+                   matched against updated_at (the last write, not when the fact was first learned).
+                   Run query with no text for a recency listing — e.g. memory query --since 24h
+                   lists everything updated in the last day, newest first.
                    --hops N follows related links + citations N steps out, pulling in neighbors.
                    Results include capped compiled truth; run memory get <id> for the full record.
                    Hides merged stubs and invalid records by default; --include-merged / --include-invalid opt back in.

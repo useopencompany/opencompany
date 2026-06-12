@@ -4,14 +4,15 @@ import {
   ATTACHMENT_MAX_PER_MESSAGE,
   ATTACHMENT_TEXT_MAX_BYTES,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  listAddableBuiltinSkills,
   modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  type ResolvedSkillMetadata,
   validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,11 +29,9 @@ import {
   ExternalLink,
   LoaderCircle,
   MessageCircleQuestion,
-  PanelRight,
   Play,
   Plus,
   ShieldAlert,
-  Sparkles,
   TerminalSquare,
   Upload,
   Wrench,
@@ -53,10 +52,9 @@ import {
   useState,
   useTransition,
 } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
-import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import {
@@ -65,12 +63,13 @@ import {
   type PendingAttachment,
   uploadAttachment,
 } from "@/components/composer-attachments";
-import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
+import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
+import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, useElapsedSeconds, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -104,6 +103,7 @@ import {
   mergeEvents,
   mergeLiveSessionAggregates,
   mergeMessages,
+  type RuntimeBrainFileReference,
   type RuntimeEvent,
   type RuntimeQuestionItem,
   type RuntimeToolCall,
@@ -131,6 +131,63 @@ import {
 
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
+
+function buildAttachedSkillCommandSources({
+  configSkills,
+  workspaceSkills,
+  personalSkills = [],
+}: {
+  configSkills: AgentConfig["skills"];
+  workspaceSkills: SkillCommandSource[];
+  personalSkills?: ResolvedSkillMetadata[];
+}): SkillCommandSource[] {
+  const workspaceById = new Map(workspaceSkills.map((skill) => [skill.id, skill]));
+  const addableBuiltinById = new Map(listAddableBuiltinSkills().map((skill) => [skill.id, skill]));
+  const seen = new Set<string>();
+  const sources: SkillCommandSource[] = [];
+
+  const add = (skill: SkillCommandSource) => {
+    if (seen.has(skill.id)) return;
+    seen.add(skill.id);
+    sources.push(skill);
+  };
+
+  for (const skill of configSkills ?? []) {
+    const workspaceSkill = workspaceById.get(skill.id);
+    if (workspaceSkill) {
+      add({
+        id: workspaceSkill.id,
+        name: workspaceSkill.name,
+        ...(workspaceSkill.description !== undefined
+          ? { description: workspaceSkill.description }
+          : {}),
+        ...(workspaceSkill.command ? { command: workspaceSkill.command } : {}),
+      });
+      continue;
+    }
+
+    const builtin = addableBuiltinById.get(skill.id);
+    if (builtin) {
+      add({
+        id: builtin.id,
+        name: builtin.name,
+        description: builtin.description,
+        ...(builtin.command ? { command: builtin.command } : {}),
+      });
+    }
+  }
+
+  for (const skill of personalSkills) {
+    add({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(skill.command ? { command: skill.command } : {}),
+    });
+  }
+
+  return sources;
+}
 
 // Snapshot statuses where the server snapshot is the authoritative transcript AND no
 // turn can still be racing into the Durable Stream — the lease has been released
@@ -183,19 +240,6 @@ type OptimisticUserMessage = SessionMessage & {
   submittedAtMs: number;
   confirmedMessageId: string | null;
   existingMessageIds: string[];
-};
-
-const MARKDOWN_COMPONENTS: Components = {
-  a: ({ children, href }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70"
-    >
-      {children}
-    </a>
-  ),
 };
 
 // Lets the deeply-nested ToolCallCard reach the session id (for tool-approval actions)
@@ -315,6 +359,7 @@ export function SessionViewContent(props: SessionViewContentProps) {
 function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const surface = useSessionSurface();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
@@ -757,17 +802,26 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
   const renderMessage = (message: SessionMessage) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
-    // Brain files this turn created or edited (write_file/edit_file set brainPath), deduped
+    // Brain files this turn created or edited (write_file/edit_file set brainFile), deduped
     // and kept in tool-call order so the footer can link straight to each one.
-    const brainFilePaths: string[] = [];
+    const brainFiles: RuntimeBrainFileReference[] = [];
     if (message.role === "assistant") {
-      const seenBrainPaths = new Set<string>();
+      const seenBrainFiles = new Set<string>();
       for (const part of assistantParts) {
         if (part.type !== "tool-call") continue;
-        const brainPath = part.toolCall.brainPath;
-        if (!brainPath || seenBrainPaths.has(brainPath)) continue;
-        seenBrainPaths.add(brainPath);
-        brainFilePaths.push(brainPath);
+        const brainFile =
+          part.toolCall.brainFile ??
+          (part.toolCall.brainPath
+            ? ({
+                scope: "company",
+                path: part.toolCall.brainPath,
+              } satisfies RuntimeBrainFileReference)
+            : null);
+        if (!brainFile) continue;
+        const key = `${brainFile.scope}:${brainFile.path}`;
+        if (seenBrainFiles.has(key)) continue;
+        seenBrainFiles.add(key);
+        brainFiles.push(brainFile);
       }
     }
     const copyText =
@@ -837,9 +891,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               ) : null}
             </div>
           )}
-          {(canCopy || brainFilePaths.length > 0) &&
-          message.status !== "running" &&
-          !awaitingInput ? (
+          {(canCopy || brainFiles.length > 0) && message.status !== "running" && !awaitingInput ? (
             <div
               className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
                 message.role === "assistant"
@@ -853,7 +905,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   {formatElapsed(Math.round(duration))}
                 </span>
               ) : null}
-              {brainFilePaths.length > 0 ? <BrainAttachments paths={brainFilePaths} /> : null}
+              {brainFiles.length > 0 ? <BrainAttachments files={brainFiles} /> : null}
             </div>
           ) : null}
         </div>
@@ -1100,34 +1152,42 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
   // Skills attached to this session's agent contribute `/<command>` entries alongside the
   // built-ins — using each skill's declared `command:` when present, else a slug of its name.
-  // The attached set comes from the synced agent config; the command + metadata come from the
-  // workspace skill catalog.
+  // Company sessions derive attached skills from the synced agent row; personal sessions use the
+  // live personal context so unsaved soft-navigation state and personal skills stay visible.
   const { agents } = useCollections();
   const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const personalAgent = useOptionalPersonalAgent();
   const { data: skillCatalog } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
     queryFn: fetchWorkspaceSkills,
     staleTime: 60_000,
   });
   const allSlashCommands = useMemo(() => {
+    const workspaceSkills: SkillCommandSource[] = (skillCatalog ?? []).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(skill.command ? { command: skill.command } : {}),
+    }));
     const attached = agentRows?.find((agent) => agent.id === session.agentId);
-    const attachedIds = new Set(
-      (attached ? (agentRowToListItem(attached).config.skills ?? []) : []).map((skill) => skill.id),
-    );
-    const sources: SkillCommandSource[] = (skillCatalog ?? [])
-      .filter((skill) => attachedIds.has(skill.id))
-      .map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        ...(skill.command ? { command: skill.command } : {}),
-      }));
+    const configSkills =
+      personalAgent?.agent.id === session.agentId
+        ? personalAgent.config.skills
+        : attached
+          ? agentRowToListItem(attached).config.skills
+          : [];
+    const sources = buildAttachedSkillCommandSources({
+      configSkills,
+      workspaceSkills,
+      personalSkills:
+        personalAgent?.agent.id === session.agentId ? personalAgent.personalSkills : [],
+    });
     if (sources.length === 0) return SLASH_COMMANDS;
     return [
       ...SLASH_COMMANDS,
       ...buildSkillSlashCommands(sources, new Set(SLASH_COMMANDS.map((c) => c.id))),
     ];
-  }, [agentRows, session.agentId, skillCatalog]);
+  }, [agentRows, personalAgent, session.agentId, skillCatalog]);
 
   // Command mode is active while the caret sits on a `/token` (at the start of the
   // input or after whitespace). The token after the slash is the live filter query.
@@ -1152,16 +1212,22 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     setSlashDismissed(false);
   }
 
-  const runSlashCommand = (command: SlashCommand, args = "") => {
+  const runSlashCommand = (
+    command: SlashCommand,
+    args = "",
+    options: { transition?: boolean } = {},
+  ) => {
     const commandKey = command.id;
     if (slashCommandInFlightRef.current.has(commandKey)) return;
     slashCommandInFlightRef.current.add(commandKey);
-    startTransition(async () => {
+
+    const run = async () => {
       try {
         await command.run({
           session,
           workspaceId,
           router,
+          sessionHref: (sessionId) => sessionHrefForSurface(surface, sessionId),
           queryClient,
           setInput,
           insertMention,
@@ -1171,7 +1237,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       } finally {
         slashCommandInFlightRef.current.delete(commandKey);
       }
-    });
+    };
+
+    if (options.transition === false) {
+      void run();
+      return;
+    }
+
+    startTransition(run);
   };
 
   // Selecting a command from the menu inserts its trigger into the input (it does not
@@ -1234,7 +1307,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // and waits for the user to send (so `/clear <prompt>` etc. can take args).
   const selectSlashCommand = (command: SlashCommand) => {
     if (command.applyOnSelect) {
-      runSlashCommand(command);
+      runSlashCommand(command, "", { transition: false });
     } else {
       insertSlashCommand(command);
     }
@@ -1841,164 +1914,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 // capabilities (tools + MCP + skills), and the runtime-sidebar toggle. The agent config — and
 // thus the capability count — is read live from the synced `agents` collection so it stays
 // reactive without threading extra fields through the session payload.
-function SessionTopBar({
-  session,
-  currentContextTokens,
-  totalCostUsdMicros,
-  inspectorCollapsed,
-  onToggleInspector,
-}: {
-  session: AgentSessionDetailPayload["session"];
-  currentContextTokens: number;
-  totalCostUsdMicros: number;
-  inspectorCollapsed: boolean;
-  onToggleInspector: () => void;
-}) {
-  const { agents } = useCollections();
-  const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
-  const capabilityCount = useMemo(() => {
-    const row = agentRows?.find((agent) => agent.id === session.agentId);
-    if (!row) return null;
-    const config = agentRowToListItem(row).config;
-    // `config.tools` already folds MCP servers in (entries with type "mcp"), so tools + MCP is
-    // its length; skills are tracked separately.
-    return config.tools.length + (config.skills?.length ?? 0);
-  }, [agentRows, session.agentId]);
-
-  const model = findModel(session.modelName);
-  const ModelIcon = model?.icon ?? Sparkles;
-  const modelLabel = model?.label ?? session.modelName.split("/").at(-1) ?? session.modelName;
-  const contextMax = model?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  // On the /personal shell the "expand sidebar" button floats over this bar's top-left while the
-  // sidebar is collapsed; widen the left padding so the agent name clears it. (false elsewhere.)
-  const floatingNavInset = useFloatingNavInset();
-
-  return (
-    <header
-      className={`flex items-center justify-between gap-3 py-2 pr-6 ${
-        floatingNavInset ? "pl-14" : "pl-6"
-      }`}
-    >
-      <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-muted">
-        <span className="truncate font-medium text-ink">{session.agentName}</span>
-        <span className="shrink-0 text-ink-subtle/60" aria-hidden>
-          ·
-        </span>
-        <span className="flex min-w-0 shrink items-center gap-1.5">
-          <ModelIcon size={12} className="shrink-0 text-ink-muted" />
-          <span className="truncate">{modelLabel}</span>
-        </span>
-        {capabilityCount && capabilityCount > 0 ? (
-          <>
-            <span className="shrink-0 text-ink-subtle/60" aria-hidden>
-              ·
-            </span>
-            <span className="shrink-0">
-              {capabilityCount} {capabilityCount === 1 ? "capability" : "capabilities"}
-            </span>
-          </>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {currentContextTokens > 0 ? (
-          <ContextWindowMeter
-            used={currentContextTokens}
-            max={contextMax}
-            totalCostUsdMicros={totalCostUsdMicros}
-          />
-        ) : null}
-        <button
-          type="button"
-          aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
-          aria-expanded={!inspectorCollapsed}
-          onClick={onToggleInspector}
-          className="shrink-0 rounded-md p-1.5 text-ink/55 transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <PanelRight size={15} strokeWidth={1.75} />
-        </button>
-      </div>
-    </header>
-  );
-}
-
-// Compact token formatter for the context gauge tooltip: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".
-function formatCompactTokens(value: number): string {
-  if (value >= 1_000_000) {
-    const millions = value / 1_000_000;
-    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
-  }
-  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
-  return `${value}`;
-}
-
-// A small ring that fills to the share of the model's context window in use. The exact
-// "used / max" figure stays out of the chrome and is surfaced only on hover (native title),
-// keeping the top bar quiet. When a cost total is available it appears below the context line.
-function ContextWindowMeter({
-  used,
-  max,
-  totalCostUsdMicros,
-}: {
-  used: number;
-  max: number;
-  totalCostUsdMicros?: number;
-}) {
-  const fraction = max > 0 ? Math.min(1, used / max) : 0;
-  const size = 14;
-  const strokeWidth = 2;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const contextDetail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
-    fraction * 100,
-  )}%`;
-  const ariaLabel =
-    totalCostUsdMicros !== undefined && totalCostUsdMicros > 0
-      ? `Context window usage: ${contextDetail} · ${formatUsdMicros(totalCostUsdMicros)} total cost`
-      : `Context window usage: ${contextDetail}`;
-  return (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger
-          aria-label={ariaLabel}
-          className="flex shrink-0 items-center rounded-full text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={radius}
-              fill="none"
-              strokeWidth={strokeWidth}
-              stroke="currentColor"
-              className="text-ink/15"
-            />
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={radius}
-              fill="none"
-              strokeWidth={strokeWidth}
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={circumference * (1 - fraction)}
-              className="text-ink/70 transition-[stroke-dashoffset] duration-500"
-            />
-          </svg>
-        </TooltipTrigger>
-        <TooltipContent>
-          <div>{contextDetail}</div>
-          {totalCostUsdMicros !== undefined && totalCostUsdMicros > 0 ? (
-            <div className="mt-0.5 text-ink-muted">
-              {formatUsdMicros(totalCostUsdMicros)} total cost
-            </div>
-          ) : null}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
 function AssistantMarkdown({
   content,
   streaming = false,
@@ -2141,28 +2056,28 @@ function CopyMessageButton({ text }: { text: string }) {
 
 const BRAIN_ATTACHMENT_VISIBLE_LIMIT = 3;
 
-// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links
-// straight to each file in the (URL-addressable) Brain editor; collapses the tail past 3.
-function BrainAttachments({ paths }: { paths: string[] }) {
-  const visible = paths.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
-  const overflow = paths.length - visible.length;
+// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links straight
+// to each file in the URL-addressable Brain editor (company or personal); collapses the tail past 3.
+function BrainAttachments({ files }: { files: RuntimeBrainFileReference[] }) {
+  const visible = files.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
+  const overflow = files.length - visible.length;
   return (
     <>
-      {visible.map((path) => (
+      {visible.map((file) => (
         <Link
-          key={path}
-          href={brainHref(path)}
-          title={`brain/${path}`}
+          key={`${file.scope}:${file.path}`}
+          href={brainFileHref(file)}
+          title={brainFileTitle(file)}
           className="inline-flex max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
           <Brain size={9} strokeWidth={1.9} className="shrink-0" />
-          <span className="truncate">{path}</span>
+          <span className="truncate">{file.path}</span>
         </Link>
       ))}
       {overflow > 0 ? (
         <Link
-          href={BRAIN_BASE_PATH}
-          title={`${overflow} more brain ${overflow === 1 ? "file" : "files"}`}
+          href={brainFileListHref(files)}
+          title={`${overflow} more Brain ${overflow === 1 ? "file" : "files"}`}
           className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
           +{overflow} others
@@ -2170,6 +2085,18 @@ function BrainAttachments({ paths }: { paths: string[] }) {
       ) : null}
     </>
   );
+}
+
+function brainFileHref(file: RuntimeBrainFileReference) {
+  return file.scope === "personal" ? personalPaths.brainFile(file.path) : brainHref(file.path);
+}
+
+function brainFileTitle(file: RuntimeBrainFileReference) {
+  return file.scope === "personal" ? `personal-brain/${file.path}` : `brain/${file.path}`;
+}
+
+function brainFileListHref(files: RuntimeBrainFileReference[]) {
+  return files.some((file) => file.scope === "personal") ? personalPaths.brain : BRAIN_BASE_PATH;
 }
 
 // One-click "copy the whole session as JSON" for debugging. Builds the snapshot lazily on
@@ -2694,9 +2621,15 @@ function ToolCallCardDefault({
           <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
             {toolCall.label || formatToolName(toolCall.name)}
           </span>
-          {toolCall.brainPath ? (
+          {toolCall.brainFile || toolCall.brainPath ? (
             <span
-              title={`Updated brain/${toolCall.brainPath}`}
+              title={`Updated ${brainFileTitle(
+                toolCall.brainFile ??
+                  ({
+                    scope: "company",
+                    path: toolCall.brainPath ?? "",
+                  } satisfies RuntimeBrainFileReference),
+              )}`}
               className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
             >
               <Brain size={9} strokeWidth={1.9} />
@@ -2780,6 +2713,7 @@ function ToolCallCardDefault({
           {toolCall.activityPreview && !toolCall.outputPreview ? (
             <ToolCallPreview label="Activity" value={toolCall.activityPreview} />
           ) : null}
+          {toolCall.subagent ? <SubagentProgressView subagent={toolCall.subagent} /> : null}
           {toolCall.outputPreview ? (
             <ToolCallPreview label="Output" value={toolCall.outputPreview} />
           ) : null}
@@ -3364,6 +3298,58 @@ function ToolCallPreview({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SubagentProgressView({
+  subagent,
+}: {
+  subagent: NonNullable<RuntimeToolCall["subagent"]>;
+}) {
+  return (
+    <div className="py-1">
+      <div className="mb-1 text-[10px] font-medium uppercase text-ink-subtle">{subagent.label}</div>
+      <div className="space-y-1 rounded-md border border-border/70 bg-surface-muted/40 px-2 py-1.5">
+        {subagent.toolLines.length > 0 ? (
+          <div className="space-y-1">
+            {subagent.toolLines.map((line) => (
+              <div key={line.id} className="flex min-w-0 items-start gap-1.5 text-[10.5px]">
+                <span className="mt-0.5 flex h-3 w-3 shrink-0 items-center justify-center text-ink-subtle">
+                  {line.status === "running" ? (
+                    <LoaderCircle size={10} strokeWidth={2} className="animate-spin text-warning" />
+                  ) : line.status === "failed" || line.status === "denied" ? (
+                    <AlertCircle size={10} strokeWidth={1.9} className="text-danger" />
+                  ) : (
+                    <Check size={10} strokeWidth={1.9} className="text-success" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-ink/65" title={line.name}>
+                    {line.label}
+                  </div>
+                  {line.outputPreview ? (
+                    <div className="truncate text-ink-subtle" title={line.outputPreview}>
+                      {line.outputPreview}
+                    </div>
+                  ) : line.inputPreview ? (
+                    <div className="truncate text-ink-subtle" title={line.inputPreview}>
+                      {line.inputPreview}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {subagent.textPreview ? (
+          <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-ink/60">
+            {subagent.textPreview}
+          </pre>
+        ) : subagent.toolLines.length === 0 ? (
+          <div className="text-[10.5px] text-ink-subtle">Waiting for subagent activity</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function formatToolName(name: string) {
   const normalized = name.replace(/[_-]+/g, " ").trim();
   if (!normalized) return "Tool call";
@@ -3423,7 +3409,7 @@ function SessionInspector({
         <div className="mt-4 space-y-4">
           <InspectorLink
             label="Session page"
-            href={sessionHref(surface, session.id)}
+            href={sessionHrefForSurface(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
@@ -3679,7 +3665,7 @@ function useSessionSurface(): "personal" | "company" {
   return pathname?.split("/").filter(Boolean)[0] === "personal" ? "personal" : "company";
 }
 
-function sessionHref(surface: "personal" | "company", sessionId: string) {
+function sessionHrefForSurface(surface: "personal" | "company", sessionId: string) {
   return surface === "personal"
     ? personalPaths.session(sessionId)
     : `/company/session/${sessionId}`;
@@ -3693,7 +3679,7 @@ function RelatedSessionLink({
   const surface = useSessionSurface();
   return (
     <Link
-      href={sessionHref(surface, session.id)}
+      href={sessionHrefForSurface(surface, session.id)}
       target="_blank"
       rel="noreferrer"
       title={session.title}
@@ -3800,10 +3786,6 @@ function formatThinkingDuration(seconds: number | undefined) {
   if (seconds === undefined) return "Thought";
   const duration = Math.max(Math.round(seconds), 1);
   return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
-}
-
-function formatUsdMicros(value: number) {
-  return `$${(value / 1_000_000).toFixed(4)}`;
 }
 
 function formatProviderName(value: string) {

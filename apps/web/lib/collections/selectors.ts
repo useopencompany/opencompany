@@ -46,7 +46,7 @@ export function sortAgentsByUpdatedDesc(agents: AgentListItemPayload[]): AgentLi
 // the row out). Excluding both statuses keeps an archiving session hidden across
 // that window, so the optimistic delete never visibly reappears.
 const SIDEBAR_HIDDEN_STATUSES = new Set(["archiving", "archived"]);
-// Mirror loadSidebarSessionsForWorkspace: render the most-recent N sessions plus
+// Mirror loadSidebarSessionsForWorkspace: render the newest-created N sessions plus
 // every pinned session (so a pinned-but-stale session always shows).
 const SIDEBAR_RECENCY_LIMIT = 50;
 
@@ -82,7 +82,7 @@ export function deriveSidebarSessions(
       starredAt: starredAtBySession.get(row.id) ?? null,
       unseen: isSessionUnseen(row.last_turn_finished_at, row.last_seen_at),
     }))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return visible.filter(
     (session, index) => index < SIDEBAR_RECENCY_LIMIT || session.starredAt !== null,
@@ -91,7 +91,7 @@ export function deriveSidebarSessions(
 
 /**
  * Personal session list variant: scoped to a single default agent, includes WhatsApp
- * sessions, and otherwise mirrors the workspace sidebar's pin-aware recency behavior.
+ * sessions, and otherwise mirrors the workspace sidebar's pin-aware created-date behavior.
  */
 export function derivePersonalSidebarSessions(
   agentId: string,
@@ -120,7 +120,7 @@ export function derivePersonalSidebarSessions(
       starredAt: starredAtBySession.get(row.id) ?? null,
       unseen: isSessionUnseen(row.last_turn_finished_at, row.last_seen_at),
     }))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return visible.filter(
     (session, index) => index < SIDEBAR_RECENCY_LIMIT || session.starredAt !== null,

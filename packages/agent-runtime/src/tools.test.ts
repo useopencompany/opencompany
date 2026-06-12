@@ -146,6 +146,22 @@ describe("AGENT_TOOL_CATALOG", () => {
   });
 });
 
+describe("run_subagent runtime tool", () => {
+  it("is always-on, directly callable, and documented in the runtime registry", () => {
+    const definition = getRuntimeToolDefinition("run_subagent");
+
+    expect(definition).toMatchObject({
+      name: "run_subagent",
+      kind: "internal",
+    });
+    expect(definition?.configToolId).toBeUndefined();
+    expect(partitionRuntimeToolNames(["run_subagent"] as RuntimeToolName[])).toEqual({
+      direct: ["run_subagent"],
+      deferred: [],
+    });
+  });
+});
+
 describe("runtime tool definitions", () => {
   it("lets delegate_to_agent continue prior child sessions by session id", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("delegate_to_agent");
@@ -344,6 +360,19 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     expect(withMemory).toContain("memory");
     expect(withMemory).toContain("recall");
     expect(withMemory).toContain("fetch_transcript");
+  });
+
+  it("guides broad time-bounded recap requests toward query-less recall", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("recall");
+    if (!definition) throw new Error("Expected recall runtime tool definition to exist");
+
+    expect(definition.description).toContain("omit query and pass only time_window");
+    expect(definition.description).toContain("what did we discuss today?");
+
+    const query = definition.parameters.properties.query as { description?: string };
+    expect(query.description).toContain("Omit when the user asks for a broad recap");
+    expect(definition.help).toContain("Mode 3, time-bounded recap");
+    expect(definition.help).toContain("pass time_window without query");
   });
 
   it("hard-gates the inbox tools to the personal agent", () => {

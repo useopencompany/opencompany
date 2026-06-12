@@ -169,13 +169,17 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   const returning = vi.fn(() => ({}));
   const values = vi.fn(() => ({ returning }));
   const insert = vi.fn(() => ({ values }));
-  // insertAgentSession reads back [sessionRow, statusEvent]; insertUserMessage (only on
-  // the prompt path) reads back [messageRow, createdEvent]. Both go through db.batch and
-  // synthesize the detail payload from these rows.
+  // insertAgentSession reads back [sessionRow, statusEvent]. The prompt path combines
+  // session/status/message/message.created into one batch and synthesizes the detail payload
+  // from those rows.
   const batch = vi
     .fn()
-    .mockResolvedValueOnce([[fakeSessionRow()], [statusEventRow]])
-    .mockResolvedValueOnce([[fakeMessageRow()], [{ id: 2, createdAt: CREATED_AT }]]);
+    .mockResolvedValueOnce([
+      [fakeSessionRow()],
+      [statusEventRow],
+      [fakeMessageRow()],
+      [{ id: 2, createdAt: CREATED_AT }],
+    ]);
   return { select, insert, batch } as never;
 }
 
@@ -316,6 +320,7 @@ describe("createAgentSessionFromPrompt", () => {
 
   it("returns a billing redirect when the workspace has no credit", async () => {
     hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
 
     const result = await createAgentSessionFromPrompt("agt_123", "Hello");
 

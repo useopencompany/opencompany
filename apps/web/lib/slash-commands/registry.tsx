@@ -15,6 +15,7 @@ export type SlashCommandContext = {
   session: AgentSessionPayload;
   workspaceId: string;
   router: ReturnType<typeof useRouter>;
+  sessionHref: (sessionId: string) => string;
   queryClient: QueryClient;
   /** Update the composer's textarea value. */
   setInput: (value: string) => void;
@@ -56,7 +57,16 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "Start a fresh session with this agent",
     icon: Eraser,
     keywords: ["new", "reset", "fresh", "restart"],
-    run: async ({ session, workspaceId, router, queryClient, setInput, showToast, args }) => {
+    run: async ({
+      session,
+      workspaceId,
+      router,
+      sessionHref,
+      queryClient,
+      setInput,
+      showToast,
+      args,
+    }) => {
       // Text after the command becomes the fresh session's first message (sent
       // immediately, like the home prompt). No text → a clean empty session.
       const prompt = args.trim();
@@ -77,7 +87,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       }
       setInput("");
       seedSessionQueries(queryClient, workspaceId, result.detail);
-      router.push(`/company/session/${result.session.id}`);
+      router.push(sessionHref(result.session.id));
     },
   },
   {
@@ -87,7 +97,16 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "Spin up a new session with this agent without leaving this one",
     icon: MessageSquarePlus,
     keywords: ["background", "side", "parallel", "by the way", "new", "spawn", "aside"],
-    run: async ({ session, workspaceId, router, queryClient, setInput, showToast, args }) => {
+    run: async ({
+      session,
+      workspaceId,
+      router,
+      sessionHref,
+      queryClient,
+      setInput,
+      showToast,
+      args,
+    }) => {
       // Same as /clear (fresh session with this agent), but we stay put instead of
       // navigating: the new session surfaces in the sidebar and via the toast's "Open".
       // Text after the command becomes the new session's first message; no text → a
@@ -114,7 +133,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
         title: prompt ? "Working on it in a new session" : "New session started",
         action: {
           label: "Open",
-          onClick: () => router.push(`/company/session/${sessionId}`),
+          onClick: () => router.push(sessionHref(sessionId)),
         },
       });
     },
