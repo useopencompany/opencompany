@@ -4,15 +4,7 @@ import { ChevronRight, CreditCard, ExternalLink, Gift, WalletCards } from "lucid
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { createCreditCheckoutSession, redeemCreditCode } from "@/lib/billing/actions";
 import {
   isValidTopUpAmountCents,
