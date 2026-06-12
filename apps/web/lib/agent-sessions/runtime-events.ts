@@ -24,6 +24,10 @@ export type SessionMessage = {
     kind: "image" | "pdf" | "text";
     mediaType: string;
     filename: string;
+    // Client-only, never persisted or serialized: a local object-URL set on an OPTIMISTIC
+    // just-sent message so the image renders instantly, before the `/api/attachments/{id}` row
+    // exists. Server-loaded messages omit it and fall back to the served URL.
+    previewUrl?: string;
   }>;
 };
 

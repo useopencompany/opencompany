@@ -43,6 +43,7 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
     posthog: mcpSettings.posthog.configured,
     betterstack: mcpSettings.betterstack.configured,
     braintrust: mcpSettings.braintrust.configured,
+    notion: mcpSettings.notion.configured,
   };
 
   const integrationDetails = buildPersonalIntegrationDetails({

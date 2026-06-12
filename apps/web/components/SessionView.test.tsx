@@ -808,6 +808,7 @@ function makePersonalAgentContext(
       posthog: false,
       betterstack: false,
       braintrust: false,
+      notion: false,
     },
     integrationDetails: {},
     toolPolicies: {},
@@ -1247,6 +1248,39 @@ describe("SessionViewContent — user message attachments", () => {
     // The pdf attachment renders a chip/link with the filename, also through the route.
     const pdfLink = screen.getByText("report.pdf").closest("a");
     expect(pdfLink).toHaveAttribute("href", "/api/attachments/att_pdf");
+  });
+
+  it("prefers a local preview URL for an optimistic just-sent image (Bug 2)", () => {
+    // An optimistic message carries a local object-URL preview so the image shows instantly,
+    // before the `/api/attachments/{id}` row exists. The renderer must use that preview, not the
+    // not-yet-valid served URL.
+    const detail = makeDetail({
+      messages: [
+        {
+          id: "msg_optimistic",
+          role: "user",
+          content: "Just sent this",
+          status: "completed",
+          createdAt: "2026-06-05T10:00:00.000Z",
+          attachments: [
+            {
+              id: "att_local",
+              kind: "image",
+              mediaType: "image/png",
+              filename: "fresh.png",
+              previewUrl: "blob:fake-preview-url",
+            },
+          ],
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    const image = screen.getByAltText("fresh.png");
+    expect(image).toHaveAttribute("src", "blob:fake-preview-url");
+    // The open-in-new-tab link also points at the preview while optimistic.
+    expect(image.closest("a")).toHaveAttribute("href", "blob:fake-preview-url");
   });
 });
 
