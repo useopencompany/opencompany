@@ -557,7 +557,9 @@ describe("resolveToolDecision", () => {
       }),
     ).toEqual({ decision: "ask", providerKey: "github", group: "merge" });
     // And allowing merges does not hand over settings/members/delete.
-    const allowMerge: WorkspaceToolPolicyMap = new Map([[policyMapKey("github", "merge"), "allow"]]);
+    const allowMerge: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("github", "merge"), "allow"],
+    ]);
     expect(
       resolveToolDecision({
         toolName: "gh",
