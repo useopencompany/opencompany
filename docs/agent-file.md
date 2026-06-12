@@ -124,6 +124,7 @@ details are catalog data in code, not `.agent` file data.
 | `amp` | Coding agent delegated into a sandboxed runtime. |
 | `linear` | Experimental workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Experimental workspace MCP access to Slack search, messages, files, emoji, and users. |
+| `notion` | Workspace MCP access to Notion search, pages, databases, comments, users, and teamspaces. |
 
 ```yaml
 tools:
@@ -138,6 +139,9 @@ tools:
   - id: slack
     type: mcp
     server: slack
+  - id: notion
+    type: mcp
+    server: notion
 ```
 
 MCP tools are beta workspace tools. The `.agent` file only records the MCP server binding; tokens

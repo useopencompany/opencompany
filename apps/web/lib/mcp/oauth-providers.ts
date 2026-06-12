@@ -9,6 +9,9 @@ import {
   LINEAR_MCP_ENDPOINT_URL,
   LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
   LINEAR_MCP_SERVER_KEY,
+  NOTION_MCP_ENDPOINT_URL,
+  NOTION_MCP_OAUTH_CREDENTIAL_KIND,
+  NOTION_MCP_SERVER_KEY,
   POSTHOG_MCP_ENDPOINT_URL,
   POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
   POSTHOG_MCP_SERVER_KEY,
@@ -82,12 +85,20 @@ export const braintrustMcpOAuth = createMcpOAuthProvider({
   credentialKind: BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
 });
 
+export const notionMcpOAuth = createMcpOAuthProvider({
+  key: NOTION_MCP_SERVER_KEY,
+  displayName: "Notion",
+  endpointUrl: NOTION_MCP_ENDPOINT_URL,
+  credentialKind: NOTION_MCP_OAUTH_CREDENTIAL_KIND,
+});
+
 export const mcpOAuthProviders = {
   linear: linearMcpOAuth,
   slack: slackMcpOAuth,
   posthog: posthogMcpOAuth,
   betterstack: betterstackMcpOAuth,
   braintrust: braintrustMcpOAuth,
+  notion: notionMcpOAuth,
 } as const;
 
 function slackClientInformation(): OAuthClientInformation {

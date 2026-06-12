@@ -43,6 +43,7 @@ import {
   removeBetterStackMcpConnection,
   removeBraintrustMcpConnection,
   removeLinearMcpToken,
+  removeNotionMcpConnection,
   removePostHogMcpConnection,
   removeSlackMcpConnection,
 } from "@/lib/mcp/actions";
@@ -561,6 +562,7 @@ const MCP_DISCONNECT_ACTIONS: Partial<
   posthog: removePostHogMcpConnection,
   betterstack: removeBetterStackMcpConnection,
   braintrust: removeBraintrustMcpConnection,
+  notion: removeNotionMcpConnection,
 };
 
 async function disconnectIntegration(

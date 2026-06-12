@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
+  FileText,
   FlaskConical,
   GitBranch,
   KeyRound,
@@ -28,6 +29,7 @@ import {
   removeBetterStackMcpConnection,
   removeBraintrustMcpConnection,
   removeLinearMcpToken,
+  removeNotionMcpConnection,
   removePostHogMcpConnection,
   removeSlackMcpConnection,
   saveLinearMcpToken,
@@ -47,6 +49,8 @@ const BETTERSTACK_MCP_DOCS_URL = "https://betterstack.com/docs/getting-started/i
 const BETTERSTACK_MCP_START_URL = "/api/mcp/betterstack/start?returnTo=/company/settings";
 const BRAINTRUST_MCP_DOCS_URL = "https://www.braintrust.dev/docs/integrations/developer-tools/mcp";
 const BRAINTRUST_MCP_START_URL = "/api/mcp/braintrust/start?returnTo=/company/settings";
+const NOTION_MCP_DOCS_URL = "https://developers.notion.com/guides/mcp/overview";
+const NOTION_MCP_START_URL = "/api/mcp/notion/start?returnTo=/company/settings";
 
 type Props = {
   profile: {
@@ -93,6 +97,12 @@ type Props = {
       updatedAt: string | null;
     };
     braintrust: {
+      configured: boolean;
+      status: "configured" | "missing_credential" | "disabled" | "error" | null;
+      statusReason: string | null;
+      updatedAt: string | null;
+    };
+    notion: {
       configured: boolean;
       status: "configured" | "missing_credential" | "disabled" | "error" | null;
       statusReason: string | null;
@@ -286,6 +296,11 @@ function McpServersSection({
       : null;
   const braintrustSetupReason =
     searchParams.get("mcp") === "braintrust" ? searchParams.get("reason") : null;
+  const notionSetupStatus = searchParams.get("mcp") === "notion" ? searchParams.get("setup") : null;
+  const normalizedNotionSetupStatus =
+    notionSetupStatus === "connected" || notionSetupStatus === "error" ? notionSetupStatus : null;
+  const notionSetupReason =
+    searchParams.get("mcp") === "notion" ? searchParams.get("reason") : null;
 
   return (
     <div className="space-y-3">
@@ -318,6 +333,12 @@ function McpServersSection({
         setupStatus={normalizedBraintrustSetupStatus}
         setupReason={braintrustSetupReason}
         policyOverrides={toolPolicies.braintrust}
+      />
+      <NotionMcpCard
+        notion={mcp.notion}
+        setupStatus={normalizedNotionSetupStatus}
+        setupReason={notionSetupReason}
+        policyOverrides={toolPolicies.notion}
       />
     </div>
   );
@@ -1055,6 +1076,139 @@ function braintrustMcpSetupErrorMessage(reason: string | null) {
       return "Could not start Braintrust authorization. Check the server logs and try again.";
     default:
       return "Braintrust connection failed. Try reconnecting Braintrust.";
+  }
+}
+
+function NotionMcpCard({
+  notion,
+  setupStatus,
+  setupReason,
+  policyOverrides,
+}: {
+  notion: Props["mcp"]["notion"];
+  setupStatus: "connected" | "error" | null;
+  setupReason: string | null;
+  policyOverrides: WorkspaceToolPolicyOverrides[string] | undefined;
+}) {
+  const router = useRouter();
+  const [dismissedSetupStatus, setDismissedSetupStatus] = useState<"connected" | "error" | null>(
+    null,
+  );
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const configured = notion.configured;
+  const setupMessage =
+    setupStatus && setupStatus !== dismissedSetupStatus
+      ? {
+          type: setupStatus === "connected" ? ("success" as const) : ("error" as const),
+          text:
+            setupStatus === "connected"
+              ? "Notion connected."
+              : notionMcpSetupErrorMessage(setupReason),
+        }
+      : null;
+  const visibleMessage = message ?? setupMessage;
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+            <FileText size={15} strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">Notion MCP</div>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${
+                  configured
+                    ? "border-success-border bg-success-bg text-success"
+                    : "border-warning-border bg-warning-bg text-warning"
+                }`}
+              >
+                {configured ? "Configured" : "Not connected"}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+              Agents can opt in with @notion after Notion is connected.
+            </p>
+            {notion.statusReason ? (
+              <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">{notion.statusReason}</p>
+            ) : null}
+          </div>
+        </div>
+        {configured ? (
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => {
+              setMessage(null);
+              setDismissedSetupStatus(setupStatus);
+              startTransition(async () => {
+                const result = await removeNotionMcpConnection();
+                if (result.ok) {
+                  setMessage({ type: "success", text: "Notion MCP connection removed." });
+                  router.refresh();
+                }
+              });
+            }}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-4 border-t border-border-subtle pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={NOTION_MCP_START_URL}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85"
+          >
+            <ExternalLink size={13} strokeWidth={1.9} />
+            {configured ? "Reconnect Notion" : "Connect Notion"}
+          </a>
+          <a
+            href={NOTION_MCP_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted hover:text-ink"
+          >
+            MCP docs
+            <ExternalLink size={12} strokeWidth={1.9} />
+          </a>
+        </div>
+      </div>
+      {visibleMessage && (
+        <div
+          className={`mt-2 text-[12px] ${
+            visibleMessage.type === "success" ? "text-success" : "text-danger"
+          }`}
+        >
+          {visibleMessage.text}
+        </div>
+      )}
+      {configured ? <ToolPolicyEditor providerKey="notion" overrides={policyOverrides} /> : null}
+    </div>
+  );
+}
+
+function notionMcpSetupErrorMessage(reason: string | null) {
+  switch (reason) {
+    case "invalid_state":
+      return "Notion connection expired or was started in another browser tab. Try reconnecting Notion.";
+    case "session_mismatch":
+      return "Notion returned to a different OpenCompany session. Sign in to the same workspace and try again.";
+    case "notion_denied":
+      return "Notion did not authorize the connection.";
+    case "missing_code":
+      return "Notion did not return an authorization code. Try reconnecting Notion.";
+    case "token_exchange_failed":
+      return "Notion authorized the connection, but token exchange failed. Check the server logs and try again.";
+    case "start_failed":
+      return "Could not start Notion authorization. Check the server logs and try again.";
+    default:
+      return "Notion connection failed. Try reconnecting Notion.";
   }
 }
 

@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  FileText,
   FlaskConical,
   GitBranch,
   ListTodo,
@@ -151,6 +152,20 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
       "Acts as the Braintrust account you authorize",
     ],
   },
+  {
+    id: "notion",
+    label: "Notion",
+    description: "Search, read, create, and update Notion workspace content.",
+    icon: FileText,
+    kind: "mcp",
+    connectUrl: (returnTo) => `/api/mcp/notion/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Search pages, databases, and workspace content",
+      "Read and fetch Notion content",
+      "Create and update pages, comments, and properties",
+      "Acts as the Notion account you authorize",
+    ],
+  },
 ];
 
 const CATALOG_BY_ID = new Map(PERSONAL_INTEGRATIONS_CATALOG.map((entry) => [entry.id, entry]));
@@ -176,4 +191,5 @@ export const PERSONAL_INTEGRATION_TOOL_IDS = new Set<string>([
   "posthog",
   "betterstack",
   "braintrust",
+  "notion",
 ]);

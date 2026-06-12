@@ -808,6 +808,7 @@ function makePersonalAgentContext(
       posthog: false,
       betterstack: false,
       braintrust: false,
+      notion: false,
     },
     integrationDetails: {},
     toolPolicies: {},

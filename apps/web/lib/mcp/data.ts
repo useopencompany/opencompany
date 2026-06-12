@@ -17,6 +17,9 @@ export const BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 export const BRAINTRUST_MCP_SERVER_KEY = "braintrust";
 export const BRAINTRUST_MCP_ENDPOINT_URL = "https://api.braintrust.dev/mcp";
 export const BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+export const NOTION_MCP_SERVER_KEY = "notion";
+export const NOTION_MCP_ENDPOINT_URL = "https://mcp.notion.com/mcp";
+export const NOTION_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 
 export const MCP_PROVIDER_KEYS = [
   LINEAR_MCP_SERVER_KEY,
@@ -24,6 +27,7 @@ export const MCP_PROVIDER_KEYS = [
   POSTHOG_MCP_SERVER_KEY,
   BETTERSTACK_MCP_SERVER_KEY,
   BRAINTRUST_MCP_SERVER_KEY,
+  NOTION_MCP_SERVER_KEY,
 ] as const;
 
 export type McpProviderKey = (typeof MCP_PROVIDER_KEYS)[number];
@@ -34,6 +38,7 @@ export type WorkspaceMcpSettings = {
   posthog: WorkspaceMcpProviderSettings;
   betterstack: WorkspaceMcpProviderSettings;
   braintrust: WorkspaceMcpProviderSettings;
+  notion: WorkspaceMcpProviderSettings;
 };
 
 export type WorkspaceMcpProviderSettings = {
@@ -101,6 +106,9 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
       if (provider === BRAINTRUST_MCP_SERVER_KEY) {
         return credential.kind === BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND;
       }
+      if (provider === NOTION_MCP_SERVER_KEY) {
+        return credential.kind === NOTION_MCP_OAUTH_CREDENTIAL_KIND;
+      }
       return credential.kind === SLACK_MCP_OAUTH_CREDENTIAL_KIND;
     });
     return {
@@ -118,5 +126,6 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
     posthog: settingsFor(POSTHOG_MCP_SERVER_KEY),
     betterstack: settingsFor(BETTERSTACK_MCP_SERVER_KEY),
     braintrust: settingsFor(BRAINTRUST_MCP_SERVER_KEY),
+    notion: settingsFor(NOTION_MCP_SERVER_KEY),
   };
 }
