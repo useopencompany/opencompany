@@ -1415,6 +1415,13 @@ describe("describeToolCall", () => {
       "Updating memory for acme",
     );
     expect(describeToolCall("memory", { args: "doctor" })).toBe("Checking memory consistency");
+    // A text-less query with --since is a recency listing, not a search.
+    expect(describeToolCall("memory", { args: "query --since 24h" })).toBe(
+      "Reviewing recent memory updates",
+    );
+    expect(describeToolCall("memory", { args: 'query --text "acme blockers" --since 24h' })).toBe(
+      "Looking in memory for “acme blockers”",
+    );
   });
 });
 

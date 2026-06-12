@@ -2,7 +2,32 @@ import type { GatewayUsageEntry } from "../retrieval/gateway";
 import { query as runQuery } from "../retrieval/index";
 import { loadProviders } from "../retrieval/providers";
 import { isMemoryStatus, isMemoryType, type MemoryType } from "../schema";
-import { type CommandContext, type CommandResult, ok } from "./io";
+import { type CommandContext, type CommandResult, fail, ok } from "./io";
+
+// `--since` accepts a relative window (30m, 24h, 7d, 2w) or an absolute ISO-8601 timestamp.
+// Relative windows resolve against the wall clock here so the agent never has to compute
+// "now minus 24 hours" itself — LLM date math is a reliable source of off-by-a-day bugs.
+const RELATIVE_SINCE = /^(\d+)([mhdw])$/;
+const SINCE_UNIT_MS: Record<string, number> = {
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+  w: 604_800_000,
+};
+
+export function resolveSince(raw: string, now: number = Date.now()): string | null {
+  const trimmed = raw.trim();
+  const relative = RELATIVE_SINCE.exec(trimmed);
+  if (relative) {
+    const amount = Number(relative[1]);
+    const unitMs = SINCE_UNIT_MS[relative[2] ?? ""];
+    if (!unitMs || !Number.isFinite(amount) || amount <= 0) return null;
+    return new Date(now - amount * unitMs).toISOString();
+  }
+  const parsed = Date.parse(trimmed);
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
+}
 
 // Hybrid retrieval over the memory tree. Model-backed stages (expansion/vector/rerank) engage
 // only when a Gateway key is present and `--lexical-only` is not set; otherwise it runs offline.
@@ -21,7 +46,13 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
     ? {}
     : await loadProviders(process.env, (entry) => usage.push(entry));
   const folder = args.get("folder");
-  const since = args.get("since");
+  const sinceInput = args.get("since");
+  const since = sinceInput ? resolveSince(sinceInput) : undefined;
+  if (sinceInput && !since) {
+    return fail(
+      `Invalid --since value "${sinceInput}". Use a relative window (30m, 24h, 7d, 2w) or an ISO-8601 timestamp.`,
+    );
+  }
   const hops = args.number("hops");
 
   const hits = await runQuery(
@@ -47,7 +78,7 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
       : hits
           .map(
             (hit, i) =>
-              `${i + 1}. [${hit.type}/${hit.status}] ${hit.id} (score ${hit.score})\n${hit.snippet}\nNext: memory get ${hit.id}`,
+              `${i + 1}. [${hit.type}/${hit.status}] ${hit.id} (score ${hit.score}, updated ${hit.updatedAt})\n${hit.snippet}\nNext: memory get ${hit.id}`,
           )
           .join("\n\n");
 
