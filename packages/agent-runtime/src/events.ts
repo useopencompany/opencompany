@@ -154,7 +154,7 @@ export type AgentRuntimeEvent =
         // formatted `inputPreview` remains for the persisted approval row.
         input?: unknown;
         providerKey: string;
-        permissionGroup: "read" | "post" | "modify" | "admin";
+        permissionGroup: "read" | "post" | "modify" | "merge" | "admin";
         inputPreview?: string;
         requestedAt: string;
       };

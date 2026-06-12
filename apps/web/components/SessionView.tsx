@@ -6,9 +6,9 @@ import {
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   listAddableBuiltinSkills,
   modelSupportsAttachments,
-  PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  permissionLabelFor,
   type ResolvedSkillMetadata,
   validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
@@ -3220,7 +3220,7 @@ function ToolApprovalPrompt({
     : "";
   const groupLabel = approval
     ? approval.permissionGroup
-      ? PERMISSION_GROUP_LABELS[approval.permissionGroup]
+      ? permissionLabelFor(approval.providerKey, approval.permissionGroup)
       : "Unknown permission"
     : "";
   const permissionDescription = approval?.permissionGroup
