@@ -190,7 +190,15 @@ usually omitted and only appears once additional opt-in skills exist.
 ```yaml
 skills:
   - agent-self-edit
+  - y-combinator-knowledge
 ```
+
+Current addable built-in skills include:
+
+- `first-principles` — a structured framework for breaking hard problems down to fundamentals.
+- `humanizer` — editing guidance for making generated prose sound human.
+- `y-combinator-knowledge` — YC-style startup sparring: office-hours framing, user obsession,
+  MVP and growth pressure, fundraising discipline, and links to canonical YC/PG teachings.
 
 **External skills** are brought in from a public GitHub repository (or a skills.sh page,
 resolved through its backing GitHub repo). They serialize as an object carrying provenance
