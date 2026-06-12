@@ -22,10 +22,14 @@ export async function uploadAttachment(input: {
   id: string;
   file: File;
   workspaceId: string;
-  sessionId: string;
+  // Absent on the home composer: the session does not exist yet (it is created on submit), so
+  // the upload lands in a sessionless `pending/` folder. The DB row written at submit time
+  // only stores the pointer, so the path scope is purely organizational.
+  sessionId?: string;
 }): Promise<{ blobPathname: string; blobUrl: string }> {
   const safeName = input.file.name.replace(/[^\w.\-]+/g, "_") || "file";
-  const pathname = `workspace/${input.workspaceId}/sessions/${input.sessionId}/${input.id}-${safeName}`;
+  const scope = input.sessionId ? `sessions/${input.sessionId}` : "pending";
+  const pathname = `workspace/${input.workspaceId}/${scope}/${input.id}-${safeName}`;
   // PRIVATE Blob store: `access` is required (BlobAccessType = "public" | "private")
   // in @vercel/blob@2.4.0. The token is minted by /api/upload (handleUpload).
   const blob = await upload(pathname, input.file, {
