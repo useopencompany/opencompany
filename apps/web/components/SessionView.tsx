@@ -56,9 +56,12 @@ import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import {
+  ATTACHMENT_FILE_INPUT_ACCEPT,
   AttachmentCard,
   ComposerAttachments,
+  ComposerDropOverlay,
   type PendingAttachment,
+  toSubmitAttachments,
 } from "@/components/composer-attachments";
 import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -1348,15 +1351,7 @@ function SessionViewContentBody({
       const result = await submitAgentSessionMessage(
         session.id,
         content,
-        ready.map((a) => ({
-          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
-          blobPathname: a.blobPathname!,
-          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
-          blobUrl: a.blobUrl!,
-          mediaType: a.mediaType,
-          filename: a.filename,
-          sizeBytes: a.sizeBytes,
-        })),
+        toSubmitAttachments(ready),
       );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
@@ -1481,20 +1476,7 @@ function SessionViewContentBody({
           // app attaches and the browser never opens the file; these only drive the overlay.
           {...dragHandlers}
         >
-          {isDragActive ? (
-            <div
-              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
-              aria-hidden="true"
-            >
-              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
-                <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
-                <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">
-                  Images, PDF, text &amp; code · or paste with ⌘V
-                </p>
-              </div>
-            </div>
-          ) : null}
+          {isDragActive ? <ComposerDropOverlay /> : null}
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
@@ -1693,10 +1675,7 @@ function SessionViewContentBody({
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        // Text/code files often have no registered MIME, so listing extensions
-                        // keeps them pickable; the broad set plus `*` lets any file through and
-                        // validation rejects unsupported ones with a toast.
-                        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,application/xml,text/css,text/yaml,.txt,.md,.markdown,.html,.htm,.csv,.tsv,.json,.jsonc,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.scss,.sass,.less"
+                        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
                         className="hidden"
                         onChange={(event) => {
                           acceptFiles(Array.from(event.target.files ?? []));

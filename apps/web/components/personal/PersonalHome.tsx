@@ -2,7 +2,7 @@
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Plus, Upload } from "lucide-react";
+import { ArrowUp, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
@@ -10,6 +10,8 @@ import { Composer } from "@/components/Composer";
 import {
   ATTACHMENT_FILE_INPUT_ACCEPT,
   ComposerAttachments,
+  ComposerDropOverlay,
+  toSubmitAttachments,
 } from "@/components/composer-attachments";
 import { PendingSessionView } from "@/components/personal/PendingSessionView";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -91,15 +93,7 @@ export default function PersonalHome() {
         agent.id,
         content,
         model || undefined,
-        ready.map((a) => ({
-          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
-          blobPathname: a.blobPathname!,
-          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
-          blobUrl: a.blobUrl!,
-          mediaType: a.mediaType,
-          filename: a.filename,
-          sizeBytes: a.sizeBytes,
-        })),
+        toSubmitAttachments(ready),
       );
       if (!result.ok) {
         setPendingSession(null);
@@ -149,20 +143,7 @@ export default function PersonalHome() {
           className="relative"
           {...dragHandlers}
         >
-          {isDragActive ? (
-            <div
-              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
-              aria-hidden="true"
-            >
-              <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
-                <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
-                <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">
-                  Images, PDF, text &amp; code · or paste with ⌘V
-                </p>
-              </div>
-            </div>
-          ) : null}
+          {isDragActive ? <ComposerDropOverlay className="rounded-2xl" /> : null}
           <input
             ref={fileInputRef}
             type="file"
