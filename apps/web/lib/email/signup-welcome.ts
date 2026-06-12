@@ -1,11 +1,17 @@
 import { captureException, createLogger } from "@opencompany/observability";
-import { type ErrorResponse, Resend, type Response as ResendResponse } from "resend";
+import {
+  assertResendResponse,
+  getResendClient,
+  isResendNotFoundError,
+  type ResendEmailClient,
+  trimmed,
+} from "@/lib/email/client";
+import { renderSignupWelcomeEmail } from "@/lib/email/templates/signup-welcome";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
-const DEFAULT_WELCOME_FROM = "Louis from OpenCompany <louis@opencompany.cloud>";
+const DEFAULT_WELCOME_FROM = "Louis from OpenCompany <louis@updates.opencompany.cloud>";
 const DEFAULT_REPLY_TO = "louis@opencompany.cloud";
-const SIGNUP_WELCOME_SUBJECT = "Welcome to OpenCompany";
 
 export type SignupWelcomeEmailInput = {
   userId: string;
@@ -13,62 +19,6 @@ export type SignupWelcomeEmailInput = {
   email: string;
   firstName?: string | null;
   lastName?: string | null;
-};
-
-type ResendEmailClient = {
-  contacts: {
-    create: (payload: {
-      email: string;
-      firstName?: string;
-      lastName?: string;
-      unsubscribed?: boolean;
-      segments?: { id: string }[];
-    }) => Promise<ResendResponse<{ object: "contact"; id: string }>>;
-    get: (payload: { email: string }) => Promise<
-      ResendResponse<{
-        object: "contact";
-        id: string;
-        email: string;
-        first_name: string | null;
-        last_name: string | null;
-        unsubscribed: boolean;
-        created_at: string;
-        properties: Record<string, unknown>;
-      }>
-    >;
-    update: (payload: {
-      email: string;
-      firstName?: string | null;
-      lastName?: string | null;
-    }) => Promise<ResendResponse<{ object: "contact"; id: string }>>;
-    segments: {
-      list: (payload: { email: string; limit?: number }) => Promise<
-        ResendResponse<{
-          object: "list";
-          has_more: boolean;
-          data: Array<{ id: string; name: string; created_at: string }>;
-        }>
-      >;
-      add: (payload: {
-        email: string;
-        segmentId: string;
-      }) => Promise<ResendResponse<{ id: string }>>;
-    };
-  };
-  emails: {
-    send: (
-      payload: {
-        from: string;
-        to: string;
-        subject: string;
-        html: string;
-        text: string;
-        replyTo: string;
-        tags: Array<{ name: string; value: string }>;
-      },
-      options: { idempotencyKey: string },
-    ) => Promise<ResendResponse<{ id: string }>>;
-  };
 };
 
 type SignupWelcomeEmailConfig =
@@ -83,13 +33,6 @@ type SignupWelcomeEmailConfig =
       enabled: false;
       reason: "missing_api_key";
     };
-
-let resendClient: ResendEmailClient | null = null;
-
-function trimmed(value: string | undefined) {
-  const next = value?.trim();
-  return next || undefined;
-}
 
 function normalizeName(value: string | null | undefined) {
   return trimmed(value ?? undefined);
@@ -117,73 +60,11 @@ function getSignupWelcomeEmailConfig(): SignupWelcomeEmailConfig {
   };
 }
 
-function getResendClient(apiKey: string): ResendEmailClient {
-  resendClient ??= new Resend(apiKey);
-  return resendClient;
-}
-
-function isNotFoundError(error: ErrorResponse) {
-  return error.statusCode === 404 || error.name === "not_found";
-}
-
-function assertResendResponse<T>(response: ResendResponse<T>, action: string): T {
-  if (response.error) {
-    throw new Error(`${action}: ${response.error.message}`);
-  }
-
-  return response.data;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-export function renderSignupWelcomeEmail(input: { firstName?: string | null | undefined }) {
-  const greetingName = normalizeName(input.firstName) ?? "there";
-  const greeting = `Hi ${greetingName},`;
-
-  const text = [
-    greeting,
-    "",
-    "Thanks for signing up for OpenCompany.",
-    "",
-    "I wanted to send a quick personal note: every piece of feedback you submit through the app goes straight to me, and I will move fast on it.",
-    "",
-    "You can also just reply to this email any time.",
-    "",
-    "Louis",
-  ].join("\n");
-
-  const html = [
-    "<!doctype html>",
-    '<html lang="en">',
-    "<body>",
-    `<p>${escapeHtml(greeting)}</p>`,
-    "<p>Thanks for signing up for OpenCompany.</p>",
-    "<p>I wanted to send a quick personal note: every piece of feedback you submit through the app goes straight to me, and I will move fast on it.</p>",
-    "<p>You can also just reply to this email any time.</p>",
-    "<p>Louis</p>",
-    "</body>",
-    "</html>",
-  ].join("");
-
-  return {
-    subject: SIGNUP_WELCOME_SUBJECT,
-    text,
-    html,
-  };
-}
-
 async function loadContact(client: ResendEmailClient, email: string) {
   const response = await client.contacts.get({ email });
 
   if (response.error) {
-    if (isNotFoundError(response.error)) return null;
+    if (isResendNotFoundError(response.error)) return null;
     throw new Error(`Unable to load Resend contact: ${response.error.message}`);
   }
 
@@ -305,3 +186,5 @@ export async function sendSignupWelcomeEmail(
     throw error;
   }
 }
+
+export { renderSignupWelcomeEmail };

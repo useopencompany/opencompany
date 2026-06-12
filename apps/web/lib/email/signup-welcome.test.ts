@@ -76,7 +76,7 @@ describe("sendSignupWelcomeEmail", () => {
     process.env = { ...originalEnv };
     process.env.RESEND_API_KEY = "re_test";
     process.env.RESEND_REGISTERED_USERS_SEGMENT_ID = "seg_registered";
-    process.env.RESEND_WELCOME_FROM = "Louis from OpenCompany <louis@opencompany.cloud>";
+    process.env.RESEND_WELCOME_FROM = "Louis from OpenCompany <louis@updates.opencompany.cloud>";
     process.env.RESEND_REPLY_TO = "louis@opencompany.cloud";
   });
 
@@ -106,7 +106,7 @@ describe("sendSignupWelcomeEmail", () => {
     expect(client.contacts.segments.add).not.toHaveBeenCalled();
     expect(client.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: "Louis from OpenCompany <louis@opencompany.cloud>",
+        from: "Louis from OpenCompany <louis@updates.opencompany.cloud>",
         to: "ada@example.com",
         subject: "Welcome to OpenCompany",
         replyTo: "louis@opencompany.cloud",
