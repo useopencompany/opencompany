@@ -14,7 +14,7 @@ import { HELP, helpResult, validateCommandArgs } from "./index";
 import type { CommandResult } from "./io";
 import { link } from "./link";
 import { merge } from "./merge";
-import { query } from "./query";
+import { query, resolveSince } from "./query";
 import { rewrite } from "./rewrite";
 
 let root: string;
@@ -40,6 +40,17 @@ function run(
 
 function data(result: CommandResult): Record<string, unknown> {
   return result.data as Record<string, unknown>;
+}
+
+// Hand-write a valid draft record with a controlled updated_at — the CLI always stamps "now",
+// so recency tests need files whose timestamps we pick ourselves.
+async function writeRecord(id: string, updatedAt: string, truth: string): Promise<void> {
+  await mkdir(path.join(root, "companies"), { recursive: true });
+  await writeFile(
+    path.join(root, "companies", `${id}.md`),
+    `---\nid: ${id}\ntype: company\nstatus: draft\ncreated_at: ${updatedAt}\nupdated_at: ${updatedAt}\n---\n# ${id}\n\n## Compiled truth\n${truth}\n\n## Timeline\n`,
+    "utf8",
+  );
 }
 
 describe("memory CLI", () => {
@@ -609,6 +620,54 @@ describe("memory CLI", () => {
     const withInvalid = await run(query, ["widgets", "--lexical-only", "--include-invalid"]);
     const withInvalidIds = (data(withInvalid).hits as Array<{ id: string }>).map((h) => h.id);
     expect(withInvalidIds).toContain("broken");
+  });
+
+  it("resolveSince parses relative windows and ISO timestamps", () => {
+    const now = Date.parse("2026-06-12T12:00:00.000Z");
+    expect(resolveSince("30m", now)).toBe("2026-06-12T11:30:00.000Z");
+    expect(resolveSince("24h", now)).toBe("2026-06-11T12:00:00.000Z");
+    expect(resolveSince("7d", now)).toBe("2026-06-05T12:00:00.000Z");
+    expect(resolveSince("2w", now)).toBe("2026-05-29T12:00:00.000Z");
+    expect(resolveSince("2026-06-01T00:00:00Z", now)).toBe("2026-06-01T00:00:00.000Z");
+    expect(resolveSince("yesterday", now)).toBeNull();
+    expect(resolveSince("0h", now)).toBeNull();
+    expect(resolveSince("24 h", now)).toBeNull();
+  });
+
+  it("query --since accepts relative windows and filters on updated_at", async () => {
+    await run(create, ["--type", "company", "--id", "fresh", "--truth", "Fresh makes widgets."]);
+    // A valid record whose updated_at is older than any relative window we use below.
+    await writeRecord("stale", "2020-01-01T00:00:00.000Z", "Stale makes widgets too.");
+
+    const all = await run(query, ["widgets", "--lexical-only"]);
+    const allIds = (data(all).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(allIds).toContain("fresh");
+    expect(allIds).toContain("stale");
+
+    const recent = await run(query, ["widgets", "--lexical-only", "--since", "24h"]);
+    const recentIds = (data(recent).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(recentIds).toEqual(["fresh"]);
+    // Hits surface their updated_at so the agent can reason about recency.
+    expect(recent.text).toMatch(/updated \d{4}-\d{2}-\d{2}T/);
+
+    const bad = await run(query, ["widgets", "--lexical-only", "--since", "yesterday"]);
+    expect(bad.code).toBe(1);
+    expect(bad.text).toContain('Invalid --since value "yesterday"');
+  });
+
+  it("query with no text and --since lists recent records newest first", async () => {
+    const dayMs = 86_400_000;
+    await writeRecord("older", new Date(Date.now() - 10 * dayMs).toISOString(), "Older fact.");
+    await writeRecord("newer", new Date(Date.now() - 2 * dayMs).toISOString(), "Newer fact.");
+
+    // No text → no lexical/vector signal → pure recency listing within the window.
+    const listing = await run(query, ["--lexical-only", "--since", "30d"]);
+    const ids = (data(listing).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(ids).toEqual(["newer", "older"]);
+
+    const narrow = await run(query, ["--lexical-only", "--since", "5d"]);
+    const narrowIds = (data(narrow).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(narrowIds).toEqual(["newer"]);
   });
 
   it("doctor passes on a healthy tree and flags broken links", async () => {
