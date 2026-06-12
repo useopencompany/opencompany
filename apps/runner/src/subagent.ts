@@ -18,6 +18,7 @@ import { publishTransientRuntimeEvent } from "./events";
 import { runFetchTranscriptTool } from "./fetch-transcript-tool";
 import { executeHostedTool, type HostedToolUsage } from "./hosted-tools";
 import { StaleRunLeaseError } from "./lease-writes";
+import { MODEL_CALL_MAX_RETRIES } from "./model-call-retry";
 import { runRecallTool } from "./recall-tool";
 import type { RunControlCheck } from "./run-control";
 import { runSandboxTool, type SandboxHandle } from "./sandbox";
@@ -219,6 +220,7 @@ export async function runSubagentLoop(
       }),
       messages: [{ role: "user", content: prompt }],
       tools,
+      maxRetries: MODEL_CALL_MAX_RETRIES,
       stopWhen: [ai.stepCountIs(maxSteps)],
       abortSignal: abort.signal,
       ...(modelRuntime.providerOptions ? { providerOptions: modelRuntime.providerOptions } : {}),

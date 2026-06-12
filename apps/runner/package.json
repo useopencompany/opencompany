@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^1.0.44",
+    "@ai-sdk/mcp": "^1.0.48",
     "@durable-streams/client": "^0.2.6",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
@@ -21,7 +21,7 @@
     "@opencompany/observability": "workspace:*",
     "@sentry/bun": "^10.53.1",
     "@vercel/blob": "^2.4.0",
-    "ai": "^6.0.189",
+    "ai": "^6.0.202",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "e2b": "^2.21.0",

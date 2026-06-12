@@ -16,6 +16,7 @@ import {
   requireLeaseWrite,
 } from "./lease-writes";
 import { createMcpToolSet } from "./mcp-tools";
+import { MODEL_CALL_MAX_RETRIES } from "./model-call-retry";
 import { buildAssistantModelMessage, toPersistedModelMessage } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
 import { observeRunStep, type RunContext } from "./run-context";
@@ -163,6 +164,7 @@ export async function streamAssistantResponse(input: {
           system: input.system,
           messages: input.messages,
           tools: selectedTools,
+          maxRetries: MODEL_CALL_MAX_RETRIES,
           stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
           prepareStep: ({ stepNumber }) =>
             softFinalizationStepSettings({ stepNumber, system: input.system }),

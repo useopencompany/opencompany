@@ -17,7 +17,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^1.0.44",
+    "@ai-sdk/mcp": "^1.0.48",
     "@durable-streams/client": "^0.2.6",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
@@ -45,7 +45,7 @@
     "@vercel/blob": "^2.4.0",
     "@workos-inc/authkit-nextjs": "^4.1.0",
     "@workos-inc/node": "^9.3.1",
-    "ai": "^6.0.189",
+    "ai": "^6.0.202",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.2",

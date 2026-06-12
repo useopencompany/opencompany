@@ -8,6 +8,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
+import { MODEL_CALL_MAX_RETRIES } from "./model-call-retry";
 import { normalizeModelUsage } from "./usage";
 
 const TITLE_MODEL = "openai/gpt-5.4-mini";
@@ -98,6 +99,7 @@ async function generateSessionTitleWithUsage(input: {
       MAX_PROMPT_CHARS,
     )}`,
     maxOutputTokens: 20,
+    maxRetries: MODEL_CALL_MAX_RETRIES,
     temperature: 0,
     providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   });
