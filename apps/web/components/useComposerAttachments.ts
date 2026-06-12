@@ -91,10 +91,18 @@ export function useComposerAttachments(opts: {
             filename: file.name,
           });
           if (!validation.ok) {
+            // `size` covers both oversized AND empty (0-byte) files — split the copy so an empty
+            // file doesn't claim to be "too large".
+            const isEmpty = validation.reason === "size" && file.size <= 0;
             showToast({
-              title: validation.reason === "size" ? "File too large" : "Unsupported file",
-              description:
-                validation.reason === "size"
+              title: isEmpty
+                ? "Empty file"
+                : validation.reason === "size"
+                  ? "File too large"
+                  : "Unsupported file",
+              description: isEmpty
+                ? "This file is empty (0 bytes)."
+                : validation.reason === "size"
                   ? "Max 25 MB (images/PDFs) or 2 MB (text files)."
                   : "Images, PDFs, and common text/code files.",
               tone: "default",
