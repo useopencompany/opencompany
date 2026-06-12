@@ -270,7 +270,8 @@ Skill-enabled tools are enabled by agent skill configuration:
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
-- `opencode_coder` when `@opencode` is enabled and bound to a connected GitHub work repository
+- `opencode_coder` when `@opencode` is enabled; it can target attached, integration-wide, or public GitHub repositories
+- `codex_coder` when `@codex` is enabled; it can target attached, integration-wide, or public GitHub repositories
 
 These coding-agent harnesses own their coding checkout and may clone the selected connected
 repository directly into `work/` for that tool run. They share the repo-clone, diff, draft-PR,
@@ -291,19 +292,30 @@ per tool call via the optional `model` argument (validated against `AGENT_MODEL_
 defaulting to a fixed platform model when omitted. The memory CLI's model-backed retrieval routes
 through the same broker (`MEMORY_GATEWAY_BASE_URL` + token in place of the raw key).
 
+Codex runs headless as `codex exec --json --sandbox workspace-write --ask-for-approval never`
+inside the same coding sandbox template. The runner writes an isolated
+`${CODEX_HOME}/config.toml` with a custom `opencompany` provider using the Responses API. When the
+LLM broker is active, that provider points at `/broker/openai/v1` and Codex receives only
+`OPENCOMPANY_LLM_BROKER_TOKEN`; the server-side `OPENAI_CODEX_API_KEY` is attached by the broker
+and broker settlement is the billable record. Without the broker (local dev, or the
+`RUNNER_LLM_BROKER_ENABLED=false` kill switch), the same config points at OpenAI directly and the
+single CLI process receives `CODEX_API_KEY`. The model is selected by `RUNNER_CODEX_MODEL`, defaults
+to `gpt-5.2-codex`, and is intentionally not exposed as a tool argument until CLI/model
+compatibility is tested. When brokered Codex emits token usage in JSONL output, the row is recorded
+display-only at cost 0; otherwise unbrokered usage is priced with platform OpenAI model pricing.
+Missing JSONL usage is noted in artifact metadata with `usageMissing: true`.
+
 > Foundational note: opencode also speaks the Agent Client Protocol (`opencode acp`, JSON-RPC over
 > stdio). A future iteration can run harnesses through an in-runner ACP client to surface their
 > individual tool calls and permission requests through the existing approval gate, and to bring
-> additional harnesses (Claude Code, Codex, Gemini) the same way. Phase 1 intentionally uses the
-> simpler one-shot `opencode run` path that mirrors AMP.
+> additional harnesses (Claude Code, Gemini) the same way. The current opencode and Codex
+> integrations intentionally use the simpler one-shot CLI paths that mirror AMP.
 
-Both harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
-`opencode` CLI is made available defensively: `opencode-tool.ts` checks for the binary and installs
-it on demand if missing, so the tool works on the current template without a rebuild. The durable
-option is to bake opencode into `OPENCOMPANY_AMP_E2B_TEMPLATE` — either via the installer or by
-basing that image on e2b's prebuilt `opencode` template and layering `git`/`gh`/`amp` on top. We do
-not point the runner directly at e2b's stock `opencode` template because a session uses one template
-and still needs `gh`/`amp` for the other tools.
+These harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
+`opencode` and `codex` CLIs are made available defensively: their tool files check for the binary
+and install on demand if missing, so the tools work on the current template without a rebuild. The
+durable option is to bake both CLIs into `OPENCOMPANY_AMP_E2B_TEMPLATE` and keep the on-demand
+install path as a fallback.
 
 MCP tools are enabled by workspace setup plus agent configuration:
 

@@ -22,6 +22,11 @@ describe("classifyRuntimeTool", () => {
     expect(classifyRuntimeTool("memory")).toEqual({ providerKey: "system", group: "read" });
     expect(classifyRuntimeTool("gh")).toEqual({ providerKey: "github", group: "admin" });
     expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "modify" });
+    expect(classifyRuntimeTool("opencode_coder")).toEqual({
+      providerKey: "github",
+      group: "modify",
+    });
+    expect(classifyRuntimeTool("codex_coder")).toEqual({ providerKey: "github", group: "modify" });
     expect(classifyRuntimeTool("x_search_posts")).toEqual({ providerKey: "x", group: "read" });
     expect(classifyRuntimeTool("youtube_get_transcript")).toEqual({
       providerKey: "youtube",

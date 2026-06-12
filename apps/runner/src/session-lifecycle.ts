@@ -402,7 +402,9 @@ function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
 function needsAuthenticatedGit(agentConfig: AgentConfig) {
   return (
     agentHasGitHubAccess(agentConfig) ||
-    agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode")
+    agentConfig.tools.some(
+      (tool) => tool.id === "amp" || tool.id === "opencode" || tool.id === "codex",
+    )
   );
 }
 

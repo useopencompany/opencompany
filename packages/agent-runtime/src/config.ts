@@ -142,7 +142,7 @@ export function resolveAgentRuntimeConfig(input: {
       ? "File tools require paths prefixed with work/, personal-brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, personal-brain/notes.md, or agent/user.md. Use read_skill for skill files."
       : "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/user.md. Use read_skill for skill files.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
-    ...opencodePublicRepositoryContext(input.agent, repositories, githubAllRepositories),
+    ...publicCodingRepositoryContext(input.agent, repositories, githubAllRepositories),
     ...githubRepositoryContext(repositories, githubAllRepositories),
     input.agent.brain?.length
       ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
@@ -414,7 +414,7 @@ function githubRepositoryContext(
   const lines: string[] = [];
   if (allRepositories) {
     lines.push(
-      "GitHub access: you can work with any repository the workspace's GitHub connection can reach — not just a pre-attached list. Always pass the repository argument (owner/repo) explicitly to amp_coder/opencode_coder, and use --repo owner/repo with gh commands.",
+      "GitHub access: you can work with any repository the workspace's GitHub connection can reach — not just a pre-attached list. Always pass the repository argument (owner/repo) explicitly to amp_coder/opencode_coder/codex_coder, and use --repo owner/repo with gh commands.",
     );
   }
   if (repositories.length > 0) {
@@ -433,15 +433,18 @@ function githubRepositoryContext(
   ];
 }
 
-function opencodePublicRepositoryContext(
+function publicCodingRepositoryContext(
   config: AgentConfig,
   repositories: AgentGitHubRepositoryConfig[],
   allRepositories = false,
 ): string[] {
   if (repositories.length > 0 || allRepositories) return [];
-  if (!config.tools.some((tool) => tool.id === "opencode")) return [];
+  const publicCodingTools = config.tools
+    .filter((tool) => tool.id === "opencode" || tool.id === "codex")
+    .map((tool) => tool.label);
+  if (publicCodingTools.length === 0) return [];
 
   return [
-    "opencode can work without an attached GitHub repository when the user provides a public GitHub owner/repo or https://github.com/owner/repo URL. Public repositories are cloned without workspace GitHub credentials, so platform-created pull requests are unavailable for those targets.",
+    `${publicCodingTools.join(" and ")} can work without an attached GitHub repository when the user provides a public GitHub owner/repo or https://github.com/owner/repo URL. Public repositories are cloned without workspace GitHub credentials, so platform-created pull requests are unavailable for those targets.`,
   ];
 }

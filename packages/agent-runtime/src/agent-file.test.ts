@@ -142,6 +142,12 @@ describe(".agent files", () => {
     expect(config.tools).toEqual(["opencode"]);
   });
 
+  test("syncs Codex coding tool config from a mention", () => {
+    const config = extractConfigFromMentions("Use @codex for code changes.");
+
+    expect(config.tools).toEqual(["codex"]);
+  });
+
   test("round-trips Linear MCP tool config without secrets", () => {
     const source = serializeAgentFile({
       title: "Linear triage",
@@ -444,6 +450,21 @@ describe(".agent files", () => {
 
     expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
     expect(parsed.config.brain).toEqual([{ path: "docs/README.md", type: "file" }]);
+  });
+
+  test("serializes Codex as a coding-agent tool config", () => {
+    const source = serializeAgentFile({
+      title: "Code",
+      body: "Work with @codex.",
+    });
+
+    expect(source).toContain("id: codex");
+    expect(source).toContain("type: coding_agent");
+    expect(source).toContain("provider: codex");
+    expect(source).toContain("label: Codex");
+    expect(source).toContain("description: Delegate coding work to Codex inside an E2B sandbox.");
+    expect(source).toContain("prCapable: true");
+    expect(parseAgentFile(source).config.tools).toEqual([expect.objectContaining({ id: "codex" })]);
   });
 
   test("round-trips GitHub repository integrations through frontmatter", () => {

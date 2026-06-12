@@ -124,14 +124,14 @@ traffic, Postgres remains the accounting source of truth.**
 
 ### ⬜ Phase 2 — Codex through the broker (PR B, on top of #424 + #439)
 
-- [ ] Rebase `louismorgner/codex-tool-plan` (PR #424) onto the broker infra
-- [ ] Write `${CODEX_HOME}/config.toml` custom provider:
+- [x] Port `louismorgner/codex-tool-plan` (PR #424) onto the broker infra
+- [x] Write `${CODEX_HOME}/config.toml` custom provider:
       `model_provider = "opencompany"`, `base_url = <publicUrl>/broker/openai/v1`,
-      `env_key = "OPENCOMPANY_LLM_BROKER_TOKEN"`, `wire_api = "responses"` — **verify exact config
-      schema against the pinned `@openai/codex@0.132.0` first**
-- [ ] `OPENCOMPANY_LLM_BROKER_TOKEN` env carries the broker token; relax the key-required guard to
+      `env_key = "OPENCOMPANY_LLM_BROKER_TOKEN"`, `wire_api = "responses"` — schema verified
+      against pinned `@openai/codex@0.132.0` with `--strict-config`
+- [x] `OPENCOMPANY_LLM_BROKER_TOKEN` env carries the broker token; relax the key-required guard to
       "broker active OR raw key present"
-- [ ] `codexHostedToolUsage` → display-only (cost 0, `broker_metered`) when brokered
+- [x] `codexHostedToolUsage` → display-only (cost 0, `broker_metered`) when brokered
 - [ ] Infisical `prod` `/runner`: add `OPENAI_CODEX_API_KEY` as a **budget-capped
       OpenAI project key** (blast-radius cap; reconciliation/alerts can follow after v1)
 
@@ -160,10 +160,10 @@ Run an opencode delegation + a memory query on a PR preview (preview runner gets
 
 ## Open risks / watch items
 
-- **Codex config.toml smoke** still required against the pinned CLI version (Phase 2 gate).
-  Official docs and package strings confirm the relevant custom-provider keys
+- **Codex live smoke** still required against the pinned CLI version. The config schema was
+  verified with `@openai/codex@0.132.0 --strict-config`
   (`model_providers`, `base_url`, `env_key`, `wire_api = "responses"`), but only a live
-  `codex exec` proves streaming + usage shape end-to-end.
+  brokered `codex exec` proves streaming + usage shape end-to-end.
 - **Render proxy + long SSE**: model streams emit continuously so idle timeouts should
   not trigger; verify on preview with a long opencode run.
 - **Gateway `stream_options.include_usage`** for non-OpenAI routed models (e.g.

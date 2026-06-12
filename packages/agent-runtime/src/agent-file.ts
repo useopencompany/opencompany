@@ -482,7 +482,7 @@ function normalizeTools(value: unknown) {
     const definition = TOOL_BY_ID.get(id as AgentToolId);
     if (!definition) continue;
 
-    if (id === "amp" || id === "opencode") {
+    if (id === "amp" || id === "opencode" || id === "codex") {
       const record = isRecord(item) ? item : {};
       tools.push(
         toConfigTool(definition, {
@@ -502,13 +502,21 @@ function normalizeTools(value: unknown) {
 
 function serializeTools(tools: AgentConfigTool[]) {
   return tools.map((tool) => {
-    if (tool.id === "amp" || tool.id === "opencode") {
-      return {
+    if (tool.id === "amp" || tool.id === "opencode" || tool.id === "codex") {
+      const serialized = {
         id: tool.id,
         type: tool.type,
         provider: tool.provider,
         prCapable: tool.prCapable,
       };
+      if (tool.id === "codex") {
+        return {
+          ...serialized,
+          label: tool.label,
+          description: tool.description,
+        };
+      }
+      return serialized;
     }
     if (tool.type === "mcp") {
       return {
