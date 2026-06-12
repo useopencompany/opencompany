@@ -15,7 +15,11 @@ function error(name: string, message: string, statusCode: number | null = null) 
   };
 }
 
-function createClientMock(input?: { contactExists?: boolean; segmentExists?: boolean }) {
+function createClientMock(input?: {
+  contactExists?: boolean;
+  segmentExists?: boolean;
+  unsubscribed?: boolean;
+}) {
   return {
     contacts: {
       create: vi.fn(async () => success({ object: "contact" as const, id: "ctc_123" })),
@@ -27,7 +31,7 @@ function createClientMock(input?: { contactExists?: boolean; segmentExists?: boo
               email: "ada@example.com",
               first_name: "Ada",
               last_name: "Lovelace",
-              unsubscribed: true,
+              unsubscribed: input?.unsubscribed ?? false,
               created_at: "2026-01-01T00:00:00.000Z",
               properties: {},
             })
@@ -57,7 +61,7 @@ describe("renderSignupWelcomeEmail", () => {
   it("uses the first name when available", () => {
     const email = renderSignupWelcomeEmail({ firstName: "Ada" });
 
-    expect(email.subject).toBe("Welcome to OpenCompany");
+    expect(email.subject).toBe("Welcome to opencompany");
     expect(email.text).toContain("Hi Ada,");
     expect(email.html).toContain("<p>Hi Ada,</p>");
   });
@@ -76,8 +80,9 @@ describe("sendSignupWelcomeEmail", () => {
     process.env = { ...originalEnv };
     process.env.RESEND_API_KEY = "re_test";
     process.env.RESEND_REGISTERED_USERS_SEGMENT_ID = "seg_registered";
-    process.env.RESEND_WELCOME_FROM = "Louis from OpenCompany <louis@opencompany.cloud>";
+    process.env.RESEND_WELCOME_FROM = "Louis from opencompany <louis@updates.opencompany.cloud>";
     process.env.RESEND_REPLY_TO = "louis@opencompany.cloud";
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.opencompany.cloud";
   });
 
   it("creates a new contact and sends the welcome email", async () => {
@@ -106,12 +111,18 @@ describe("sendSignupWelcomeEmail", () => {
     expect(client.contacts.segments.add).not.toHaveBeenCalled();
     expect(client.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: "Louis from OpenCompany <louis@opencompany.cloud>",
+        from: "Louis from opencompany <louis@updates.opencompany.cloud>",
         to: "ada@example.com",
-        subject: "Welcome to OpenCompany",
+        subject: "Welcome to opencompany",
         replyTo: "louis@opencompany.cloud",
+        headers: {
+          "List-Unsubscribe": expect.stringMatching(
+            /^<https:\/\/app\.opencompany\.cloud\/api\/email\/unsubscribe\?token=.+>$/,
+          ),
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
         text: expect.stringContaining("feedback you submit through the app"),
-        html: expect.stringContaining("feedback you submit through the app"),
+        html: expect.stringContaining("https://app.opencompany.cloud/api/email/unsubscribe"),
       }),
       { idempotencyKey: "signup-welcome:usr_123" },
     );
@@ -142,6 +153,33 @@ describe("sendSignupWelcomeEmail", () => {
       email: "ada@example.com",
       segmentId: "seg_registered",
     });
+  });
+
+  it("skips an existing globally unsubscribed contact", async () => {
+    const client = createClientMock({
+      contactExists: true,
+      segmentExists: false,
+      unsubscribed: true,
+    });
+
+    const result = await sendSignupWelcomeEmail(
+      {
+        userId: "usr_123",
+        workspaceId: "wks_123",
+        email: "ada@example.com",
+        firstName: "Ada",
+      },
+      { client },
+    );
+
+    expect(result).toEqual({ status: "skipped", reason: "unsubscribed" });
+    expect(client.contacts.update).toHaveBeenCalledWith({
+      email: "ada@example.com",
+      firstName: "Ada",
+      lastName: null,
+    });
+    expect(client.contacts.segments.add).not.toHaveBeenCalled();
+    expect(client.emails.send).not.toHaveBeenCalled();
   });
 
   it("skips cleanly when Resend is not configured", async () => {
