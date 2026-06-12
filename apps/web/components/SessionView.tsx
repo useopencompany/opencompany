@@ -1,16 +1,13 @@
 "use client";
 
 import {
-  ATTACHMENT_MAX_PER_MESSAGE,
   ATTACHMENT_TEXT_MAX_BYTES,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   listAddableBuiltinSkills,
-  modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
   type ResolvedSkillMetadata,
-  validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
 import type { AgentConfig, AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
@@ -61,7 +58,6 @@ import {
   AttachmentCard,
   ComposerAttachments,
   type PendingAttachment,
-  uploadAttachment,
 } from "@/components/composer-attachments";
 import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -70,6 +66,7 @@ import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopB
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, useElapsedSeconds, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -375,112 +372,24 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [, startModelTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
-  const [isDragActive, setIsDragActive] = useState<boolean>(false);
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  // Latest-attachments ref so the unmount cleanup can revoke all outstanding object URLs
-  // with an empty-dep effect (fires on unmount only) instead of re-running on every change.
-  const attachmentsRef = useRef(attachments);
-  // Sync the ref in an effect (not during render — that trips the react-compiler lint
-  // rule) so the empty-dep unmount cleanup below can revoke outstanding object URLs.
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentCapability = modelSupportsAttachments(session.modelName);
-  // Attaching is always available: text/code files need no model capability (they are
-  // inlined as text). The per-file image/pdf capability gate happens in acceptFiles.
-  const attachmentsEnabled = true;
-
-  const acceptFiles = useCallback(
-    (files: File[]) => {
-      setAttachments((prev) => {
-        const next = [...prev];
-        for (const file of files) {
-          if (next.length >= ATTACHMENT_MAX_PER_MESSAGE) {
-            showToast({
-              title: "Limit reached",
-              description: `Max ${ATTACHMENT_MAX_PER_MESSAGE} files.`,
-              tone: "default",
-            });
-            break;
-          }
-          const validation = validateAttachmentCandidate({
-            mediaType: file.type,
-            sizeBytes: file.size,
-            filename: file.name,
-          });
-          if (!validation.ok) {
-            showToast({
-              title: validation.reason === "size" ? "File too large" : "Unsupported file",
-              description:
-                validation.reason === "size"
-                  ? "Max 25 MB (images/PDFs) or 2 MB (text files)."
-                  : "Images, PDFs, and common text/code files.",
-              tone: "default",
-            });
-            continue;
-          }
-          // Image/PDF need the model to support them; text is always allowed.
-          if (validation.kind === "pdf" && !attachmentCapability.pdf) {
-            showToast({
-              title: "Unsupported file",
-              description: "This session's model can't read PDFs.",
-              tone: "default",
-            });
-            continue;
-          }
-          if (validation.kind === "image" && !attachmentCapability.images) {
-            showToast({
-              title: "Unsupported file",
-              description: "This session's model can't read images.",
-              tone: "default",
-            });
-            continue;
-          }
-          const id = crypto.randomUUID();
-          next.push({
-            id,
-            filename: file.name,
-            mediaType: file.type,
-            kind: validation.kind,
-            sizeBytes: file.size,
-            status: "uploading",
-            ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
-          });
-          void uploadAttachment({ id, file, workspaceId, sessionId: session.id })
-            .then((res) =>
-              setAttachments((cur) =>
-                cur.map((a) => (a.id === id ? { ...a, status: "ready", ...res } : a)),
-              ),
-            )
-            .catch((err) =>
-              setAttachments((cur) =>
-                cur.map((a) => (a.id === id ? { ...a, status: "error", error: String(err) } : a)),
-              ),
-            );
-        }
-        return next;
-      });
-    },
-    [attachmentCapability, session.id, workspaceId, showToast],
-  );
-
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => {
-      const target = prev.find((a) => a.id === id);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((a) => a.id !== id);
-    });
-  }, []);
-  // Revoke any still-live preview object URLs when the composer unmounts (e.g. navigating
-  // away with unsent attachments) so they don't leak.
-  useEffect(() => {
-    return () => {
-      for (const att of attachmentsRef.current) {
-        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
-      }
-    };
-  }, []);
+  // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
+  // home composers). The drop overlay, validation/capability gate and upload lifecycle all come
+  // from here. Attaching is always available: text/code files need no model capability (they are
+  // inlined as text); the per-file image/PDF gate happens inside the hook.
+  const {
+    attachments,
+    setAttachments,
+    acceptFiles,
+    removeAttachment,
+    isDragActive,
+    handlePasteFiles,
+    dragHandlers,
+  } = useComposerAttachments({
+    workspaceId,
+    modelName: session.modelName,
+    uploadScope: { kind: "session", sessionId: session.id },
+  });
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -491,7 +400,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const slashCommandInFlightRef = useRef<Set<string>>(new Set());
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const dragCounterRef = useRef(0);
   // ID of the user message to scroll to the top of the viewport ONCE, right after a
   // send. The reserved space below it is held by CSS (min-height on the last turn),
   // not a JS maintain loop — so there is no per-frame re-pin (no jitter) and the
@@ -985,42 +893,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [input]);
 
-  // Browsers don't always fire a final `dragleave` when the user drags out of
-  // the window — without this, the drop overlay can stay stuck visible. Reset
-  // on window blur so the overlay never outlives the gesture.
-  useEffect(() => {
-    if (!isDragActive) return;
-    const reset = () => {
-      dragCounterRef.current = 0;
-      setIsDragActive(false);
-    };
-    window.addEventListener("blur", reset);
-    return () => window.removeEventListener("blur", reset);
-  }, [isDragActive]);
-
-  // A file dropped anywhere in the window — not just on the composer drop zone — must NOT make
-  // the browser navigate to / open the file (its default). Prevent that window-wide, and route
-  // any in-window file drop into the composer as an attachment.
-  useEffect(() => {
-    const onWindowDragOver = (event: DragEvent) => {
-      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
-    };
-    const onWindowDrop = (event: DragEvent) => {
-      if (!event.dataTransfer?.types.includes("Files")) return;
-      event.preventDefault();
-      dragCounterRef.current = 0;
-      setIsDragActive(false);
-      const files = Array.from(event.dataTransfer.files);
-      if (files.length > 0) acceptFiles(files);
-    };
-    window.addEventListener("dragover", onWindowDragOver);
-    window.addEventListener("drop", onWindowDrop);
-    return () => {
-      window.removeEventListener("dragover", onWindowDragOver);
-      window.removeEventListener("drop", onWindowDrop);
-    };
-  }, [acceptFiles]);
-
   // The Durable Stream self-recovers (the client reconnects + resumes from its
   // offset) and refresh/visibility recovery is no longer needed — a refresh
   // replays the whole transcript from the stream.
@@ -1468,6 +1340,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
         />
 
+        {/* Drop-overlay hover handlers (`dragHandlers`) come from the shared attachment hook. The
+            window-level drop handler inside that hook does the actual preventDefault + accept, so a
+            drop anywhere in the app attaches and the browser never opens the file; the spread
+            handlers here only drive the "Drop files to attach" overlay. */}
         <div
           ref={scrollContainerRef}
           className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
@@ -1485,33 +1361,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
             isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
           }}
-          onDragEnter={(event) => {
-            if (!attachmentsEnabled) return;
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-            dragCounterRef.current += 1;
-            setIsDragActive(true);
-          }}
-          onDragOver={(event) => {
-            if (!attachmentsEnabled) return;
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-          }}
-          onDragLeave={(event) => {
-            if (!attachmentsEnabled) return;
-            event.preventDefault();
-            dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
-            if (dragCounterRef.current === 0) {
-              setIsDragActive(false);
-            }
-          }}
-          onDrop={() => {
-            // The window-level drop handler (see effect above) preventDefaults + accepts, so a
-            // drop anywhere in the app attaches and the browser never opens the file. Here we
-            // only clear the hover overlay (avoids double-accepting the same drop).
-            dragCounterRef.current = 0;
-            setIsDragActive(false);
-          }}
+          // Drop-overlay hover handlers come from the shared hook. The window-level drop handler
+          // (inside the hook) does the actual preventDefault + accept, so a drop anywhere in the
+          // app attaches and the browser never opens the file; these only drive the overlay.
+          {...dragHandlers}
         >
           {isDragActive ? (
             <div
@@ -1690,23 +1543,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       }
                     }}
                     onPaste={(event) => {
-                      if (!attachmentsEnabled) return;
-                      const items = event.clipboardData?.items;
-                      if (!items) return;
-                      const files: File[] = [];
-                      for (const item of Array.from(items)) {
-                        if (item.kind !== "file") continue;
-                        const file = item.getAsFile();
-                        if (file) files.push(file);
-                      }
-                      if (files.length > 0) {
-                        // Files in the clipboard: take them as attachments and stop the browser
-                        // from also pasting them (e.g. an image) into the textarea. Any text
-                        // portion of a mixed paste still falls through normally.
-                        event.preventDefault();
-                        acceptFiles(files);
-                        return;
-                      }
+                      // Files in the clipboard (e.g. a screenshot) are taken as attachments by the
+                      // shared hook, which also stops the browser pasting them into the textarea.
+                      if (handlePasteFiles(event)) return;
                       // Oversized plain-text pastes become a .txt attachment instead of dumping
                       // a wall of text into the composer. Beyond the attachment size cap the
                       // paste falls through untouched — losing the user's text to a rejection
