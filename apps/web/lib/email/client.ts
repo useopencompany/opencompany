@@ -25,6 +25,7 @@ export type ResendEmailClient = {
       email: string;
       firstName?: string | null;
       lastName?: string | null;
+      unsubscribed?: boolean;
     }) => Promise<ResendResponse<{ object: "contact"; id: string }>>;
     segments: {
       list: (payload: { email: string; limit?: number }) => Promise<
@@ -49,6 +50,7 @@ export type ResendEmailClient = {
         html: string;
         text: string;
         replyTo: string;
+        headers?: Record<string, string>;
         tags: Array<{ name: string; value: string }>;
       },
       options: { idempotencyKey: string },

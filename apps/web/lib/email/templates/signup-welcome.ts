@@ -14,11 +14,14 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
-export function renderSignupWelcomeEmail(input: { firstName?: string | null | undefined }) {
+export function renderSignupWelcomeEmail(input: {
+  firstName?: string | null | undefined;
+  unsubscribeUrl?: string | null | undefined;
+}) {
   const greetingName = normalizeName(input.firstName) ?? "there";
   const greeting = `Hi ${greetingName},`;
 
-  const text = [
+  const textParts = [
     greeting,
     "",
     "Thanks for signing up for opencompany.",
@@ -28,9 +31,15 @@ export function renderSignupWelcomeEmail(input: { firstName?: string | null | un
     "You can also just reply to this email any time.",
     "",
     "Louis",
-  ].join("\n");
+  ];
 
-  const html = [
+  const unsubscribeUrl = input.unsubscribeUrl?.trim();
+
+  if (unsubscribeUrl) {
+    textParts.push("", `Unsubscribe: ${unsubscribeUrl}`);
+  }
+
+  const htmlParts = [
     "<!doctype html>",
     '<html lang="en">',
     "<body>",
@@ -39,13 +48,19 @@ export function renderSignupWelcomeEmail(input: { firstName?: string | null | un
     "<p>I wanted to send a quick personal note: every piece of feedback you submit through the app goes straight to me, and I will move fast on it.</p>",
     "<p>You can also just reply to this email any time.</p>",
     "<p>Louis</p>",
-    "</body>",
-    "</html>",
-  ].join("");
+  ];
+
+  if (unsubscribeUrl) {
+    htmlParts.push(
+      `<p style="color:#666;font-size:12px;margin-top:32px"><a href="${escapeHtml(unsubscribeUrl)}">Unsubscribe</a></p>`,
+    );
+  }
+
+  htmlParts.push("</body>", "</html>");
 
   return {
     subject: SIGNUP_WELCOME_SUBJECT,
-    text,
-    html,
+    text: textParts.join("\n"),
+    html: htmlParts.join(""),
   };
 }

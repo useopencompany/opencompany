@@ -7,6 +7,7 @@ import {
   trimmed,
 } from "@/lib/email/client";
 import { renderSignupWelcomeEmail } from "@/lib/email/templates/signup-welcome";
+import { createEmailUnsubscribeUrl } from "@/lib/email/unsubscribe";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
@@ -89,6 +90,10 @@ async function syncRegisteredUserContact(input: {
       }),
       "Unable to update Resend contact",
     );
+
+    if (contact.unsubscribed) {
+      return { unsubscribed: true } as const;
+    }
   } else {
     assertResendResponse(
       await input.client.contacts.create({
@@ -108,7 +113,7 @@ async function syncRegisteredUserContact(input: {
   );
 
   if (segments.data.some((segment) => segment.id === input.registeredUsersSegmentId)) {
-    return;
+    return { unsubscribed: false } as const;
   }
 
   assertResendResponse(
@@ -118,6 +123,8 @@ async function syncRegisteredUserContact(input: {
     }),
     "Unable to add Resend contact to Registered Users segment",
   );
+
+  return { unsubscribed: false } as const;
 }
 
 export async function sendSignupWelcomeEmail(
@@ -139,16 +146,30 @@ export async function sendSignupWelcomeEmail(
   const client = options?.client ?? getResendClient(config.apiKey);
   const firstName = normalizeName(input.firstName);
   const lastName = normalizeName(input.lastName);
-  const rendered = renderSignupWelcomeEmail({ firstName });
+  const unsubscribeUrl = createEmailUnsubscribeUrl({
+    email: input.email,
+    type: "signup_welcome",
+  });
+  const rendered = renderSignupWelcomeEmail({ firstName, unsubscribeUrl });
 
   try {
-    await syncRegisteredUserContact({
+    const contactSync = await syncRegisteredUserContact({
       client,
       email: input.email,
       registeredUsersSegmentId: config.registeredUsersSegmentId,
       ...(firstName ? { firstName } : {}),
       ...(lastName ? { lastName } : {}),
     });
+
+    if (contactSync.unsubscribed) {
+      logger.info("Skipped signup welcome email because contact is unsubscribed", {
+        event: "opencompany.signup_welcome_email_skipped",
+        user_id: input.userId,
+        workspace_id: input.workspaceId,
+        reason: "unsubscribed",
+      });
+      return { status: "skipped", reason: "unsubscribed" } as const;
+    }
 
     const email = assertResendResponse(
       await client.emails.send(
@@ -159,6 +180,10 @@ export async function sendSignupWelcomeEmail(
           html: rendered.html,
           text: rendered.text,
           replyTo: config.replyTo,
+          headers: {
+            "List-Unsubscribe": `<${unsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
           tags: [
             { name: "category", value: "transactional" },
             { name: "type", value: "signup_welcome" },
