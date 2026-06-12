@@ -511,19 +511,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   }, [baseRuntime, optimisticUserMessages]);
 
   // Once a just-sent optimistic message is backed by its durable server message (which serves the
-  // image via /api/attachments), its local object-URL previews are no longer needed: revoke them
-  // and drop the optimistic copy so the URLs don't leak.
+  // image via /api/attachments), its local object-URL previews are no longer needed: revoke them.
+  // Tracked by a ref (not state) so this stays a pure side-effect — the optimistic copy is already
+  // hidden from the merged transcript by the `runtime` memo above, so no re-render is needed.
+  const revokedOptimisticIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const durable = optimisticUserMessages.filter((message) =>
-      hasDurableUserMessage(baseRuntime.messages, message),
-    );
-    if (durable.length === 0) return;
-    for (const message of durable) {
+    for (const message of optimisticUserMessages) {
+      if (revokedOptimisticIdsRef.current.has(message.optimisticId)) continue;
+      if (!hasDurableUserMessage(baseRuntime.messages, message)) continue;
       message.attachments?.forEach((att) => {
         if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
       });
+      revokedOptimisticIdsRef.current.add(message.optimisticId);
     }
-    setOptimisticUserMessages((current) => current.filter((message) => !durable.includes(message)));
   }, [baseRuntime.messages, optimisticUserMessages]);
 
   // Revoke any optimistic-message previews still outstanding when the view unmounts (e.g.
