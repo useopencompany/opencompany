@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
+import { verifyCreditCheckoutSessionReturn as verifyCreditCheckoutSessionReturnForCurrentWorkspace } from "@/lib/billing/checkout-return";
 import {
   isValidTopUpAmountCents,
   MAX_TOP_UP_AMOUNT_CENTS,
@@ -18,7 +19,6 @@ import {
   newStripeCheckoutRecordId,
   redeemCreditCodeForWorkspace,
 } from "@/lib/billing/service";
-import { verifyCreditCheckoutSessionReturn as verifyCreditCheckoutSessionReturnForCurrentWorkspace } from "@/lib/billing/checkout-return";
 import { getAppUrl, getStripe } from "@/lib/billing/stripe";
 
 function formatTopUpName(amountCents: number) {
