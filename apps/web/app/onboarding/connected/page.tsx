@@ -7,7 +7,7 @@ import {
   type OnboardingConnectedMessage,
 } from "@/lib/onboarding/setups";
 
-// Popup-closer for inline integration connect on /onboarding/personal.
+// Popup-closer for inline integration connect flows.
 //
 // Every OAuth start route (integrations + MCP) is opened in a popup with returnTo pointing here, and
 // every callback redirects back to this page with a status param: integrations append

@@ -109,6 +109,29 @@
   }
 }
 
+/* Eye animation for Leo's mark (components/leo/LeoMark.tsx): the dots rest
+   top-right and tour down-left → down-right → back, pausing at each stop. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes leo-gaze-tour {
+    0%,
+    20% {
+      transform: translate(0, 0);
+    }
+    30%,
+    48% {
+      transform: translate(-3.4px, 7px);
+    }
+    58%,
+    76% {
+      transform: translate(0, 7px);
+    }
+    86%,
+    100% {
+      transform: translate(0, 0);
+    }
+  }
+}
+
 html,
 body {
   background: var(--color-canvas);

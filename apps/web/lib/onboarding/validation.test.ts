@@ -8,7 +8,9 @@ const validValues: OnboardingValues = {
   teamSize: "2_10",
   companyUrl: "opencompany.ai",
   agentExperience: "medium",
-  helpAreas: ["product_building", "operations"],
+  goal: "Win back my time",
+  personalBrainFolders: ["meetings", "projects"],
+  personalIntegrations: ["github", "gmail"],
 };
 
 describe("validateOnboardingValues", () => {
@@ -17,7 +19,16 @@ describe("validateOnboardingValues", () => {
 
     expect(result.errors).toEqual({});
     expect(result.normalized.companyUrl).toBe("https://opencompany.ai/");
-    expect(result.normalized.helpAreas).toEqual(["product_building", "operations"]);
+    expect(result.normalized.goal).toBe("Win back my time");
+    expect(result.normalized.personalBrainFolders).toEqual(["meetings", "projects"]);
+    expect(result.normalized.personalIntegrations).toEqual(["github", "gmail"]);
+  });
+
+  it("treats an empty goal as optional and normalizes it to null", () => {
+    const result = validateOnboardingValues({ ...validValues, goal: "   " });
+
+    expect(result.errors).toEqual({});
+    expect(result.normalized.goal).toBeNull();
   });
 
   it("reports missing required fields", () => {
@@ -28,7 +39,9 @@ describe("validateOnboardingValues", () => {
       teamSize: "",
       companyUrl: "",
       agentExperience: "",
-      helpAreas: [],
+      goal: "",
+      personalBrainFolders: [],
+      personalIntegrations: [],
     });
 
     expect(result.errors).toMatchObject({
@@ -36,23 +49,41 @@ describe("validateOnboardingValues", () => {
       role: "Enter your role.",
       teamSize: "Choose your team size.",
       agentExperience: "Choose your experience level.",
-      helpAreas: "Choose at least one area.",
     });
+    expect(result.errors.goal).toBeUndefined();
   });
 
-  it("requires details for the other source and filters unknown help areas", () => {
+  it("requires details for the other source and validates the company URL", () => {
     const result = validateOnboardingValues({
       ...validValues,
       heardFrom: "other",
       heardFromDetail: "",
       companyUrl: "not-a-host",
-      helpAreas: ["product_building", "unknown"],
     });
 
     expect(result.errors).toMatchObject({
       heardFromDetail: "Tell us where you heard about opencompany.",
       companyUrl: "Enter a valid company URL.",
     });
-    expect(result.normalized.helpAreas).toEqual(["product_building"]);
+  });
+
+  it("rejects unsupported Personal Brain folders", () => {
+    const result = validateOnboardingValues({
+      ...validValues,
+      personalBrainFolders: ["meetings", "unknown"],
+    });
+
+    expect(result.errors.personalBrainFolders).toBe(
+      "Choose only supported Personal Brain folders.",
+    );
+  });
+
+  it("rejects unsupported integrations", () => {
+    const result = validateOnboardingValues({
+      ...validValues,
+      personalIntegrations: ["github", "unknown"],
+    });
+
+    expect(result.errors.personalIntegrations).toBe("Choose only supported integrations.");
   });
 });
