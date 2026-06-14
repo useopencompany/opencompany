@@ -1,4 +1,8 @@
-import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/actions";
+import {
+  archiveAgentSession,
+  renameAgentSession,
+  setSessionStar,
+} from "@/lib/agent-sessions/actions";
 import { deleteAgent } from "@/lib/agents/actions";
 import { createElectricCollection } from "@/lib/collections/electric";
 import type {
@@ -47,6 +51,20 @@ export function createCollections(workspaceId: string) {
       const mutation = transaction.mutations[0];
       if (!mutation) throw new Error("Archive mutation had no target row.");
       const result = await archiveAgentSession(String(mutation.key));
+      if (!result.ok) throw new Error(result.error);
+      return { txid: result.txid };
+    },
+    // Rename is a single optimistic update() that changes `title`; the handler
+    // persists it and returns the txid Electric reconciles against. The sidebar only
+    // ever mutates the title through this path, so any non-title update is rejected.
+    onUpdate: async ({ transaction }) => {
+      const mutation = transaction.mutations[0];
+      if (!mutation) throw new Error("Rename mutation had no target row.");
+      const title = mutation.modified.title;
+      if (typeof title !== "string") {
+        throw new Error("Unsupported session update.");
+      }
+      const result = await renameAgentSession(String(mutation.key), title);
       if (!result.ok) throw new Error(result.error);
       return { txid: result.txid };
     },
