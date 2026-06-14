@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-12
+
+### Added
+- Agents can now create Linear issues directly from chat, preserving the relevant conversation context in the issue (#462) — @jasper.
+- Notion is now available as a first-party MCP integration with OAuth connection flow and tool discovery (#455) — @louis.
+- New users can now complete a Leo-led onboarding flow with updated personal onboarding screens and kickoff behavior (#451) — @louis.
+- Agents can now use the bundled YC knowledge skill (#456) — @louis.
+- Feedback reports can now include screenshots, which are uploaded and embedded inline in the linked Linear issue (#447) — @jasper.
+- The personal Memory surface is now URL-addressable, so selected memory paths can be opened and restored from direct links (#446) — @jasper.
+- Memory queries now support relative `--since` windows and query-less recent-memory listings (#444) — @louis.
+- Preview workspaces now show an early-preview badge in the sidebar (#457) — @louis.
+
+### Changed
+- Personal sidebar navigation was refreshed for the updated personal surface structure (#449) — @louis.
+- GitHub permission scopes were consolidated and renamed around clearer permission groups (#450) — @louis.
+- Signup welcome email delivery and unsubscribe handling were refactored for more reliable account email flows (#452) — @louis.
+
+### Fixed
+- Home-space image drag and drop now preserves sent images and shows them in the chat bubble after sending (#454) — @jasper.
+- Sessions now recover stale stream state after returning to a tab instead of staying stuck on outdated loading state (#448) — @louis.
+- Personal Brain writes are no longer silently dropped when the agent bundle exceeds the 80-file cap (#445) — @louis.
+- Chat scrolling now settles at the bottom when expected during active sessions (#431) — @jasper.
+
 ## [0.12.0] - 2026-06-11
 
 ### Added

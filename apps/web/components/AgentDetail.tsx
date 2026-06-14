@@ -57,6 +57,7 @@ import {
   mcpConnectUrl,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
+import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -171,7 +172,7 @@ function AgentDetailContent({
 }) {
   const queryClient = useQueryClient();
   const { agents: agentsCollection } = useCollections();
-  const { showError } = useToast();
+  const { showError, showToast } = useToast();
   const { data: workspaceSkills } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
     queryFn: fetchWorkspaceSkills,
@@ -407,7 +408,7 @@ function AgentDetailContent({
         const result = await runAgentScheduleNow(agent.id, triggerId);
         if (!result.ok) {
           if ("redirectTo" in result) {
-            router.push(result.redirectTo);
+            showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
             return;
           }
           showError(result.error, "Could not run schedule");
@@ -455,7 +456,11 @@ function AgentDetailContent({
                     const result = await createAgentSession(agent.id);
                     if (!result.ok) {
                       if ("redirectTo" in result) {
-                        router.push(result.redirectTo);
+                        showOutOfCreditsToast({
+                          showToast,
+                          router,
+                          redirectTo: result.redirectTo,
+                        });
                         return;
                       }
                       showError(result.error, "Could not start session");

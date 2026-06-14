@@ -55,6 +55,7 @@ import {
   requireLeaseWrite,
   StaleRunLeaseError,
 } from "./lease-writes";
+import { runCreateLinearIssueTool } from "./linear-issue-tool";
 import { runMemoryTool } from "./memory-tool";
 import {
   buildToolModelMessage,
@@ -751,6 +752,24 @@ async function executeRuntimeToolInner(
           // Runner-side, no sandbox: reads the full transcript of a session the caller is allowed
           // to see (its own past sessions, or the parent it was spawned to review).
           return runFetchTranscriptTool({ callerSessionId: input.sessionId, args: input.args });
+        }
+        if (input.definition.name === "create_linear_issue") {
+          // Runner-side: creates an issue in the workspace's OWN connected Linear by driving its
+          // MCP connection (same decrypted creds as the agent's linear tools). Needs a workspace.
+          if (!input.workspaceId) {
+            throw new RecoverableToolError(
+              "Creating a Linear issue requires a workspace context.",
+              "missing_workspace",
+            );
+          }
+          return runCreateLinearIssueTool({
+            sessionId: input.sessionId,
+            workspaceId: input.workspaceId,
+            args: input.args,
+            integrationCredentialEncryptionKey: input.env.integrationCredentialEncryptionKey,
+            blobReadWriteToken: input.env.blobReadWriteToken,
+            signal: input.signal,
+          });
         }
         if (input.definition.name === "update_agent_file") {
           if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {

@@ -17,6 +17,7 @@ export type RuntimeToolName =
   | "inbox_add"
   | "inbox_update"
   | "fetch_transcript"
+  | "create_linear_issue"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -583,6 +584,44 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Only items in the current user's inbox can be updated.",
       "Marking an item done/dismissed stamps it resolved and removes it from the user's inbox view.",
+    ].join("\n"),
+  },
+  {
+    name: "create_linear_issue",
+    kind: "internal",
+    description:
+      "Create an issue in this workspace's connected Linear from the current chat. Use when the user asks to open/file a Linear issue, including from a screenshot they dropped into the chat. Posts to the workspace's OWN Linear (Settings → Integrations), not to OpenCompany's internal feedback tracker. Provide a concise title and a markdown description; pass `team` (a Linear team name or key) when the user names one, or when the workspace has more than one team. IMPORTANT: any image(s) the user attached to their most recent message are uploaded and attached to the new issue AUTOMATICALLY — you do NOT need a file, path, or URL, and you cannot upload the image yourself; just call this tool and the screenshot is included.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Short issue title. Required.",
+        },
+        description: {
+          type: "string",
+          description:
+            "Issue body in Markdown. Include the user's report. Any attached screenshot is added separately.",
+        },
+        team: {
+          type: "string",
+          description:
+            'Linear team name or key (e.g. "Engineering" or "ENG"). Optional when the workspace has a single team; required to disambiguate when several exist.',
+        },
+        include_attachments: {
+          type: "boolean",
+          description:
+            "Whether to attach the image(s) the user dropped onto their most recent message. Defaults to true. Set false only if the user explicitly wants a text-only issue.",
+        },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    help: [
+      "Targets the workspace's connected Linear, not OpenCompany's internal feedback Linear.",
+      "Dropped screenshots are attached automatically by the runner (it reads the bytes from secure storage) — never tell the user you can't attach the image, and never ask them for a file or URL.",
+      "If Linear is not connected, this returns a recoverable error — tell the user to connect Linear in Settings → Integrations.",
+      "If the workspace has multiple Linear teams and none was given, it returns the available team names so you can pass `team` and retry (or ask the user which team).",
     ].join("\n"),
   },
   {
@@ -2915,6 +2954,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   inbox_add: "Add to inbox",
   inbox_update: "Update inbox item",
   fetch_transcript: "Fetch transcript",
+  create_linear_issue: "Create Linear issue",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",

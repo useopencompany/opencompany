@@ -565,6 +565,9 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   inbox_list: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   inbox_add: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   inbox_update: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
+  // Creates an issue in the workspace's OWN connected Linear (not OC's feedback Linear). A real
+  // external write, so it's gated "post" under the linear provider (ask-first by default).
+  create_linear_issue: { providerKey: "linear", group: "post" },
   // Reads a mounted skill file from the sandbox.
   read_skill: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   // Self-edit of the agent's own definition; its safety flow (validation + skill-read
