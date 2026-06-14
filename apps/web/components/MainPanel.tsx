@@ -16,6 +16,7 @@ import {
   ComposerDropOverlay,
   toSubmitAttachments,
 } from "@/components/composer-attachments";
+import { useToast } from "@/components/ToastProvider";
 import {
   Select,
   SelectContent,
@@ -23,7 +24,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useToast } from "@/components/ToastProvider";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
