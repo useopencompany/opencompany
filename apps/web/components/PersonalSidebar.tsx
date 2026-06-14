@@ -341,12 +341,6 @@ function SessionRow({
     };
   }, []);
 
-  // Keep the draft aligned with the title when it changes upstream (e.g. the
-  // auto-generated title arrives) while we're not actively editing.
-  useEffect(() => {
-    if (!editing) setDraft(session.title);
-  }, [session.title, editing]);
-
   // Focus + select the field whenever we enter edit mode.
   useEffect(() => {
     if (editing) {
