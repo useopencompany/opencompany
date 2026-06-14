@@ -7,6 +7,7 @@ import { ArrowUp, LoaderCircle, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
+import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import {
@@ -22,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToast } from "@/components/ToastProvider";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -44,6 +46,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const { showToast } = useToast();
   const [input, setInput] = useState("");
   const [selectedAgentIdOverride, setSelectedAgentIdOverride] = useState("");
   // An explicit model pick, scoped to the agent it was made for. Scoping it this way means a
@@ -121,7 +124,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
       );
       if (!result.ok) {
         if ("redirectTo" in result) {
-          router.push(result.redirectTo);
+          showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
           return;
         }
         setError(result.error);
