@@ -1040,6 +1040,57 @@ export async function setSessionStar(sessionId: string, starred: boolean) {
   return { ok: true, txid, starredAt: null } as const;
 }
 
+// Rename a session's sidebar title. The title is auto-generated from the first
+// message at creation; this lets the owning user override it. Returns the Postgres
+// txid of the write so the sidebar's optimistic update (agentSessions.update())
+// reconciles cleanly against the Electric replication stream.
+export async function renameAgentSession(sessionId: string, title: string) {
+  const { user, workspace } = await currentWorkspace();
+
+  // Trim, and cap defensively — the column is unbounded `text`, but a sidebar title
+  // has no business being longer than this.
+  const next = title.trim().slice(0, 200);
+  if (!next) {
+    return { ok: false, error: "Title cannot be empty." } as const;
+  }
+
+  const db = getDb();
+
+  // Guard: only the owning user may rename a session they can actually see.
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  const txid = await batchWithTxid(
+    db
+      .update(agentSessions)
+      .set({ title: next, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.workspaceId, workspace.id),
+          eq(agentSessions.userId, user.id),
+          isNull(agentSessions.archivedAt),
+        ),
+      ),
+  );
+
+  return { ok: true, txid } as const;
+}
+
 // Record that the current user has viewed this session, clearing its sidebar "unseen"
 // blue dot. Writes ONLY last_seen_at — deliberately not updatedAt, so viewing a session
 // never reshuffles the sidebar's recency order. Fire-and-forget from the open session
