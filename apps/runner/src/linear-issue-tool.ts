@@ -1,4 +1,5 @@
-import { agentSessionMessageAttachments } from "@opencompany/db/schema";
+import { agentSessionMessageAttachments, agentSessionMessages } from "@opencompany/db/schema";
+import { captureException } from "@opencompany/observability";
 import { and, desc, eq } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { getDb } from "./db";
@@ -63,6 +64,14 @@ function parseMcpJson(result: unknown): Record<string, unknown> | null {
   }
 }
 
+// The AI-SDK MCP client returns a FAILED tool call as a result object with isError:true — it does
+// NOT throw. Detect that so save/attach failures become real errors instead of phantom successes.
+function isMcpError(result: unknown): boolean {
+  return Boolean(
+    result && typeof result === "object" && (result as Record<string, unknown>).isError === true,
+  );
+}
+
 type LinearTeam = { id?: string; key?: string; name?: string };
 
 // Best-effort: the Linear MCP returns team data as text (often JSON). Parse what we can; an empty
@@ -103,35 +112,39 @@ function teamLabel(team: LinearTeam): string | undefined {
 
 type SessionImage = { filename: string; mediaType: string; blobUrl: string };
 
-// The image attachment(s) the user dropped onto their most recent message in THIS session. Scoped to
-// session + workspace server-side — the model never supplies a blob source. Grouping by the newest
-// messageId means we attach exactly the just-dropped screenshot(s), not older images in the session.
+// The image attachment(s) on the most recent USER message in this session — i.e. the message that
+// triggered this turn. Scoped to that ONE message (not the globally-newest image in the session) so
+// we attach the just-dropped screenshot and never re-attach a stale image from an earlier turn when
+// the current message had none. Scoped server-side; the model never supplies a blob source.
 async function fetchLatestSessionImages(
   sessionId: string,
   workspaceId: string,
 ): Promise<SessionImage[]> {
+  const [latestUserMessage] = await getDb()
+    .select({ id: agentSessionMessages.id })
+    .from(agentSessionMessages)
+    .where(
+      and(eq(agentSessionMessages.sessionId, sessionId), eq(agentSessionMessages.role, "user")),
+    )
+    .orderBy(desc(agentSessionMessages.createdAt))
+    .limit(1);
+  if (!latestUserMessage) return [];
   const rows = await getDb()
     .select({
-      messageId: agentSessionMessageAttachments.messageId,
       filename: agentSessionMessageAttachments.filename,
       mediaType: agentSessionMessageAttachments.mediaType,
       blobUrl: agentSessionMessageAttachments.blobUrl,
-      createdAt: agentSessionMessageAttachments.createdAt,
     })
     .from(agentSessionMessageAttachments)
     .where(
       and(
+        eq(agentSessionMessageAttachments.messageId, latestUserMessage.id),
         eq(agentSessionMessageAttachments.sessionId, sessionId),
         eq(agentSessionMessageAttachments.workspaceId, workspaceId),
         eq(agentSessionMessageAttachments.kind, "image"),
       ),
-    )
-    .orderBy(desc(agentSessionMessageAttachments.createdAt));
-  const newestMessageId = rows[0]?.messageId;
-  if (!newestMessageId) return [];
-  return rows
-    .filter((r) => r.messageId === newestMessageId)
-    .map((r) => ({ filename: r.filename, mediaType: r.mediaType, blobUrl: r.blobUrl }));
+    );
+  return rows.map((r) => ({ filename: r.filename, mediaType: r.mediaType, blobUrl: r.blobUrl }));
 }
 
 // Upload one image's bytes to Linear and attach it to the issue. Throws on any failure (caller
@@ -145,14 +158,16 @@ async function attachImageToIssue(
   signal: AbortSignal,
 ): Promise<void> {
   const bytes = await downloadBlobBytes(image.blobUrl, blobToken);
-  const prep = parseMcpJson(
-    await linear.callTool("prepare_attachment_upload", {
-      issue,
-      filename: image.filename,
-      contentType: image.mediaType,
-      size: bytes.byteLength,
-    }),
-  );
+  const prepResult = await linear.callTool("prepare_attachment_upload", {
+    issue,
+    filename: image.filename,
+    contentType: image.mediaType,
+    size: bytes.byteLength,
+  });
+  if (isMcpError(prepResult)) {
+    throw new Error(`prepare_attachment_upload failed: ${mcpResultText(prepResult).slice(0, 300)}`);
+  }
+  const prep = parseMcpJson(prepResult);
   const uploadRequest = prep?.uploadRequest as
     | { url?: string; method?: string; headers?: Record<string, string> }
     | undefined;
@@ -160,9 +175,14 @@ async function attachImageToIssue(
   if (!uploadRequest?.url || !assetUrl) {
     throw new Error("prepare_attachment_upload returned no upload URL / assetUrl");
   }
+  // Linear's signed PUT requires every returned header (content-type, x-goog-content-length-range,
+  // …) — without them GCS returns 403, so fail loudly rather than attempt a doomed request.
+  if (!uploadRequest.headers) {
+    throw new Error("prepare_attachment_upload returned no upload headers");
+  }
   const put = await fetch(uploadRequest.url, {
     method: uploadRequest.method ?? "PUT",
-    headers: uploadRequest.headers ?? { "content-type": image.mediaType },
+    headers: uploadRequest.headers,
     // Buffer isn't a valid fetch BodyInit per the DOM types; copy into an ArrayBuffer-backed view.
     body: new Uint8Array(bytes),
     signal,
@@ -170,11 +190,16 @@ async function attachImageToIssue(
   if (!put.ok) {
     throw new Error(`attachment upload PUT failed: ${put.status} ${put.statusText}`);
   }
-  await linear.callTool("create_attachment_from_upload", {
+  const finalizeResult = await linear.callTool("create_attachment_from_upload", {
     issue,
     assetUrl,
     title: image.filename,
   });
+  if (isMcpError(finalizeResult)) {
+    throw new Error(
+      `create_attachment_from_upload failed: ${mcpResultText(finalizeResult).slice(0, 300)}`,
+    );
+  }
 }
 
 export async function runCreateLinearIssueTool(input: {
@@ -230,22 +255,44 @@ export async function runCreateLinearIssueTool(input: {
     if (description) issueArgs.description = description;
 
     const createResult = await linear.callTool("save_issue", issueArgs);
+    // The MCP client returns failures as { isError: true } rather than throwing — surface them as
+    // real errors instead of reporting a phantom success to the user.
+    if (isMcpError(createResult)) {
+      return recoverable(
+        "linear_issue_create_failed",
+        `Linear rejected the issue: ${mcpResultText(createResult).slice(0, 500)}`,
+      );
+    }
     const created = parseMcpJson(createResult);
     const issueId = typeof created?.id === "string" ? created.id : undefined;
     const issueUrl = typeof created?.url === "string" ? created.url : undefined;
+    if (!issueId) {
+      // Don't claim success we can't confirm (and don't blindly retry → duplicate).
+      return recoverable(
+        "linear_issue_unconfirmed",
+        `The issue may have been created, but Linear's response carried no issue id so I can't confirm it — check Linear before retrying. Response: ${mcpResultText(createResult).slice(0, 400)}`,
+      );
+    }
 
     // Step B: attach the dropped screenshot(s). Best-effort — a failed image must not fail the
-    // issue (mirrors the feedback flow's resilience). Needs the issue id from save_issue.
+    // issue (mirrors the feedback flow's resilience).
     let attachedImages = 0;
     let failedImages = 0;
-    if (includeAttachments && issueId) {
+    if (includeAttachments) {
       const images = await fetchLatestSessionImages(input.sessionId, input.workspaceId);
       for (const image of images) {
         try {
           await attachImageToIssue(linear, issueId, image, input.blobReadWriteToken, input.signal);
           attachedImages += 1;
-        } catch {
+        } catch (error) {
           failedImages += 1;
+          captureException(error, {
+            event: "opencompany.create_linear_issue_attachment_failed",
+            session_id: input.sessionId,
+            workspace_id: input.workspaceId,
+            issue_id: issueId,
+            filename: image.filename,
+          });
         }
       }
     }
