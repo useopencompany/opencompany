@@ -2194,7 +2194,7 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     await waitFor(() => {
       expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_clear");
     });
-    expect(createAgentSession).toHaveBeenCalledWith("agent_001");
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "personal" });
     expect(seedSessionQueries).toHaveBeenCalledWith(
       expect.any(QueryClient),
       "wks_test",
@@ -2216,6 +2216,38 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     await waitFor(() => {
       expect(routerMock.push).toHaveBeenCalledWith("/company/session/sess_clear");
     });
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "company" });
+  });
+
+  it("shows an out-of-credits toast instead of redirecting immediately from /clear", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/personal/session/sess_001";
+    vi.mocked(createAgentSession).mockResolvedValue({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
+    } as Awaited<ReturnType<typeof createAgentSession>>);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    setComposerValue("/clear ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "Add credits" }),
+          title: "You're out of credits",
+          tone: "error",
+        }),
+      );
+    });
+    expect(routerMock.push).not.toHaveBeenCalled();
+
+    const toast = toastMock.showToast.mock.calls.at(-1)?.[0];
+    toast?.action?.onClick();
+
+    expect(routerMock.push).toHaveBeenCalledWith("/personal/settings?billing=insufficient");
   });
 
   it("opens /btw-created sessions under /personal from the toast action", async () => {
@@ -2242,6 +2274,7 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     toast?.action?.onClick();
 
     expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_btw");
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "personal" });
   });
 });
 

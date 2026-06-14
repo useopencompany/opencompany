@@ -1196,6 +1196,7 @@ function SessionViewContentBody({
       try {
         await command.run({
           session,
+          surface,
           workspaceId,
           router,
           sessionHref: (sessionId) => sessionHrefForSurface(surface, sessionId),

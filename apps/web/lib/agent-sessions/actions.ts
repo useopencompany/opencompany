@@ -52,15 +52,28 @@ import {
   enablePersonalAgentIntegrations,
   type PersonalIntegrationId,
 } from "@/lib/personal/actions";
+import { personalPaths } from "@/lib/personal/paths";
 import { determineApprovalResolution } from "./approval-resolution";
 
-export async function createAgentSession(idOrPath: string) {
+type SessionStartSurface = "company" | "personal";
+
+type SessionStartOptions = {
+  surface?: SessionStartSurface;
+};
+
+function billingRedirectForSurface(surface: SessionStartSurface = "company") {
+  return surface === "personal"
+    ? `${personalPaths.settings}?billing=insufficient`
+    : "/company/settings?billing=insufficient";
+}
+
+export async function createAgentSession(idOrPath: string, options: SessionStartOptions = {}) {
   const { user, workspace } = await currentWorkspace();
   if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/company/settings?billing=insufficient",
+      redirectTo: billingRedirectForSurface(options.surface),
     } as const;
   }
   const agent = await loadAgentForSession(idOrPath, workspace.id, user.id);
@@ -108,6 +121,7 @@ export async function createAgentSessionFromPrompt(
   content: string,
   modelId?: string,
   attachments: SubmitAttachmentInput[] = [],
+  options: SessionStartOptions = {},
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
@@ -124,7 +138,7 @@ export async function createAgentSessionFromPrompt(
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/company/settings?billing=insufficient",
+      redirectTo: billingRedirectForSurface(options.surface),
     } as const;
   }
   if (!agent) {
@@ -1024,6 +1038,57 @@ export async function setSessionStar(sessionId: string, starred: boolean) {
       .where(and(eq(sessionStars.userId, user.id), eq(sessionStars.sessionId, sessionId))),
   );
   return { ok: true, txid, starredAt: null } as const;
+}
+
+// Rename a session's sidebar title. The title is auto-generated from the first
+// message at creation; this lets the owning user override it. Returns the Postgres
+// txid of the write so the sidebar's optimistic update (agentSessions.update())
+// reconciles cleanly against the Electric replication stream.
+export async function renameAgentSession(sessionId: string, title: string) {
+  const { user, workspace } = await currentWorkspace();
+
+  // Trim, and cap defensively — the column is unbounded `text`, but a sidebar title
+  // has no business being longer than this.
+  const next = title.trim().slice(0, 200);
+  if (!next) {
+    return { ok: false, error: "Title cannot be empty." } as const;
+  }
+
+  const db = getDb();
+
+  // Guard: only the owning user may rename a session they can actually see.
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  const txid = await batchWithTxid(
+    db
+      .update(agentSessions)
+      .set({ title: next, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.workspaceId, workspace.id),
+          eq(agentSessions.userId, user.id),
+          isNull(agentSessions.archivedAt),
+        ),
+      ),
+  );
+
+  return { ok: true, txid } as const;
 }
 
 // Record that the current user has viewed this session, clearing its sidebar "unseen"

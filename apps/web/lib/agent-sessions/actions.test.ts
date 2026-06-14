@@ -219,6 +219,19 @@ describe("createAgentSession", () => {
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
   });
 
+  it("returns a personal billing redirect for personal-surface session starts", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+
+    const result = await createAgentSession("agt_123", { surface: "personal" });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
+    });
+    expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
+  });
+
   it("returns an error when the agent cannot be found", async () => {
     getDbMock.mockReturnValue(dbWithAgent(null));
 
@@ -361,6 +374,22 @@ describe("createAgentSessionFromPrompt", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a personal billing redirect for personal-surface prompt starts", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Hello", undefined, [], {
+      surface: "personal",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
     });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });

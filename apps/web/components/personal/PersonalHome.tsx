@@ -6,6 +6,7 @@ import { ArrowUp, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
+import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { Composer } from "@/components/Composer";
 import {
   ATTACHMENT_FILE_INPUT_ACCEPT,
@@ -16,6 +17,7 @@ import {
 import { PendingSessionView } from "@/components/personal/PendingSessionView";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { PersonalInbox } from "@/components/personal/PersonalInbox";
+import { useToast } from "@/components/ToastProvider";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
@@ -35,6 +37,7 @@ export default function PersonalHome() {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const { showToast } = useToast();
   const [input, setInput] = useState("");
   const [model, setModel] = useState<string>(agent.defaultModel || DEFAULT_MODEL_ID);
   const [error, setError] = useState<string | null>(null);
@@ -94,11 +97,12 @@ export default function PersonalHome() {
         content,
         model || undefined,
         toSubmitAttachments(ready),
+        { surface: "personal" },
       );
       if (!result.ok) {
         setPendingSession(null);
         if ("redirectTo" in result) {
-          router.push(result.redirectTo);
+          showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
           return;
         }
         setError(result.error);
