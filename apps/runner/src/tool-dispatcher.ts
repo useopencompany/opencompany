@@ -740,9 +740,11 @@ async function executeRuntimeToolInner(
             );
           }
           return runCreateLinearIssueTool({
+            sessionId: input.sessionId,
             workspaceId: input.workspaceId,
             args: input.args,
             integrationCredentialEncryptionKey: input.env.integrationCredentialEncryptionKey,
+            blobReadWriteToken: input.env.blobReadWriteToken,
             signal: input.signal,
           });
         }
