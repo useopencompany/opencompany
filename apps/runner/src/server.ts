@@ -1,5 +1,5 @@
-import { createLogger } from "@opencompany/observability";
 import fastifyWebsocket from "@fastify/websocket";
+import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
 import {

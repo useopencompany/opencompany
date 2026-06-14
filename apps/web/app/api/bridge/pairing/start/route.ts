@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { devicePairingRequests } from "@opencompany/db/schema";
 import { getDb } from "@opencompany/db/client";
-import { NextResponse, type NextRequest } from "next/server";
+import { devicePairingRequests } from "@opencompany/db/schema";
+import { type NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,10 @@ export async function POST(request: NextRequest) {
   const platform =
     typeof record.platform === "string" ? record.platform.trim().slice(0, 30) : "unknown";
   if (!/^[a-f0-9]{64}$/.test(secretHash)) {
-    return NextResponse.json({ error: "secretHash must be a SHA-256 hex digest." }, { status: 400 });
+    return NextResponse.json(
+      { error: "secretHash must be a SHA-256 hex digest." },
+      { status: 400 },
+    );
   }
   if (!deviceName) {
     return NextResponse.json({ error: "deviceName is required." }, { status: 400 });

@@ -1,7 +1,7 @@
-import { devicePairingRequests, workspaceDevices } from "@opencompany/db/schema";
 import { getDb } from "@opencompany/db/client";
+import { devicePairingRequests, workspaceDevices } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 

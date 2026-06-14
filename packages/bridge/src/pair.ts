@@ -80,7 +80,9 @@ async function collectInitialGrants(): Promise<void> {
   try {
     console.log("");
     // The READ prompt is pre-filled with ~/Projects; clearing it skips the grant.
-    const readFolder = (await ask(rl, "Folder agents may READ (empty to skip): ", "~/Projects")).trim();
+    const readFolder = (
+      await ask(rl, "Folder agents may READ (empty to skip): ", "~/Projects")
+    ).trim();
     const writeFolder = (await ask(rl, "Folder agents may WRITE (empty to skip): ")).trim();
 
     const added: string[] = [];

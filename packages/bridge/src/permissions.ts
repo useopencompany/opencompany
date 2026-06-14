@@ -130,9 +130,7 @@ function resolveTarget(tool: BridgeToolName, args: unknown): ResolvedTarget {
   return { ok: true, kind: "path", path: resolved, summary: resolved };
 }
 
-type ParsedRule =
-  | { kind: "read" | "write"; glob: string }
-  | { kind: "shell"; pattern: string };
+type ParsedRule = { kind: "read" | "write"; glob: string } | { kind: "shell"; pattern: string };
 
 // Malformed rules never match — a typo in a hand-edited allow rule fails closed.
 function parseRule(rule: string): ParsedRule | null {

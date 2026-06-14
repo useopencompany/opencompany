@@ -43,7 +43,11 @@ describe("createStatusWriter", () => {
   it("prepends activity newest-first and caps the ring buffer at 25", () => {
     const writer = createStatusWriter({ deviceName: "Mac", mode: "allow-everything", path });
     for (let i = 0; i < 30; i += 1) {
-      writer.pushActivity({ tool: "local_shell", decision: "allowed_by_mode", summary: `cmd ${i}` });
+      writer.pushActivity({
+        tool: "local_shell",
+        decision: "allowed_by_mode",
+        summary: `cmd ${i}`,
+      });
     }
     const status = readStatus(path);
     expect(status?.recentActions).toHaveLength(25);

@@ -9,11 +9,7 @@ vi.mock("./db", () => ({
   }),
 }));
 
-import {
-  checkDevicePermission,
-  disconnectDevice,
-  registerDeviceConnection,
-} from "./device-bridge";
+import { checkDevicePermission, disconnectDevice, registerDeviceConnection } from "./device-bridge";
 
 function createFakeSocket() {
   const sent: string[] = [];

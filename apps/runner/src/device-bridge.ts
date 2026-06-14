@@ -6,8 +6,8 @@ import {
   type BridgeToolName,
   type BridgeVerdict,
   type DaemonToRunnerMessage,
-  type RunnerToDaemonMessage,
   isBridgeToolName,
+  type RunnerToDaemonMessage,
 } from "@opencompany/bridge/protocol";
 import {
   agentSessions,

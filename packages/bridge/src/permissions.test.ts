@@ -107,9 +107,9 @@ describe("evaluatePermission — shell patterns", () => {
 describe("evaluatePermission — path globs", () => {
   it("matches ** across directory separators", () => {
     const rules = settings({ allow: ["read(~/Projects/**)"] });
-    expect(evaluatePermission(readReq(`${HOME}/Projects/app/src/index.ts`), rules, []).verdict).toBe(
-      "allow",
-    );
+    expect(
+      evaluatePermission(readReq(`${HOME}/Projects/app/src/index.ts`), rules, []).verdict,
+    ).toBe("allow");
     expect(evaluatePermission(readReq(`${HOME}/Projects/x.txt`), rules, []).verdict).toBe("allow");
     expect(evaluatePermission(readReq(`${HOME}/Other/x.txt`), rules, []).verdict).toBe("ask");
   });
@@ -122,7 +122,9 @@ describe("evaluatePermission — path globs", () => {
   it("keeps * within a single path segment", () => {
     const rules = settings({ allow: ["read(~/Projects/*.txt)"] });
     expect(evaluatePermission(readReq(`${HOME}/Projects/a.txt`), rules, []).verdict).toBe("allow");
-    expect(evaluatePermission(readReq(`${HOME}/Projects/sub/a.txt`), rules, []).verdict).toBe("ask");
+    expect(evaluatePermission(readReq(`${HOME}/Projects/sub/a.txt`), rules, []).verdict).toBe(
+      "ask",
+    );
   });
 
   it("matches exactly one non-separator character with ?", () => {
@@ -262,7 +264,11 @@ describe("evaluatePermission — invalid args", () => {
 
   it("denies a shell request with a missing, empty, or non-string command", () => {
     for (const command of [undefined, "", "   ", 42, ["ls"]]) {
-      const result = evaluatePermission(shellReq(command), settings({ mode: "allow-everything" }), []);
+      const result = evaluatePermission(
+        shellReq(command),
+        settings({ mode: "allow-everything" }),
+        [],
+      );
       expect(result.verdict).toBe("deny");
       expect(result.rule).toBeUndefined();
       expect(result.summary).toContain("command");

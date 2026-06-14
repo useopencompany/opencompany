@@ -3,8 +3,8 @@
 import {
   ATTACHMENT_TEXT_MAX_BYTES,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
-  listAddableBuiltinSkills,
   LOCAL_DEVICE_PROVIDER_KEY,
+  listAddableBuiltinSkills,
   modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,

@@ -1,6 +1,6 @@
 import { DevicesView } from "@/components/settings/DevicesView";
-import { loadMyDeviceActions, loadMyDevices } from "@/lib/devices/actions";
 import { currentWorkspace } from "@/lib/auth";
+import { loadMyDeviceActions, loadMyDevices } from "@/lib/devices/actions";
 
 export const dynamic = "force-dynamic";
 

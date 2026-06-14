@@ -150,7 +150,14 @@ export function createMessageHandler(
       const output = await runTool(opts.executor, msg.tool, msg.args);
       log(`${msg.tool} ${describeDecision(decision, decidingRule)}: ${evaluation.summary}`);
       emit({ tool: msg.tool, decision, summary: evaluation.summary });
-      return { kind: "result", id: msg.id, ok: true, output, decision, summary: evaluation.summary };
+      return {
+        kind: "result",
+        id: msg.id,
+        ok: true,
+        output,
+        decision,
+        summary: evaluation.summary,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log(`${msg.tool} failed (${decision}): ${message}`);
@@ -167,11 +174,7 @@ export function createMessageHandler(
   };
 }
 
-function runTool(
-  executor: BridgeExecutor,
-  tool: BridgeToolName,
-  args: unknown,
-): Promise<unknown> {
+function runTool(executor: BridgeExecutor, tool: BridgeToolName, args: unknown): Promise<unknown> {
   // Arg shapes were validated by evaluatePermission before execution is reached.
   switch (tool) {
     case "local_shell":

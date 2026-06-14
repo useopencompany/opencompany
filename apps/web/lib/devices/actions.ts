@@ -1,12 +1,8 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import {
-  deviceActions,
-  devicePairingRequests,
-  workspaceDevices,
-} from "@opencompany/db/schema";
 import { getDb } from "@opencompany/db/client";
+import { deviceActions, devicePairingRequests, workspaceDevices } from "@opencompany/db/schema";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { callRunner } from "@/lib/agent-sessions/runner";
@@ -40,7 +36,10 @@ export type DeviceActionSummary = {
 // hash — the secret itself never left the device).
 export async function confirmDevicePairing(input: { code: string }) {
   const { user, workspace } = await currentWorkspace();
-  const code = input.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const code = input.code
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
   if (code.length !== 6) {
     return { ok: false, error: "Enter the 6-character code shown in your terminal." } as const;
   }

@@ -100,7 +100,8 @@ function printStatus(): void {
 async function toggleTrust(): Promise<void> {
   const settings = loadSettings();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (question: string) => new Promise<string>((resolve) => rl.question(question, resolve));
+  const ask = (question: string) =>
+    new Promise<string>((resolve) => rl.question(question, resolve));
 
   try {
     if (settings.mode === "allow-everything") {

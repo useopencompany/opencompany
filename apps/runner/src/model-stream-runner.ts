@@ -72,8 +72,7 @@ async function resolveLocalDeviceDecision(input: {
   if (result.kind === "unreachable") {
     return { ...input.classified, decision: "allow" };
   }
-  const decision =
-    result.verdict === "ask" && !input.suspendable ? "deny" : result.verdict;
+  const decision = result.verdict === "ask" && !input.suspendable ? "deny" : result.verdict;
   return { ...input.classified, decision };
 }
 

@@ -3,11 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createExecutor } from "./executor";
-import {
-  BRIDGE_LIST_ENTRIES_CAP,
-  BRIDGE_READ_FILE_CAP,
-  BRIDGE_SHELL_OUTPUT_CAP,
-} from "./protocol";
+import { BRIDGE_LIST_ENTRIES_CAP, BRIDGE_READ_FILE_CAP, BRIDGE_SHELL_OUTPUT_CAP } from "./protocol";
 
 const tmp = mkdtempSync(join(tmpdir(), "oc-bridge-executor-"));
 const executor = createExecutor();

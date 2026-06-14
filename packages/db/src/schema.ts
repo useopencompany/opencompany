@@ -2165,7 +2165,10 @@ export const devicePairingRequests = pgTable(
     secretHash: text("secret_hash").notNull(),
     deviceName: text("device_name").notNull(),
     platform: text("platform").notNull(),
-    status: text("status").$type<"pending" | "confirmed" | "expired">().notNull().default("pending"),
+    status: text("status")
+      .$type<"pending" | "confirmed" | "expired">()
+      .notNull()
+      .default("pending"),
     deviceId: text("device_id").references(() => workspaceDevices.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

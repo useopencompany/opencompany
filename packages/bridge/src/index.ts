@@ -1,5 +1,21 @@
-export * from "./protocol";
 export { type BridgeConfig, bridgeHome, configPath, loadConfig, saveConfig } from "./config";
+export {
+  createMessageHandler,
+  type MessageHandlerOptions,
+  type SessionGrants,
+  startDaemon,
+} from "./daemon";
+export { type BridgeExecutor, createExecutor } from "./executor";
+export { runPairing } from "./pair";
+export {
+  deriveGrantRule,
+  evaluatePermission,
+  expandTilde,
+  type PermissionRequest,
+  type PermissionResult,
+  resolveBridgePath,
+} from "./permissions";
+export * from "./protocol";
 export {
   appendAllowRule,
   type BridgeMode,
@@ -9,22 +25,6 @@ export {
   saveSettings,
   settingsPath,
 } from "./settings";
-export {
-  deriveGrantRule,
-  evaluatePermission,
-  expandTilde,
-  type PermissionRequest,
-  type PermissionResult,
-  resolveBridgePath,
-} from "./permissions";
-export { type BridgeExecutor, createExecutor } from "./executor";
-export {
-  createMessageHandler,
-  type MessageHandlerOptions,
-  type SessionGrants,
-  startDaemon,
-} from "./daemon";
-export { runPairing } from "./pair";
 export {
   type BridgeActivityEntry,
   type BridgeStatus,
