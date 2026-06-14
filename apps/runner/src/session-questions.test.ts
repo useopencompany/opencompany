@@ -39,12 +39,13 @@ describe("normalizeQuestionsInput", () => {
         question: "Which environment?",
         options: [{ label: "Production", description: "live" }, { label: "Staging" }],
         allowMultiple: false,
-        allowOther: false,
+        // "Other" is always offered, so the user can always type their own answer.
+        allowOther: true,
       },
     ]);
   });
 
-  it("coerces allowMultiple/allowOther only when strictly true", () => {
+  it("coerces allowMultiple only when strictly true, and always allows other", () => {
     const result = normalizeQuestionsInput({
       questions: [
         {
@@ -52,13 +53,13 @@ describe("normalizeQuestionsInput", () => {
           question: "What scope?",
           options: [{ label: "A" }, { label: "B" }],
           allowMultiple: true,
-          allowOther: "yes",
         },
       ],
     });
     const question = result?.[0];
     expect(question?.allowMultiple).toBe(true);
-    expect(question?.allowOther).toBe(false);
+    // Always on, independent of model input.
+    expect(question?.allowOther).toBe(true);
   });
 
   it("clamps to the question and option maximums", () => {
