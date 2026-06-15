@@ -45,6 +45,7 @@ import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validation";
 import { isSessionContinuable, isToolStepLimitResumable } from "@/lib/agent-sessions/resumable";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
+import type { SendMode } from "@/lib/agent-sessions/send-mode";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
 import { normalizeCompanyUrl } from "@/lib/onboarding/validation";
@@ -453,6 +454,7 @@ export async function submitAgentSessionMessage(
   sessionId: string,
   content: string,
   attachments: SubmitAttachmentInput[] = [],
+  sendMode: SendMode = "steer",
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
@@ -471,6 +473,7 @@ export async function submitAgentSessionMessage(
         agentId: agentSessions.agentId,
         modelProvider: agentSessions.modelProvider,
         modelName: agentSessions.modelName,
+        status: agentSessions.status,
       })
       .from(agentSessions)
       .where(
@@ -523,14 +526,38 @@ export async function submitAgentSessionMessage(
   const { message } = await insertUserMessage(sessionId, trimmed, {
     workspaceId: workspace.id,
     attachments,
+    sendMode,
   });
   const messageId = message.id;
+
+  // Interrupt mode: the user aborted the in-flight turn to run this message now. Request the
+  // abort synchronously (off the time-to-first-token path it would otherwise share) so the
+  // runner stops at its next step/tool boundary as soon as possible; its abort-path
+  // continuation then answers this message next. Only meaningful while a turn is actually
+  // running — otherwise interrupt is just a normal send. Steer and queue never abort.
+  const interruptRunning = sendMode === "interrupt" && session.status === "running";
+  if (interruptRunning) {
+    await db
+      .update(agentSessions)
+      .set({ status: "aborting", abortRequestedAt: new Date(), updatedAt: new Date() })
+      .where(eq(agentSessions.id, sessionId));
+    await appendSessionStreamEvent(sessionId, {
+      id: null,
+      type: "session.status",
+      messageId: null,
+      payload: { status: "aborting" },
+      createdAt: new Date().toISOString(),
+    });
+  }
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
   // and therefore the runner dispatch. Run dispatch and analytics concurrently in
   // `after()` so neither sits on the time-to-first-token path.
   after(() =>
     Promise.all([
+      ...(interruptRunning
+        ? [dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id })]
+        : []),
       triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
       dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
       captureServerEvent("session_message_sent", user.id, {
@@ -1314,11 +1341,17 @@ async function insertAgentSessionWithUserMessage(input: {
 async function insertUserMessage(
   sessionId: string,
   content: string,
-  options: { workspaceId: string; attachments: SubmitAttachmentInput[]; modelContent?: string },
+  options: {
+    workspaceId: string;
+    attachments: SubmitAttachmentInput[];
+    modelContent?: string;
+    sendMode?: SendMode | null;
+  },
 ) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
-  const payload = { messageId, role: "user", content, status: "completed" };
+  const sendMode = options.sendMode ?? null;
+  const payload = { messageId, role: "user", content, status: "completed", sendMode };
 
   // The model message stays TEXT-ONLY — attachment bytes never touch Postgres. The
   // attachment rows here only persist metadata + the private-blob pointers; the runner
@@ -1340,6 +1373,7 @@ async function insertUserMessage(
       role: "user",
       status: "completed",
       content,
+      sendMode,
       modelMessage: { role: "user", content: modelContent },
       completedAt: new Date(),
     })

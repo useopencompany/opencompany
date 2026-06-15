@@ -114,6 +114,14 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import {
+  DEFAULT_SEND_MODE,
+  isSendMode,
+  SEND_MODE_STORAGE_KEY,
+  SEND_MODES,
+  type SendMode,
+  sendModeMeta,
+} from "@/lib/agent-sessions/send-mode";
 import { BRAIN_BASE_PATH, brainHref } from "@/lib/brain/paths";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import { personalPaths } from "@/lib/personal/paths";
@@ -248,6 +256,83 @@ type OptimisticUserMessage = SessionMessage & {
   confirmedMessageId: string | null;
   existingMessageIds: string[];
 };
+
+// Tailwind tint for the send button per send-mode, applied only while a run is active. Green =
+// Steer (live nudge), amber = Queue, red = Interrupt. Idle sends use the neutral ink button.
+const SEND_MODE_BUTTON_CLASS: Record<SendMode, string> = {
+  steer: "bg-success text-white hover:bg-success/90",
+  queue: "bg-warning text-white hover:bg-warning/90",
+  interrupt: "bg-danger text-white hover:bg-danger/90",
+};
+
+// Composer control (shown only while a run is active) for choosing how the next message is
+// dispatched into the live run. A colored pill + popover; the choice is lifted to SessionView
+// state so it can be persisted to localStorage. See lib/agent-sessions/send-mode.ts.
+function SendModePicker({
+  value,
+  onChange,
+  open,
+  setOpen,
+}: {
+  value: SendMode;
+  onChange: (mode: SendMode) => void;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open, setOpen]);
+  const meta = sendModeMeta(value);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Send mode: ${meta.label}`}
+        className={`flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11.5px] font-medium transition-colors ${meta.activeClassName}`}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClassName}`} />
+        {meta.label}
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute bottom-[calc(100%+8px)] left-0 z-20 w-64 overflow-hidden rounded-lg border border-border bg-surface shadow-lg"
+        >
+          {SEND_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={mode.value === value}
+              onClick={() => {
+                onChange(mode.value);
+                setOpen(false);
+              }}
+              className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-surface-muted ${
+                mode.value === value ? "bg-surface-muted" : ""
+              }`}
+            >
+              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
+                <span className={`h-1.5 w-1.5 rounded-full ${mode.dotClassName}`} />
+                {mode.label}
+              </span>
+              <span className="text-[11px] text-ink-muted">{mode.description}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // Lets the deeply-nested ToolCallCard reach the session id (for tool-approval actions)
 // without threading a prop through every intermediate render layer.
@@ -399,6 +484,23 @@ function SessionViewContentBody({
   // than the send path's `isPending`.
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [, startModelTransition] = useTransition();
+  // Composer send-mode: how a message is dispatched while a run is already in flight (Steer /
+  // Queue / Interrupt). Sticky per device — restored from and persisted to localStorage. Only
+  // affects sends made mid-run; idle sends ignore it. See lib/agent-sessions/send-mode.ts.
+  const [sendMode, setSendModeState] = useState<SendMode>(DEFAULT_SEND_MODE);
+  const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
+  useEffect(() => {
+    const stored = window.localStorage.getItem(SEND_MODE_STORAGE_KEY);
+    if (isSendMode(stored)) setSendModeState(stored);
+  }, []);
+  const setSendMode = useCallback((mode: SendMode) => {
+    setSendModeState(mode);
+    try {
+      window.localStorage.setItem(SEND_MODE_STORAGE_KEY, mode);
+    } catch {
+      // Private mode / storage disabled — keep the in-memory choice for this session.
+    }
+  }, []);
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
@@ -765,6 +867,11 @@ function SessionViewContentBody({
   // a viewport of room below it — reserved by CSS, so it survives resize and never
   // needs a JS re-pin. -1 (no user message yet) means no turn to reserve.
   const lastUserTurnStart = visibleMessages.findLastIndex((message) => message.role === "user");
+  // Index of the most recent assistant message — a user message after it is still unanswered, which
+  // is when a mid-run send-mode chip ("Steering"/"Queued"/"Interrupting") should show.
+  const lastAssistantIndex = visibleMessages.findLastIndex(
+    (message) => message.role === "assistant",
+  );
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
@@ -833,6 +940,21 @@ function SessionViewContentBody({
         partsAwaitQuestion(assistantParts) ||
         partsHaveRunningTool(assistantParts));
 
+    // A user message dispatched mid-run shows a colored chip while it's still waiting for the
+    // agent (i.e. it sits after the last assistant message). It clears once the agent starts
+    // answering it. Only set on sends made while a run was active. See send-mode.ts.
+    const sendModeChip =
+      message.role === "user" &&
+      message.sendMode &&
+      visibleMessages.findIndex((m) => m.id === message.id) > lastAssistantIndex
+        ? sendModeMeta(message.sendMode)
+        : null;
+    const sendModeChipLabel: Record<SendMode, string> = {
+      steer: "Steering",
+      queue: "Queued",
+      interrupt: "Interrupting",
+    };
+
     return (
       <div
         key={message.id}
@@ -864,6 +986,14 @@ function SessionViewContentBody({
           ) : (
             <div className="flex flex-col gap-2">
               {message.content ? <div>{message.content}</div> : null}
+              {sendModeChip ? (
+                <span
+                  className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${sendModeChip.activeClassName}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${sendModeChip.dotClassName}`} />
+                  {sendModeChipLabel[sendModeChip.value]}
+                </span>
+              ) : null}
               {message.attachments && message.attachments.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {message.attachments.map((att) => {
@@ -1304,12 +1434,17 @@ function SessionViewContentBody({
       runSlashCommand(parsed.command, parsed.args);
       return;
     }
-    if (isBusy) return;
+    // Note: we intentionally do NOT bail when the agent is running. Sending mid-run is the whole
+    // point of send-modes — the server + runner route the message per `sendMode`.
     submit();
   };
 
   const submit = () => {
-    if (isBusy) return;
+    // Guard only against a double-submit of our own in-flight transition; sending while the agent
+    // runs is allowed and resolves to steer/queue/interrupt on the server.
+    if (isPending) return;
+    // Whether a run is active right now decides if `sendMode` matters and whether to show a chip.
+    const sentMidRun = hasRunningAssistantMessage || showWaitingForAssistant;
     const content = input.trim();
     const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
     if (!content && ready.length === 0) return;
@@ -1325,6 +1460,9 @@ function SessionViewContentBody({
       role: "user",
       content,
       status: "completed",
+      // Only tag the bubble with a send-mode when it was actually dispatched into a live run, so
+      // the chip ("Steering"/"Queued"/"Interrupt") shows for those and not for idle first sends.
+      ...(sentMidRun ? { sendMode } : {}),
       createdAt: new Date(submittedAtMs).toISOString(),
       completedAt: new Date(submittedAtMs).toISOString(),
       // Carry the sent attachments so the bubble shows them immediately. Images use their local
@@ -1353,6 +1491,7 @@ function SessionViewContentBody({
         session.id,
         content,
         toSubmitAttachments(ready),
+        sendMode,
       );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
@@ -1716,37 +1855,64 @@ function SessionViewContentBody({
                       fallbackModelId={DEFAULT_MODEL_ID}
                       onChange={handleModelChange}
                     />
+                    {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
+                      <SendModePicker
+                        value={sendMode}
+                        onChange={setSendMode}
+                        open={sendModeMenuOpen}
+                        setOpen={setSendModeMenuOpen}
+                      />
+                    ) : null}
                   </>
                 }
-                action={
-                  canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                    <button
-                      type="button"
-                      disabled={isPending}
-                      onClick={requestAbort}
-                      aria-label="Stop generating"
-                      title="Stop generating"
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
-                    >
-                      <CircleStop size={16} strokeWidth={1.9} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={
-                        isPending ||
-                        attachments.some((a) => a.status !== "ready") ||
-                        (!parseSlashCommand(input, allSlashCommands) &&
-                          (isBusy || (!input.trim() && attachments.length === 0)))
-                      }
-                      onClick={handleSend}
-                      aria-label="Send message"
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
-                    >
-                      <ArrowUp size={13} strokeWidth={2} />
-                    </button>
-                  )
-                }
+                action={(() => {
+                  // While a run is active the composer offers BOTH send (which dispatches per
+                  // the chosen send-mode) and stop. The send button is tinted by the mode —
+                  // green for Steer, amber for Queue, red for Interrupt — so the "this button
+                  // is green" cue maps to live-steering. Idle: a single neutral send button.
+                  const runActive =
+                    canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
+                  const sendDisabled =
+                    isPending ||
+                    attachments.some((a) => a.status !== "ready") ||
+                    (!parseSlashCommand(input, allSlashCommands) &&
+                      !input.trim() &&
+                      attachments.length === 0);
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={sendDisabled}
+                        onClick={handleSend}
+                        aria-label={
+                          runActive ? `Send (${sendModeMeta(sendMode).label})` : "Send message"
+                        }
+                        title={
+                          runActive ? `Send · ${sendModeMeta(sendMode).label}` : "Send message"
+                        }
+                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+                          runActive
+                            ? SEND_MODE_BUTTON_CLASS[sendMode]
+                            : "bg-ink text-canvas hover:bg-ink/85"
+                        }`}
+                      >
+                        <ArrowUp size={13} strokeWidth={2} />
+                      </button>
+                      {runActive ? (
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={requestAbort}
+                          aria-label="Stop generating"
+                          title="Stop generating"
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          <CircleStop size={16} strokeWidth={1.9} />
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })()}
                 rightControls={
                   <div
                     className={`flex items-center gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
