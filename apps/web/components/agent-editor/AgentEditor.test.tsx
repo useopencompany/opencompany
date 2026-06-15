@@ -394,6 +394,47 @@ describe("AgentEditor", () => {
     });
   });
 
+  it("does not auto-convert typed @mention text into a pill without an explicit selection (PRO-169)", async () => {
+    const user = userEvent.setup();
+    const captured: Array<{ body: string; content: unknown }> = [];
+
+    const { container } = render(
+      <AgentEditor
+        initialBody=""
+        mentionItems={buildAgentMentionItems()}
+        onChange={(body, content) =>
+          captured.push({ body, content: JSON.parse(JSON.stringify(content)) })
+        }
+      />,
+    );
+    const editor = container.querySelector(".ProseMirror") as HTMLElement;
+    editor.focus();
+
+    // Type a token that exactly matches a known mention item, then close the
+    // suggestion menu with a trailing space WITHOUT selecting anything. The
+    // editor must leave the text as-is — mentions require an explicit
+    // Enter/click confirmation, never a silent keystroke/idle injection.
+    await user.keyboard("@amp ");
+
+    // Wait well past the legacy 600ms idle auto-convert window — if anyone
+    // re-introduces idle auto-conversion this margin lets the pill form.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    });
+
+    // Precondition: the typed text actually landed (proves onChange fired, so
+    // the no-mention-node assertion below isn't vacuously green).
+    expect(captured.at(-1)?.body).toContain("@amp");
+    expect(container.querySelector(".agent-mention")).toBeNull();
+    const paragraph = (
+      captured.at(-1)?.content as {
+        content?: Array<{ content?: Array<{ type?: string }> }>;
+      }
+    )?.content?.[0];
+    const hasMentionNode = paragraph?.content?.some((node) => node.type === "mention");
+    expect(hasMentionNode).not.toBe(true);
+  });
+
   it("opens the #after-session hook menu when typing # at the start of a line", async () => {
     const user = userEvent.setup();
     const captured: Array<{ body: string; content: unknown }> = [];
