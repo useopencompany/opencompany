@@ -487,12 +487,15 @@ function SessionViewContentBody({
   // Composer send-mode: how a message is dispatched while a run is already in flight (Steer /
   // Queue / Interrupt). Sticky per device — restored from and persisted to localStorage. Only
   // affects sends made mid-run; idle sends ignore it. See lib/agent-sessions/send-mode.ts.
-  const [sendMode, setSendModeState] = useState<SendMode>(DEFAULT_SEND_MODE);
-  const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
-  useEffect(() => {
+  // Read once in a lazy initializer (not an effect) so there's no synchronous setState-in-effect;
+  // the picker that surfaces this only renders once a run is active, well after hydration, so the
+  // SSR-default vs restored-value difference can't cause a hydration mismatch.
+  const [sendMode, setSendModeState] = useState<SendMode>(() => {
+    if (typeof window === "undefined") return DEFAULT_SEND_MODE;
     const stored = window.localStorage.getItem(SEND_MODE_STORAGE_KEY);
-    if (isSendMode(stored)) setSendModeState(stored);
-  }, []);
+    return isSendMode(stored) ? stored : DEFAULT_SEND_MODE;
+  });
+  const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
   const setSendMode = useCallback((mode: SendMode) => {
     setSendModeState(mode);
     try {
@@ -899,7 +902,6 @@ function SessionViewContentBody({
   // Abort stays available while paused so the user can cancel a parked run without
   // having to approve or deny the pending tool call first.
   const canAbort = sessionCanGenerate || sessionIsPaused;
-  const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   const renderMessage = (message: SessionMessage) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
