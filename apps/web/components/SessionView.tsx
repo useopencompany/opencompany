@@ -980,16 +980,16 @@ function SessionViewContentBody({
     if (message.role === "user" && message.sendMode) {
       const meta = sendModeMeta(message.sendMode);
       return (
-        <div key={message.id} data-message-id={message.id} className="flex justify-start">
-          <div className="flex max-w-[80%] flex-col gap-1.5">
+        <div key={message.id} data-message-id={message.id} className="flex justify-end">
+          <div className="flex max-w-[80%] flex-col items-end gap-1.5">
             <div
-              className={`inline-flex max-w-full items-start gap-1.5 rounded-md border px-2 py-1 text-[12px] leading-5 ${meta.activeClassName}`}
+              className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] leading-5 ${meta.activeClassName}`}
             >
-              <span className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClassName}`} />
               <span className="shrink-0 font-medium">{SEND_MODE_ROW_LABEL[message.sendMode]}</span>
               {message.content ? (
                 <span className="break-words font-normal opacity-90">· {message.content}</span>
               ) : null}
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClassName}`} />
             </div>
             {attachmentsBlock}
           </div>

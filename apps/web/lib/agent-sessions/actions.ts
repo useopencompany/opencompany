@@ -523,10 +523,20 @@ export async function submitAgentSessionMessage(
       ),
     );
 
+  // Steering only applies mid-work — a message sent while a turn is actively in flight (or parked
+  // mid-turn awaiting input/approval). When the session is idle or the run is already done, this is
+  // just a normal message: we don't tag it with a send-mode, so the UI renders a plain bubble (not
+  // a "Steered" annotation) and a finished run is never re-steered. The runner still treats a NULL
+  // mode as steer if one somehow lands mid-run, so this only affects presentation, never delivery.
+  const midWork =
+    session.status === "running" ||
+    session.status === "awaiting_approval" ||
+    session.status === "awaiting_input";
+  const effectiveSendMode = midWork ? sendMode : null;
   const { message } = await insertUserMessage(sessionId, trimmed, {
     workspaceId: workspace.id,
     attachments,
-    sendMode,
+    sendMode: effectiveSendMode,
   });
   const messageId = message.id;
 
