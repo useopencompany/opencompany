@@ -265,6 +265,13 @@ const SEND_MODE_BUTTON_CLASS: Record<SendMode, string> = {
   interrupt: "bg-danger text-white hover:bg-danger/90",
 };
 
+// Past-tense labels for the inline annotation a mid-run send leaves above the turn it affected.
+const SEND_MODE_ROW_LABEL: Record<SendMode, string> = {
+  steer: "Steered",
+  queue: "Queued",
+  interrupt: "Interrupted",
+};
+
 // Composer control (shown only while a run is active) for choosing how the next message is
 // dispatched into the live run. A colored pill + popover; the choice is lifted to SessionView
 // state so it can be persisted to localStorage. See lib/agent-sessions/send-mode.ts.
@@ -870,11 +877,6 @@ function SessionViewContentBody({
   // a viewport of room below it — reserved by CSS, so it survives resize and never
   // needs a JS re-pin. -1 (no user message yet) means no turn to reserve.
   const lastUserTurnStart = visibleMessages.findLastIndex((message) => message.role === "user");
-  // Index of the most recent assistant message — a user message after it is still unanswered, which
-  // is when a mid-run send-mode chip ("Steering"/"Queued"/"Interrupting") should show.
-  const lastAssistantIndex = visibleMessages.findLastIndex(
-    (message) => message.role === "assistant",
-  );
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
@@ -942,20 +944,58 @@ function SessionViewContentBody({
         partsAwaitQuestion(assistantParts) ||
         partsHaveRunningTool(assistantParts));
 
-    // A user message dispatched mid-run shows a colored chip while it's still waiting for the
-    // agent (i.e. it sits after the last assistant message). It clears once the agent starts
-    // answering it. Only set on sends made while a run was active. See send-mode.ts.
-    const sendModeChip =
-      message.role === "user" &&
-      message.sendMode &&
-      visibleMessages.findIndex((m) => m.id === message.id) > lastAssistantIndex
-        ? sendModeMeta(message.sendMode)
-        : null;
-    const sendModeChipLabel: Record<SendMode, string> = {
-      steer: "Steering",
-      queue: "Queued",
-      interrupt: "Interrupting",
-    };
+    // Attachments preview, shared by the normal user bubble and the mid-run steer row below.
+    const attachmentsBlock =
+      message.attachments && message.attachments.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {message.attachments.map((att) => {
+            // Optimistic just-sent messages carry a local object-URL preview so the image
+            // shows instantly; the served `/api/attachments/{id}` row doesn't exist yet.
+            // Server-loaded messages have no previewUrl and use the served URL.
+            const servedUrl = `/api/attachments/${att.id}`;
+            const imageSrc = att.previewUrl ?? servedUrl;
+            return (
+              <a
+                key={att.id}
+                href={att.previewUrl ?? servedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block"
+              >
+                <AttachmentCard
+                  kind={att.kind}
+                  filename={att.filename}
+                  src={att.kind === "image" ? imageSrc : undefined}
+                />
+              </a>
+            );
+          })}
+        </div>
+      ) : null;
+
+    // A message sent while a run was already in flight (Steer / Queue / Interrupt) renders as a
+    // compact, left-aligned annotation attached just above the agent turn it affected — not as a
+    // normal right-side bubble — so it stays obvious the run was redirected. Past-tense wording
+    // (Steered/Queued/Interrupted) since by render time the mode has already been applied.
+    if (message.role === "user" && message.sendMode) {
+      const meta = sendModeMeta(message.sendMode);
+      return (
+        <div key={message.id} data-message-id={message.id} className="flex justify-start">
+          <div className="flex max-w-[80%] flex-col gap-1.5">
+            <div
+              className={`inline-flex max-w-full items-start gap-1.5 rounded-md border px-2 py-1 text-[12px] leading-5 ${meta.activeClassName}`}
+            >
+              <span className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClassName}`} />
+              <span className="shrink-0 font-medium">{SEND_MODE_ROW_LABEL[message.sendMode]}</span>
+              {message.content ? (
+                <span className="break-words font-normal opacity-90">· {message.content}</span>
+              ) : null}
+            </div>
+            {attachmentsBlock}
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div
@@ -988,40 +1028,7 @@ function SessionViewContentBody({
           ) : (
             <div className="flex flex-col gap-2">
               {message.content ? <div>{message.content}</div> : null}
-              {sendModeChip ? (
-                <span
-                  className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${sendModeChip.activeClassName}`}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${sendModeChip.dotClassName}`} />
-                  {sendModeChipLabel[sendModeChip.value]}
-                </span>
-              ) : null}
-              {message.attachments && message.attachments.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {message.attachments.map((att) => {
-                    // Optimistic just-sent messages carry a local object-URL preview so the image
-                    // shows instantly; the served `/api/attachments/{id}` row doesn't exist yet.
-                    // Server-loaded messages have no previewUrl and use the served URL.
-                    const servedUrl = `/api/attachments/${att.id}`;
-                    const imageSrc = att.previewUrl ?? servedUrl;
-                    return (
-                      <a
-                        key={att.id}
-                        href={att.previewUrl ?? servedUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block"
-                      >
-                        <AttachmentCard
-                          kind={att.kind}
-                          filename={att.filename}
-                          src={att.kind === "image" ? imageSrc : undefined}
-                        />
-                      </a>
-                    );
-                  })}
-                </div>
-              ) : null}
+              {attachmentsBlock}
             </div>
           )}
           {(canCopy || brainFiles.length > 0) && message.status !== "running" && !awaitingInput ? (
