@@ -877,6 +877,12 @@ function SessionViewContentBody({
   // a viewport of room below it — reserved by CSS, so it survives resize and never
   // needs a JS re-pin. -1 (no user message yet) means no turn to reserve.
   const lastUserTurnStart = visibleMessages.findLastIndex((message) => message.role === "user");
+  // A mid-run steer is a small annotation, not a fresh turn, so it shouldn't claim the
+  // viewport-height reserve that pins a just-sent message to the top — that left the steer row
+  // floating high with a big empty gap below it. When the latest user message is a steer, skip
+  // the reserve so it drops to the bottom and flows with the response, like Conductor.
+  const latestUserIsSteer =
+    lastUserTurnStart >= 0 && Boolean(visibleMessages[lastUserTurnStart]?.sendMode);
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
@@ -1652,7 +1658,7 @@ function SessionViewContentBody({
             <div
               className="space-y-5"
               style={
-                lastUserTurnStart >= 0
+                lastUserTurnStart >= 0 && !latestUserIsSteer
                   ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
                   : undefined
               }
