@@ -936,7 +936,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "ask_user_question",
     kind: "internal",
     description:
-      "Pause and ask the user one or more structured questions when you genuinely cannot proceed without their input — a real decision, a missing requirement, or an ambiguity that changes the outcome. The run suspends until the user answers, so do not use this for things you can reasonably decide yourself, and never use it to narrate progress or ask for permission to use a tool. Prefer a single round of questions over many sequential pauses: batch everything you need now. Each question presents selectable options; set allowMultiple when several options can be chosen together, and set allowOther when a sensible answer might fall outside the options (this lets the user type their own). Keep headers to two or three words and questions to one clear sentence.",
+      'Pause and ask the user one or more structured questions when you genuinely cannot proceed without their input — a real decision, a missing requirement, or an ambiguity that changes the outcome. The run suspends until the user answers, so do not use this for things you can reasonably decide yourself, and never use it to narrate progress or ask for permission to use a tool. Prefer a single round of questions over many sequential pauses: batch everything you need now. Each question presents selectable options, plus a free-text "Other" answer that is always offered automatically — so you never need to add your own "other"/"something else" option, and you can give focused options knowing the user can always type their own. Set allowMultiple when several options can be chosen together. Keep headers to two or three words and questions to one clear sentence.',
     parameters: {
       type: "object",
       properties: {
@@ -978,12 +978,6 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
                 description: "Whether the user may select more than one option. Defaults to false.",
                 default: false,
               },
-              allowOther: {
-                type: "boolean",
-                description:
-                  "Whether the user may provide a free-text answer outside the options. Defaults to false.",
-                default: false,
-              },
             },
             required: ["header", "question", "options"],
             additionalProperties: false,
@@ -996,7 +990,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use ask_user_question only when user input is genuinely required to proceed correctly.",
       "Batch every question you need into one call; the run pauses until the user answers.",
-      "Set allowMultiple for multi-select questions; set allowOther to let the user type their own answer.",
+      'Set allowMultiple for multi-select questions; a free-text "Other" answer is always offered automatically, so do not add your own "other" option.',
       "Do not use it to narrate progress or to ask permission to run a tool.",
     ].join("\n"),
   },

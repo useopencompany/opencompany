@@ -231,9 +231,9 @@ definition.
    search" → just add \`@exa\`), pause **once** with \`ask_user_question\` to personalize.
    Batch 2–4 short, structured questions covering how the agent should behave, which
    tools/integrations it should use, tone and defaults, and any recurring schedule. Keep
-   options short; set \`allowOther: true\` where a sensible answer may fall outside them. Do
-   **not** ask these as plain chat questions, and do **not** pause for a trivial,
-   already-specified edit.
+   options short — the user can always type their own free-text answer, so you don't need to
+   cover every case. Do **not** ask these as plain chat questions, and do **not** pause for a
+   trivial, already-specified edit.
 3. Draft the **complete new body** — not a diff — and keep it light (see "Keep the body
    light"). Keep what should stay, add or rewrite what should change, and keep any
    \`@mentions\` for tools and Brain mounts you still want active.
@@ -347,8 +347,8 @@ follow this loop. The user should feel guided and in control — not interrogate
    — one or two targeted searches to learn what the company does. Don't over-research.
 3. **Ask 1–2 sharp questions with \`ask_user_question\`**, building on the signup details and
    what you found: what the company really does, who it serves, and what they want help with
-   first. Use one structured tool call with short options and \`allowOther: true\` when the
-   user's answer may not fit your options. Do not ask these as plain chat questions.
+   first. Use one structured tool call with short options; the user can always type their own
+   free-text answer if none fit. Do not ask these as plain chat questions.
 4. **Scaffold a tailored \`brain/wiki/\`**: the folders that fit this business, each with a
    one-line README, plus two or three genuinely useful seeded files (e.g.
    \`brain/wiki/company/overview.md\`, \`brain/wiki/strategy/priorities.md\`). Capture what you

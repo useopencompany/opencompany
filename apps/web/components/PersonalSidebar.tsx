@@ -11,6 +11,7 @@ import {
   Inbox,
   MessageCircle,
   PanelLeft,
+  Pencil,
   Pin,
   Plug,
   ScrollText,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useCollections } from "@/components/CollectionsProvider";
 import { PersonalAgentAvatar } from "@/components/personal/PersonalAgentAvatar";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -195,6 +197,110 @@ function groupSessions(sessions: SidebarSession[]) {
   return groups.filter((group) => group.sessions.length > 0);
 }
 
+// Right-click menu for a session row. Rendered through a portal at the cursor so it
+// is never clipped by the sidebar's overflow, and clamped to stay on-screen. Closes
+// on Escape or any outside interaction (mousedown / scroll / resize / blur).
+function SessionRowMenu({
+  x,
+  y,
+  starred,
+  onRename,
+  onTogglePin,
+  onArchive,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  starred: boolean;
+  onRename: () => void;
+  onTogglePin: () => void;
+  onArchive: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPos({
+      left: Math.min(x, window.innerWidth - rect.width - 8),
+      top: Math.min(y, window.innerHeight - rect.height - 8),
+    });
+  }, [x, y]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("mousedown", onClose);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("blur", onClose);
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("scroll", onClose, true);
+    return () => {
+      window.removeEventListener("mousedown", onClose);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("blur", onClose);
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  const item =
+    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] text-ink hover:bg-surface-hover focus:outline-none";
+
+  return createPortal(
+    <div
+      ref={ref}
+      role="menu"
+      style={{ position: "fixed", left: pos.left, top: pos.top }}
+      onMouseDown={(event) => event.stopPropagation()}
+      className="z-50 min-w-[172px] rounded-md border border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]"
+    >
+      <button
+        type="button"
+        role="menuitem"
+        className={item}
+        onClick={() => {
+          onClose();
+          onRename();
+        }}
+      >
+        <Pencil size={13} strokeWidth={1.8} className="text-ink-subtle" />
+        Rename
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={item}
+        onClick={() => {
+          onClose();
+          onTogglePin();
+        }}
+      >
+        <Pin size={13} strokeWidth={1.8} className="text-ink-subtle" />
+        {starred ? "Unpin" : "Pin"}
+      </button>
+      <div className="my-1 h-px bg-ink/10" />
+      <button
+        type="button"
+        role="menuitem"
+        className={item}
+        onClick={() => {
+          onClose();
+          onArchive();
+        }}
+      >
+        <Archive size={13} strokeWidth={1.8} className="text-ink-subtle" />
+        Archive
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
 function SessionRow({
   session,
   active,
@@ -202,6 +308,7 @@ function SessionRow({
   onSelect,
   onToggleStar,
   onArchive,
+  onRename,
 }: {
   session: SidebarSession;
   active: boolean;
@@ -209,9 +316,19 @@ function SessionRow({
   onSelect: (sessionId: string) => void;
   onToggleStar: (sessionId: string, currentlyStarred: boolean) => void;
   onArchive: (sessionId: string, active: boolean) => void;
+  onRename: (sessionId: string, title: string) => void;
 }) {
   const [archiving, setArchiving] = useState(false);
   const archiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Inline rename: double-click the title (or pick Rename from the right-click menu)
+  // to edit in place. `editing` swaps the title button for an input; `menu` holds the
+  // open context menu's cursor position (or null). `editingRef` guards commit/cancel
+  // so the blur handler can't double-fire after Enter/Escape already resolved.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(session.title);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const editingRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Split-pane integration (null on surfaces without a split provider): rows are
   // drag sources for the session canvas, and clicks post an open-request so the
   // canvas can swap/flash panes even when the URL doesn't change.
@@ -224,6 +341,49 @@ function SessionRow({
     };
   }, []);
 
+  // Focus + select the field whenever we enter edit mode.
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const startEditing = useCallback(() => {
+    editingRef.current = true;
+    setDraft(session.title);
+    setEditing(true);
+  }, [session.title]);
+
+  const commitEditing = useCallback(() => {
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    setEditing(false);
+    const next = draft.trim();
+    if (next && next !== session.title) {
+      onRename(session.id, next);
+    } else {
+      setDraft(session.title);
+    }
+  }, [draft, onRename, session.id, session.title]);
+
+  const cancelEditing = useCallback(() => {
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    setEditing(false);
+    setDraft(session.title);
+  }, [session.title]);
+
+  const archiveNow = useCallback(() => {
+    // Brief red highlight as feedback before the optimistic delete removes the row
+    // from the sidebar (onArchive archives via the collection).
+    setArchiving(true);
+    archiveTimerRef.current = setTimeout(() => {
+      archiveTimerRef.current = null;
+      onArchive(session.id, active);
+    }, ARCHIVE_HIGHLIGHT_DELAY_MS);
+  }, [active, onArchive, session.id]);
+
   const showStatusDot =
     session.status === "running" ||
     session.status === "provisioning" ||
@@ -233,7 +393,7 @@ function SessionRow({
 
   return (
     <div
-      draggable={Boolean(drag)}
+      draggable={Boolean(drag) && !editing}
       onDragStart={
         drag
           ? (event) => {
@@ -249,74 +409,112 @@ function SessionRow({
           : undefined
       }
       onDragEnd={drag ? () => drag.endDrag() : undefined}
+      onContextMenu={(event) => {
+        if (editing) return;
+        event.preventDefault();
+        setMenu({ x: event.clientX, y: event.clientY });
+      }}
       className={`group flex items-center rounded-md text-[13px] transition-all duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : ""}`}
     >
-      <button
-        type="button"
-        onClick={() => {
-          openSession?.openSession({ id: session.id, name: session.title });
-          onSelect(session.id);
-        }}
-        title={session.lastError ?? session.title}
-        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        {showStatusDot ? <SessionStatusDot status={session.status} pulse /> : null}
-        <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
-        {session.source === "whatsapp" ? (
-          <MessageCircle
-            size={12}
-            strokeWidth={2}
-            className="shrink-0 text-emerald-600"
-            aria-label="WhatsApp"
-          />
-        ) : null}
-      </button>
-      <button
-        type="button"
-        title={starred ? "Unpin session" : "Pin session"}
-        aria-label={starred ? `Unpin ${session.title}` : `Pin ${session.title}`}
-        aria-pressed={starred}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onToggleStar(session.id, Boolean(starred));
-        }}
-        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-          starred
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-        }`}
-      >
-        <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
-      </button>
-      <button
-        type="button"
-        title="Archive session"
-        aria-label={`Archive ${session.title}`}
-        aria-busy={archiving}
-        disabled={archiving}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-
-          // Brief red highlight as feedback before the optimistic delete removes
-          // the row from the sidebar (onArchive archives via the collection).
-          setArchiving(true);
-          archiveTimerRef.current = setTimeout(() => {
-            archiveTimerRef.current = null;
-            onArchive(session.id, active);
-          }, ARCHIVE_HIGHLIGHT_DELAY_MS);
-        }}
-        className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-          archiving
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-        }`}
-      >
-        <Archive size={12.5} strokeWidth={1.8} />
-      </button>
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitEditing();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelEditing();
+            }
+          }}
+          onBlur={commitEditing}
+          aria-label="Session name"
+          className="min-w-0 flex-1 rounded-md bg-surface px-2 py-[5px] text-[13px] text-ink outline-none ring-1 ring-ink/25 focus-visible:ring-ink/40"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            openSession?.openSession({ id: session.id, name: session.title });
+            onSelect(session.id);
+          }}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            startEditing();
+          }}
+          title={session.lastError ?? session.title}
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {showStatusDot ? <SessionStatusDot status={session.status} pulse /> : null}
+          <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
+          {session.source === "whatsapp" ? (
+            <MessageCircle
+              size={12}
+              strokeWidth={2}
+              className="shrink-0 text-emerald-600"
+              aria-label="WhatsApp"
+            />
+          ) : null}
+        </button>
+      )}
+      {!editing ? (
+        <>
+          <button
+            type="button"
+            title={starred ? "Unpin session" : "Pin session"}
+            aria-label={starred ? `Unpin ${session.title}` : `Pin ${session.title}`}
+            aria-pressed={starred}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleStar(session.id, Boolean(starred));
+            }}
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              starred
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            }`}
+          >
+            <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
+          </button>
+          <button
+            type="button"
+            title="Archive session"
+            aria-label={`Archive ${session.title}`}
+            aria-busy={archiving}
+            disabled={archiving}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              archiveNow();
+            }}
+            className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+              archiving
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            }`}
+          >
+            <Archive size={12.5} strokeWidth={1.8} />
+          </button>
+        </>
+      ) : null}
+      {menu ? (
+        <SessionRowMenu
+          x={menu.x}
+          y={menu.y}
+          starred={Boolean(starred)}
+          onRename={startEditing}
+          onTogglePin={() => onToggleStar(session.id, Boolean(starred))}
+          onArchive={archiveNow}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -474,6 +672,26 @@ function PersonalSidebarView({
     [agentSessions, router, showError],
   );
 
+  // Rename optimistically updates the title in the agent_sessions collection (the
+  // sidebar reflects it at once); the collection's onUpdate persists it via the server
+  // action, and a failure rolls the row back and surfaces the error.
+  const handleRename = useCallback(
+    (sessionId: string, title: string) => {
+      const next = title.trim();
+      if (!next) return;
+      const tx = agentSessions.update(sessionId, (draft) => {
+        draft.title = next;
+      });
+      void tx.isPersisted.promise.catch((error) => {
+        showError(
+          error instanceof Error ? error.message : "Could not rename session.",
+          "Could not rename session",
+        );
+      });
+    },
+    [agentSessions, showError],
+  );
+
   const { starredSessions, unstarredSessions } = useMemo(() => {
     const starred: SidebarSession[] = [];
     const unstarred: SidebarSession[] = [];
@@ -588,6 +806,7 @@ function PersonalSidebarView({
                     onSelect={(id) => router.push(personalPaths.session(id))}
                     onToggleStar={handleToggleStar}
                     onArchive={handleArchive}
+                    onRename={handleRename}
                   />
                 ))}
               </div>
@@ -687,6 +906,7 @@ function PersonalSidebarView({
                             onSelect={(id) => router.push(personalPaths.session(id))}
                             onToggleStar={handleToggleStar}
                             onArchive={handleArchive}
+                            onRename={handleRename}
                           />
                         ))}
                       </div>
