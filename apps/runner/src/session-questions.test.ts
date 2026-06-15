@@ -62,6 +62,24 @@ describe("normalizeQuestionsInput", () => {
     expect(question?.allowOther).toBe(true);
   });
 
+  it("always forces allowOther on, even when the model explicitly opts out", () => {
+    // The free-text "Other" escape hatch is a product guarantee: the user can always type their
+    // own answer, so the model's allowOther is intentionally ignored (the schema no longer exposes
+    // it). Guards against silently regressing to the old model-controlled behavior.
+    for (const allowOther of [false, undefined, "false", 0, null]) {
+      const result = normalizeQuestionsInput({
+        questions: [
+          {
+            question: "Prod or staging?",
+            options: [{ label: "Prod" }, { label: "Staging" }],
+            allowOther,
+          },
+        ],
+      });
+      expect(result?.[0]?.allowOther).toBe(true);
+    }
+  });
+
   it("clamps to the question and option maximums", () => {
     const tooManyQuestions = Array.from({ length: MAX_QUESTIONS + 3 }, (_, index) => ({
       question: `Q${index}`,
