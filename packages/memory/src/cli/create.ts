@@ -1,9 +1,12 @@
+import { parseDocument } from "../document";
+import { folderForType } from "../paths";
 import type { MemoryDocument, MemoryStatus } from "../schema";
 import { DEFAULT_RELATION_TYPE, isCanonicalType, isMemoryType, isValidMemoryId } from "../schema";
-import { idExists } from "../store";
+import { areAnyNamesSimilar } from "../similarity";
+import { listFiles } from "../store";
 import { nowIso } from "../time";
 import { readStdin } from "./args";
-import { persist, validateCitations } from "./common";
+import { entityNames, isLiveCanonical, persist, validateCitations } from "./common";
 import { type CommandContext, type CommandResult, fail, ok } from "./io";
 
 // Create a canonical object with valid frontmatter and the two-layer skeleton. Evidence types
@@ -22,8 +25,46 @@ export async function create(ctx: CommandContext): Promise<CommandResult> {
   if (!id || !isValidMemoryId(id)) {
     return fail("`--id` is required and must be a lowercase slug (a-z, 0-9, hyphen).");
   }
-  if (await idExists(root, id)) {
+  const title = args.get("title") ?? id;
+  const aliases = args.getAll("alias");
+
+  const files = await listFiles(root);
+  if (files.some((file) => file.id === id)) {
     return fail(`An id "${id}" already exists. Ids must be unique across the whole tree.`);
+  }
+
+  // Refuse a near-duplicate of an existing object of the same type — the same person/company filed
+  // twice under a slightly different name (`aurelio` vs `aurelio-anastassiades`, a misspelling like
+  // `gruenberg` vs `grueneberg`). The right move is to update the existing record, not create a
+  // second one. `--allow-similar` is the escape hatch for genuinely distinct things that happen to
+  // share a name; it is a presence-only boolean, but treat an explicit `--allow-similar false` as
+  // "do not override" so a caller fumbling the flag syntax can't silently defeat the guard.
+  const allowSimilar = args.has("allow-similar") && args.get("allow-similar") !== "false";
+  if (!allowSimilar) {
+    const folderPrefix = `${folderForType(type)}/`;
+    const newNames = entityNames(title, id, aliases);
+    const collisions: string[] = [];
+    for (const file of files) {
+      if (!file.relativePath.startsWith(folderPrefix)) continue;
+      const existing = parseDocument(file.source);
+      // Same liveness predicate doctor uses, plus the exact type (the folder prefix is just a cheap
+      // pre-filter; the type check guards a misfiled doc). doctor additionally suppresses pairs
+      // already adjudicated `not_duplicate`, but a brand-new record carries no such link yet, so that
+      // can't apply here — `--allow-similar` is how you record "this really is a different <type>".
+      if (!isLiveCanonical(existing.frontmatter) || existing.frontmatter.type !== type) continue;
+      const existingNames = entityNames(
+        existing.title,
+        file.id,
+        existing.frontmatter.aliases ?? [],
+      );
+      if (areAnyNamesSimilar(newNames, existingNames)) collisions.push(file.id);
+    }
+    if (collisions.length > 0) {
+      const list = collisions.map((c) => `"${c}"`).join(", ");
+      return fail(
+        `This looks like the same ${type} as ${list}, which already exists. Update that record instead of creating a duplicate: \`memory get <id>\`, then \`memory rewrite\` (or \`memory alias\` to record the other spelling). If two existing records are the same thing, \`memory merge\` them. If this really is a different ${type}, re-run with --allow-similar.`,
+      );
+    }
   }
 
   const statusInput = args.get("status");
@@ -47,7 +88,6 @@ export async function create(ctx: CommandContext): Promise<CommandResult> {
   }
 
   const now = nowIso();
-  const aliases = args.getAll("alias");
   const related = [...new Set(args.getAll("related").filter(isValidMemoryId))].map((target) => ({
     type: DEFAULT_RELATION_TYPE,
     target,
@@ -63,7 +103,7 @@ export async function create(ctx: CommandContext): Promise<CommandResult> {
       related,
       ...(aliases.length > 0 ? { aliases } : {}),
     },
-    title: args.get("title") ?? id,
+    title,
     compiledTruth: truth,
     timeline: [],
   };
