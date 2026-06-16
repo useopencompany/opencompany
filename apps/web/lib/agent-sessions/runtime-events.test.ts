@@ -2331,8 +2331,54 @@ describe("buildAssistantTurnParts", () => {
     );
 
     expect(parts).toEqual([
-      { type: "reasoning", durationSeconds: 5, text: "Think 1Think 2" },
+      { type: "reasoning", durationSeconds: 5, text: "Think 1\n\nThink 2" },
       { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("separates distinct reasoning phases with a blank line so consecutive thoughts do not run together", () => {
+    // Regression for PRO-241: separate reasoning phases were concatenated with no
+    // separator, gluing the end of one thought onto the start of the next
+    // (e.g. "...both channels.Hit a rate limit..."). Deltas WITHIN a phase must
+    // still join seamlessly; only the phase boundary gets a blank line.
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Done.",
+        status: "completed",
+        createdAt: "2026-05-22T13:00:00.000Z",
+        completedAt: "2026-05-22T13:00:20.000Z",
+        modelMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done." }],
+        },
+      },
+      [
+        event(1, "message.reasoning_delta", {
+          messageId: "msg_assistant",
+          delta: "Let me check the videos from both ",
+        }),
+        event(2, "message.reasoning_delta", {
+          messageId: "msg_assistant",
+          delta: "channels.",
+        }),
+        event(3, "tool.started", { messageId: "msg_assistant", toolCallId: "call_1" }),
+        event(4, "tool.completed", { messageId: "msg_assistant", toolCallId: "call_1" }),
+        event(5, "message.reasoning_delta", {
+          messageId: "msg_assistant",
+          delta: "Hit a rate limit on a couple calls.",
+        }),
+        event(6, "message.delta", { messageId: "msg_assistant", delta: "Done." }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "reasoning",
+        text: "Let me check the videos from both channels.\n\nHit a rate limit on a couple calls.",
+      },
+      { type: "text", text: "Done." },
     ]);
   });
 
