@@ -38,7 +38,6 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  type CSSProperties,
   createContext,
   Fragment,
   useContext,
@@ -266,10 +265,9 @@ const SEND_MODE_ICON_CLASS: Record<SendMode, string> = {
   interrupt: "text-danger",
 };
 
-// Steering-wheel glyph for the steer caption + the composer mode toggle (lucide has no wheel) —
-// mirrors the metaphor Hermes uses for steering. A ring, a hub, and three spokes; inherits color
-// + size from className. `style` lets the toggle spin it on click.
-function SteerWheelIcon({ className, style }: { className?: string; style?: CSSProperties }) {
+// Steering-wheel glyph for the steer caption (lucide has no wheel) — mirrors the metaphor Hermes
+// uses for steering. A ring, a hub, and three spokes; inherits color + size from className.
+function SteerWheelIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -279,7 +277,6 @@ function SteerWheelIcon({ className, style }: { className?: string; style?: CSSP
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
-      style={style}
       aria-hidden="true"
     >
       <circle cx="12" cy="12" r="9" />
@@ -441,15 +438,6 @@ function SessionViewContentBody({
   // than the send path's `isPending`.
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [, startModelTransition] = useTransition();
-  // Composer send-mode toggle (the steering wheel, shown only while a run is active): mid-run
-  // sends default to Steer; clicking the wheel switches to Queue and spins it. Interrupt stays the
-  // Stop button. Session-local — no need to persist a transient per-turn choice.
-  const [sendMode, setSendMode] = useState<SendMode>("steer");
-  const [wheelTurns, setWheelTurns] = useState(0);
-  const toggleSendMode = () => {
-    setWheelTurns((turns) => turns + 1);
-    setSendMode((mode) => (mode === "steer" ? "queue" : "steer"));
-  };
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
@@ -931,7 +919,7 @@ function SessionViewContentBody({
           <div className="flex max-w-[80%] flex-col gap-1.5">
             <div className="inline-flex max-w-full items-center gap-1.5 pl-1 text-[11px] leading-4 text-ink-subtle">
               <SteerWheelIcon
-                className={`h-3 w-3 shrink-0 ${SEND_MODE_ICON_CLASS[message.sendMode]}`}
+                className={`steer-wheel-spin h-3 w-3 shrink-0 ${SEND_MODE_ICON_CLASS[message.sendMode]}`}
               />
               <span className="shrink-0 font-medium">{SEND_MODE_ROW_LABEL[message.sendMode]}</span>
               {message.content ? (
@@ -1421,8 +1409,8 @@ function SessionViewContentBody({
       content,
       status: "completed",
       // Only tag the bubble with a send-mode when it was actually dispatched into a live run, so
-      // the quiet caption ("steered"/"queued") shows for those and not for idle first sends.
-      ...(sentMidRun ? { sendMode } : {}),
+      // the chip ("Steering"/"Queued"/"Interrupt") shows for those and not for idle first sends.
+      ...(sentMidRun ? { sendMode: "steer" as const } : {}),
       createdAt: new Date(submittedAtMs).toISOString(),
       completedAt: new Date(submittedAtMs).toISOString(),
       // Carry the sent attachments so the bubble shows them immediately. Images use their local
@@ -1447,14 +1435,14 @@ function SessionViewContentBody({
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
-      // A message sent while a run is active uses the composer's send-mode: Steer (default —
-      // delivered at the next model-step boundary, in-flight work preserved) or Queue (waits for
-      // the current turn to finish). Idle sends just start a turn; the server ignores the mode.
+      // A message sent while a run is active steers it (delivered at the next model-step
+      // boundary, in-flight work preserved); idle sends just start a turn. There's no mode
+      // picker — "steer" is the single default behavior, the server ignores it when idle.
       const result = await submitAgentSessionMessage(
         session.id,
         content,
         toSubmitAttachments(ready),
-        sendMode,
+        "steer",
       );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
@@ -1818,38 +1806,12 @@ function SessionViewContentBody({
                       fallbackModelId={DEFAULT_MODEL_ID}
                       onChange={handleModelChange}
                     />
-                    {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                      <button
-                        type="button"
-                        onClick={toggleSendMode}
-                        aria-label={
-                          sendMode === "steer"
-                            ? "Send mode: Steer (click to Queue)"
-                            : "Send mode: Queue (click to Steer)"
-                        }
-                        title={
-                          sendMode === "steer"
-                            ? "Steer — nudge the agent at its next step (click to Queue)"
-                            : "Queue — wait for the current turn to finish (click to Steer)"
-                        }
-                        className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] font-medium transition-colors hover:bg-surface-hover ${SEND_MODE_ICON_CLASS[sendMode]}`}
-                      >
-                        <SteerWheelIcon
-                          className="h-3.5 w-3.5 shrink-0"
-                          style={{
-                            transform: `rotate(${wheelTurns * 180}deg)`,
-                            transition: "transform 0.35s ease",
-                          }}
-                        />
-                        {sendMode === "steer" ? "Steer" : "Queue"}
-                      </button>
-                    ) : null}
                   </>
                 }
                 action={(() => {
-                  // While a run is active you can type + send — the steering-wheel toggle to the
-                  // left chooses Steer (default) or Queue. The neutral send button stays, and a
-                  // Stop button appears alongside it as the hard interrupt. Idle: just send.
+                  // While a run is active you can still type + send — that steers the run (no
+                  // mode picker; "steer" is the one default). The neutral send button stays, and
+                  // a Stop button appears alongside it as the hard interrupt. Idle: just send.
                   const runActive =
                     canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
                   const sendDisabled =
