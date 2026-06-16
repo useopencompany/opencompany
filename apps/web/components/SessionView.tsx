@@ -1830,10 +1830,17 @@ function SessionViewContentBody({
                         onClick={handleSend}
                         aria-label={runActive ? "Steer the running agent" : "Send message"}
                         title={runActive ? "Steer the running agent" : "Send message"}
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-colors hover:bg-ink/85 disabled:opacity-40"
+                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+                          runActive
+                            ? "text-ink-subtle hover:text-ink-muted"
+                            : "bg-ink text-canvas hover:bg-ink/85"
+                        }`}
                       >
                         {runActive ? (
-                          <SteerWheelIcon key="send-wheel" className="steer-wheel-spin h-4 w-4" />
+                          <SteerWheelIcon
+                            key="send-wheel"
+                            className="steer-wheel-spin h-3.5 w-3.5"
+                          />
                         ) : (
                           <ArrowUp size={13} strokeWidth={2} />
                         )}
