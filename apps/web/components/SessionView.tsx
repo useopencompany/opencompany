@@ -265,12 +265,44 @@ const SEND_MODE_BUTTON_CLASS: Record<SendMode, string> = {
   interrupt: "bg-danger text-white hover:bg-danger/90",
 };
 
-// Past-tense labels for the inline annotation a mid-run send leaves above the turn it affected.
+// Past-tense labels for the quiet caption a mid-run send leaves on the turn it affected. Lowercase
+// to sit unobtrusively alongside the muted process rows (Thinking, "2 steps", …).
 const SEND_MODE_ROW_LABEL: Record<SendMode, string> = {
-  steer: "Steered",
-  queue: "Queued",
-  interrupt: "Interrupted",
+  steer: "steered",
+  queue: "queued",
+  interrupt: "interrupted",
 };
+
+// The only color the dezent caption carries is a faint tint on the steering-wheel icon, so the
+// mode stays distinguishable at a glance without a loud badge.
+const SEND_MODE_ICON_CLASS: Record<SendMode, string> = {
+  steer: "text-success",
+  queue: "text-warning",
+  interrupt: "text-danger",
+};
+
+// Steering-wheel glyph for the steer caption (lucide has no wheel) — mirrors the metaphor Hermes
+// uses for steering. A ring, a hub, and three spokes; inherits color + size from className.
+function SteerWheelIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.85}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="2.4" />
+      <line x1="12" y1="2.6" x2="12" y2="9.6" />
+      <line x1="4" y1="16.5" x2="10" y2="13.2" />
+      <line x1="20" y1="16.5" x2="14" y2="13.2" />
+    </svg>
+  );
+}
 
 // Composer control (shown only while a run is active) for choosing how the next message is
 // dispatched into the live run. A colored pill + popover; the choice is lifted to SessionView
@@ -984,18 +1016,20 @@ function SessionViewContentBody({
     // normal right-side bubble — so it stays obvious the run was redirected. Past-tense wording
     // (Steered/Queued/Interrupted) since by render time the mode has already been applied.
     if (message.role === "user" && message.sendMode) {
-      const meta = sendModeMeta(message.sendMode);
+      // A mid-run send renders as a quiet, left-aligned caption attached to the turn it affected —
+      // styled like OC's muted process rows (Thinking, "N steps"), not a loud right-side bubble.
+      // The steering-wheel icon carries the only color (a faint mode tint); text stays muted.
       return (
-        <div key={message.id} data-message-id={message.id} className="flex justify-end">
-          <div className="flex max-w-[80%] flex-col items-end gap-1.5">
-            <div
-              className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] leading-5 ${meta.activeClassName}`}
-            >
+        <div key={message.id} data-message-id={message.id} className="flex justify-start">
+          <div className="flex max-w-[80%] flex-col gap-1.5">
+            <div className="inline-flex max-w-full items-center gap-1.5 pl-1 text-[11px] leading-4 text-ink-subtle">
+              <SteerWheelIcon
+                className={`h-3 w-3 shrink-0 ${SEND_MODE_ICON_CLASS[message.sendMode]}`}
+              />
               <span className="shrink-0 font-medium">{SEND_MODE_ROW_LABEL[message.sendMode]}</span>
               {message.content ? (
-                <span className="break-words font-normal opacity-90">· {message.content}</span>
+                <span className="break-words text-ink-muted">· {message.content}</span>
               ) : null}
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClassName}`} />
             </div>
             {attachmentsBlock}
           </div>
