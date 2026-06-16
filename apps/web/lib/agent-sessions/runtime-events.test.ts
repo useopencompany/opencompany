@@ -348,6 +348,42 @@ describe("statusObserved (stream scalar authority)", () => {
   });
 });
 
+describe("message.created sendMode", () => {
+  it("carries a valid send-mode onto the created user message", () => {
+    const state = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", {
+        messageId: "msg_steer",
+        role: "user",
+        content: "make the button green",
+        sendMode: "queue",
+      }),
+    );
+    expect(state.messages.find((m) => m.id === "msg_steer")?.sendMode).toBe("queue");
+  });
+
+  it("ignores an unknown send-mode and leaves it unset", () => {
+    const state = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", {
+        messageId: "msg_bad",
+        role: "user",
+        content: "hi",
+        sendMode: "turbo",
+      }),
+    );
+    expect(state.messages.find((m) => m.id === "msg_bad")?.sendMode).toBeUndefined();
+  });
+
+  it("leaves send-mode unset when absent (idle/first send)", () => {
+    const state = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", { messageId: "msg_plain", role: "user", content: "hi" }),
+    );
+    expect(state.messages.find((m) => m.id === "msg_plain")?.sendMode).toBeUndefined();
+  });
+});
+
 describe("applyRuntimeEventToState", () => {
   it("applies assistant message lifecycle events", () => {
     let state = initialState();

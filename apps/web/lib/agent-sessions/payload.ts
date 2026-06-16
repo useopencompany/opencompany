@@ -6,6 +6,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { isSendMode } from "@/lib/agent-sessions/send-mode";
 
 export const SESSIONS_QUERY_STALE_TIME_MS = 30_000;
 
@@ -427,6 +428,12 @@ function parseSessionMessage(value: unknown): SessionMessage {
   if ("internal" in record) {
     const internal = readOptionalBooleanField(record, "internal");
     if (internal !== undefined) message.internal = internal;
+  }
+  if ("sendMode" in record) {
+    // Carry the mid-run send-mode through serialize→parse so the "steered" caption survives a
+    // client refetch/reload; an unknown/legacy NULL value just leaves it unset (plain bubble).
+    const sendMode = readNullableStringField(record, "sendMode");
+    if (isSendMode(sendMode)) message.sendMode = sendMode;
   }
   if ("toolName" in record) message.toolName = readNullableStringField(record, "toolName");
   if ("toolCallId" in record) message.toolCallId = readNullableStringField(record, "toolCallId");
