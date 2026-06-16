@@ -257,6 +257,31 @@ export const workspaceSkillSnapshots = pgTable(
   }),
 );
 
+export const personalMcpTokens = pgTable(
+  "personal_mcp_tokens",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default("MCP token"),
+    tokenHash: text("token_hash").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceUserIdx: index("personal_mcp_tokens_workspace_user_idx").on(
+      table.workspaceId,
+      table.userId,
+    ),
+    tokenHashIdx: uniqueIndex("personal_mcp_tokens_token_hash_idx").on(table.tokenHash),
+  }),
+);
+
 export const brainFiles = pgTable(
   "brain_files",
   {
@@ -1743,6 +1768,7 @@ export const workspaceSlackChannels = pgTable(
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(workspaceMemberships),
   createdWorkspaces: many(workspaces),
+  personalMcpTokens: many(personalMcpTokens),
   agentSessions: many(agentSessions),
   sessionStars: many(sessionStars),
   onboardingResponses: many(onboardingResponses),
@@ -1779,6 +1805,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   experiments: many(workspaceExperiments),
   mcpServers: many(workspaceMcpServers),
   mcpCredentials: many(workspaceMcpCredentials),
+  personalMcpTokens: many(personalMcpTokens),
 }));
 
 export const agentsRelations = relations(agents, ({ one, many }) => ({
@@ -1809,6 +1836,17 @@ export const agentFilesRelations = relations(agentFiles, ({ one }) => ({
   agent: one(agents, {
     fields: [agentFiles.agentId],
     references: [agents.id],
+  }),
+}));
+
+export const personalMcpTokensRelations = relations(personalMcpTokens, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [personalMcpTokens.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [personalMcpTokens.userId],
+    references: [users.id],
   }),
 }));
 

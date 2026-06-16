@@ -400,6 +400,13 @@
       "when": 1781268927234,
       "tag": "0056_new_whistler",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1781585369924,
+      "tag": "0057_white_cannonball",
+      "breakpoints": true
     }
   ]
 }
