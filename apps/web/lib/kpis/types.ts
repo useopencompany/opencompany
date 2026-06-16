@@ -17,10 +17,22 @@ export type KpiTimeRangeDays = (typeof KPI_TIME_RANGES)[number];
 
 export type KpiUnit = "count" | "users";
 
+export type KpiConfigField = {
+  key: string;
+  label: string;
+  description?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  required?: boolean;
+  maxLength?: number;
+};
+
 /**
  * A prebuilt metric users can place on the board. The catalog is the
  * click-together onboarding path: providers ship descriptors, the UI renders
- * a picker, no per-metric UI code.
+ * a picker, no per-metric UI code. Optional config fields are constrained
+ * provider inputs; future AI authoring should generate this config data, not
+ * executable metric code.
  */
 export type KpiCatalogEntry = {
   /** Globally unique, namespaced by provider: "github.open_prs". */
@@ -33,6 +45,7 @@ export type KpiCatalogEntry = {
   defaultTimeRangeDays: KpiTimeRangeDays;
   /** Per-entry polling floor, keyed to the provider's rate budget. */
   refreshIntervalMinutes: number;
+  configFields?: KpiConfigField[];
 };
 
 export type KpiProvider<TConnection = unknown> = {

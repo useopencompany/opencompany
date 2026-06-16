@@ -51,6 +51,7 @@ export function AddKpiDialog({
   const [title, setTitle] = useState("");
   const [viz, setViz] = useState<Viz>("number");
   const [rangeDays, setRangeDays] = useState<number>(7);
+  const [config, setConfig] = useState<Record<string, string>>({});
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -67,6 +68,11 @@ export function AddKpiDialog({
     setTitle(selectedEntry.label);
     setViz(selectedEntry.defaultViz);
     setRangeDays(selectedEntry.defaultTimeRangeDays);
+    setConfig(
+      Object.fromEntries(
+        (selectedEntry.configFields ?? []).map((field) => [field.key, field.defaultValue ?? ""]),
+      ),
+    );
   }
 
   function handleCreate() {
@@ -79,6 +85,7 @@ export function AddKpiDialog({
           title,
           viz,
           timeRangeDays: rangeDays,
+          config,
         });
         if (!result.ok) {
           showError(result.error, "Could not add KPI");
@@ -175,6 +182,26 @@ export function AddKpiDialog({
               />
             </label>
 
+            {(entry?.configFields ?? []).map((field) => (
+              <label key={field.key} className="flex flex-col gap-1.5">
+                <span className="text-[11.5px] font-medium text-ink-muted">{field.label}</span>
+                <input
+                  value={config[field.key] ?? ""}
+                  onChange={(event) =>
+                    setConfig((current) => ({ ...current, [field.key]: event.target.value }))
+                  }
+                  maxLength={field.maxLength ?? 240}
+                  placeholder={field.placeholder}
+                  className="h-8 rounded-md border border-border bg-surface px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong focus:ring-2 focus:ring-ink/[0.04]"
+                />
+                {field.description && (
+                  <span className="text-[11.5px] leading-4 text-ink-subtle">
+                    {field.description}
+                  </span>
+                )}
+              </label>
+            ))}
+
             <div className="flex flex-col gap-1.5">
               <span className="text-[11.5px] font-medium text-ink-muted">Visualization</span>
               <div className="flex gap-1">
@@ -227,7 +254,13 @@ export function AddKpiDialog({
               <button
                 type="button"
                 onClick={handleCreate}
-                disabled={isPending || !title.trim()}
+                disabled={
+                  isPending ||
+                  !title.trim() ||
+                  (entry?.configFields ?? []).some(
+                    (field) => field.required && !config[field.key]?.trim(),
+                  )
+                }
                 className="flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas transition-opacity duration-150 hover:opacity-90 disabled:opacity-55"
               >
                 {isPending && <Loader2 size={12.5} strokeWidth={2} className="animate-spin" />}

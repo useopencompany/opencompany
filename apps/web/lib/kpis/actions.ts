@@ -6,6 +6,7 @@ import { type KpiCardViz, kpiCards, kpiMetrics } from "@opencompany/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
+import { normalizeKpiMetricConfig } from "@/lib/kpis/config";
 import { kpiConfigHash } from "@/lib/kpis/config-hash";
 import { getKpiCatalogEntry } from "@/lib/kpis/providers";
 import { refreshKpiMetricNow } from "@/lib/kpis/refresh";
@@ -24,6 +25,7 @@ export async function createKpiCard(input: {
   title?: string;
   viz?: KpiCardViz;
   timeRangeDays?: number;
+  config?: Record<string, unknown>;
 }): Promise<KpiActionResult> {
   const { user, workspace } = await currentWorkspace();
 
@@ -38,6 +40,8 @@ export async function createKpiCard(input: {
     return { ok: false, error: "Unsupported time range." };
   }
   const title = (input.title ?? "").trim().slice(0, MAX_TITLE_LENGTH) || entry.label;
+  const normalizedConfig = normalizeKpiMetricConfig(entry, input.config);
+  if (!normalizedConfig.ok) return normalizedConfig;
 
   const connection = await provider.getConnection(workspace.id);
   if (connection === null) {
@@ -47,10 +51,10 @@ export async function createKpiCard(input: {
     };
   }
 
-  let config: Record<string, unknown> = {};
+  let config: Record<string, unknown> = normalizedConfig.config;
   if (provider.resolveConfig) {
     try {
-      config = await provider.resolveConfig(connection);
+      config = { ...config, ...(await provider.resolveConfig(connection)) };
     } catch (error) {
       return {
         ok: false,
