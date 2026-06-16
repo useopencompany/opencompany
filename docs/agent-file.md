@@ -102,6 +102,7 @@ The model the agent runs on. Must be one of:
 | `zai/glm-5.1`                              | Latest GLM for coding-heavy and agentic engineering tasks.      |
 | `zai/glm-5-turbo`                          | Faster GLM 5 variant for production agent workflows.            |
 | `zai/glm-5v-turbo`                         | Multimodal GLM 5 model for visual coding and GUI tasks.         |
+| `openrouter/fusion`                        | OpenRouter multi-model router for research and critique.        |
 
 Unknown model IDs fall back to `openai/gpt-5.4-mini` rather than failing the parse.
 

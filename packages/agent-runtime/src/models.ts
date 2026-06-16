@@ -51,7 +51,8 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 //   cost (output $/M tokens): ≤$2.50 → 1 · $2.51–$7.50 → 2 · >$7.50 → 3
 // minimax/minimax-m3, xai/grok-build-0.1, and anthropic/claude-fable-5 are
 // estimates (no published benchmark yet) — revisit when Artificial Analysis
-// lists them.
+// lists them. openrouter/fusion is a variable panel + judge router and is rated
+// qualitatively from OpenRouter's Fusion defaults rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-5.4-mini",
@@ -569,6 +570,18 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     supportsImages: true,
     supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 2 },
+  },
+  {
+    id: "openrouter/fusion",
+    type: "model",
+    contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+    label: "OpenRouter Fusion",
+    description: "Multi-model OpenRouter router for research, critique, and high-stakes answers.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 1, cost: 3 },
   },
 ];
 

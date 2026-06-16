@@ -943,7 +943,7 @@ function SessionViewContentBody({
   // having to approve or deny the pending tool call first.
   const canAbort = sessionCanGenerate || sessionIsPaused;
 
-  const renderMessage = (message: SessionMessage) => {
+  const renderMessage = (message: SessionMessage, opts?: { footerInFlow?: boolean }) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
     // Brain files this turn created or edited (write_file/edit_file set brainFile), deduped
     // and kept in tool-call order so the footer can link straight to each one.
@@ -1073,7 +1073,11 @@ function SessionViewContentBody({
           )}
           {(canCopy || brainFiles.length > 0) && message.status !== "running" && !awaitingInput ? (
             <div
-              className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
+              className={`${
+                opts?.footerInFlow && message.role === "assistant"
+                  ? "relative mt-1"
+                  : `absolute z-10 ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"}`
+              } flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
                 message.role === "assistant"
                   ? "opacity-100"
                   : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
@@ -1116,7 +1120,7 @@ function SessionViewContentBody({
     if (!anchoredParts?.length) return renderMessage(message);
     return (
       <Fragment key={`${message.id}-row`}>
-        {renderMessage(message)}
+        {renderMessage(message, { footerInFlow: true })}
         {renderBackgroundParts(anchoredParts)}
       </Fragment>
     );

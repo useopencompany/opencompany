@@ -3,7 +3,6 @@
 import { buildAgentTiptapDoc, type MentionResolver } from "@opencompany/agent-runtime";
 import { Mention } from "@tiptap/extension-mention";
 import { Fragment, Slice } from "@tiptap/pm/model";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
 import {
   EditorContent,
   Extension,
@@ -67,133 +66,6 @@ const plainTextKeysExtension = Extension.create({
     };
   },
 });
-
-const AUTO_MENTION_TOKEN_RE = /([@#])([\w./\-]+)/g;
-const AUTO_MENTION_IDLE_MS = 600;
-const autoMentionPluginKey = new PluginKey<{ force: boolean }>("autoMentionConvert");
-
-const createAutoMentionExtension = (getItems: () => AgentMentionItem[]) =>
-  Extension.create({
-    name: "autoMentionConvert",
-    addProseMirrorPlugins() {
-      return [
-        new Plugin({
-          key: autoMentionPluginKey,
-          view() {
-            let timer: ReturnType<typeof setTimeout> | null = null;
-            const clear = () => {
-              if (timer) {
-                clearTimeout(timer);
-                timer = null;
-              }
-            };
-            return {
-              update: (view, prevState) => {
-                const docSame = view.state.doc.eq(prevState.doc);
-                const selSame = view.state.selection.eq(prevState.selection);
-                if (docSame && selSame) return;
-
-                let pending = false;
-                view.state.doc.descendants((node) => {
-                  if (pending) return false;
-                  if (node.isText && node.text && /[@#]/.test(node.text)) pending = true;
-                });
-
-                clear();
-                if (!pending) return;
-
-                timer = setTimeout(() => {
-                  timer = null;
-                  if ((view as { isDestroyed?: boolean }).isDestroyed) return;
-                  view.dispatch(view.state.tr.setMeta(autoMentionPluginKey, { force: true }));
-                }, AUTO_MENTION_IDLE_MS);
-              },
-              destroy: clear,
-            };
-          },
-          appendTransaction: (transactions, oldState, newState) => {
-            const docChanged = transactions.some((tr) => tr.docChanged);
-            const selectionChanged = !newState.selection.eq(oldState.selection);
-            const force = transactions.some(
-              (tr) => tr.getMeta(autoMentionPluginKey)?.force === true,
-            );
-            if (!docChanged && !selectionChanged && !force) return null;
-
-            const wasTypingForward =
-              docChanged &&
-              !force &&
-              newState.selection.empty &&
-              oldState.selection.empty &&
-              newState.selection.from === oldState.selection.from + 1;
-
-            const items = getItems();
-            const cursorEmpty = newState.selection.empty;
-            const cursorPos = newState.selection.from;
-            const replacements: Array<{
-              from: number;
-              to: number;
-              trigger: string;
-              item: AgentMentionItem;
-            }> = [];
-
-            newState.doc.descendants((node, pos) => {
-              if (!node.isText || !node.text) return;
-              const text = node.text;
-              AUTO_MENTION_TOKEN_RE.lastIndex = 0;
-              let match: RegExpExecArray | null;
-              while ((match = AUTO_MENTION_TOKEN_RE.exec(text)) !== null) {
-                const matchStart = pos + match.index;
-                const trigger = match[1] ?? "";
-                const rawToken = match[2] ?? "";
-                const token = rawToken.replace(/[.,;:!?)}\]]+$/g, "");
-                if (!token) continue;
-
-                if (matchStart > 0) {
-                  const charBefore = newState.doc.textBetween(matchStart - 1, matchStart, "\n", "");
-                  if (charBefore && !/[\s([{]/.test(charBefore)) continue;
-                }
-
-                const tokenEnd = matchStart + 1 + token.length;
-                if (
-                  wasTypingForward &&
-                  cursorEmpty &&
-                  cursorPos >= matchStart &&
-                  cursorPos <= tokenEnd
-                ) {
-                  continue;
-                }
-
-                const item =
-                  trigger === "@"
-                    ? (findMentionItem(token, items) ?? findMentionItem(`${token}/`, items))
-                    : findMentionItem(token, AGENT_AFTER_SESSION_MENTION_ITEMS);
-                if (!item || item.kind === "schedule") continue;
-
-                replacements.push({ from: matchStart, to: tokenEnd, trigger, item });
-              }
-            });
-
-            if (replacements.length === 0) return null;
-
-            const mentionType = newState.schema.nodes.mention;
-            if (!mentionType) return null;
-
-            const tr = newState.tr;
-            replacements.sort((a, b) => b.from - a.from);
-            for (const r of replacements) {
-              const mentionNode = mentionType.create({
-                id: r.item.mentionId,
-                label: r.item.label,
-                mentionSuggestionChar: r.trigger,
-              });
-              tr.replaceWith(r.from, r.to, mentionNode);
-            }
-            return tr;
-          },
-        }),
-      ];
-    },
-  });
 
 export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEditor(
   {
@@ -260,10 +132,6 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
       }),
     [],
   );
-  const autoMentionExtension = useMemo(
-    () => createAutoMentionExtension(() => mentionItemsRef.current),
-    [],
-  );
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -274,7 +142,6 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
         horizontalRule: false,
       }),
       mentionExtension,
-      autoMentionExtension,
       plainTextKeysExtension,
     ],
     content: initialEditorContent,

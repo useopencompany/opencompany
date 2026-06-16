@@ -81,6 +81,8 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("User first name: Ada");
     expect(resolved.systemPrompt).toContain("User last name: Lovelace");
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
+    expect(resolved.systemPrompt).toContain("make the tool call before answering");
+    expect(resolved.systemPrompt).toContain("do not say or imply you checked a source");
     expect(resolved.systemPrompt).toContain("call ask_user_question");
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
@@ -148,6 +150,16 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain(
       "(empty — populate this as you learn who your user is)",
     );
+  });
+
+  it("requires internal source checks before claiming personal facts are unknown", () => {
+    const resolved = resolveAgentRuntimeConfig({ agent: profileConfig(), personalAgent: true });
+
+    expect(resolved.tools).toContain("memory");
+    expect(resolved.systemPrompt).toContain("Before saying you do not know");
+    expect(resolved.systemPrompt).toContain("query memory for durable facts");
+    expect(resolved.systemPrompt).toContain("use file tools on personal-brain/");
+    expect(resolved.systemPrompt).toContain("Ask the user only after those checks fail");
   });
 
   it("truncates an oversized profile with a marker and bounds its length", () => {
@@ -682,6 +694,7 @@ describe("resolveAgentRuntimeConfig", () => {
     "zai/glm-5.1",
     "zai/glm-5-turbo",
     "zai/glm-5v-turbo",
+    "openrouter/fusion",
   ] as const)("marks %s as reasoning-capable without custom provider options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
