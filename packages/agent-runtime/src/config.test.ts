@@ -152,13 +152,14 @@ describe("resolveAgentRuntimeConfig", () => {
     );
   });
 
-  it("requires a memory lookup before claiming durable facts are absent", () => {
+  it("requires internal source checks before claiming personal facts are unknown", () => {
     const resolved = resolveAgentRuntimeConfig({ agent: profileConfig(), personalAgent: true });
 
     expect(resolved.tools).toContain("memory");
-    expect(resolved.systemPrompt).toContain("Before saying memory does not contain a durable fact");
-    expect(resolved.systemPrompt).toContain("query memory first");
-    expect(resolved.systemPrompt).toContain("ask the user only after that lookup fails");
+    expect(resolved.systemPrompt).toContain("Before saying you do not know");
+    expect(resolved.systemPrompt).toContain("query memory for durable facts");
+    expect(resolved.systemPrompt).toContain("use file tools on personal-brain/");
+    expect(resolved.systemPrompt).toContain("Ask the user only after those checks fail");
   });
 
   it("truncates an oversized profile with a marker and bounds its length", () => {
