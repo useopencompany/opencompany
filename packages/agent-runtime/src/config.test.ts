@@ -81,6 +81,8 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("User first name: Ada");
     expect(resolved.systemPrompt).toContain("User last name: Lovelace");
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
+    expect(resolved.systemPrompt).toContain("make the tool call before answering");
+    expect(resolved.systemPrompt).toContain("do not say or imply you checked a source");
     expect(resolved.systemPrompt).toContain("call ask_user_question");
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
@@ -148,6 +150,15 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain(
       "(empty — populate this as you learn who your user is)",
     );
+  });
+
+  it("requires a memory lookup before claiming durable facts are absent", () => {
+    const resolved = resolveAgentRuntimeConfig({ agent: profileConfig(), personalAgent: true });
+
+    expect(resolved.tools).toContain("memory");
+    expect(resolved.systemPrompt).toContain("Before saying memory does not contain a durable fact");
+    expect(resolved.systemPrompt).toContain("query memory first");
+    expect(resolved.systemPrompt).toContain("ask the user only after that lookup fails");
   });
 
   it("truncates an oversized profile with a marker and bounds its length", () => {
