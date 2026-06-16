@@ -24,7 +24,7 @@ import {
   logBraintrustSpan,
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
-import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, ne, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
 import { materializeAgentBundleForSession } from "./agent-bundle";
@@ -496,12 +496,30 @@ export async function loadUserMessage(sessionId: string, messageId: string) {
   return message ?? null;
 }
 
-// The oldest non-internal user message created after `afterCreatedAt` that no
-// assistant message has responded to yet. This is how a turn detects a steering
-// message the user sent while a run was already in flight. See
-// docs/agent-turn-vocabulary.md.
+// `notExists` clause shared by every pending-message lookup below: true when no assistant
+// message in this session has responded to the candidate user message yet. Each call builds
+// its own alias so the subquery can be composed into independent top-level queries.
+function noResponseYet(sessionId: string) {
+  const responses = alias(agentSessionMessages, "pending_responses");
+  return notExists(
+    getDb()
+      .select({ value: sql`1` })
+      .from(responses)
+      .where(
+        and(
+          eq(responses.sessionId, sessionId),
+          eq(responses.responseToMessageId, agentSessionMessages.id),
+        ),
+      ),
+  );
+}
+
+// Early-stop signal: the oldest unanswered user message sent in "steer" mode (or a legacy
+// NULL send, which behaves as steer) after `afterCreatedAt`. The turn's extraStopConditions
+// polls this to end the active turn at the next model-step boundary. "queue" messages are
+// excluded so the active turn runs all its steps first; "interrupt" messages travel the abort
+// path instead. See docs/agent-turn-vocabulary.md.
 export async function loadNextSteerMessage(input: { sessionId: string; afterCreatedAt: Date }) {
-  const responses = alias(agentSessionMessages, "steer_responses");
   const [message] = await getDb()
     .select({
       id: agentSessionMessages.id,
@@ -514,20 +532,66 @@ export async function loadNextSteerMessage(input: { sessionId: string; afterCrea
         eq(agentSessionMessages.role, "user"),
         eq(agentSessionMessages.internal, false),
         gt(agentSessionMessages.createdAt, input.afterCreatedAt),
-        notExists(
-          getDb()
-            .select({ value: sql`1` })
-            .from(responses)
-            .where(
-              and(
-                eq(responses.sessionId, input.sessionId),
-                eq(responses.responseToMessageId, agentSessionMessages.id),
-              ),
-            ),
-        ),
+        or(eq(agentSessionMessages.sendMode, "steer"), isNull(agentSessionMessages.sendMode)),
+        noResponseYet(input.sessionId),
       ),
     )
     .orderBy(asc(agentSessionMessages.createdAt))
+    .limit(1);
+
+  return message ?? null;
+}
+
+// Turn-completion pickup: the oldest unanswered user message of ANY send-mode after
+// `afterCreatedAt`. Once a turn ends naturally, both "steer" and "queue" messages drain here
+// in FIFO order, each answered as its own subsequent turn.
+export async function loadNextPendingMessage(input: { sessionId: string; afterCreatedAt: Date }) {
+  const [message] = await getDb()
+    .select({
+      id: agentSessionMessages.id,
+      createdAt: agentSessionMessages.createdAt,
+      sendMode: agentSessionMessages.sendMode,
+    })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.sessionId, input.sessionId),
+        eq(agentSessionMessages.role, "user"),
+        eq(agentSessionMessages.internal, false),
+        gt(agentSessionMessages.createdAt, input.afterCreatedAt),
+        noResponseYet(input.sessionId),
+      ),
+    )
+    .orderBy(asc(agentSessionMessages.createdAt))
+    .limit(1);
+
+  return message ?? null;
+}
+
+// Abort-path continuation: the newest unanswered "interrupt" message other than the one whose
+// turn just aborted. After a run aborts because the user chose Interrupt and sent a new message,
+// the outer turn loop runs this next — ahead of any queued messages, since interrupt means "do
+// this now". Excluding `abortedMessageId` matters when the aborted turn was itself started by an
+// interrupt message: a plain Stop of such a turn (no new message) must not re-run it, and
+// interrupting-an-interrupt must run the latest one, not the abandoned earlier one.
+export async function loadPendingInterruptMessage(input: {
+  sessionId: string;
+  abortedMessageId: string;
+}) {
+  const [message] = await getDb()
+    .select({ id: agentSessionMessages.id })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.sessionId, input.sessionId),
+        eq(agentSessionMessages.role, "user"),
+        eq(agentSessionMessages.internal, false),
+        eq(agentSessionMessages.sendMode, "interrupt"),
+        ne(agentSessionMessages.id, input.abortedMessageId),
+        noResponseYet(input.sessionId),
+      ),
+    )
+    .orderBy(desc(agentSessionMessages.createdAt))
     .limit(1);
 
   return message ?? null;

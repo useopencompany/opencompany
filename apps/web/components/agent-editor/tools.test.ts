@@ -1,3 +1,4 @@
+import { Atom, Blocks, Brain, Feather, Sparkles } from "lucide-react";
 import { describe, expect, test } from "vitest";
 import {
   AGENT_MODELS,
@@ -5,6 +6,7 @@ import {
   buildBrainMentionItems,
   buildWorkspaceAgentMentionItems,
   findModel,
+  skillIconFor,
 } from "./tools";
 
 describe("agent editor mention tools", () => {
@@ -198,6 +200,16 @@ describe("agent editor mention tools", () => {
         }),
       ]),
     );
+  });
+
+  test("gives built-in skills distinct icons and external skills a neutral fallback", () => {
+    expect(skillIconFor("first-principles")).toBe(Atom);
+    expect(skillIconFor("humanizer")).toBe(Feather);
+    expect(skillIconFor("memory")).toBe(Brain);
+    // Unknown / external skill ids fall back to a neutral glyph rather than the
+    // old shared Sparkles placeholder.
+    expect(skillIconFor("some-external-github-skill")).toBe(Blocks);
+    expect(skillIconFor("first-principles")).not.toBe(Sparkles);
   });
 
   test("exposes workspace agents as stable agent slug mentions", () => {

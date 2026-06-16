@@ -4,12 +4,16 @@ import {
   parseGitHubCliArgs,
   toolDisplayTitle,
 } from "@opencompany/agent-runtime";
+import { isSendMode, type SendMode } from "@/lib/agent-sessions/send-mode";
 
 export type SessionMessage = {
   id: string;
   role: string;
   content: string;
   status: string;
+  // Set on user messages dispatched while a run was already in flight, so the composer can show
+  // a "Steering"/"Queued"/"Interrupt" chip until the agent answers. Absent on idle/first sends.
+  sendMode?: SendMode | null;
   internal?: boolean;
   modelMessage?: Record<string, unknown> | null;
   toolName?: string | null;
@@ -390,6 +394,8 @@ export function applyRuntimeEventToState(
     if (messageId && role && !next.messages.some((message) => message.id === messageId)) {
       const status =
         optionalString(event.payload.status) ?? (role === "user" ? "completed" : "running");
+      const sendModeRaw = optionalString(event.payload.sendMode);
+      const sendMode = isSendMode(sendModeRaw) ? sendModeRaw : null;
       next = {
         ...next,
         messages: [
@@ -400,6 +406,7 @@ export function applyRuntimeEventToState(
             content: optionalString(event.payload.content) ?? "",
             status,
             internal,
+            ...(sendMode ? { sendMode } : {}),
             createdAt: event.createdAt ?? new Date().toISOString(),
           },
         ],

@@ -486,6 +486,21 @@ body {
   }
 }
 
+/* One-shot half-turn when a "steered" caption appears, so the steer is visible as the wheel
+   turning. Plays once on mount; see SessionView's mid-run caption. */
+.steer-wheel-spin {
+  animation: steer-wheel-spin 0.55s ease-out;
+}
+
+@keyframes steer-wheel-spin {
+  from {
+    transform: rotate(-180deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .session-markdown[data-streaming="true"] {
     will-change: auto;
@@ -495,6 +510,10 @@ body {
     animation: none;
     color: var(--color-ink-muted);
     opacity: 1;
+  }
+
+  .steer-wheel-spin {
+    animation: none;
   }
 }
 
