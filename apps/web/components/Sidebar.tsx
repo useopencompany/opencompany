@@ -6,6 +6,7 @@ import {
   Archive,
   Bot,
   Brain,
+  ChartNoAxesColumn,
   // CircleEqual,
   // Download,
   Inbox,
@@ -499,6 +500,12 @@ function SidebarContent({
               icon={Brain}
               label="Brain"
               active={isActive(BRAIN_BASE_PATH)}
+            />
+            <NavItem
+              href="/company/kpis"
+              icon={ChartNoAxesColumn}
+              label="KPIs"
+              active={isActive("/company/kpis")}
             />
             <NavItem
               href="/company/inbox"

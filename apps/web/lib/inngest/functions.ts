@@ -29,6 +29,7 @@ import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import { runProvisionSlackSupport } from "@/lib/inngest/provision-slack-support";
+import { sweepDueKpiMetrics } from "@/lib/kpis/refresh";
 import { runDeliverWhatsappReply, runWhatsappDeliverySweep } from "@/lib/messaging/delivery";
 import {
   type DeliverWhatsappReplyInput,
@@ -563,6 +564,27 @@ export const sweepFailedSlackSupportChannels = inngest.createFunction(
     ),
 );
 
+// KPI board refresh. Polls every due kpi_metrics row (claim-based, so an
+// overlapping run never double-fetches a metric) and snapshots provider values
+// into kpi_datapoints. Metrics only exist while a card references them, so the
+// sweep's workload is exactly what's on workspace boards.
+const KPI_REFRESH_SWEEP_CRON = "*/5 * * * *";
+
+export const sweepKpiMetricRefresh = inngest.createFunction(
+  {
+    id: "sweep-kpi-metric-refresh",
+    name: "Refresh due KPI metrics",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: KPI_REFRESH_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return step.run("refresh due kpi metrics", async () => {
+      return sweepDueKpiMetrics();
+    });
+  },
+);
+
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
@@ -583,4 +605,5 @@ export const inngestFunctions = [
   deliverWhatsappReply,
   sweepWhatsappDeliveries,
   sweepFailedSlackSupportChannels,
+  sweepKpiMetricRefresh,
 ];

@@ -49,6 +49,20 @@ const SHAPE_SCOPES: Record<string, ShapeScope> = {
     table: "session_stars",
     where: ({ userId }) => ({ clause: `"user_id" = $1`, params: [userId] }),
   },
+  // KPI board: cards (display), metrics (definitions + refresh state), and the
+  // snapshot store. All workspace-wide — the board is shared, not per-user.
+  kpi_cards: {
+    table: "kpi_cards",
+    where: ({ workspaceId }) => ({ clause: `"workspace_id" = $1`, params: [workspaceId] }),
+  },
+  kpi_metrics: {
+    table: "kpi_metrics",
+    where: ({ workspaceId }) => ({ clause: `"workspace_id" = $1`, params: [workspaceId] }),
+  },
+  kpi_datapoints: {
+    table: "kpi_datapoints",
+    where: ({ workspaceId }) => ({ clause: `"workspace_id" = $1`, params: [workspaceId] }),
+  },
   // Only live items sync to the client; resolved (done/dismissed) items leave the shape. A snoozed
   // item stays synced (the client hides it until snoozed_until elapses).
   inbox_items: {

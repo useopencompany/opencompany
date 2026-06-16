@@ -5,9 +5,13 @@ import type {
   AgentRow,
   AgentSessionRow,
   InboxItemRow,
+  KpiCardRow,
+  KpiDatapointRow,
+  KpiMetricRow,
   SessionStarRow,
 } from "@/lib/collections/types";
 import { completeInboxItem, dismissInboxItem, snoozeInboxItem } from "@/lib/inbox/actions";
+import { deleteKpiCard, updateKpiCard } from "@/lib/kpis/actions";
 
 /**
  * All client collections for a workspace. Built by a factory (not module
@@ -101,7 +105,57 @@ export function createCollections(workspaceId: string) {
     },
   });
 
-  return { workspaceId, agents, agentSessions, sessionStars, inboxItems };
+  const kpiCards = createElectricCollection<KpiCardRow>({
+    id: `kpi_cards:${workspaceId}`,
+    table: "kpi_cards",
+    getKey: (row) => row.id,
+    // Title/viz/time-range edits apply optimistically; the handler persists the
+    // changed fields and returns the txid Electric reconciles against.
+    onUpdate: async ({ transaction }) => {
+      const mutation = transaction.mutations[0];
+      if (!mutation) throw new Error("Card mutation had no target row.");
+      const result = await updateKpiCard(String(mutation.key), {
+        ...(mutation.changes.title !== undefined ? { title: mutation.changes.title } : {}),
+        ...(mutation.changes.viz !== undefined ? { viz: mutation.changes.viz } : {}),
+        ...(mutation.changes.time_range_days !== undefined
+          ? { timeRangeDays: mutation.changes.time_range_days }
+          : {}),
+      });
+      if (!result.ok) throw new Error(result.error);
+      return { txid: result.txid };
+    },
+    onDelete: async ({ transaction }) => {
+      const mutation = transaction.mutations[0];
+      if (!mutation) throw new Error("Delete mutation had no target row.");
+      const result = await deleteKpiCard(String(mutation.key));
+      if (!result.ok) throw new Error(result.error);
+      return { txid: result.txid };
+    },
+  });
+
+  // Server-written rows (the refresh pipeline owns them): read-only collections.
+  const kpiMetrics = createElectricCollection<KpiMetricRow>({
+    id: `kpi_metrics:${workspaceId}`,
+    table: "kpi_metrics",
+    getKey: (row) => row.id,
+  });
+
+  const kpiDatapoints = createElectricCollection<KpiDatapointRow>({
+    id: `kpi_datapoints:${workspaceId}`,
+    table: "kpi_datapoints",
+    getKey: (row) => row.id,
+  });
+
+  return {
+    workspaceId,
+    agents,
+    agentSessions,
+    sessionStars,
+    inboxItems,
+    kpiCards,
+    kpiMetrics,
+    kpiDatapoints,
+  };
 }
 
 export type Collections = ReturnType<typeof createCollections>;

@@ -400,6 +400,13 @@
       "when": 1781268927234,
       "tag": "0056_new_whistler",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1781272078546,
+      "tag": "0057_perpetual_christian_walker",
+      "breakpoints": true
     }
   ]
 }

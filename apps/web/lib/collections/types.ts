@@ -62,6 +62,47 @@ export type SessionStarRow = {
   starred_at: string;
 };
 
+export type KpiMetricRow = {
+  id: string;
+  workspace_id: string;
+  provider: string;
+  metric_key: string;
+  config: Record<string, unknown>;
+  config_hash: string;
+  metric_type: "current" | "event" | "bucketed";
+  unit: string;
+  label: string;
+  refresh_interval_minutes: number;
+  next_refresh_at: string;
+  last_refreshed_at: string | null;
+  last_refresh_status: "ok" | "refreshing" | "error" | null;
+  last_refresh_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type KpiCardRow = {
+  id: string;
+  workspace_id: string;
+  metric_id: string;
+  title: string;
+  viz: "number" | "bar" | "line";
+  time_range_days: number;
+  position: number;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type KpiDatapointRow = {
+  id: number;
+  workspace_id: string;
+  metric_id: string;
+  ts: string;
+  value: number;
+  created_at: string;
+};
+
 // Only live items (status open/snoozed) are synced into this shape; resolved items leave it.
 export type InboxItemRow = {
   id: string;

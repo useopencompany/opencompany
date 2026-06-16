@@ -12,6 +12,7 @@ import {
   boolean,
   check,
   customType,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -1435,6 +1436,125 @@ export const workspaceMcpCredentials = pgTable(
   }),
 );
 
+/**
+ * KPI dashboards: metric definitions, their snapshotted datapoints, and the
+ * cards that display them.
+ *
+ * A metric is the polling unit (provider + catalog key + config); a card is
+ * the display unit (viz + time horizon). Several cards can reference one
+ * metric, so a metric is fetched once per refresh regardless of how many
+ * cards show it. Metrics exist only while at least one card references them —
+ * deleting the last card deletes the metric (and cascades its datapoints), so
+ * the refresh sweep never polls anything that isn't on a board.
+ */
+
+/** How the provider serves the metric — determines bucketing/backfill semantics. */
+export type KpiMetricType =
+  // Provider only exposes a live total (e.g. open PRs). The series is built by
+  // snapshotting each sync (hour-bucketed); history cannot be backfilled.
+  | "current"
+  // Computed by counting timestamped entities (e.g. issues created). Counted
+  // into day buckets; recent buckets are rewritten on each refresh.
+  | "event"
+  // Provider returns pre-summarized period values (e.g. a daily WAU series).
+  // Upserted by bucket; re-fetching heals/backfills.
+  | "bucketed";
+
+export type KpiMetricRefreshStatus = "ok" | "refreshing" | "error";
+
+export type KpiCardViz = "number" | "bar" | "line";
+
+export const kpiMetrics = pgTable(
+  "kpi_metrics",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    metricKey: text("metric_key").notNull(),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    // Stable hash of `config` so identical definitions dedupe onto one metric.
+    configHash: text("config_hash").notNull(),
+    metricType: text("metric_type").$type<KpiMetricType>().notNull(),
+    unit: text("unit").notNull(),
+    label: text("label").notNull(),
+    refreshIntervalMinutes: integer("refresh_interval_minutes").notNull().default(15),
+    nextRefreshAt: timestamp("next_refresh_at", { withTimezone: true }).notNull().defaultNow(),
+    lastRefreshedAt: timestamp("last_refreshed_at", { withTimezone: true }),
+    lastRefreshStatus: text("last_refresh_status").$type<KpiMetricRefreshStatus>(),
+    lastRefreshError: text("last_refresh_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("kpi_metrics_workspace_idx").on(table.workspaceId),
+    workspaceDefinitionIdx: uniqueIndex("kpi_metrics_workspace_definition_idx").on(
+      table.workspaceId,
+      table.provider,
+      table.metricKey,
+      table.configHash,
+    ),
+    nextRefreshAtIdx: index("kpi_metrics_next_refresh_at_idx").on(table.nextRefreshAt),
+    metricTypeCheck: check(
+      "kpi_metrics_metric_type_check",
+      sql`${table.metricType} IN ('current', 'event', 'bucketed')`,
+    ),
+  }),
+);
+
+export const kpiCards = pgTable(
+  "kpi_cards",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    metricId: text("metric_id")
+      .notNull()
+      .references(() => kpiMetrics.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    viz: text("viz").$type<KpiCardViz>().notNull(),
+    timeRangeDays: integer("time_range_days").notNull().default(7),
+    position: integer("position").notNull().default(0),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspacePositionIdx: index("kpi_cards_workspace_position_idx").on(
+      table.workspaceId,
+      table.position,
+    ),
+    metricIdx: index("kpi_cards_metric_idx").on(table.metricId),
+    vizCheck: check("kpi_cards_viz_check", sql`${table.viz} IN ('number', 'bar', 'line')`),
+  }),
+);
+
+export const kpiDatapoints = pgTable(
+  "kpi_datapoints",
+  {
+    id: serial("id").primaryKey(),
+    // Denormalized from the metric so the Electric shape can scope on it directly.
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    metricId: text("metric_id")
+      .notNull()
+      .references(() => kpiMetrics.id, { onDelete: "cascade" }),
+    ts: timestamp("ts", { withTimezone: true }).notNull(),
+    value: doublePrecision("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Idempotent upsert target: one value per metric per bucket timestamp.
+    metricTsIdx: uniqueIndex("kpi_datapoints_metric_ts_idx").on(table.metricId, table.ts),
+    workspaceIdx: index("kpi_datapoints_workspace_idx").on(table.workspaceId),
+  }),
+);
+
 export const workspaceToolPolicies = pgTable(
   "workspace_tool_policies",
   {
@@ -2112,6 +2232,9 @@ export const onboardingResponsesRelations = relations(onboardingResponses, ({ on
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
+export type KpiMetric = typeof kpiMetrics.$inferSelect;
+export type KpiCard = typeof kpiCards.$inferSelect;
+export type KpiDatapoint = typeof kpiDatapoints.$inferSelect;
 export type WorkspaceIntegration = typeof workspaceIntegrations.$inferSelect;
 export type WorkspaceIntegrationResource = typeof workspaceIntegrationResources.$inferSelect;
 export type WorkspaceIntegrationCredential = typeof workspaceIntegrationCredentials.$inferSelect;
