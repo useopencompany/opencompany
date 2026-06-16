@@ -1,8 +1,10 @@
 import { extractCitations, parseDocument, TIMELINE_HEADING, TRUTH_HEADING } from "../document";
 import { typeForFolder } from "../paths";
 import { isCanonicalType, isEvidenceType } from "../schema";
+import { areAnyNamesSimilar } from "../similarity";
 import { listFiles } from "../store";
 import { validateDocument } from "../validate";
+import { entityNames, isLiveCanonical } from "./common";
 import { type CommandContext, type CommandResult, fail, ok } from "./io";
 
 type Severity = "error" | "warn";
@@ -58,6 +60,46 @@ export async function doctor(ctx: CommandContext): Promise<CommandResult> {
         id: distinct.join(","),
         message: `Alias "${alias}" maps to multiple objects: ${distinct.join(", ")}.`,
       });
+    }
+  }
+
+  // Near-duplicate canonical objects: the same real person/company filed twice under a slightly
+  // different name (`aurelio` + `aurelio-anastassiades`, `gruenberg` + `grueneberg`). This is a
+  // warning, not an error — the names only *look* alike, so a human or a model judges whether they
+  // are truly the same before running `merge`. Merged/deprecated stubs are skipped so a redirect is
+  // never flagged against the survivor it already points to, and a pair already adjudicated distinct
+  // (linked `not_duplicate` in either direction) is suppressed so we don't re-flag genuinely
+  // different look-alikes forever. Compared within a type only; O(n²) over live canonical objects,
+  // which is fine for realistic memory trees.
+  const liveCanonical = [...byId.entries()]
+    .filter(([, entry]) => isLiveCanonical(entry.parsed.frontmatter))
+    .map(([id, entry]) => ({
+      id,
+      type: entry.parsed.frontmatter.type,
+      names: entityNames(entry.parsed.title, id, entry.parsed.frontmatter.aliases ?? []),
+      notDuplicateOf: new Set(
+        (entry.parsed.frontmatter.related ?? [])
+          .filter((r) => r.type === "not_duplicate")
+          .map((r) => r.target),
+      ),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  for (let i = 0; i < liveCanonical.length; i++) {
+    const a = liveCanonical[i];
+    if (!a) continue;
+    for (let j = i + 1; j < liveCanonical.length; j++) {
+      const b = liveCanonical[j];
+      if (!b || a.type !== b.type) continue;
+      if (a.notDuplicateOf.has(b.id) || b.notDuplicateOf.has(a.id)) continue;
+      if (areAnyNamesSimilar(a.names, b.names)) {
+        findings.push({
+          severity: "warn",
+          code: "near_duplicate",
+          id: `${a.id},${b.id}`,
+          message: `"${a.id}" and "${b.id}" look like the same ${a.type}. If they are, merge them (\`memory merge --from <duplicate> --into <record-to-keep>\`, then \`memory rewrite\`).`,
+        });
+      }
     }
   }
 

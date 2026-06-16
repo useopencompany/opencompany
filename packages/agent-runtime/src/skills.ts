@@ -441,7 +441,10 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 
 ## Commands
 
-- **create** — a new canonical object.
+- **create** — a new canonical object. Query by name first: if this person/company already exists
+  under another spelling, update that record (\`rewrite\`/\`alias\`) instead of making a second one.
+  \`create\` refuses a near-duplicate of an existing object of the same type and names it; pass
+  \`--allow-similar\` only when it genuinely is a different thing that happens to share a name.
   \`memory create --type company --id acme --alias "Acme Inc"\`
 - **append-evidence** — record immutable evidence and link it to canonical subjects.
   \`memory append-evidence --kind meeting --id acme-call-2026-06-06 --subject acme --subject jane-doe --source-ref "gcal://event/abc" --summary "Confirmed enterprise eval; SSO is the blocker."\`
@@ -472,7 +475,8 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   \`memory delete acme-corp\` (use \`--dry-run\` to preview). Related links and evidence subjects are
   scrubbed automatically; if the target is still cited or is a merge target, it needs \`--force\` and
   you must repair those references afterward (run \`memory doctor\`).
-- **doctor** — health check (broken links, missing provenance, stale truth, duplicates).
+- **doctor** — health check (broken links, missing provenance, stale truth, duplicates, and
+  \`near_duplicate\` look-alike objects that should probably be merged).
   \`memory doctor\` — a read-only report; fix what it flags with the commands above.
 
 ## How to use it well

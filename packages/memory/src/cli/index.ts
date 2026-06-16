@@ -38,7 +38,17 @@ const GLOBAL_FLAGS = ["root", "json", "report-usage"] as const;
 
 const COMMAND_SPECS: Record<string, CommandSpec> = {
   create: {
-    flags: ["type", "id", "status", "truth", "truth-stdin", "alias", "related", "title"],
+    flags: [
+      "type",
+      "id",
+      "status",
+      "truth",
+      "truth-stdin",
+      "alias",
+      "related",
+      "title",
+      "allow-similar",
+    ],
     maxPositionals: 0,
   },
   get: { flags: ["id", "section", "follow"], maxPositionals: 1 },
@@ -86,6 +96,8 @@ Usage: memory <command> [options]
 Commands:
   create           Create a canonical object (person|company|project|customer|decision|concept|theme).
                    New objects start as drafts; --status active with compiled truth requires citations.
+                   Refuses a near-duplicate of an existing object of the same type (same name under a
+                   different spelling); update that record instead, or pass --allow-similar to override.
   get              Fetch a memory file (--section truth|timeline|frontmatter|all, --follow).
                    Default output is structured; --section scopes both the text and the --json payload.
   query            Hybrid retrieval over the tree.
