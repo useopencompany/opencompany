@@ -1301,7 +1301,7 @@ describe("SessionViewContent — optimistic send", () => {
     await user.type(composer, "Fast replay");
     await user.keyboard("{Enter}");
 
-    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay", []);
+    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay", [], "steer");
     expect(composer).toHaveValue("");
     expect(screen.getByText("Fast replay")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();

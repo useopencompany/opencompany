@@ -22,6 +22,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { isSendMode } from "@/lib/agent-sessions/send-mode";
 
 const SIDEBAR_RECENCY_LIMIT = 50;
 
@@ -476,8 +477,11 @@ export async function loadAgentSessionDetailForWorkspace(
   }
   const messagesWithUsage = messages.map((message) => {
     const outputReasoningTokens = usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0;
+    // The DB column is plain text; narrow it back to the SendMode union (NULL/legacy → null).
+    const sendMode = isSendMode(message.sendMode) ? message.sendMode : null;
     const sessionMessage = {
       ...message,
+      sendMode,
       outputReasoningTokens,
       createdAt: message.createdAt.toISOString(),
       completedAt: message.completedAt?.toISOString() ?? null,
@@ -485,6 +489,7 @@ export async function loadAgentSessionDetailForWorkspace(
     const attachments = attachmentsByMessageId.get(message.id);
     return {
       ...message,
+      sendMode,
       outputReasoningTokens,
       thinkingDurationSeconds: computeThinkingDurationSeconds(sessionMessage, eventsWithCreatedAt),
       ...(attachments ? { attachments } : {}),
