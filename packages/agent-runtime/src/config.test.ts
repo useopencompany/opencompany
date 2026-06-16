@@ -694,6 +694,7 @@ describe("resolveAgentRuntimeConfig", () => {
     "zai/glm-5.1",
     "zai/glm-5-turbo",
     "zai/glm-5v-turbo",
+    "openrouter/fusion",
   ] as const)("marks %s as reasoning-capable without custom provider options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",

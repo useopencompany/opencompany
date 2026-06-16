@@ -64,6 +64,7 @@ describe("agent editor mention tools", () => {
       "zai/glm-5.1",
       "zai/glm-5-turbo",
       "zai/glm-5v-turbo",
+      "openrouter/fusion",
     ]);
     expect(findModel("model:google/gemini-3-flash")).toMatchObject({
       id: "google/gemini-3-flash",
@@ -72,6 +73,10 @@ describe("agent editor mention tools", () => {
     expect(findModel("model:minimax/minimax-m3")).toMatchObject({
       id: "minimax/minimax-m3",
       displayLabel: "minimax/minimax-m3",
+    });
+    expect(findModel("model:openrouter/fusion")).toMatchObject({
+      id: "openrouter/fusion",
+      displayLabel: "openrouter/fusion",
     });
   });
 

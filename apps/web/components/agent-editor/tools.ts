@@ -204,6 +204,7 @@ function modelIconFor(id: AgentModelId): LucideIcon {
 // model picker. Falls back to the raw prefix for unlisted providers.
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
+  openrouter: "OpenRouter",
   anthropic: "Anthropic",
   google: "Google",
   deepseek: "DeepSeek",

@@ -101,7 +101,8 @@ export type AgentModelId =
   | "xai/grok-build-0.1"
   | "zai/glm-5.1"
   | "zai/glm-5-turbo"
-  | "zai/glm-5v-turbo";
+  | "zai/glm-5v-turbo"
+  | "openrouter/fusion";
 
 export type AgentHostedToolConfig = {
   id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "neon" | "gmail" | "google_calendar";
