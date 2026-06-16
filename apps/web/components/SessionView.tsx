@@ -1761,6 +1761,31 @@ function SessionViewContentBody({
                 }
                 leftControls={
                   <>
+                    {(() => {
+                      // Steering-wheel indicator (Hermes-style), far left of the composer. Not a
+                      // control — it signals the steer behavior: green + a one-shot spin once a run
+                      // is active (your message will steer it), muted when idle.
+                      const runActive =
+                        canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
+                      return (
+                        <span
+                          aria-label="Steering"
+                          title={
+                            runActive
+                              ? "Steering — your message nudges the running agent at its next step"
+                              : "Steering — send while the agent is running to nudge it"
+                          }
+                          className={`flex h-7 w-7 items-center justify-center ${
+                            runActive ? "text-success" : "text-ink-subtle"
+                          }`}
+                        >
+                          <SteerWheelIcon
+                            key={runActive ? "steer-active" : "steer-idle"}
+                            className={`h-4 w-4 shrink-0 ${runActive ? "steer-wheel-spin" : ""}`}
+                          />
+                        </span>
+                      );
+                    })()}
                     <div ref={attachMenuRef} className="relative">
                       <input
                         ref={fileInputRef}
