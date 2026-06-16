@@ -78,7 +78,12 @@ export function normalizeQuestionsInput(rawInput: unknown): AgentSessionQuestion
       question,
       options,
       allowMultiple: q.allowMultiple === true,
-      allowOther: q.allowOther === true,
+      // The free-text "Other" answer is always offered, regardless of what the model asked for: the
+      // user must always be able to give their own answer when none of the options fit (or to combine
+      // them). This is the single source of truth — UI render and answer validation both read it back
+      // from the persisted prompt, so forcing it here keeps them consistent. The model no longer
+      // controls this (the schema param is gone); allowMultiple stays model-driven.
+      allowOther: true,
     });
   }
 
