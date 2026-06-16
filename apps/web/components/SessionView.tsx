@@ -40,7 +40,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   Fragment,
-  useCallback,
   useContext,
   useEffect,
   useId,
@@ -114,14 +113,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
-import {
-  DEFAULT_SEND_MODE,
-  isSendMode,
-  SEND_MODE_STORAGE_KEY,
-  SEND_MODES,
-  type SendMode,
-  sendModeMeta,
-} from "@/lib/agent-sessions/send-mode";
+import type { SendMode } from "@/lib/agent-sessions/send-mode";
 import { BRAIN_BASE_PATH, brainHref } from "@/lib/brain/paths";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import { personalPaths } from "@/lib/personal/paths";
@@ -257,14 +249,6 @@ type OptimisticUserMessage = SessionMessage & {
   existingMessageIds: string[];
 };
 
-// Tailwind tint for the send button per send-mode, applied only while a run is active. Green =
-// Steer (live nudge), amber = Queue, red = Interrupt. Idle sends use the neutral ink button.
-const SEND_MODE_BUTTON_CLASS: Record<SendMode, string> = {
-  steer: "bg-success text-white hover:bg-success/90",
-  queue: "bg-warning text-white hover:bg-warning/90",
-  interrupt: "bg-danger text-white hover:bg-danger/90",
-};
-
 // Past-tense labels for the quiet caption a mid-run send leaves on the turn it affected. Lowercase
 // to sit unobtrusively alongside the muted process rows (Thinking, "2 steps", …).
 const SEND_MODE_ROW_LABEL: Record<SendMode, string> = {
@@ -301,75 +285,6 @@ function SteerWheelIcon({ className }: { className?: string }) {
       <line x1="4" y1="16.5" x2="10" y2="13.2" />
       <line x1="20" y1="16.5" x2="14" y2="13.2" />
     </svg>
-  );
-}
-
-// Composer control (shown only while a run is active) for choosing how the next message is
-// dispatched into the live run. A colored pill + popover; the choice is lifted to SessionView
-// state so it can be persisted to localStorage. See lib/agent-sessions/send-mode.ts.
-function SendModePicker({
-  value,
-  onChange,
-  open,
-  setOpen,
-}: {
-  value: SendMode;
-  onChange: (mode: SendMode) => void;
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [open, setOpen]);
-  const meta = sendModeMeta(value);
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={`Send mode: ${meta.label}`}
-        className={`flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11.5px] font-medium transition-colors ${meta.activeClassName}`}
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClassName}`} />
-        {meta.label}
-      </button>
-      {open ? (
-        <div
-          role="menu"
-          className="absolute bottom-[calc(100%+8px)] left-0 z-20 w-64 overflow-hidden rounded-lg border border-border bg-surface shadow-lg"
-        >
-          {SEND_MODES.map((mode) => (
-            <button
-              key={mode.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={mode.value === value}
-              onClick={() => {
-                onChange(mode.value);
-                setOpen(false);
-              }}
-              className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-surface-muted ${
-                mode.value === value ? "bg-surface-muted" : ""
-              }`}
-            >
-              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
-                <span className={`h-1.5 w-1.5 rounded-full ${mode.dotClassName}`} />
-                {mode.label}
-              </span>
-              <span className="text-[11px] text-ink-muted">{mode.description}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -523,26 +438,6 @@ function SessionViewContentBody({
   // than the send path's `isPending`.
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [, startModelTransition] = useTransition();
-  // Composer send-mode: how a message is dispatched while a run is already in flight (Steer /
-  // Queue / Interrupt). Sticky per device — restored from and persisted to localStorage. Only
-  // affects sends made mid-run; idle sends ignore it. See lib/agent-sessions/send-mode.ts.
-  // Read once in a lazy initializer (not an effect) so there's no synchronous setState-in-effect;
-  // the picker that surfaces this only renders once a run is active, well after hydration, so the
-  // SSR-default vs restored-value difference can't cause a hydration mismatch.
-  const [sendMode, setSendModeState] = useState<SendMode>(() => {
-    if (typeof window === "undefined") return DEFAULT_SEND_MODE;
-    const stored = window.localStorage.getItem(SEND_MODE_STORAGE_KEY);
-    return isSendMode(stored) ? stored : DEFAULT_SEND_MODE;
-  });
-  const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
-  const setSendMode = useCallback((mode: SendMode) => {
-    setSendModeState(mode);
-    try {
-      window.localStorage.setItem(SEND_MODE_STORAGE_KEY, mode);
-    } catch {
-      // Private mode / storage disabled — keep the in-memory choice for this session.
-    }
-  }, []);
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
@@ -1515,7 +1410,7 @@ function SessionViewContentBody({
       status: "completed",
       // Only tag the bubble with a send-mode when it was actually dispatched into a live run, so
       // the chip ("Steering"/"Queued"/"Interrupt") shows for those and not for idle first sends.
-      ...(sentMidRun ? { sendMode } : {}),
+      ...(sentMidRun ? { sendMode: "steer" as const } : {}),
       createdAt: new Date(submittedAtMs).toISOString(),
       completedAt: new Date(submittedAtMs).toISOString(),
       // Carry the sent attachments so the bubble shows them immediately. Images use their local
@@ -1540,11 +1435,14 @@ function SessionViewContentBody({
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
+      // A message sent while a run is active steers it (delivered at the next model-step
+      // boundary, in-flight work preserved); idle sends just start a turn. There's no mode
+      // picker — "steer" is the single default behavior, the server ignores it when idle.
       const result = await submitAgentSessionMessage(
         session.id,
         content,
         toSubmitAttachments(ready),
-        sendMode,
+        "steer",
       );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
@@ -1908,21 +1806,12 @@ function SessionViewContentBody({
                       fallbackModelId={DEFAULT_MODEL_ID}
                       onChange={handleModelChange}
                     />
-                    {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                      <SendModePicker
-                        value={sendMode}
-                        onChange={setSendMode}
-                        open={sendModeMenuOpen}
-                        setOpen={setSendModeMenuOpen}
-                      />
-                    ) : null}
                   </>
                 }
                 action={(() => {
-                  // While a run is active the composer offers BOTH send (which dispatches per
-                  // the chosen send-mode) and stop. The send button is tinted by the mode —
-                  // green for Steer, amber for Queue, red for Interrupt — so the "this button
-                  // is green" cue maps to live-steering. Idle: a single neutral send button.
+                  // While a run is active you can still type + send — that steers the run (no
+                  // mode picker; "steer" is the one default). The neutral send button stays, and
+                  // a Stop button appears alongside it as the hard interrupt. Idle: just send.
                   const runActive =
                     canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
                   const sendDisabled =
@@ -1937,17 +1826,9 @@ function SessionViewContentBody({
                         type="button"
                         disabled={sendDisabled}
                         onClick={handleSend}
-                        aria-label={
-                          runActive ? `Send (${sendModeMeta(sendMode).label})` : "Send message"
-                        }
-                        title={
-                          runActive ? `Send · ${sendModeMeta(sendMode).label}` : "Send message"
-                        }
-                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
-                          runActive
-                            ? SEND_MODE_BUTTON_CLASS[sendMode]
-                            : "bg-ink text-canvas hover:bg-ink/85"
-                        }`}
+                        aria-label="Send message"
+                        title="Send message"
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-colors hover:bg-ink/85 disabled:opacity-40"
                       >
                         <ArrowUp size={13} strokeWidth={2} />
                       </button>
