@@ -6,7 +6,11 @@ import {
   searchPersonalBrain,
   searchPersonalMemory,
 } from "@/lib/mcp/opencompany-context";
-import { authenticatePersonalMcpToken } from "@/lib/personal/mcp-tokens";
+import { authenticateOpenCompanyMcpAuthorization } from "@/lib/personal/mcp-auth";
+import {
+  mcpBearerChallenge,
+  openCompanyMcpProtectedResourceMetadataUrl,
+} from "@/lib/personal/mcp-oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -106,16 +110,16 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: Request) {
-  const auth = await authenticatePersonalMcpToken(request.headers.get("authorization"));
+  const auth = await authenticateOpenCompanyMcpAuthorization(request.headers.get("authorization"));
   if (!auth) {
     return NextResponse.json(
       {
         error: "unauthorized",
-        message: "Provide a valid OpenCompany personal MCP bearer token.",
+        message: "Provide a valid OpenCompany MCP bearer token or connect with OAuth.",
       },
       {
         status: 401,
-        headers: { ...MCP_HEADERS, "WWW-Authenticate": 'Bearer realm="OpenCompany MCP"' },
+        headers: { ...MCP_HEADERS, "WWW-Authenticate": mcpBearerChallenge() },
       },
     );
   }
@@ -165,6 +169,9 @@ async function handleJsonRpc(
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "opencompany", version: "0.2.0" },
+          _meta: {
+            "opencompany/oauth_protected_resource": openCompanyMcpProtectedResourceMetadataUrl(),
+          },
           instructions:
             "OpenCompany exposes read-only personal memory and personal brain context. Search first, then fetch individual records by id or path when needed.",
         });

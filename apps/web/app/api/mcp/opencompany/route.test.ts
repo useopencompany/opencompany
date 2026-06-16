@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getPersonalMemory, searchPersonalMemory } from "@/lib/mcp/opencompany-context";
-import { authenticatePersonalMcpToken } from "@/lib/personal/mcp-tokens";
+import { authenticateOpenCompanyMcpAuthorization } from "@/lib/personal/mcp-auth";
 import { POST } from "./route";
 
-vi.mock("@/lib/personal/mcp-tokens", () => ({
-  authenticatePersonalMcpToken: vi.fn(),
+vi.mock("@/lib/personal/mcp-auth", () => ({
+  authenticateOpenCompanyMcpAuthorization: vi.fn(),
 }));
 
 vi.mock("@/lib/mcp/opencompany-context", () => ({
@@ -14,29 +14,35 @@ vi.mock("@/lib/mcp/opencompany-context", () => ({
   getPersonalBrainFile: vi.fn(),
 }));
 
-const authenticatePersonalMcpTokenMock = vi.mocked(authenticatePersonalMcpToken);
+const authenticateOpenCompanyMcpAuthorizationMock = vi.mocked(
+  authenticateOpenCompanyMcpAuthorization,
+);
 const searchPersonalMemoryMock = vi.mocked(searchPersonalMemory);
 const getPersonalMemoryMock = vi.mocked(getPersonalMemory);
 
 describe("OpenCompany MCP route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authenticatePersonalMcpTokenMock.mockResolvedValue({
+    authenticateOpenCompanyMcpAuthorizationMock.mockResolvedValue({
       tokenId: "pmcpt_123",
       workspaceId: "wks_123",
       userId: "usr_123",
+      kind: "personal_token",
     });
   });
 
-  it("requires a personal MCP bearer token", async () => {
-    authenticatePersonalMcpTokenMock.mockResolvedValue(null);
+  it("requires a valid MCP bearer token or OAuth access token", async () => {
+    authenticateOpenCompanyMcpAuthorizationMock.mockResolvedValue(null);
 
     const response = await POST(jsonRpcRequest("tools/list"));
 
     expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain(
+      'resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource"',
+    );
     await expect(response.json()).resolves.toEqual({
       error: "unauthorized",
-      message: "Provide a valid OpenCompany personal MCP bearer token.",
+      message: "Provide a valid OpenCompany MCP bearer token or connect with OAuth.",
     });
   });
 

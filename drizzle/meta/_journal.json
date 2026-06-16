@@ -407,6 +407,13 @@
       "when": 1781585369924,
       "tag": "0057_white_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1781601734641,
+      "tag": "0058_concerned_jack_power",
+      "breakpoints": true
     }
   ]
 }

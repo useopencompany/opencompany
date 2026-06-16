@@ -282,6 +282,99 @@ export const personalMcpTokens = pgTable(
   }),
 );
 
+export const personalMcpOAuthClients = pgTable(
+  "personal_mcp_oauth_clients",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    clientName: text("client_name").notNull().default("MCP client"),
+    clientUri: text("client_uri"),
+    logoUri: text("logo_uri"),
+    redirectUris: jsonb("redirect_uris").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    grantTypes: jsonb("grant_types")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'["authorization_code","refresh_token"]'::jsonb`),
+    responseTypes: jsonb("response_types")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'["code"]'::jsonb`),
+    scope: text("scope").notNull().default("mcp:read"),
+    tokenEndpointAuthMethod: text("token_endpoint_auth_method").notNull().default("none"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    clientIdIdx: uniqueIndex("personal_mcp_oauth_clients_client_id_idx").on(table.clientId),
+  }),
+);
+
+export const personalMcpOAuthAuthorizationCodes = pgTable(
+  "personal_mcp_oauth_authorization_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => personalMcpOAuthClients.clientId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    redirectUri: text("redirect_uri").notNull(),
+    scope: text("scope").notNull().default("mcp:read"),
+    codeChallenge: text("code_challenge").notNull(),
+    codeChallengeMethod: text("code_challenge_method").notNull(),
+    resource: text("resource").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    clientIdx: index("personal_mcp_oauth_codes_client_idx").on(table.clientId),
+    expiresAtIdx: index("personal_mcp_oauth_codes_expires_at_idx").on(table.expiresAt),
+  }),
+);
+
+export const personalMcpOAuthTokens = pgTable(
+  "personal_mcp_oauth_tokens",
+  {
+    id: text("id").primaryKey(),
+    accessTokenHash: text("access_token_hash").notNull(),
+    refreshTokenHash: text("refresh_token_hash"),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => personalMcpOAuthClients.clientId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scope: text("scope").notNull().default("mcp:read"),
+    resource: text("resource").notNull(),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }).notNull(),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    accessTokenHashIdx: uniqueIndex("personal_mcp_oauth_tokens_access_hash_idx").on(
+      table.accessTokenHash,
+    ),
+    refreshTokenHashIdx: uniqueIndex("personal_mcp_oauth_tokens_refresh_hash_idx").on(
+      table.refreshTokenHash,
+    ),
+    clientUserIdx: index("personal_mcp_oauth_tokens_client_user_idx").on(
+      table.clientId,
+      table.userId,
+    ),
+  }),
+);
+
 export const brainFiles = pgTable(
   "brain_files",
   {
@@ -1769,6 +1862,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(workspaceMemberships),
   createdWorkspaces: many(workspaces),
   personalMcpTokens: many(personalMcpTokens),
+  personalMcpOAuthAuthorizationCodes: many(personalMcpOAuthAuthorizationCodes),
+  personalMcpOAuthTokens: many(personalMcpOAuthTokens),
   agentSessions: many(agentSessions),
   sessionStars: many(sessionStars),
   onboardingResponses: many(onboardingResponses),
@@ -1806,6 +1901,46 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   mcpServers: many(workspaceMcpServers),
   mcpCredentials: many(workspaceMcpCredentials),
   personalMcpTokens: many(personalMcpTokens),
+  personalMcpOAuthAuthorizationCodes: many(personalMcpOAuthAuthorizationCodes),
+  personalMcpOAuthTokens: many(personalMcpOAuthTokens),
+}));
+
+export const personalMcpOAuthClientsRelations = relations(personalMcpOAuthClients, ({ many }) => ({
+  authorizationCodes: many(personalMcpOAuthAuthorizationCodes),
+  tokens: many(personalMcpOAuthTokens),
+}));
+
+export const personalMcpOAuthAuthorizationCodesRelations = relations(
+  personalMcpOAuthAuthorizationCodes,
+  ({ one }) => ({
+    client: one(personalMcpOAuthClients, {
+      fields: [personalMcpOAuthAuthorizationCodes.clientId],
+      references: [personalMcpOAuthClients.clientId],
+    }),
+    workspace: one(workspaces, {
+      fields: [personalMcpOAuthAuthorizationCodes.workspaceId],
+      references: [workspaces.id],
+    }),
+    user: one(users, {
+      fields: [personalMcpOAuthAuthorizationCodes.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const personalMcpOAuthTokensRelations = relations(personalMcpOAuthTokens, ({ one }) => ({
+  client: one(personalMcpOAuthClients, {
+    fields: [personalMcpOAuthTokens.clientId],
+    references: [personalMcpOAuthClients.clientId],
+  }),
+  workspace: one(workspaces, {
+    fields: [personalMcpOAuthTokens.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [personalMcpOAuthTokens.userId],
+    references: [users.id],
+  }),
 }));
 
 export const agentsRelations = relations(agents, ({ one, many }) => ({
