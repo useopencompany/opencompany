@@ -1761,31 +1761,6 @@ function SessionViewContentBody({
                 }
                 leftControls={
                   <>
-                    {(() => {
-                      // Steering-wheel indicator (Hermes-style), far left of the composer. Not a
-                      // control — it signals the steer behavior: green + a one-shot spin once a run
-                      // is active (your message will steer it), muted when idle.
-                      const runActive =
-                        canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
-                      return (
-                        <span
-                          aria-label="Steering"
-                          title={
-                            runActive
-                              ? "Steering — your message nudges the running agent at its next step"
-                              : "Steering — send while the agent is running to nudge it"
-                          }
-                          className={`flex h-7 w-7 items-center justify-center ${
-                            runActive ? "text-success" : "text-ink-subtle"
-                          }`}
-                        >
-                          <SteerWheelIcon
-                            key={runActive ? "steer-active" : "steer-idle"}
-                            className={`h-4 w-4 shrink-0 ${runActive ? "steer-wheel-spin" : ""}`}
-                          />
-                        </span>
-                      );
-                    })()}
                     <div ref={attachMenuRef} className="relative">
                       <input
                         ref={fileInputRef}
@@ -1834,9 +1809,11 @@ function SessionViewContentBody({
                   </>
                 }
                 action={(() => {
-                  // While a run is active you can still type + send — that steers the run (no
-                  // mode picker; "steer" is the one default). The neutral send button stays, and
-                  // a Stop button appears alongside it as the hard interrupt. Idle: just send.
+                  // While a run is active you can still type + send — that steers the run (no mode
+                  // picker; "steer" is the one default). The send button itself becomes the cue:
+                  // its arrow is replaced by the steering wheel (one-shot spin) to signal the send
+                  // will steer. Idle: a plain arrow, nothing extra. A Stop button sits alongside it
+                  // as the hard interrupt.
                   const runActive =
                     canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
                   const sendDisabled =
@@ -1851,11 +1828,15 @@ function SessionViewContentBody({
                         type="button"
                         disabled={sendDisabled}
                         onClick={handleSend}
-                        aria-label="Send message"
-                        title="Send message"
+                        aria-label={runActive ? "Steer the running agent" : "Send message"}
+                        title={runActive ? "Steer the running agent" : "Send message"}
                         className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-colors hover:bg-ink/85 disabled:opacity-40"
                       >
-                        <ArrowUp size={13} strokeWidth={2} />
+                        {runActive ? (
+                          <SteerWheelIcon key="send-wheel" className="steer-wheel-spin h-4 w-4" />
+                        ) : (
+                          <ArrowUp size={13} strokeWidth={2} />
+                        )}
                       </button>
                       {runActive ? (
                         <button
