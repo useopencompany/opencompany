@@ -143,6 +143,27 @@ describe("calculateModelUsageCost", () => {
     });
   });
 
+  it("does not guess static prices for variable-priced router models", () => {
+    const cost = calculateModelUsageCost({
+      modelName: "openrouter/fusion",
+      inputTokens: 1_000,
+      inputNoCacheTokens: 1_000,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 1_000,
+    });
+
+    expect(cost).toMatchObject({
+      billable: false,
+      providerCostUsdMicros: 0,
+      platformFeeUsdMicros: 0,
+      totalCostUsdMicros: 0,
+      costBasis: {
+        reason: "variable_pricing",
+      },
+    });
+  });
+
   it("rounds fractional micro-dollar costs deterministically", () => {
     const cost = calculateModelUsageCost({
       modelName: "openai/gpt-5.4-mini",
