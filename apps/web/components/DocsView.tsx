@@ -169,7 +169,7 @@ function TableOfContents({ toc }: { toc: TOCItemType[] }) {
 
 export default function DocsView({ title, description, url, tree, toc, body: MDX }: DocsViewProps) {
   return (
-    <main className="flex h-screen w-screen overflow-hidden bg-canvas">
+    <main className="flex h-dvh w-full overflow-hidden overflow-x-hidden bg-canvas">
       <DocsSidebar tree={tree} activeUrl={url} />
       <section className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar title={title} />
