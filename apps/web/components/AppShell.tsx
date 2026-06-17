@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { CollectionsProvider } from "@/components/CollectionsProvider";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
 import QueryProvider from "@/components/QueryProvider";
+import { ShellChrome } from "@/components/ShellChrome";
 import Sidebar from "@/components/Sidebar";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
@@ -64,27 +65,32 @@ export default async function AppShell({ children }: { children: React.ReactNode
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
               <div className="flex h-dvh w-full overflow-hidden overflow-x-hidden bg-canvas">
-                <Suspense
-                  fallback={
-                    <Sidebar
-                      userName={userName}
-                      userEmail={authUser.email}
-                      workspaceName={workspace.name}
-                      initialCollapsed={initialSidebarCollapsed}
-                      initialSessions={[]}
-                      sessionsLoading
-                    />
+                <ShellChrome
+                  sidebar={
+                    <Suspense
+                      fallback={
+                        <Sidebar
+                          userName={userName}
+                          userEmail={authUser.email}
+                          workspaceName={workspace.name}
+                          initialCollapsed={initialSidebarCollapsed}
+                          initialSessions={[]}
+                          sessionsLoading
+                        />
+                      }
+                    >
+                      <SidebarWithSessions
+                        userName={userName}
+                        userEmail={authUser.email}
+                        workspaceName={workspace.name}
+                        initialCollapsed={initialSidebarCollapsed}
+                        sessionsPromise={sessionsPromise}
+                      />
+                    </Suspense>
                   }
                 >
-                  <SidebarWithSessions
-                    userName={userName}
-                    userEmail={authUser.email}
-                    workspaceName={workspace.name}
-                    initialCollapsed={initialSidebarCollapsed}
-                    sessionsPromise={sessionsPromise}
-                  />
-                </Suspense>
-                {children}
+                  {children}
+                </ShellChrome>
               </div>
             </ToastProvider>
           </CollectionsProvider>
