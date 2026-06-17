@@ -1755,7 +1755,7 @@ function SessionViewContentBody({
                     aria-activedescendant={slashActiveOptionId}
                     aria-haspopup="listbox"
                     rows={1}
-                    className="min-h-9 w-full resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                    className="min-h-9 w-full resize-none content-center bg-transparent text-[16px] md:text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                     style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                   />
                 }
