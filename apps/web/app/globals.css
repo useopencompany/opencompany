@@ -138,6 +138,8 @@ body {
   color: var(--color-ink);
   color-scheme: light;
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   font-feature-settings: "cv11", "ss01";
   /* Stop inner scroll areas (chat, sidebar) from chaining their scroll to the
      page — no rubber-band / page shift when hitting top or bottom of the fold. */

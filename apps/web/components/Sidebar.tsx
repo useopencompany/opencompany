@@ -525,7 +525,7 @@ function SidebarContent({
                   value={sessionQuery}
                   onChange={(event) => setSessionQuery(event.target.value)}
                   placeholder="Filter sessions"
-                  className="h-7 w-full rounded-md border border-border bg-surface/55 pl-7 pr-7 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong focus:ring-2 focus:ring-ink/[0.04]"
+                  className="h-7 w-full rounded-md border border-border bg-surface/55 pl-7 pr-7 text-[16px] md:text-[12.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong focus:ring-2 focus:ring-ink/[0.04]"
                 />
                 {sessionQuery && (
                   <button

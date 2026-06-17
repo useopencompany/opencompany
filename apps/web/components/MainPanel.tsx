@@ -182,7 +182,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             }}
             rows={1}
             placeholder="Ask Open Company to build, fix bugs, explore"
-            className="min-h-9 w-full resize-none content-center bg-transparent text-[15px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
+            className="min-h-9 w-full resize-none content-center bg-transparent text-[16px] md:text-[15px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
             style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
           />
         }
