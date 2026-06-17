@@ -4,12 +4,16 @@ import {
   parseGitHubCliArgs,
   toolDisplayTitle,
 } from "@opencompany/agent-runtime";
+import { isSendMode, type SendMode } from "@/lib/agent-sessions/send-mode";
 
 export type SessionMessage = {
   id: string;
   role: string;
   content: string;
   status: string;
+  // Set on user messages dispatched while a run was already in flight, so the composer can show
+  // a "Steering"/"Queued"/"Interrupt" chip until the agent answers. Absent on idle/first sends.
+  sendMode?: SendMode | null;
   internal?: boolean;
   modelMessage?: Record<string, unknown> | null;
   toolName?: string | null;
@@ -390,6 +394,8 @@ export function applyRuntimeEventToState(
     if (messageId && role && !next.messages.some((message) => message.id === messageId)) {
       const status =
         optionalString(event.payload.status) ?? (role === "user" ? "completed" : "running");
+      const sendModeRaw = optionalString(event.payload.sendMode);
+      const sendMode = isSendMode(sendModeRaw) ? sendModeRaw : null;
       next = {
         ...next,
         messages: [
@@ -400,6 +406,7 @@ export function applyRuntimeEventToState(
             content: optionalString(event.payload.content) ?? "",
             status,
             internal,
+            ...(sendMode ? { sendMode } : {}),
             createdAt: event.createdAt ?? new Date().toISOString(),
           },
         ],
@@ -1582,12 +1589,29 @@ function readModelReasoning(parts: Record<string, unknown>[] | null) {
 }
 
 function readReasoningDeltas(events: RuntimeEvent[], messageId: string) {
-  return events
-    .filter((event) => event.type === "message.reasoning_delta")
-    .filter((event) => eventBelongsToMessage(event, messageId))
-    .map((event) => readString(event.payload.delta))
-    .filter(Boolean)
-    .join("");
+  // Reasoning streams as a run of `message.reasoning_delta` token fragments per
+  // phase, with phases separated by `reasoning_completed`, tool calls, or any
+  // other event. Concatenate fragments WITHIN a phase seamlessly, but separate
+  // distinct phases with a blank line so they don't render as one run-on block
+  // (PRO-241: "...both channels.Hit a rate limit..."). Mirrors how the text path
+  // (buildEventAssistantTurnParts) splits per-step utterances on event boundaries.
+  const phases: string[] = [];
+  let current = "";
+  const flushPhase = () => {
+    const phase = current.trim();
+    if (phase) phases.push(phase);
+    current = "";
+  };
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, messageId)) continue;
+    if (event.type === "message.reasoning_delta") {
+      current += readString(event.payload.delta);
+      continue;
+    }
+    flushPhase();
+  }
+  flushPhase();
+  return phases.join("\n\n");
 }
 
 function hasReasoningDelta(events: RuntimeEvent[], messageId: string) {

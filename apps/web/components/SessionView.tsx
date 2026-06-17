@@ -40,7 +40,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   Fragment,
-  useCallback,
   useContext,
   useEffect,
   useId,
@@ -114,6 +113,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import type { SendMode } from "@/lib/agent-sessions/send-mode";
 import { BRAIN_BASE_PATH, brainHref } from "@/lib/brain/paths";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import { personalPaths } from "@/lib/personal/paths";
@@ -248,6 +248,45 @@ type OptimisticUserMessage = SessionMessage & {
   confirmedMessageId: string | null;
   existingMessageIds: string[];
 };
+
+// Past-tense labels for the quiet caption a mid-run send leaves on the turn it affected. Lowercase
+// to sit unobtrusively alongside the muted process rows (Thinking, "2 steps", …).
+const SEND_MODE_ROW_LABEL: Record<SendMode, string> = {
+  steer: "steered",
+  queue: "queued",
+  interrupt: "interrupted",
+};
+
+// The only color the dezent caption carries is a faint tint on the steering-wheel icon, so the
+// mode stays distinguishable at a glance without a loud badge.
+const SEND_MODE_ICON_CLASS: Record<SendMode, string> = {
+  steer: "text-success",
+  queue: "text-warning",
+  interrupt: "text-danger",
+};
+
+// Steering-wheel glyph for the steer caption (lucide has no wheel) — mirrors the metaphor Hermes
+// uses for steering. A ring, a hub, and three spokes; inherits color + size from className.
+function SteerWheelIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.85}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="2.4" />
+      <line x1="12" y1="2.6" x2="12" y2="9.6" />
+      <line x1="4" y1="16.5" x2="10" y2="13.2" />
+      <line x1="20" y1="16.5" x2="14" y2="13.2" />
+    </svg>
+  );
+}
 
 // Lets the deeply-nested ToolCallCard reach the session id (for tool-approval actions)
 // without threading a prop through every intermediate render layer.
@@ -765,6 +804,12 @@ function SessionViewContentBody({
   // a viewport of room below it — reserved by CSS, so it survives resize and never
   // needs a JS re-pin. -1 (no user message yet) means no turn to reserve.
   const lastUserTurnStart = visibleMessages.findLastIndex((message) => message.role === "user");
+  // A mid-run steer is a small annotation, not a fresh turn, so it shouldn't claim the
+  // viewport-height reserve that pins a just-sent message to the top — that left the steer row
+  // floating high with a big empty gap below it. When the latest user message is a steer, skip
+  // the reserve so it drops to the bottom and flows with the response, like Conductor.
+  const latestUserIsSteer =
+    lastUserTurnStart >= 0 && Boolean(visibleMessages[lastUserTurnStart]?.sendMode);
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
@@ -792,7 +837,6 @@ function SessionViewContentBody({
   // Abort stays available while paused so the user can cancel a parked run without
   // having to approve or deny the pending tool call first.
   const canAbort = sessionCanGenerate || sessionIsPaused;
-  const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   const renderMessage = (message: SessionMessage, opts?: { footerInFlow?: boolean }) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
@@ -833,6 +877,61 @@ function SessionViewContentBody({
         partsAwaitQuestion(assistantParts) ||
         partsHaveRunningTool(assistantParts));
 
+    // Attachments preview, shared by the normal user bubble and the mid-run steer row below.
+    const attachmentsBlock =
+      message.attachments && message.attachments.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {message.attachments.map((att) => {
+            // Optimistic just-sent messages carry a local object-URL preview so the image
+            // shows instantly; the served `/api/attachments/{id}` row doesn't exist yet.
+            // Server-loaded messages have no previewUrl and use the served URL.
+            const servedUrl = `/api/attachments/${att.id}`;
+            const imageSrc = att.previewUrl ?? servedUrl;
+            return (
+              <a
+                key={att.id}
+                href={att.previewUrl ?? servedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block"
+              >
+                <AttachmentCard
+                  kind={att.kind}
+                  filename={att.filename}
+                  src={att.kind === "image" ? imageSrc : undefined}
+                />
+              </a>
+            );
+          })}
+        </div>
+      ) : null;
+
+    // A message sent while a run was already in flight (Steer / Queue / Interrupt) renders as a
+    // compact, left-aligned annotation attached just above the agent turn it affected — not as a
+    // normal right-side bubble — so it stays obvious the run was redirected. Past-tense wording
+    // (Steered/Queued/Interrupted) since by render time the mode has already been applied.
+    if (message.role === "user" && message.sendMode) {
+      // A mid-run send renders as a quiet, left-aligned caption attached to the turn it affected —
+      // styled like OC's muted process rows (Thinking, "N steps"), not a loud right-side bubble.
+      // The steering-wheel icon carries the only color (a faint mode tint); text stays muted.
+      return (
+        <div key={message.id} data-message-id={message.id} className="flex justify-start">
+          <div className="flex max-w-[80%] flex-col gap-1.5">
+            <div className="inline-flex max-w-full items-center gap-1.5 pl-1 text-[11px] leading-4 text-ink-subtle">
+              <SteerWheelIcon
+                className={`steer-wheel-spin h-3 w-3 shrink-0 ${SEND_MODE_ICON_CLASS[message.sendMode]}`}
+              />
+              <span className="shrink-0 font-medium">{SEND_MODE_ROW_LABEL[message.sendMode]}</span>
+              {message.content ? (
+                <span className="break-words text-ink-muted">· {message.content}</span>
+              ) : null}
+            </div>
+            {attachmentsBlock}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         key={message.id}
@@ -864,32 +963,7 @@ function SessionViewContentBody({
           ) : (
             <div className="flex flex-col gap-2">
               {message.content ? <div>{message.content}</div> : null}
-              {message.attachments && message.attachments.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {message.attachments.map((att) => {
-                    // Optimistic just-sent messages carry a local object-URL preview so the image
-                    // shows instantly; the served `/api/attachments/{id}` row doesn't exist yet.
-                    // Server-loaded messages have no previewUrl and use the served URL.
-                    const servedUrl = `/api/attachments/${att.id}`;
-                    const imageSrc = att.previewUrl ?? servedUrl;
-                    return (
-                      <a
-                        key={att.id}
-                        href={att.previewUrl ?? servedUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block"
-                      >
-                        <AttachmentCard
-                          kind={att.kind}
-                          filename={att.filename}
-                          src={att.kind === "image" ? imageSrc : undefined}
-                        />
-                      </a>
-                    );
-                  })}
-                </div>
-              ) : null}
+              {attachmentsBlock}
             </div>
           )}
           {(canCopy || brainFiles.length > 0) && message.status !== "running" && !awaitingInput ? (
@@ -1308,12 +1382,17 @@ function SessionViewContentBody({
       runSlashCommand(parsed.command, parsed.args);
       return;
     }
-    if (isBusy) return;
+    // Note: we intentionally do NOT bail when the agent is running. Sending mid-run is the whole
+    // point of send-modes — the server + runner route the message per `sendMode`.
     submit();
   };
 
   const submit = () => {
-    if (isBusy) return;
+    // Guard only against a double-submit of our own in-flight transition; sending while the agent
+    // runs is allowed and resolves to steer/queue/interrupt on the server.
+    if (isPending) return;
+    // Whether a run is active right now decides if `sendMode` matters and whether to show a chip.
+    const sentMidRun = hasRunningAssistantMessage || showWaitingForAssistant;
     const content = input.trim();
     const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
     if (!content && ready.length === 0) return;
@@ -1329,6 +1408,9 @@ function SessionViewContentBody({
       role: "user",
       content,
       status: "completed",
+      // Only tag the bubble with a send-mode when it was actually dispatched into a live run, so
+      // the chip ("Steering"/"Queued"/"Interrupt") shows for those and not for idle first sends.
+      ...(sentMidRun ? { sendMode: "steer" as const } : {}),
       createdAt: new Date(submittedAtMs).toISOString(),
       completedAt: new Date(submittedAtMs).toISOString(),
       // Carry the sent attachments so the bubble shows them immediately. Images use their local
@@ -1353,10 +1435,14 @@ function SessionViewContentBody({
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
+      // A message sent while a run is active steers it (delivered at the next model-step
+      // boundary, in-flight work preserved); idle sends just start a turn. There's no mode
+      // picker — "steer" is the single default behavior, the server ignores it when idle.
       const result = await submitAgentSessionMessage(
         session.id,
         content,
         toSubmitAttachments(ready),
+        "steer",
       );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
@@ -1508,7 +1594,7 @@ function SessionViewContentBody({
             <div
               className="space-y-5"
               style={
-                lastUserTurnStart >= 0
+                lastUserTurnStart >= 0 && !latestUserIsSteer
                   ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
                   : undefined
               }
@@ -1722,35 +1808,58 @@ function SessionViewContentBody({
                     />
                   </>
                 }
-                action={
-                  canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                    <button
-                      type="button"
-                      disabled={isPending}
-                      onClick={requestAbort}
-                      aria-label="Stop generating"
-                      title="Stop generating"
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
-                    >
-                      <CircleStop size={16} strokeWidth={1.9} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={
-                        isPending ||
-                        attachments.some((a) => a.status !== "ready") ||
-                        (!parseSlashCommand(input, allSlashCommands) &&
-                          (isBusy || (!input.trim() && attachments.length === 0)))
-                      }
-                      onClick={handleSend}
-                      aria-label="Send message"
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
-                    >
-                      <ArrowUp size={13} strokeWidth={2} />
-                    </button>
-                  )
-                }
+                action={(() => {
+                  // While a run is active you can still type + send — that steers the run (no mode
+                  // picker; "steer" is the one default). The send button itself becomes the cue:
+                  // its arrow is replaced by the steering wheel (one-shot spin) to signal the send
+                  // will steer. Idle: a plain arrow, nothing extra. A Stop button sits alongside it
+                  // as the hard interrupt.
+                  const runActive =
+                    canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
+                  const sendDisabled =
+                    isPending ||
+                    attachments.some((a) => a.status !== "ready") ||
+                    (!parseSlashCommand(input, allSlashCommands) &&
+                      !input.trim() &&
+                      attachments.length === 0);
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={sendDisabled}
+                        onClick={handleSend}
+                        aria-label={runActive ? "Steer the running agent" : "Send message"}
+                        title={runActive ? "Steer the running agent" : "Send message"}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+                          runActive
+                            ? "text-ink-subtle hover:text-ink-muted"
+                            : "bg-ink text-canvas hover:bg-ink/85"
+                        }`}
+                      >
+                        {runActive ? (
+                          <SteerWheelIcon
+                            key="send-wheel"
+                            className="steer-wheel-spin h-3.5 w-3.5"
+                          />
+                        ) : (
+                          <ArrowUp size={13} strokeWidth={2} />
+                        )}
+                      </button>
+                      {runActive ? (
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={requestAbort}
+                          aria-label="Stop generating"
+                          title="Stop generating"
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          <CircleStop size={16} strokeWidth={1.9} />
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })()}
                 rightControls={
                   <div
                     className={`flex items-center gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
