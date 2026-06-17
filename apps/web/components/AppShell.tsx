@@ -2,6 +2,7 @@ import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { CollectionsProvider } from "@/components/CollectionsProvider";
+import { MobileMenuButton } from "@/components/MobileMenuButton";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
 import QueryProvider from "@/components/QueryProvider";
 import { ShellChrome } from "@/components/ShellChrome";
@@ -89,6 +90,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
                     </Suspense>
                   }
                 >
+                  <MobileMenuButton />
                   {children}
                 </ShellChrome>
               </div>

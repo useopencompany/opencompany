@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { cn } from "@/lib/utils";
 
@@ -26,11 +26,13 @@ export function ShellChrome({ sidebar, children }: { sidebar: ReactNode; childre
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
-  // Close the drawer on navigation (covers nav-link taps, which change the path).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: close only when the path changes.
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
+  // Close the drawer on navigation (covers nav-link taps). Adjust state during render
+  // per React's "you might not need an effect" guidance — avoids a setState-in-effect.
+  const [prevPathname, setPrevPathname] = useState(pathname);
+  if (prevPathname !== pathname) {
+    setPrevPathname(pathname);
+    if (open) setOpen(false);
+  }
 
   // Lock body scroll + close on Escape while the drawer is open on mobile.
   useEffect(() => {

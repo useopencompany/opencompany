@@ -462,7 +462,7 @@ function SidebarContent({
     <>
       <aside
         className={`relative h-full shrink-0 overflow-hidden bg-sidebar transition-[width] duration-200 ease-out ${
-          collapsed ? "w-0" : "w-[256px]"
+          collapsed ? "w-[256px] md:w-0" : "w-[256px]"
         }`}
         aria-hidden={collapsed}
       >
