@@ -100,6 +100,18 @@ type WorkspaceIntegrationState = {
   };
 };
 type GitHubConnection = WorkspaceIntegrationState["github"]["connections"][number];
+
+/**
+ * Deep-link to a connection's GitHub installation settings, where the user grants or revokes which
+ * repositories the OpenCompany GitHub App can access. Organisation and user installations live at
+ * different URLs, so branch on the account type.
+ */
+function githubConfigureUrl(connection: GitHubConnection): string {
+  if (connection.accountType === "Organization" && connection.accountLogin) {
+    return `https://github.com/organizations/${connection.accountLogin}/settings/installations/${connection.installationId}`;
+  }
+  return `https://github.com/settings/installations/${connection.installationId}`;
+}
 type NeonConnection = WorkspaceIntegrationState["neon"]["connections"][number];
 type DisconnectFeedback = {
   connectionId: string;
@@ -453,6 +465,15 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
                       {integrationStatusLabel(connection.status)}
                     </span>
                   ) : null}
+                  <a
+                    href={githubConfigureUrl(connection)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-canvas"
+                  >
+                    <ExternalLink size={13} strokeWidth={1.9} />
+                    Configure on GitHub
+                  </a>
                   <form action={refreshGitHubRepositories.bind(null, connection.id)}>
                     <RefreshRepositoriesButton />
                   </form>
@@ -1199,7 +1220,8 @@ function githubIntegrationState(status: IntegrationStatus): IntegrationCardState
     return {
       status: "needs_repository_access" as const,
       label: "Needs access",
-      description: "GitHub is installed but no repositories are available.",
+      description:
+        "GitHub is installed, but no repositories have been granted to it yet. Add repositories in GitHub via Configure, then click Refresh.",
     };
   }
   if (status === "needs_reauth") {
