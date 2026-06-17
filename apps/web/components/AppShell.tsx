@@ -63,7 +63,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-              <div className="flex h-screen w-screen overflow-hidden bg-canvas">
+              <div className="flex h-dvh w-full overflow-hidden overflow-x-hidden bg-canvas">
                 <Suspense
                   fallback={
                     <Sidebar
