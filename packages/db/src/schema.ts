@@ -319,6 +319,46 @@ export const agentFiles = pgTable(
   }),
 );
 
+// Append-only version history for brain knowledge files. Before the runner
+// overwrites or deletes a personal-brain (agentFiles) or company-brain
+// (brainFiles) file, the prior content is captured here so any bad turn can be
+// rolled back ("step back a turn"). This is the durability floor for PRO-244:
+// no user knowledge is silently lost, because the displaced bytes always land
+// in a version row first. Deliberately NOT FK-linked to agents/sessions — a
+// recreated agent or pruned session must not cascade-delete the backups.
+export const brainFileVersions = pgTable(
+  "brain_file_versions",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // "personal" -> agentFiles/personal-brain, "company" -> brainFiles/brain.
+    scope: text("scope").notNull(),
+    // Set for personal scope (owning agent); null for company brain.
+    agentId: text("agent_id"),
+    // Canonical repo path of the file whose prior content this row preserves.
+    path: text("path").notNull(),
+    content: text("content").notNull().default(""),
+    contentHash: text("content_hash").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    // What displaced this content: "overwrite" | "delete".
+    operation: text("operation").notNull(),
+    // Session/turn that displaced it — the grouping key for "step back a turn".
+    sessionId: text("session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    lookupIdx: index("brain_file_versions_lookup_idx").on(
+      table.workspaceId,
+      table.scope,
+      table.path,
+      table.createdAt,
+    ),
+    sessionIdx: index("brain_file_versions_session_idx").on(table.workspaceId, table.sessionId),
+  }),
+);
+
 // Unified, workspace-scoped projection outbox. Producers (web brain/agent
 // edits, runner writeback, agent self-edit) write canonical content to their
 // own tables and enqueue one row here per dirty repo path. A single projector

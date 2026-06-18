@@ -548,6 +548,10 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   // Creates an issue in the workspace's OWN connected Linear (not OC's feedback Linear). A real
   // external write, so it's gated "post" under the linear provider (ask-first by default).
   create_linear_issue: { providerKey: "linear", group: "post" },
+  // Restores a brain file to a saved version. Like write_file/edit_file it mutates a sandbox-backed
+  // brain (company brain_files / personal agent_files) tree, so it sits in the ungated system
+  // "modify" group — the version row it writes first keeps the change itself recoverable.
+  restore_brain_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // Reads a mounted skill file from the sandbox.
   read_skill: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   // Self-edit of the agent's own definition; its safety flow (validation + skill-read

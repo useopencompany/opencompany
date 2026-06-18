@@ -18,6 +18,7 @@ export type RuntimeToolName =
   | "inbox_update"
   | "fetch_transcript"
   | "create_linear_issue"
+  | "restore_brain_file"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -616,6 +617,46 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Dropped screenshots are attached automatically by the runner (it reads the bytes from secure storage) — never tell the user you can't attach the image, and never ask them for a file or URL.",
       "If Linear is not connected, this returns a recoverable error — tell the user to connect Linear in Settings → Integrations.",
       "If the workspace has multiple Linear teams and none was given, it returns the available team names so you can pass `team` and retry (or ask the user which team).",
+    ].join("\n"),
+  },
+  {
+    name: "restore_brain_file",
+    kind: "internal",
+    description:
+      'Roll a brain knowledge file back to a previously-saved version. Every time a brain file is overwritten or deleted, its prior content is automatically backed up; use this to recover from a bad edit or an accidental deletion ("step back a turn"). Pass the file `path`; with no version it restores the single most recent saved version, which undoes the last change. Set `list_only` to see the available versions (id, what changed it, size, when) before choosing, then re-call with `version_id`. Restoring is itself undoable — the current content is backed up first. For your own personal brain this targets personal-brain/ files; in a company workspace it targets the shared company brain.',
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            'The brain file path to restore. For the company brain use the logical brain path (e.g. "docs/context.md"); for a personal brain use the file\'s full repo path.',
+        },
+        version_id: {
+          type: "number",
+          description:
+            "Optional id of the specific saved version to restore (from list_only). Omit to restore the most recent saved version, undoing the last change.",
+        },
+        session_id: {
+          type: "string",
+          description:
+            "Optional session id to scope the restore to the most recent version saved during that session/turn. Ignored when version_id is given.",
+        },
+        list_only: {
+          type: "boolean",
+          description:
+            "When true, return the available saved versions for the path WITHOUT restoring anything. Use this first to pick a version_id.",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use restore_brain_file to recover brain content lost to a bad overwrite or an accidental delete.",
+      "Call once with list_only=true to inspect saved versions, then call again with the chosen version_id.",
+      'With no version_id and no session_id, it restores the single most recent saved version — the simplest "undo the last change".',
+      "Restoring a version whose change was a delete re-creates the file with that content.",
+      "The restore is recorded as a new version too, so it can itself be undone; a no-op restore (content unchanged) records nothing.",
     ].join("\n"),
   },
   {
@@ -2858,6 +2899,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   inbox_update: "Update inbox item",
   fetch_transcript: "Fetch transcript",
   create_linear_issue: "Create Linear issue",
+  restore_brain_file: "Restore brain file",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",

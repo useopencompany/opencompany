@@ -1,20 +1,25 @@
 import { agentBundleDir, shellQuote } from "@opencompany/agent-runtime";
+import { recordBrainFileVersion } from "@opencompany/db/brain-versions";
 import { agentFiles, agentSessionBundleMounts, agents } from "@opencompany/db/schema";
 import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
-import { MAX_BRAIN_FILE_BYTES, MAX_BRAIN_MOUNT_BYTES } from "./brain";
 import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
 import { conflictPath, hashContent } from "./repo-files";
 import { type SandboxHandle, sandboxLayout, writeSandboxTextFiles } from "./sandbox";
 
-const MAX_AGENT_BUNDLE_FILE_BYTES = MAX_BRAIN_FILE_BYTES;
+// Personal-brain caps are intentionally MUCH larger than the company-brain caps. A user's
+// "second brain" is the whole point of the personal surface; the old limits (inherited from the
+// 256 KB/file + 2 MB-total company caps) silently truncated real imports — the core PRO-244
+// data-loss bug. Decoupled and generous here, and anything still over-cap is now SURFACED via an
+// agent_bundle.cap_exceeded event, never dropped silently. TODO(jasper): confirm these numbers.
+export const MAX_AGENT_BUNDLE_FILE_BYTES = 2 * 1024 * 1024; // 2 MB per file
 // Deliberately decoupled from MAX_BRAIN_MOUNT_FILES (80): structured memory creates many small
 // files by design, so the byte budget is the real bound here. Sync cost stays O(changed files)
 // because hashing happens in-sandbox (see syncAgentBundleFromSandbox).
-const MAX_AGENT_BUNDLE_MOUNT_FILES = 1000;
-const MAX_AGENT_BUNDLE_MOUNT_BYTES = MAX_BRAIN_MOUNT_BYTES;
+export const MAX_AGENT_BUNDLE_MOUNT_FILES = 1000;
+export const MAX_AGENT_BUNDLE_MOUNT_BYTES = 32 * 1024 * 1024; // 32 MB total bundle
 // Profile file: always-present so the agent can read/edit it and so the runtime can inject it
 // into the system prompt every session (see resolveAgentRuntimeConfig). Created empty when
 // absent, exactly like a freshly-seeded scratchpad.
@@ -117,6 +122,15 @@ export async function materializeAgentBundleForSession(input: {
       agent_id: input.agentId,
       dropped_count: dropped.length,
       sample_paths: dropped.slice(0, 10).map((file) => file.repoPath),
+    });
+    // Surface the truncation to the user instead of only logging it (PRO-244).
+    await appendRuntimeEvent(db, {
+      sessionId: input.sessionId,
+      type: "agent_bundle.cap_exceeded",
+      payload: {
+        droppedPaths: dropped.slice(0, 50).map((file) => file.repoPath),
+        droppedCount: dropped.length,
+      },
     });
   }
   const layout = sandboxLayout(input.workdir, personal);
@@ -301,6 +315,15 @@ export async function syncAgentBundleFromSandbox(input: {
       path: targetPath,
       content,
       contentHash: hash,
+      sessionId: input.sessionId,
+      previous:
+        current && targetPath === repoPath
+          ? {
+              content: current.content,
+              contentHash: current.contentHash,
+              sizeBytes: current.sizeBytes,
+            }
+          : null,
     });
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
@@ -354,6 +377,20 @@ export async function syncAgentBundleFromSandbox(input: {
       continue;
     }
     await db.transaction(async (tx) => {
+      // Preserve the deleted content before the row is gone.
+      if (current) {
+        await recordBrainFileVersion(tx, {
+          workspaceId: input.workspaceId,
+          scope: "personal",
+          agentId: input.agentId,
+          path: mount.path,
+          content: current.content,
+          contentHash: current.contentHash,
+          sizeBytes: current.sizeBytes,
+          operation: "delete",
+          sessionId: input.sessionId,
+        });
+      }
       await tx
         .delete(agentFiles)
         .where(and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.path, mount.path)));
@@ -380,6 +417,15 @@ export async function syncAgentBundleFromSandbox(input: {
       agent_id: input.agentId,
       dropped_count: droppedPaths.length,
       sample_paths: droppedPaths.slice(0, 10),
+    });
+    // Surface to the user — a silent log here is exactly how the migration vanished (PRO-244).
+    await appendRuntimeEvent(db, {
+      sessionId: input.sessionId,
+      type: "agent_bundle.cap_exceeded",
+      payload: {
+        droppedPaths: droppedPaths.slice(0, 50),
+        droppedCount: droppedPaths.length,
+      },
     });
   }
 }
@@ -455,12 +501,28 @@ async function upsertAgentFileFromRunner(input: {
   path: string;
   content: string;
   contentHash: string;
+  sessionId: string | null;
+  previous: { content: string; contentHash: string; sizeBytes: number } | null;
 }) {
   const db = getDb();
   const sizeBytes = Buffer.byteLength(input.content, "utf8");
   const now = new Date();
 
   await db.transaction(async (tx) => {
+    // Back up the bytes we are about to overwrite so the change is recoverable.
+    if (input.previous && input.previous.contentHash !== input.contentHash) {
+      await recordBrainFileVersion(tx, {
+        workspaceId: input.workspaceId,
+        scope: "personal",
+        agentId: input.agentId,
+        path: input.path,
+        content: input.previous.content,
+        contentHash: input.previous.contentHash,
+        sizeBytes: input.previous.sizeBytes,
+        operation: "overwrite",
+        sessionId: input.sessionId,
+      });
+    }
     await tx
       .insert(agentFiles)
       .values({

@@ -25,7 +25,11 @@ vi.mock("@opencompany/observability", () => ({
 vi.mock("./events", () => eventMocks);
 vi.mock("./github", () => githubMocks);
 
-import { materializeAgentBundleForSession, syncAgentBundleFromSandbox } from "./agent-bundle";
+import {
+  MAX_AGENT_BUNDLE_FILE_BYTES,
+  materializeAgentBundleForSession,
+  syncAgentBundleFromSandbox,
+} from "./agent-bundle";
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -248,9 +252,9 @@ describe("materializeAgentBundleForSession", () => {
       },
       {
         path: "agents/sales/playbooks/oversized.md",
-        content: "x".repeat(256 * 1024 + 1),
+        content: "x".repeat(MAX_AGENT_BUNDLE_FILE_BYTES + 1),
         contentHash: "hash_oversized",
-        sizeBytes: 256 * 1024 + 1,
+        sizeBytes: MAX_AGENT_BUNDLE_FILE_BYTES + 1,
       },
       ...Array.from({ length: 85 }, (_, index) => ({
         path: `agents/sales/zz-${String(index).padStart(3, "0")}.md`,
@@ -476,7 +480,7 @@ describe("syncAgentBundleFromSandbox", () => {
   });
 
   it("drops oversized files loudly but no longer caps at 80 files", async () => {
-    const big = "x".repeat(256 * 1024 + 1);
+    const big = "x".repeat(MAX_AGENT_BUNDLE_FILE_BYTES + 1);
     const db = createAgentBundleDb({
       selectResults: [
         [{ path: "agents/sales/sales.agent" }],
@@ -751,6 +755,165 @@ describe("syncAgentBundleFromSandbox", () => {
 
     expect(sandbox.files.read).not.toHaveBeenCalled();
     expect(db.insertedValues).toEqual([]);
+  });
+
+  it("captures a version of the prior content before overwriting a personal-brain file", async () => {
+    const db = createAgentBundleDb({
+      selectResults: [
+        [{ path: "agents/sales/sales.agent" }],
+        [
+          {
+            sessionId: "ses_123",
+            workspaceId: "wsp_123",
+            requestedPath: "agent/notes.md",
+            path: "agents/sales/notes.md",
+            referenceType: "file",
+            baseHash: sha256("Old notes"),
+            lastSyncedHash: sha256("Old notes"),
+          },
+        ],
+        [
+          {
+            path: "agents/sales/notes.md",
+            content: "Old notes",
+            contentHash: sha256("Old notes"),
+            sizeBytes: 9,
+          },
+        ],
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const sandbox = createSandbox({
+      commandStdout: `${hashLine("agent/notes.md", "New notes")}\n`,
+      fileReads: {
+        "/home/user/workspace/agent/notes.md": "New notes",
+      },
+    });
+
+    await syncAgentBundleFromSandbox({
+      sandbox: sandbox as never,
+      sessionId: "ses_123",
+      workspaceId: "wsp_123",
+      agentId: "agt_sales",
+      workdir: "/home/user/workspace",
+    });
+
+    // The displaced bytes ("Old notes") are preserved before the row is rewritten.
+    expect(db.insertedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: "personal",
+          agentId: "agt_sales",
+          path: "agents/sales/notes.md",
+          content: "Old notes",
+          operation: "overwrite",
+          sessionId: "ses_123",
+        }),
+      ]),
+    );
+  });
+
+  it("captures a version of the deleted content before removing a personal-brain file", async () => {
+    const db = createAgentBundleDb({
+      selectResults: [
+        [{ path: "agents/sales/sales.agent" }],
+        [
+          {
+            sessionId: "ses_123",
+            workspaceId: "wsp_123",
+            requestedPath: "agent/notes.md",
+            path: "agents/sales/notes.md",
+            referenceType: "file",
+            baseHash: sha256("Old notes"),
+            lastSyncedHash: sha256("Old notes"),
+          },
+        ],
+        [
+          {
+            path: "agents/sales/notes.md",
+            content: "Old notes",
+            contentHash: sha256("Old notes"),
+            sizeBytes: 9,
+          },
+        ],
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    // Empty sandbox listing => the mounted file was removed in-sandbox.
+    const sandbox = createSandbox({ commandStdout: "", fileReads: {} });
+
+    await syncAgentBundleFromSandbox({
+      sandbox: sandbox as never,
+      sessionId: "ses_123",
+      workspaceId: "wsp_123",
+      agentId: "agt_sales",
+      workdir: "/home/user/workspace",
+    });
+
+    // Deletion still propagates, but the content is recoverable from a version row.
+    expect(db.insertedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: "personal",
+          agentId: "agt_sales",
+          path: "agents/sales/notes.md",
+          content: "Old notes",
+          operation: "delete",
+          sessionId: "ses_123",
+        }),
+      ]),
+    );
+  });
+
+  it("surfaces a cap_exceeded event instead of silently dropping an over-cap personal-brain file", async () => {
+    const big = "x".repeat(MAX_AGENT_BUNDLE_FILE_BYTES + 1);
+    const db = createAgentBundleDb({
+      selectResults: [
+        [{ path: "agents/sales/sales.agent" }],
+        [
+          {
+            sessionId: "ses_123",
+            workspaceId: "wsp_123",
+            requestedPath: "agent/huge.md",
+            path: "agents/sales/huge.md",
+            referenceType: "file",
+            baseHash: "hash_x",
+            lastSyncedHash: "hash_x",
+          },
+        ],
+        [],
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const sandbox = createSandbox({
+      commandStdout: `${hashLine("agent/huge.md", big)}\n`,
+      fileReads: { "/home/user/workspace/agent/huge.md": big },
+    });
+
+    await syncAgentBundleFromSandbox({
+      sandbox: sandbox as never,
+      sessionId: "ses_123",
+      workspaceId: "wsp_123",
+      agentId: "agt_sales",
+      workdir: "/home/user/workspace",
+    });
+
+    // The drop is announced to the user instead of being a silent logger.warn.
+    expect(eventMocks.appendRuntimeEvent).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        sessionId: "ses_123",
+        type: "agent_bundle.cap_exceeded",
+        payload: expect.objectContaining({
+          droppedPaths: ["agents/sales/huge.md"],
+          droppedCount: 1,
+        }),
+      }),
+    );
+    // And the over-cap file is not persisted.
+    expect(db.insertedValues).not.toContainEqual(
+      expect.objectContaining({ path: "agents/sales/huge.md" }),
+    );
   });
 });
 
