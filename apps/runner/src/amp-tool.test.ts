@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { repositoryIdForFullName } from "@opencompany/agent-runtime";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGitHubWorkRepositoryDb } from "./agent-loop-test-support";
 import {
   buildAmpCommand,
@@ -8,6 +9,7 @@ import {
   createKnownSecretRedactor,
   fetchAmpThreadCost,
   loadGitHubWorkRepository,
+  loadGitHubWorkRepositoryByFullName,
   selectPublishBranch,
 } from "./amp-tool";
 
@@ -17,6 +19,15 @@ const dbMocks = vi.hoisted(() => ({
 
 vi.mock("./db", () => ({
   getDb: dbMocks.getDb,
+}));
+
+const githubMocks = vi.hoisted(() => ({
+  fetchGitHubWorkRepository: vi.fn(),
+}));
+
+vi.mock("./github", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./github")>()),
+  fetchGitHubWorkRepository: githubMocks.fetchGitHubWorkRepository,
 }));
 
 afterEach(() => {
@@ -816,5 +827,167 @@ describe("Amp stream parsing", () => {
     );
 
     expect(output).toBe("Amp session T-123 started.\nAmp completed in 1.3s, 2 turns.\n");
+  });
+});
+
+describe("loadGitHubWorkRepositoryByFullName live resolution", () => {
+  beforeEach(() => {
+    githubMocks.fetchGitHubWorkRepository.mockReset();
+    dbMocks.getDb.mockReset();
+  });
+
+  // Mock db serving the two query shapes the live path uses — the repo-snapshot lookup (ends in
+  // `.limit`) and the connected-installations lookup (ends in `.orderBy`) — plus the persistence
+  // upsert (`.insert().values().onConflictDoUpdate()`), capturing every upserted row in `inserts`.
+  function createLiveResolveDb(input: {
+    repoRows?: unknown[];
+    installations?: Array<{ integrationId: string; installationId: string }>;
+  }) {
+    const inserts: Array<Record<string, unknown>> = [];
+    const makeQuery = () => {
+      const query: Record<string, unknown> = {
+        from: vi.fn(() => query),
+        innerJoin: vi.fn(() => query),
+        where: vi.fn(() => query),
+        limit: vi.fn(async () => input.repoRows ?? []),
+        orderBy: vi.fn(async () => input.installations ?? []),
+      };
+      return query;
+    };
+    return {
+      inserts,
+      select: vi.fn(() => makeQuery()),
+      insert: vi.fn(() => ({
+        values: vi.fn((values: Record<string, unknown>) => ({
+          onConflictDoUpdate: vi.fn(async () => {
+            inserts.push(values);
+          }),
+        })),
+      })),
+    };
+  }
+
+  it("resolves and persists a repo granted after the last sync (cache miss → live hit)", async () => {
+    const db = createLiveResolveDb({
+      repoRows: [],
+      installations: [{ integrationId: "wint_1", installationId: "111" }],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    githubMocks.fetchGitHubWorkRepository.mockResolvedValue({
+      id: "42",
+      fullName: "acme/private-app",
+      defaultBranch: "develop",
+      private: true,
+    });
+
+    const result = await loadGitHubWorkRepositoryByFullName("wks_1", "acme/private-app");
+
+    expect(result).toEqual({
+      repository: {
+        id: repositoryIdForFullName("acme/private-app"),
+        fullName: "acme/private-app",
+        defaultBranch: "develop",
+      },
+      installationId: "111",
+    });
+    expect(githubMocks.fetchGitHubWorkRepository).toHaveBeenCalledWith({
+      installationId: "111",
+      fullName: "acme/private-app",
+    });
+    expect(db.inserts).toHaveLength(1);
+    expect(db.inserts[0]).toMatchObject({
+      integrationId: "wint_1",
+      provider: "github",
+      resourceType: "repository",
+      externalId: "42",
+      name: "acme/private-app",
+      status: "available",
+      metadata: { defaultBranch: "develop", private: true },
+    });
+  });
+
+  it("returns null and persists nothing when no installation grants the repo", async () => {
+    const db = createLiveResolveDb({
+      repoRows: [],
+      installations: [{ integrationId: "wint_1", installationId: "111" }],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    githubMocks.fetchGitHubWorkRepository.mockResolvedValue(null);
+
+    const result = await loadGitHubWorkRepositoryByFullName("wks_1", "acme/never-granted");
+
+    expect(result).toBeNull();
+    expect(db.inserts).toHaveLength(0);
+  });
+
+  it("probes every connected installation and resolves on a later one (multi-account)", async () => {
+    const db = createLiveResolveDb({
+      repoRows: [],
+      installations: [
+        { integrationId: "wint_a", installationId: "aaa" },
+        { integrationId: "wint_b", installationId: "bbb" },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    githubMocks.fetchGitHubWorkRepository.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: "7",
+      fullName: "acme/app",
+      defaultBranch: "main",
+      private: true,
+    });
+
+    const result = await loadGitHubWorkRepositoryByFullName("wks_1", "acme/app");
+
+    expect(result?.installationId).toBe("bbb");
+    expect(githubMocks.fetchGitHubWorkRepository).toHaveBeenCalledTimes(2);
+    expect(db.inserts[0]).toMatchObject({ integrationId: "wint_b", externalId: "7" });
+  });
+
+  it("treats a live-check failure as best-effort and keeps probing the next installation", async () => {
+    const db = createLiveResolveDb({
+      repoRows: [],
+      installations: [
+        { integrationId: "wint_a", installationId: "aaa" },
+        { integrationId: "wint_b", installationId: "bbb" },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    githubMocks.fetchGitHubWorkRepository
+      .mockRejectedValueOnce(new Error("network blip"))
+      .mockResolvedValueOnce({
+        id: "9",
+        fullName: "acme/app",
+        defaultBranch: "main",
+        private: false,
+      });
+
+    const result = await loadGitHubWorkRepositoryByFullName("wks_1", "acme/app");
+
+    expect(result?.installationId).toBe("bbb");
+  });
+
+  it("short-circuits on a DB-snapshot hit without any live GitHub call", async () => {
+    const db = createLiveResolveDb({
+      repoRows: [
+        {
+          integrationId: "wint_1",
+          fullName: "acme/app",
+          installationId: "111",
+          connectionLabel: "acme",
+          connectionStatus: "connected",
+          connectionStatusReason: null,
+          resourceStatus: "available",
+          resourceStatusReason: null,
+          metadata: { defaultBranch: "main" },
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await loadGitHubWorkRepositoryByFullName("wks_1", "acme/app");
+
+    expect(result).toMatchObject({ installationId: "111" });
+    expect(githubMocks.fetchGitHubWorkRepository).not.toHaveBeenCalled();
+    expect(db.inserts).toHaveLength(0);
   });
 });
