@@ -227,7 +227,7 @@ export default function PersonalShell({
           arrangement survives navigation between personal sub-routes, and so the
           sidebar can act as a drag source into the session canvas. */}
       <PersonalSplitProvider>
-        <div className="flex h-screen w-screen overflow-hidden bg-sidebar">
+        <div className="flex h-dvh w-full overflow-hidden overflow-x-hidden bg-sidebar">
           <PersonalSidebar
             collapsed={collapsed}
             onToggleCollapsed={() => persistSidebarCollapsed(!collapsed)}

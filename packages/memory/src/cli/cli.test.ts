@@ -90,6 +90,201 @@ describe("memory CLI", () => {
     expect(evidenceType.code).toBe(1);
   });
 
+  it("refuses a near-duplicate of an existing object and points at the original", async () => {
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio-anastassiades",
+      "--title",
+      "Aurelio Anastassiades",
+    ]);
+
+    // A shorter spelling of the same person must be refused, naming the existing record.
+    const shorter = await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio",
+      "--title",
+      "Aurelio",
+    ]);
+    expect(shorter.code).toBe(1);
+    expect(shorter.text).toContain("aurelio-anastassiades");
+
+    // A single-character misspelling of the same person must be refused too.
+    const typo = await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio-anastasiades",
+      "--title",
+      "Aurelio Anastasiades",
+    ]);
+    expect(typo.code).toBe(1);
+    expect(typo.text).toContain("aurelio-anastassiades");
+
+    // Nothing duplicate-ish was actually written.
+    const all = await run(query, ["--type", "person", "--limit", "20"]);
+    expect((data(all).hits as unknown[]).length).toBe(1);
+  });
+
+  it("--allow-similar overrides the near-duplicate guard for genuinely distinct objects", async () => {
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio-anastassiades",
+      "--title",
+      "Aurelio Anastassiades",
+    ]);
+    const forced = await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio",
+      "--title",
+      "Aurelio",
+      "--allow-similar",
+    ]);
+    expect(forced.code).toBe(0);
+    expect(data(forced).path).toBe("people/aurelio.md");
+  });
+
+  it("the near-duplicate guard does not block unrelated names or other types", async () => {
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio-anastassiades",
+      "--title",
+      "Aurelio Anastassiades",
+    ]);
+
+    // Different person — allowed.
+    const other = await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "christian-gruenberg",
+      "--title",
+      "Christian Gruenberg",
+    ]);
+    expect(other.code).toBe(0);
+
+    // Same name string but a different TYPE is not a collision.
+    const company = await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "aurelio",
+      "--title",
+      "Aurelio",
+    ]);
+    expect(company.code).toBe(0);
+  });
+
+  it("doctor flags near-duplicate canonical objects as a warning, not an error", async () => {
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio-anastassiades",
+      "--title",
+      "Aurelio Anastassiades",
+    ]);
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio",
+      "--title",
+      "Aurelio",
+      "--allow-similar",
+    ]);
+    // An unrelated person must not be dragged into the finding.
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "christian-gruenberg",
+      "--title",
+      "Christian Gruenberg",
+    ]);
+
+    const report = await run(doctor, []);
+    expect(report.code).toBe(0); // warning only — doctor still exits clean
+    const findings = data(report).findings as {
+      code: string;
+      id: string;
+      severity: string;
+      message: string;
+    }[];
+    const nearDup = findings.filter((f) => f.code === "near_duplicate");
+    expect(nearDup).toHaveLength(1);
+    expect(nearDup[0]?.severity).toBe("warn");
+    expect(nearDup[0]?.id).toBe("aurelio,aurelio-anastassiades");
+    expect(nearDup[0]?.message).toContain("merge"); // points the reader at how to consolidate
+  });
+
+  it("doctor reports no near-duplicate for distinct objects", async () => {
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio-anastassiades",
+      "--title",
+      "Aurelio Anastassiades",
+    ]);
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "christian-gruenberg",
+      "--title",
+      "Christian Gruenberg",
+    ]);
+    const findings = data(await run(doctor, [])).findings as { code: string }[];
+    expect(findings.some((f) => f.code === "near_duplicate")).toBe(false);
+  });
+
+  it("doctor does not flag a merged stub against the survivor it points to", async () => {
+    await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme"]);
+    await run(create, ["--type", "company", "--id", "acme-corp", "--allow-similar"]);
+    await run(merge, ["--from", "acme-corp", "--into", "acme"]);
+    const findings = data(await run(doctor, [])).findings as { code: string }[];
+    expect(findings.some((f) => f.code === "near_duplicate")).toBe(false);
+  });
+
+  it("doctor stops flagging a pair once it is linked not_duplicate", async () => {
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio-anastassiades",
+      "--title",
+      "Aurelio Anastassiades",
+    ]);
+    await run(create, [
+      "--type",
+      "person",
+      "--id",
+      "aurelio",
+      "--title",
+      "Aurelio",
+      "--allow-similar",
+    ]);
+
+    // Before adjudication the look-alikes are flagged.
+    const before = data(await run(doctor, [])).findings as { code: string }[];
+    expect(before.some((f) => f.code === "near_duplicate")).toBe(true);
+
+    // Once a model/human records them as genuinely distinct, the warning is suppressed.
+    await run(link, ["aurelio", "--to", "aurelio-anastassiades", "--as", "not_duplicate"]);
+    const after = data(await run(doctor, [])).findings as { code: string }[];
+    expect(after.some((f) => f.code === "near_duplicate")).toBe(false);
+  });
+
   it("append-evidence enforces provenance and links subjects without bumping updated_at", async () => {
     await run(create, ["--type", "company", "--id", "acme"]);
     const before = data(await run(get, ["acme", "--section", "frontmatter"]));
@@ -237,7 +432,7 @@ describe("memory CLI", () => {
 
   it("merges a duplicate into the survivor and re-points evidence", async () => {
     await run(create, ["--type", "company", "--id", "acme"]);
-    await run(create, ["--type", "company", "--id", "acme-corp"]);
+    await run(create, ["--type", "company", "--id", "acme-corp", "--allow-similar"]);
     await run(appendEvidence, [
       "--kind",
       "meeting",
@@ -265,7 +460,7 @@ describe("memory CLI", () => {
 
   it("merge consolidates aliases onto the survivor without leaving a duplicate", async () => {
     await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme"]);
-    await run(create, ["--type", "company", "--id", "acme-corp"]);
+    await run(create, ["--type", "company", "--id", "acme-corp", "--allow-similar"]);
 
     const merged = await run(merge, ["--from", "acme", "--into", "acme-corp"]);
     expect(merged.code).toBe(0);
@@ -379,7 +574,7 @@ describe("memory CLI", () => {
 
   it("deletes a merged stub cleanly and leaves a healthy tree", async () => {
     await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme"]);
-    await run(create, ["--type", "company", "--id", "acme-corp"]);
+    await run(create, ["--type", "company", "--id", "acme-corp", "--allow-similar"]);
     await run(merge, ["--from", "acme", "--into", "acme-corp"]);
 
     // A merged stub has no inbound references, so it deletes without --force.
@@ -588,7 +783,7 @@ describe("memory CLI", () => {
 
   it("query hides merged stubs by default and surfaces them with --include-merged", async () => {
     await run(create, ["--type", "company", "--id", "acme"]);
-    await run(create, ["--type", "company", "--id", "acme-corp"]);
+    await run(create, ["--type", "company", "--id", "acme-corp", "--allow-similar"]);
     await run(merge, ["--from", "acme-corp", "--into", "acme"]);
 
     const hidden = await run(query, ["acme-corp", "--lexical-only"]);

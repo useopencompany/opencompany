@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { type AgentConfig, repositoryIdForFullName, shellQuote } from "@opencompany/agent-runtime";
 import type { AgentGitHubRepositoryConfig } from "@opencompany/agent-runtime/types";
 import {
@@ -8,7 +9,11 @@ import {
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
+import {
+  createDraftPullRequest,
+  fetchGitHubWorkRepository,
+  getGitHubWorkInstallationToken,
+} from "./github";
 import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import {
@@ -460,7 +465,7 @@ async function resolveAmpWorkspaceRepository(
   const resolved = await loadGitHubWorkRepositoryByFullName(workspaceId, target.fullName);
   if (!resolved) {
     throw new Error(
-      `GitHub work repository ${target.fullName} is not available to this workspace. Reconnect GitHub or grant the installation access to it.`,
+      `GitHub work repository ${target.fullName} is not available to this workspace. Its GitHub App installation has not been granted access to it — add the repository to the installation in GitHub (Settings → Applications → your installed GitHub App → Configure), and it becomes available automatically.`,
     );
   }
   return resolved;
@@ -509,9 +514,11 @@ export async function loadGitHubWorkRepository(
 /**
  * Live lookup for integration-wide (`@github` all-repositories) targets: resolve any
  * owner/repo the workspace's GitHub connection can reach without it being attached to the
- * agent, picking up the synced default branch. Returns null when the repository is unknown
- * to the workspace (so callers can fall back, e.g. opencode's public-clone path); a
- * known-but-unusable repository still throws the actionable status errors.
+ * agent, picking up the synced default branch. On a snapshot miss it re-checks GitHub live (see
+ * {@link resolveGitHubWorkRepositoryLive}) so a repo granted after the last sync still resolves.
+ * Returns null only when no connected installation can reach the repository (so callers can fall
+ * back, e.g. opencode's public-clone path); a known-but-unusable repository still throws the
+ * actionable status errors.
  */
 export async function loadGitHubWorkRepositoryByFullName(
   workspaceId: string,
@@ -522,16 +529,23 @@ export async function loadGitHubWorkRepositoryByFullName(
     fullName,
     defaultBranch: "main",
   });
-  if (!row) return null;
+  if (row) {
+    return {
+      repository: {
+        id: repositoryIdForFullName(row.fullName),
+        fullName: row.fullName,
+        defaultBranch: row.defaultBranch,
+      },
+      installationId: row.installationId,
+    };
+  }
 
-  return {
-    repository: {
-      id: repositoryIdForFullName(row.fullName),
-      fullName: row.fullName,
-      defaultBranch: row.defaultBranch,
-    },
-    installationId: row.installationId,
-  };
+  // Cache miss. The synced repository list is only a snapshot (refreshed at connect-time or via the
+  // "Refresh repositories" button), so a repo granted to the installation *after* the last sync is
+  // absent here even though the agent is allowed to use it. Re-check live against each connected
+  // installation before giving up — this stops a freshly-granted repo from being reported "not
+  // available" until someone manually refreshes.
+  return resolveGitHubWorkRepositoryLive(workspaceId, fullName);
 }
 
 /**
@@ -561,6 +575,130 @@ export async function loadConnectedGitHubInstallation(
     .limit(1);
 
   return row ?? null;
+}
+
+/**
+ * All connected GitHub installations for a workspace, oldest first. A workspace can connect more
+ * than one GitHub account ("Connect another GitHub account"), and a requested repo may be granted
+ * on any of them, so live resolution probes each in turn.
+ */
+async function loadConnectedGitHubInstallations(
+  workspaceId: string,
+): Promise<Array<{ integrationId: string; installationId: string }>> {
+  const db = getDb();
+  return db
+    .select({
+      integrationId: workspaceIntegrations.id,
+      installationId: workspaceIntegrations.externalId,
+    })
+    .from(workspaceIntegrations)
+    .where(
+      and(
+        eq(workspaceIntegrations.workspaceId, workspaceId),
+        eq(workspaceIntegrations.provider, "github"),
+        eq(workspaceIntegrations.status, "connected"),
+      ),
+    )
+    .orderBy(asc(workspaceIntegrations.createdAt));
+}
+
+/**
+ * Resolve a repo absent from the synced snapshot by asking GitHub live whether any connected
+ * installation can currently reach it (i.e. it was granted after the last sync). Best-effort: any
+ * failure falls back to null so the live path can only upgrade a miss into a hit, never break an
+ * existing one.
+ */
+async function resolveGitHubWorkRepositoryLive(
+  workspaceId: string,
+  fullName: string,
+): Promise<{ repository: AgentGitHubRepositoryConfig; installationId: string } | null> {
+  const installations = await loadConnectedGitHubInstallations(workspaceId);
+  for (const installation of installations) {
+    let repository: Awaited<ReturnType<typeof fetchGitHubWorkRepository>>;
+    try {
+      repository = await fetchGitHubWorkRepository({
+        installationId: installation.installationId,
+        fullName,
+      });
+    } catch {
+      continue;
+    }
+    if (!repository) continue;
+
+    // Write the freshly-granted repo back into the synced snapshot so future lookups hit the DB and
+    // it shows up in the integration's repository list. Best-effort: a write failure must not block
+    // the agent, which already has the live-resolved repo for this run.
+    try {
+      await persistResolvedGitHubWorkRepository({
+        workspaceId,
+        integrationId: installation.integrationId,
+        repository,
+      });
+    } catch {
+      // ignore — persistence is an optimisation, not required for this run to proceed.
+    }
+
+    return {
+      repository: {
+        id: repositoryIdForFullName(repository.fullName),
+        fullName: repository.fullName,
+        defaultBranch: repository.defaultBranch,
+      },
+      installationId: installation.installationId,
+    };
+  }
+  return null;
+}
+
+/**
+ * Upsert a live-resolved repo into the synced snapshot (self-healing resync of a single repo).
+ * Mirrors the resource shape and conflict target written by the web app's
+ * `syncGitHubIntegrationRepositories` — keep the two in sync if either changes.
+ */
+async function persistResolvedGitHubWorkRepository(input: {
+  workspaceId: string;
+  integrationId: string;
+  repository: NonNullable<Awaited<ReturnType<typeof fetchGitHubWorkRepository>>>;
+}): Promise<void> {
+  const db = getDb();
+  const now = new Date();
+  const metadata = {
+    defaultBranch: input.repository.defaultBranch,
+    private: input.repository.private,
+  };
+  await db
+    .insert(workspaceIntegrationResources)
+    .values({
+      id: `wres_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      workspaceId: input.workspaceId,
+      integrationId: input.integrationId,
+      provider: "github",
+      resourceType: "repository",
+      externalId: input.repository.id,
+      name: input.repository.fullName,
+      displayName: input.repository.fullName,
+      status: "available",
+      statusReason: null,
+      lastSyncedAt: now,
+      metadata,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        workspaceIntegrationResources.integrationId,
+        workspaceIntegrationResources.resourceType,
+        workspaceIntegrationResources.externalId,
+      ],
+      set: {
+        name: input.repository.fullName,
+        displayName: input.repository.fullName,
+        status: "available",
+        statusReason: null,
+        lastSyncedAt: now,
+        metadata,
+        updatedAt: now,
+      },
+    });
 }
 
 async function loadGitHubWorkRepositoryRow(

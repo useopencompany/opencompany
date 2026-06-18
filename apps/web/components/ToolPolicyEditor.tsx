@@ -41,19 +41,29 @@ export function ToolPolicyEditor({ providerKey, overrides }: ToolPolicyEditorPro
   const update = (group: PermissionGroup, decision: PolicyDecision) => {
     const previous = decisions[group];
     setDecisions((current) => ({ ...current, [group]: decision }));
+    const revert = () => {
+      setDecisions((current) => ({
+        ...current,
+        [group]: previous ?? DEFAULT_GROUP_STANCE[group],
+      }));
+    };
     startTransition(async () => {
-      const result = await setWorkspaceToolPolicy({
-        providerKey,
-        permissionGroup: group,
-        decision,
-      });
-      if (!result.ok) {
-        // Revert the optimistic change on failure.
-        setDecisions((current) => ({
-          ...current,
-          [group]: previous ?? DEFAULT_GROUP_STANCE[group],
-        }));
-        showError(result.error);
+      try {
+        const result = await setWorkspaceToolPolicy({
+          providerKey,
+          permissionGroup: group,
+          decision,
+        });
+        if (!result.ok) {
+          // Revert the optimistic change on failure.
+          revert();
+          showError(result.error);
+        }
+      } catch {
+        // A thrown server-action error must not escalate to the route error
+        // boundary and tear down a surrounding flow (e.g. the onboarding wizard).
+        revert();
+        showError("Couldn't update this permission. Please try again.");
       }
     });
   };

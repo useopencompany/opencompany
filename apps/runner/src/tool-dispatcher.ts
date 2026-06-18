@@ -1304,7 +1304,7 @@ async function resolveShellGitHubAuth(input: {
       );
       if (!resolved) {
         throw new Error(
-          `GitHub work repository ${requestedRepository} is not available to this workspace. Reconnect GitHub or grant the installation access to it.`,
+          `GitHub work repository ${requestedRepository} is not available to this workspace. Its GitHub App installation has not been granted access to it — add the repository to the installation in GitHub (Settings → Applications → your installed GitHub App → Configure), and it becomes available automatically.`,
         );
       }
 

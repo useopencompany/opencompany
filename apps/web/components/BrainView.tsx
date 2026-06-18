@@ -1155,7 +1155,7 @@ export default function BrainView({
       />
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
+        <div className="relative z-10 flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
           {selected ? (
             <>
               <div className="flex min-w-0 flex-1 items-center gap-2 text-[12.5px]">

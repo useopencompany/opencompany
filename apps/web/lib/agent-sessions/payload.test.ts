@@ -131,6 +131,34 @@ describe("session payload cache helpers", () => {
     ).toBe(14_200);
   });
 
+  it("round-trips a message's sendMode and leaves it unset for legacy messages", () => {
+    const sessionDetail = detail({
+      messages: [
+        {
+          id: "msg_steer",
+          role: "user",
+          content: "no make it 6",
+          status: "completed",
+          sendMode: "steer",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          completedAt: "2026-05-24T10:00:00.000Z",
+        },
+        {
+          id: "msg_legacy",
+          role: "user",
+          content: "hi",
+          status: "completed",
+          createdAt: "2026-05-24T10:00:01.000Z",
+          completedAt: "2026-05-24T10:00:01.000Z",
+        },
+      ],
+    });
+
+    const messages = parseAgentSessionDetailResponse({ detail: sessionDetail }).detail.messages;
+    expect(messages[0].sendMode).toBe("steer");
+    expect(messages[1].sendMode).toBeUndefined();
+  });
+
   it("defaults currentContextTokens to 0 for payloads cached before the field shipped", () => {
     const { currentContextTokens: _omitted, ...legacy } = detail();
 
