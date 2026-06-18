@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- OpenRouter Fusion models are now supported (#473) — @louis.
+- Messages sent mid-run now offer Steer, Queue, and Interrupt send-modes (#468) — @jasper.
+- Chat sessions can now be renamed via double-click or a right-click menu (#467) — @jasper.
+- Clarifying questions now always include a free-text "Other" answer (#466) — @jasper.
+- Screenshots dropped into chat are now attached to the Linear issue created from that conversation (#464) — @jasper.
+
+### Changed
+- Built-in skills now show distinct icons instead of a shared Sparkles placeholder (#475) — @jasper.
+- Memory lookup prompting tightened for more relevant recall (#474) — @louis.
+- Typed @mentions in the agent editor are no longer auto-converted as you type (#470) — @jasper.
+
+### Fixed
+- The onboarding wizard no longer resets when setting tool policies during the capabilities step (#481) — @jasper.
+- The three-dot menu in the brain file view no longer renders behind the file text (#480) — @jasper.
+- GitHub work repositories granted after connecting now resolve via a live lookup instead of being missed (#479) — @jasper.
+- Various mobile and phone UI fixes (#478) — @jasper.
+- Near-identical person records in memory are now deduplicated (#477) — @jasper.
+- The thinking trace now separates distinct reasoning phases instead of running them together (#476) — @jasper.
+- The "Updated memory" card no longer overlaps the message footer (#469) — @jasper.
+- Fixed the personal billing redirect (#465) — @louis.
+
 ## [0.13.0] - 2026-06-12
 
 ### Added
