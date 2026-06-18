@@ -1,8 +1,9 @@
 "use server";
 
+import { recordBrainFileVersion } from "@opencompany/db/brain-versions";
 import { getDb } from "@opencompany/db/client";
-import { agentFiles } from "@opencompany/db/schema";
-import { and, eq } from "drizzle-orm";
+import { agentFiles, brainFileVersions } from "@opencompany/db/schema";
+import { and, desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { isBrainTextFile, MAX_BRAIN_FILE_BYTES, normalizeBrainPath } from "@/lib/brain/paths";
@@ -250,4 +251,181 @@ export async function deletePersonalBrainFolder(path: string): Promise<BrainActi
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Delete failed." };
   }
+}
+
+// --- Version history + restore (PRO-244) ---------------------------------------
+//
+// The runner captures the prior content of every personal-brain file before it
+// overwrites/deletes it (brainFileVersions, scope="personal", agentId=the
+// owning agent, path=the FULL agent_files repo path — NOT the logical UI path).
+// These actions list those versions and roll a file back. Like every other
+// personal-brain mutation they are LOCAL-ONLY: restores write to agent_files and
+// never touch the workspace sync outbox. A restore is itself recorded as a new
+// version row, so it is just as undoable as the change it reverts.
+
+// What the UI needs to render the version list — never the full content (which
+// can be up to 256 KB per row); content is only loaded on restore.
+export type PersonalBrainFileVersionSummary = {
+  id: number;
+  operation: string;
+  sizeBytes: number;
+  createdAt: string;
+  sessionId: string | null;
+};
+
+type ListResult =
+  | { ok: true; versions: PersonalBrainFileVersionSummary[] }
+  | { ok: false; error: string };
+
+// List the saved versions for a single personal Brain file, newest first.
+export async function listPersonalBrainFileVersions(path: string): Promise<ListResult> {
+  try {
+    const ref = await requirePersonalAgentRef();
+    const repoPath = personalBrainRepoPath(ref.bundleDir, normalizeBrainPath(path));
+    const rows = await getDb()
+      .select({
+        id: brainFileVersions.id,
+        operation: brainFileVersions.operation,
+        sizeBytes: brainFileVersions.sizeBytes,
+        createdAt: brainFileVersions.createdAt,
+        sessionId: brainFileVersions.sessionId,
+      })
+      .from(brainFileVersions)
+      .where(
+        and(
+          eq(brainFileVersions.workspaceId, ref.workspaceId),
+          eq(brainFileVersions.scope, "personal"),
+          eq(brainFileVersions.path, repoPath),
+        ),
+      )
+      .orderBy(desc(brainFileVersions.createdAt))
+      .limit(50);
+
+    const versions = rows.map((row) => ({
+      id: row.id,
+      operation: row.operation,
+      sizeBytes: row.sizeBytes,
+      createdAt: row.createdAt.toISOString(),
+      sessionId: row.sessionId,
+    }));
+    return { ok: true, versions };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to load versions.",
+    };
+  }
+}
+
+// Restore a personal Brain file to a specific saved version. The current live
+// content is first captured as a new version row (so the restore is undoable),
+// then the file is upserted to the version's content via upsertPersonalBrainFile
+// — local-only, no sync. A version whose `operation` was "delete" re-creates the
+// file via the same upsert.
+export async function restorePersonalBrainFileVersion(input: {
+  path: string;
+  versionId: number;
+}): Promise<BrainActionResult> {
+  try {
+    const ref = await requirePersonalAgentRef();
+    const logicalPath = normalizeBrainPath(input.path);
+    const repoPath = personalBrainRepoPath(ref.bundleDir, logicalPath);
+    const db = getDb();
+
+    const [version] = await db
+      .select()
+      .from(brainFileVersions)
+      .where(
+        and(
+          eq(brainFileVersions.id, input.versionId),
+          eq(brainFileVersions.workspaceId, ref.workspaceId),
+          eq(brainFileVersions.scope, "personal"),
+          eq(brainFileVersions.path, repoPath),
+        ),
+      )
+      .limit(1);
+    if (!version) return { ok: false, error: "Version not found." };
+
+    return await applyPersonalBrainRestore({ ref, logicalPath, repoPath, version });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Restore failed." };
+  }
+}
+
+// "Step back a turn" for the personal Brain: restore the single most-recent saved
+// version for the file (no multi-file/session grouping).
+export async function restoreLatestPersonalBrainVersionBeforeTurn(
+  path: string,
+): Promise<BrainActionResult> {
+  try {
+    const ref = await requirePersonalAgentRef();
+    const logicalPath = normalizeBrainPath(path);
+    const repoPath = personalBrainRepoPath(ref.bundleDir, logicalPath);
+    const db = getDb();
+
+    const [version] = await db
+      .select()
+      .from(brainFileVersions)
+      .where(
+        and(
+          eq(brainFileVersions.workspaceId, ref.workspaceId),
+          eq(brainFileVersions.scope, "personal"),
+          eq(brainFileVersions.path, repoPath),
+        ),
+      )
+      .orderBy(desc(brainFileVersions.createdAt))
+      .limit(1);
+    if (!version) return { ok: false, error: "No previous version to restore." };
+
+    return await applyPersonalBrainRestore({ ref, logicalPath, repoPath, version });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Restore failed." };
+  }
+}
+
+// Shared restore body: snapshot the live content as a new version (unless it
+// already matches the target), then write the version's content back through the
+// normal local-only upsert path.
+async function applyPersonalBrainRestore(input: {
+  ref: Awaited<ReturnType<typeof requirePersonalAgentRef>>;
+  logicalPath: string;
+  repoPath: string;
+  version: typeof brainFileVersions.$inferSelect;
+}): Promise<BrainActionResult> {
+  const { ref, logicalPath, repoPath, version } = input;
+  const db = getDb();
+
+  const [current] = await db
+    .select({
+      content: agentFiles.content,
+      contentHash: agentFiles.contentHash,
+      sizeBytes: agentFiles.sizeBytes,
+    })
+    .from(agentFiles)
+    .where(and(eq(agentFiles.workspaceId, ref.workspaceId), eq(agentFiles.path, repoPath)))
+    .limit(1);
+
+  // Capture the live content as a new version before we overwrite it, so the
+  // restore is itself undoable. Skip when the file already matches the target
+  // (nothing would change, so there is nothing to preserve).
+  if (current && current.contentHash !== version.contentHash) {
+    await recordBrainFileVersion(db, {
+      workspaceId: ref.workspaceId,
+      scope: "personal",
+      agentId: ref.agentId,
+      path: repoPath,
+      content: current.content,
+      contentHash: current.contentHash,
+      sizeBytes: current.sizeBytes,
+      operation: "overwrite",
+      sessionId: null,
+    });
+  }
+
+  // Reuse the standard local-only edit path (upsert into agent_files, no sync).
+  return await upsertPersonalBrainFile({
+    path: logicalPath,
+    content: version.content,
+    createOnly: false,
+  });
 }

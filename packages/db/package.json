@@ -24,6 +24,10 @@
       "types": "./src/sync-outbox.ts",
       "default": "./src/sync-outbox.ts"
     },
+    "./brain-versions": {
+      "types": "./src/brain-versions.ts",
+      "default": "./src/brain-versions.ts"
+    },
     "./recall": {
       "types": "./src/recall.ts",
       "default": "./src/recall.ts"

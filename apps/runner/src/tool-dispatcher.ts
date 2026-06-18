@@ -63,6 +63,7 @@ import {
 } from "./model-messages";
 import { runOpencodeCoderTool } from "./opencode-tool";
 import { runRecallTool } from "./recall-tool";
+import { runRestoreBrainTool } from "./restore-brain-tool";
 import {
   RunAbortError,
   type RunControlCheck,
@@ -746,6 +747,25 @@ async function executeRuntimeToolInner(
             integrationCredentialEncryptionKey: input.env.integrationCredentialEncryptionKey,
             blobReadWriteToken: input.env.blobReadWriteToken,
             signal: input.signal,
+          });
+        }
+        if (input.definition.name === "restore_brain_file") {
+          // Runner-side: restores a brain knowledge file to a saved version (PRO-244). Company scope
+          // touches brain_files; personal scope touches this agent's agent_files. Needs a workspace;
+          // the personal path additionally needs the owning agentId (the tool returns a recoverable
+          // error when it is missing).
+          if (!input.workspaceId) {
+            throw new RecoverableToolError(
+              "Restoring a brain file requires a workspace context.",
+              "missing_workspace",
+            );
+          }
+          return runRestoreBrainTool({
+            sessionId: input.sessionId,
+            workspaceId: input.workspaceId,
+            agentId: input.observabilityContext?.agentId,
+            personalAgent: input.personalAgent ?? false,
+            args: input.args,
           });
         }
         if (input.definition.name === "update_agent_file") {
@@ -1454,6 +1474,20 @@ export function preflightSandboxToolArgs(input: {
   if (personal && requestedRoot === "memory") {
     throw new RecoverableToolError(
       "Generic file tools cannot access memory/. Use the memory tool to read or write structured memory.",
+      "invalid_sandbox_path",
+    );
+  }
+  // Personal sessions have no company brain/ mount; a write there resolves to no real root and
+  // would be silently lost (the PRO-244 "wrong folder" bug). Route the model to personal-brain/
+  // explicitly instead of the bare allowed-roots error.
+  if (personal && requestedRoot === "brain") {
+    const suggested =
+      requestedPath
+        ?.trim()
+        .replace(/^\.?\//, "")
+        .replace(/^brain\//, "") || "notes.md";
+    throw new RecoverableToolError(
+      `brain/ is a company-session root and is not mounted in this personal session — writing here would be lost. Save persistent user content under personal-brain/ instead (e.g. personal-brain/${suggested}), use work/ for private scratch, or agent/ for your private agent folder.`,
       "invalid_sandbox_path",
     );
   }
