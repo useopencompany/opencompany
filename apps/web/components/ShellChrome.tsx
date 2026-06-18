@@ -1,7 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { useDrawerGesture } from "@/lib/useDrawerGesture";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,13 @@ export function ShellChrome({ sidebar, children }: { sidebar: ReactNode; childre
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const { dragging, progress } = useDrawerGesture({
+    open,
+    setOpen,
+    isMobile,
+    getWidth: () => drawerRef.current?.getBoundingClientRect().width || 300,
+  });
 
   // Close the drawer on navigation (covers nav-link taps). Adjust state during render
   // per React's "you might not need an effect" guidance — avoids a setState-in-effect.
@@ -52,22 +60,32 @@ export function ShellChrome({ sidebar, children }: { sidebar: ReactNode; childre
   return (
     <Ctx.Provider value={{ open, setOpen, isMobile }}>
       <div
+        ref={drawerRef}
         className={cn(
           "shrink-0",
           isMobile && "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out",
           isMobile && (open ? "translate-x-0" : "-translate-x-full"),
         )}
+        // While dragging, follow the finger 1:1: the inline transform overrides the
+        // translate class and `transition: none` disables the snap until release.
+        style={
+          isMobile && dragging
+            ? { transform: `translateX(${(progress - 1) * 100}%)`, transition: "none" }
+            : undefined
+        }
       >
         {sidebar}
       </div>
 
-      {isMobile && open ? (
+      {isMobile && (open || dragging) ? (
         <button
           type="button"
           aria-label="Close menu"
           data-testid="drawer-scrim"
           onClick={() => setOpen(false)}
           className="fixed inset-0 z-30 bg-black/40"
+          // Fade the dim in step with the drag; full strength once open.
+          style={dragging ? { opacity: progress } : undefined}
         />
       ) : null}
 
