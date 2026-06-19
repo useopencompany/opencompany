@@ -1,7 +1,7 @@
 "use client";
 
-import { useLiveQuery } from "@tanstack/react-db";
 import { Send } from "@opencompany/ui/icons";
+import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
