@@ -1270,7 +1270,24 @@ function buildEventAssistantTurnParts(
     text = "";
   }
 
-  for (const event of events) {
+  // Render in durable-id order, not array-arrival order. Durable events carry a monotonic
+  // id — the same order the refetched Postgres snapshot (modelMessage.content) uses — but
+  // the live Durable Stream can deliver a batch out of order (reconnect/replay). Without
+  // this, the streaming view emits tool-call parts in arrival order, so the list visibly
+  // reorders for a moment when the snapshot replaces the live overlay. Transient deltas
+  // (id === null: token/tool-arg fragments) have no id,
+  // so anchor each to the most recent durable id seen in arrival order; the index
+  // tie-break keeps a stable, in-segment order. Already-ordered input is left unchanged.
+  let lastDurableId = 0;
+  const ordered = events
+    .map((event, index) => {
+      if (event.id !== null) lastDurableId = event.id;
+      return { event, index, anchor: event.id ?? lastDurableId };
+    })
+    .sort((a, b) => a.anchor - b.anchor || a.index - b.index)
+    .map((entry) => entry.event);
+
+  for (const event of ordered) {
     if (!eventBelongsToMessage(event, messageId)) continue;
 
     if (event.type === "message.delta") {
