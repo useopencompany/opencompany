@@ -60,6 +60,9 @@ describe("MEMORY_KEEPER_SYSTEM_PROMPT", () => {
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).not.toContain("agent/memory.md");
     // Defaults to a no-op so trivial sessions cost nothing meaningful.
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).toMatch(/NO update|nothing durable|do nothing/i);
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("Only preserve information when");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("Never record inferred preferences");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("Do not create or edit personal-brain/");
     // Corrections are prioritized.
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).toMatch(/correct/i);
   });
