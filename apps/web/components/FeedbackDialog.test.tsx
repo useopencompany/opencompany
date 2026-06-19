@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { usePathname } from "next/navigation";
 import { describe, expect, it, vi } from "vitest";
 import { submitFeedback } from "@/lib/feedback/actions";
@@ -24,7 +24,7 @@ describe("FeedbackDialog", () => {
   it("submits the current session id when feedback opens from a company session page", () => {
     usePathnameMock.mockReturnValue("/company/session/ses_123");
 
-    const { container } = render(<FeedbackDialog open onClose={vi.fn()} />);
+    const { container } = render(<FeedbackDialog open onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     const input = container.querySelector<HTMLInputElement>('input[name="sessionId"]');
     expect(input).toHaveValue("ses_123");
@@ -33,7 +33,7 @@ describe("FeedbackDialog", () => {
   it("submits the current session id when feedback opens from a personal session page", () => {
     usePathnameMock.mockReturnValue("/personal/session/ses_456");
 
-    const { container } = render(<FeedbackDialog open onClose={vi.fn()} />);
+    const { container } = render(<FeedbackDialog open onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     const input = container.querySelector<HTMLInputElement>('input[name="sessionId"]');
     expect(input).toHaveValue("ses_456");
@@ -42,7 +42,7 @@ describe("FeedbackDialog", () => {
   it("does not submit a session id outside session pages", () => {
     usePathnameMock.mockReturnValue("/company/settings");
 
-    const { container } = render(<FeedbackDialog open onClose={vi.fn()} />);
+    const { container } = render(<FeedbackDialog open onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     expect(container.querySelector('input[name="sessionId"]')).toBeNull();
   });
@@ -50,7 +50,9 @@ describe("FeedbackDialog", () => {
   it("offers image attachment when a workspace id is provided", () => {
     usePathnameMock.mockReturnValue("/company");
 
-    const { getByRole } = render(<FeedbackDialog open onClose={vi.fn()} workspaceId="wks_123" />);
+    const { getByRole } = render(
+      <FeedbackDialog open onClose={vi.fn()} onSubmit={vi.fn()} workspaceId="wks_123" />,
+    );
 
     expect(getByRole("button", { name: /attach image/i })).toBeInTheDocument();
   });
@@ -58,7 +60,7 @@ describe("FeedbackDialog", () => {
   it("stays text-only when no workspace id is provided", () => {
     usePathnameMock.mockReturnValue("/company");
 
-    const { queryByRole } = render(<FeedbackDialog open onClose={vi.fn()} />);
+    const { queryByRole } = render(<FeedbackDialog open onClose={vi.fn()} onSubmit={vi.fn()} />);
 
     expect(queryByRole("button", { name: /attach image/i })).toBeNull();
   });
@@ -70,7 +72,7 @@ describe("FeedbackDialog", () => {
     vi.mocked(uploadFeedbackImage).mockRejectedValue(new Error("upload failed"));
 
     const { container, getByRole, findByText } = render(
-      <FeedbackDialog open onClose={vi.fn()} workspaceId="wks_123" />,
+      <FeedbackDialog open onClose={vi.fn()} onSubmit={vi.fn()} workspaceId="wks_123" />,
     );
 
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
@@ -85,12 +87,12 @@ describe("FeedbackDialog", () => {
     expect(getByRole("button", { name: /send/i })).not.toBeDisabled();
   });
 
-  it("auto-closes the dialog after a successful submit", async () => {
+  it("optimistically closes and hands the submission to the parent", () => {
     usePathnameMock.mockReturnValue("/company/settings");
-    submitFeedbackMock.mockResolvedValue({ ok: true });
     const onClose = vi.fn();
+    const onSubmit = vi.fn();
 
-    const { container } = render(<FeedbackDialog open onClose={onClose} />);
+    const { container } = render(<FeedbackDialog open onClose={onClose} onSubmit={onSubmit} />);
 
     const message = container.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
     if (!message) throw new Error("message field not found");
@@ -100,7 +102,30 @@ describe("FeedbackDialog", () => {
     if (!form) throw new Error("form not found");
     fireEvent.submit(form);
 
-    await waitFor(() => expect(submitFeedbackMock).toHaveBeenCalled());
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: 4000 });
+    // Optimistic: the dialog closes immediately and forwards the form snapshot. It does NOT call the
+    // server action itself — the parent owns sending and the success/failure toast.
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const formData = onSubmit.mock.calls[0]?.[0] as FormData;
+    expect(formData.get("message")).toBe("Something looks off.");
+    expect(submitFeedbackMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks an empty submission and keeps the dialog open", () => {
+    usePathnameMock.mockReturnValue("/company/settings");
+    const onClose = vi.fn();
+    const onSubmit = vi.fn();
+
+    const { container, getByText } = render(
+      <FeedbackDialog open onClose={onClose} onSubmit={onSubmit} />,
+    );
+
+    const form = container.querySelector("form");
+    if (!form) throw new Error("form not found");
+    fireEvent.submit(form);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getByText(/enter feedback/i)).toBeInTheDocument();
   });
 });

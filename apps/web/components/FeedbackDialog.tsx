@@ -3,9 +3,8 @@
 import { ATTACHMENT_IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES } from "@opencompany/agent-runtime";
 import { ImagePlus, Send, X } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useActionState, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ComposerAttachments, type PendingAttachment } from "@/components/composer-attachments";
-import { type FeedbackActionState, submitFeedback } from "@/lib/feedback/actions";
 import { uploadFeedbackImage } from "@/lib/feedback/upload-image";
 
 const kindOptions = [
@@ -20,6 +19,10 @@ const IMAGE_MIME_TYPES = new Set<string>(ATTACHMENT_IMAGE_MIME_TYPES);
 type Props = {
   open: boolean;
   onClose: () => void;
+  // Called with the form snapshot when the user submits valid feedback. The dialog closes
+  // optimistically the moment this fires — the parent owns the actual send and surfaces success or
+  // failure via a toast (see SidebarAccountFooter), so it must outlive this unmounting dialog.
+  onSubmit: (formData: FormData) => void;
   // Enables image attachments (drag / paste / browse). Absent on surfaces without a workspace
   // context — the dialog then stays text-only. The bytes are uploaded under this workspace's scope.
   workspaceId?: string | undefined;
@@ -40,20 +43,18 @@ function sessionIdFromPathname(pathname: string | null) {
 
 function FeedbackForm({
   onClose,
+  onSubmit,
   workspaceId,
 }: {
   onClose: () => void;
+  onSubmit: (formData: FormData) => void;
   workspaceId?: string | undefined;
 }) {
-  const [state, formAction, isPending] = useActionState<FeedbackActionState | null, FormData>(
-    submitFeedback,
-    null,
-  );
   const pathname = usePathname();
   const sessionId = sessionIdFromPathname(pathname);
   const messageRef = useRef<HTMLTextAreaElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const imagesEnabled = Boolean(workspaceId);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -155,15 +156,27 @@ function FeedbackForm({
     };
   }, [onClose]);
 
-  useEffect(() => {
-    if (state?.ok) {
-      formRef.current?.reset();
-      // Attachment state + object URLs are cleared on unmount: a successful submit auto-closes the
-      // dialog, which unmounts this form (FeedbackDialog renders null when closed).
-      const timer = setTimeout(onClose, 2500);
-      return () => clearTimeout(timer);
-    }
-  }, [state, onClose]);
+  const handleSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      // Validate client-side (mirrors the server's bounds) so we never optimistically close the
+      // dialog on input the send would reject — invalid input keeps the dialog open with an error.
+      const message = messageRef.current?.value.trim() ?? "";
+      if (message.length < 3) {
+        setError("Enter feedback.");
+        return;
+      }
+      if (message.length > 4000) {
+        setError("Keep feedback under 4,000 characters.");
+        return;
+      }
+      // Snapshot the form (kind, message, sessionId, ready-image refs) before this dialog unmounts,
+      // then hand it off. The parent sends in the background and toasts the outcome; we close now.
+      onSubmit(new FormData(event.currentTarget));
+      onClose();
+    },
+    [onSubmit, onClose],
+  );
 
   const isUploading = attachments.some((a) => a.status === "uploading");
   const readyImages = attachments.filter((a) => a.status === "ready");
@@ -174,9 +187,8 @@ function FeedbackForm({
 
   return (
     <form
-      ref={formRef}
       className="relative w-full max-w-[520px] overflow-hidden rounded-lg border border-black/[0.1] bg-surface-raised shadow-[0_24px_64px_rgba(0,0,0,0.2),0_4px_14px_rgba(0,0,0,0.1)]"
-      action={formAction}
+      onSubmit={handleSubmit}
       onPaste={(event) => {
         if (!imagesEnabled) return;
         const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
@@ -270,8 +282,7 @@ function FeedbackForm({
           <select
             name="kind"
             defaultValue="bug"
-            disabled={isPending}
-            className="h-8 rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none transition-colors focus:border-ink/30 focus:ring-1 focus:ring-ink/15 disabled:opacity-60"
+            className="h-8 rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none transition-colors focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
           >
             {kindOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -291,9 +302,9 @@ function FeedbackForm({
             rows={9}
             minLength={3}
             maxLength={4000}
-            disabled={isPending}
+            onChange={() => setError(null)}
             placeholder="Tell us what happened, what you expected, or what you want to see."
-            className="min-h-[184px] resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink/30 focus:ring-1 focus:ring-ink/15 disabled:opacity-60"
+            className="min-h-[184px] resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
           />
         </label>
 
@@ -314,7 +325,7 @@ function FeedbackForm({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isPending || activeCount >= MAX_FEEDBACK_IMAGES}
+                disabled={activeCount >= MAX_FEEDBACK_IMAGES}
                 className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <ImagePlus size={13} strokeWidth={1.9} />
@@ -337,15 +348,9 @@ function FeedbackForm({
           </div>
         ) : null}
 
-        {state && !state.ok && (
+        {error && (
           <div className="rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] text-danger">
-            {state.error}
-          </div>
-        )}
-
-        {state?.ok && (
-          <div className="rounded-md border border-success-border bg-success-bg px-3 py-2 text-[12.5px] text-success">
-            <span>Thanks, we are on it.</span>
+            {error}
           </div>
         )}
       </div>
@@ -360,18 +365,18 @@ function FeedbackForm({
         </button>
         <button
           type="submit"
-          disabled={isPending || isUploading}
+          disabled={isUploading}
           className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <Send size={13} strokeWidth={1.9} />
-          {isPending ? "Sending..." : isUploading ? "Uploading..." : "Send"}
+          {isUploading ? "Uploading..." : "Send"}
         </button>
       </div>
     </form>
   );
 }
 
-export default function FeedbackDialog({ open, onClose, workspaceId }: Props) {
+export default function FeedbackDialog({ open, onClose, onSubmit, workspaceId }: Props) {
   if (!open) return null;
 
   return (
@@ -395,7 +400,7 @@ export default function FeedbackDialog({ open, onClose, workspaceId }: Props) {
         event.stopPropagation();
       }}
     >
-      <FeedbackForm onClose={onClose} workspaceId={workspaceId} />
+      <FeedbackForm onClose={onClose} onSubmit={onSubmit} workspaceId={workspaceId} />
     </div>
   );
 }
