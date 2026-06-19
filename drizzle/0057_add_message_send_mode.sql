@@ -1,0 +1,1 @@
+ALTER TABLE "agent_session_messages" ADD COLUMN "send_mode" text;

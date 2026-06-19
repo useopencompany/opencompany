@@ -181,6 +181,65 @@ describe("syncBrainFromSandbox", () => {
       }),
     );
   });
+
+  it("captures a version of the prior content before overwriting a company-brain file", async () => {
+    const db = createSyncDb({
+      mounts: [
+        {
+          sessionId: "ses_123",
+          workspaceId: "wsp_123",
+          requestedPath: "docs/notes.md",
+          path: "docs/notes.md",
+          referenceType: "file",
+          baseHash: "hash_old",
+          lastSyncedHash: "hash_old",
+        },
+      ],
+      currentFiles: [
+        {
+          path: "docs/notes.md",
+          content: "Old content",
+          contentHash: "hash_old",
+          sizeBytes: 11,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({
+          stdout: "brain/docs/notes.md\n",
+          stderr: "",
+          exitCode: 0,
+        }),
+      },
+      files: {
+        read: vi.fn().mockResolvedValue("New content"),
+      },
+    };
+
+    await syncBrainFromSandbox({
+      sandbox: sandbox as never,
+      sessionId: "ses_123",
+      workspaceId: "wsp_123",
+      workdir: "/home/user/workspace",
+    });
+
+    // The displaced bytes ("Old content") are preserved as a recoverable version
+    // row before the canonical row is overwritten with "New content".
+    expect(db.insertedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: "company",
+          agentId: null,
+          path: "docs/notes.md",
+          content: "Old content",
+          operation: "overwrite",
+          sessionId: "ses_123",
+        }),
+      ]),
+    );
+  });
 });
 
 function createBrainDb(rows: Array<Record<string, unknown>>) {

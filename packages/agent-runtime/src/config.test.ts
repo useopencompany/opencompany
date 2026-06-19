@@ -425,6 +425,8 @@ describe("resolveAgentRuntimeConfig", () => {
 
     expect(resolved.systemPrompt).toContain("personal-brain/");
     expect(resolved.systemPrompt).toContain("create or update personal-brain/ only when");
+    expect(resolved.systemPrompt).toContain("This session has NO company brain/ root");
+    expect(resolved.systemPrompt).toContain("never leave anything intended to persist there");
     expect(resolved.systemPrompt).toContain(
       "If you are unsure whether the user wants a persistent file",
     );

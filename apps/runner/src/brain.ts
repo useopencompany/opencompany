@@ -3,6 +3,7 @@ import {
   matchesBrainReference,
   shellQuote,
 } from "@opencompany/agent-runtime";
+import { recordBrainFileVersion } from "@opencompany/db/brain-versions";
 import { agentSessionBrainMounts, brainFiles } from "@opencompany/db/schema";
 import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { and, eq } from "drizzle-orm";
@@ -178,6 +179,15 @@ export async function syncBrainFromSandbox(input: {
       path: targetPath,
       content,
       contentHash: hash,
+      sessionId: input.sessionId,
+      previous:
+        current && targetPath === path
+          ? {
+              content: current.content,
+              contentHash: current.contentHash,
+              sizeBytes: current.sizeBytes,
+            }
+          : null,
     });
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
@@ -248,6 +258,18 @@ export async function syncBrainFromSandbox(input: {
         )
         .returning({ githubBlobSha: brainFiles.githubBlobSha });
       if (deleted.length === 0) return null;
+      // Preserve the deleted content before the row is gone.
+      await recordBrainFileVersion(tx, {
+        workspaceId: input.workspaceId,
+        scope: "company",
+        agentId: null,
+        path: mount.path,
+        content: current.content,
+        contentHash: current.contentHash,
+        sizeBytes: current.sizeBytes,
+        operation: "delete",
+        sessionId: input.sessionId,
+      });
       await enqueueWorkspaceSync(tx, {
         workspaceId: input.workspaceId,
         repoPath: brainRepoPath(mount.path),
@@ -320,12 +342,28 @@ async function upsertBrainFileFromRunner(input: {
   path: string;
   content: string;
   contentHash: string;
+  sessionId: string | null;
+  previous: { content: string; contentHash: string; sizeBytes: number } | null;
 }) {
   const db = getDb();
   const sizeBytes = Buffer.byteLength(input.content, "utf8");
   const now = new Date();
 
   await db.transaction(async (tx) => {
+    // Back up the bytes we are about to overwrite so the change is recoverable.
+    if (input.previous && input.previous.contentHash !== input.contentHash) {
+      await recordBrainFileVersion(tx, {
+        workspaceId: input.workspaceId,
+        scope: "company",
+        agentId: null,
+        path: input.path,
+        content: input.previous.content,
+        contentHash: input.previous.contentHash,
+        sizeBytes: input.previous.sizeBytes,
+        operation: "overwrite",
+        sessionId: input.sessionId,
+      });
+    }
     await tx
       .insert(brainFiles)
       .values({

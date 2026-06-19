@@ -98,7 +98,9 @@ import {
   type LoadedSession,
   loadAssistantResponseForMessage,
   loadLatestUserMessage,
+  loadNextPendingMessage,
   loadNextSteerMessage,
+  loadPendingInterruptMessage,
   loadSession,
   loadUserMessage,
   markAfterSessionRunSpawned,
@@ -611,14 +613,15 @@ async function runMessageWithContext(
         }),
       );
     }
-    // If the user steered mid-run, answer that message as the next turn. The lease
-    // is already released, so the next turn acquires its own. See
+    // The turn ended naturally, so drain the next pending message of ANY send-mode
+    // (steer and queue both land here in FIFO order) as the next turn. The lease is
+    // already released, so the next turn acquires its own. See
     // docs/agent-turn-vocabulary.md.
-    const steer = await loadNextSteerMessage({
+    const pending = await loadNextPendingMessage({
       sessionId: input.sessionId,
       afterCreatedAt: userMessage.createdAt,
     });
-    nextSteerMessageId = steer?.id;
+    nextSteerMessageId = pending?.id;
     logger.info("Runner session completed", {
       event: "opencompany.runner_session_completed",
       workspace_id: workspaceId,
@@ -708,7 +711,18 @@ async function runMessageWithContext(
         model_provider: modelProvider,
         model_name: modelName,
       });
-      return;
+      // The user chose Interrupt: they aborted this in-flight turn to run a new message
+      // *now*. The lease is released (failRunLease above), so continue the outer turn loop
+      // with that message — ahead of any queued messages. A plain Stop inserts no interrupt
+      // message, so this stays null and the loop ends. The runner's duplicate-response guard
+      // keeps execution exactly-once even when the web also dispatched a run for it.
+      const interrupt = leaseAcquired
+        ? await loadPendingInterruptMessage({
+            sessionId: input.sessionId,
+            abortedMessageId: input.messageId,
+          })
+        : null;
+      return { nextSteerMessageId: interrupt?.id };
     }
 
     const message = error instanceof Error ? error.message : "Unknown runner error";

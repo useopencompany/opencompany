@@ -213,6 +213,9 @@ from a GitHub/skills.sh URL are managed by a human in the editor and are preserv
 - \`@skill/y-combinator-knowledge\` — YC-style startup sparring: office-hours framing, user
   obsession, MVP and growth pressure, fundraising discipline, and links to canonical YC/PG
   teachings. Add it for founder, product, growth, fundraising, or company strategy agents.
+- \`@skill/move-to-opencompany\` — import an external knowledge base (a GitHub repo or folders)
+  into the Brain safely, with a preview and a receipt (imported N, lost 0). Add it when the user
+  is migrating notes, docs, or a wiki into OpenCompany.
 
 Add a skill only when it genuinely fits how you work — an unused skill is just noise in your
 definition.
@@ -441,7 +444,10 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 
 ## Commands
 
-- **create** — a new canonical object.
+- **create** — a new canonical object. Query by name first: if this person/company already exists
+  under another spelling, update that record (\`rewrite\`/\`alias\`) instead of making a second one.
+  \`create\` refuses a near-duplicate of an existing object of the same type and names it; pass
+  \`--allow-similar\` only when it genuinely is a different thing that happens to share a name.
   \`memory create --type company --id acme --alias "Acme Inc"\`
 - **append-evidence** — record immutable evidence and link it to canonical subjects.
   \`memory append-evidence --kind meeting --id acme-call-2026-06-06 --subject acme --subject jane-doe --source-ref "gcal://event/abc" --summary "Confirmed enterprise eval; SSO is the blocker."\`
@@ -472,7 +478,8 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   \`memory delete acme-corp\` (use \`--dry-run\` to preview). Related links and evidence subjects are
   scrubbed automatically; if the target is still cited or is a merge target, it needs \`--force\` and
   you must repair those references afterward (run \`memory doctor\`).
-- **doctor** — health check (broken links, missing provenance, stale truth, duplicates).
+- **doctor** — health check (broken links, missing provenance, stale truth, duplicates, and
+  \`near_duplicate\` look-alike objects that should probably be merged).
   \`memory doctor\` — a read-only report; fix what it flags with the commands above.
 
 ## How to use it well
@@ -1060,6 +1067,82 @@ For product/growth work, prefer:
 
 const Y_COMBINATOR_KNOWLEDGE_SKILL_MD = buildYCombinatorKnowledgeSkillMd();
 
+export const MOVE_TO_OPENCOMPANY_SKILL_ID = "move-to-opencompany";
+
+function buildMoveToOpenCompanySkillMd(): string {
+  return `---
+name: move-to-opencompany
+description: Import an external knowledge base — a GitHub repo or a set of folders/files — into the Brain, safely. Stage, preview, confirm, commit, and report a receipt. Use when the user wants to migrate notes, docs, a wiki, or an existing second brain into OpenCompany.
+---
+
+# Import a knowledge base into OpenCompany
+
+You bring an outside knowledge base (a GitHub repo, an exported wiki, a pile of markdown) into the
+user's Brain — without ever silently losing or clobbering their content. Two rules hold the whole
+skill together:
+
+1. Stage in work/, commit to the Brain. work/ is your private, ephemeral scratch space — clone,
+   inspect, and transform there. Nothing in work/ survives the session and the user never sees it,
+   so an import that only landed in work/ is LOST. The Brain is where imports persist:
+   personal-brain/ (your default — the user's private knowledge) or brain/ for a shared company
+   workspace.
+2. Never overwrite blind. Default to SKIP on a path collision. Every overwrite is recoverable (the
+   prior version is captured automatically when you save), but the user still decides — surface
+   collisions in the preview and only overwrite when they say so.
+
+## The procedure
+
+### 1. Locate and STAGE the source (in work/)
+- GitHub repo: clone it into work/import-src with the gh tool (gh repo clone <owner/name>
+  work/import-src). For a public repo not attached to this agent, fall back to the shell:
+  git clone --depth 1 <https-url> work/import-src.
+- Files the user pasted, attached, or pointed at a path: copy them under work/import-src/ with the
+  shell.
+- Survey with list_files work/import-src and read a few representative files. Layouts vary — do not
+  assume structure.
+
+### 2. PLAN the mapping (no writes yet)
+- Decide each source file's destination Brain path. Map the source folders onto a clean wiki shape
+  (personal-brain/<area>/... or brain/wiki/<area>/...); rename messy paths to something a human
+  would keep.
+- Convert non-markdown text to .md where sensible; leave already-markdown as-is.
+- Exclude noise: .git/, build output, binaries, lockfiles — anything that is not knowledge.
+- Respect the size limits. A single file over 2 MB, or a personal brain growing past ~32 MB total,
+  is too large to load back into a session and would be dropped. Mark oversized files to SKIP or
+  split, and say so — never let one vanish silently.
+- Detect collisions: for each destination, read_file it. Classify NEW (nothing there), IDENTICAL
+  (same content — skip, no-op), or DIFFERENT (a real collision that needs a decision).
+
+### 3. PREVIEW + CONFIRM (ask_user_question)
+Show a compact preview before touching the Brain: how many files will be imported, the destination
+tree, which are skipped and why (noise / too big / identical), and every DIFFERENT collision. Then
+ask_user_question once: proceed as previewed, and for collisions choose skip-existing (default),
+overwrite (recoverable), or import-as a <name>.imported.md copy. Do not write until they answer.
+
+### 4. COMMIT (write_file into the Brain)
+- Write each planned file with write_file to its Brain destination (personal-brain/... or
+  brain/...). These persist and surface to the user; work/ does not.
+- Be idempotent: skip IDENTICAL files and honor the user's collision choice. Running the skill
+  twice on the same source converges to the same Brain — never duplicate.
+- If the import is large, commit in coherent batches by area rather than truncating mid-import.
+
+### 5. RECEIPT (always)
+End with an honest, structured tally:
+- Imported: N — list the destination paths (or per-folder counts if there are many).
+- Skipped: M — each with a reason (identical / too large / excluded noise / user chose skip).
+- Overwritten: K — note these are recoverable (a prior version was saved automatically).
+- Lost: 0 — this is the contract. If anything could not be imported AND could not be safely
+  skipped, say so loudly and leave the source in work/ so nothing is dropped silently.
+
+## Guardrails
+- Never import directly into work/ as a destination — it is staging only.
+- memory/ is off-limits to file tools; never route imports there.
+- This skill grants no new tools — it is the safe procedure around gh, shell, list_files,
+  read_file, write_file, and ask_user_question that you already have.
+`;
+}
+const MOVE_TO_OPENCOMPANY_SKILL_MD = buildMoveToOpenCompanySkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -1135,6 +1218,17 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
     defaultEnabled: false,
     addable: true,
     files: [{ path: "SKILL.md", content: Y_COMBINATOR_KNOWLEDGE_SKILL_MD }],
+  },
+  {
+    id: MOVE_TO_OPENCOMPANY_SKILL_ID,
+    name: "Import a knowledge base",
+    description:
+      "Import an external knowledge base (a GitHub repo or folders/files) into the Brain safely — stage in work/, preview, confirm, commit to personal-brain/, and report a receipt (imported N, skipped M, lost 0). Use when migrating notes, docs, or a wiki into OpenCompany.",
+    // Offered, not default-on: only relevant during a one-time migration, so it would be noise in
+    // every session. The durability layer (PRO-244 version backup) makes its overwrites safe.
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: MOVE_TO_OPENCOMPANY_SKILL_MD }],
   },
 ];
 

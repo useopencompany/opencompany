@@ -22,7 +22,10 @@ export async function setWorkspaceToolPolicy(input: {
   permissionGroup: PermissionGroup;
   decision: PolicyDecision;
 }) {
-  const { user, workspace } = await currentWorkspace({ requireAdmin: true });
+  // skipOnboarding: this action is also reachable from the onboarding "Capabilities"
+  // step, where onboarding isn't complete yet. Without it, currentWorkspace would
+  // redirect to /onboarding mid-action and tear the wizard back to step 0.
+  const { user, workspace } = await currentWorkspace({ requireAdmin: true, skipOnboarding: true });
 
   const spec = PROVIDER_PERMISSION_REGISTRY[input.providerKey];
   if (!spec || !spec.gated) {

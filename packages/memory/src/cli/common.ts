@@ -1,7 +1,30 @@
 import { extractCitations, parseDocument, serializeDocument } from "../document";
-import { isEvidenceType, type MemoryDocument } from "../schema";
+import {
+  isCanonicalType,
+  isEvidenceType,
+  type MemoryDocument,
+  type MemoryFrontmatter,
+} from "../schema";
 import { findFile, pathForDocument, writeDocumentText } from "../store";
 import { validateDocument } from "../validate";
+
+// The names a canonical record can be recognized by — its human title, its id (a slug), and any
+// aliases. The single source of truth for "what identifies this entity" in near-duplicate detection,
+// shared by `create` (refuse a new collision) and `doctor` (flag existing pairs) so the two never
+// drift on which names to compare.
+export function entityNames(title: string, id: string, aliases: readonly string[] = []): string[] {
+  return [title, id, ...aliases];
+}
+
+// A record is a live near-duplicate target when it is a canonical object that is neither a merged
+// redirect stub nor a deprecated tombstone. Shared by `create` and `doctor` so both agree on which
+// records count as existing things to collide against.
+// Accepts a partially-parsed frontmatter (the lenient `parseDocument` shape, where type/status may
+// be absent on a malformed file): a missing type is not canonical, and a missing status is treated
+// as live (the conservative direction — better to flag/refuse against it than to ignore it).
+export function isLiveCanonical(fm: Partial<Pick<MemoryFrontmatter, "type" | "status">>): boolean {
+  return isCanonicalType(fm.type) && fm.status !== "merged" && fm.status !== "deprecated";
+}
 
 // Load + strictly validate a document by id. Returns the loaded doc, a validation failure, or
 // null when the id is absent — letting callers map each case to the right exit code.
