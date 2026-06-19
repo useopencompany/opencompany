@@ -167,6 +167,20 @@ body {
   border-color: var(--color-border);
 }
 
+/* Keep an element scrollable but fully hide its scrollbar so it doesn't
+   reserve layout width (PRO-157 — the personal sidebar session list). Mirrors
+   the chromeless sidebars in ChatGPT/Linear/Notion. Content stays scrollable
+   via wheel/trackpad; the scrollbar (incl. the macOS overlay) is suppressed. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chromium/Safari */
+}
+
 .tiptap-agent p {
   margin: 0 0 0.5em 0;
 }
