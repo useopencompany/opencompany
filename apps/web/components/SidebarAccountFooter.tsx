@@ -12,8 +12,36 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
+import { useToast } from "@/components/ToastProvider";
+import { submitFeedback } from "@/lib/feedback/actions";
+
+type ShowToast = ReturnType<typeof useToast>["showToast"];
+
+// Sends the feedback the dialog has already optimistically confirmed. Runs fire-and-forget: by the
+// time this resolves the dialog is gone, so a failure can't fall back to the form — it surfaces as
+// an error toast whose Retry re-sends the same FormData. The server action leaves the transit image
+// blobs in place on failure, so a retry still carries any screenshots.
+async function sendFeedbackInBackground(formData: FormData, showToast: ShowToast) {
+  try {
+    const result = await submitFeedback(null, formData);
+    if (!result.ok) throw new Error(result.error);
+  } catch (error) {
+    showToast({
+      title: "Couldn't send feedback",
+      description:
+        error instanceof Error ? error.message : "Something went wrong. Please try again.",
+      tone: "error",
+      action: {
+        label: "Retry",
+        onClick: () => {
+          void sendFeedbackInBackground(formData, showToast);
+        },
+      },
+    });
+  }
+}
 
 const STATUS_PAGE_URL = "https://myopencompany.betteruptime.com";
 const STATUS_PAGE_JSON_URL = `${STATUS_PAGE_URL}/index.json`;
@@ -274,6 +302,18 @@ export function SidebarAccountFooter({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const footerRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast();
+
+  // Optimistic feedback: confirm instantly with a toast and send in the background. The dialog
+  // closes itself the moment it calls this, so the toast (rooted at the app shell) is what survives
+  // to report the outcome.
+  const handleFeedbackSubmit = useCallback(
+    (formData: FormData) => {
+      showToast({ title: "Feedback sent" });
+      void sendFeedbackInBackground(formData, showToast);
+    },
+    [showToast],
+  );
 
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -344,6 +384,7 @@ export function SidebarAccountFooter({
       <FeedbackDialog
         open={feedbackOpen}
         onClose={() => setFeedbackOpen(false)}
+        onSubmit={handleFeedbackSubmit}
         workspaceId={workspaceId}
       />
     </>

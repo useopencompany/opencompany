@@ -612,7 +612,7 @@ function PersonalSidebarView({
   const router = useRouter();
   const { userId, workspaceId } = useWorkspaceContext();
   const { agentSessions, sessionStars } = useCollections();
-  const { showError } = useToast();
+  const { showError, showToast } = useToast();
   const {
     agent,
     userName,
@@ -661,6 +661,9 @@ function PersonalSidebarView({
   const handleArchive = useCallback(
     (sessionId: string, active: boolean) => {
       const tx = agentSessions.delete(sessionId);
+      // Optimistic: the row is already gone, so confirm right away. A failure rolls the row back
+      // into the sidebar and the catch below surfaces the error toast.
+      showToast({ title: "Chat archived" });
       if (active) router.replace(personalPaths.home);
       void tx.isPersisted.promise.catch((error) => {
         showError(
@@ -669,7 +672,7 @@ function PersonalSidebarView({
         );
       });
     },
-    [agentSessions, router, showError],
+    [agentSessions, router, showError, showToast],
   );
 
   // Rename optimistically updates the title in the agent_sessions collection (the
