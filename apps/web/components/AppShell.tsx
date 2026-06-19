@@ -65,7 +65,9 @@ export default async function AppShell({ children }: { children: React.ReactNode
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-              <div className="flex h-dvh w-full overflow-hidden overflow-x-hidden bg-canvas">
+              {/* touch-pan-y: hand horizontal drags to the drawer swipe (useDrawerGesture)
+                  instead of letting iOS Safari treat them as back/forward navigation. */}
+              <div className="flex h-dvh w-full touch-pan-y overflow-hidden overflow-x-hidden bg-canvas">
                 <ShellChrome
                   sidebar={
                     <Suspense
