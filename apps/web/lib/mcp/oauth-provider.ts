@@ -7,7 +7,14 @@ import {
 } from "@ai-sdk/mcp";
 import type { WorkspaceMcpCredentialKind } from "@opencompany/db/schema";
 import { getAppUrl } from "@/lib/billing/stripe";
-import { loadMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
+import {
+  DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY,
+  finalizeMcpCredentialAccount,
+  loadMcpCredential,
+  newMcpCredentialAccountKey,
+  normalizeAccountKey,
+  saveMcpCredential,
+} from "@/lib/mcp/credential-storage";
 import type { McpProviderKey } from "@/lib/mcp/data";
 import {
   createMcpOAuthState,
@@ -41,6 +48,15 @@ export type McpOAuthPayload = {
 export type McpOAuthContext = {
   workspaceId: string;
   serverId: string;
+  accountKey?: string;
+};
+
+export type McpOAuthAccountMetadata = {
+  nextAccountKey?: string;
+  externalAccountId?: string | null;
+  accountLabel?: string | null;
+  accountEmail?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type McpOAuthProviderConfig = {
@@ -60,6 +76,13 @@ export type McpOAuthProviderConfig = {
    * secret must stay out of the database.
    */
   staticClientInformation?: () => OAuthClientInformation;
+  /** Store one OAuth credential per connected account instead of replacing the provider default. */
+  multipleAccounts?: boolean;
+  /** Resolve display metadata for a newly connected account. */
+  resolveAccountMetadata?: (input: {
+    payload: McpOAuthPayload;
+    accountKey: string;
+  }) => Promise<McpOAuthAccountMetadata>;
   /**
    * Provider-specific env vars surfaced in the server status reason when the start flow
    * fails because one of them is missing (Slack client id/secret).
@@ -119,16 +142,21 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     serverId: string;
     returnTo: string;
   }) {
+    const accountKey = config.multipleAccounts
+      ? newMcpCredentialAccountKey()
+      : DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY;
     const state = createState({
       workspaceId: input.workspaceId,
       userId: input.userId,
       returnTo: input.returnTo,
+      credentialAccountKey: accountKey,
     });
     let authorizationUrl: string | null = null;
     const provider = createClientProvider({
       workspaceId: input.workspaceId,
       serverId: input.serverId,
-      payload: await loadPayload(input),
+      accountKey,
+      payload: await loadPayload({ ...input, accountKey }),
       state,
       onAuthorizationUrl: (url) => {
         authorizationUrl = url.toString();
@@ -150,14 +178,18 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
 
   async function complete(input: {
     workspaceId: string;
+    userId: string;
     serverId: string;
+    accountKey?: string;
     code: string;
     state: string;
   }) {
+    const accountKey = normalizeAccountKey(input.accountKey);
     const provider = createClientProvider({
       workspaceId: input.workspaceId,
       serverId: input.serverId,
-      payload: await loadPayload(input),
+      accountKey,
+      payload: await loadPayload({ ...input, accountKey }),
     });
 
     const result = await auth(provider, {
@@ -169,6 +201,25 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     if (result !== "AUTHORIZED") {
       throw new Error(`${displayName} MCP authorization was not completed.`);
     }
+
+    if (!config.multipleAccounts) {
+      return { accountKey };
+    }
+
+    const payload = await loadPayload({ ...input, accountKey });
+    const resolved = (await config.resolveAccountMetadata?.({ payload, accountKey })) ?? {};
+    return finalizeMcpCredentialAccount({
+      workspaceId: input.workspaceId,
+      serverId: input.serverId,
+      kind: credentialKind,
+      accountKey,
+      connectedByUserId: input.userId,
+      ...(resolved.nextAccountKey ? { nextAccountKey: resolved.nextAccountKey } : {}),
+      externalAccountId: resolved.externalAccountId ?? null,
+      accountLabel: resolved.accountLabel ?? displayName,
+      accountEmail: resolved.accountEmail ?? null,
+      metadata: resolved.metadata ?? {},
+    });
   }
 
   function startFailureStatusReason(errorMessage: string) {
@@ -184,6 +235,7 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
   function createClientProvider(input: {
     workspaceId: string;
     serverId: string;
+    accountKey: string;
     payload: McpOAuthPayload;
     state?: string;
     onAuthorizationUrl?: (url: URL) => void;
@@ -192,6 +244,7 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     const context = {
       workspaceId: input.workspaceId,
       serverId: input.serverId,
+      accountKey: input.accountKey,
     };
 
     async function persist(next: McpOAuthPayload) {
@@ -267,6 +320,7 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     displayName,
     endpointUrl,
     credentialKind,
+    multipleAccounts: config.multipleAccounts === true,
     deniedReason: `${key}_denied` as const,
     callbackUrl,
     appendSetupStatus,

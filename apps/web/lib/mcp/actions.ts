@@ -3,9 +3,15 @@
 import { getDb } from "@opencompany/db/client";
 import type { WorkspaceMcpCredentialKind } from "@opencompany/db/schema";
 import { workspaceMcpServers } from "@opencompany/db/schema";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
-import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
+import {
+  DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY,
+  deleteMcpCredential,
+  listMcpCredentialAccounts,
+  saveMcpCredential,
+} from "@/lib/mcp/credential-storage";
 import {
   BETTERSTACK_MCP_ENDPOINT_URL,
   BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND,
@@ -96,8 +102,13 @@ export async function removeLinearMcpToken() {
   ]);
 }
 
-export async function removeSlackMcpConnection() {
-  return removeMcpCredentials(SLACK_MCP_SERVER_KEY, "Slack MCP connection was removed.");
+export async function removeSlackMcpConnection(accountKey?: string) {
+  return removeMcpCredentials(
+    SLACK_MCP_SERVER_KEY,
+    accountKey ? "Slack MCP account was removed." : "Slack MCP connection was removed.",
+    undefined,
+    accountKey,
+  );
 }
 
 export async function removePostHogMcpConnection() {
@@ -171,20 +182,61 @@ async function removeMcpCredentials(
   provider: McpProviderKey,
   statusReason: string,
   kinds?: WorkspaceMcpCredentialKind[],
+  accountKey?: string,
 ) {
-  const { workspace } = await currentWorkspace({ requireAdmin: true });
-  const server = await upsertProviderMcpServer(
-    provider,
-    workspace.id,
-    "missing_credential",
-    statusReason,
+  const { workspace, user, role } = await currentWorkspace(
+    accountKey ? {} : { requireAdmin: true },
   );
+  const server = accountKey
+    ? await loadProviderMcpServer(provider, workspace.id)
+    : await upsertProviderMcpServer(provider, workspace.id, "missing_credential", statusReason);
+  if (!server) {
+    revalidateMcpPaths();
+    return { ok: true as const };
+  }
+  if (accountKey) {
+    const accounts = await listMcpCredentialAccounts({
+      workspaceId: workspace.id,
+      serverId: server.id,
+      kind: MCP_SERVER_PRESETS[provider].oauthCredentialKind,
+    });
+    const targetAccount = accounts.find((account) => account.accountKey === accountKey);
+    const canDisconnectTarget =
+      !targetAccount ||
+      role === "admin" ||
+      (targetAccount.connectedByUserId && targetAccount.connectedByUserId === user.id);
+    if (!canDisconnectTarget) {
+      return {
+        ok: false as const,
+        message:
+          "Only the member who connected this account or a workspace admin can disconnect it.",
+      };
+    }
+  }
   for (const kind of kinds ?? [MCP_SERVER_PRESETS[provider].oauthCredentialKind]) {
     await deleteMcpCredential({
       workspaceId: workspace.id,
       serverId: server.id,
       kind,
+      ...(accountKey ? { accountKey } : {}),
     });
+  }
+  if (accountKey) {
+    const remainingAccounts = await listMcpCredentialAccounts({
+      workspaceId: workspace.id,
+      serverId: server.id,
+      kind: MCP_SERVER_PRESETS[provider].oauthCredentialKind,
+    });
+    const completedAccounts = remainingAccounts.filter(
+      (account) =>
+        account.accountKey === DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY ||
+        Boolean(account.connectedByUserId),
+    );
+    if (completedAccounts.length > 0) {
+      await upsertProviderMcpServer(provider, workspace.id, "configured", null);
+    } else {
+      await upsertProviderMcpServer(provider, workspace.id, "missing_credential", statusReason);
+    }
   }
 
   revalidateMcpPaths();
@@ -206,6 +258,20 @@ async function upsertProviderMcpServer(
     status,
     statusReason,
   });
+}
+
+async function loadProviderMcpServer(provider: McpProviderKey, workspaceId: string) {
+  const [server] = await getDb()
+    .select({ id: workspaceMcpServers.id })
+    .from(workspaceMcpServers)
+    .where(
+      and(
+        eq(workspaceMcpServers.workspaceId, workspaceId),
+        eq(workspaceMcpServers.serverKey, provider),
+      ),
+    )
+    .limit(1);
+  return server ?? null;
 }
 
 async function upsertMcpServer(input: {
@@ -252,4 +318,5 @@ function newWorkspaceMcpServerId() {
 function revalidateMcpPaths() {
   revalidatePath("/company/settings");
   revalidatePath("/company/agents");
+  revalidatePath("/personal");
 }

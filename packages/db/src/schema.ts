@@ -1458,21 +1458,37 @@ export const workspaceMcpCredentials = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     serverId: text("server_id").notNull(),
     kind: text("kind").$type<WorkspaceMcpCredentialKind>().notNull(),
+    accountKey: text("account_key").notNull().default("default"),
+    externalAccountId: text("external_account_id"),
+    accountLabel: text("account_label"),
+    accountEmail: text("account_email"),
+    connectedByUserId: text("connected_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     encryptedPayload: jsonb("encrypted_payload")
       .$type<WorkspaceIntegrationCredentialEncryptedPayload>()
       .notNull(),
     encryptionKeyVersion: integer("encryption_key_version").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     workspaceIdx: index("workspace_mcp_credentials_workspace_idx").on(table.workspaceId),
     serverIdx: index("workspace_mcp_credentials_server_idx").on(table.serverId),
-    serverKindIdx: uniqueIndex("workspace_mcp_credentials_server_kind_idx").on(
+    serverKindAccountIdx: uniqueIndex("workspace_mcp_credentials_server_kind_account_idx").on(
       table.serverId,
       table.kind,
+      table.accountKey,
+    ),
+    serverExternalAccountIdx: index("workspace_mcp_credentials_server_external_account_idx").on(
+      table.serverId,
+      table.externalAccountId,
     ),
     serverWorkspaceFk: foreignKey({
       name: "workspace_mcp_credentials_server_workspace_fk",

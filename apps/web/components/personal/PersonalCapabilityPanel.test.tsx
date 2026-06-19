@@ -50,9 +50,10 @@ vi.mock("@/lib/integrations/google-actions", () => ({
 }));
 
 const removeLinearMcp = vi.fn(async () => ({ ok: true }));
+const removeSlackMcp = vi.fn(async (_accountKey?: string) => ({ ok: true }));
 vi.mock("@/lib/mcp/actions", () => ({
   removeLinearMcpToken: () => removeLinearMcp(),
-  removeSlackMcpConnection: vi.fn(async () => ({ ok: true })),
+  removeSlackMcpConnection: (accountKey?: string) => removeSlackMcp(accountKey),
   removePostHogMcpConnection: vi.fn(async () => ({ ok: true })),
   removeBetterStackMcpConnection: vi.fn(async () => ({ ok: true })),
   removeBraintrustMcpConnection: vi.fn(async () => ({ ok: true })),
@@ -808,6 +809,73 @@ describe("PersonalCapabilityPanel integrations", () => {
 
     expect(openSpy).toHaveBeenCalledWith(
       "/api/integrations/gmail/start?returnTo=%2Fonboarding%2Fconnected",
+      "oc-personal-connect",
+      expect.any(String),
+    );
+
+    openSpy.mockRestore();
+  });
+
+  it("lets a connected Slack row connect another account from its details", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue({ closed: false } as Window);
+    const config: AgentConfig = {
+      ...baseConfig,
+      tools: [
+        {
+          id: "slack",
+          type: "mcp",
+          server: "slack",
+          label: "slack",
+          description: "Use Slack",
+        },
+      ],
+    };
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={config}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: false,
+          google_calendar: false,
+          linear: false,
+          slack: true,
+          posthog: false,
+          betterstack: false,
+          braintrust: false,
+          notion: false,
+        }}
+        details={{
+          slack: {
+            summary: "Acme",
+            accounts: [
+              {
+                id: "slack_acme",
+                label: "Acme",
+                detail: null,
+                status: "connected",
+                statusReason: null,
+                updatedAt: new Date().toISOString(),
+                resources: [],
+              },
+            ],
+            resourcesLabel: null,
+            statusReason: null,
+          },
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Expand Slack details" }));
+    await user.click(screen.getByRole("button", { name: "Connect another Slack account" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/mcp/slack/start?returnTo=%2Fonboarding%2Fconnected",
       "oc-personal-connect",
       expect.any(String),
     );

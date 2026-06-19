@@ -625,6 +625,94 @@ describe("createMcpToolSet", () => {
     expect(mcpClient.close).toHaveBeenCalled();
   });
 
+  it("requires an account selector when multiple Slack MCP accounts are connected", async () => {
+    const executeAcme = vi.fn(async () => ({ messages: [{ text: "acme" }] }));
+    const executeBeta = vi.fn(async () => ({ messages: [{ text: "beta" }] }));
+    db.queryResults = [
+      [slackServerRow()],
+      [
+        slackOAuthConnectionRow({
+          accountKey: "slack_acme",
+          accountLabel: "Acme",
+          connectedByUserId: "usr_123",
+          accessToken: "slack_acme_access",
+        }),
+        slackOAuthConnectionRow({
+          accountKey: "slack_beta",
+          accountLabel: "Beta",
+          connectedByUserId: "usr_123",
+          accessToken: "slack_beta_access",
+        }),
+      ],
+    ];
+    mcpClient.listTools
+      .mockResolvedValueOnce({ tools: [{ name: "search" }] } as never)
+      .mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
+    mcpClient.toolsFromDefinitions
+      .mockReturnValueOnce({
+        search: {
+          description: "Search Slack",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          execute: executeAcme,
+        },
+      })
+      .mockReturnValueOnce({
+        search: {
+          description: "Search Slack",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          execute: executeBeta,
+        },
+      });
+
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig, toolStartCoordinator));
+    const slackTool = (mcpTools.tools as ToolSet).slack__use_tool;
+    const missingAccountInput = { tool: "search", arguments: { query: "launch" } };
+
+    await slackTool?.onInputAvailable?.({
+      input: missingAccountInput,
+      toolCallId: "call_missing_account",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_missing_account");
+    const missingOutput = await slackTool?.execute?.(missingAccountInput, {
+      toolCallId: "call_missing_account",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(missingOutput).toMatchObject({
+      ok: false,
+      error: {
+        code: "mcp_tool_execution_failed",
+        recoverable: true,
+      },
+    });
+    expect(executeAcme).not.toHaveBeenCalled();
+    expect(executeBeta).not.toHaveBeenCalled();
+
+    const betaInput = { tool: "search", account: "Beta", arguments: { query: "launch" } };
+    await slackTool?.onInputAvailable?.({
+      input: betaInput,
+      toolCallId: "call_beta",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_beta");
+    const betaOutput = await slackTool?.execute?.(betaInput, {
+      toolCallId: "call_beta",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(betaOutput).toEqual({ messages: [{ text: "beta" }] });
+    expect(executeBeta).toHaveBeenCalledWith({ query: "launch" }, { toolCallId: "call_beta" });
+    expect(createMCPClient).toHaveBeenCalledTimes(2);
+
+    await mcpTools.close();
+  });
+
   it("loads Better Stack MCP OAuth tools with dynamic client credentials", async () => {
     db.queryResults = [[betterStackServerRow()], [betterStackOAuthConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({
@@ -768,15 +856,28 @@ function slackServerRow() {
   };
 }
 
-function slackOAuthConnectionRow() {
+function slackOAuthConnectionRow(
+  overrides: Partial<{
+    accountKey: string;
+    accountLabel: string | null;
+    accountEmail: string | null;
+    connectedByUserId: string | null;
+    accessToken: string;
+  }> = {},
+) {
+  const accessToken = overrides.accessToken ?? "slack_access";
   return {
     serverId: "wmcps_slack",
+    accountKey: overrides.accountKey ?? "default",
+    accountLabel: overrides.accountLabel ?? null,
+    accountEmail: overrides.accountEmail ?? null,
+    connectedByUserId: overrides.connectedByUserId ?? null,
     credentialKind: "oauth",
     encryptionKeyVersion: 1,
     encryptedPayload: encryptPayload(
       {
         tokens: {
-          access_token: "slack_access",
+          access_token: accessToken,
           refresh_token: "slack_refresh",
           token_type: "Bearer",
         },

@@ -1,6 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import { workspaceMcpCredentials, workspaceMcpServers } from "@opencompany/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
+import { DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY } from "@/lib/mcp/credential-storage";
 
 export const LINEAR_MCP_SERVER_KEY = "linear";
 export const LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
@@ -47,6 +48,17 @@ export type WorkspaceMcpProviderSettings = {
   status: "configured" | "missing_credential" | "disabled" | "error" | null;
   statusReason: string | null;
   updatedAt: string | null;
+  accounts: WorkspaceMcpAccountSettings[];
+};
+
+export type WorkspaceMcpAccountSettings = {
+  accountKey: string;
+  label: string;
+  email: string | null;
+  externalAccountId: string | null;
+  connectedByUserId: string | null;
+  updatedAt: string | null;
+  metadata: Record<string, unknown>;
 };
 
 export async function loadWorkspaceMcpSettingsForWorkspace(
@@ -73,6 +85,13 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
       .select({
         serverKey: workspaceMcpServers.serverKey,
         kind: workspaceMcpCredentials.kind,
+        accountKey: workspaceMcpCredentials.accountKey,
+        externalAccountId: workspaceMcpCredentials.externalAccountId,
+        accountLabel: workspaceMcpCredentials.accountLabel,
+        accountEmail: workspaceMcpCredentials.accountEmail,
+        connectedByUserId: workspaceMcpCredentials.connectedByUserId,
+        credentialUpdatedAt: workspaceMcpCredentials.updatedAt,
+        metadata: workspaceMcpCredentials.metadata,
       })
       .from(workspaceMcpCredentials)
       .innerJoin(
@@ -92,31 +111,33 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
     const server = serverByKey.get(provider);
     const hasCredential = credentials.some((credential) => {
       if (credential.serverKey !== provider) return false;
-      if (provider === LINEAR_MCP_SERVER_KEY) {
-        return (
-          credential.kind === "bearer_token" || credential.kind === LINEAR_MCP_OAUTH_CREDENTIAL_KIND
-        );
-      }
-      if (provider === POSTHOG_MCP_SERVER_KEY) {
-        return credential.kind === POSTHOG_MCP_OAUTH_CREDENTIAL_KIND;
-      }
-      if (provider === BETTERSTACK_MCP_SERVER_KEY) {
-        return credential.kind === BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND;
-      }
-      if (provider === BRAINTRUST_MCP_SERVER_KEY) {
-        return credential.kind === BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND;
-      }
-      if (provider === NOTION_MCP_SERVER_KEY) {
-        return credential.kind === NOTION_MCP_OAUTH_CREDENTIAL_KIND;
-      }
-      return credential.kind === SLACK_MCP_OAUTH_CREDENTIAL_KIND;
+      return isUsableCredentialForProvider(provider, credential);
     });
+    const accounts = credentials
+      .filter(
+        (credential) =>
+          credential.serverKey === provider && isUsableCredentialForProvider(provider, credential),
+      )
+      .map(
+        (credential): WorkspaceMcpAccountSettings => ({
+          accountKey: credential.accountKey,
+          label:
+            credential.accountLabel ?? credential.accountEmail ?? MCP_PROVIDER_LABELS[provider],
+          email: credential.accountEmail,
+          externalAccountId: credential.externalAccountId,
+          connectedByUserId: credential.connectedByUserId,
+          updatedAt: credential.credentialUpdatedAt?.toISOString() ?? null,
+          metadata: credential.metadata,
+        }),
+      )
+      .sort((left, right) => left.label.localeCompare(right.label));
     return {
       configured: Boolean(hasCredential && server?.status === "configured"),
       serverId: server?.id ?? null,
       status: server?.status ?? null,
       statusReason: server?.statusReason ?? null,
       updatedAt: server?.updatedAt.toISOString() ?? null,
+      accounts,
     };
   }
 
@@ -128,4 +149,47 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
     braintrust: settingsFor(BRAINTRUST_MCP_SERVER_KEY),
     notion: settingsFor(NOTION_MCP_SERVER_KEY),
   };
+}
+
+const MCP_PROVIDER_LABELS: Record<McpProviderKey, string> = {
+  linear: "Linear",
+  slack: "Slack",
+  posthog: "PostHog",
+  betterstack: "Better Stack",
+  braintrust: "Braintrust",
+  notion: "Notion",
+};
+
+function isCredentialKindForProvider(provider: McpProviderKey, kind: string) {
+  if (provider === LINEAR_MCP_SERVER_KEY) {
+    return kind === "bearer_token" || kind === LINEAR_MCP_OAUTH_CREDENTIAL_KIND;
+  }
+  if (provider === POSTHOG_MCP_SERVER_KEY) {
+    return kind === POSTHOG_MCP_OAUTH_CREDENTIAL_KIND;
+  }
+  if (provider === BETTERSTACK_MCP_SERVER_KEY) {
+    return kind === BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND;
+  }
+  if (provider === BRAINTRUST_MCP_SERVER_KEY) {
+    return kind === BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND;
+  }
+  if (provider === NOTION_MCP_SERVER_KEY) {
+    return kind === NOTION_MCP_OAUTH_CREDENTIAL_KIND;
+  }
+  return kind === SLACK_MCP_OAUTH_CREDENTIAL_KIND;
+}
+
+function isUsableCredentialForProvider(
+  provider: McpProviderKey,
+  credential: {
+    kind: string;
+    accountKey: string;
+    connectedByUserId: string | null;
+  },
+) {
+  if (!isCredentialKindForProvider(provider, credential.kind)) return false;
+  return (
+    credential.accountKey === DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY ||
+    Boolean(credential.connectedByUserId)
+  );
 }

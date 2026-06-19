@@ -12,6 +12,7 @@ export type McpOAuthStateInput = {
   workspaceId: string;
   userId: string;
   returnTo: string;
+  credentialAccountKey?: string;
 };
 
 export type McpOAuthState = McpOAuthStateInput & {
@@ -76,6 +77,7 @@ function isMcpOAuthState(value: unknown): value is McpOAuthState {
     typeof value.workspaceId === "string" &&
     typeof value.userId === "string" &&
     typeof value.returnTo === "string" &&
+    (value.credentialAccountKey === undefined || typeof value.credentialAccountKey === "string") &&
     typeof value.expiresAt === "number" &&
     typeof value.nonce === "string"
   );

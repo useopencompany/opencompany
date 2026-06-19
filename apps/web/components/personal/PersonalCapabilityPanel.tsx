@@ -555,7 +555,7 @@ function IntegrationAccountDetail({
 // MCP integrations remove the workspace credential. All of these re-derive server state via
 // router.refresh() on success, same as the connect flow.
 const MCP_DISCONNECT_ACTIONS: Partial<
-  Record<PersonalIntegrationId, () => Promise<{ ok: boolean }>>
+  Record<PersonalIntegrationId, (accountId?: string) => Promise<{ ok: boolean }>>
 > = {
   linear: removeLinearMcpToken,
   slack: removeSlackMcpConnection,
@@ -579,7 +579,7 @@ async function disconnectIntegration(
   }
   const remove = MCP_DISCONNECT_ACTIONS[integrationId];
   if (!remove) return { ok: false, message: "This integration cannot be disconnected here." };
-  return remove();
+  return remove(accountId);
 }
 
 // The management footer of an expanded integration/account section: refresh (GitHub only) and a
@@ -1429,7 +1429,7 @@ function githubRowStatus(
 }
 
 function supportsMultipleAccounts(entry: PersonalIntegrationCatalogEntry) {
-  return entry.kind === "github" || entry.kind === "google";
+  return entry.kind === "github" || entry.kind === "google" || entry.id === "slack";
 }
 
 function isToolAdded(toolId: AgentToolId, config: AgentConfig) {

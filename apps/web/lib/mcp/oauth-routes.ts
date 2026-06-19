@@ -24,7 +24,7 @@ export function createMcpOAuthStartRoute(
     // skipOnboarding: the onboarding integrations step opens this OAuth flow in a popup before
     // onboarding is marked complete; the default gate would bounce the popup to /onboarding.
     const { user, workspace } = await currentWorkspace({
-      requireAdmin: true,
+      ...(provider.multipleAccounts ? {} : { requireAdmin: true }),
       skipOnboarding: true,
     });
     const url = new URL(request.url);
@@ -33,8 +33,8 @@ export function createMcpOAuthStartRoute(
     try {
       const server = await upsertServer(
         workspace.id,
-        "missing_credential",
-        `${provider.displayName} MCP authorization started.`,
+        provider.multipleAccounts ? "configured" : "missing_credential",
+        provider.multipleAccounts ? null : `${provider.displayName} MCP authorization started.`,
       );
       const result = await provider.start({
         workspaceId: workspace.id,
@@ -81,7 +81,10 @@ export function createMcpOAuthCallbackRoute(
   return async function GET(request: Request) {
     // skipOnboarding: the onboarding integrations step opens this OAuth flow in a popup before
     // onboarding is marked complete; the default gate would bounce the popup to /onboarding.
-    const current = await currentWorkspace({ requireAdmin: true, skipOnboarding: true });
+    const current = await currentWorkspace({
+      ...(provider.multipleAccounts ? {} : { requireAdmin: true }),
+      skipOnboarding: true,
+    });
     const url = new URL(request.url);
     const stateValue = url.searchParams.get("state") ?? "";
 
@@ -154,7 +157,9 @@ export function createMcpOAuthCallbackRoute(
       );
       await provider.complete({
         workspaceId: current.workspace.id,
+        userId: current.user.id,
         serverId: server.id,
+        ...(state.credentialAccountKey ? { accountKey: state.credentialAccountKey } : {}),
         code,
         state: stateValue,
       });

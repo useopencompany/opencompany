@@ -61,6 +61,7 @@ const BRAINTRUST_MCP_SERVER_KEY = "braintrust";
 const BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const NOTION_MCP_SERVER_KEY = "notion";
 const NOTION_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY = "default";
 const SLACK_READ_SCOPES = [
   "search:read.public",
   "search:read.private",
@@ -101,6 +102,15 @@ type McpProvider = {
     clientSecret: string;
   };
   scopes?: string[];
+};
+
+type LoadedMcpConnection = {
+  endpointUrl: string;
+  serverId: string;
+  accountKey: string;
+  accountLabel: string;
+  accountEmail: string | null;
+  auth: { type: "oauth"; payload: McpOAuthPayload } | { type: "bearer"; bearerToken: string };
 };
 
 const MCP_PROVIDER_CATALOG: Record<McpProviderKey, McpProvider> = {
@@ -235,9 +245,9 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
 
   try {
     for (const provider of requestedProviders) {
-      let connection: Awaited<ReturnType<typeof loadMcpConnection>>;
+      let connections: LoadedMcpConnection[];
       try {
-        connection = await loadMcpConnection(input, provider);
+        connections = await loadMcpConnections(input, provider);
       } catch (error: unknown) {
         // The integration is enabled on the agent but not set up in the workspace
         // (no credential, beta off, etc.). Don't abort the whole turn — register a
@@ -256,31 +266,41 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
         });
         continue;
       }
-      const client = await createMCPClient({
-        clientName: "opencompany-runner",
-        version: "0.2.0",
-        transport: mcpTransportForConnection({
-          workspaceId: input.workspaceId,
-          provider,
-          integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
-          connection,
-        }),
-      });
-      clients.push(client);
+      const accounts: ConnectedMcpAccount[] = [];
+      for (const connection of connections) {
+        const client = await createMCPClient({
+          clientName: "opencompany-runner",
+          version: "0.2.0",
+          transport: mcpTransportForConnection({
+            workspaceId: input.workspaceId,
+            provider,
+            integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
+            connection,
+          }),
+        });
+        clients.push(client);
 
-      const definitions = await client.listTools({ options: { signal: input.signal } });
-      const rawTools = client.toolsFromDefinitions(definitions);
+        const definitions = await client.listTools({ options: { signal: input.signal } });
+        const rawTools = client.toolsFromDefinitions(definitions);
 
-      // The catalog (name + description + JSON input schema) comes straight from the MCP
-      // listTools response so `search_tools` returns plain schemas the model can read.
-      const catalog: McpToolCatalogEntry[] =
-        (definitions as { tools?: McpToolCatalogEntry[] }).tools ?? [];
-      const bodyByRawName = new Map<string, McpToolBody>();
-      for (const [rawName, rawTool] of Object.entries(rawTools)) {
-        bodyByRawName.set(rawName, (rawTool as unknown as { execute?: McpToolBody }).execute);
+        // The catalog (name + description + JSON input schema) comes straight from the MCP
+        // listTools response so `search_tools` returns plain schemas the model can read.
+        const catalog: McpToolCatalogEntry[] =
+          (definitions as { tools?: McpToolCatalogEntry[] }).tools ?? [];
+        const bodyByRawName = new Map<string, McpToolBody>();
+        for (const [rawName, rawTool] of Object.entries(rawTools)) {
+          bodyByRawName.set(rawName, (rawTool as unknown as { execute?: McpToolBody }).execute);
+        }
+        accounts.push({
+          accountKey: connection.accountKey,
+          label: connection.accountLabel,
+          email: connection.accountEmail,
+          catalog,
+          bodyByRawName,
+        });
       }
 
-      const connected: ConnectedMcpProvider = { provider, catalog, bodyByRawName };
+      const connected: ConnectedMcpProvider = { provider, accounts };
       const searchName = uniqueToolName(mcpSearchToolsName(provider.key), usedNames);
       const useName = uniqueToolName(mcpUseToolName(provider.key), usedNames);
       providerByToolName.set(searchName, connected);
@@ -424,15 +444,27 @@ type McpToolCatalogEntry = {
 
 // A live server connection reduced to what the meta-tools need: the discovery catalog
 // and the executable bodies keyed by raw tool name.
-type ConnectedMcpProvider = {
-  provider: McpProvider;
+type ConnectedMcpAccount = {
+  accountKey: string;
+  label: string;
+  email: string | null;
   catalog: McpToolCatalogEntry[];
   bodyByRawName: Map<string, McpToolBody>;
+};
+
+type ConnectedMcpProvider = {
+  provider: McpProvider;
+  accounts: ConnectedMcpAccount[];
 };
 
 const MCP_SEARCH_TOOLS_INPUT_SCHEMA = {
   type: "object",
   properties: {
+    account: {
+      type: "string",
+      description:
+        "Optional connected account label or id. Required by use_tool when multiple accounts are connected.",
+    },
     query: {
       type: "string",
       description: "Optional case-insensitive substring filter over tool names and descriptions.",
@@ -453,6 +485,10 @@ const MCP_USE_TOOL_INPUT_SCHEMA = {
       description: "Arguments object for the chosen tool, matching its input schema.",
       additionalProperties: true,
     },
+    account: {
+      type: "string",
+      description: "Connected account label or id to use when multiple accounts are connected.",
+    },
   },
   required: ["tool"],
   additionalProperties: false,
@@ -470,15 +506,17 @@ function searchToolsDescription(provider: McpProvider) {
 function useToolDescription(provider: McpProvider) {
   return (
     `${provider.displayName} MCP — run one ${provider.displayName} tool. Set "tool" to a name ` +
-    `from ${mcpSearchToolsName(provider.key)} and "arguments" to that tool's input. Each ` +
+    `from ${mcpSearchToolsName(provider.key)} and "arguments" to that tool's input. If multiple ` +
+    `${provider.displayName} accounts are connected, also pass "account". Each ` +
     `underlying tool keeps its own permission, so a write or destructive tool may require approval.`
   );
 }
 
-function parseUseToolInput(args: unknown): { tool: string; arguments: unknown } {
+function parseUseToolInput(args: unknown): { tool: string; arguments: unknown; account?: string } {
   if (isRecord(args)) {
     const tool = typeof args.tool === "string" ? args.tool.trim() : "";
-    return { tool, arguments: args.arguments ?? {} };
+    const account = typeof args.account === "string" ? args.account.trim() : "";
+    return { tool, arguments: args.arguments ?? {}, ...(account ? { account } : {}) };
   }
   return { tool: "", arguments: {} };
 }
@@ -498,17 +536,32 @@ function unknownMcpToolBody(provider: McpProvider, rawName: string): McpToolBody
 function buildMcpCatalogResult(connected: ConnectedMcpProvider, args: unknown) {
   const query =
     isRecord(args) && typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+  const accountArg = isRecord(args) && typeof args.account === "string" ? args.account : undefined;
+  const account = accountArg
+    ? resolveConnectedMcpAccount(connected, accountArg)
+    : connected.accounts[0]!;
   const entries = query
-    ? connected.catalog.filter(
+    ? account.catalog.filter(
         (entry) =>
           entry.name.toLowerCase().includes(query) ||
           (entry.description ?? "").toLowerCase().includes(query),
       )
-    : connected.catalog;
+    : account.catalog;
   return {
     ok: true as const,
     server: connected.provider.key,
     useTool: mcpUseToolName(connected.provider.key),
+    account: account.label,
+    ...(connected.accounts.length > 1
+      ? {
+          accounts: connected.accounts.map((candidate) => ({
+            id: candidate.accountKey,
+            label: candidate.label,
+            ...(candidate.email ? { email: candidate.email } : {}),
+          })),
+          accountSelection: `Multiple ${connected.provider.displayName} accounts are connected. Pass "account" to ${mcpUseToolName(connected.provider.key)} using one of these ids or labels.`,
+        }
+      : {}),
     toolCount: entries.length,
     tools: entries.map((entry) => ({
       name: entry.name,
@@ -516,6 +569,44 @@ function buildMcpCatalogResult(connected: ConnectedMcpProvider, args: unknown) {
       inputSchema: entry.inputSchema,
     })),
   };
+}
+
+function resolveConnectedMcpAccount(
+  connected: ConnectedMcpProvider,
+  accountArg: string | undefined,
+): ConnectedMcpAccount {
+  if (connected.accounts.length === 0) {
+    throw new Error(`${connected.provider.displayName} has no connected accounts.`);
+  }
+
+  const wanted = accountArg?.trim().toLowerCase();
+  if (wanted) {
+    const match = connected.accounts.find((account) => {
+      return (
+        account.accountKey.toLowerCase() === wanted ||
+        account.label.toLowerCase() === wanted ||
+        account.email?.toLowerCase() === wanted
+      );
+    });
+    if (!match) {
+      throw new Error(
+        `No connected ${connected.provider.displayName} account matches "${accountArg}". Connected: ${connectedMcpAccountList(connected)}.`,
+      );
+    }
+    return match;
+  }
+
+  if (connected.accounts.length > 1) {
+    throw new Error(
+      `Multiple ${connected.provider.displayName} accounts are connected; pass "account" to choose one. Connected: ${connectedMcpAccountList(connected)}.`,
+    );
+  }
+
+  return connected.accounts[0]!;
+}
+
+function connectedMcpAccountList(connected: ConnectedMcpProvider) {
+  return connected.accounts.map((account) => account.label).join(", ");
 }
 
 // Resolve the named raw tool's body and run it through the shared execution tail. The
@@ -533,13 +624,29 @@ async function dispatchMcpUseTool(
     args: unknown;
   },
 ) {
-  const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
-  const body = input.connected.bodyByRawName.get(rawName);
+  const { tool: rawName, arguments: rawArgs, account: accountArg } = parseUseToolInput(input.args);
   const toolName = mcpUseToolName(input.connected.provider.key);
+  let account: ConnectedMcpAccount;
+  try {
+    account = resolveConnectedMcpAccount(input.connected, accountArg);
+  } catch (error) {
+    return executeMcpTool({
+      ...input,
+      mcpServer: input.connected.provider.key,
+      toolCallId: input.toolCallId,
+      toolName,
+      rawToolName: rawName || MCP_USE_TOOL_RAW_NAME,
+      execute: () => {
+        throw error;
+      },
+      args: rawArgs,
+    });
+  }
+  const body = account.bodyByRawName.get(rawName);
 
   // Only validate when we have both an executable body and a catalog schema. An unknown tool keeps
   // the existing recoverable-failure path; a missing schema means we can't validate, so pass through.
-  const schema = input.connected.catalog.find((entry) => entry.name === rawName)?.inputSchema;
+  const schema = account.catalog.find((entry) => entry.name === rawName)?.inputSchema;
   if (body && schema !== undefined) {
     const prepared = await prepareToolArgs({
       surface: "mcp",
@@ -681,7 +788,7 @@ function mcpTransportForConnection(input: {
   workspaceId: string;
   provider: McpProvider;
   integrationCredentialEncryptionKey: Buffer;
-  connection: Awaited<ReturnType<typeof loadMcpConnection>>;
+  connection: LoadedMcpConnection;
 }) {
   if (input.connection.auth.type === "oauth") {
     return {
@@ -690,6 +797,7 @@ function mcpTransportForConnection(input: {
       authProvider: createRunnerMcpOAuthProvider({
         workspaceId: input.workspaceId,
         serverId: input.connection.serverId,
+        accountKey: input.connection.accountKey,
         payload: input.connection.auth.payload,
         provider: input.provider,
         encryptionKey: input.integrationCredentialEncryptionKey,
@@ -919,7 +1027,21 @@ function isMcpFailedToolOutput(
 async function loadMcpConnection(
   input: Pick<McpToolContext, "workspaceId" | "integrationCredentialEncryptionKey">,
   provider: McpProvider,
-) {
+): Promise<LoadedMcpConnection> {
+  const connections = await loadMcpConnections(input, provider);
+  const [connection] = connections;
+  if (!connection) {
+    throw new Error(
+      `${provider.displayName} MCP is enabled on this agent, but ${provider.displayName} is not configured.`,
+    );
+  }
+  return connection;
+}
+
+async function loadMcpConnections(
+  input: Pick<McpToolContext, "workspaceId" | "integrationCredentialEncryptionKey">,
+  provider: McpProvider,
+): Promise<LoadedMcpConnection[]> {
   const db = getDb();
   const { workspaceId } = input;
   const [server] = await db
@@ -946,6 +1068,10 @@ async function loadMcpConnection(
   const rows = await db
     .select({
       serverId: workspaceMcpCredentials.serverId,
+      accountKey: workspaceMcpCredentials.accountKey,
+      accountLabel: workspaceMcpCredentials.accountLabel,
+      accountEmail: workspaceMcpCredentials.accountEmail,
+      connectedByUserId: workspaceMcpCredentials.connectedByUserId,
       encryptedPayload: workspaceMcpCredentials.encryptedPayload,
       encryptionKeyVersion: workspaceMcpCredentials.encryptionKeyVersion,
       credentialKind: workspaceMcpCredentials.kind,
@@ -958,29 +1084,38 @@ async function loadMcpConnection(
       ),
     );
 
-  const oauthRow = rows.find(
-    (candidate) => candidate.credentialKind === provider.oauthCredentialKind,
+  const oauthRows = rows.filter(
+    (candidate) =>
+      candidate.credentialKind === provider.oauthCredentialKind &&
+      isCompletedMcpCredential(candidate),
   );
-  if (oauthRow) {
-    const payload = parseMcpOAuthPayload(
-      decryptPayload(oauthRow.encryptedPayload, {
-        workspaceId,
-        serverId: oauthRow.serverId,
-        kind: oauthRow.credentialKind,
-        keyVersion: oauthRow.encryptionKeyVersion,
-        encryptionKey: input.integrationCredentialEncryptionKey,
-      }),
-    );
-    if (!(provider.staticClientEnv || payload.clientInformation) || !payload.tokens) {
-      throw new Error(
-        `${provider.displayName} MCP OAuth credential is incomplete. Reconnect ${provider.displayName}.`,
+  if (oauthRows.length > 0) {
+    const connections: LoadedMcpConnection[] = [];
+    for (const oauthRow of oauthRows) {
+      const payload = parseMcpOAuthPayload(
+        decryptPayload(oauthRow.encryptedPayload, {
+          workspaceId,
+          serverId: oauthRow.serverId,
+          kind: oauthRow.credentialKind,
+          keyVersion: oauthRow.encryptionKeyVersion,
+          encryptionKey: input.integrationCredentialEncryptionKey,
+        }),
       );
+      if (!(provider.staticClientEnv || payload.clientInformation) || !payload.tokens) {
+        throw new Error(
+          `${provider.displayName} MCP OAuth credential is incomplete. Reconnect ${provider.displayName}.`,
+        );
+      }
+      connections.push({
+        endpointUrl: server.endpointUrl,
+        serverId: oauthRow.serverId,
+        accountKey: oauthRow.accountKey ?? DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY,
+        accountLabel: oauthRow.accountLabel ?? provider.displayName,
+        accountEmail: oauthRow.accountEmail,
+        auth: { type: "oauth" as const, payload },
+      });
     }
-    return {
-      endpointUrl: server.endpointUrl,
-      serverId: oauthRow.serverId,
-      auth: { type: "oauth" as const, payload },
-    };
+    return connections;
   }
 
   if (!provider.supportsBearerToken) {
@@ -1004,11 +1139,26 @@ async function loadMcpConnection(
   const bearerToken = typeof payload.bearerToken === "string" ? payload.bearerToken.trim() : "";
   if (!bearerToken)
     throw new Error(`${provider.displayName} MCP credential is missing a bearer token.`);
-  return {
-    endpointUrl: server.endpointUrl,
-    serverId: bearerRow.serverId,
-    auth: { type: "bearer" as const, bearerToken },
-  };
+  return [
+    {
+      endpointUrl: server.endpointUrl,
+      serverId: bearerRow.serverId,
+      accountKey: DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY,
+      accountLabel: provider.displayName,
+      accountEmail: null,
+      auth: { type: "bearer" as const, bearerToken },
+    } satisfies LoadedMcpConnection,
+  ];
+}
+
+function isCompletedMcpCredential(row: {
+  accountKey: string | null;
+  connectedByUserId: string | null;
+}) {
+  return (
+    (row.accountKey ?? DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY) === DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY ||
+    Boolean(row.connectedByUserId)
+  );
 }
 
 type McpOAuthPayload = {
@@ -1021,6 +1171,7 @@ type McpOAuthPayload = {
 function createRunnerMcpOAuthProvider(input: {
   workspaceId: string;
   serverId: string;
+  accountKey: string;
   payload: McpOAuthPayload;
   provider: McpProvider;
   encryptionKey: Buffer;
@@ -1047,13 +1198,18 @@ function createRunnerMcpOAuthProvider(input: {
         workspaceId: input.workspaceId,
         serverId: input.serverId,
         kind: input.provider.oauthCredentialKind,
+        accountKey: input.accountKey,
         encryptedPayload,
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
         lastRotatedAt: now,
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: [workspaceMcpCredentials.serverId, workspaceMcpCredentials.kind],
+        target: [
+          workspaceMcpCredentials.serverId,
+          workspaceMcpCredentials.kind,
+          workspaceMcpCredentials.accountKey,
+        ],
         set: {
           workspaceId: input.workspaceId,
           encryptedPayload,

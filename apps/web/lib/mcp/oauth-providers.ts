@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { OAuthClientInformation } from "@ai-sdk/mcp";
 import {
   BETTERSTACK_MCP_ENDPOINT_URL,
@@ -19,6 +20,7 @@ import {
   SLACK_MCP_OAUTH_CREDENTIAL_KIND,
   SLACK_MCP_SERVER_KEY,
 } from "@/lib/mcp/data";
+import type { McpOAuthAccountMetadata, McpOAuthPayload } from "@/lib/mcp/oauth-provider";
 import { createMcpOAuthProvider } from "@/lib/mcp/oauth-provider";
 
 // Per-provider MCP OAuth configuration. Adding a provider = one entry here plus the two
@@ -61,6 +63,8 @@ export const slackMcpOAuth = createMcpOAuthProvider({
   credentialKind: SLACK_MCP_OAUTH_CREDENTIAL_KIND,
   authScope: SLACK_READ_SCOPES.join(" "),
   staticClientInformation: slackClientInformation,
+  multipleAccounts: true,
+  resolveAccountMetadata: resolveSlackMcpAccountMetadata,
   startFailureEnvHints: ["SLACK_MCP_CLIENT_ID", "SLACK_MCP_CLIENT_SECRET"],
 });
 
@@ -112,4 +116,87 @@ function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required for Slack MCP OAuth.`);
   return value;
+}
+
+async function resolveSlackMcpAccountMetadata(input: {
+  payload: McpOAuthPayload;
+  accountKey: string;
+}): Promise<McpOAuthAccountMetadata> {
+  const accessToken = input.payload.tokens?.access_token;
+  const authTest = accessToken ? await fetchSlackAuthTest(accessToken).catch(() => null) : null;
+  const tokenRecord: Record<string, unknown> = isRecord(input.payload.tokens)
+    ? input.payload.tokens
+    : {};
+  const teamRecord = recordField(tokenRecord, "team");
+  const authedUserRecord = recordField(tokenRecord, "authed_user");
+
+  const teamId =
+    authTest?.team_id ?? stringField(teamRecord.id) ?? stringField(tokenRecord.team_id);
+  const teamName =
+    authTest?.team ?? stringField(teamRecord.name) ?? stringField(tokenRecord.team_name);
+  const userId =
+    authTest?.user_id ?? stringField(authedUserRecord.id) ?? stringField(tokenRecord.user_id);
+  const userName = authTest?.user ?? stringField(authedUserRecord.name);
+  const externalAccountId = [teamId, userId].filter(Boolean).join(":") || null;
+
+  return {
+    nextAccountKey: externalAccountId
+      ? `slack_${hashForAccountKey(externalAccountId)}`
+      : input.accountKey,
+    externalAccountId,
+    accountLabel: slackAccountLabel({ teamName, userName, teamId, userId }),
+    metadata: {
+      ...(teamId ? { teamId } : {}),
+      ...(teamName ? { teamName } : {}),
+      ...(userId ? { userId } : {}),
+      ...(userName ? { userName } : {}),
+    },
+  };
+}
+
+type SlackAuthTestResponse = {
+  ok?: boolean;
+  team?: string;
+  team_id?: string;
+  user?: string;
+  user_id?: string;
+};
+
+async function fetchSlackAuthTest(accessToken: string): Promise<SlackAuthTestResponse | null> {
+  const response = await fetch("https://slack.com/api/auth.test", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) return null;
+  const body = (await response.json()) as SlackAuthTestResponse;
+  return body.ok ? body : null;
+}
+
+function slackAccountLabel(input: {
+  teamName?: string | undefined;
+  userName?: string | undefined;
+  teamId?: string | undefined;
+  userId?: string | undefined;
+}) {
+  if (input.teamName && input.userName) return `${input.teamName} · ${input.userName}`;
+  if (input.teamName) return input.teamName;
+  if (input.teamId && input.userId) return `${input.teamId} · ${input.userId}`;
+  if (input.teamId) return input.teamId;
+  return "Slack account";
+}
+
+function hashForAccountKey(value: string) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function stringField(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function recordField(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return isRecord(value) ? value : {};
 }

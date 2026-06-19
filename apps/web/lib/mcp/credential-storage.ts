@@ -15,6 +15,7 @@ import {
 import { and, eq } from "drizzle-orm";
 
 const ENCRYPTION_KEY_VERSION = 1;
+export const DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY = "default";
 
 type CredentialDb = Pick<ReturnType<typeof getDb>, "delete" | "insert" | "select">;
 
@@ -22,14 +23,29 @@ export type McpCredentialContext = {
   workspaceId: string;
   serverId: string;
   kind: WorkspaceMcpCredentialKind;
+  accountKey?: string;
+};
+
+export type McpCredentialAccountFields = {
+  externalAccountId?: string | null;
+  accountLabel?: string | null;
+  accountEmail?: string | null;
+  connectedByUserId?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type LoadedMcpCredential = {
+  accountKey: string;
+  externalAccountId: string | null;
+  accountLabel: string | null;
+  accountEmail: string | null;
+  connectedByUserId: string | null;
   payload: Record<string, unknown>;
   bearerToken?: string;
   expiresAt: Date | null;
   lastRotatedAt: Date | null;
   updatedAt: Date;
+  metadata: Record<string, unknown>;
   encryptionKeyVersion: number;
 };
 
@@ -39,12 +55,14 @@ export async function saveMcpCredential(
     bearerToken?: string;
     expiresAt?: Date | null;
     db?: CredentialDb;
-  },
+  } & McpCredentialAccountFields,
 ) {
   const db = input.db ?? getDb();
   const now = new Date();
+  const accountKey = normalizeAccountKey(input.accountKey);
   const payload = input.payload ?? { bearerToken: input.bearerToken };
   const encryptedPayload = encryptPayload(payload, input);
+  const accountSet = accountFieldsForUpdate(input);
 
   const [credential] = await db
     .insert(workspaceMcpCredentials)
@@ -53,20 +71,31 @@ export async function saveMcpCredential(
       workspaceId: input.workspaceId,
       serverId: input.serverId,
       kind: input.kind,
+      accountKey,
+      externalAccountId: input.externalAccountId ?? null,
+      accountLabel: input.accountLabel ?? null,
+      accountEmail: input.accountEmail ?? null,
+      connectedByUserId: input.connectedByUserId ?? null,
       encryptedPayload,
       encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
       expiresAt: input.expiresAt ?? null,
       lastRotatedAt: now,
+      metadata: input.metadata ?? {},
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [workspaceMcpCredentials.serverId, workspaceMcpCredentials.kind],
+      target: [
+        workspaceMcpCredentials.serverId,
+        workspaceMcpCredentials.kind,
+        workspaceMcpCredentials.accountKey,
+      ],
       set: {
         workspaceId: input.workspaceId,
         encryptedPayload,
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
         expiresAt: input.expiresAt ?? null,
         lastRotatedAt: now,
+        ...accountSet,
         updatedAt: now,
       },
     })
@@ -79,16 +108,23 @@ export async function loadMcpCredential(
   input: McpCredentialContext & { db?: CredentialDb },
 ): Promise<LoadedMcpCredential | null> {
   const db = input.db ?? getDb();
+  const accountKey = normalizeAccountKey(input.accountKey);
   const [credential] = await db
     .select({
       workspaceId: workspaceMcpCredentials.workspaceId,
       serverId: workspaceMcpCredentials.serverId,
       kind: workspaceMcpCredentials.kind,
+      accountKey: workspaceMcpCredentials.accountKey,
+      externalAccountId: workspaceMcpCredentials.externalAccountId,
+      accountLabel: workspaceMcpCredentials.accountLabel,
+      accountEmail: workspaceMcpCredentials.accountEmail,
+      connectedByUserId: workspaceMcpCredentials.connectedByUserId,
       encryptedPayload: workspaceMcpCredentials.encryptedPayload,
       encryptionKeyVersion: workspaceMcpCredentials.encryptionKeyVersion,
       expiresAt: workspaceMcpCredentials.expiresAt,
       lastRotatedAt: workspaceMcpCredentials.lastRotatedAt,
       updatedAt: workspaceMcpCredentials.updatedAt,
+      metadata: workspaceMcpCredentials.metadata,
     })
     .from(workspaceMcpCredentials)
     .where(
@@ -96,6 +132,7 @@ export async function loadMcpCredential(
         eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
         eq(workspaceMcpCredentials.serverId, input.serverId),
         eq(workspaceMcpCredentials.kind, input.kind),
+        eq(workspaceMcpCredentials.accountKey, accountKey),
       ),
     )
     .limit(1);
@@ -104,7 +141,8 @@ export async function loadMcpCredential(
   if (
     credential.workspaceId !== input.workspaceId ||
     credential.serverId !== input.serverId ||
-    credential.kind !== input.kind
+    credential.kind !== input.kind ||
+    credential.accountKey !== accountKey
   ) {
     throw new Error("MCP credential row did not match the requested context.");
   }
@@ -116,19 +154,60 @@ export async function loadMcpCredential(
   );
   const bearerToken = typeof payload.bearerToken === "string" ? payload.bearerToken : undefined;
   return {
+    accountKey: credential.accountKey,
+    externalAccountId: credential.externalAccountId,
+    accountLabel: credential.accountLabel,
+    accountEmail: credential.accountEmail,
+    connectedByUserId: credential.connectedByUserId,
     payload,
     ...(bearerToken ? { bearerToken } : {}),
     expiresAt: credential.expiresAt,
     lastRotatedAt: credential.lastRotatedAt,
     updatedAt: credential.updatedAt,
+    metadata: credential.metadata,
     encryptionKeyVersion: credential.encryptionKeyVersion,
   };
 }
 
 export async function deleteMcpCredential(input: McpCredentialContext & { db?: CredentialDb }) {
   const db = input.db ?? getDb();
+  const baseFilter = and(
+    eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
+    eq(workspaceMcpCredentials.serverId, input.serverId),
+    eq(workspaceMcpCredentials.kind, input.kind),
+  );
   await db
     .delete(workspaceMcpCredentials)
+    .where(
+      input.accountKey
+        ? and(
+            baseFilter,
+            eq(workspaceMcpCredentials.accountKey, normalizeAccountKey(input.accountKey)),
+          )
+        : baseFilter,
+    );
+}
+
+export async function listMcpCredentialAccounts(input: {
+  workspaceId: string;
+  serverId: string;
+  kind: WorkspaceMcpCredentialKind;
+  db?: CredentialDb;
+}) {
+  const db = input.db ?? getDb();
+  return db
+    .select({
+      accountKey: workspaceMcpCredentials.accountKey,
+      externalAccountId: workspaceMcpCredentials.externalAccountId,
+      accountLabel: workspaceMcpCredentials.accountLabel,
+      accountEmail: workspaceMcpCredentials.accountEmail,
+      connectedByUserId: workspaceMcpCredentials.connectedByUserId,
+      expiresAt: workspaceMcpCredentials.expiresAt,
+      lastRotatedAt: workspaceMcpCredentials.lastRotatedAt,
+      updatedAt: workspaceMcpCredentials.updatedAt,
+      metadata: workspaceMcpCredentials.metadata,
+    })
+    .from(workspaceMcpCredentials)
     .where(
       and(
         eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
@@ -136,6 +215,58 @@ export async function deleteMcpCredential(input: McpCredentialContext & { db?: C
         eq(workspaceMcpCredentials.kind, input.kind),
       ),
     );
+}
+
+export async function finalizeMcpCredentialAccount(
+  input: McpCredentialContext &
+    Required<Pick<McpCredentialAccountFields, "connectedByUserId">> &
+    McpCredentialAccountFields & {
+      nextAccountKey?: string;
+    },
+) {
+  const db = getDb();
+  const now = new Date();
+  const currentAccountKey = normalizeAccountKey(input.accountKey);
+  const nextAccountKey = normalizeAccountKey(input.nextAccountKey ?? currentAccountKey);
+
+  return db.transaction(async (tx) => {
+    if (nextAccountKey !== currentAccountKey) {
+      await tx
+        .delete(workspaceMcpCredentials)
+        .where(
+          and(
+            eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
+            eq(workspaceMcpCredentials.serverId, input.serverId),
+            eq(workspaceMcpCredentials.kind, input.kind),
+            eq(workspaceMcpCredentials.accountKey, nextAccountKey),
+          ),
+        );
+    }
+
+    const [updated] = await tx
+      .update(workspaceMcpCredentials)
+      .set({
+        accountKey: nextAccountKey,
+        externalAccountId: input.externalAccountId ?? null,
+        accountLabel: input.accountLabel ?? null,
+        accountEmail: input.accountEmail ?? null,
+        connectedByUserId: input.connectedByUserId,
+        metadata: input.metadata ?? {},
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
+          eq(workspaceMcpCredentials.serverId, input.serverId),
+          eq(workspaceMcpCredentials.kind, input.kind),
+          eq(workspaceMcpCredentials.accountKey, currentAccountKey),
+        ),
+      )
+      .returning({ accountKey: workspaceMcpCredentials.accountKey });
+
+    if (!updated) throw new Error("Could not finalize MCP credential account.");
+    return { accountKey: updated.accountKey };
+  });
 }
 
 function encryptPayload(
@@ -185,4 +316,23 @@ function authenticatedData(context: McpCredentialContext, keyVersion: number) {
 
 function newWorkspaceMcpCredentialId() {
   return `wmcpc_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+}
+
+export function newMcpCredentialAccountKey() {
+  return `acct_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+}
+
+export function normalizeAccountKey(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed || DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY;
+}
+
+function accountFieldsForUpdate(input: McpCredentialAccountFields) {
+  const fields: Partial<typeof workspaceMcpCredentials.$inferInsert> = {};
+  if (input.externalAccountId !== undefined) fields.externalAccountId = input.externalAccountId;
+  if (input.accountLabel !== undefined) fields.accountLabel = input.accountLabel;
+  if (input.accountEmail !== undefined) fields.accountEmail = input.accountEmail;
+  if (input.connectedByUserId !== undefined) fields.connectedByUserId = input.connectedByUserId;
+  if (input.metadata !== undefined) fields.metadata = input.metadata;
+  return fields;
 }

@@ -74,10 +74,16 @@ type StoredCredentialRow = {
   workspaceId: string;
   serverId: string;
   kind: string;
+  accountKey: string;
+  externalAccountId: string | null;
+  accountLabel: string | null;
+  accountEmail: string | null;
+  connectedByUserId: string | null;
   encryptedPayload: WorkspaceIntegrationCredentialEncryptedPayload;
   encryptionKeyVersion: number;
   expiresAt: Date | null;
   lastRotatedAt: Date | null;
+  metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -90,7 +96,10 @@ function createCredentialDb() {
         onConflictDoUpdate: vi.fn(({ set }) => ({
           returning: vi.fn(async () => {
             const existing = rows.find(
-              (row) => row.serverId === values.serverId && row.kind === values.kind,
+              (row) =>
+                row.serverId === values.serverId &&
+                row.kind === values.kind &&
+                row.accountKey === values.accountKey,
             );
             if (existing) {
               Object.assign(existing, set);
@@ -99,8 +108,14 @@ function createCredentialDb() {
 
             rows.push({
               ...values,
+              accountKey: values.accountKey ?? "default",
+              externalAccountId: values.externalAccountId ?? null,
+              accountLabel: values.accountLabel ?? null,
+              accountEmail: values.accountEmail ?? null,
+              connectedByUserId: values.connectedByUserId ?? null,
               expiresAt: values.expiresAt ?? null,
               lastRotatedAt: values.lastRotatedAt ?? null,
+              metadata: values.metadata ?? {},
               createdAt: new Date("2026-01-01T00:00:00.000Z"),
             });
             return [{ id: values.id }];
@@ -130,11 +145,17 @@ function toSelectedCredential(row: StoredCredentialRow) {
     workspaceId: row.workspaceId,
     serverId: row.serverId,
     kind: row.kind,
+    accountKey: row.accountKey,
+    externalAccountId: row.externalAccountId,
+    accountLabel: row.accountLabel,
+    accountEmail: row.accountEmail,
+    connectedByUserId: row.connectedByUserId,
     encryptedPayload: row.encryptedPayload,
     encryptionKeyVersion: row.encryptionKeyVersion,
     expiresAt: row.expiresAt,
     lastRotatedAt: row.lastRotatedAt,
     updatedAt: row.updatedAt,
+    metadata: row.metadata,
   };
 }
 

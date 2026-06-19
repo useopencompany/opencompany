@@ -1,6 +1,10 @@
 import { auth } from "@ai-sdk/mcp";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  finalizeMcpCredentialAccount,
+  loadMcpCredential,
+  saveMcpCredential,
+} from "@/lib/mcp/credential-storage";
 import {
   betterstackMcpOAuth,
   braintrustMcpOAuth,
@@ -24,7 +28,13 @@ vi.mock("@/lib/billing/stripe", () => ({
 }));
 
 vi.mock("@/lib/mcp/credential-storage", () => ({
+  DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY: "default",
+  finalizeMcpCredentialAccount: vi.fn(async ({ nextAccountKey }) => ({
+    accountKey: nextAccountKey ?? "default",
+  })),
   loadMcpCredential: vi.fn(async () => null),
+  newMcpCredentialAccountKey: vi.fn(() => "acct_new"),
+  normalizeAccountKey: vi.fn((value) => value?.trim() || "default"),
   saveMcpCredential: vi.fn(async () => undefined),
 }));
 
@@ -45,6 +55,10 @@ beforeEach(() => {
   vi.stubEnv("MCP_OAUTH_STATE_SECRET", "state-secret");
   vi.stubEnv("SLACK_MCP_CLIENT_ID", "slack_client");
   vi.stubEnv("SLACK_MCP_CLIENT_SECRET", "slack_secret");
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe.each([
@@ -77,6 +91,7 @@ describe.each([
         workspaceId: "wks_123",
         serverId: `wmcps_${provider.key}`,
         kind: "oauth",
+        accountKey: "default",
         payload: expect.objectContaining({
           clientInformation: { client_id: "dynamic_client" },
         }),
@@ -117,9 +132,68 @@ describe("Slack MCP OAuth", () => {
     );
     expect(saveMcpCredential).toHaveBeenCalled();
     for (const call of vi.mocked(saveMcpCredential).mock.calls) {
+      expect(call[0].accountKey).toBe("acct_new");
       expect(call[0].payload).not.toHaveProperty("clientInformation");
       expect(JSON.stringify(call[0].payload)).not.toContain("slack_secret");
     }
+  });
+
+  it("finalizes a connected Slack account with Slack auth metadata", async () => {
+    vi.mocked(auth).mockResolvedValueOnce("AUTHORIZED");
+    vi.mocked(loadMcpCredential).mockResolvedValue(
+      loadedCredential({
+        tokens: {
+          access_token: "slack_access",
+          refresh_token: "slack_refresh",
+          token_type: "Bearer",
+        },
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          team: "Acme",
+          team_id: "T123",
+          user: "Louis",
+          user_id: "U123",
+        }),
+      })),
+    );
+
+    const state = slackMcpOAuth.createState({
+      workspaceId: "wks_123",
+      userId: "usr_123",
+      returnTo: "/settings",
+      credentialAccountKey: "acct_new",
+    });
+
+    await slackMcpOAuth.complete({
+      workspaceId: "wks_123",
+      userId: "usr_123",
+      serverId: "wmcps_slack",
+      accountKey: "acct_new",
+      code: "auth_code",
+      state,
+    });
+
+    expect(finalizeMcpCredentialAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "wks_123",
+        serverId: "wmcps_slack",
+        kind: "oauth",
+        accountKey: "acct_new",
+        connectedByUserId: "usr_123",
+        externalAccountId: "T123:U123",
+        accountLabel: "Acme · Louis",
+        metadata: expect.objectContaining({ teamId: "T123", userId: "U123" }),
+      }),
+    );
+    expect(vi.mocked(finalizeMcpCredentialAccount).mock.calls[0]?.[0].nextAccountKey).toMatch(
+      /^slack_[a-f0-9]{16}$/,
+    );
   });
 
   it("requires the Slack client env vars", async () => {
@@ -178,6 +252,11 @@ describe("MCP OAuth provider factory", () => {
 
   it("drops malformed tokens and client information when parsing stored payloads", async () => {
     vi.mocked(loadMcpCredential).mockResolvedValueOnce({
+      accountKey: "default",
+      externalAccountId: null,
+      accountLabel: null,
+      accountEmail: null,
+      connectedByUserId: null,
       payload: {
         clientInformation: { client_id: 42 },
         tokens: { access_token: "tok" }, // missing token_type → invalid
@@ -187,6 +266,7 @@ describe("MCP OAuth provider factory", () => {
       expiresAt: null,
       lastRotatedAt: null,
       updatedAt: new Date(),
+      metadata: {},
       encryptionKeyVersion: 1,
     });
 
@@ -200,6 +280,11 @@ describe("MCP OAuth provider factory", () => {
 
   it("parses well-formed stored payloads", async () => {
     vi.mocked(loadMcpCredential).mockResolvedValueOnce({
+      accountKey: "default",
+      externalAccountId: null,
+      accountLabel: null,
+      accountEmail: null,
+      connectedByUserId: null,
       payload: {
         clientInformation: { client_id: "client" },
         tokens: { access_token: "tok", token_type: "Bearer", refresh_token: "ref" },
@@ -207,6 +292,7 @@ describe("MCP OAuth provider factory", () => {
       expiresAt: null,
       lastRotatedAt: null,
       updatedAt: new Date(),
+      metadata: {},
       encryptionKeyVersion: 1,
     });
 
@@ -223,6 +309,11 @@ describe("MCP OAuth provider factory", () => {
 
   it("never rehydrates persisted client information for static-client providers", async () => {
     vi.mocked(loadMcpCredential).mockResolvedValueOnce({
+      accountKey: "default",
+      externalAccountId: null,
+      accountLabel: null,
+      accountEmail: null,
+      connectedByUserId: null,
       payload: {
         clientInformation: { client_id: "stale", client_secret: "stale_secret" },
         tokens: { access_token: "tok", token_type: "Bearer" },
@@ -230,6 +321,7 @@ describe("MCP OAuth provider factory", () => {
       expiresAt: null,
       lastRotatedAt: null,
       updatedAt: new Date(),
+      metadata: {},
       encryptionKeyVersion: 1,
     });
 
@@ -243,3 +335,19 @@ describe("MCP OAuth provider factory", () => {
     });
   });
 });
+
+function loadedCredential(payload: Record<string, unknown>) {
+  return {
+    accountKey: "acct_new",
+    externalAccountId: null,
+    accountLabel: null,
+    accountEmail: null,
+    connectedByUserId: null,
+    payload,
+    expiresAt: null,
+    lastRotatedAt: null,
+    updatedAt: new Date(),
+    metadata: {},
+    encryptionKeyVersion: 1,
+  };
+}

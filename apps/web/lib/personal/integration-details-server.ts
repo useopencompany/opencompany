@@ -45,7 +45,7 @@ export function buildPersonalIntegrationDetails(input: {
     gmail: buildGoogleDetail(input.google.gmail.connections, null),
     google_calendar: buildGoogleDetail(input.google.google_calendar.connections, "Calendars"),
     linear: buildMcpDetail(input.mcp.linear),
-    slack: buildMcpDetail(input.mcp.slack),
+    slack: buildMcpDetail(input.mcp.slack, { accounts: true }),
     posthog: buildMcpDetail(input.mcp.posthog),
     betterstack: buildMcpDetail(input.mcp.betterstack),
     braintrust: buildMcpDetail(input.mcp.braintrust),
@@ -132,10 +132,31 @@ function buildGoogleDetail(
   };
 }
 
-function buildMcpDetail(settings: WorkspaceMcpSettings[McpProviderKey]): PersonalIntegrationDetail {
+function buildMcpDetail(
+  settings: WorkspaceMcpSettings[McpProviderKey],
+  options: { accounts?: boolean } = {},
+): PersonalIntegrationDetail {
+  const accounts: PersonalIntegrationAccountDetail[] = options.accounts
+    ? settings.accounts.map((account) => ({
+        id: account.accountKey,
+        label: account.label,
+        detail: account.email,
+        status: settings.configured ? "connected" : "sync_failed",
+        statusReason: settings.configured ? null : settings.statusReason,
+        updatedAt: account.updatedAt ?? settings.updatedAt,
+        resources: [],
+      }))
+    : [];
+  const summary =
+    accounts.length === 0
+      ? null
+      : accounts.length === 1
+        ? accounts[0]!.label
+        : `${accounts.length} accounts`;
+
   return {
-    summary: null,
-    accounts: [],
+    summary,
+    accounts,
     resourcesLabel: null,
     statusReason:
       settings.status && settings.status !== "configured" ? settings.statusReason : null,

@@ -35,12 +35,16 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
         mcpServerRow("wmcps_notion", "notion", "configured"),
       ],
       [
-        { serverKey: "linear", kind: "bearer_token" },
-        { serverKey: "slack", kind: "oauth" },
-        { serverKey: "posthog", kind: "oauth" },
-        { serverKey: "betterstack", kind: "oauth" },
-        { serverKey: "braintrust", kind: "oauth" },
-        { serverKey: "notion", kind: "oauth" },
+        mcpCredentialRow("linear", "bearer_token"),
+        mcpCredentialRow("slack", "oauth", {
+          accountKey: "slack_acme",
+          accountLabel: "Acme",
+          connectedByUserId: "usr_123",
+        }),
+        mcpCredentialRow("posthog", "oauth"),
+        mcpCredentialRow("betterstack", "oauth"),
+        mcpCredentialRow("braintrust", "oauth"),
+        mcpCredentialRow("notion", "oauth"),
       ],
     ];
 
@@ -55,6 +59,7 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
       configured: true,
       serverId: "wmcps_slack",
       status: "configured",
+      accounts: [{ accountKey: "slack_acme", label: "Acme" }],
     });
     expect(settings.posthog).toMatchObject({
       configured: true,
@@ -84,13 +89,25 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),
       ],
-      [{ serverKey: "linear", kind: "oauth" }],
+      [mcpCredentialRow("linear", "oauth")],
     ];
 
     const settings = await loadWorkspaceMcpSettingsForWorkspace("wks_123");
 
     expect(settings.linear.configured).toBe(true);
     expect(settings.slack.configured).toBe(false);
+  });
+
+  it("ignores unfinished non-default Slack OAuth credentials", async () => {
+    db.queryResults = [
+      [mcpServerRow("wmcps_slack", "slack", "configured")],
+      [mcpCredentialRow("slack", "oauth", { accountKey: "acct_pending" })],
+    ];
+
+    const settings = await loadWorkspaceMcpSettingsForWorkspace("wks_123");
+
+    expect(settings.slack.configured).toBe(false);
+    expect(settings.slack.accounts).toEqual([]);
   });
 });
 
@@ -113,5 +130,32 @@ function queryResult(result: unknown[]) {
     limit: vi.fn(async () => result),
     then: (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
       Promise.resolve(result).then(resolve, reject),
+  };
+}
+
+function mcpCredentialRow(
+  serverKey: "linear" | "slack" | "posthog" | "betterstack" | "braintrust" | "notion",
+  kind: string,
+  overrides: Partial<{
+    accountKey: string;
+    externalAccountId: string | null;
+    accountLabel: string | null;
+    accountEmail: string | null;
+    connectedByUserId: string | null;
+    credentialUpdatedAt: Date;
+    metadata: Record<string, unknown>;
+  }> = {},
+) {
+  return {
+    serverKey,
+    kind,
+    accountKey: "default",
+    externalAccountId: null,
+    accountLabel: null,
+    accountEmail: null,
+    connectedByUserId: null,
+    credentialUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    metadata: {},
+    ...overrides,
   };
 }
