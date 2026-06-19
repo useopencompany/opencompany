@@ -57,9 +57,9 @@ describe("ShellChrome", () => {
 });
 
 describe("ShellChrome swipe gesture", () => {
-  // Drive a pointer drag on `document` (where the gesture listens). jsdom can't time
-  // a flick, so these cover distance/axis/edge behavior; velocity is unit-tested in
-  // drawerGesture.test.ts.
+  // Drive a pointer drag on `document` (where the gesture listens, in the capture phase).
+  // jsdom can't time a flick, so these cover distance/axis/direction behavior; velocity is
+  // unit-tested in drawerGesture.test.ts.
   function fireDrag(points: Array<[number, number]>) {
     const first = points[0];
     const last = points[points.length - 1];
@@ -71,7 +71,7 @@ describe("ShellChrome swipe gesture", () => {
     fireEvent.pointerUp(document, { pointerId: 1, clientX: last[0], clientY: last[1] });
   }
 
-  it("opens on a rightward drag from the left edge", () => {
+  it("opens the menu on a rightward drag from the left edge", () => {
     setMobile(true);
     render(
       <ShellChrome sidebar={<nav>SIDEBAR</nav>}>
@@ -87,17 +87,35 @@ describe("ShellChrome swipe gesture", () => {
     expect(screen.getByTestId("drawer-scrim")).toBeInTheDocument();
   });
 
-  it("does not open when the drag starts beyond the edge zone", () => {
+  it("opens the menu on a rightward drag that starts away from the edge (filmstrip: direction, not position)", () => {
     setMobile(true);
     render(
       <ShellChrome sidebar={<nav>SIDEBAR</nav>}>
         <div>CONTENT</div>
       </ShellChrome>,
     );
+    expect(screen.queryByTestId("drawer-scrim")).toBeNull();
     fireDrag([
       [220, 200],
       [340, 202],
-      [420, 205],
+      [440, 205],
+    ]);
+    expect(screen.getByTestId("drawer-scrim")).toBeInTheDocument();
+  });
+
+  it("does nothing on a leftward drag when nothing is open and there is no details panel", () => {
+    setMobile(true);
+    render(
+      <ShellChrome sidebar={<nav>SIDEBAR</nav>}>
+        <div>CONTENT</div>
+      </ShellChrome>,
+    );
+    // No MobileInspectorProvider here, so the right panel is unavailable — a leftward
+    // swipe has nowhere to go and must leave the page alone.
+    fireDrag([
+      [300, 200],
+      [180, 202],
+      [60, 205],
     ]);
     expect(screen.queryByTestId("drawer-scrim")).toBeNull();
   });
