@@ -581,13 +581,22 @@ function resolveConnectedMcpAccount(
 
   const wanted = accountArg?.trim().toLowerCase();
   if (wanted) {
-    const match = connected.accounts.find((account) => {
-      return (
-        account.accountKey.toLowerCase() === wanted ||
-        account.label.toLowerCase() === wanted ||
-        account.email?.toLowerCase() === wanted
+    // accountKey is unique, so an exact key match always wins. Labels and emails can collide
+    // across distinct accounts (e.g. two Slack orgs with the same team+user display name); on a
+    // collision we refuse to guess and ask for the unambiguous id rather than silently picking
+    // the first match and querying the wrong account.
+    const byKey = connected.accounts.find((account) => account.accountKey.toLowerCase() === wanted);
+    if (byKey) return byKey;
+    const matches = connected.accounts.filter(
+      (account) =>
+        account.label.toLowerCase() === wanted || account.email?.toLowerCase() === wanted,
+    );
+    if (matches.length > 1) {
+      throw new Error(
+        `"${accountArg}" matches multiple connected ${connected.provider.displayName} accounts; pass the account id instead. Connected: ${connectedMcpAccountList(connected)}.`,
       );
-    });
+    }
+    const match = matches[0];
     if (!match) {
       throw new Error(
         `No connected ${connected.provider.displayName} account matches "${accountArg}". Connected: ${connectedMcpAccountList(connected)}.`,
@@ -606,7 +615,8 @@ function resolveConnectedMcpAccount(
 }
 
 function connectedMcpAccountList(connected: ConnectedMcpProvider) {
-  return connected.accounts.map((account) => account.label).join(", ");
+  // Include the unique id alongside the label so the model can disambiguate colliding labels.
+  return connected.accounts.map((account) => `${account.label} (${account.accountKey})`).join(", ");
 }
 
 // Resolve the named raw tool's body and run it through the shared execution tail. The
@@ -1205,6 +1215,8 @@ function createRunnerMcpOAuthProvider(input: {
         updatedAt: now,
       })
       .onConflictDoUpdate({
+        // Conflict target must match the workspace_mcp_credentials unique index and the web upsert
+        // in apps/web/lib/mcp/credential-storage.ts (saveMcpCredential). Keep all three in sync.
         target: [
           workspaceMcpCredentials.serverId,
           workspaceMcpCredentials.kind,

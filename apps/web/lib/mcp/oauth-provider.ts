@@ -8,6 +8,7 @@ import {
 import type { WorkspaceMcpCredentialKind } from "@opencompany/db/schema";
 import { getAppUrl } from "@/lib/billing/stripe";
 import {
+  cleanupIncompleteMcpCredentials,
   DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY,
   finalizeMcpCredentialAccount,
   loadMcpCredential,
@@ -142,6 +143,15 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     serverId: string;
     returnTo: string;
   }) {
+    if (config.multipleAccounts) {
+      // Sweep this user's (and others') stale half-finished connect attempts before minting a
+      // new temp account, so abandoned flows don't accumulate orphan credential rows.
+      await cleanupIncompleteMcpCredentials({
+        workspaceId: input.workspaceId,
+        serverId: input.serverId,
+        kind: credentialKind,
+      });
+    }
     const accountKey = config.multipleAccounts
       ? newMcpCredentialAccountKey()
       : DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY;

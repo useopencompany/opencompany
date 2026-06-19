@@ -29,6 +29,7 @@ vi.mock("@/lib/billing/stripe", () => ({
 
 vi.mock("@/lib/mcp/credential-storage", () => ({
   DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY: "default",
+  cleanupIncompleteMcpCredentials: vi.fn(async () => undefined),
   finalizeMcpCredentialAccount: vi.fn(async ({ nextAccountKey }) => ({
     accountKey: nextAccountKey ?? "default",
   })),

@@ -12,10 +12,16 @@ import {
   type WorkspaceMcpCredentialKind,
   workspaceMcpCredentials,
 } from "@opencompany/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lt, ne } from "drizzle-orm";
 
 const ENCRYPTION_KEY_VERSION = 1;
 export const DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY = "default";
+
+// An abandoned multi-account OAuth flow leaves a temp row (generated accountKey, no
+// connectedByUserId) that `complete` never finalized. They're already filtered out of the
+// runner and settings, but accumulate on every retry. We sweep ones older than the state TTL
+// (10 min, see oauth-state.ts) so an in-flight concurrent connect is never deleted mid-flow.
+const INCOMPLETE_MCP_CREDENTIAL_TTL_MS = 10 * 60 * 1000;
 
 type CredentialDb = Pick<ReturnType<typeof getDb>, "delete" | "insert" | "select">;
 
@@ -84,6 +90,8 @@ export async function saveMcpCredential(
       updatedAt: now,
     })
     .onConflictDoUpdate({
+      // Conflict target must match the workspace_mcp_credentials unique index and the runner's
+      // upsert in apps/runner/src/mcp-tools.ts (createRunnerMcpOAuthProvider). Keep all three in sync.
       target: [
         workspaceMcpCredentials.serverId,
         workspaceMcpCredentials.kind,
@@ -213,6 +221,31 @@ export async function listMcpCredentialAccounts(input: {
         eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
         eq(workspaceMcpCredentials.serverId, input.serverId),
         eq(workspaceMcpCredentials.kind, input.kind),
+      ),
+    );
+}
+
+// Delete abandoned, never-finalized multi-account temp rows for a server+kind. Best-effort:
+// called when a new connect starts so retries don't pile up orphan credential rows. Bounded by
+// the state TTL so it can't race a concurrent in-flight flow.
+export async function cleanupIncompleteMcpCredentials(input: {
+  workspaceId: string;
+  serverId: string;
+  kind: WorkspaceMcpCredentialKind;
+  db?: CredentialDb;
+}) {
+  const db = input.db ?? getDb();
+  const cutoff = new Date(Date.now() - INCOMPLETE_MCP_CREDENTIAL_TTL_MS);
+  await db
+    .delete(workspaceMcpCredentials)
+    .where(
+      and(
+        eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
+        eq(workspaceMcpCredentials.serverId, input.serverId),
+        eq(workspaceMcpCredentials.kind, input.kind),
+        ne(workspaceMcpCredentials.accountKey, DEFAULT_MCP_CREDENTIAL_ACCOUNT_KEY),
+        isNull(workspaceMcpCredentials.connectedByUserId),
+        lt(workspaceMcpCredentials.updatedAt, cutoff),
       ),
     );
 }

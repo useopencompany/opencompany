@@ -34,6 +34,7 @@ import {
   removeSlackMcpConnection,
   saveLinearMcpToken,
 } from "@/lib/mcp/actions";
+import type { WorkspaceMcpAccountSettings } from "@/lib/mcp/data";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 import { removeAvatar, updateAvatar } from "@/lib/users/actions";
 import { updateWorkspaceName } from "@/lib/workspaces/actions";
@@ -83,6 +84,7 @@ type Props = {
       status: "configured" | "missing_credential" | "disabled" | "error" | null;
       statusReason: string | null;
       updatedAt: string | null;
+      accounts: WorkspaceMcpAccountSettings[];
     };
     posthog: {
       configured: boolean;
@@ -582,7 +584,13 @@ function SlackMcpCard({
               startTransition(async () => {
                 const result = await removeSlackMcpConnection();
                 if (result.ok) {
-                  setMessage({ type: "success", text: "Slack MCP connection removed." });
+                  setMessage({
+                    type: "success",
+                    text:
+                      slack.accounts.length > 1
+                        ? `All ${slack.accounts.length} Slack accounts disconnected.`
+                        : "Slack MCP connection removed.",
+                  });
                   router.refresh();
                 }
               });
@@ -590,7 +598,7 @@ function SlackMcpCard({
             className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 size={13} strokeWidth={1.9} />
-            Remove
+            {slack.accounts.length > 1 ? "Remove all" : "Remove"}
           </button>
         ) : null}
       </div>

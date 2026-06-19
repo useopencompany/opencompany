@@ -23,6 +23,10 @@ export function createMcpOAuthStartRoute(
   return async function GET(request: Request) {
     // skipOnboarding: the onboarding integrations step opens this OAuth flow in a popup before
     // onboarding is marked complete; the default gate would bounce the popup to /onboarding.
+    //
+    // requireAdmin is intentionally dropped for multi-account providers: each member connects
+    // their own account (stored per-account, removable only by the connector or an admin), so
+    // connecting is a per-member action rather than an admin-only workspace setting.
     const { user, workspace } = await currentWorkspace({
       ...(provider.multipleAccounts ? {} : { requireAdmin: true }),
       skipOnboarding: true,
@@ -81,6 +85,7 @@ export function createMcpOAuthCallbackRoute(
   return async function GET(request: Request) {
     // skipOnboarding: the onboarding integrations step opens this OAuth flow in a popup before
     // onboarding is marked complete; the default gate would bounce the popup to /onboarding.
+    // requireAdmin dropped for multi-account providers — see the start route for the rationale.
     const current = await currentWorkspace({
       ...(provider.multipleAccounts ? {} : { requireAdmin: true }),
       skipOnboarding: true,

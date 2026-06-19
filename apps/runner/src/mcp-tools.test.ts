@@ -713,6 +713,91 @@ describe("createMcpToolSet", () => {
     await mcpTools.close();
   });
 
+  it("refuses to guess when two Slack MCP accounts share a label, but resolves by id", async () => {
+    const executeOne = vi.fn(async () => ({ messages: [{ text: "one" }] }));
+    const executeTwo = vi.fn(async () => ({ messages: [{ text: "two" }] }));
+    db.queryResults = [
+      [slackServerRow()],
+      [
+        slackOAuthConnectionRow({
+          accountKey: "slack_one",
+          accountLabel: "Acme",
+          connectedByUserId: "usr_123",
+          accessToken: "slack_one_access",
+        }),
+        slackOAuthConnectionRow({
+          accountKey: "slack_two",
+          accountLabel: "Acme",
+          connectedByUserId: "usr_123",
+          accessToken: "slack_two_access",
+        }),
+      ],
+    ];
+    mcpClient.listTools
+      .mockResolvedValueOnce({ tools: [{ name: "search" }] } as never)
+      .mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
+    mcpClient.toolsFromDefinitions
+      .mockReturnValueOnce({
+        search: {
+          description: "Search Slack",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          execute: executeOne,
+        },
+      })
+      .mockReturnValueOnce({
+        search: {
+          description: "Search Slack",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          execute: executeTwo,
+        },
+      });
+
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig, toolStartCoordinator));
+    const slackTool = (mcpTools.tools as ToolSet).slack__use_tool;
+
+    // The shared label is ambiguous — we must not silently pick the first account.
+    const ambiguousInput = { tool: "search", account: "Acme", arguments: { query: "launch" } };
+    await slackTool?.onInputAvailable?.({
+      input: ambiguousInput,
+      toolCallId: "call_ambiguous",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_ambiguous");
+    const ambiguousOutput = await slackTool?.execute?.(ambiguousInput, {
+      toolCallId: "call_ambiguous",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    expect(ambiguousOutput).toMatchObject({
+      ok: false,
+      error: { code: "mcp_tool_execution_failed", recoverable: true },
+    });
+    expect(executeOne).not.toHaveBeenCalled();
+    expect(executeTwo).not.toHaveBeenCalled();
+
+    // The unique accountKey disambiguates.
+    const byIdInput = { tool: "search", account: "slack_two", arguments: { query: "launch" } };
+    await slackTool?.onInputAvailable?.({
+      input: byIdInput,
+      toolCallId: "call_by_id",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_by_id");
+    const byIdOutput = await slackTool?.execute?.(byIdInput, {
+      toolCallId: "call_by_id",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    expect(byIdOutput).toEqual({ messages: [{ text: "two" }] });
+    expect(executeTwo).toHaveBeenCalledWith({ query: "launch" }, { toolCallId: "call_by_id" });
+    expect(executeOne).not.toHaveBeenCalled();
+
+    await mcpTools.close();
+  });
+
   it("loads Better Stack MCP OAuth tools with dynamic client credentials", async () => {
     db.queryResults = [[betterStackServerRow()], [betterStackOAuthConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({
