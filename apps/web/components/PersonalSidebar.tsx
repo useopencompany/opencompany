@@ -789,7 +789,7 @@ function PersonalSidebarView({
         </nav>
 
         {/* Scrollable body */}
-        <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
+        <div className="no-scrollbar mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
           {starredSessions.length > 0 && (
             <div className="px-2 pt-3">
               <div className="flex items-center gap-1 px-2 pb-1">
