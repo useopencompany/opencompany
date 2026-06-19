@@ -33,7 +33,12 @@ const nextConfig = {
     // a misleading dev-server start time.
     ...(release ? { NEXT_PUBLIC_BUILD_TIMESTAMP: new Date().toISOString() } : {}),
   },
-  transpilePackages: ["@opencompany/analytics", "@opencompany/db", "@opencompany/observability"],
+  transpilePackages: [
+    "@opencompany/analytics",
+    "@opencompany/db",
+    "@opencompany/observability",
+    "@opencompany/ui",
+  ],
   // The workspace route group moved from the root to /company. Keep old root
   // links (bookmarks, emails, stale clients) working with temporary redirects.
   async redirects() {
