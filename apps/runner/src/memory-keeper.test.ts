@@ -76,9 +76,10 @@ describe("spawnMemoryKeeperSession", () => {
       [
         "ses_parent",
         "",
-        "if you had to remember something from ses_parent for the future session to be more useful (focus especially on things the user said) - what would that be? reflect on that, then use the memory tool to properly update your memory.",
+        'Review ses_parent for explicit long-lived memory signals. If the user did not clearly ask to remember/save/update something and the transcript contains no correction or stable preference, identity fact, ongoing project, decision, or convention likely to matter in future sessions, make no tool writes and end exactly "Nothing new worth remembering." Otherwise update only the relevant structured memory/profile according to the system instructions.',
       ].join("\n"),
     );
+    expect(messageInsert?.values.content).not.toContain("if you had to remember something");
 
     expect(inserts.some((i) => i.table === agentSessionEvents)).toBe(true);
 
