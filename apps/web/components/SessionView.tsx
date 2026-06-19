@@ -4,7 +4,6 @@ import {
   ATTACHMENT_TEXT_MAX_BYTES,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   listAddableBuiltinSkills,
-  PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
   permissionLabelFor,
@@ -69,6 +68,7 @@ import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopB
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
@@ -249,6 +249,8 @@ type OptimisticUserMessage = SessionMessage & {
   existingMessageIds: string[];
 };
 
+type InspectorTab = "info" | "logs" | "other";
+
 // Past-tense labels for the quiet caption a mid-run send leaves on the turn it affected. Lowercase
 // to sit unobtrusively alongside the muted process rows (Thinking, "2 steps", …).
 const SEND_MODE_ROW_LABEL: Record<SendMode, string> = {
@@ -428,6 +430,7 @@ function SessionViewContentBody({
   const { showError, showToast } = useToast();
   const session = detail.session;
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("info");
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -1923,35 +1926,61 @@ function SessionViewContentBody({
       )}
 
       <aside
-        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
+        className={`flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface-raised/95 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed
             ? "hidden"
-            : "fixed inset-y-0 right-0 z-40 block w-[min(328px,calc(100vw-24px))] lg:static lg:z-auto lg:w-[328px]"
+            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] lg:static lg:z-auto lg:w-[392px]"
         }`}
         aria-hidden={inspectorCollapsed}
       >
-        <div className="mb-5 flex items-center justify-between pr-9 lg:mb-7">
-          <div className="text-[12px] font-medium text-ink">Runtime</div>
-          <CopySessionJsonButton build={buildSessionDebugSnapshot} />
-        </div>
-        <SessionInspector
-          session={session}
-          related={detail.related}
-          currentStatus={runtime.currentStatus}
-          lastError={sessionHasResumableStepLimitFailure ? null : runtime.lastError}
-          streamStatus={streamStatus}
-          streamErrorMessage={streamStatus === "error" ? "Stream connection error" : null}
-          connectionStale={false}
-          runnerConfigured={true}
-          eventCount={inspectorEvents.length}
-          usage={runtime.usage}
-          toolUsage={runtime.toolUsage}
-          cost={runtime.cost}
-          recentEvents={inspectorEvents.slice(-16)}
-          canAbort={canAbort}
-          isPending={isPending}
-          onAbort={requestAbort}
-        />
+        <Tabs
+          value={inspectorTab}
+          onValueChange={(value) => setInspectorTab(value as InspectorTab)}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="border-border border-b px-5 pb-4 pt-4 lg:pt-6">
+            <div className="flex items-center justify-between pr-9">
+              <div>
+                <div className="text-[12px] font-medium text-ink">Session details</div>
+                <div className="mt-0.5 text-[11px] text-ink-subtle">
+                  {statusLabel(runtime.currentStatus)} · {inspectorEvents.length} events
+                </div>
+              </div>
+              <CopySessionJsonButton build={buildSessionDebugSnapshot} />
+            </div>
+            <TabsList className="mt-4 bg-surface-hover">
+              <TabsTrigger value="info">Info</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+              <TabsTrigger value="other">Other</TabsTrigger>
+            </TabsList>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:py-6">
+            {(["info", "logs", "other"] satisfies InspectorTab[]).map((tab) => (
+              <TabsContent key={tab} value={tab} className="mt-0">
+                <SessionInspector
+                  activeTab={tab}
+                  session={session}
+                  related={detail.related}
+                  currentStatus={runtime.currentStatus}
+                  lastError={sessionHasResumableStepLimitFailure ? null : runtime.lastError}
+                  streamStatus={streamStatus}
+                  streamErrorMessage={streamStatus === "error" ? "Stream connection error" : null}
+                  connectionStale={false}
+                  runnerConfigured={true}
+                  eventCount={inspectorEvents.length}
+                  usage={runtime.usage}
+                  toolUsage={runtime.toolUsage}
+                  cost={runtime.cost}
+                  recentEvents={inspectorEvents.slice(-16)}
+                  canAbort={canAbort}
+                  isPending={isPending}
+                  onAbort={requestAbort}
+                  buildSessionDebugSnapshot={buildSessionDebugSnapshot}
+                />
+              </TabsContent>
+            ))}
+          </div>
+        </Tabs>
       </aside>
     </main>
   );
@@ -3404,6 +3433,7 @@ function formatToolName(name: string) {
 }
 
 function SessionInspector({
+  activeTab,
   session,
   related,
   currentStatus,
@@ -3420,7 +3450,9 @@ function SessionInspector({
   canAbort,
   isPending,
   onAbort,
+  buildSessionDebugSnapshot,
 }: {
+  activeTab: InspectorTab;
   session: AgentSessionDetailPayload["session"];
   related: AgentSessionDetailPayload["related"];
   currentStatus: string;
@@ -3437,6 +3469,7 @@ function SessionInspector({
   canAbort: boolean;
   isPending: boolean;
   onAbort: () => void;
+  buildSessionDebugSnapshot: () => unknown;
 }) {
   const surface = useSessionSurface();
   // The personal surface has a single agent page (no per-agent route), so the agent link
@@ -3446,6 +3479,122 @@ function SessionInspector({
       ? personalPaths.agent
       : `/company/agents/${session.agentPath ?? session.agentId}`;
 
+  if (activeTab === "logs") {
+    return (
+      <div className="space-y-8">
+        <div>
+          <InspectorHeader label="Runtime" countLabel={streamStatusLabel(streamStatus)} />
+          <div className="space-y-4">
+            <InspectorStatusField status={currentStatus} lastError={lastError} />
+            <InspectorField
+              label="Live stream"
+              value={runnerConfigured ? "Configured" : "Not configured"}
+            />
+            <InspectorField label="Activity events" value={String(eventCount)} />
+            {session.runLeaseId ? (
+              <InspectorField label="Run lease" value={session.runLeaseId} mono />
+            ) : null}
+            {session.abortRequestedAt ? (
+              <InspectorField
+                label="Abort requested"
+                value={formatRuntimeDate(session.abortRequestedAt)}
+              />
+            ) : null}
+          </div>
+          {lastError ? (
+            <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
+              {lastError}
+            </div>
+          ) : streamErrorMessage || streamStatus === "stale" || connectionStale ? (
+            <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
+              {streamStatus === "stale" || connectionStale
+                ? "The live session stream is not responding. Reconnecting and refreshing persisted progress."
+                : streamErrorMessage}
+            </div>
+          ) : null}
+        </div>
+
+        <div>
+          <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
+          {recentEvents.length > 0 ? (
+            <div className="space-y-1.5">
+              {recentEvents.map((event, index) => (
+                <div
+                  key={event.id ?? `transient-${index}`}
+                  className="rounded-md border border-border bg-surface/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <TerminalSquare
+                      size={12}
+                      strokeWidth={1.7}
+                      className="shrink-0 text-ink-subtle"
+                    />
+                    <span className="min-w-0 truncate font-medium text-ink/75">{event.type}</span>
+                  </div>
+                  {summarizeEvent(event) ? (
+                    <div className="mt-1 truncate text-[11px] text-ink-subtle">
+                      {summarizeEvent(event)}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
+              No runtime events yet
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTab === "other") {
+    return (
+      <div className="space-y-8">
+        <div>
+          <InspectorHeader label="Debug export" countLabel="json" />
+          <CopySessionJsonButton build={buildSessionDebugSnapshot} />
+        </div>
+
+        <div>
+          <InspectorHeader label="Internal IDs" countLabel="reference" />
+          <div className="space-y-4">
+            <InspectorField label="Session ID" value={session.id} mono />
+            <InspectorField label="Agent ID" value={session.agentId} mono />
+            {session.agentPath ? (
+              <InspectorField label="Agent path" value={session.agentPath} mono />
+            ) : null}
+          </div>
+        </div>
+
+        <div>
+          <InspectorHeader label="Environment" countLabel={session.modelProvider} />
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <InspectorField label="Model provider" value={session.modelProvider} mono />
+            <InspectorField label="Model" value={session.modelName} mono />
+            <div className="col-span-2">
+              <InspectorField label="Workdir" value={session.workdir} mono />
+            </div>
+            {session.e2bSandboxId ? (
+              <div className="col-span-2">
+                <InspectorField label="Sandbox" value={session.e2bSandboxId} mono />
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div>
+          <InspectorHeader label="Timing" countLabel="lifecycle" />
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <InspectorField label="Created" value={formatRuntimeDate(session.createdAt)} />
+            <InspectorField label="Updated" value={formatRuntimeDate(session.updatedAt)} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <div>
@@ -3453,17 +3602,17 @@ function SessionInspector({
           <Bot size={14} strokeWidth={1.9} className="text-ink-muted" />
           Session
         </div>
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4">
           <InspectorLink
             label="Session page"
             href={sessionHrefForSurface(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
-          <InspectorField label="Title" value={session.title} />
+          <div className="col-span-2">
+            <InspectorField label="Title" value={session.title} />
+          </div>
           <InspectorStatusField status={currentStatus} lastError={lastError} />
-          <InspectorField label="Created" value={formatRuntimeDate(session.createdAt)} />
-          <InspectorField label="Updated" value={formatRuntimeDate(session.updatedAt)} />
         </div>
       </div>
 
@@ -3491,46 +3640,9 @@ function SessionInspector({
       )}
 
       <div>
-        <InspectorHeader label="Runtime" countLabel={streamStatusLabel(streamStatus)} />
-        <div className="space-y-4">
-          <InspectorField label="Model provider" value={session.modelProvider} mono />
-          <InspectorField label="Model" value={session.modelName} mono />
-          <InspectorField
-            label="Live stream"
-            value={runnerConfigured ? "Configured" : "Not configured"}
-          />
-          <InspectorField label="Workdir" value={session.workdir} mono />
-          {session.e2bSandboxId ? (
-            <InspectorField label="Sandbox" value={session.e2bSandboxId} mono />
-          ) : null}
-          {session.runLeaseId ? (
-            <InspectorField label="Run lease" value={session.runLeaseId} mono />
-          ) : null}
-          {session.abortRequestedAt ? (
-            <InspectorField
-              label="Abort requested"
-              value={formatRuntimeDate(session.abortRequestedAt)}
-            />
-          ) : null}
-          <InspectorField label="Activity events" value={String(eventCount)} />
-        </div>
-        {lastError ? (
-          <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
-            {lastError}
-          </div>
-        ) : streamErrorMessage || streamStatus === "stale" || connectionStale ? (
-          <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
-            {streamStatus === "stale" || connectionStale
-              ? "The live session stream is not responding. Reconnecting and refreshing persisted progress."
-              : streamErrorMessage}
-          </div>
-        ) : null}
-      </div>
-
-      <div>
         <InspectorHeader label="Token usage" countLabel={formatTokenCount(usage.totalTokens)} />
         <div className="space-y-5">
-          <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
             <InspectorField label="Input total" value={formatTokenCount(usage.inputTokens)} />
             <InspectorField
               label="Input uncached"
@@ -3545,7 +3657,7 @@ function SessionInspector({
               value={formatTokenCount(usage.inputCacheWriteTokens)}
             />
           </div>
-          <div className="space-y-4 border-t border-border pt-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border pt-4">
             <InspectorField label="Output total" value={formatTokenCount(usage.outputTokens)} />
             <InspectorField label="Output text" value={formatTokenCount(usage.outputTextTokens)} />
             <InspectorField
@@ -3559,7 +3671,7 @@ function SessionInspector({
 
       <div>
         <InspectorHeader label="Cost" countLabel={formatUsdMicros(cost.totalCostUsdMicros)} />
-        <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           <InspectorField label="Model charges" value={formatUsdMicros(cost.modelCostUsdMicros)} />
           <InspectorField label="Tool charges" value={formatUsdMicros(cost.toolCostUsdMicros)} />
           <InspectorField
@@ -3607,38 +3719,6 @@ function SessionInspector({
           <CircleStop size={13} strokeWidth={1.9} />
           Abort session
         </button>
-      </div>
-
-      <div>
-        <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
-        {recentEvents.length > 0 ? (
-          <div className="space-y-1.5">
-            {recentEvents.map((event, index) => (
-              <div
-                key={event.id ?? `transient-${index}`}
-                className="rounded-md border border-border bg-surface/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <TerminalSquare
-                    size={12}
-                    strokeWidth={1.7}
-                    className="shrink-0 text-ink-subtle"
-                  />
-                  <span className="shrink-0 font-medium text-ink/75">{event.type}</span>
-                </div>
-                {summarizeEvent(event) ? (
-                  <div className="mt-1 truncate text-[11px] text-ink-subtle">
-                    {summarizeEvent(event)}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
-            No runtime events yet
-          </div>
-        )}
       </div>
     </div>
   );
