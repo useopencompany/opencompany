@@ -1,5 +1,6 @@
 "use client";
 
+import { Send } from "@opencompany/ui/icons";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -8,7 +9,6 @@ import {
   Brain,
   BrainCircuit,
   ChevronDown,
-  Inbox,
   MessageCircle,
   PanelLeft,
   Pencil,
@@ -612,7 +612,7 @@ function PersonalSidebarView({
   const router = useRouter();
   const { userId, workspaceId } = useWorkspaceContext();
   const { agentSessions, sessionStars } = useCollections();
-  const { showError } = useToast();
+  const { showError, showToast } = useToast();
   const {
     agent,
     userName,
@@ -661,6 +661,9 @@ function PersonalSidebarView({
   const handleArchive = useCallback(
     (sessionId: string, active: boolean) => {
       const tx = agentSessions.delete(sessionId);
+      // Optimistic: the row is already gone, so confirm right away. A failure rolls the row back
+      // into the sidebar and the catch below surfaces the error toast.
+      showToast({ title: "Chat archived" });
       if (active) router.replace(personalPaths.home);
       void tx.isPersisted.promise.catch((error) => {
         showError(
@@ -669,7 +672,7 @@ function PersonalSidebarView({
         );
       });
     },
-    [agentSessions, router, showError],
+    [agentSessions, router, showError, showToast],
   );
 
   // Rename optimistically updates the title in the agent_sessions collection (the
@@ -754,12 +757,11 @@ function PersonalSidebarView({
                 : "text-ink/90 hover:bg-surface-hover hover:text-ink"
             }`}
           >
-            <Inbox
+            <Send
               size={14}
-              strokeWidth={1.75}
               className={inboxActive ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}
             />
-            <span className="truncate tracking-[-0.005em]">Home</span>
+            <span className="truncate tracking-[-0.005em]">New Session</span>
             {inboxCount > 0 ? (
               <span className="ml-auto rounded-full bg-ink/10 px-1.5 text-[11px] font-medium tabular-nums text-ink/70">
                 {inboxCount}
