@@ -64,6 +64,7 @@ describe("agent editor mention tools", () => {
       "xai/grok-4.1-fast-non-reasoning",
       "xai/grok-build-0.1",
       "zai/glm-5.1",
+      "zai/glm-5.2",
       "zai/glm-5-turbo",
       "zai/glm-5v-turbo",
       "openrouter/fusion",
