@@ -1,45 +1,58 @@
 import { describe, expect, it } from "vitest";
-import {
-  DRAWER_GESTURE,
-  lockAxis,
-  progressForSide,
-  resolveGesture,
-  shouldCommitOpen,
-} from "./drawerGesture";
+import { lockAxis, progressForSide, resolveGesture, shouldCommitOpen } from "./drawerGesture";
 
-const VW = 400;
 const closed = { leftOpen: false, rightOpen: false, rightAvailable: true };
 
-describe("resolveGesture", () => {
-  it("starts an open-drag for the LEFT drawer from the left edge zone", () => {
-    expect(resolveGesture(closed, 10, VW)).toEqual({ side: "left", opening: true });
-    expect(resolveGesture(closed, DRAWER_GESTURE.EDGE, VW)).toEqual({
-      side: "left",
-      opening: true,
+describe("resolveGesture (filmstrip: [ menu | chat | details ])", () => {
+  describe("leftward swipe (right-to-left) — steps toward DETAILS", () => {
+    it("opens the right details panel when nothing is open and details exist", () => {
+      expect(resolveGesture(closed, -1)).toEqual({ side: "right", opening: true });
+    });
+
+    it("does nothing when there is no details panel (e.g. not in a chat)", () => {
+      expect(resolveGesture({ ...closed, rightAvailable: false }, -1)).toBeNull();
+    });
+
+    it("closes the menu when the menu is open", () => {
+      expect(resolveGesture({ ...closed, leftOpen: true }, -1)).toEqual({
+        side: "left",
+        opening: false,
+      });
+    });
+
+    it("does nothing when details are already open (already at the right end)", () => {
+      expect(resolveGesture({ ...closed, rightOpen: true }, -1)).toBeNull();
     });
   });
 
-  it("starts an open-drag for the RIGHT drawer from the right edge zone when available", () => {
-    expect(resolveGesture(closed, VW - 10, VW)).toEqual({ side: "right", opening: true });
-  });
-
-  it("does not start a right-drag when the right drawer is unavailable (e.g. not in a chat)", () => {
-    expect(resolveGesture({ ...closed, rightAvailable: false }, VW - 10, VW)).toBeNull();
-  });
-
-  it("ignores touches that start in the middle (so the page scrolls/taps normally)", () => {
-    expect(resolveGesture(closed, VW / 2, VW)).toBeNull();
-  });
-
-  it("starts a close-drag for whichever drawer is open, from anywhere", () => {
-    expect(resolveGesture({ ...closed, leftOpen: true }, VW / 2, VW)).toEqual({
-      side: "left",
-      opening: false,
+  describe("rightward swipe (left-to-right) — steps toward MENU", () => {
+    it("opens the menu when nothing is open", () => {
+      expect(resolveGesture(closed, 1)).toEqual({ side: "left", opening: true });
     });
-    expect(resolveGesture({ ...closed, rightOpen: true }, 5, VW)).toEqual({
-      side: "right",
-      opening: false,
+
+    it("opens the menu even when there is no details panel", () => {
+      expect(resolveGesture({ ...closed, rightAvailable: false }, 1)).toEqual({
+        side: "left",
+        opening: true,
+      });
     });
+
+    it("closes details when the details panel is open", () => {
+      expect(resolveGesture({ ...closed, rightOpen: true }, 1)).toEqual({
+        side: "right",
+        opening: false,
+      });
+    });
+
+    it("does nothing when the menu is already open (already at the left end)", () => {
+      expect(resolveGesture({ ...closed, leftOpen: true }, 1)).toBeNull();
+    });
+  });
+
+  it("the position the swipe starts from is irrelevant — only direction decides", () => {
+    // Same state + direction always resolves the same way regardless of where it began.
+    expect(resolveGesture(closed, -1)).toEqual({ side: "right", opening: true });
+    expect(resolveGesture(closed, 1)).toEqual({ side: "left", opening: true });
   });
 });
 

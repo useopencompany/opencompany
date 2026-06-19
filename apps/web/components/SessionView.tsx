@@ -446,7 +446,13 @@ function SessionViewContentBody({
     isOpen: () => !inspectorCollapsedRef.current,
     setOpen: (open) => setInspectorCollapsed(!open),
     setDrag: (dragging, progress) => setInspectorDrag({ dragging, progress }),
-    getWidth: () => inspectorAsideRef.current?.getBoundingClientRect().width || 360,
+    // While collapsed the panel is display:none, so it measures 0 — fall back to the
+    // width it WILL have once shown (mirrors the `w-[min(392px,calc(100vw-16px))]` class)
+    // so the swipe maps the finger 1:1 from the very first move.
+    getWidth: () => {
+      const measured = inspectorAsideRef.current?.getBoundingClientRect().width ?? 0;
+      return measured > 1 ? measured : Math.min(392, window.innerWidth - 16);
+    },
   });
   useEffect(() => {
     registerMobileInspector(mobileInspectorHandle.current);
