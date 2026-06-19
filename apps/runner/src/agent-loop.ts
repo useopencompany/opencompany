@@ -1395,7 +1395,7 @@ async function runAfterSessionWithContext(
         ...runtime,
         tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
       },
-      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward: durable facts about who the user is in your profile (agent/user.md), kept tight (it loads into every future session, ~3KB cap); every other durable fact (people, companies, projects, decisions, lessons) into structured memory via the memory tool. Skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Persist only clear long-lived context: an explicit user request to remember/save/update something, a correction to stale information, or a stable preference, identity fact, ongoing project, decision, or convention likely to matter in future sessions. Put durable facts about who the user is in your profile (agent/user.md), kept tight (it loads into every future session, ~3KB cap); put every other qualifying durable fact into structured memory via the memory tool. Do not create or edit personal-brain/ or ./brain files unless the conversation explicitly asked for a named persistent file update. Skip the update if intent is ambiguous or nothing is worth preserving.`,
       messages,
       tools,
       mcpContext: {

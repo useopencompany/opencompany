@@ -2707,7 +2707,7 @@ function renderPersonalFileToolDefinition(
     return {
       ...definition,
       description:
-        "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+        "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites. Only edit personal-brain/ when the user clearly asked to save or update a persistent file. Use the memory tool for structured memory; generic file tools cannot access memory/.",
       parameters,
     };
   }
@@ -2715,7 +2715,7 @@ function renderPersonalFileToolDefinition(
     return {
       ...definition,
       description:
-        "Create or overwrite a UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, personal-brain/, or agent/. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+        "Create or overwrite a UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, personal-brain/, or agent/. Only write personal-brain/ when the user clearly asked for a saved persistent file or update. Use the memory tool for structured memory; generic file tools cannot access memory/.",
       parameters,
     };
   }

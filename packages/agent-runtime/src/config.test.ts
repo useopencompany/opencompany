@@ -84,6 +84,9 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("make the tool call before answering");
     expect(resolved.systemPrompt).toContain("do not say or imply you checked a source");
     expect(resolved.systemPrompt).toContain("call ask_user_question");
+    expect(resolved.systemPrompt).toContain(
+      "whether any durable file or memory update is clearly intended",
+    );
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
     expect(resolved.systemPrompt).toMatch(/Current date: \w+, \w+ \d{1,2}, \d{4}/);
@@ -160,6 +163,13 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("query memory for durable facts");
     expect(resolved.systemPrompt).toContain("use file tools on personal-brain/");
     expect(resolved.systemPrompt).toContain("Ask the user only after those checks fail");
+  });
+
+  it("uses mounted brain refs, not personal-brain paths, for workspace source checks", () => {
+    const resolved = resolveAgentRuntimeConfig({ agent: profileConfig(), personalAgent: false });
+
+    expect(resolved.systemPrompt).toContain("use file tools on mounted brain/ refs");
+    expect(resolved.systemPrompt).not.toContain("use file tools on personal-brain/");
   });
 
   it("truncates an oversized profile with a marker and bounds its length", () => {
@@ -414,6 +424,12 @@ describe("resolveAgentRuntimeConfig", () => {
     const resolved = resolveAgentRuntimeConfig({ agent: config, personalAgent: true });
 
     expect(resolved.systemPrompt).toContain("personal-brain/");
+    expect(resolved.systemPrompt).toContain("create or update personal-brain/ only when");
+    expect(resolved.systemPrompt).toContain(
+      "If you are unsure whether the user wants a persistent file",
+    );
+    expect(resolved.systemPrompt).toContain("do not infer memory from casual wording");
+    expect(resolved.systemPrompt).not.toContain("When unsure, prefer personal-brain");
     expect(resolved.systemPrompt).toContain(
       "File tools require paths prefixed with work/, personal-brain/, or agent/.",
     );

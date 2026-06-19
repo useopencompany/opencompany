@@ -370,7 +370,7 @@ Add `#after-session` inside the body to enable a background pass after a session
 Help the user during the session. #after-session Update memory with durable preferences and decisions from the transcript.
 ```
 
-The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should capture anything worth carrying forward — durable facts about who the user is into the profile (`agent/user.md`, kept tight given the ~3 KB cap), and every other durable fact into structured memory via the `memory` tool — when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
+The after-session run is not a visible chat turn. It reuses the agent loop and can use configured tools, but should persist only clear long-lived context: an explicit user request to remember/save/update something, a correction to stale information, or a stable preference, identity fact, ongoing project, decision, or convention likely to matter in future sessions. Durable facts about who the user is go into the profile (`agent/user.md`, kept tight given the ~3 KB cap); other qualifying durable facts go into structured memory via the `memory` tool. Do not create Brain or Personal Brain files unless the conversation explicitly asked for a named persistent file update.
 
 ## Storage layout
 
