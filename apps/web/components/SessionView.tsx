@@ -62,6 +62,7 @@ import {
   toSubmitAttachments,
 } from "@/components/composer-attachments";
 import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
+import { type RightPanelHandle, useMobileInspector } from "@/components/MobileInspectorContext";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
@@ -431,6 +432,26 @@ function SessionViewContentBody({
   const session = detail.session;
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("info");
+  // Mobile right-edge swipe drives this inspector via the global gesture in ShellChrome.
+  // We register a handle it can read/open/close and finger-drag; a live ref keeps the
+  // open state current for the gesture's pointer-down. No-op off the company shell.
+  const [inspectorDrag, setInspectorDrag] = useState({ dragging: false, progress: 0 });
+  const inspectorAsideRef = useRef<HTMLElement>(null);
+  const inspectorCollapsedRef = useRef(inspectorCollapsed);
+  useEffect(() => {
+    inspectorCollapsedRef.current = inspectorCollapsed;
+  }, [inspectorCollapsed]);
+  const { register: registerMobileInspector } = useMobileInspector();
+  const mobileInspectorHandle = useRef<RightPanelHandle>({
+    isOpen: () => !inspectorCollapsedRef.current,
+    setOpen: (open) => setInspectorCollapsed(!open),
+    setDrag: (dragging, progress) => setInspectorDrag({ dragging, progress }),
+    getWidth: () => inspectorAsideRef.current?.getBoundingClientRect().width || 360,
+  });
+  useEffect(() => {
+    registerMobileInspector(mobileInspectorHandle.current);
+    return () => registerMobileInspector(null);
+  }, [registerMobileInspector]);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -1916,22 +1937,36 @@ function SessionViewContentBody({
         )}
       </div>
 
-      {!inspectorCollapsed && (
+      {!inspectorCollapsed || inspectorDrag.dragging ? (
         <button
           type="button"
           aria-label="Collapse runtime details"
           className="fixed inset-0 z-30 bg-ink/[0.06] lg:hidden"
+          // Fade the dim in step with a swipe; full strength once open.
+          style={inspectorDrag.dragging ? { opacity: inspectorDrag.progress } : undefined}
           onClick={() => updateInspectorCollapsed(true)}
         />
-      )}
+      ) : null}
 
       <aside
+        ref={inspectorAsideRef}
         className={`flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface-raised/95 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:shadow-none lg:backdrop-blur-0 ${
-          inspectorCollapsed
+          inspectorCollapsed && !inspectorDrag.dragging
             ? "hidden"
             : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] lg:static lg:z-auto lg:w-[392px]"
         }`}
-        aria-hidden={inspectorCollapsed}
+        // While swiping on mobile, track the finger 1:1 (inline transform overrides the
+        // class; transition:none disables the snap until release). Driven by the global
+        // gesture via MobileInspectorContext.
+        style={
+          inspectorDrag.dragging
+            ? {
+                transform: `translateX(${(1 - inspectorDrag.progress) * 100}%)`,
+                transition: "none",
+              }
+            : undefined
+        }
+        aria-hidden={inspectorCollapsed && !inspectorDrag.dragging}
       >
         <Tabs
           value={inspectorTab}

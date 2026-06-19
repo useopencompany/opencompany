@@ -2,101 +2,117 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  type GestureMode,
-  gestureModeFor,
+  type DrawerSide,
   lockAxis,
-  progressFor,
+  progressForSide,
+  resolveGesture,
   shouldCommitOpen,
 } from "./drawerGesture";
 
-type Options = {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  isMobile: boolean;
-  /** Measures the live drawer width (px) for progress; falls back when unmeasured. */
+/** One swipeable drawer. `isOpen` is read live (the right panel's state lives elsewhere). */
+export type DrawerSideConfig = {
+  isOpen: () => boolean;
+  setOpen: (open: boolean) => void;
+  /** Live drawer width in px, for progress math; the hook falls back to 1 if unmeasured. */
   getWidth: () => number;
 };
 
-/**
- * Drives the existing off-canvas drawer with a finger drag: edge-swipe to open,
- * drag-left to close, tracking the pointer 1:1. Returns `dragging` + `progress`
- * (0 closed → 1 open) so the shell can apply a live transform and fade the scrim.
- *
- * Listens on `document` so the open-edge, the drawer and the scrim all feed one
- * handler; gated by `isMobile` so desktop is completely untouched. Decision logic
- * lives in `drawerGesture.ts`.
- */
-export function useDrawerGesture({ open, setOpen, isMobile, getWidth }: Options): {
-  dragging: boolean;
-  progress: number;
-} {
-  const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(0);
+type Options = {
+  isMobile: boolean;
+  left: DrawerSideConfig;
+  /** Omit/null when no right panel exists on this page (e.g. not in a chat). */
+  right: DrawerSideConfig | null;
+};
 
-  // Keep the latest props available to the once-bound listeners without re-binding.
-  const latest = useRef({ open, setOpen, getWidth });
+export type DragState = { dragging: boolean; progress: number };
+const IDLE: DragState = { dragging: false, progress: 0 };
+
+/**
+ * Finger-driven swipe for a left nav drawer and an optional right panel. Edge-swipe
+ * to open the side you started from, drag to close whichever is open — one at a time.
+ * Listens on `document` so the edges, drawers and scrim all feed one handler; gated by
+ * `isMobile` so desktop is untouched. Decision logic lives in `drawerGesture.ts`.
+ *
+ * Returns live `{ dragging, progress }` per side so the shell can apply a 1:1 transform
+ * (the right side's values are forwarded to the registered panel via the bridge context).
+ */
+export function useDrawerGesture({ isMobile, left, right }: Options): {
+  left: DragState;
+  right: DragState;
+} {
+  const [active, setActive] = useState<{ side: DrawerSide; progress: number } | null>(null);
+  const latest = useRef({ left, right });
   useEffect(() => {
-    latest.current = { open, setOpen, getWidth };
+    latest.current = { left, right };
   });
 
   useEffect(() => {
     if (!isMobile) return;
 
-    let mode: GestureMode | null = null;
+    let start: { side: DrawerSide; opening: boolean } | null = null;
     let axis: "x" | "y" | null = null;
-    let pointerId = -1;
-    let startX = 0;
-    let startY = 0;
-    let lastX = 0;
-    let lastT = 0;
-    let velocity = 0;
+    let pid = -1;
+    let sx = 0;
+    let sy = 0;
+    let lx = 0;
+    let lt = 0;
+    let vel = 0;
     let width = 1;
 
     const end = () => {
-      mode = null;
+      start = null;
       axis = null;
-      pointerId = -1;
-      setDragging(false);
+      pid = -1;
+      setActive(null);
     };
 
     const onDown = (e: PointerEvent) => {
-      if (mode !== null) return; // already tracking a pointer
+      if (start !== null) return;
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      const next = gestureModeFor(latest.current.open, e.clientX);
-      if (!next) return;
-      mode = next;
-      pointerId = e.pointerId;
-      startX = lastX = e.clientX;
-      startY = e.clientY;
-      lastT = e.timeStamp;
-      velocity = 0;
-      width = latest.current.getWidth() || 1;
+      const { left: L, right: R } = latest.current;
+      const g = resolveGesture(
+        { leftOpen: L.isOpen(), rightOpen: R?.isOpen() ?? false, rightAvailable: !!R },
+        e.clientX,
+        window.innerWidth,
+      );
+      if (!g) return;
+      start = g;
+      pid = e.pointerId;
+      sx = lx = e.clientX;
+      sy = e.clientY;
+      lt = e.timeStamp;
+      vel = 0;
+      width = (g.side === "left" ? L.getWidth() : (R?.getWidth() ?? 0)) || 1;
     };
 
     const onMove = (e: PointerEvent) => {
-      if (mode === null || e.pointerId !== pointerId) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
+      if (!start || e.pointerId !== pid) return;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
       if (axis === null) {
         const locked = lockAxis(dx, dy);
         if (!locked) return;
         if (locked === "y") return end(); // vertical → let the page scroll
         axis = "x";
-        setDragging(true);
       }
       e.preventDefault();
-      const dt = e.timeStamp - lastT;
-      if (dt > 0) velocity = (e.clientX - lastX) / dt;
-      lastX = e.clientX;
-      lastT = e.timeStamp;
-      setProgress(progressFor(mode, dx, width));
+      const dt = e.timeStamp - lt;
+      if (dt > 0) vel = (e.clientX - lx) / dt;
+      lx = e.clientX;
+      lt = e.timeStamp;
+      setActive({
+        side: start.side,
+        progress: progressForSide(start.side, start.opening, dx, width),
+      });
     };
 
     const onUp = (e: PointerEvent) => {
-      if (mode === null || e.pointerId !== pointerId) return;
+      if (!start || e.pointerId !== pid) return;
       if (axis === "x") {
-        const p = progressFor(mode, e.clientX - startX, width);
-        latest.current.setOpen(shouldCommitOpen(mode, p, velocity));
+        const dx = e.clientX - sx;
+        const p = progressForSide(start.side, start.opening, dx, width);
+        const open = shouldCommitOpen(start.side, start.opening, p, vel);
+        (start.side === "left" ? latest.current.left : latest.current.right)?.setOpen(open);
       }
       end();
     };
@@ -113,5 +129,8 @@ export function useDrawerGesture({ open, setOpen, isMobile, getWidth }: Options)
     };
   }, [isMobile]);
 
-  return { dragging, progress };
+  return {
+    left: active?.side === "left" ? { dragging: true, progress: active.progress } : IDLE,
+    right: active?.side === "right" ? { dragging: true, progress: active.progress } : IDLE,
+  };
 }

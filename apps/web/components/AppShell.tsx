@@ -2,6 +2,7 @@ import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { CollectionsProvider } from "@/components/CollectionsProvider";
+import { MobileInspectorProvider } from "@/components/MobileInspectorContext";
 import { MobileMenuButton } from "@/components/MobileMenuButton";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
 import QueryProvider from "@/components/QueryProvider";
@@ -66,36 +67,40 @@ export default async function AppShell({ children }: { children: React.ReactNode
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
               {/* touch-pan-y: hand horizontal drags to the drawer swipe (useDrawerGesture)
-                  instead of letting iOS Safari treat them as back/forward navigation. */}
-              <div className="flex h-dvh w-full touch-pan-y overflow-hidden overflow-x-hidden bg-canvas">
-                <ShellChrome
-                  sidebar={
-                    <Suspense
-                      fallback={
-                        <Sidebar
+                  instead of letting iOS Safari treat them as back/forward navigation.
+                  MobileInspectorProvider sits above ShellChrome so the swipe gesture and
+                  a session page's right inspector (registered below) share one channel. */}
+              <MobileInspectorProvider>
+                <div className="flex h-dvh w-full touch-pan-y overflow-hidden overflow-x-hidden bg-canvas">
+                  <ShellChrome
+                    sidebar={
+                      <Suspense
+                        fallback={
+                          <Sidebar
+                            userName={userName}
+                            userEmail={authUser.email}
+                            workspaceName={workspace.name}
+                            initialCollapsed={initialSidebarCollapsed}
+                            initialSessions={[]}
+                            sessionsLoading
+                          />
+                        }
+                      >
+                        <SidebarWithSessions
                           userName={userName}
                           userEmail={authUser.email}
                           workspaceName={workspace.name}
                           initialCollapsed={initialSidebarCollapsed}
-                          initialSessions={[]}
-                          sessionsLoading
+                          sessionsPromise={sessionsPromise}
                         />
-                      }
-                    >
-                      <SidebarWithSessions
-                        userName={userName}
-                        userEmail={authUser.email}
-                        workspaceName={workspace.name}
-                        initialCollapsed={initialSidebarCollapsed}
-                        sessionsPromise={sessionsPromise}
-                      />
-                    </Suspense>
-                  }
-                >
-                  <MobileMenuButton />
-                  {children}
-                </ShellChrome>
-              </div>
+                      </Suspense>
+                    }
+                  >
+                    <MobileMenuButton />
+                    {children}
+                  </ShellChrome>
+                </div>
+              </MobileInspectorProvider>
             </ToastProvider>
           </CollectionsProvider>
         </WorkspaceProvider>
