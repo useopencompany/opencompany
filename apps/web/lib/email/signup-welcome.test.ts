@@ -80,8 +80,8 @@ describe("sendSignupWelcomeEmail", () => {
     process.env = { ...originalEnv };
     process.env.RESEND_API_KEY = "re_test";
     process.env.RESEND_REGISTERED_USERS_SEGMENT_ID = "seg_registered";
-    process.env.RESEND_WELCOME_FROM = "Louis from opencompany <louis@updates.opencompany.cloud>";
-    process.env.RESEND_REPLY_TO = "louis@opencompany.cloud";
+    delete process.env.RESEND_WELCOME_FROM;
+    delete process.env.RESEND_REPLY_TO;
     process.env.NEXT_PUBLIC_APP_URL = "https://app.opencompany.cloud";
   });
 
