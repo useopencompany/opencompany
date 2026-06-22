@@ -71,7 +71,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
                   MobileInspectorProvider sits above ShellChrome so the swipe gesture and
                   a session page's right inspector (registered below) share one channel. */}
               <MobileInspectorProvider>
-                <div className="flex h-dvh w-full touch-pan-y overflow-hidden overflow-x-hidden bg-canvas">
+                <div className="flex h-dvh w-full touch-pan-y overflow-hidden overflow-x-hidden bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
                   <ShellChrome
                     sidebar={
                       <Suspense

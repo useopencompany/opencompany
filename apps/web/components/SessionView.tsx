@@ -1985,7 +1985,7 @@ function SessionViewContentBody({
         className={`flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface-raised/95 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed && !inspectorDrag.dragging
             ? "hidden"
-            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] lg:static lg:z-auto lg:w-[392px]"
+            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] lg:static lg:z-auto lg:w-[392px] lg:pt-0 lg:pb-0 lg:pr-0"
         }`}
         // While swiping on mobile, track the finger 1:1 (inline transform overrides the
         // class; transition:none disables the snap until release). Driven by the global
