@@ -50,4 +50,5 @@ ALTER TABLE "llm_broker_tokens" ADD CONSTRAINT "llm_broker_tokens_settled_tool_u
 CREATE INDEX "llm_broker_requests_token_idx" ON "llm_broker_requests" USING btree ("token_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "llm_broker_tokens_token_hash_idx" ON "llm_broker_tokens" USING btree ("token_hash");--> statement-breakpoint
 CREATE INDEX "llm_broker_tokens_session_idx" ON "llm_broker_tokens" USING btree ("session_id");--> statement-breakpoint
-CREATE INDEX "llm_broker_tokens_unsettled_idx" ON "llm_broker_tokens" USING btree ("expires_at") WHERE "llm_broker_tokens"."settled_at" IS NULL;
+CREATE INDEX "llm_broker_tokens_unsettled_idx" ON "llm_broker_tokens" USING btree ("expires_at") WHERE "llm_broker_tokens"."settled_at" IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_session_tool_usage_broker_request_idx" ON "agent_session_tool_usage" USING btree ("provider_request_id") WHERE "agent_session_tool_usage"."provider_request_id" LIKE 'broker:%';

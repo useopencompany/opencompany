@@ -211,6 +211,27 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips Notion MCP tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "Notion docs",
+      body: "Search docs and create pages with @notion.",
+    });
+
+    expect(source).toContain("id: notion");
+    expect(source).toContain("type: mcp");
+    expect(source).toContain("server: notion");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "notion",
+        type: "mcp",
+        server: "notion",
+        label: "notion",
+        description: "Use workspace-configured Notion MCP tools.",
+      },
+    ]);
+  });
+
   test("round-trips X hosted tool config without secrets", () => {
     const source = serializeAgentFile({
       title: "X research",

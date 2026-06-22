@@ -10,6 +10,7 @@ import {
   listAddableBuiltinSkills,
   MAX_PERSONAL_SKILLS,
   MEMORY_SKILL_ID,
+  MOVE_TO_OPENCOMPANY_SKILL_ID,
   normalizeAgentSkills,
   normalizeExternalSkillReference,
   ONBOARDING_SKILL_ID,
@@ -18,6 +19,7 @@ import {
   resolveEnabledSkillMetadata,
   SKILL_CREATOR_SKILL_ID,
   scanPersonalSkills,
+  Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
 } from "./skills";
 import type { AgentConfig, AgentExternalSkillReference } from "./types";
 
@@ -178,6 +180,8 @@ describe("first-principles skill (addable built-in)", () => {
     expect(skillMd).toContain("@skill/");
     expect(skillMd).toContain(`@skill/${FIRST_PRINCIPLES_SKILL_ID}`);
     expect(skillMd).toContain(`@skill/${HUMANIZER_SKILL_ID}`);
+    expect(skillMd).toContain(`@skill/${Y_COMBINATOR_KNOWLEDGE_SKILL_ID}`);
+    expect(skillMd).toContain(`@skill/${MOVE_TO_OPENCOMPANY_SKILL_ID}`);
   });
 });
 
@@ -207,6 +211,70 @@ describe("humanizer skill (addable built-in)", () => {
 
   test("listAddableBuiltinSkills offers it", () => {
     expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(HUMANIZER_SKILL_ID);
+  });
+});
+
+describe("y-combinator-knowledge skill (addable built-in)", () => {
+  test("is a known built-in but off by default", () => {
+    expect(isKnownAgentSkillId(Y_COMBINATOR_KNOWLEDGE_SKILL_ID)).toBe(true);
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((s) => s.id)).not.toContain(
+      Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
+    );
+    expect(resolveEnabledSkillMetadata(baseConfig()).map((s) => s.id)).not.toContain(
+      Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
+    );
+  });
+
+  test("materializes once listed in config.skills as a bare built-in ref", () => {
+    const config = baseConfig({ skills: [{ id: Y_COMBINATOR_KNOWLEDGE_SKILL_ID }] });
+    const skill = resolveEnabledBuiltinSkillFiles(config).find(
+      (s) => s.id === Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
+    );
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    expect(skillMd).toContain("Office-hours loop");
+    expect(skillMd).toContain("https://www.ycombinator.com/library");
+    expect(skillMd).toContain("https://www.paulgraham.com/ds.html");
+    expect(skillMd).toMatch(/default alive/i);
+    expect(
+      resolveEnabledSkillMetadata(config).find((s) => s.id === Y_COMBINATOR_KNOWLEDGE_SKILL_ID)
+        ?.origin,
+    ).toBe("builtin");
+  });
+
+  test("listAddableBuiltinSkills offers it", () => {
+    expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(Y_COMBINATOR_KNOWLEDGE_SKILL_ID);
+  });
+});
+
+describe("move-to-opencompany skill (addable built-in)", () => {
+  test("is a known built-in but off by default", () => {
+    expect(isKnownAgentSkillId(MOVE_TO_OPENCOMPANY_SKILL_ID)).toBe(true);
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((s) => s.id)).not.toContain(
+      MOVE_TO_OPENCOMPANY_SKILL_ID,
+    );
+    expect(resolveEnabledSkillMetadata(baseConfig()).map((s) => s.id)).not.toContain(
+      MOVE_TO_OPENCOMPANY_SKILL_ID,
+    );
+  });
+
+  test("materializes once listed in config.skills, and teaches safe staging + a receipt", () => {
+    const config = baseConfig({ skills: [{ id: MOVE_TO_OPENCOMPANY_SKILL_ID }] });
+    const skill = resolveEnabledBuiltinSkillFiles(config).find(
+      (s) => s.id === MOVE_TO_OPENCOMPANY_SKILL_ID,
+    );
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    expect(skillMd).toContain("move-to-opencompany");
+    // The two load-bearing guarantees: stage in ephemeral work/, and never lose anything.
+    expect(skillMd).toMatch(/work\/ is your private, ephemeral scratch/);
+    expect(skillMd).toContain("Lost: 0");
+    expect(
+      resolveEnabledSkillMetadata(config).find((s) => s.id === MOVE_TO_OPENCOMPANY_SKILL_ID)
+        ?.origin,
+    ).toBe("builtin");
+  });
+
+  test("listAddableBuiltinSkills offers it", () => {
+    expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(MOVE_TO_OPENCOMPANY_SKILL_ID);
   });
 });
 
@@ -420,6 +488,20 @@ describe("scanPersonalSkills", () => {
       "SKILL.md",
       "references/format.md",
     ]);
+  });
+
+  test("reads a personal skill's optional command slug", () => {
+    const { skills, warnings } = scanPersonalSkills({
+      bundleDir,
+      bundleFiles: [
+        file(
+          "skills/weekly-digest/SKILL.md",
+          skillMd("Weekly digest", "Monday digest.", "command: /Weekly-Digest\n"),
+        ),
+      ],
+    });
+    expect(warnings).toEqual([]);
+    expect(skills[0]?.metadata.command).toBe("weekly_digest");
   });
 
   test("skips a folder with missing/invalid frontmatter, with a warning", () => {

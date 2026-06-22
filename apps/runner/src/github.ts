@@ -139,6 +139,66 @@ async function getInstallationToken(input: {
   return result.token;
 }
 
+/**
+ * Live check whether the work-repository installation can currently reach a repo, returning its
+ * metadata or null when GitHub does not grant it (404).
+ *
+ * The synced `workspaceIntegrationResources` list is only a point-in-time snapshot (refreshed at
+ * connect-time or via the "Refresh repositories" button), so a repo granted to the installation
+ * *after* the last sync is absent there even though the agent is allowed to use it. Callers resolve
+ * such a freshly-granted repo on demand with this instead of failing on a stale snapshot.
+ */
+export async function fetchGitHubWorkRepository(input: {
+  installationId: string;
+  fullName: string;
+}): Promise<{
+  id: string;
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+} | null> {
+  if (!hasGitHubIntegrationAppEnv()) return null;
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.fullName)) return null;
+
+  // Unscoped installation token (no `repositories` filter): lets us probe any repo the installation
+  // can see. GitHub answers 200 when the repo is granted, 404 when it is not.
+  const token = await getGitHubWorkInstallationToken({ installationId: input.installationId });
+  if (!token) return null;
+
+  const response = await fetch(`https://api.github.com/repos/${input.fullName}`, {
+    method: "GET",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  // 404 = the installation cannot see this repo (never granted, or access revoked). Treat as
+  // "unknown" so the caller falls back to its existing not-available handling rather than throwing.
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(
+      `GitHub repository lookup for ${input.fullName} failed with ${response.status}: ${await response.text()}`,
+    );
+  }
+
+  const repo = (await response.json()) as {
+    id?: number | string;
+    full_name?: string;
+    default_branch?: string;
+    private?: boolean;
+  };
+  if (!repo.full_name) return null;
+
+  return {
+    id: String(repo.id ?? ""),
+    fullName: repo.full_name,
+    defaultBranch: repo.default_branch?.trim() || "main",
+    private: repo.private ?? true,
+  };
+}
+
 export async function createDraftPullRequest(input: {
   installationId?: string;
   repositoryFullName: string;

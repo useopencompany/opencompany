@@ -319,6 +319,46 @@ export const agentFiles = pgTable(
   }),
 );
 
+// Append-only version history for brain knowledge files. Before the runner
+// overwrites or deletes a personal-brain (agentFiles) or company-brain
+// (brainFiles) file, the prior content is captured here so any bad turn can be
+// rolled back ("step back a turn"). This is the durability floor for PRO-244:
+// no user knowledge is silently lost, because the displaced bytes always land
+// in a version row first. Deliberately NOT FK-linked to agents/sessions — a
+// recreated agent or pruned session must not cascade-delete the backups.
+export const brainFileVersions = pgTable(
+  "brain_file_versions",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // "personal" -> agentFiles/personal-brain, "company" -> brainFiles/brain.
+    scope: text("scope").notNull(),
+    // Set for personal scope (owning agent); null for company brain.
+    agentId: text("agent_id"),
+    // Canonical repo path of the file whose prior content this row preserves.
+    path: text("path").notNull(),
+    content: text("content").notNull().default(""),
+    contentHash: text("content_hash").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    // What displaced this content: "overwrite" | "delete".
+    operation: text("operation").notNull(),
+    // Session/turn that displaced it — the grouping key for "step back a turn".
+    sessionId: text("session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    lookupIdx: index("brain_file_versions_lookup_idx").on(
+      table.workspaceId,
+      table.scope,
+      table.path,
+      table.createdAt,
+    ),
+    sessionIdx: index("brain_file_versions_session_idx").on(table.workspaceId, table.sessionId),
+  }),
+);
+
 // Unified, workspace-scoped projection outbox. Producers (web brain/agent
 // edits, runner writeback, agent self-edit) write canonical content to their
 // own tables and enqueue one row here per dirty repo path. A single projector
@@ -583,6 +623,13 @@ export const agentSessionMessages = pgTable(
     status: text("status").notNull().default("created"),
     content: text("content").notNull().default(""),
     internal: boolean("internal").notNull().default(false),
+    // How a user message was dispatched while a run was already in flight (the composer's
+    // send-mode picker): "steer" stops the active turn at the next model-step boundary,
+    // "queue" lets the active turn finish all its steps first, "interrupt" aborts the active
+    // turn (discarding in-flight work) and runs immediately. NULL on idle/first sends and all
+    // legacy rows — the runner treats NULL as "steer" so historical behavior is preserved.
+    // See docs/agent-turn-vocabulary.md and apps/runner/src/session-lifecycle.ts.
+    sendMode: text("send_mode"),
     modelMessage: jsonb("model_message").$type<Record<string, unknown>>(),
     toolName: text("tool_name"),
     toolCallId: text("tool_call_id"),
@@ -982,6 +1029,9 @@ export const agentSessionToolUsage = pgTable(
       table.createdAt,
     ),
     toolCallIdx: index("agent_session_tool_usage_tool_call_idx").on(table.toolCallId),
+    brokerProviderRequestIdx: uniqueIndex("agent_session_tool_usage_broker_request_idx")
+      .on(table.providerRequestId)
+      .where(sql`${table.providerRequestId} LIKE 'broker:%'`),
   }),
 );
 
@@ -1532,7 +1582,7 @@ export const workspaceToolPolicies = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     providerKey: text("provider_key").notNull(),
     permissionGroup: text("permission_group")
-      .$type<"read" | "post" | "modify" | "admin">()
+      .$type<"read" | "post" | "modify" | "merge" | "admin">()
       .notNull(),
     decision: text("decision").$type<"allow" | "ask" | "deny">().notNull(),
     updatedByUserId: text("updated_by_user_id").references(() => users.id, {
@@ -1550,7 +1600,7 @@ export const workspaceToolPolicies = pgTable(
     workspaceIdx: index("workspace_tool_policies_workspace_idx").on(table.workspaceId),
     groupCheck: check(
       "workspace_tool_policies_group_check",
-      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'merge', 'admin')`,
     ),
     decisionCheck: check(
       "workspace_tool_policies_decision_check",
@@ -1571,7 +1621,7 @@ export const agentToolApprovals = pgTable(
     toolName: text("tool_name").notNull(),
     providerKey: text("provider_key").notNull(),
     permissionGroup: text("permission_group")
-      .$type<"read" | "post" | "modify" | "admin">()
+      .$type<"read" | "post" | "modify" | "merge" | "admin">()
       .notNull(),
     status: text("status").$type<"pending" | "approved" | "denied">().notNull().default("pending"),
     inputPreview: text("input_preview"),
@@ -1595,7 +1645,7 @@ export const agentToolApprovals = pgTable(
     ),
     groupCheck: check(
       "agent_tool_approvals_group_check",
-      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'merge', 'admin')`,
     ),
     statusCheck: check(
       "agent_tool_approvals_status_check",
@@ -1787,6 +1837,9 @@ export const onboardingResponses = pgTable(
     role: text("role").notNull(),
     agentExperience: text("agent_experience").notNull(),
     helpAreas: text("help_areas").array().notNull().default(sql`'{}'::text[]`),
+    // Free-text answer to "what do you want to accomplish with opencompany?".
+    // Optional — users may leave it empty.
+    goal: text("goal"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

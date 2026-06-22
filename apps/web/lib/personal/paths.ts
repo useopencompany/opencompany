@@ -3,6 +3,8 @@
 // view-state machine. Keep this the single source of truth for personal URLs; components link
 // through `personalPaths.*` rather than hand-writing `/personal/...` strings.
 
+import { encodeBrainPath } from "@/lib/brain/paths";
+
 export type PersonalPanel =
   | "agent"
   | "skills"
@@ -19,6 +21,10 @@ export const personalPaths = {
   agent: "/personal/agent",
   soul: "/personal/files/soul.md",
   brain: "/personal/brain",
+  brainFile: (path: string) => {
+    const encoded = encodeBrainPath(path);
+    return encoded ? `/personal/brain/${encoded}` : "/personal/brain";
+  },
   memory: "/personal/memory",
   settings: "/personal/settings",
   skills: "/personal/skills",

@@ -24,6 +24,10 @@ import { githubStatus } from "@/lib/integrations/status";
 
 export async function loadWorkspaceIntegrationState() {
   const { workspace } = await currentWorkspace();
+  return loadWorkspaceIntegrationStateForWorkspace(workspace.id);
+}
+
+export async function loadWorkspaceIntegrationStateForWorkspace(workspaceId: string) {
   const db = getDb();
   const [connections, repositories] = await Promise.all([
     db
@@ -31,7 +35,7 @@ export async function loadWorkspaceIntegrationState() {
       .from(workspaceIntegrations)
       .where(
         and(
-          eq(workspaceIntegrations.workspaceId, workspace.id),
+          eq(workspaceIntegrations.workspaceId, workspaceId),
           eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
         ),
       )
@@ -41,7 +45,7 @@ export async function loadWorkspaceIntegrationState() {
       .from(workspaceIntegrationResources)
       .where(
         and(
-          eq(workspaceIntegrationResources.workspaceId, workspace.id),
+          eq(workspaceIntegrationResources.workspaceId, workspaceId),
           eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
           eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
         ),

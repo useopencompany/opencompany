@@ -38,7 +38,17 @@ const GLOBAL_FLAGS = ["root", "json", "report-usage"] as const;
 
 const COMMAND_SPECS: Record<string, CommandSpec> = {
   create: {
-    flags: ["type", "id", "status", "truth", "truth-stdin", "alias", "related", "title"],
+    flags: [
+      "type",
+      "id",
+      "status",
+      "truth",
+      "truth-stdin",
+      "alias",
+      "related",
+      "title",
+      "allow-similar",
+    ],
     maxPositionals: 0,
   },
   get: { flags: ["id", "section", "follow"], maxPositionals: 1 },
@@ -86,10 +96,16 @@ Usage: memory <command> [options]
 Commands:
   create           Create a canonical object (person|company|project|customer|decision|concept|theme).
                    New objects start as drafts; --status active with compiled truth requires citations.
+                   Refuses a near-duplicate of an existing object of the same type (same name under a
+                   different spelling); update that record instead, or pass --allow-similar to override.
   get              Fetch a memory file (--section truth|timeline|frontmatter|all, --follow).
                    Default output is structured; --section scopes both the text and the --json payload.
   query            Hybrid retrieval over the tree.
                    Filters: --type, --status, --folder, --since, --limit, --lexical-only.
+                   --since takes a relative window (30m, 24h, 7d, 2w) or an ISO-8601 timestamp,
+                   matched against updated_at (the last write, not when the fact was first learned).
+                   Run query with no text for a recency listing — e.g. memory query --since 24h
+                   lists everything updated in the last day, newest first.
                    --hops N follows related links + citations N steps out, pulling in neighbors.
                    Results include capped compiled truth; run memory get <id> for the full record.
                    Hides merged stubs and invalid records by default; --include-merged / --include-invalid opt back in.

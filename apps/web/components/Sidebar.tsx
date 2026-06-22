@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
+import { SidebarPreviewBadge } from "@/components/SidebarPreviewBadge";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
@@ -332,7 +333,7 @@ function SidebarLive({
   const router = useRouter();
   const { userId } = useWorkspaceContext();
   const { agentSessions, sessionStars } = useCollections();
-  const { showError } = useToast();
+  const { showError, showToast } = useToast();
   // Sessions with an in-flight pin toggle. Guards rapid re-clicks from firing an
   // insert against an already-optimistically-inserted star (duplicate key).
   const pinTogglesInFlight = useRef<Set<string>>(new Set());
@@ -385,6 +386,9 @@ function SidebarLive({
   const handleArchive = useCallback(
     (sessionId: string, active: boolean) => {
       const tx = agentSessions.delete(sessionId);
+      // Optimistic: the row is already gone, so confirm right away. A failure rolls the row back
+      // into the sidebar and the catch below surfaces the error toast.
+      showToast({ title: "Chat archived" });
       if (active) router.replace("/company");
       void tx.isPersisted.promise.catch((error) => {
         showError(
@@ -393,7 +397,7 @@ function SidebarLive({
         );
       });
     },
-    [agentSessions, router, showError],
+    [agentSessions, router, showError, showToast],
   );
 
   return (
@@ -423,6 +427,7 @@ function SidebarContent({
   onArchive: (sessionId: string, active: boolean) => void;
 }) {
   const pathname = usePathname();
+  const { workspaceId } = useWorkspaceContext();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
@@ -460,7 +465,7 @@ function SidebarContent({
     <>
       <aside
         className={`relative h-full shrink-0 overflow-hidden bg-sidebar transition-[width] duration-200 ease-out ${
-          collapsed ? "w-0" : "w-[256px]"
+          collapsed ? "w-[256px] md:w-0" : "w-[256px]"
         }`}
         aria-hidden={collapsed}
       >
@@ -476,6 +481,7 @@ function SidebarContent({
             >
               <PanelLeft size={15} strokeWidth={1.75} />
             </button>
+            <SidebarPreviewBadge />
             <SpaceSwitcher
               activeSpace="workspace"
               workspaceName={workspaceName}
@@ -522,7 +528,7 @@ function SidebarContent({
                   value={sessionQuery}
                   onChange={(event) => setSessionQuery(event.target.value)}
                   placeholder="Filter sessions"
-                  className="h-7 w-full rounded-md border border-border bg-surface/55 pl-7 pr-7 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong focus:ring-2 focus:ring-ink/[0.04]"
+                  className="h-7 w-full rounded-md border border-border bg-surface/55 pl-7 pr-7 text-[16px] md:text-[12.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong focus:ring-2 focus:ring-ink/[0.04]"
                 />
                 {sessionQuery && (
                   <button
@@ -606,6 +612,7 @@ function SidebarContent({
             userName={userName}
             userEmail={userEmail}
             subtitle={workspaceName}
+            workspaceId={workspaceId}
             trailing={
               <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
                 <button

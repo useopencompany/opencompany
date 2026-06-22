@@ -63,6 +63,7 @@ export type AgentToolId =
   | "posthog"
   | "betterstack"
   | "braintrust"
+  | "notion"
   | "gmail"
   | "google_calendar";
 export type AgentModelId =
@@ -101,7 +102,8 @@ export type AgentModelId =
   | "xai/grok-build-0.1"
   | "zai/glm-5.1"
   | "zai/glm-5-turbo"
-  | "zai/glm-5v-turbo";
+  | "zai/glm-5v-turbo"
+  | "openrouter/fusion";
 
 export type AgentHostedToolConfig = {
   id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "neon" | "gmail" | "google_calendar";
@@ -120,9 +122,9 @@ export type AgentCodingToolConfig = {
 };
 
 export type AgentMcpToolConfig = {
-  id: "linear" | "slack" | "posthog" | "betterstack" | "braintrust";
+  id: "linear" | "slack" | "posthog" | "betterstack" | "braintrust" | "notion";
   type: "mcp";
-  server: "linear" | "slack" | "posthog" | "betterstack" | "braintrust";
+  server: "linear" | "slack" | "posthog" | "betterstack" | "braintrust" | "notion";
   label: string;
   description: string;
 };

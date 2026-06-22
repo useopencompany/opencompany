@@ -21,12 +21,9 @@ describe("classifyRuntimeTool", () => {
     expect(classifyRuntimeTool("shell")).toEqual({ providerKey: "system", group: "admin" });
     expect(classifyRuntimeTool("memory")).toEqual({ providerKey: "system", group: "read" });
     expect(classifyRuntimeTool("gh")).toEqual({ providerKey: "github", group: "admin" });
-    expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "modify" });
-    expect(classifyRuntimeTool("opencode_coder")).toEqual({
-      providerKey: "github",
-      group: "modify",
-    });
-    expect(classifyRuntimeTool("codex_coder")).toEqual({ providerKey: "github", group: "modify" });
+    expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "post" });
+    expect(classifyRuntimeTool("opencode_coder")).toEqual({ providerKey: "github", group: "post" });
+    expect(classifyRuntimeTool("codex_coder")).toEqual({ providerKey: "github", group: "post" });
     expect(classifyRuntimeTool("x_search_posts")).toEqual({ providerKey: "x", group: "read" });
     expect(classifyRuntimeTool("youtube_get_transcript")).toEqual({
       providerKey: "youtube",
@@ -256,39 +253,52 @@ describe("classifyGitHubCliArgs", () => {
       "issue status",
       "release view v1.0.0",
       "release list --limit 10",
+      "release download v1.0.0",
       "repo view opencompany/web",
       "repo list opencompany",
+      "repo clone opencompany/web work/opencompany-web",
+      "run list --limit 10",
+      "run view 12345 --log",
+      "run watch 12345",
+      "workflow list",
+      "workflow view deploy.yml",
+      "gist view abc123",
+      "gist list",
+      "search prs --author octocat",
+      "search code 'classifyGitHubCliArgs'",
+      "label list",
+      "cache list",
+      "secret list",
+      "variable list",
+      "org list",
+      "project list --owner opencompany",
+      "status",
+      "auth status",
       "api repos/opencompany/web/pulls/301",
       "api --method GET repos/opencompany/web/pulls/301",
       "api --method GET repos/opencompany/web/issues -f title=bug",
+      // GET on a sensitive path is still just a read.
+      "api --method GET repos/opencompany/web/collaborators",
+      // GraphQL without a mutation operation is a read.
+      "api graphql -f query='query { viewer { login } }'",
       "--repo opencompany/web pr diff 301",
     ]) {
       expect(classifyGitHubCliArgs(args)).toBe("read");
     }
   });
 
-  it("classifies gh commands with external side effects as modify", () => {
+  it("classifies additive, reviewable contributions as post", () => {
     for (const args of [
       "pr create --fill",
-      "pr edit 301 --title updated",
       "pr comment 301 --body hello",
-      "pr close 301",
-      "pr reopen 301",
-      "pr merge 301 --squash",
-      "pr review 301 --approve",
       "issue create --title bug",
-      "issue edit 123 --title updated",
       "issue comment 123 --body hello",
-      "release create v1.0.0",
-      "release edit v1.0.0 --notes updated",
-      "release upload v1.0.0 artifact.tgz",
+      "issue develop 123 --checkout",
       "gist create notes.md",
-      "gist edit abc123 notes.md",
       "repo fork opencompany/web",
-      "repo clone opencompany/web work/opencompany-web",
+      "label create triage --color FF0000",
       "api --method POST repos/opencompany/web/issues",
-      "api --method PUT repos/opencompany/web/pulls/301/merge",
-      "api --method PATCH repos/opencompany/web/issues/123",
+      // Body without an explicit method defaults to POST in gh.
       "api repos/opencompany/web/issues -f title=bug",
       "api repos/opencompany/web/issues -F title=bug",
       "api repos/opencompany/web/issues --field title=bug",
@@ -297,29 +307,86 @@ describe("classifyGitHubCliArgs", () => {
       "api repos/opencompany/web/issues --field=title=bug",
       "api repos/opencompany/web/issues --raw-field=title=bug",
       "api repos/opencompany/web/issues --input=body.json",
-      "api graphql -f query='mutation { __typename }'",
       // pflag attached-value shorthands must classify like their spaced forms.
       "api repos/opencompany/web/issues -ftitle=bug",
       "api repos/opencompany/web/issues -Ftitle=bug",
       "api repos/opencompany/web/issues -f=title=bug",
       "api -XPOST repos/opencompany/web/issues",
+    ]) {
+      expect(classifyGitHubCliArgs(args)).toBe("post");
+    }
+  });
+
+  it("classifies mutations of existing items as modify", () => {
+    for (const args of [
+      "pr edit 301 --title updated",
+      "pr close 301",
+      "pr reopen 301",
+      "pr ready 301",
+      "pr review 301 --approve",
+      "pr update-branch 301",
+      "issue edit 123 --title updated",
+      "issue close 123",
+      "issue reopen 123",
+      "issue transfer 123 opencompany/other",
+      "release edit v1.0.0 --notes updated",
+      "gist edit abc123 notes.md",
+      "label edit triage --color 00FF00",
+      "run rerun 12345",
+      "run cancel 12345",
+      "api --method PATCH repos/opencompany/web/issues/123",
       "api -X=PATCH repos/opencompany/web/issues/123",
+      "api --method PUT repos/opencompany/web/issues/123/lock",
     ]) {
       expect(classifyGitHubCliArgs(args)).toBe("modify");
     }
   });
 
+  it("classifies merging as its own merge tier", () => {
+    for (const args of [
+      // Merging lands code on the target branch — the highest-consequence routine action.
+      "pr merge 301 --squash",
+      // The raw api equivalents follow the same policy as `pr merge`.
+      "api --method PUT repos/opencompany/web/pulls/301/merge",
+      "api --method POST repos/opencompany/web/merges",
+    ]) {
+      expect(classifyGitHubCliArgs(args)).toBe("merge");
+    }
+  });
+
   it("classifies destructive, unknown, empty, or malformed gh args as admin", () => {
     for (const args of [
+      // Publishing releases is a supply-chain act.
+      "release create v1.0.0",
+      "release upload v1.0.0 artifact.tgz",
+      "release delete v1.0.0",
+      // Dispatching workflows is remote code execution.
+      "workflow run deploy.yml",
+      "workflow enable deploy.yml",
+      "secret set DEPLOY_KEY",
       "repo delete opencompany/web --yes",
+      "repo edit opencompany/web --visibility public",
       "api --method DELETE repos/opencompany/web/issues/comments/1",
+      // DELETE on a merge path stays admin, not the merge tier.
+      "api --method DELETE repos/opencompany/web/merges",
+      // Sensitive non-GET api endpoints can't ride the post/modify tiers.
+      "api --method PUT repos/opencompany/web/collaborators/mallory",
+      "api --method PUT repos/opencompany/web/actions/secrets/DEPLOY_KEY",
+      "api --method POST repos/opencompany/web/hooks",
+      "api --method POST repos/opencompany/web/keys",
+      "api --method POST repos/opencompany/web/actions/workflows/deploy.yml/dispatches",
+      "api --method PUT repos/opencompany/web/branches/main/protection",
+      "api --method POST repos/opencompany/web/releases",
+      "api --method POST repos/opencompany/web/transfer",
+      // GraphQL mutations can express arbitrary writes (including merging PRs).
+      "api graphql -f query='mutation { __typename }'",
       // Attached shorthand method: previously fell through to "no method" → read.
       "api -XDELETE repos/opencompany/web/issues/comments/1",
       "api -X=DELETE repos/opencompany/web/issues/comments/1",
       // Empty attached value is unparseable → treated as DELETE, not waved through.
       "api -X= repos/opencompany/web",
       "pr frobnicate 301",
-      "workflow run deploy.yml",
+      "frobnicate",
       "",
       "   ",
       "pr view 'unterminated",
@@ -427,7 +494,7 @@ describe("resolveToolDecision", () => {
       }),
     ).toEqual({ decision: "allow", providerKey: "system", group: "modify" });
 
-    // A github-gated underlying tool (amp_coder → github/modify) follows the github policy.
+    // A github-gated underlying tool (amp_coder → github/post) follows the github policy.
     const decision = resolveToolDecision({
       toolName: "use_tool",
       toolInput: { tool: "amp_coder", arguments: {} },
@@ -435,24 +502,25 @@ describe("resolveToolDecision", () => {
       suspendable: true,
     });
     expect(decision.providerKey).toBe("github");
-    expect(decision.group).toBe("modify");
+    expect(decision.group).toBe("post");
     expect(decision.decision).toBe("ask");
 
-    const allowModify: WorkspaceToolPolicyMap = new Map([
-      [policyMapKey("github", "modify"), "allow"],
+    const allowContribute: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("github", "post"), "allow"],
     ]);
     expect(
       resolveToolDecision({
         toolName: "use_tool",
         toolInput: { tool: "amp_coder", arguments: {} },
-        policy: allowModify,
+        policy: allowContribute,
         suspendable: true,
       }).decision,
     ).toBe("allow");
   });
 
-  it("uses gh args to apply GitHub read/modify/admin policies", () => {
-    const allowModify: WorkspaceToolPolicyMap = new Map([
+  it("uses gh args to apply GitHub read/post/modify/merge/admin policies", () => {
+    const allowContribute: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("github", "post"), "allow"],
       [policyMapKey("github", "modify"), "allow"],
     ]);
 
@@ -468,15 +536,44 @@ describe("resolveToolDecision", () => {
       resolveToolDecision({
         toolName: "gh",
         toolInput: { args: "pr create --fill" },
-        policy: allowModify,
+        policy: allowContribute,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "github", group: "post" });
+    expect(
+      resolveToolDecision({
+        toolName: "gh",
+        toolInput: { args: "pr edit 301 --title updated" },
+        policy: allowContribute,
         suspendable: true,
       }),
     ).toEqual({ decision: "allow", providerKey: "github", group: "modify" });
+    // Allowing contributions and edits still does not allow shipping: merge is its own tier.
+    expect(
+      resolveToolDecision({
+        toolName: "gh",
+        toolInput: { args: "pr merge 301 --squash" },
+        policy: allowContribute,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "ask", providerKey: "github", group: "merge" });
+    // And allowing merges does not hand over settings/members/delete.
+    const allowMerge: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("github", "merge"), "allow"],
+    ]);
+    expect(
+      resolveToolDecision({
+        toolName: "gh",
+        toolInput: { args: "pr merge 301 --squash" },
+        policy: allowMerge,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "github", group: "merge" });
     expect(
       resolveToolDecision({
         toolName: "gh",
         toolInput: { args: "repo delete opencompany/web --yes" },
-        policy: allowModify,
+        policy: allowMerge,
         suspendable: true,
       }),
     ).toEqual({ decision: "ask", providerKey: "github", group: "admin" });
@@ -612,6 +709,17 @@ describe("formatWorkspaceToolPolicyContext", () => {
     ).toContain("Linear: Read=ask first, Post=deny, Modify=deny, Admin=deny.");
   });
 
+  it("uses provider-specific group labels (GitHub post → Contribute)", () => {
+    const context = formatWorkspaceToolPolicyContext({
+      providerKeys: ["github"],
+      policy: new Map(),
+      suspendable: true,
+    });
+    expect(context).toContain(
+      "GitHub: Read=allow, Contribute=ask first, Modify=ask first, Merge=ask first, Admin=ask first.",
+    );
+  });
+
   it("describes ask policies as denied for non-suspendable runs", () => {
     const policy: WorkspaceToolPolicyMap = new Map([[policyMapKey("linear", "read"), "ask"]]);
 
@@ -650,5 +758,15 @@ describe("buildDeniedToolOutput", () => {
     expect(output.error.recoverable).toBe(false);
     expect(output.error.message).toContain("Slack");
     expect(output.error.message).toContain("Do not retry");
+  });
+
+  it("uses the provider-specific group label in the denial message", () => {
+    const output = buildDeniedToolOutput({
+      toolName: "amp_coder",
+      providerKey: "github",
+      group: "post",
+      source: "policy",
+    });
+    expect(output.error.message).toContain("GitHub · Contribute");
   });
 });

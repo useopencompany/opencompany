@@ -248,7 +248,7 @@ async function handleBrokerRequest(input: {
       session_id: token.sessionId,
       error,
     });
-    await recordSpendSafely(store, {
+    await recordSpend(store, {
       token,
       endpoint,
       model,
@@ -279,7 +279,7 @@ async function handleBrokerRequest(input: {
     const usage = upstreamResponse.ok
       ? parseJsonUsage(safeJsonParse(responseBuffer.toString("utf8")))
       : null;
-    await recordSpendSafely(store, {
+    await recordSpend(store, {
       token,
       endpoint,
       model,
@@ -299,7 +299,7 @@ async function handleBrokerRequest(input: {
   const meteredStream = createMeteredResponseStream(
     upstreamResponse.body,
     async (usage) => {
-      await recordSpendSafely(store, {
+      await recordSpend(store, {
         token,
         endpoint,
         model,
@@ -367,13 +367,14 @@ function createMeteredResponseStream(
           await recordUsage(scanner.finish());
         } catch (error) {
           onMeteringError(error);
+          throw error;
         }
       },
     }),
   );
 }
 
-async function recordSpendSafely(
+async function recordSpend(
   store: BrokerTokenStore,
   input: {
     token: ValidatedBrokerToken;
@@ -389,32 +390,20 @@ async function recordSpendSafely(
   const costUsdMicros = usage?.parsed
     ? priceBrokerRequest({ provider: input.token.provider, model: input.model, usage })
     : 0;
-  try {
-    await store.recordSpend({
-      tokenId: input.token.id,
-      sessionId: input.token.sessionId,
-      endpoint: input.endpoint,
-      model: input.model,
-      streamed: input.streamed,
-      upstreamStatus: input.upstreamStatus,
-      inputTokens: usage?.inputTokens ?? 0,
-      inputCacheReadTokens: usage?.inputCacheReadTokens ?? 0,
-      inputCacheWriteTokens: usage?.inputCacheWriteTokens ?? 0,
-      outputTokens: usage?.outputTokens ?? 0,
-      costUsdMicros,
-      usageParsed: usage?.parsed ?? false,
-      latencyMs: input.latencyMs,
-      rawUsage: usage?.raw ?? {},
-    });
-  } catch (error) {
-    // Metering failures must never fail the proxied response; the settlement sweeper
-    // and the unparsed counter exist to keep these visible.
-    logger.error("LLM broker failed to record spend", {
-      event: "opencompany.llm_broker_record_spend_failed",
-      session_id: input.token.sessionId,
-      token_id: input.token.id,
-      endpoint: input.endpoint,
-      error,
-    });
-  }
+  await store.recordSpend({
+    tokenId: input.token.id,
+    sessionId: input.token.sessionId,
+    endpoint: input.endpoint,
+    model: input.model,
+    streamed: input.streamed,
+    upstreamStatus: input.upstreamStatus,
+    inputTokens: usage?.inputTokens ?? 0,
+    inputCacheReadTokens: usage?.inputCacheReadTokens ?? 0,
+    inputCacheWriteTokens: usage?.inputCacheWriteTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? 0,
+    costUsdMicros,
+    usageParsed: usage?.parsed ?? false,
+    latencyMs: input.latencyMs,
+    rawUsage: usage?.raw ?? {},
+  });
 }

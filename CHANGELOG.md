@@ -7,11 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-06-22
+
+### Fixed
+- Completed assistant replies now appear live when the final stream payload is missed, without needing a page reload (#496) — @louis.
+
+## [0.16.0] - 2026-06-19
+
+### Added
+- Personal sessions on mobile can now swipe from the opposite edge for session details, while filmstrip gestures respect swipe direction (#492, #495) — @jasper.
+- The personal agent sidebar now includes a tabbed session details inspector (#489) — @louis.
+
+### Changed
+- Feedback reports now submit optimistically and archive actions show a confirmation toast (#491) — @jasper.
+- Personal Brain and after-session memory guidance is stricter, so agents only save persistent files or memories when user intent is clear (#485) — @louis.
+- The personal sidebar home entry is now labeled New Session and uses the send icon (#487) — @louis.
+- Personal sidebar session lists now hide scrollbars while remaining scrollable (#494) — @jasper.
+
+### Fixed
+- Agent replies no longer reorder in the transcript when stream events arrive out of order (#493) — @jasper.
+- Mobile drawer swipes now work more reliably in Safari while preserving normal vertical page scrolling (#490) — @jasper.
+
+## [0.15.0] - 2026-06-18
+
+### Added
+- Personal Brain now keeps restorable file versions, with restore tooling, caps, and runner guidance for safer durable writes (#483) — @jasper.
+- Mobile users can now swipe to open the main navigation drawer (#484) — @jasper.
+
+### Fixed
+- The onboarding wizard no longer resets when setting tool policies during the capabilities step (#481) — @jasper.
+- The three-dot menu in the brain file view no longer renders behind the file text (#480) — @jasper.
+- GitHub work repositories granted after connecting now resolve via a live lookup instead of being missed (#479) — @jasper.
+- Various mobile and phone UI fixes (#478) — @jasper.
+
+## [0.14.0] - 2026-06-16
+
+### Added
+- OpenRouter Fusion models are now supported (#473) — @louis.
+- Messages sent mid-run now offer Steer, Queue, and Interrupt send-modes (#468) — @jasper.
+- Chat sessions can now be renamed via double-click or a right-click menu (#467) — @jasper.
+- Clarifying questions now always include a free-text "Other" answer (#466) — @jasper.
+- Screenshots dropped into chat are now attached to the Linear issue created from that conversation (#464) — @jasper.
+
+### Changed
+- Built-in skills now show distinct icons instead of a shared Sparkles placeholder (#475) — @jasper.
+- Memory lookup prompting tightened for more relevant recall (#474) — @louis.
+- Typed @mentions in the agent editor are no longer auto-converted as you type (#470) — @jasper.
+
+### Fixed
+- Near-identical person records in memory are now deduplicated (#477) — @jasper.
+- The thinking trace now separates distinct reasoning phases instead of running them together (#476) — @jasper.
+- The "Updated memory" card no longer overlaps the message footer (#469) — @jasper.
+- Fixed the personal billing redirect (#465) — @louis.
+
+## [0.13.0] - 2026-06-12
+
+### Added
+- Agents can now create Linear issues directly from chat, preserving the relevant conversation context in the issue (#462) — @jasper.
+- Notion is now available as a first-party MCP integration with OAuth connection flow and tool discovery (#455) — @louis.
+- New users can now complete a Leo-led onboarding flow with updated personal onboarding screens and kickoff behavior (#451) — @louis.
+- Agents can now use the bundled YC knowledge skill (#456) — @louis.
+- Feedback reports can now include screenshots, which are uploaded and embedded inline in the linked Linear issue (#447) — @jasper.
+- The personal Memory surface is now URL-addressable, so selected memory paths can be opened and restored from direct links (#446) — @jasper.
+- Memory queries now support relative `--since` windows and query-less recent-memory listings (#444) — @louis.
+- Preview workspaces now show an early-preview badge in the sidebar (#457) — @louis.
+
+### Changed
+- Personal sidebar navigation was refreshed for the updated personal surface structure (#449) — @louis.
+- GitHub permission scopes were consolidated and renamed around clearer permission groups (#450) — @louis.
+- Signup welcome email delivery and unsubscribe handling were refactored for more reliable account email flows (#452) — @louis.
+
+### Fixed
+- Home-space image drag and drop now preserves sent images and shows them in the chat bubble after sending (#454) — @jasper.
+- Sessions now recover stale stream state after returning to a tab instead of staying stuck on outdated loading state (#448) — @louis.
+- Personal Brain writes are no longer silently dropped when the agent bundle exceeds the 80-file cap (#445) — @louis.
+- Chat scrolling now settles at the bottom when expected during active sessions (#431) — @jasper.
+
 ## [0.12.0] - 2026-06-11
 
 ### Added
 - Brain files created or edited by agents now show as clickable attachments under assistant turns, and the company Brain can be opened directly at `/brain/<path>` deep links (#356) — @louis.
 - The personal Brain is now URL-addressable too, with nested file links restoring the selected file on reload and keeping the Brain navigation active (#426) — @jasper.
+- Personal Brain files created or edited during agent turns now link directly from the session transcript into the matching personal Brain path (#442) — @louis.
+- Personal sessions now support split-screen panes, so multiple chats can stay visible and be arranged side by side (#441) — @louis.
+- Agents can now start scoped subagents with selected tool grants, with subagent lifecycle events shown in the parent session transcript (#421) — @louis.
 - The personal Integrations tab now expands inline with connected account details, permission summaries, degraded-access warnings, disconnect actions, and GitHub repository refresh (#390) — @louis.
 - Personal recall can now be constrained by time windows, including query-less recent-session snippets, so agents can ask for memory from a specific lookback period (#416) — @louis.
 - Large pasted text is captured through the attachment pipeline, and oversized text attachments are materialized as sandbox file references instead of being inlined into every model call (#410) — @louis.
@@ -19,6 +98,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runner observability now records per-tool-call phase timings, Braintrust spans, PostHog rollups, and hidden sandbox hydration timing events for production latency diagnosis (#411, #417) — @louis.
 
 ### Changed
+- Starting a session from the personal home prompt now switches to an optimistic session view immediately while creation and navigation finish in the background (#420) — @louis.
+- Runner sandbox hydration now overlaps bundle, skill, and setup work to reduce startup latency for sessions that need a sandbox (#434) — @louis.
+- Personal inbox cards now render markdown in their body and step text, matching the markdown contract used by the inbox tool (#438) — @louis.
+- Recall recap guidance is tighter, with cleaner formatting for recalled memories and follow-up summaries (#436) — @louis.
+- Preview deployment PR comments now include `?skipOnboarding`, letting reviewers test fresh preview accounts without going through onboarding (#435) — @louis.
 - New personal agents now default to Leo on Kimi K2.6, with updated default capabilities, model selection, settings reset, and personal agent source normalization (#409, #425) — @louis.
 - Memory tooling now returns richer `memory query` and `memory get` output, clearer invalid-usage help, a tighter keeper kickoff prompt, and canonical guidance that durable facts belong in structured memory while `agent/user.md` is the always-loaded digest (#413, #418, #422, #428) — @louis.
 - Memory keeper passes now use Gemini 3.1 Flash Lite, surface what they stored, and appear in the transcript near the turn they followed instead of pinned to the bottom (#401, #397) — @louis.
@@ -26,6 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slack support channel names now keep the per-workspace suffix at the end, for example `<customer>-x-opencompany-<id8>` (#394) — @jasper.
 
 ### Fixed
+- Slash command session starts now route to the intended personal or company surface instead of opening the wrong session view (#432) — @louis.
+- Session lists now consistently sort by creation time across the company and personal sidebars (#437) — @louis.
+- Personal agent skill slash commands are available again in the composer slash menu and insert the right skill mention (#440) — @louis.
 - Personal-session inspector links now stay inside the personal surface instead of opening related sessions, session pages, or agent links under `/company` (#391) — @louis.
 - Personal runtime tool guidance now advertises the correct `work/`, `personal-brain/`, and `agent/` roots and blocks generic file tools from editing structured memory paths (#414) — @louis.
 - OpenCode tool usage is now parsed from current `step_finish` events and charged back to the spawning session instead of silently appearing as zero-cost work (#402) — @jasper.

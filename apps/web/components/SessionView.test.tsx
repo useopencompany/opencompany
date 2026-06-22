@@ -12,6 +12,11 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentSkillCatalogEntry } from "@/components/agent-editor/tools";
+import {
+  type PersonalAgentContextValue,
+  PersonalAgentProvider,
+} from "@/components/personal/PersonalAgentContext";
 import {
   continueInterruptedSession,
   createAgentSession,
@@ -147,6 +152,15 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
   },
   SESSIONS_QUERY_STALE_TIME_MS: 30_000,
 }));
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+globalThis.ResizeObserver ??= ResizeObserverMock;
+Element.prototype.scrollIntoView ??= vi.fn();
 
 afterEach(() => {
   actionMocks.cancelAgentSessionQuestion.mockReset();
@@ -752,23 +766,111 @@ function emptyStreamState(overrides: Partial<SessionRuntimeState> = {}): Session
   };
 }
 
+function makePersonalAgentContext(
+  overrides: Partial<PersonalAgentContextValue> = {},
+): PersonalAgentContextValue {
+  const config: PersonalAgentContextValue["config"] = {
+    schemaVersion: "agent.v1",
+    title: "Personal Agent",
+    instructions: "Help me.",
+    model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+    tools: [],
+    brain: [],
+    skills: [],
+    integrations: { github: { repositories: [] } },
+    triggers: [],
+  };
+
+  return {
+    agent: {
+      id: "agent_001",
+      name: "Personal Agent",
+      defaultModel: "openai/gpt-5.4-mini",
+      path: "agents/personal",
+      config,
+      body: "Help me.",
+      content: { type: "doc" },
+    },
+    bundleDir: "agents/personal",
+    userName: "Test User",
+    userEmail: "test@example.com",
+    workspaceName: "Test Workspace",
+    initialSessions: [],
+    personalSkills: [],
+    githubIntegrationStatus: "not_connected",
+    githubRepositories: [],
+    integrationConnections: {
+      github: false,
+      gmail: false,
+      google_calendar: false,
+      linear: false,
+      slack: false,
+      posthog: false,
+      betterstack: false,
+      braintrust: false,
+      notion: false,
+    },
+    integrationDetails: {},
+    toolPolicies: {},
+    config,
+    setConfig: vi.fn(),
+    githubRequested: false,
+    proMode: false,
+    setProMode: vi.fn(),
+    companySurfaceEnabled: false,
+    setCompanySurfaceEnabled: vi.fn(),
+    getDraft: () => ({ body: "Help me.", content: { type: "doc" } }),
+    setDraft: vi.fn(),
+    files: [],
+    upsertFile: vi.fn(),
+    addIntegration: vi.fn(async () => true),
+    addTool: vi.fn(async () => undefined),
+    addSkill: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
 function renderSessionViewContent(
   detail: AgentSessionDetailPayload,
   streamStatus: SessionStreamStatus = "live",
+  options: {
+    personalAgent?: PersonalAgentContextValue;
+    workspaceSkills?: AgentSkillCatalogEntry[];
+    // Snapshot fetch time (react-query dataUpdatedAt) for the stream-staleness
+    // authority rule. Omitted (0) = "snapshot age unknown" → stream stays
+    // authoritative, matching the pre-staleness behavior most tests assume.
+    detailUpdatedAt?: number;
+  } = {},
 ) {
   streamMock.status = streamStatus;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(["workspace-skills", "wks_test"], options.workspaceSkills ?? []);
+  const content = (
+    <SessionViewContent
+      detail={detail}
+      workspaceId="wks_test"
+      {...(options.detailUpdatedAt !== undefined
+        ? { detailUpdatedAt: options.detailUpdatedAt }
+        : {})}
+    />
+  );
   return render(
     <QueryClientProvider client={queryClient}>
-      <SessionViewContent detail={detail} workspaceId="wks_test" />
+      {options.personalAgent ? (
+        <PersonalAgentProvider value={options.personalAgent}>{content}</PersonalAgentProvider>
+      ) : (
+        content
+      )}
     </QueryClientProvider>,
   );
 }
 
 function setComposerValue(value: string) {
-  fireEvent.change(screen.getByPlaceholderText("Ask this agent to do something"), {
+  const composer = screen.getByPlaceholderText("Ask this agent to do something");
+  fireEvent.change(composer, {
     target: { value, selectionStart: value.length },
   });
+  composer.focus();
 }
 
 describe("SessionViewContent — stream-sourced pending turn", () => {
@@ -1010,6 +1112,102 @@ describe("SessionViewContent — #306: startup-status snapshot must not seedFrom
   });
 });
 
+// A Durable Stream subscription can die while the tab is hidden (the client's
+// pause/resume race, an exhausted retry budget) and freeze on its last observed
+// state — typically "running" mid-turn. On return, the focus refetch brings the
+// finished turn in the snapshot; the merge must let that strictly-fresher snapshot
+// beat the dead overlay (scalars AND message copies) instead of showing the frozen
+// thinking spinner forever. A LIVE stream that is merely behind on durable ids
+// (web appends ride with id null) must keep authority, or the just-sent-message
+// flow would regress to "Stopped before finishing".
+describe("SessionViewContent — dead-stream overlay vs fresher snapshot", () => {
+  const userMessage = {
+    id: "msg_user",
+    role: "user",
+    content: "run the report",
+    status: "completed",
+    createdAt: "2026-06-04T10:00:00.000Z",
+  };
+
+  function fresherCompletedDetail() {
+    return makeDetail({
+      session: makeSession({ id: "sess_frozen", status: "completed", lastError: null }),
+      messages: [
+        userMessage,
+        {
+          id: "msg_assistant",
+          role: "assistant",
+          content: "All done — here is the report.",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:01:30.000Z",
+        },
+      ],
+      // The snapshot has seen durable events beyond the overlay's high-water (5).
+      latestEventId: 9,
+    });
+  }
+
+  function frozenRunningOverlay(lastEventReceivedAt: number) {
+    return emptyStreamState({
+      events: [
+        {
+          id: 5,
+          type: "message.created",
+          messageId: "msg_assistant",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          payload: { messageId: "msg_assistant", role: "assistant", status: "running" },
+        },
+      ],
+      messages: [
+        userMessage,
+        makeRunningAssistantMessage({
+          id: "msg_assistant",
+          content: "Working on it",
+          status: "running",
+          createdAt: "2026-06-04T10:00:01.000Z",
+        }),
+      ],
+      currentStatus: "running",
+      statusObserved: true,
+      lastEventReceivedAt,
+    });
+  }
+
+  it("renders the snapshot's finished turn when the overlay is dead (behind AND silent since the fetch)", () => {
+    // Overlay last delivered at t=1000; snapshot fetched at t=2000 with newer events.
+    streamMock.state = frozenRunningOverlay(1_000);
+    renderSessionViewContent(fresherCompletedDetail(), "error", { detailUpdatedAt: 2_000 });
+
+    // The final assistant content (snapshot copy) wins over the frozen partial.
+    expect(screen.getByText("All done — here is the report.")).toBeInTheDocument();
+    expect(screen.queryByText("Working on it")).not.toBeInTheDocument();
+    // No thinking spinner, no misread stop notice.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+  });
+
+  it("keeps a live-but-id-behind overlay authoritative (delivered since the snapshot fetch)", () => {
+    // Same id gap, but the overlay delivered AFTER the snapshot was fetched — it is
+    // live (e.g. the id-null web append path), so its running state must win.
+    streamMock.state = frozenRunningOverlay(3_000);
+    renderSessionViewContent(fresherCompletedDetail(), "live", { detailUpdatedAt: 2_000 });
+
+    expect(screen.getByText("Working on it")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("keeps stream authority when the snapshot fetch time is unknown (default prop)", () => {
+    // Without detailUpdatedAt the staleness clause must never fire — pre-existing
+    // behavior for callers that do not thread the fetch time through.
+    streamMock.state = frozenRunningOverlay(0);
+    renderSessionViewContent(fresherCompletedDetail(), "live");
+
+    expect(screen.getByText("Working on it")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+});
+
 describe("SessionViewContent — user message attachments", () => {
   it("renders an <img> and a pdf chip for a user message's attachments", () => {
     const detail = makeDetail({
@@ -1051,6 +1249,39 @@ describe("SessionViewContent — user message attachments", () => {
     const pdfLink = screen.getByText("report.pdf").closest("a");
     expect(pdfLink).toHaveAttribute("href", "/api/attachments/att_pdf");
   });
+
+  it("prefers a local preview URL for an optimistic just-sent image (Bug 2)", () => {
+    // An optimistic message carries a local object-URL preview so the image shows instantly,
+    // before the `/api/attachments/{id}` row exists. The renderer must use that preview, not the
+    // not-yet-valid served URL.
+    const detail = makeDetail({
+      messages: [
+        {
+          id: "msg_optimistic",
+          role: "user",
+          content: "Just sent this",
+          status: "completed",
+          createdAt: "2026-06-05T10:00:00.000Z",
+          attachments: [
+            {
+              id: "att_local",
+              kind: "image",
+              mediaType: "image/png",
+              filename: "fresh.png",
+              previewUrl: "blob:fake-preview-url",
+            },
+          ],
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    const image = screen.getByAltText("fresh.png");
+    expect(image).toHaveAttribute("src", "blob:fake-preview-url");
+    // The open-in-new-tab link also points at the preview while optimistic.
+    expect(image.closest("a")).toHaveAttribute("href", "blob:fake-preview-url");
+  });
 });
 
 describe("SessionViewContent — optimistic send", () => {
@@ -1070,7 +1301,7 @@ describe("SessionViewContent — optimistic send", () => {
     await user.type(composer, "Fast replay");
     await user.keyboard("{Enter}");
 
-    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay", []);
+    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay", [], "steer");
     expect(composer).toHaveValue("");
     expect(screen.getByText("Fast replay")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();
@@ -1890,6 +2121,65 @@ describe("SessionViewContent — surface-aware inspector links", () => {
 });
 
 describe("SessionViewContent — surface-aware slash command navigation", () => {
+  it("pipes enabled personal-agent built-in skill slash commands into the composer", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/personal/session/sess_001";
+    const personalAgent = makePersonalAgentContext();
+    personalAgent.config = {
+      ...personalAgent.config,
+      skills: [{ id: "humanizer" }],
+    };
+    personalAgent.agent = { ...personalAgent.agent, config: personalAgent.config };
+
+    renderSessionViewContent(
+      makeDetail({ session: makeSession({ status: "completed" }) }),
+      "live",
+      {
+        personalAgent,
+      },
+    );
+
+    setComposerValue("/hum");
+    await screen.findByRole("option", { name: /Humanizer/i });
+    await user.keyboard("{Tab}");
+
+    expect(screen.getByPlaceholderText("Ask this agent to do something")).toHaveValue(
+      "@skill/humanizer ",
+    );
+  });
+
+  it("pipes personal skill slash commands into the composer", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/personal/session/sess_001";
+    const personalAgent = makePersonalAgentContext({
+      personalSkills: [
+        {
+          id: "weekly-digest",
+          name: "Weekly digest",
+          description: "Summarize the week.",
+          command: "digest",
+          origin: "personal",
+        },
+      ],
+    });
+
+    renderSessionViewContent(
+      makeDetail({ session: makeSession({ status: "completed" }) }),
+      "live",
+      {
+        personalAgent,
+      },
+    );
+
+    setComposerValue("/digest");
+    await screen.findByRole("option", { name: /\/digest/i });
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByPlaceholderText("Ask this agent to do something")).toHaveValue(
+      "@skill/weekly-digest ",
+    );
+  });
+
   it("keeps /clear-created sessions under /personal when invoked from a personal session", async () => {
     const user = userEvent.setup();
     navigationMock.pathname = "/personal/session/sess_001";
@@ -1904,7 +2194,7 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     await waitFor(() => {
       expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_clear");
     });
-    expect(createAgentSession).toHaveBeenCalledWith("agent_001");
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "personal" });
     expect(seedSessionQueries).toHaveBeenCalledWith(
       expect.any(QueryClient),
       "wks_test",
@@ -1926,6 +2216,38 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     await waitFor(() => {
       expect(routerMock.push).toHaveBeenCalledWith("/company/session/sess_clear");
     });
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "company" });
+  });
+
+  it("shows an out-of-credits toast instead of redirecting immediately from /clear", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/personal/session/sess_001";
+    vi.mocked(createAgentSession).mockResolvedValue({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
+    } as Awaited<ReturnType<typeof createAgentSession>>);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    setComposerValue("/clear ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "Add credits" }),
+          title: "You're out of credits",
+          tone: "error",
+        }),
+      );
+    });
+    expect(routerMock.push).not.toHaveBeenCalled();
+
+    const toast = toastMock.showToast.mock.calls.at(-1)?.[0];
+    toast?.action?.onClick();
+
+    expect(routerMock.push).toHaveBeenCalledWith("/personal/settings?billing=insufficient");
   });
 
   it("opens /btw-created sessions under /personal from the toast action", async () => {
@@ -1952,6 +2274,7 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     toast?.action?.onClick();
 
     expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_btw");
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "personal" });
   });
 });
 
@@ -1968,5 +2291,66 @@ describe("pastedTextFile — oversized paste → attachment", () => {
       typeof pastedTextFile
     >[1];
     expect(pastedTextFile("more text", pending).name).toBe("pasted-text-2.txt");
+  });
+});
+
+// ── Open chat scrolled to the bottom ────────────────────────────────────────
+describe("SessionViewContent — opens a chat scrolled to the bottom", () => {
+  let scrollToSpy: ReturnType<typeof vi.fn>;
+  let originalScrollTo: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    scrollToSpy = vi.fn();
+    originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo");
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollToSpy,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 2000,
+    });
+  });
+
+  afterEach(() => {
+    if (originalScrollTo) {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
+    } else {
+      // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+      delete (HTMLElement.prototype as unknown as { scrollTo?: unknown }).scrollTo;
+    }
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { clientHeight?: unknown }).clientHeight;
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { scrollHeight?: unknown }).scrollHeight;
+    vi.clearAllMocks();
+  });
+
+  it("snaps an idle session with existing messages to the bottom on open", async () => {
+    const detail = makeDetail({
+      messages: [
+        { id: "m_user", role: "user", content: "Question", status: "completed" },
+        { id: "m_assistant", role: "assistant", content: "Answer", status: "completed" },
+      ],
+    });
+    streamMock.status = "live";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      const wentToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(wentToBottom).toBe(true);
+    });
   });
 });

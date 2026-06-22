@@ -109,12 +109,37 @@
   }
 }
 
+/* Eye animation for Leo's mark (components/leo/LeoMark.tsx): the dots rest
+   top-right and tour down-left → down-right → back, pausing at each stop. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes leo-gaze-tour {
+    0%,
+    20% {
+      transform: translate(0, 0);
+    }
+    30%,
+    48% {
+      transform: translate(-3.4px, 7px);
+    }
+    58%,
+    76% {
+      transform: translate(0, 7px);
+    }
+    86%,
+    100% {
+      transform: translate(0, 0);
+    }
+  }
+}
+
 html,
 body {
   background: var(--color-canvas);
   color: var(--color-ink);
   color-scheme: light;
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   font-feature-settings: "cv11", "ss01";
   /* Stop inner scroll areas (chat, sidebar) from chaining their scroll to the
      page — no rubber-band / page shift when hitting top or bottom of the fold. */
@@ -140,6 +165,20 @@ body {
 
 * {
   border-color: var(--color-border);
+}
+
+/* Keep an element scrollable but fully hide its scrollbar so it doesn't
+   reserve layout width (PRO-157 — the personal sidebar session list). Mirrors
+   the chromeless sidebars in ChatGPT/Linear/Notion. Content stays scrollable
+   via wheel/trackpad; the scrollbar (incl. the macOS overlay) is suppressed. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chromium/Safari */
 }
 
 .tiptap-agent p {
@@ -430,6 +469,22 @@ body {
 .session-markdown[data-streaming="true"] {
   will-change: opacity, filter;
 }
+/* Dense card contexts (inbox items): keep agent-markdown headings near body size. */
+.session-markdown.markdown-compact h1,
+.session-markdown.markdown-compact h2,
+.session-markdown.markdown-compact h3,
+.session-markdown.markdown-compact h4 {
+  margin: 0.9em 0 0.3em;
+  font-size: 1em;
+}
+.session-markdown.markdown-compact p,
+.session-markdown.markdown-compact ul,
+.session-markdown.markdown-compact ol,
+.session-markdown.markdown-compact blockquote,
+.session-markdown.markdown-compact pre,
+.session-markdown.markdown-compact table {
+  margin-bottom: 0.5em;
+}
 
 .thinking-shimmer {
   color: var(--color-ink);
@@ -447,6 +502,21 @@ body {
   }
 }
 
+/* One-shot half-turn when a "steered" caption appears, so the steer is visible as the wheel
+   turning. Plays once on mount; see SessionView's mid-run caption. */
+.steer-wheel-spin {
+  animation: steer-wheel-spin 0.55s ease-out;
+}
+
+@keyframes steer-wheel-spin {
+  from {
+    transform: rotate(-180deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .session-markdown[data-streaming="true"] {
     will-change: auto;
@@ -456,6 +526,10 @@ body {
     animation: none;
     color: var(--color-ink-muted);
     opacity: 1;
+  }
+
+  .steer-wheel-spin {
+    animation: none;
   }
 }
 

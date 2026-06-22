@@ -71,6 +71,7 @@ function createFakeStore(
     async claimSettlement() {
       return null;
     },
+    async releaseSettlementClaim() {},
     async findSettleableTokenIds() {
       return [];
     },
@@ -329,6 +330,28 @@ describe("LLM broker proxying", () => {
       usageParsed: true,
     });
     expect(spends[0]?.costUsdMicros).toBeGreaterThan(0);
+  });
+
+  it("fails a buffered response when the spend write cannot be persisted", async () => {
+    const fetchImpl = jsonUpstream({
+      id: "chatcmpl-1",
+      usage: { prompt_tokens: 100, completion_tokens: 10 },
+    });
+    const { app } = createBrokerApp({
+      fetchImpl,
+      onRecordSpend: async () => {
+        throw new Error("database unavailable");
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/broker/gateway/v1/chat/completions",
+      headers: { authorization: `Bearer ${GATEWAY_TOKEN}` },
+      payload: { model: "anthropic/claude-sonnet-4.6", messages: [] },
+    });
+
+    expect(response.statusCode).toBe(500);
   });
 
   it("pins the openai upstream for responses-API calls", async () => {

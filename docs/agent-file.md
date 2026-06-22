@@ -102,6 +102,7 @@ The model the agent runs on. Must be one of:
 | `zai/glm-5.1`                              | Latest GLM for coding-heavy and agentic engineering tasks.      |
 | `zai/glm-5-turbo`                          | Faster GLM 5 variant for production agent workflows.            |
 | `zai/glm-5v-turbo`                         | Multimodal GLM 5 model for visual coding and GUI tasks.         |
+| `openrouter/fusion`                        | OpenRouter multi-model router for research and critique.        |
 
 Unknown model IDs fall back to `openai/gpt-5.4-mini` rather than failing the parse.
 
@@ -126,6 +127,7 @@ details are catalog data in code, not `.agent` file data.
 | `codex` | Codex coding agent delegated into a sandboxed runtime, with attached or public GitHub repository support. |
 | `linear` | Experimental workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Experimental workspace MCP access to Slack search, messages, files, emoji, and users. |
+| `notion` | Workspace MCP access to Notion search, pages, databases, comments, users, and teamspaces. |
 
 ```yaml
 tools:
@@ -145,6 +147,9 @@ tools:
   - id: slack
     type: mcp
     server: slack
+  - id: notion
+    type: mcp
+    server: notion
 ```
 
 MCP tools are beta workspace tools. The `.agent` file only records the MCP server binding; tokens
@@ -197,7 +202,15 @@ usually omitted and only appears once additional opt-in skills exist.
 ```yaml
 skills:
   - agent-self-edit
+  - y-combinator-knowledge
 ```
+
+Current addable built-in skills include:
+
+- `first-principles` — a structured framework for breaking hard problems down to fundamentals.
+- `humanizer` — editing guidance for making generated prose sound human.
+- `y-combinator-knowledge` — YC-style startup sparring: office-hours framing, user obsession,
+  MVP and growth pressure, fundraising discipline, and links to canonical YC/PG teachings.
 
 **External skills** are brought in from a public GitHub repository (or a skills.sh page,
 resolved through its backing GitHub repo). They serialize as an object carrying provenance
@@ -364,7 +377,7 @@ Add `#after-session` inside the body to enable a background pass after a session
 Help the user during the session. #after-session Update memory with durable preferences and decisions from the transcript.
 ```
 
-The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should capture anything worth carrying forward — durable facts about who the user is into the profile (`agent/user.md`, kept tight given the ~3 KB cap), and every other durable fact into structured memory via the `memory` tool — when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
+The after-session run is not a visible chat turn. It reuses the agent loop and can use configured tools, but should persist only clear long-lived context: an explicit user request to remember/save/update something, a correction to stale information, or a stable preference, identity fact, ongoing project, decision, or convention likely to matter in future sessions. Durable facts about who the user is go into the profile (`agent/user.md`, kept tight given the ~3 KB cap); other qualifying durable facts go into structured memory via the `memory` tool. Do not create Brain or Personal Brain files unless the conversation explicitly asked for a named persistent file update.
 
 ## Storage layout
 

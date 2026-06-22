@@ -331,7 +331,10 @@ jobs:
           RUNNER_PUBLIC_URL: ${{ steps.provision.outputs.runner_url }}
           EXPECTED_RELEASE: ${{ env.PR_SHA }}
           SMOKE_WEB_ATTEMPTS: "18"
-          SMOKE_RUNNER_ATTEMPTS: "18"
+          # Render can mark a preview deploy live before the public service endpoint
+          # has finished routing to the new container. Keep polling long enough for
+          # cold starts instead of failing on transient 503 HTML from Render.
+          SMOKE_RUNNER_ATTEMPTS: "60"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke
 

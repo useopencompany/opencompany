@@ -16,7 +16,6 @@ import {
   type LucideIcon,
   Plus,
   Search,
-  Sparkles,
   Wrench,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -31,6 +30,7 @@ import {
   type AgentTool,
   buildSkillMentionItems,
   findTool,
+  skillIconFor,
 } from "@/components/agent-editor/tools";
 import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -43,6 +43,7 @@ import {
   removeBetterStackMcpConnection,
   removeBraintrustMcpConnection,
   removeLinearMcpToken,
+  removeNotionMcpConnection,
   removePostHogMcpConnection,
   removeSlackMcpConnection,
 } from "@/lib/mcp/actions";
@@ -227,8 +228,7 @@ export function PersonalCapabilityPanel({
 // Opens an integration's OAuth flow in a popup window and reports back when it lands on the
 // popup-closer page (/onboarding/connected, which postMessages the opener and closes itself). On a
 // successful connection we router.refresh() so the server re-derives connection state and the row
-// flips to "Connected" — without the integrations tab ever navigating away. Mirrors the inline
-// connect flow on /onboarding/personal (see PersonalOnboardingChat).
+// flips to "Connected" — without the integrations tab ever navigating away.
 function useConnectPopup() {
   const router = useRouter();
   const [connectingId, setConnectingId] = useState<PersonalIntegrationId | null>(null);
@@ -562,6 +562,7 @@ const MCP_DISCONNECT_ACTIONS: Partial<
   posthog: removePostHogMcpConnection,
   betterstack: removeBetterStackMcpConnection,
   braintrust: removeBraintrustMcpConnection,
+  notion: removeNotionMcpConnection,
 };
 
 async function disconnectIntegration(
@@ -1464,7 +1465,7 @@ function buildRows(
   if (section === "skills") {
     const referenced: IntegrationRow[] = (config.skills ?? []).map((skill) => ({
       id: skill.id,
-      icon: Sparkles,
+      icon: skillIconFor(skill.id),
       label: isExternalSkillReference(skill) ? skill.name || skill.id : skill.id,
       description: isExternalSkillReference(skill)
         ? skill.description || skill.source.url
@@ -1474,7 +1475,7 @@ function buildRows(
     // discovered from the bundle — not in `skills:` frontmatter — so they're flagged with a badge.
     const personal: IntegrationRow[] = personalSkills.map((skill) => ({
       id: `personal:${skill.id}`,
-      icon: Sparkles,
+      icon: skillIconFor(skill.id),
       label: skill.name,
       description: skill.description,
       badge: skill.provenance === "user" ? "Personal · you" : "Personal",

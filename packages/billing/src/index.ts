@@ -67,7 +67,7 @@ export type WorkspaceUsageDebitInput = {
   metadata?: Record<string, unknown>;
 };
 
-const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
+const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
   "openai/gpt-5.4-mini": {
     model: "openai/gpt-5.4-mini",
     provider: "openai",
@@ -377,6 +377,7 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     outputUsdMicrosPerMillion: 4_000_000,
   },
 };
+const VARIABLE_PRICED_MODELS = new Set<AgentModelId>(["openrouter/fusion"]);
 
 export function centsToUsdMicros(cents: number) {
   return Math.round(cents * USD_MICROS_PER_CENT);
@@ -394,6 +395,9 @@ export function calculatePlatformFeeUsdMicros(providerCostUsdMicros: number) {
 export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult {
   const pricing = MODEL_PRICING[input.modelName as AgentModelId];
   if (!pricing) {
+    const reason = VARIABLE_PRICED_MODELS.has(input.modelName as AgentModelId)
+      ? "variable_pricing"
+      : "unknown_model";
     return {
       billable: false,
       providerCostUsdMicros: 0,
@@ -403,7 +407,7 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
         kind: "model_usage",
         modelName: input.modelName,
         billable: false,
-        reason: "unknown_model",
+        reason,
       },
     };
   }

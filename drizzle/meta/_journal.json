@@ -390,8 +390,36 @@
     {
       "idx": 55,
       "version": "7",
-      "when": 1781199869159,
-      "tag": "0055_reflective_silver_sable",
+      "when": 1781265490758,
+      "tag": "0055_permission_group_merge",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1781268927234,
+      "tag": "0056_new_whistler",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1781512560389,
+      "tag": "0057_add_message_send_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1781782370369,
+      "tag": "0058_brain_file_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1782131949864,
+      "tag": "0059_naive_harry_osborn",
       "breakpoints": true
     }
   ]

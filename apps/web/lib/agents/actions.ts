@@ -547,6 +547,10 @@ export async function updateAgent(
           {
             linearConfigured: mcpSettings.linear.configured,
             slackConfigured: mcpSettings.slack.configured,
+            posthogConfigured: mcpSettings.posthog.configured,
+            betterstackConfigured: mcpSettings.betterstack.configured,
+            braintrustConfigured: mcpSettings.braintrust.configured,
+            notionConfigured: mcpSettings.notion.configured,
           },
           bundleFiles,
         )

@@ -321,6 +321,7 @@ MCP tools are enabled by workspace setup plus agent configuration:
 
 - `linear__*` tools when Linear MCP is configured for the workspace and the agent mentions `@linear`
 - `slack__*` tools when Slack MCP is configured for the workspace and the agent mentions `@slack`
+- `notion__*` tools when Notion MCP is configured for the workspace and the agent mentions `@notion`
 
 **Source of truth:** `packages/agent-runtime/src/tools.ts`.
 

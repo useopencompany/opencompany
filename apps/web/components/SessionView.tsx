@@ -1,16 +1,15 @@
 "use client";
 
 import {
-  ATTACHMENT_MAX_PER_MESSAGE,
   ATTACHMENT_TEXT_MAX_BYTES,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
-  modelSupportsAttachments,
-  PERMISSION_GROUP_LABELS,
+  listAddableBuiltinSkills,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
-  validateAttachmentCandidate,
+  permissionLabelFor,
+  type ResolvedSkillMetadata,
 } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,7 +39,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   Fragment,
-  useCallback,
   useContext,
   useEffect,
   useId,
@@ -50,22 +48,29 @@ import {
   useState,
   useTransition,
 } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import {
+  ATTACHMENT_FILE_INPUT_ACCEPT,
   AttachmentCard,
   ComposerAttachments,
+  ComposerDropOverlay,
   type PendingAttachment,
-  uploadAttachment,
+  toSubmitAttachments,
 } from "@/components/composer-attachments";
+import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
+import { type RightPanelHandle, useMobileInspector } from "@/components/MobileInspectorContext";
+import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, useElapsedSeconds, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -99,6 +104,7 @@ import {
   mergeEvents,
   mergeLiveSessionAggregates,
   mergeMessages,
+  type RuntimeBrainFileReference,
   type RuntimeEvent,
   type RuntimeQuestionItem,
   type RuntimeToolCall,
@@ -108,6 +114,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import type { SendMode } from "@/lib/agent-sessions/send-mode";
 import { BRAIN_BASE_PATH, brainHref } from "@/lib/brain/paths";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import { personalPaths } from "@/lib/personal/paths";
@@ -126,6 +133,63 @@ import {
 
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
+
+function buildAttachedSkillCommandSources({
+  configSkills,
+  workspaceSkills,
+  personalSkills = [],
+}: {
+  configSkills: AgentConfig["skills"];
+  workspaceSkills: SkillCommandSource[];
+  personalSkills?: ResolvedSkillMetadata[];
+}): SkillCommandSource[] {
+  const workspaceById = new Map(workspaceSkills.map((skill) => [skill.id, skill]));
+  const addableBuiltinById = new Map(listAddableBuiltinSkills().map((skill) => [skill.id, skill]));
+  const seen = new Set<string>();
+  const sources: SkillCommandSource[] = [];
+
+  const add = (skill: SkillCommandSource) => {
+    if (seen.has(skill.id)) return;
+    seen.add(skill.id);
+    sources.push(skill);
+  };
+
+  for (const skill of configSkills ?? []) {
+    const workspaceSkill = workspaceById.get(skill.id);
+    if (workspaceSkill) {
+      add({
+        id: workspaceSkill.id,
+        name: workspaceSkill.name,
+        ...(workspaceSkill.description !== undefined
+          ? { description: workspaceSkill.description }
+          : {}),
+        ...(workspaceSkill.command ? { command: workspaceSkill.command } : {}),
+      });
+      continue;
+    }
+
+    const builtin = addableBuiltinById.get(skill.id);
+    if (builtin) {
+      add({
+        id: builtin.id,
+        name: builtin.name,
+        description: builtin.description,
+        ...(builtin.command ? { command: builtin.command } : {}),
+      });
+    }
+  }
+
+  for (const skill of personalSkills) {
+    add({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(skill.command ? { command: skill.command } : {}),
+    });
+  }
+
+  return sources;
+}
 
 // Snapshot statuses where the server snapshot is the authoritative transcript AND no
 // turn can still be racing into the Durable Stream — the lease has been released
@@ -171,6 +235,12 @@ const LAST_TURN_MIN_HEIGHT_FACTOR = 0.5;
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
+  // When the snapshot was last fetched (react-query `dataUpdatedAt`, epoch ms). The
+  // stream/snapshot authority rule reads it: an overlay that has delivered nothing
+  // since this time AND is behind on durable events is a dead stream's leftovers and
+  // must not override the snapshot. Defaults to 0 ("snapshot age unknown"), which
+  // keeps the stream authoritative — the pre-existing behavior.
+  detailUpdatedAt?: number;
 };
 
 type OptimisticUserMessage = SessionMessage & {
@@ -180,18 +250,46 @@ type OptimisticUserMessage = SessionMessage & {
   existingMessageIds: string[];
 };
 
-const MARKDOWN_COMPONENTS: Components = {
-  a: ({ children, href }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70"
-    >
-      {children}
-    </a>
-  ),
+type InspectorTab = "info" | "logs" | "other";
+
+// Past-tense labels for the quiet caption a mid-run send leaves on the turn it affected. Lowercase
+// to sit unobtrusively alongside the muted process rows (Thinking, "2 steps", …).
+const SEND_MODE_ROW_LABEL: Record<SendMode, string> = {
+  steer: "steered",
+  queue: "queued",
+  interrupt: "interrupted",
 };
+
+// The only color the dezent caption carries is a faint tint on the steering-wheel icon, so the
+// mode stays distinguishable at a glance without a loud badge.
+const SEND_MODE_ICON_CLASS: Record<SendMode, string> = {
+  steer: "text-success",
+  queue: "text-warning",
+  interrupt: "text-danger",
+};
+
+// Steering-wheel glyph for the steer caption (lucide has no wheel) — mirrors the metaphor Hermes
+// uses for steering. A ring, a hub, and three spokes; inherits color + size from className.
+function SteerWheelIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.85}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="2.4" />
+      <line x1="12" y1="2.6" x2="12" y2="9.6" />
+      <line x1="4" y1="16.5" x2="10" y2="13.2" />
+      <line x1="20" y1="16.5" x2="14" y2="13.2" />
+    </svg>
+  );
+}
 
 // Lets the deeply-nested ToolCallCard reach the session id (for tool-approval actions)
 // without threading a prop through every intermediate render layer.
@@ -231,8 +329,10 @@ function SessionViewQuery({
 }) {
   const { workspaceId } = useWorkspaceContext();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
+  const lastElectricDetailRefreshRef = useRef<string | null>(null);
   const {
     data: detail,
+    dataUpdatedAt,
     isPending,
     error,
     refetch,
@@ -244,6 +344,12 @@ function SessionViewQuery({
     // and is refetched on turn completion to refresh those aggregates.
     queryFn: () => fetchAgentSession(sessionId),
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
+    // Overrides the app-wide `refetchOnWindowFocus: false`: the open session is the
+    // one place a stale snapshot actively misleads. If the Durable Stream died while
+    // the tab was hidden (see useSessionStream), this focus refetch is what brings
+    // back the turn's true outcome — the authority rule in SessionViewContentBody
+    // then lets the fresher snapshot beat the dead stream's frozen "running" state.
+    refetchOnWindowFocus: true,
     // Instant paint from TanStack DB: while the server detail (transcript history
     // floor + usage/cost aggregates) is in flight, render the session chrome from
     // the synced collections. placeholderData (not initialData) keeps the query
@@ -251,6 +357,31 @@ function SessionViewQuery({
     // the post-turn invalidation.
     placeholderData: placeholder,
   });
+
+  // The open transcript is primarily driven by Durable Streams, but the synced
+  // agent_sessions row is the low-volume durable signal that a turn yielded. If
+  // the stream tail is missed, use Electric's newer settled status to refresh the
+  // Postgres snapshot so the final assistant row appears without a page reload.
+  const electricSessionId = placeholder?.session.id;
+  const electricSessionStatus = placeholder?.session.status;
+  const electricSessionUpdatedAt = placeholder?.session.updatedAt;
+  useEffect(() => {
+    if (!detail || !electricSessionId || !electricSessionStatus || !electricSessionUpdatedAt) {
+      return;
+    }
+    if (electricSessionId !== detail.session.id) return;
+    if (!SETTLED_SNAPSHOT_STATUSES.has(electricSessionStatus)) return;
+
+    const electricUpdatedAt = Date.parse(electricSessionUpdatedAt);
+    const detailUpdatedAtMs = Date.parse(detail.session.updatedAt);
+    if (!Number.isFinite(electricUpdatedAt) || !Number.isFinite(detailUpdatedAtMs)) return;
+    if (electricUpdatedAt <= detailUpdatedAtMs) return;
+
+    const refreshKey = `${electricSessionId}:${electricSessionStatus}:${electricSessionUpdatedAt}`;
+    if (lastElectricDetailRefreshRef.current === refreshKey) return;
+    lastElectricDetailRefreshRef.current = refreshKey;
+    void refetch();
+  }, [detail, electricSessionId, electricSessionStatus, electricSessionUpdatedAt, refetch]);
 
   if (!detail && isPending) return <SessionPageSkeleton />;
 
@@ -296,7 +427,14 @@ function SessionViewQuery({
     );
   }
 
-  return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
+  return (
+    <SessionViewContent
+      key={detail.session.id}
+      detail={detail}
+      workspaceId={workspaceId}
+      detailUpdatedAt={dataUpdatedAt}
+    />
+  );
 }
 
 export function SessionViewContent(props: SessionViewContentProps) {
@@ -307,7 +445,11 @@ export function SessionViewContent(props: SessionViewContentProps) {
   );
 }
 
-function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
+function SessionViewContentBody({
+  detail,
+  workspaceId,
+  detailUpdatedAt = 0,
+}: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const surface = useSessionSurface();
@@ -315,6 +457,33 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const { showError, showToast } = useToast();
   const session = detail.session;
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("info");
+  // Mobile right-edge swipe drives this inspector via the global gesture in ShellChrome.
+  // We register a handle it can read/open/close and finger-drag; a live ref keeps the
+  // open state current for the gesture's pointer-down. No-op off the company shell.
+  const [inspectorDrag, setInspectorDrag] = useState({ dragging: false, progress: 0 });
+  const inspectorAsideRef = useRef<HTMLElement>(null);
+  const inspectorCollapsedRef = useRef(inspectorCollapsed);
+  useEffect(() => {
+    inspectorCollapsedRef.current = inspectorCollapsed;
+  }, [inspectorCollapsed]);
+  const { register: registerMobileInspector } = useMobileInspector();
+  const mobileInspectorHandle = useRef<RightPanelHandle>({
+    isOpen: () => !inspectorCollapsedRef.current,
+    setOpen: (open) => setInspectorCollapsed(!open),
+    setDrag: (dragging, progress) => setInspectorDrag({ dragging, progress }),
+    // While collapsed the panel is display:none, so it measures 0 — fall back to the
+    // width it WILL have once shown (mirrors the `w-[min(392px,calc(100vw-16px))]` class)
+    // so the swipe maps the finger 1:1 from the very first move.
+    getWidth: () => {
+      const measured = inspectorAsideRef.current?.getBoundingClientRect().width ?? 0;
+      return measured > 1 ? measured : Math.min(392, window.innerWidth - 16);
+    },
+  });
+  useEffect(() => {
+    registerMobileInspector(mobileInspectorHandle.current);
+    return () => registerMobileInspector(null);
+  }, [registerMobileInspector]);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -326,112 +495,24 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [, startModelTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
-  const [isDragActive, setIsDragActive] = useState<boolean>(false);
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  // Latest-attachments ref so the unmount cleanup can revoke all outstanding object URLs
-  // with an empty-dep effect (fires on unmount only) instead of re-running on every change.
-  const attachmentsRef = useRef(attachments);
-  // Sync the ref in an effect (not during render — that trips the react-compiler lint
-  // rule) so the empty-dep unmount cleanup below can revoke outstanding object URLs.
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentCapability = modelSupportsAttachments(session.modelName);
-  // Attaching is always available: text/code files need no model capability (they are
-  // inlined as text). The per-file image/pdf capability gate happens in acceptFiles.
-  const attachmentsEnabled = true;
-
-  const acceptFiles = useCallback(
-    (files: File[]) => {
-      setAttachments((prev) => {
-        const next = [...prev];
-        for (const file of files) {
-          if (next.length >= ATTACHMENT_MAX_PER_MESSAGE) {
-            showToast({
-              title: "Limit reached",
-              description: `Max ${ATTACHMENT_MAX_PER_MESSAGE} files.`,
-              tone: "default",
-            });
-            break;
-          }
-          const validation = validateAttachmentCandidate({
-            mediaType: file.type,
-            sizeBytes: file.size,
-            filename: file.name,
-          });
-          if (!validation.ok) {
-            showToast({
-              title: validation.reason === "size" ? "File too large" : "Unsupported file",
-              description:
-                validation.reason === "size"
-                  ? "Max 25 MB (images/PDFs) or 2 MB (text files)."
-                  : "Images, PDFs, and common text/code files.",
-              tone: "default",
-            });
-            continue;
-          }
-          // Image/PDF need the model to support them; text is always allowed.
-          if (validation.kind === "pdf" && !attachmentCapability.pdf) {
-            showToast({
-              title: "Unsupported file",
-              description: "This session's model can't read PDFs.",
-              tone: "default",
-            });
-            continue;
-          }
-          if (validation.kind === "image" && !attachmentCapability.images) {
-            showToast({
-              title: "Unsupported file",
-              description: "This session's model can't read images.",
-              tone: "default",
-            });
-            continue;
-          }
-          const id = crypto.randomUUID();
-          next.push({
-            id,
-            filename: file.name,
-            mediaType: file.type,
-            kind: validation.kind,
-            sizeBytes: file.size,
-            status: "uploading",
-            ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
-          });
-          void uploadAttachment({ id, file, workspaceId, sessionId: session.id })
-            .then((res) =>
-              setAttachments((cur) =>
-                cur.map((a) => (a.id === id ? { ...a, status: "ready", ...res } : a)),
-              ),
-            )
-            .catch((err) =>
-              setAttachments((cur) =>
-                cur.map((a) => (a.id === id ? { ...a, status: "error", error: String(err) } : a)),
-              ),
-            );
-        }
-        return next;
-      });
-    },
-    [attachmentCapability, session.id, workspaceId, showToast],
-  );
-
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => {
-      const target = prev.find((a) => a.id === id);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((a) => a.id !== id);
-    });
-  }, []);
-  // Revoke any still-live preview object URLs when the composer unmounts (e.g. navigating
-  // away with unsent attachments) so they don't leak.
-  useEffect(() => {
-    return () => {
-      for (const att of attachmentsRef.current) {
-        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
-      }
-    };
-  }, []);
+  // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
+  // home composers). The drop overlay, validation/capability gate and upload lifecycle all come
+  // from here. Attaching is always available: text/code files need no model capability (they are
+  // inlined as text); the per-file image/PDF gate happens inside the hook.
+  const {
+    attachments,
+    setAttachments,
+    acceptFiles,
+    removeAttachment,
+    isDragActive,
+    handlePasteFiles,
+    dragHandlers,
+  } = useComposerAttachments({
+    workspaceId,
+    modelName: session.modelName,
+    uploadScope: { kind: "session", sessionId: session.id },
+  });
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -442,7 +523,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const slashCommandInFlightRef = useRef<Set<string>>(new Set());
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const dragCounterRef = useRef(0);
   // ID of the user message to scroll to the top of the viewport ONCE, right after a
   // send. The reserved space below it is held by CSS (min-height on the last turn),
   // not a JS maintain loop — so there is no per-frame re-pin (no jitter) and the
@@ -522,24 +602,50 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // deltas still flow.
     //
     // Status/error are scalars, not a union, so they need an explicit authority
-    // rule. The stream's scalar status/lastError become authoritative only once it
-    // has actually reduced a status-bearing event (`statusObserved`) — NOT merely
-    // once it has emitted any event. The distinction matters because, with
-    // `seedFromEnd`, the stream tails from the current end without replaying history,
-    // so its scalars start at the empty seed (`"created"` / `null`); a lone token or
-    // usage delta would otherwise flip authority to that seed and momentarily blank
-    // out (or wrongly clear) the snapshot's real status/error — the start-of-session
-    // flicker. Until the stream genuinely knows the status, the snapshot stays the
-    // source of truth; once it does, the live stream wins (e.g. a brand-new turn, or
-    // an error and its recovery).
+    // rule, in two parts:
+    //
+    // 1. The stream's scalars become authoritative only once it has actually reduced
+    //    a status-bearing event (`statusObserved`) — NOT merely once it has emitted
+    //    any event. With `seedFromEnd` the stream tails from the current end without
+    //    replaying history, so its scalars start at the empty seed (`"created"` /
+    //    `null`); a lone token or usage delta would otherwise flip authority to that
+    //    seed and momentarily blank out (or wrongly clear) the snapshot's real
+    //    status/error — the start-of-session flicker.
+    //
+    // 2. The stream keeps that authority only while it is NOT provably stale. A
+    //    subscription can die (hidden-tab pause/resume race, exhausted retry budget,
+    //    zombie connection after sleep) and freeze on its last observed state —
+    //    typically "running" mid-turn. Without a staleness check, the focus refetch
+    //    bringing the finished turn would be ignored forever (the frozen "thinking"
+    //    spinner). The stream is stale exactly when the snapshot has seen a NEWER
+    //    durable event (latestEventId beyond the overlay's durable high-water) AND
+    //    the stream has delivered nothing since that snapshot was fetched. The
+    //    delivery-time clause protects the live path: web/reaper appends ride with
+    //    id null, so a healthy stream can be "behind" on durable ids while clearly
+    //    ahead in time (e.g. the just-sent user message before the runner's first
+    //    durable event) — it stays authoritative. A stale overlay also loses the
+    //    per-message merge preference, so a frozen partial assistant message yields
+    //    to the snapshot's final content.
+    let overlayLatestEventId = 0;
+    for (const event of streamState.events) {
+      if (typeof event.id === "number" && event.id > overlayLatestEventId) {
+        overlayLatestEventId = event.id;
+      }
+    }
+    const streamIsStale =
+      detail.latestEventId > overlayLatestEventId &&
+      (streamState.lastEventReceivedAt ?? 0) < detailUpdatedAt;
+    const streamIsAuthoritative = streamState.statusObserved && !streamIsStale;
     return {
       events: mergeEvents(detail.events, streamState.events),
-      messages: mergeMessages(detail.messages, streamState.messages),
+      messages: streamIsStale
+        ? mergeMessages(streamState.messages, detail.messages)
+        : mergeMessages(detail.messages, streamState.messages),
       ...aggregates,
-      currentStatus: streamState.statusObserved ? streamState.currentStatus : detail.session.status,
-      lastError: streamState.statusObserved ? streamState.lastError : detail.session.lastError,
+      currentStatus: streamIsAuthoritative ? streamState.currentStatus : detail.session.status,
+      lastError: streamIsAuthoritative ? streamState.lastError : detail.session.lastError,
     };
-  }, [detail, streamState]);
+  }, [detail, streamState, detailUpdatedAt]);
   const runtime = useMemo(() => {
     const pendingOptimisticMessages = optimisticUserMessages.filter(
       (message) => !hasDurableUserMessage(baseRuntime.messages, message),
@@ -552,6 +658,38 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: null,
     };
   }, [baseRuntime, optimisticUserMessages]);
+
+  // Once a just-sent optimistic message is backed by its durable server message (which serves the
+  // image via /api/attachments), its local object-URL previews are no longer needed: revoke them.
+  // Tracked by a ref (not state) so this stays a pure side-effect — the optimistic copy is already
+  // hidden from the merged transcript by the `runtime` memo above, so no re-render is needed.
+  const revokedOptimisticIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const message of optimisticUserMessages) {
+      if (revokedOptimisticIdsRef.current.has(message.optimisticId)) continue;
+      if (!hasDurableUserMessage(baseRuntime.messages, message)) continue;
+      message.attachments?.forEach((att) => {
+        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      });
+      revokedOptimisticIdsRef.current.add(message.optimisticId);
+    }
+  }, [baseRuntime.messages, optimisticUserMessages]);
+
+  // Revoke any optimistic-message previews still outstanding when the view unmounts (e.g.
+  // navigating away right after a send, before the durable message arrives) so they don't leak.
+  const optimisticMessagesRef = useRef(optimisticUserMessages);
+  useEffect(() => {
+    optimisticMessagesRef.current = optimisticUserMessages;
+  }, [optimisticUserMessages]);
+  useEffect(() => {
+    return () => {
+      for (const message of optimisticMessagesRef.current) {
+        message.attachments?.forEach((att) => {
+          if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+        });
+      }
+    };
+  }, []);
   // Full-detail debug snapshot for the "Copy session JSON" affordance. Assembled lazily
   // (only when the button is clicked) so we never stringify the whole transcript on
   // every render. Pulls from the merged `runtime` so it includes live stream state, and
@@ -722,6 +860,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // a viewport of room below it — reserved by CSS, so it survives resize and never
   // needs a JS re-pin. -1 (no user message yet) means no turn to reserve.
   const lastUserTurnStart = visibleMessages.findLastIndex((message) => message.role === "user");
+  // A mid-run steer is a small annotation, not a fresh turn, so it shouldn't claim the
+  // viewport-height reserve that pins a just-sent message to the top — that left the steer row
+  // floating high with a big empty gap below it. When the latest user message is a steer, skip
+  // the reserve so it drops to the bottom and flows with the response, like Conductor.
+  const latestUserIsSteer =
+    lastUserTurnStart >= 0 && Boolean(visibleMessages[lastUserTurnStart]?.sendMode);
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
@@ -749,21 +893,29 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // Abort stays available while paused so the user can cancel a parked run without
   // having to approve or deny the pending tool call first.
   const canAbort = sessionCanGenerate || sessionIsPaused;
-  const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
-  const renderMessage = (message: SessionMessage) => {
+  const renderMessage = (message: SessionMessage, opts?: { footerInFlow?: boolean }) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
-    // Brain files this turn created or edited (write_file/edit_file set brainPath), deduped
+    // Brain files this turn created or edited (write_file/edit_file set brainFile), deduped
     // and kept in tool-call order so the footer can link straight to each one.
-    const brainFilePaths: string[] = [];
+    const brainFiles: RuntimeBrainFileReference[] = [];
     if (message.role === "assistant") {
-      const seenBrainPaths = new Set<string>();
+      const seenBrainFiles = new Set<string>();
       for (const part of assistantParts) {
         if (part.type !== "tool-call") continue;
-        const brainPath = part.toolCall.brainPath;
-        if (!brainPath || seenBrainPaths.has(brainPath)) continue;
-        seenBrainPaths.add(brainPath);
-        brainFilePaths.push(brainPath);
+        const brainFile =
+          part.toolCall.brainFile ??
+          (part.toolCall.brainPath
+            ? ({
+                scope: "company",
+                path: part.toolCall.brainPath,
+              } satisfies RuntimeBrainFileReference)
+            : null);
+        if (!brainFile) continue;
+        const key = `${brainFile.scope}:${brainFile.path}`;
+        if (seenBrainFiles.has(key)) continue;
+        seenBrainFiles.add(key);
+        brainFiles.push(brainFile);
       }
     }
     const copyText =
@@ -780,6 +932,61 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       (partsAwaitApproval(assistantParts) ||
         partsAwaitQuestion(assistantParts) ||
         partsHaveRunningTool(assistantParts));
+
+    // Attachments preview, shared by the normal user bubble and the mid-run steer row below.
+    const attachmentsBlock =
+      message.attachments && message.attachments.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {message.attachments.map((att) => {
+            // Optimistic just-sent messages carry a local object-URL preview so the image
+            // shows instantly; the served `/api/attachments/{id}` row doesn't exist yet.
+            // Server-loaded messages have no previewUrl and use the served URL.
+            const servedUrl = `/api/attachments/${att.id}`;
+            const imageSrc = att.previewUrl ?? servedUrl;
+            return (
+              <a
+                key={att.id}
+                href={att.previewUrl ?? servedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block"
+              >
+                <AttachmentCard
+                  kind={att.kind}
+                  filename={att.filename}
+                  src={att.kind === "image" ? imageSrc : undefined}
+                />
+              </a>
+            );
+          })}
+        </div>
+      ) : null;
+
+    // A message sent while a run was already in flight (Steer / Queue / Interrupt) renders as a
+    // compact, left-aligned annotation attached just above the agent turn it affected — not as a
+    // normal right-side bubble — so it stays obvious the run was redirected. Past-tense wording
+    // (Steered/Queued/Interrupted) since by render time the mode has already been applied.
+    if (message.role === "user" && message.sendMode) {
+      // A mid-run send renders as a quiet, left-aligned caption attached to the turn it affected —
+      // styled like OC's muted process rows (Thinking, "N steps"), not a loud right-side bubble.
+      // The steering-wheel icon carries the only color (a faint mode tint); text stays muted.
+      return (
+        <div key={message.id} data-message-id={message.id} className="flex justify-start">
+          <div className="flex max-w-[80%] flex-col gap-1.5">
+            <div className="inline-flex max-w-full items-center gap-1.5 pl-1 text-[11px] leading-4 text-ink-subtle">
+              <SteerWheelIcon
+                className={`steer-wheel-spin h-3 w-3 shrink-0 ${SEND_MODE_ICON_CLASS[message.sendMode]}`}
+              />
+              <span className="shrink-0 font-medium">{SEND_MODE_ROW_LABEL[message.sendMode]}</span>
+              {message.content ? (
+                <span className="break-words text-ink-muted">· {message.content}</span>
+              ) : null}
+            </div>
+            {attachmentsBlock}
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div
@@ -812,32 +1019,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           ) : (
             <div className="flex flex-col gap-2">
               {message.content ? <div>{message.content}</div> : null}
-              {message.attachments && message.attachments.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {message.attachments.map((att) => (
-                    <a
-                      key={att.id}
-                      href={`/api/attachments/${att.id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block"
-                    >
-                      <AttachmentCard
-                        kind={att.kind}
-                        filename={att.filename}
-                        src={att.kind === "image" ? `/api/attachments/${att.id}` : undefined}
-                      />
-                    </a>
-                  ))}
-                </div>
-              ) : null}
+              {attachmentsBlock}
             </div>
           )}
-          {(canCopy || brainFilePaths.length > 0) &&
-          message.status !== "running" &&
-          !awaitingInput ? (
+          {(canCopy || brainFiles.length > 0) && message.status !== "running" && !awaitingInput ? (
             <div
-              className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
+              className={`${
+                opts?.footerInFlow && message.role === "assistant"
+                  ? "relative mt-1"
+                  : `absolute z-10 ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"}`
+              } flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
                 message.role === "assistant"
                   ? "opacity-100"
                   : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
@@ -849,7 +1040,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   {formatElapsed(Math.round(duration))}
                 </span>
               ) : null}
-              {brainFilePaths.length > 0 ? <BrainAttachments paths={brainFilePaths} /> : null}
+              {brainFiles.length > 0 ? <BrainAttachments files={brainFiles} /> : null}
             </div>
           ) : null}
         </div>
@@ -880,7 +1071,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     if (!anchoredParts?.length) return renderMessage(message);
     return (
       <Fragment key={`${message.id}-row`}>
-        {renderMessage(message)}
+        {renderMessage(message, { footerInFlow: true })}
         {renderBackgroundParts(anchoredParts)}
       </Fragment>
     );
@@ -929,45 +1120,15 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [input]);
 
-  // Browsers don't always fire a final `dragleave` when the user drags out of
-  // the window — without this, the drop overlay can stay stuck visible. Reset
-  // on window blur so the overlay never outlives the gesture.
-  useEffect(() => {
-    if (!isDragActive) return;
-    const reset = () => {
-      dragCounterRef.current = 0;
-      setIsDragActive(false);
-    };
-    window.addEventListener("blur", reset);
-    return () => window.removeEventListener("blur", reset);
-  }, [isDragActive]);
+  // Window-wide drop interception + the blur-reset for the drop overlay now live in the
+  // useComposerAttachments hook (shared with the home composers).
 
-  // A file dropped anywhere in the window — not just on the composer drop zone — must NOT make
-  // the browser navigate to / open the file (its default). Prevent that window-wide, and route
-  // any in-window file drop into the composer as an attachment.
-  useEffect(() => {
-    const onWindowDragOver = (event: DragEvent) => {
-      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
-    };
-    const onWindowDrop = (event: DragEvent) => {
-      if (!event.dataTransfer?.types.includes("Files")) return;
-      event.preventDefault();
-      dragCounterRef.current = 0;
-      setIsDragActive(false);
-      const files = Array.from(event.dataTransfer.files);
-      if (files.length > 0) acceptFiles(files);
-    };
-    window.addEventListener("dragover", onWindowDragOver);
-    window.addEventListener("drop", onWindowDrop);
-    return () => {
-      window.removeEventListener("dragover", onWindowDragOver);
-      window.removeEventListener("drop", onWindowDrop);
-    };
-  }, [acceptFiles]);
-
-  // The Durable Stream self-recovers (the client reconnects + resumes from its
-  // offset) and refresh/visibility recovery is no longer needed — a refresh
-  // replays the whole transcript from the stream.
+  // Durable Stream recovery lives in useSessionStream: the client reconnects +
+  // resumes from its offset on transient failures, and a DEAD subscription (the
+  // hidden-tab pause/resume race, an exhausted retry budget) is re-opened when the
+  // tab regains visibility/focus. The detail query's refetchOnWindowFocus plus the
+  // staleness-gated authority rule in baseRuntime cover the gap until that
+  // re-subscription catches up.
 
   useEffect(() => {
     if (!attachMenuOpen) return;
@@ -1040,6 +1201,26 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     showWaitingForAssistant,
   ]);
 
+  // Open at bottom: when a chat is first opened (or switched to), land on the newest
+  // message — once per session. Runs in useLayoutEffect (before paint) so there is no
+  // visible top→bottom jump. Keyed on session.id and guarded by a ref so it never
+  // re-fires on later renders (the streaming follow owns those) and never fights the
+  // send-snap (which positions the view itself on send).
+  // Deps use `hasMessages` (a boolean) not the visibleMessages array, so it fires on the
+  // first-content flip and on session change — not on every streamed delta.
+  const hasMessages = visibleMessages.length > 0;
+  const initialScrollSessionRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (pendingScrollMessageId) return; // a send-snap owns this frame
+    if (initialScrollSessionRef.current === session.id) return; // already snapped this chat
+    if (!hasMessages) return; // wait until content exists
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    isPinnedAtBottomRef.current = true;
+    initialScrollSessionRef.current = session.id;
+  }, [session.id, hasMessages, pendingScrollMessageId]);
+
   // Keep the reserved-space height (--chat-vh) in sync with the scroll container's own
   // height. A single ResizeObserver means the CSS min-height on the last turn recomputes
   // on every viewport/container resize (window resize, sidebar toggle, devtools), so the
@@ -1076,34 +1257,42 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
   // Skills attached to this session's agent contribute `/<command>` entries alongside the
   // built-ins — using each skill's declared `command:` when present, else a slug of its name.
-  // The attached set comes from the synced agent config; the command + metadata come from the
-  // workspace skill catalog.
+  // Company sessions derive attached skills from the synced agent row; personal sessions use the
+  // live personal context so unsaved soft-navigation state and personal skills stay visible.
   const { agents } = useCollections();
   const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const personalAgent = useOptionalPersonalAgent();
   const { data: skillCatalog } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
     queryFn: fetchWorkspaceSkills,
     staleTime: 60_000,
   });
   const allSlashCommands = useMemo(() => {
+    const workspaceSkills: SkillCommandSource[] = (skillCatalog ?? []).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(skill.command ? { command: skill.command } : {}),
+    }));
     const attached = agentRows?.find((agent) => agent.id === session.agentId);
-    const attachedIds = new Set(
-      (attached ? (agentRowToListItem(attached).config.skills ?? []) : []).map((skill) => skill.id),
-    );
-    const sources: SkillCommandSource[] = (skillCatalog ?? [])
-      .filter((skill) => attachedIds.has(skill.id))
-      .map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        ...(skill.command ? { command: skill.command } : {}),
-      }));
+    const configSkills =
+      personalAgent?.agent.id === session.agentId
+        ? personalAgent.config.skills
+        : attached
+          ? agentRowToListItem(attached).config.skills
+          : [];
+    const sources = buildAttachedSkillCommandSources({
+      configSkills,
+      workspaceSkills,
+      personalSkills:
+        personalAgent?.agent.id === session.agentId ? personalAgent.personalSkills : [],
+    });
     if (sources.length === 0) return SLASH_COMMANDS;
     return [
       ...SLASH_COMMANDS,
       ...buildSkillSlashCommands(sources, new Set(SLASH_COMMANDS.map((c) => c.id))),
     ];
-  }, [agentRows, session.agentId, skillCatalog]);
+  }, [agentRows, personalAgent, session.agentId, skillCatalog]);
 
   // Command mode is active while the caret sits on a `/token` (at the start of the
   // input or after whitespace). The token after the slash is the live filter query.
@@ -1128,14 +1317,20 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     setSlashDismissed(false);
   }
 
-  const runSlashCommand = (command: SlashCommand, args = "") => {
+  const runSlashCommand = (
+    command: SlashCommand,
+    args = "",
+    options: { transition?: boolean } = {},
+  ) => {
     const commandKey = command.id;
     if (slashCommandInFlightRef.current.has(commandKey)) return;
     slashCommandInFlightRef.current.add(commandKey);
-    startTransition(async () => {
+
+    const run = async () => {
       try {
         await command.run({
           session,
+          surface,
           workspaceId,
           router,
           sessionHref: (sessionId) => sessionHrefForSurface(surface, sessionId),
@@ -1148,7 +1343,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       } finally {
         slashCommandInFlightRef.current.delete(commandKey);
       }
-    });
+    };
+
+    if (options.transition === false) {
+      void run();
+      return;
+    }
+
+    startTransition(run);
   };
 
   // Selecting a command from the menu inserts its trigger into the input (it does not
@@ -1211,7 +1413,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // and waits for the user to send (so `/clear <prompt>` etc. can take args).
   const selectSlashCommand = (command: SlashCommand) => {
     if (command.applyOnSelect) {
-      runSlashCommand(command);
+      runSlashCommand(command, "", { transition: false });
     } else {
       insertSlashCommand(command);
     }
@@ -1236,12 +1438,17 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       runSlashCommand(parsed.command, parsed.args);
       return;
     }
-    if (isBusy) return;
+    // Note: we intentionally do NOT bail when the agent is running. Sending mid-run is the whole
+    // point of send-modes — the server + runner route the message per `sendMode`.
     submit();
   };
 
   const submit = () => {
-    if (isBusy) return;
+    // Guard only against a double-submit of our own in-flight transition; sending while the agent
+    // runs is allowed and resolves to steer/queue/interrupt on the server.
+    if (isPending) return;
+    // Whether a run is active right now decides if `sendMode` matters and whether to show a chip.
+    const sentMidRun = hasRunningAssistantMessage || showWaitingForAssistant;
     const content = input.trim();
     const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
     if (!content && ready.length === 0) return;
@@ -1257,8 +1464,25 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       role: "user",
       content,
       status: "completed",
+      // Only tag the bubble with a send-mode when it was actually dispatched into a live run, so
+      // the chip ("Steering"/"Queued"/"Interrupt") shows for those and not for idle first sends.
+      ...(sentMidRun ? { sendMode: "steer" as const } : {}),
       createdAt: new Date(submittedAtMs).toISOString(),
       completedAt: new Date(submittedAtMs).toISOString(),
+      // Carry the sent attachments so the bubble shows them immediately. Images use their local
+      // object-URL preview (the served /api/attachments row doesn't exist yet); the revoke is
+      // deferred until the durable server message replaces this optimistic one (see effect below).
+      ...(ready.length > 0
+        ? {
+            attachments: ready.map((a) => ({
+              id: a.id,
+              kind: a.kind,
+              mediaType: a.mediaType,
+              filename: a.filename,
+              ...(a.previewUrl ? { previewUrl: a.previewUrl } : {}),
+            })),
+          }
+        : {}),
     };
     setOptimisticUserMessages((current) => [...current, optimisticMessage]);
     setInput("");
@@ -1267,24 +1491,25 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
+      // A message sent while a run is active steers it (delivered at the next model-step
+      // boundary, in-flight work preserved); idle sends just start a turn. There's no mode
+      // picker — "steer" is the single default behavior, the server ignores it when idle.
       const result = await submitAgentSessionMessage(
         session.id,
         content,
-        ready.map((a) => ({
-          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
-          blobPathname: a.blobPathname!,
-          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
-          blobUrl: a.blobUrl!,
-          mediaType: a.mediaType,
-          filename: a.filename,
-          sizeBytes: a.sizeBytes,
-        })),
+        toSubmitAttachments(ready),
+        "steer",
       );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
-        // Sent successfully — drop the previews and clear the tray. Revoke the object
-        // URLs so the not-yet-uploaded local-file previews don't leak.
-        attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+        // Sent successfully — clear the tray. The sent attachments' object-URL previews are now
+        // owned by the optimistic message (revoked when its durable server message arrives), so
+        // only revoke previews that were NOT carried over (defensive — the send gate means all
+        // tray attachments are `ready`, so this set is normally empty).
+        const carried = new Set(ready.map((a) => a.id));
+        attachments.forEach((a) => {
+          if (a.previewUrl && !carried.has(a.id)) URL.revokeObjectURL(a.previewUrl);
+        });
         setAttachments([]);
         setOptimisticUserMessages((current) =>
           current.map((message) =>
@@ -1372,6 +1597,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
         />
 
+        {/* Drop-overlay hover handlers (`dragHandlers`) come from the shared attachment hook. The
+            window-level drop handler inside that hook does the actual preventDefault + accept, so a
+            drop anywhere in the app attaches and the browser never opens the file; the spread
+            handlers here only drive the "Drop files to attach" overlay. */}
         <div
           ref={scrollContainerRef}
           className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
@@ -1389,48 +1618,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
             isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
           }}
-          onDragEnter={(event) => {
-            if (!attachmentsEnabled) return;
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-            dragCounterRef.current += 1;
-            setIsDragActive(true);
-          }}
-          onDragOver={(event) => {
-            if (!attachmentsEnabled) return;
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-          }}
-          onDragLeave={(event) => {
-            if (!attachmentsEnabled) return;
-            event.preventDefault();
-            dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
-            if (dragCounterRef.current === 0) {
-              setIsDragActive(false);
-            }
-          }}
-          onDrop={() => {
-            // The window-level drop handler (see effect above) preventDefaults + accepts, so a
-            // drop anywhere in the app attaches and the browser never opens the file. Here we
-            // only clear the hover overlay (avoids double-accepting the same drop).
-            dragCounterRef.current = 0;
-            setIsDragActive(false);
-          }}
+          // Drop-overlay hover handlers come from the shared hook. The window-level drop handler
+          // (inside the hook) does the actual preventDefault + accept, so a drop anywhere in the
+          // app attaches and the browser never opens the file; these only drive the overlay.
+          {...dragHandlers}
         >
-          {isDragActive ? (
-            <div
-              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
-              aria-hidden="true"
-            >
-              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
-                <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
-                <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">
-                  Images, PDF, text &amp; code · or paste with ⌘V
-                </p>
-              </div>
-            </div>
-          ) : null}
+          {isDragActive ? <ComposerDropOverlay /> : null}
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
@@ -1457,7 +1650,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             <div
               className="space-y-5"
               style={
-                lastUserTurnStart >= 0
+                lastUserTurnStart >= 0 && !latestUserIsSteer
                   ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
                   : undefined
               }
@@ -1594,23 +1787,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       }
                     }}
                     onPaste={(event) => {
-                      if (!attachmentsEnabled) return;
-                      const items = event.clipboardData?.items;
-                      if (!items) return;
-                      const files: File[] = [];
-                      for (const item of Array.from(items)) {
-                        if (item.kind !== "file") continue;
-                        const file = item.getAsFile();
-                        if (file) files.push(file);
-                      }
-                      if (files.length > 0) {
-                        // Files in the clipboard: take them as attachments and stop the browser
-                        // from also pasting them (e.g. an image) into the textarea. Any text
-                        // portion of a mixed paste still falls through normally.
-                        event.preventDefault();
-                        acceptFiles(files);
-                        return;
-                      }
+                      // Files in the clipboard (e.g. a screenshot) are taken as attachments by the
+                      // shared hook, which also stops the browser pasting them into the textarea.
+                      if (handlePasteFiles(event)) return;
                       // Oversized plain-text pastes become a .txt attachment instead of dumping
                       // a wall of text into the composer. Beyond the attachment size cap the
                       // paste falls through untouched — losing the user's text to a rejection
@@ -1632,7 +1811,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     aria-activedescendant={slashActiveOptionId}
                     aria-haspopup="listbox"
                     rows={1}
-                    className="min-h-9 w-full resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                    className="min-h-9 w-full resize-none content-center bg-transparent text-[16px] md:text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                     style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                   />
                 }
@@ -1643,10 +1822,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        // Text/code files often have no registered MIME, so listing extensions
-                        // keeps them pickable; the broad set plus `*` lets any file through and
-                        // validation rejects unsupported ones with a toast.
-                        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,application/xml,text/css,text/yaml,.txt,.md,.markdown,.html,.htm,.csv,.tsv,.json,.jsonc,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.scss,.sass,.less"
+                        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
                         className="hidden"
                         onChange={(event) => {
                           acceptFiles(Array.from(event.target.files ?? []));
@@ -1688,35 +1864,58 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     />
                   </>
                 }
-                action={
-                  canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                    <button
-                      type="button"
-                      disabled={isPending}
-                      onClick={requestAbort}
-                      aria-label="Stop generating"
-                      title="Stop generating"
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
-                    >
-                      <CircleStop size={16} strokeWidth={1.9} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={
-                        isPending ||
-                        attachments.some((a) => a.status !== "ready") ||
-                        (!parseSlashCommand(input, allSlashCommands) &&
-                          (isBusy || (!input.trim() && attachments.length === 0)))
-                      }
-                      onClick={handleSend}
-                      aria-label="Send message"
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
-                    >
-                      <ArrowUp size={13} strokeWidth={2} />
-                    </button>
-                  )
-                }
+                action={(() => {
+                  // While a run is active you can still type + send — that steers the run (no mode
+                  // picker; "steer" is the one default). The send button itself becomes the cue:
+                  // its arrow is replaced by the steering wheel (one-shot spin) to signal the send
+                  // will steer. Idle: a plain arrow, nothing extra. A Stop button sits alongside it
+                  // as the hard interrupt.
+                  const runActive =
+                    canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
+                  const sendDisabled =
+                    isPending ||
+                    attachments.some((a) => a.status !== "ready") ||
+                    (!parseSlashCommand(input, allSlashCommands) &&
+                      !input.trim() &&
+                      attachments.length === 0);
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={sendDisabled}
+                        onClick={handleSend}
+                        aria-label={runActive ? "Steer the running agent" : "Send message"}
+                        title={runActive ? "Steer the running agent" : "Send message"}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+                          runActive
+                            ? "text-ink-subtle hover:text-ink-muted"
+                            : "bg-ink text-canvas hover:bg-ink/85"
+                        }`}
+                      >
+                        {runActive ? (
+                          <SteerWheelIcon
+                            key="send-wheel"
+                            className="steer-wheel-spin h-3.5 w-3.5"
+                          />
+                        ) : (
+                          <ArrowUp size={13} strokeWidth={2} />
+                        )}
+                      </button>
+                      {runActive ? (
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={requestAbort}
+                          aria-label="Stop generating"
+                          title="Stop generating"
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          <CircleStop size={16} strokeWidth={1.9} />
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })()}
                 rightControls={
                   <div
                     className={`flex items-center gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
@@ -1770,45 +1969,85 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         )}
       </div>
 
-      {!inspectorCollapsed && (
+      {!inspectorCollapsed || inspectorDrag.dragging ? (
         <button
           type="button"
           aria-label="Collapse runtime details"
           className="fixed inset-0 z-30 bg-ink/[0.06] lg:hidden"
+          // Fade the dim in step with a swipe; full strength once open.
+          style={inspectorDrag.dragging ? { opacity: inspectorDrag.progress } : undefined}
           onClick={() => updateInspectorCollapsed(true)}
         />
-      )}
+      ) : null}
 
       <aside
-        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
-          inspectorCollapsed
+        ref={inspectorAsideRef}
+        className={`flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface-raised/95 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:shadow-none lg:backdrop-blur-0 ${
+          inspectorCollapsed && !inspectorDrag.dragging
             ? "hidden"
-            : "fixed inset-y-0 right-0 z-40 block w-[min(328px,calc(100vw-24px))] lg:static lg:z-auto lg:w-[328px]"
+            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] lg:static lg:z-auto lg:w-[392px] lg:pt-0 lg:pb-0 lg:pr-0"
         }`}
-        aria-hidden={inspectorCollapsed}
+        // While swiping on mobile, track the finger 1:1 (inline transform overrides the
+        // class; transition:none disables the snap until release). Driven by the global
+        // gesture via MobileInspectorContext.
+        style={
+          inspectorDrag.dragging
+            ? {
+                transform: `translateX(${(1 - inspectorDrag.progress) * 100}%)`,
+                transition: "none",
+              }
+            : undefined
+        }
+        aria-hidden={inspectorCollapsed && !inspectorDrag.dragging}
       >
-        <div className="mb-5 flex items-center justify-between pr-9 lg:mb-7">
-          <div className="text-[12px] font-medium text-ink">Runtime</div>
-          <CopySessionJsonButton build={buildSessionDebugSnapshot} />
-        </div>
-        <SessionInspector
-          session={session}
-          related={detail.related}
-          currentStatus={runtime.currentStatus}
-          lastError={sessionHasResumableStepLimitFailure ? null : runtime.lastError}
-          streamStatus={streamStatus}
-          streamErrorMessage={streamStatus === "error" ? "Stream connection error" : null}
-          connectionStale={false}
-          runnerConfigured={true}
-          eventCount={inspectorEvents.length}
-          usage={runtime.usage}
-          toolUsage={runtime.toolUsage}
-          cost={runtime.cost}
-          recentEvents={inspectorEvents.slice(-16)}
-          canAbort={canAbort}
-          isPending={isPending}
-          onAbort={requestAbort}
-        />
+        <Tabs
+          value={inspectorTab}
+          onValueChange={(value) => setInspectorTab(value as InspectorTab)}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="border-border border-b px-5 pb-4 pt-4 lg:pt-6">
+            <div className="flex items-center justify-between pr-9">
+              <div>
+                <div className="text-[12px] font-medium text-ink">Session details</div>
+                <div className="mt-0.5 text-[11px] text-ink-subtle">
+                  {statusLabel(runtime.currentStatus)} · {inspectorEvents.length} events
+                </div>
+              </div>
+              <CopySessionJsonButton build={buildSessionDebugSnapshot} />
+            </div>
+            <TabsList className="mt-4 bg-surface-hover">
+              <TabsTrigger value="info">Info</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+              <TabsTrigger value="other">Other</TabsTrigger>
+            </TabsList>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:py-6">
+            {(["info", "logs", "other"] satisfies InspectorTab[]).map((tab) => (
+              <TabsContent key={tab} value={tab} className="mt-0">
+                <SessionInspector
+                  activeTab={tab}
+                  session={session}
+                  related={detail.related}
+                  currentStatus={runtime.currentStatus}
+                  lastError={sessionHasResumableStepLimitFailure ? null : runtime.lastError}
+                  streamStatus={streamStatus}
+                  streamErrorMessage={streamStatus === "error" ? "Stream connection error" : null}
+                  connectionStale={false}
+                  runnerConfigured={true}
+                  eventCount={inspectorEvents.length}
+                  usage={runtime.usage}
+                  toolUsage={runtime.toolUsage}
+                  cost={runtime.cost}
+                  recentEvents={inspectorEvents.slice(-16)}
+                  canAbort={canAbort}
+                  isPending={isPending}
+                  onAbort={requestAbort}
+                  buildSessionDebugSnapshot={buildSessionDebugSnapshot}
+                />
+              </TabsContent>
+            ))}
+          </div>
+        </Tabs>
       </aside>
     </main>
   );
@@ -1960,28 +2199,28 @@ function CopyMessageButton({ text }: { text: string }) {
 
 const BRAIN_ATTACHMENT_VISIBLE_LIMIT = 3;
 
-// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links
-// straight to each file in the (URL-addressable) Brain editor; collapses the tail past 3.
-function BrainAttachments({ paths }: { paths: string[] }) {
-  const visible = paths.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
-  const overflow = paths.length - visible.length;
+// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links straight
+// to each file in the URL-addressable Brain editor (company or personal); collapses the tail past 3.
+function BrainAttachments({ files }: { files: RuntimeBrainFileReference[] }) {
+  const visible = files.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
+  const overflow = files.length - visible.length;
   return (
     <>
-      {visible.map((path) => (
+      {visible.map((file) => (
         <Link
-          key={path}
-          href={brainHref(path)}
-          title={`brain/${path}`}
+          key={`${file.scope}:${file.path}`}
+          href={brainFileHref(file)}
+          title={brainFileTitle(file)}
           className="inline-flex max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
           <Brain size={9} strokeWidth={1.9} className="shrink-0" />
-          <span className="truncate">{path}</span>
+          <span className="truncate">{file.path}</span>
         </Link>
       ))}
       {overflow > 0 ? (
         <Link
-          href={BRAIN_BASE_PATH}
-          title={`${overflow} more brain ${overflow === 1 ? "file" : "files"}`}
+          href={brainFileListHref(files)}
+          title={`${overflow} more Brain ${overflow === 1 ? "file" : "files"}`}
           className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
         >
           +{overflow} others
@@ -1989,6 +2228,18 @@ function BrainAttachments({ paths }: { paths: string[] }) {
       ) : null}
     </>
   );
+}
+
+function brainFileHref(file: RuntimeBrainFileReference) {
+  return file.scope === "personal" ? personalPaths.brainFile(file.path) : brainHref(file.path);
+}
+
+function brainFileTitle(file: RuntimeBrainFileReference) {
+  return file.scope === "personal" ? `personal-brain/${file.path}` : `brain/${file.path}`;
+}
+
+function brainFileListHref(files: RuntimeBrainFileReference[]) {
+  return files.some((file) => file.scope === "personal") ? personalPaths.brain : BRAIN_BASE_PATH;
 }
 
 // One-click "copy the whole session as JSON" for debugging. Builds the snapshot lazily on
@@ -2513,9 +2764,15 @@ function ToolCallCardDefault({
           <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
             {toolCall.label || formatToolName(toolCall.name)}
           </span>
-          {toolCall.brainPath ? (
+          {toolCall.brainFile || toolCall.brainPath ? (
             <span
-              title={`Updated brain/${toolCall.brainPath}`}
+              title={`Updated ${brainFileTitle(
+                toolCall.brainFile ??
+                  ({
+                    scope: "company",
+                    path: toolCall.brainPath ?? "",
+                  } satisfies RuntimeBrainFileReference),
+              )}`}
               className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
             >
               <Brain size={9} strokeWidth={1.9} />
@@ -3106,7 +3363,7 @@ function ToolApprovalPrompt({
     : "";
   const groupLabel = approval
     ? approval.permissionGroup
-      ? PERMISSION_GROUP_LABELS[approval.permissionGroup]
+      ? permissionLabelFor(approval.providerKey, approval.permissionGroup)
       : "Unknown permission"
     : "";
   const permissionDescription = approval?.permissionGroup
@@ -3243,6 +3500,7 @@ function formatToolName(name: string) {
 }
 
 function SessionInspector({
+  activeTab,
   session,
   related,
   currentStatus,
@@ -3259,7 +3517,9 @@ function SessionInspector({
   canAbort,
   isPending,
   onAbort,
+  buildSessionDebugSnapshot,
 }: {
+  activeTab: InspectorTab;
   session: AgentSessionDetailPayload["session"];
   related: AgentSessionDetailPayload["related"];
   currentStatus: string;
@@ -3276,6 +3536,7 @@ function SessionInspector({
   canAbort: boolean;
   isPending: boolean;
   onAbort: () => void;
+  buildSessionDebugSnapshot: () => unknown;
 }) {
   const surface = useSessionSurface();
   // The personal surface has a single agent page (no per-agent route), so the agent link
@@ -3285,6 +3546,122 @@ function SessionInspector({
       ? personalPaths.agent
       : `/company/agents/${session.agentPath ?? session.agentId}`;
 
+  if (activeTab === "logs") {
+    return (
+      <div className="space-y-8">
+        <div>
+          <InspectorHeader label="Runtime" countLabel={streamStatusLabel(streamStatus)} />
+          <div className="space-y-4">
+            <InspectorStatusField status={currentStatus} lastError={lastError} />
+            <InspectorField
+              label="Live stream"
+              value={runnerConfigured ? "Configured" : "Not configured"}
+            />
+            <InspectorField label="Activity events" value={String(eventCount)} />
+            {session.runLeaseId ? (
+              <InspectorField label="Run lease" value={session.runLeaseId} mono />
+            ) : null}
+            {session.abortRequestedAt ? (
+              <InspectorField
+                label="Abort requested"
+                value={formatRuntimeDate(session.abortRequestedAt)}
+              />
+            ) : null}
+          </div>
+          {lastError ? (
+            <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
+              {lastError}
+            </div>
+          ) : streamErrorMessage || streamStatus === "stale" || connectionStale ? (
+            <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
+              {streamStatus === "stale" || connectionStale
+                ? "The live session stream is not responding. Reconnecting and refreshing persisted progress."
+                : streamErrorMessage}
+            </div>
+          ) : null}
+        </div>
+
+        <div>
+          <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
+          {recentEvents.length > 0 ? (
+            <div className="space-y-1.5">
+              {recentEvents.map((event, index) => (
+                <div
+                  key={event.id ?? `transient-${index}`}
+                  className="rounded-md border border-border bg-surface/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <TerminalSquare
+                      size={12}
+                      strokeWidth={1.7}
+                      className="shrink-0 text-ink-subtle"
+                    />
+                    <span className="min-w-0 truncate font-medium text-ink/75">{event.type}</span>
+                  </div>
+                  {summarizeEvent(event) ? (
+                    <div className="mt-1 truncate text-[11px] text-ink-subtle">
+                      {summarizeEvent(event)}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
+              No runtime events yet
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTab === "other") {
+    return (
+      <div className="space-y-8">
+        <div>
+          <InspectorHeader label="Debug export" countLabel="json" />
+          <CopySessionJsonButton build={buildSessionDebugSnapshot} />
+        </div>
+
+        <div>
+          <InspectorHeader label="Internal IDs" countLabel="reference" />
+          <div className="space-y-4">
+            <InspectorField label="Session ID" value={session.id} mono />
+            <InspectorField label="Agent ID" value={session.agentId} mono />
+            {session.agentPath ? (
+              <InspectorField label="Agent path" value={session.agentPath} mono />
+            ) : null}
+          </div>
+        </div>
+
+        <div>
+          <InspectorHeader label="Environment" countLabel={session.modelProvider} />
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <InspectorField label="Model provider" value={session.modelProvider} mono />
+            <InspectorField label="Model" value={session.modelName} mono />
+            <div className="col-span-2">
+              <InspectorField label="Workdir" value={session.workdir} mono />
+            </div>
+            {session.e2bSandboxId ? (
+              <div className="col-span-2">
+                <InspectorField label="Sandbox" value={session.e2bSandboxId} mono />
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div>
+          <InspectorHeader label="Timing" countLabel="lifecycle" />
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+            <InspectorField label="Created" value={formatRuntimeDate(session.createdAt)} />
+            <InspectorField label="Updated" value={formatRuntimeDate(session.updatedAt)} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <div>
@@ -3292,17 +3669,17 @@ function SessionInspector({
           <Bot size={14} strokeWidth={1.9} className="text-ink-muted" />
           Session
         </div>
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4">
           <InspectorLink
             label="Session page"
             href={sessionHrefForSurface(surface, session.id)}
             value={session.id}
           />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
-          <InspectorField label="Title" value={session.title} />
+          <div className="col-span-2">
+            <InspectorField label="Title" value={session.title} />
+          </div>
           <InspectorStatusField status={currentStatus} lastError={lastError} />
-          <InspectorField label="Created" value={formatRuntimeDate(session.createdAt)} />
-          <InspectorField label="Updated" value={formatRuntimeDate(session.updatedAt)} />
         </div>
       </div>
 
@@ -3330,46 +3707,9 @@ function SessionInspector({
       )}
 
       <div>
-        <InspectorHeader label="Runtime" countLabel={streamStatusLabel(streamStatus)} />
-        <div className="space-y-4">
-          <InspectorField label="Model provider" value={session.modelProvider} mono />
-          <InspectorField label="Model" value={session.modelName} mono />
-          <InspectorField
-            label="Live stream"
-            value={runnerConfigured ? "Configured" : "Not configured"}
-          />
-          <InspectorField label="Workdir" value={session.workdir} mono />
-          {session.e2bSandboxId ? (
-            <InspectorField label="Sandbox" value={session.e2bSandboxId} mono />
-          ) : null}
-          {session.runLeaseId ? (
-            <InspectorField label="Run lease" value={session.runLeaseId} mono />
-          ) : null}
-          {session.abortRequestedAt ? (
-            <InspectorField
-              label="Abort requested"
-              value={formatRuntimeDate(session.abortRequestedAt)}
-            />
-          ) : null}
-          <InspectorField label="Activity events" value={String(eventCount)} />
-        </div>
-        {lastError ? (
-          <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
-            {lastError}
-          </div>
-        ) : streamErrorMessage || streamStatus === "stale" || connectionStale ? (
-          <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
-            {streamStatus === "stale" || connectionStale
-              ? "The live session stream is not responding. Reconnecting and refreshing persisted progress."
-              : streamErrorMessage}
-          </div>
-        ) : null}
-      </div>
-
-      <div>
         <InspectorHeader label="Token usage" countLabel={formatTokenCount(usage.totalTokens)} />
         <div className="space-y-5">
-          <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
             <InspectorField label="Input total" value={formatTokenCount(usage.inputTokens)} />
             <InspectorField
               label="Input uncached"
@@ -3384,7 +3724,7 @@ function SessionInspector({
               value={formatTokenCount(usage.inputCacheWriteTokens)}
             />
           </div>
-          <div className="space-y-4 border-t border-border pt-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border pt-4">
             <InspectorField label="Output total" value={formatTokenCount(usage.outputTokens)} />
             <InspectorField label="Output text" value={formatTokenCount(usage.outputTextTokens)} />
             <InspectorField
@@ -3398,7 +3738,7 @@ function SessionInspector({
 
       <div>
         <InspectorHeader label="Cost" countLabel={formatUsdMicros(cost.totalCostUsdMicros)} />
-        <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           <InspectorField label="Model charges" value={formatUsdMicros(cost.modelCostUsdMicros)} />
           <InspectorField label="Tool charges" value={formatUsdMicros(cost.toolCostUsdMicros)} />
           <InspectorField
@@ -3446,38 +3786,6 @@ function SessionInspector({
           <CircleStop size={13} strokeWidth={1.9} />
           Abort session
         </button>
-      </div>
-
-      <div>
-        <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
-        {recentEvents.length > 0 ? (
-          <div className="space-y-1.5">
-            {recentEvents.map((event, index) => (
-              <div
-                key={event.id ?? `transient-${index}`}
-                className="rounded-md border border-border bg-surface/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <TerminalSquare
-                    size={12}
-                    strokeWidth={1.7}
-                    className="shrink-0 text-ink-subtle"
-                  />
-                  <span className="shrink-0 font-medium text-ink/75">{event.type}</span>
-                </div>
-                {summarizeEvent(event) ? (
-                  <div className="mt-1 truncate text-[11px] text-ink-subtle">
-                    {summarizeEvent(event)}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
-            No runtime events yet
-          </div>
-        )}
       </div>
     </div>
   );

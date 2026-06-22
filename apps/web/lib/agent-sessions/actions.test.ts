@@ -169,18 +169,28 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   const returning = vi.fn(() => ({}));
   const values = vi.fn(() => ({ returning }));
   const insert = vi.fn(() => ({ values }));
-  // insertAgentSession reads back [sessionRow, statusEvent]. The prompt path combines
-  // session/status/message/message.created into one batch and synthesizes the detail payload
-  // from those rows.
-  const batch = vi
-    .fn()
-    .mockResolvedValueOnce([
-      [fakeSessionRow()],
-      [statusEventRow],
-      [fakeMessageRow()],
-      [{ id: 2, createdAt: CREATED_AT }],
-    ]);
-  return { select, insert, batch } as never;
+  const updateWhere = vi.fn();
+  const set = vi.fn(() => ({ where: updateWhere }));
+  const update = vi.fn(() => ({ set }));
+  // The prompt path combines session/status/message/message.created into one batch. The personal
+  // onboarding path writes the session first, then the visible first message in a second batch.
+  let twoQueryBatchCount = 0;
+  const batch = vi.fn(async (queries: unknown[]) => {
+    if (queries.length === 4) {
+      return [
+        [fakeSessionRow()],
+        [statusEventRow],
+        [fakeMessageRow()],
+        [{ id: 2, createdAt: CREATED_AT }],
+      ];
+    }
+
+    twoQueryBatchCount += 1;
+    return twoQueryBatchCount === 1
+      ? [[fakeSessionRow()], [statusEventRow]]
+      : [[fakeMessageRow()], [{ id: 2, createdAt: CREATED_AT }]];
+  });
+  return { select, insert, update, batch } as never;
 }
 
 describe("createAgentSession", () => {
@@ -206,6 +216,19 @@ describe("createAgentSession", () => {
       redirectTo: "/company/settings?billing=insufficient",
     });
     expect(getDbMock).toHaveBeenCalled();
+    expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a personal billing redirect for personal-surface session starts", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+
+    const result = await createAgentSession("agt_123", { surface: "personal" });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
+    });
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
   });
 
@@ -280,7 +303,7 @@ describe("createPersonalOnboardingSession", () => {
 
   it("skips the onboarding gate — the caller has not completed onboarding yet", async () => {
     // Regression: without skipOnboarding, currentWorkspace() redirects the submit straight back
-    // to /onboarding/personal (the survey row that marks completion is only written inside this
+    // to /onboarding (the survey row that marks completion is only written inside this
     // action), trapping the user in an onboarding loop.
     hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
 
@@ -295,6 +318,29 @@ describe("createPersonalOnboardingSession", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
+    });
+  });
+
+  it("can start the first onboarding session before the workspace has credits", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+    newAgentSessionIdMock.mockReturnValue("ses_123");
+    newAgentSessionMessageIdMock.mockReturnValue("msg_123");
+
+    const result = await createPersonalOnboardingSession(
+      "agt_123",
+      { name: "Ada", website: "", role: "Founder" },
+      "Help me get started",
+      { integrations: [], skipBillingCheck: true },
+    );
+
+    if (!result.ok) throw new Error("expected ok result");
+    expect(hasPositiveWorkspaceBalanceMock).not.toHaveBeenCalled();
+    expect(result.session).toMatchObject({ id: "ses_123", status: "created" });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      workspaceId: "wks_123",
     });
   });
 });
@@ -328,6 +374,22 @@ describe("createAgentSessionFromPrompt", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a personal billing redirect for personal-surface prompt starts", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Hello", undefined, [], {
+      surface: "personal",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
     });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
@@ -387,6 +449,90 @@ describe("createAgentSessionFromPrompt", () => {
       is_initial_message: true,
       message_length: "Ship it".length,
     });
+  });
+
+  it("persists a valid image attachment on the first message", async () => {
+    // Capture the rows handed to `.values(...)`: the prompt path builds every insert op (incl.
+    // the attachment rows) and passes them into db.batch, so the attachment payload shows up as
+    // a `values` call we can assert on.
+    const valuesCalls: unknown[] = [];
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn((rows) => {
+      valuesCalls.push(rows);
+      return { returning };
+    });
+    const insert = vi.fn(() => ({ values }));
+    const limit = vi.fn().mockResolvedValue([fakeAgent()]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const batch = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [fakeSessionRow()],
+        [statusEventRow],
+        [fakeMessageRow()],
+        [{ id: 2, createdAt: CREATED_AT }],
+      ]);
+    getDbMock.mockReturnValue({ select, insert, batch } as never);
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Look at this", undefined, [
+      {
+        blobPathname: "workspace/wks_123/pending/att1-x.png",
+        blobUrl: "https://blob.example/x.png",
+        mediaType: "image/png",
+        filename: "x.png",
+        sizeBytes: 1024,
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+    // The attachment row carries the blob pointer + scoped to the new session/message.
+    expect(valuesCalls).toContainEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          blobPathname: "workspace/wks_123/pending/att1-x.png",
+          blobUrl: "https://blob.example/x.png",
+          kind: "image",
+          sessionId: "ses_123",
+          messageId: "msg_123",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects an attachment that fails validation without creating a session", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+
+    const result = await createAgentSessionFromPrompt("agt_123", "hi", undefined, [
+      {
+        blobPathname: "workspace/wks_123/pending/att2-x.exe",
+        blobUrl: "https://blob.example/x.exe",
+        mediaType: "application/x-msdownload",
+        filename: "x.exe",
+        sizeBytes: 10,
+      },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an attachment scoped to another workspace", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+
+    const result = await createAgentSessionFromPrompt("agt_123", "hi", undefined, [
+      {
+        blobPathname: "workspace/wks_OTHER/pending/att3-x.png",
+        blobUrl: "https://blob.example/x.png",
+        mediaType: "image/png",
+        filename: "x.png",
+        sizeBytes: 1024,
+      },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 });
 

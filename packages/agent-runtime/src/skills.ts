@@ -1,5 +1,5 @@
 import { parse as parseYaml } from "yaml";
-import { validateSkillFiles } from "./skill-resolver";
+import { normalizeSkillCommand, validateSkillFiles } from "./skill-resolver";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import {
   type AgentConfig,
@@ -210,6 +210,12 @@ from a GitHub/skills.sh URL are managed by a human in the editor and are preserv
 - \`@skill/humanizer\` — strip the telltale signs of AI-generated writing and give prose a real
   human voice. Add it when you regularly write text people will read — emails, posts,
   summaries, docs.
+- \`@skill/y-combinator-knowledge\` — YC-style startup sparring: office-hours framing, user
+  obsession, MVP and growth pressure, fundraising discipline, and links to canonical YC/PG
+  teachings. Add it for founder, product, growth, fundraising, or company strategy agents.
+- \`@skill/move-to-opencompany\` — import an external knowledge base (a GitHub repo or folders)
+  into the Brain safely, with a preview and a receipt (imported N, lost 0). Add it when the user
+  is migrating notes, docs, or a wiki into OpenCompany.
 
 Add a skill only when it genuinely fits how you work — an unused skill is just noise in your
 definition.
@@ -228,9 +234,9 @@ definition.
    search" → just add \`@exa\`), pause **once** with \`ask_user_question\` to personalize.
    Batch 2–4 short, structured questions covering how the agent should behave, which
    tools/integrations it should use, tone and defaults, and any recurring schedule. Keep
-   options short; set \`allowOther: true\` where a sensible answer may fall outside them. Do
-   **not** ask these as plain chat questions, and do **not** pause for a trivial,
-   already-specified edit.
+   options short — the user can always type their own free-text answer, so you don't need to
+   cover every case. Do **not** ask these as plain chat questions, and do **not** pause for a
+   trivial, already-specified edit.
 3. Draft the **complete new body** — not a diff — and keep it light (see "Keep the body
    light"). Keep what should stay, add or rewrite what should change, and keep any
    \`@mentions\` for tools and Brain mounts you still want active.
@@ -344,8 +350,8 @@ follow this loop. The user should feel guided and in control — not interrogate
    — one or two targeted searches to learn what the company does. Don't over-research.
 3. **Ask 1–2 sharp questions with \`ask_user_question\`**, building on the signup details and
    what you found: what the company really does, who it serves, and what they want help with
-   first. Use one structured tool call with short options and \`allowOther: true\` when the
-   user's answer may not fit your options. Do not ask these as plain chat questions.
+   first. Use one structured tool call with short options; the user can always type their own
+   free-text answer if none fit. Do not ask these as plain chat questions.
 4. **Scaffold a tailored \`brain/wiki/\`**: the folders that fit this business, each with a
    one-line README, plus two or three genuinely useful seeded files (e.g.
    \`brain/wiki/company/overview.md\`, \`brain/wiki/strategy/priorities.md\`). Capture what you
@@ -438,7 +444,10 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 
 ## Commands
 
-- **create** — a new canonical object.
+- **create** — a new canonical object. Query by name first: if this person/company already exists
+  under another spelling, update that record (\`rewrite\`/\`alias\`) instead of making a second one.
+  \`create\` refuses a near-duplicate of an existing object of the same type and names it; pass
+  \`--allow-similar\` only when it genuinely is a different thing that happens to share a name.
   \`memory create --type company --id acme --alias "Acme Inc"\`
 - **append-evidence** — record immutable evidence and link it to canonical subjects.
   \`memory append-evidence --kind meeting --id acme-call-2026-06-06 --subject acme --subject jane-doe --source-ref "gcal://event/abc" --summary "Confirmed enterprise eval; SSO is the blocker."\`
@@ -458,6 +467,9 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 - **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
   Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`. Add \`--hops N\` to also pull
   in objects reachable via \`related\` edges (e.g. \`--hops 1\` surfaces directly-linked neighbours).
+  \`--since\` takes a relative window (\`30m\`, \`24h\`, \`7d\`, \`2w\`) or an ISO-8601 timestamp, matched
+  against \`updated_at\`. Run query with no text for a recency listing — \`memory query --since 24h\`
+  lists everything updated in the last day, newest first.
   Results include capped compiled truth and a \`memory get <id>\` hint for the full record/timeline.
 - **merge** — fold a duplicate canonical object into another, then re-synthesize. Aliases, related
   links and timeline move to the survivor; the source becomes a redirect stub.
@@ -466,7 +478,8 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   \`memory delete acme-corp\` (use \`--dry-run\` to preview). Related links and evidence subjects are
   scrubbed automatically; if the target is still cited or is a merge target, it needs \`--force\` and
   you must repair those references afterward (run \`memory doctor\`).
-- **doctor** — health check (broken links, missing provenance, stale truth, duplicates).
+- **doctor** — health check (broken links, missing provenance, stale truth, duplicates, and
+  \`near_duplicate\` look-alike objects that should probably be merged).
   \`memory doctor\` — a read-only report; fix what it flags with the commands above.
 
 ## How to use it well
@@ -475,6 +488,9 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   **capture it as evidence first**, then **rewrite** the relevant object's compiled truth citing it.
 - Before answering questions about people, companies, or past decisions, **query** memory; use
   **get** when the query result indicates a likely record and details or timeline matter.
+- For "what's new" / "catch me up" questions about memory itself, list recent updates with
+  \`memory query --since 24h\` (or \`7d\`) and no search text. For what was *said* recently, the
+  recall tool over past transcripts is the better source.
 - When two objects are connected (a person at a company, a decision on a project), **link** them
   so future queries can hop between them with \`--hops\`. A well-linked graph retrieves better.
 - Keep compiled truth tight and current; let the timeline hold the history.
@@ -876,6 +892,257 @@ the user asked to see the reasoning.
 
 const HUMANIZER_SKILL_MD = buildHumanizerSkillMd();
 
+export const Y_COMBINATOR_KNOWLEDGE_SKILL_ID = "y-combinator-knowledge";
+
+function buildYCombinatorKnowledgeSkillMd(): string {
+  return `---
+name: y-combinator-knowledge
+description: Be a high-leverage YC-style startup sparring partner. Use for founder office hours, startup strategy, idea validation, MVP scope, user conversations, growth, fundraising, hiring, and hard prioritization.
+---
+
+# Y Combinator knowledge
+
+Use this skill when the user wants YC-level startup judgment: a sharp sparring partner who
+pushes toward users, speed, focus, evidence, and uncomfortable truth. Do not imitate YC partners
+or claim affiliation. Apply the public YC/Paul Graham canon as an operating model, then adapt it
+to the user's actual company, stage, constraints, and evidence.
+
+## Operating posture
+
+- Be concrete. Convert vague strategy into a weekly goal, a user segment, a learning question,
+  and the next action.
+- Prefer customer evidence over opinions. Ask what users did, paid for, retained, complained
+  about, or pulled out of the team.
+- Push for narrowness before scale. Find the smallest market, workflow, or customer set where
+  the product can become urgent.
+- Default to action. The next step should usually be a user conversation, a launch, a manual
+  concierge test, a sale, or a smaller build.
+- Be candid without theater. Name the riskiest assumption, the fake work, and the metric that
+  would prove progress.
+- Keep the company alive. Watch runway, burn, founder energy, and whether the plan can create
+  a believable path to default alive.
+
+## Office-hours loop
+
+Run startup conversations like office hours, not a strategy essay:
+
+1. Stage the company in one sentence: customer, problem, product, traction, team, runway.
+2. Identify the live bottleneck: idea, users, activation, retention, revenue, distribution,
+   hiring, fundraising, or focus.
+3. Ask for the sharpest numbers: weekly active users, retained users, revenue, growth rate,
+   conversion, sales cycle, burn, runway, and the last five customer conversations.
+4. Separate signal from story. What changed because users pulled, paid, returned, referred, or
+   complained? What is just founder narrative?
+5. Pick one priority for the week. Write the concrete experiment, owner, deadline, success
+   threshold, and what decision it will unlock.
+6. End with the founder's homework. One to three actions, all measurable, all doable before the
+   next check-in.
+
+## YC lenses
+
+### Idea and market
+
+- Good startup ideas usually start from real problems, preferably problems the founders know
+  personally and can build for.
+- Look for intensity before breadth. A few people who urgently need the thing beat many people
+  who say it sounds interesting.
+- If the idea feels too broad, ask: who is the first narrow customer, what painful job do they
+  hire this for, and why now?
+- If the user has no idea yet, push them toward observation: workflows, annoyances, expensive
+  hacks, and changes in the world that create newly possible products.
+
+### MVP and product
+
+- The MVP is the smallest product that can create real user learning, not a small version of the
+  eventual company.
+- Ship earlier than feels comfortable, but not before there is a clear testable promise.
+- Do things manually when automation would hide whether users actually care.
+- Product quality means solving the urgent user problem and creating an unusually good early
+  experience, not polishing every surface.
+
+### Users and growth
+
+- Talking to users is a job, not a slogan. Ask about what they already do, what broke, what they
+  tried, what they paid for, and what would make them switch.
+- Recruit early users by hand. Do not wait for distribution to happen.
+- Measure growth weekly. Early numbers are small; compounding and retention matter more than
+  vanity scale.
+- A launch is a learning event. Launch repeatedly, learn from who reacts, then narrow or expand.
+
+### Fundraising
+
+- Fundraising is not company progress. Use it when it helps the company move faster, not as the
+  main validation loop.
+- A good fundraise story is simple: big problem, specific customer pull, strong team, credible
+  insight, and evidence that the company can grow.
+- Keep investor writing plain and founder-written. No marketing fog, no inflated category
+  language, no hiding the actual business.
+- Ask whether the company can make meaningful progress without this round. That pressure often
+  improves both the business and the pitch.
+
+### Hiring and operations
+
+- Hire when a function is breaking and the company has learned what excellent work in that
+  function looks like.
+- Before hiring, ask whether the founders can do the work manually, simplify the process, or use
+  tools to remove it.
+- Avoid organizational theater: meetings, dashboards, planning cycles, and titles that do not
+  change user or revenue outcomes.
+
+### Founder psychology
+
+- Early startups are fragile. Treat morale, focus, and speed as company assets.
+- Challenge avoidant behavior: endless rebuilding, broad positioning, premature hiring,
+  over-research, investor chasing, and polished decks before customer proof.
+- Maintain intensity without magical thinking. The answer is usually a smaller sharper plan
+  executed every week.
+
+## Diagnostic prompts
+
+Use these questions to force clarity:
+
+- What did users do last week that they did not do before?
+- Who exactly wants this most, and what are they doing without it?
+- What is the one metric that would make this week obviously better?
+- What part of the product could be manual for the next ten customers?
+- If you had to get one paying customer in seven days, what would you do?
+- What are you doing that feels productive but is not changing user behavior?
+- What would make you change your mind about this idea?
+- Are you default alive? If not, what has to become true before runway runs out?
+
+## Canonical YC links
+
+Start here when the answer would benefit from primary material. Prefer official YC and Paul
+Graham sources over summaries.
+
+- YC Startup Library: https://www.ycombinator.com/library
+- Startup School: https://www.startupschool.org/
+- Office Hours collection: https://www.ycombinator.com/library/carousel/Office%20Hours
+- Startup School collection: https://www.ycombinator.com/library/carousel/Startup%20School
+- Essays by Paul Graham at YC: https://www.ycombinator.com/library/carousel/Essays%20by%20Paul%20Graham
+- Paul Graham essays index: https://www.paulgraham.com/articles.html
+- YC essential startup advice: https://www.ycombinator.com/library/4D-yc-s-essential-startup-advice
+- Order of operations for starting a startup: https://www.ycombinator.com/library/61-order-of-operations-for-starting-a-startup
+- How to get startup ideas: https://www.ycombinator.com/library/8g-how-to-get-startup-ideas
+- How to talk to users: https://www.ycombinator.com/library/Iq-how-to-talk-to-users
+- How to plan an MVP: https://www.ycombinator.com/library/6f-how-to-plan-an-mvp
+- How to build an MVP: https://www.ycombinator.com/library/Io-how-to-build-an-mvp
+- How to get your first customers: https://www.ycombinator.com/library/Ip-how-to-get-your-first-customers
+- The real product-market fit: https://www.ycombinator.com/library/5z-the-real-product-market-fit
+- Growth for startups: https://www.ycombinator.com/library/6k-growth-for-startups
+- YC guide to business models: https://www.ycombinator.com/library/Gh-yc-guide-to-business-models
+- Getting press for your startup: https://www.ycombinator.com/library/4c-getting-press-for-your-startup
+- Modern Startup Funding: https://www.startupschool.org/
+- Paul Graham, Do Things that Don't Scale: https://www.paulgraham.com/ds.html
+- Paul Graham, How to Get Startup Ideas: https://www.paulgraham.com/startupideas.html
+- Paul Graham, Default Alive or Default Dead?: https://www.paulgraham.com/aord.html
+
+## Output formats
+
+For office hours, prefer:
+
+- Snapshot: stage, users, traction, runway, current priority.
+- Diagnosis: the bottleneck and the riskiest assumption.
+- Prescription: one weekly priority, one experiment, and success criteria.
+- Homework: concrete next actions and what evidence to bring back.
+
+For fundraising or pitch review, prefer:
+
+- Plain one-sentence company description.
+- What is compelling.
+- What is unclear or weak.
+- The evidence investors will ask for.
+- Rewritten pitch bullets in direct founder language.
+
+For product/growth work, prefer:
+
+- User segment.
+- Pain and current workaround.
+- Manual test.
+- MVP scope.
+- Metric.
+- Seven-day plan.
+`;
+}
+
+const Y_COMBINATOR_KNOWLEDGE_SKILL_MD = buildYCombinatorKnowledgeSkillMd();
+
+export const MOVE_TO_OPENCOMPANY_SKILL_ID = "move-to-opencompany";
+
+function buildMoveToOpenCompanySkillMd(): string {
+  return `---
+name: move-to-opencompany
+description: Import an external knowledge base — a GitHub repo or a set of folders/files — into the Brain, safely. Stage, preview, confirm, commit, and report a receipt. Use when the user wants to migrate notes, docs, a wiki, or an existing second brain into OpenCompany.
+---
+
+# Import a knowledge base into OpenCompany
+
+You bring an outside knowledge base (a GitHub repo, an exported wiki, a pile of markdown) into the
+user's Brain — without ever silently losing or clobbering their content. Two rules hold the whole
+skill together:
+
+1. Stage in work/, commit to the Brain. work/ is your private, ephemeral scratch space — clone,
+   inspect, and transform there. Nothing in work/ survives the session and the user never sees it,
+   so an import that only landed in work/ is LOST. The Brain is where imports persist:
+   personal-brain/ (your default — the user's private knowledge) or brain/ for a shared company
+   workspace.
+2. Never overwrite blind. Default to SKIP on a path collision. Every overwrite is recoverable (the
+   prior version is captured automatically when you save), but the user still decides — surface
+   collisions in the preview and only overwrite when they say so.
+
+## The procedure
+
+### 1. Locate and STAGE the source (in work/)
+- GitHub repo: clone it into work/import-src with the gh tool (gh repo clone <owner/name>
+  work/import-src). For a public repo not attached to this agent, fall back to the shell:
+  git clone --depth 1 <https-url> work/import-src.
+- Files the user pasted, attached, or pointed at a path: copy them under work/import-src/ with the
+  shell.
+- Survey with list_files work/import-src and read a few representative files. Layouts vary — do not
+  assume structure.
+
+### 2. PLAN the mapping (no writes yet)
+- Decide each source file's destination Brain path. Map the source folders onto a clean wiki shape
+  (personal-brain/<area>/... or brain/wiki/<area>/...); rename messy paths to something a human
+  would keep.
+- Convert non-markdown text to .md where sensible; leave already-markdown as-is.
+- Exclude noise: .git/, build output, binaries, lockfiles — anything that is not knowledge.
+- Respect the size limits. A single file over 2 MB, or a personal brain growing past ~32 MB total,
+  is too large to load back into a session and would be dropped. Mark oversized files to SKIP or
+  split, and say so — never let one vanish silently.
+- Detect collisions: for each destination, read_file it. Classify NEW (nothing there), IDENTICAL
+  (same content — skip, no-op), or DIFFERENT (a real collision that needs a decision).
+
+### 3. PREVIEW + CONFIRM (ask_user_question)
+Show a compact preview before touching the Brain: how many files will be imported, the destination
+tree, which are skipped and why (noise / too big / identical), and every DIFFERENT collision. Then
+ask_user_question once: proceed as previewed, and for collisions choose skip-existing (default),
+overwrite (recoverable), or import-as a <name>.imported.md copy. Do not write until they answer.
+
+### 4. COMMIT (write_file into the Brain)
+- Write each planned file with write_file to its Brain destination (personal-brain/... or
+  brain/...). These persist and surface to the user; work/ does not.
+- Be idempotent: skip IDENTICAL files and honor the user's collision choice. Running the skill
+  twice on the same source converges to the same Brain — never duplicate.
+- If the import is large, commit in coherent batches by area rather than truncating mid-import.
+
+### 5. RECEIPT (always)
+End with an honest, structured tally:
+- Imported: N — list the destination paths (or per-folder counts if there are many).
+- Skipped: M — each with a reason (identical / too large / excluded noise / user chose skip).
+- Overwritten: K — note these are recoverable (a prior version was saved automatically).
+- Lost: 0 — this is the contract. If anything could not be imported AND could not be safely
+  skipped, say so loudly and leave the source in work/ so nothing is dropped silently.
+
+## Guardrails
+- Never import directly into work/ as a destination — it is staging only.
+- memory/ is off-limits to file tools; never route imports there.
+- This skill grants no new tools — it is the safe procedure around gh, shell, list_files,
+  read_file, write_file, and ask_user_question that you already have.
+`;
+}
+const MOVE_TO_OPENCOMPANY_SKILL_MD = buildMoveToOpenCompanySkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -941,6 +1208,28 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
     addable: true,
     files: [{ path: "SKILL.md", content: HUMANIZER_SKILL_MD }],
   },
+  {
+    id: Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
+    name: "Y Combinator knowledge",
+    description:
+      "Be a high-leverage YC-style startup sparring partner — use public YC/PG startup teachings for founder office hours, strategy, MVP scope, users, growth, fundraising, hiring, and prioritization.",
+    // Offered, not default-on: most useful for founder, product, growth, fundraising, and
+    // company-strategy agents, but too domain-specific to load in every session.
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: Y_COMBINATOR_KNOWLEDGE_SKILL_MD }],
+  },
+  {
+    id: MOVE_TO_OPENCOMPANY_SKILL_ID,
+    name: "Import a knowledge base",
+    description:
+      "Import an external knowledge base (a GitHub repo or folders/files) into the Brain safely — stage in work/, preview, confirm, commit to personal-brain/, and report a receipt (imported N, skipped M, lost 0). Use when migrating notes, docs, or a wiki into OpenCompany.",
+    // Offered, not default-on: only relevant during a one-time migration, so it would be noise in
+    // every session. The durability layer (PRO-244 version backup) makes its overwrites safe.
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: MOVE_TO_OPENCOMPANY_SKILL_MD }],
+  },
 ];
 
 export const AGENT_SKILL_DEFINITION_BY_ID = new Map(
@@ -967,6 +1256,7 @@ export type ResolvedSkillMetadata = {
   id: string;
   name: string;
   description: string;
+  command?: string;
   origin: "builtin" | "external" | "personal";
   source?: AgentSkillSource;
   provenance?: "agent" | "user";
@@ -1162,7 +1452,7 @@ export type PersonalSkillScanResult = {
 // `description`, and additionally reads the optional `provenance` marker (agent- vs user-authored).
 function parsePersonalSkillFrontmatter(
   content: string,
-): { name: string; description: string; provenance?: "agent" | "user" } | null {
+): { name: string; description: string; command?: string; provenance?: "agent" | "user" } | null {
   const normalized = content.replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) return null;
   const end = normalized.indexOf("\n---", 4);
@@ -1181,7 +1471,13 @@ function parsePersonalSkillFrontmatter(
   const rawProvenance = typeof record.provenance === "string" ? record.provenance.trim() : "";
   const provenance =
     rawProvenance === "agent" || rawProvenance === "user" ? rawProvenance : undefined;
-  return { name, description, ...(provenance ? { provenance } : {}) };
+  const command = normalizeSkillCommand(record.command);
+  return {
+    name,
+    description,
+    ...(command ? { command } : {}),
+    ...(provenance ? { provenance } : {}),
+  };
 }
 
 // Discover the agent's personal skills from its bundle files. Pure: no DB, no files, no network —
@@ -1252,6 +1548,7 @@ export function scanPersonalSkills(input: {
         id,
         name: parsed.name,
         description: parsed.description,
+        ...(parsed.command ? { command: parsed.command } : {}),
         origin: "personal",
         ...(parsed.provenance ? { provenance: parsed.provenance } : {}),
       },

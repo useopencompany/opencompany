@@ -88,6 +88,7 @@ export type BrokerTokenTotals = {
   inputCacheWriteTokens: number;
   outputTokens: number;
   unparsedRequestCount: number;
+  settledToolUsageId: number | null;
 };
 
 type InsertTokenRow = {
@@ -112,6 +113,7 @@ export type BrokerTokenStore = {
   revokeToken(tokenId: string): Promise<void>;
   revokeTokensForSession(sessionId: string): Promise<string[]>;
   claimSettlement(tokenId: string): Promise<BrokerTokenTotals | null>;
+  releaseSettlementClaim(tokenId: string): Promise<void>;
   findSettleableTokenIds(limit: number): Promise<string[]>;
   insertSettledToolUsage(input: {
     sessionId: string;
@@ -120,6 +122,7 @@ export type BrokerTokenStore = {
     toolName: string;
     provider: string;
     operation: string;
+    providerRequestId: string;
     costUsdMicros: number;
     rawUsage: Record<string, unknown>;
   }): Promise<{ id: number }>;
@@ -151,7 +154,8 @@ const TOTALS_COLUMNS = sql`
   input_cache_read_tokens AS "inputCacheReadTokens",
   input_cache_write_tokens AS "inputCacheWriteTokens",
   output_tokens AS "outputTokens",
-  unparsed_request_count AS "unparsedRequestCount"
+  unparsed_request_count AS "unparsedRequestCount",
+  settled_tool_usage_id AS "settledToolUsageId"
 `;
 
 export function createDbBrokerTokenStore(): BrokerTokenStore {
@@ -248,15 +252,43 @@ export function createDbBrokerTokenStore(): BrokerTokenStore {
     },
 
     async claimSettlement(tokenId) {
-      // The CAS: exactly one caller flips settled_at and receives the totals.
+      // The CAS: exactly one caller flips settled_at and receives the totals. Stale,
+      // incomplete settlement claims are reclaimable so a runner death after claim but
+      // before debit cannot strand already-metered spend.
       const result = await getDb().execute(sql`
         UPDATE llm_broker_tokens
         SET settled_at = now()
-        WHERE id = ${tokenId} AND settled_at IS NULL
+        WHERE id = ${tokenId}
+          AND (
+            settled_at IS NULL
+            OR (
+              request_count > 0
+              AND settled_at < now() - interval '5 minutes'
+              AND (
+                settled_tool_usage_id IS NULL
+                OR (
+                  spent_usd_micros > 0
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM workspace_credit_ledger
+                    WHERE tool_usage_id = settled_tool_usage_id
+                  )
+                )
+              )
+            )
+          )
         RETURNING ${TOTALS_COLUMNS}
       `);
       const row = rowsFromExecute<BrokerTokenTotals>(result)[0];
       return row ? normalizeTotals(row) : null;
+    },
+
+    async releaseSettlementClaim(tokenId) {
+      await getDb().execute(sql`
+        UPDATE llm_broker_tokens
+        SET settled_at = NULL
+        WHERE id = ${tokenId}
+      `);
     },
 
     async findSettleableTokenIds(limit) {
@@ -266,8 +298,25 @@ export function createDbBrokerTokenStore(): BrokerTokenStore {
       const result = await getDb().execute(sql`
         SELECT id
         FROM llm_broker_tokens
-        WHERE settled_at IS NULL
+        WHERE (
+          settled_at IS NULL
           AND (revoked_at IS NOT NULL OR expires_at < now() - interval '5 minutes')
+        )
+        OR (
+          request_count > 0
+          AND settled_at < now() - interval '5 minutes'
+          AND (
+            settled_tool_usage_id IS NULL
+            OR (
+              spent_usd_micros > 0
+              AND NOT EXISTS (
+                SELECT 1
+                FROM workspace_credit_ledger
+                WHERE tool_usage_id = settled_tool_usage_id
+              )
+            )
+          )
+        )
         LIMIT ${limit}
       `);
       return rowsFromExecute<{ id: string }>(result).map((row) => row.id);
@@ -282,9 +331,11 @@ export function createDbBrokerTokenStore(): BrokerTokenStore {
         )
         VALUES (
           ${input.sessionId}, ${input.messageId}, NULL, ${input.toolCallId}, ${input.toolName},
-          ${input.provider}, ${input.operation}, NULL, ${input.costUsdMicros},
+          ${input.provider}, ${input.operation}, ${input.providerRequestId}, ${input.costUsdMicros},
           ${JSON.stringify(input.rawUsage)}::jsonb
         )
+        ON CONFLICT (provider_request_id) WHERE provider_request_id LIKE 'broker:%'
+        DO UPDATE SET raw_usage = agent_session_tool_usage.raw_usage
         RETURNING id
       `);
       const row = rowsFromExecute<{ id: number }>(result)[0];
@@ -315,6 +366,7 @@ function normalizeTotals(row: BrokerTokenTotals): BrokerTokenTotals {
     inputCacheWriteTokens: Number(row.inputCacheWriteTokens),
     outputTokens: Number(row.outputTokens),
     unparsedRequestCount: Number(row.unparsedRequestCount),
+    settledToolUsageId: row.settledToolUsageId == null ? null : Number(row.settledToolUsageId),
   };
 }
 
@@ -382,88 +434,109 @@ export async function settleBrokerToken(
   const totals = await store.claimSettlement(tokenId);
   if (!totals) return { settled: false, reason: "already_settled" };
 
-  // A token that never reached the broker (or only made unmetered failed requests)
-  // settles as a no-op; the token row remains as the audit trail.
-  if (totals.requestCount === 0 && totals.spentUsdMicros === 0) {
-    return { settled: true, billed: false };
-  }
+  try {
+    // A token that never reached the broker settles as a no-op; the token row remains
+    // as the audit trail. Tokens with request rows, even zero-cost rows, still get a
+    // tool-usage row so reconciliation can see what happened.
+    if (totals.requestCount === 0 && totals.spentUsdMicros === 0) {
+      return { settled: true, billed: false };
+    }
 
-  const provider = settlementProvider(totals.toolName);
-  const operation = "brokered";
-  const cost = calculateHostedToolUsageCost({
-    provider,
-    operation,
-    providerCostUsdMicros: totals.spentUsdMicros,
-    costSource: "broker_metered",
-  });
-
-  const toolUsageRow = await store.insertSettledToolUsage({
-    sessionId: totals.sessionId,
-    messageId: totals.messageId,
-    toolCallId: totals.toolCallId ?? `broker:${totals.id}`,
-    toolName: totals.toolName,
-    provider,
-    operation,
-    costUsdMicros: cost.providerCostUsdMicros,
-    rawUsage: {
-      costSource: "broker_metered",
-      brokerTokenId: totals.id,
-      brokerProvider: totals.provider,
-      requestCount: totals.requestCount,
-      unparsedRequestCount: totals.unparsedRequestCount,
-      inputTokens: totals.inputTokens,
-      inputCacheReadTokens: totals.inputCacheReadTokens,
-      inputCacheWriteTokens: totals.inputCacheWriteTokens,
-      outputTokens: totals.outputTokens,
-    },
-  });
-
-  if (cost.billable) {
-    await recordDebit({
-      db: getDbImpl(),
-      sessionId: totals.sessionId,
-      messageId: totals.messageId,
-      toolUsageId: toolUsageRow.id,
-      source: "tool_usage",
-      providerCostUsdMicros: cost.providerCostUsdMicros,
-      platformFeeUsdMicros: cost.platformFeeUsdMicros,
-      totalCostUsdMicros: cost.totalCostUsdMicros,
-      costBasis: cost.costBasis,
-      metadata: {
-        brokerTokenId: totals.id,
-        toolCallId: totals.toolCallId,
-        toolName: totals.toolName,
-      },
-    });
-  }
-
-  await store.linkSettledToolUsage(totals.id, toolUsageRow.id);
-
-  // Unconditional (lease-less) append so the session cost UI rolls the brokered cost in.
-  // Same payload shape as recordToolUsage's session.tool_usage event.
-  await appendEvent(getDbImpl(), {
-    sessionId: totals.sessionId,
-    messageId: totals.messageId,
-    type: "session.tool_usage",
-    payload: {
-      messageId: totals.messageId ?? "",
-      toolCallId: totals.toolCallId ?? `broker:${totals.id}`,
-      toolName: totals.toolName,
+    const provider = settlementProvider(totals.toolName);
+    const operation = "brokered";
+    const cost = calculateHostedToolUsageCost({
       provider,
       operation,
-      costUsdMicros: cost.providerCostUsdMicros,
-      providerCostUsdMicros: cost.providerCostUsdMicros,
-      platformFeeUsdMicros: cost.platformFeeUsdMicros,
-      chargedCostUsdMicros: cost.totalCostUsdMicros,
-    },
-  });
+      providerCostUsdMicros: totals.spentUsdMicros,
+      costSource: "broker_metered",
+    });
+    const providerRequestId = `broker:${totals.id}`;
 
-  return {
-    settled: true,
-    billed: cost.billable,
-    toolUsageId: toolUsageRow.id,
-    chargedCostUsdMicros: cost.totalCostUsdMicros,
-  };
+    const toolUsageRow = totals.settledToolUsageId
+      ? { id: totals.settledToolUsageId }
+      : await store.insertSettledToolUsage({
+          sessionId: totals.sessionId,
+          messageId: totals.messageId,
+          toolCallId: totals.toolCallId ?? providerRequestId,
+          toolName: totals.toolName,
+          provider,
+          operation,
+          providerRequestId,
+          costUsdMicros: cost.providerCostUsdMicros,
+          rawUsage: {
+            costSource: "broker_metered",
+            brokerTokenId: totals.id,
+            brokerProvider: totals.provider,
+            requestCount: totals.requestCount,
+            unparsedRequestCount: totals.unparsedRequestCount,
+            inputTokens: totals.inputTokens,
+            inputCacheReadTokens: totals.inputCacheReadTokens,
+            inputCacheWriteTokens: totals.inputCacheWriteTokens,
+            outputTokens: totals.outputTokens,
+          },
+        });
+
+    if (!totals.settledToolUsageId) {
+      await store.linkSettledToolUsage(totals.id, toolUsageRow.id);
+    }
+
+    if (cost.billable) {
+      await recordDebit({
+        db: getDbImpl(),
+        sessionId: totals.sessionId,
+        messageId: totals.messageId,
+        toolUsageId: toolUsageRow.id,
+        source: "tool_usage",
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        costBasis: cost.costBasis,
+        metadata: {
+          brokerTokenId: totals.id,
+          toolCallId: totals.toolCallId,
+          toolName: totals.toolName,
+        },
+      });
+    }
+
+    // Unconditional (lease-less) append so the session cost UI rolls the brokered cost in.
+    // Same payload shape as recordToolUsage's session.tool_usage event.
+    await appendEvent(getDbImpl(), {
+      sessionId: totals.sessionId,
+      messageId: totals.messageId,
+      type: "session.tool_usage",
+      payload: {
+        messageId: totals.messageId ?? "",
+        toolCallId: totals.toolCallId ?? providerRequestId,
+        toolName: totals.toolName,
+        provider,
+        operation,
+        costUsdMicros: cost.providerCostUsdMicros,
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        chargedCostUsdMicros: cost.totalCostUsdMicros,
+      },
+    });
+
+    return {
+      settled: true,
+      billed: cost.billable,
+      toolUsageId: toolUsageRow.id,
+      chargedCostUsdMicros: cost.totalCostUsdMicros,
+    };
+  } catch (error) {
+    try {
+      await store.releaseSettlementClaim(totals.id);
+    } catch (releaseError) {
+      brokerLogger.error("Failed to release broker settlement claim after settlement error", {
+        event: "opencompany.llm_broker_settlement_release_failed",
+        token_id: totals.id,
+        session_id: totals.sessionId,
+        error: releaseError,
+      });
+    }
+    throw error;
+  }
 }
 
 // Run one brokered delegation: mint a token for the tool call, hand it to `fn`, and

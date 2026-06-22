@@ -2,12 +2,12 @@
 
 import {
   DEFAULT_GROUP_STANCE,
-  PERMISSION_GROUP_LABELS,
   type PermissionGroup,
   POLICY_DECISIONS,
   type PolicyDecision,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  permissionLabelFor,
 } from "@opencompany/agent-runtime";
 import { useState, useTransition } from "react";
 import { useToast } from "@/components/ToastProvider";
@@ -41,19 +41,29 @@ export function ToolPolicyEditor({ providerKey, overrides }: ToolPolicyEditorPro
   const update = (group: PermissionGroup, decision: PolicyDecision) => {
     const previous = decisions[group];
     setDecisions((current) => ({ ...current, [group]: decision }));
+    const revert = () => {
+      setDecisions((current) => ({
+        ...current,
+        [group]: previous ?? DEFAULT_GROUP_STANCE[group],
+      }));
+    };
     startTransition(async () => {
-      const result = await setWorkspaceToolPolicy({
-        providerKey,
-        permissionGroup: group,
-        decision,
-      });
-      if (!result.ok) {
-        // Revert the optimistic change on failure.
-        setDecisions((current) => ({
-          ...current,
-          [group]: previous ?? DEFAULT_GROUP_STANCE[group],
-        }));
-        showError(result.error);
+      try {
+        const result = await setWorkspaceToolPolicy({
+          providerKey,
+          permissionGroup: group,
+          decision,
+        });
+        if (!result.ok) {
+          // Revert the optimistic change on failure.
+          revert();
+          showError(result.error);
+        }
+      } catch {
+        // A thrown server-action error must not escalate to the route error
+        // boundary and tear down a surrounding flow (e.g. the onboarding wizard).
+        revert();
+        showError("Couldn't update this permission. Please try again.");
       }
     });
   };
@@ -65,7 +75,7 @@ export function ToolPolicyEditor({ providerKey, overrides }: ToolPolicyEditorPro
         <div key={group} className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[12.5px] font-medium text-ink">
-              {PERMISSION_GROUP_LABELS[group]}
+              {permissionLabelFor(providerKey, group)}
             </div>
             <div className="text-[11px] leading-4 text-ink-subtle">
               {permissionDescriptionFor(providerKey, group)}
@@ -73,7 +83,7 @@ export function ToolPolicyEditor({ providerKey, overrides }: ToolPolicyEditorPro
           </div>
           <div
             role="radiogroup"
-            aria-label={`${PERMISSION_GROUP_LABELS[group]} permission`}
+            aria-label={`${permissionLabelFor(providerKey, group)} permission`}
             className="inline-flex shrink-0 overflow-hidden rounded-md border border-border"
           >
             {POLICY_DECISIONS.map((decision) => {

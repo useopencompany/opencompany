@@ -4,12 +4,16 @@ import {
   parseGitHubCliArgs,
   toolDisplayTitle,
 } from "@opencompany/agent-runtime";
+import { isSendMode, type SendMode } from "@/lib/agent-sessions/send-mode";
 
 export type SessionMessage = {
   id: string;
   role: string;
   content: string;
   status: string;
+  // Set on user messages dispatched while a run was already in flight, so the composer can show
+  // a "Steering"/"Queued"/"Interrupt" chip until the agent answers. Absent on idle/first sends.
+  sendMode?: SendMode | null;
   internal?: boolean;
   modelMessage?: Record<string, unknown> | null;
   toolName?: string | null;
@@ -24,6 +28,10 @@ export type SessionMessage = {
     kind: "image" | "pdf" | "text";
     mediaType: string;
     filename: string;
+    // Client-only, never persisted or serialized: a local object-URL set on an OPTIMISTIC
+    // just-sent message so the image renders instantly, before the `/api/attachments/{id}` row
+    // exists. Server-loaded messages omit it and fall back to the served URL.
+    previewUrl?: string;
   }>;
 };
 
@@ -82,6 +90,12 @@ export type SessionRuntimeState = {
   // token/usage delta alone leaves it false), so the displayed status/error can
   // never momentarily regress to the seed and flicker. See the merge in SessionView.
   statusObserved: boolean;
+  // Wall-clock (epoch ms) of the last batch the stream consumer delivered. Stamped by
+  // subscribeSessionStream (NOT the pure reducer), so the view can tell a live overlay
+  // from a dead/stalled one: if the server snapshot was fetched after the stream last
+  // delivered anything AND carries newer durable events, the snapshot — not the stale
+  // overlay — is authoritative. Absent on states never touched by the stream consumer.
+  lastEventReceivedAt?: number;
 };
 
 export type SessionAggregateSnapshot = {
@@ -96,9 +110,12 @@ export type SessionAggregateSnapshot = {
  * but as-of fetch time) with the live Durable-Stream overlay. The snapshot is the
  * floor: a message present only in the snapshot — e.g. a user message that only the
  * web's best-effort stream append was meant to publish, or any history that predates
- * the stream — is never dropped. The overlay's copy of a shared message wins (it
- * carries live deltas/status); messages new since the snapshot are appended in
- * stream order (they are chronologically newer). Keyed by message id.
+ * the stream — is never dropped. The overlay's copy of a shared message usually wins
+ * because it carries live deltas/status. The exception is a completed assistant
+ * overlay that lacks the snapshot's canonical final payload (`modelMessage`/content),
+ * which can happen when transient deltas or an older completion event were missed.
+ * Messages new since the snapshot are appended in stream order (they are
+ * chronologically newer). Keyed by message id.
  */
 export function mergeMessages(
   snapshot: SessionMessage[],
@@ -108,13 +125,38 @@ export function mergeMessages(
   const merged: SessionMessage[] = [];
   const seen = new Set<string>();
   for (const message of snapshot) {
-    merged.push(overlayById.get(message.id) ?? message);
+    const overlayMessage = overlayById.get(message.id);
+    merged.push(overlayMessage ? mergeSharedMessage(message, overlayMessage) : message);
     seen.add(message.id);
   }
   for (const message of overlay) {
     if (!seen.has(message.id)) merged.push(message);
   }
   return merged;
+}
+
+function mergeSharedMessage(snapshot: SessionMessage, overlay: SessionMessage): SessionMessage {
+  if (!shouldRestoreCompletedAssistantSnapshot(snapshot, overlay)) return overlay;
+
+  return {
+    ...overlay,
+    content: snapshot.content,
+    ...(snapshot.modelMessage !== undefined ? { modelMessage: snapshot.modelMessage } : {}),
+    completedAt: snapshot.completedAt ?? overlay.completedAt,
+    thinkingDurationSeconds: snapshot.thinkingDurationSeconds ?? overlay.thinkingDurationSeconds,
+    outputReasoningTokens: snapshot.outputReasoningTokens ?? overlay.outputReasoningTokens,
+  };
+}
+
+function shouldRestoreCompletedAssistantSnapshot(
+  snapshot: SessionMessage,
+  overlay: SessionMessage,
+) {
+  if (snapshot.role !== "assistant" || overlay.role !== "assistant") return false;
+  if (snapshot.status !== "completed" || overlay.status !== "completed") return false;
+  if (overlay.modelMessage) return false;
+  if (snapshot.modelMessage) return true;
+  return snapshot.content.length > overlay.content.length;
 }
 
 /**
@@ -244,6 +286,9 @@ export type RuntimeToolCall = {
   inputPreview: string;
   activityPreview: string;
   outputPreview: string;
+  brainFile?: RuntimeBrainFileReference | undefined;
+  // Legacy company-Brain shortcut. New UI should prefer `brainFile`, which also
+  // identifies Personal Brain writes from `personal-brain/`.
   brainPath?: string | undefined;
   issueUrl?: string | undefined;
   approval?: RuntimeToolApprovalState | undefined;
@@ -266,6 +311,11 @@ export type RuntimeToolCall = {
   completedEventId: number | null;
   // ISO timestamp from tool.started event, used to show an elapsed counter for long-running tools.
   startedAt?: string | undefined;
+};
+
+export type RuntimeBrainFileReference = {
+  scope: "company" | "personal";
+  path: string;
 };
 
 export type AssistantTurnPart =
@@ -372,6 +422,8 @@ export function applyRuntimeEventToState(
     if (messageId && role && !next.messages.some((message) => message.id === messageId)) {
       const status =
         optionalString(event.payload.status) ?? (role === "user" ? "completed" : "running");
+      const sendModeRaw = optionalString(event.payload.sendMode);
+      const sendMode = isSendMode(sendModeRaw) ? sendModeRaw : null;
       next = {
         ...next,
         messages: [
@@ -382,6 +434,7 @@ export function applyRuntimeEventToState(
             content: optionalString(event.payload.content) ?? "",
             status,
             internal,
+            ...(sendMode ? { sendMode } : {}),
             createdAt: event.createdAt ?? new Date().toISOString(),
           },
         ],
@@ -736,7 +789,10 @@ export function buildAssistantTurnParts(
       const toolCallId = readString(part.toolCallId);
       if (!toolCallId) continue;
       const matchingToolCall = toolCallsById.get(toolCallId);
-      const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
+      const brainFile =
+        matchingToolCall?.brainFile ??
+        brainFileReferenceFromLegacyPath(matchingToolCall?.brainPath) ??
+        brainFileForToolCallPart(part);
       const issueUrl =
         matchingToolCall?.issueUrl ??
         linearIssueUrlFromToolCallPart(part) ??
@@ -758,7 +814,8 @@ export function buildAssistantTurnParts(
           activityPreview: matchingToolCall?.activityPreview ?? "",
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
-          ...(brainPath ? { brainPath } : {}),
+          ...(brainFile ? { brainFile } : {}),
+          ...(brainFile?.scope === "company" ? { brainPath: brainFile.path } : {}),
           ...(issueUrl ? { issueUrl } : {}),
           ...(matchingToolCall?.approval ? { approval: matchingToolCall.approval } : {}),
           ...(matchingToolCall?.question ? { question: matchingToolCall.question } : {}),
@@ -1050,10 +1107,10 @@ export function buildRuntimeToolCallsForMessage(
     }
 
     if (event.type === "file.changed") {
-      const brainPath = normalizeBrainWorkspacePath(readString(event.payload.path));
-      const call = brainPath ? findLatestToolCall(calls, "write_file") : null;
-      if (brainPath && call) {
-        call.brainPath = brainPath;
+      const brainFile = normalizeBrainWorkspaceFile(readString(event.payload.path));
+      const call = brainFile ? findLatestFileMutationToolCall(calls) : null;
+      if (brainFile && call) {
+        setToolCallBrainFile(call, brainFile);
       }
       continue;
     }
@@ -1159,9 +1216,9 @@ export function buildRuntimeToolCallsForMessage(
           decisionSource: "user",
         };
       }
-      const brainPath = brainPathForToolPayload(call.name, display.input);
-      if (brainPath) {
-        call.brainPath = brainPath;
+      const brainFile = brainFileForToolPayload(call.name, display.input);
+      if (brainFile) {
+        setToolCallBrainFile(call, brainFile);
       }
       const issueUrl = linearIssueUrlFromPayload(event.payload.input);
       if (issueUrl) {
@@ -1186,9 +1243,9 @@ export function buildRuntimeToolCallsForMessage(
               event.payload.outputPreview || event.payload.error || event.payload.output,
             )
           : formatRuntimePreview(event.payload.outputPreview || event.payload.output);
-      const brainPath = brainPathForToolPayload(call.name, event.payload.output);
-      if (brainPath) {
-        call.brainPath = brainPath;
+      const brainFile = brainFileForToolPayload(call.name, event.payload.output);
+      if (brainFile) {
+        setToolCallBrainFile(call, brainFile);
       }
       // Output carries the canonical issue URL, so let it win over any input-derived value.
       const issueUrl =
@@ -1241,7 +1298,24 @@ function buildEventAssistantTurnParts(
     text = "";
   }
 
-  for (const event of events) {
+  // Render in durable-id order, not array-arrival order. Durable events carry a monotonic
+  // id — the same order the refetched Postgres snapshot (modelMessage.content) uses — but
+  // the live Durable Stream can deliver a batch out of order (reconnect/replay). Without
+  // this, the streaming view emits tool-call parts in arrival order, so the list visibly
+  // reorders for a moment when the snapshot replaces the live overlay. Transient deltas
+  // (id === null: token/tool-arg fragments) have no id,
+  // so anchor each to the most recent durable id seen in arrival order; the index
+  // tie-break keeps a stable, in-segment order. Already-ordered input is left unchanged.
+  let lastDurableId = 0;
+  const ordered = events
+    .map((event, index) => {
+      if (event.id !== null) lastDurableId = event.id;
+      return { event, index, anchor: event.id ?? lastDurableId };
+    })
+    .sort((a, b) => a.anchor - b.anchor || a.index - b.index)
+    .map((entry) => entry.event);
+
+  for (const event of ordered) {
     if (!eventBelongsToMessage(event, messageId)) continue;
 
     if (event.type === "message.delta") {
@@ -1314,6 +1388,23 @@ function findLatestToolCall(calls: RuntimeToolCall[], name: string) {
   return null;
 }
 
+function findLatestFileMutationToolCall(calls: RuntimeToolCall[]) {
+  const isFileMutation = (call: RuntimeToolCall | undefined) =>
+    call?.name === "write_file" || call?.name === "edit_file";
+
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index];
+    if (call?.status === "running" && isFileMutation(call)) return call;
+  }
+
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index];
+    if (isFileMutation(call)) return call;
+  }
+
+  return null;
+}
+
 function buildToolResultsByCallId(messages: SessionMessage[]) {
   const resultsByCallId = new Map<string, string>();
 
@@ -1351,26 +1442,47 @@ function readToolResultPreview(modelMessage: Record<string, unknown> | null | un
   return "";
 }
 
-function brainPathForToolCallPart(part: Record<string, unknown>) {
+function brainFileForToolCallPart(part: Record<string, unknown>) {
   const name = readString(part.toolName);
   return (
-    brainPathForToolPayload(name, part.input) ||
-    brainPathForToolPayload(name, part.args) ||
+    brainFileForToolPayload(name, part.input) ||
+    brainFileForToolPayload(name, part.args) ||
     undefined
   );
 }
 
-function brainPathForToolPayload(name: string, payload: unknown) {
+function brainFileForToolPayload(name: string, payload: unknown) {
   if ((name !== "write_file" && name !== "edit_file") || !isRecord(payload)) return undefined;
-  return normalizeBrainWorkspacePath(payload.path);
+  return normalizeBrainWorkspaceFile(payload.path);
 }
 
-function normalizeBrainWorkspacePath(value: unknown) {
+function normalizeBrainWorkspaceFile(value: unknown): RuntimeBrainFileReference | undefined {
   if (typeof value !== "string") return undefined;
   const path = value.trim().replace(/^\.?\//, "");
-  if (!path.startsWith("brain/")) return undefined;
-  const brainPath = path.slice("brain/".length);
-  return brainPath || undefined;
+  if (path.startsWith("brain/")) {
+    const brainPath = path.slice("brain/".length);
+    return brainPath ? { scope: "company", path: brainPath } : undefined;
+  }
+  if (path.startsWith("personal-brain/")) {
+    const brainPath = path.slice("personal-brain/".length);
+    return brainPath ? { scope: "personal", path: brainPath } : undefined;
+  }
+  return undefined;
+}
+
+function brainFileReferenceFromLegacyPath(
+  path: string | undefined,
+): RuntimeBrainFileReference | undefined {
+  return path ? { scope: "company", path } : undefined;
+}
+
+function setToolCallBrainFile(call: RuntimeToolCall, brainFile: RuntimeBrainFileReference) {
+  call.brainFile = brainFile;
+  if (brainFile.scope === "company") {
+    call.brainPath = brainFile.path;
+  } else {
+    delete call.brainPath;
+  }
 }
 
 // Linear surfaces the canonical issue URL in tool output (and sometimes input). Pull it so the
@@ -1522,12 +1634,29 @@ function readModelReasoning(parts: Record<string, unknown>[] | null) {
 }
 
 function readReasoningDeltas(events: RuntimeEvent[], messageId: string) {
-  return events
-    .filter((event) => event.type === "message.reasoning_delta")
-    .filter((event) => eventBelongsToMessage(event, messageId))
-    .map((event) => readString(event.payload.delta))
-    .filter(Boolean)
-    .join("");
+  // Reasoning streams as a run of `message.reasoning_delta` token fragments per
+  // phase, with phases separated by `reasoning_completed`, tool calls, or any
+  // other event. Concatenate fragments WITHIN a phase seamlessly, but separate
+  // distinct phases with a blank line so they don't render as one run-on block
+  // (PRO-241: "...both channels.Hit a rate limit..."). Mirrors how the text path
+  // (buildEventAssistantTurnParts) splits per-step utterances on event boundaries.
+  const phases: string[] = [];
+  let current = "";
+  const flushPhase = () => {
+    const phase = current.trim();
+    if (phase) phases.push(phase);
+    current = "";
+  };
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, messageId)) continue;
+    if (event.type === "message.reasoning_delta") {
+      current += readString(event.payload.delta);
+      continue;
+    }
+    flushPhase();
+  }
+  flushPhase();
+  return phases.join("\n\n");
 }
 
 function hasReasoningDelta(events: RuntimeEvent[], messageId: string) {
@@ -1706,8 +1835,12 @@ function describeMemoryToolCall(args: string) {
   const command = argv[0];
   switch (command) {
     case "query": {
-      const query = findMemoryPositionalArg(argv, 1);
-      return query ? `Looking in memory for “${truncateLabelText(query)}”` : "Looking in memory";
+      const query = findMemoryPositionalArg(argv, 1) || firstCliOptionValue(argv, "--text");
+      if (query) return `Looking in memory for “${truncateLabelText(query)}”`;
+      // A text-less query with --since is a recency listing, not a search.
+      return firstCliOptionValue(argv, "--since")
+        ? "Reviewing recent memory updates"
+        : "Looking in memory";
     }
     case "get": {
       const id = findMemoryPositionalArg(argv, 1);
@@ -1786,6 +1919,7 @@ const MEMORY_CLI_VALUE_OPTIONS = new Set([
   "--status",
   "--subject",
   "--summary",
+  "--text",
   "--to",
   "--truth",
   "--type",

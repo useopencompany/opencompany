@@ -46,6 +46,7 @@ function createFakeStore() {
           inputCacheWriteTokens: 0,
           outputTokens: 0,
           unparsedRequestCount: 0,
+          settledToolUsageId: null,
         },
         revoked: false,
         settled: false,
@@ -102,12 +103,22 @@ function createFakeStore() {
       token.settled = true;
       return { ...token.totals };
     },
+    async releaseSettlementClaim(tokenId) {
+      const token = tokens.get(tokenId);
+      if (token) token.settled = false;
+    },
     async findSettleableTokenIds() {
       return [...tokens.values()]
         .filter((token) => !token.settled && token.revoked)
         .map((token) => token.row.id);
     },
     async insertSettledToolUsage(input) {
+      const existing = toolUsageRows.find(
+        (row) => row.providerRequestId === input.providerRequestId,
+      );
+      if (existing && typeof existing.id === "number") {
+        return { id: existing.id };
+      }
       const id = nextToolUsageId;
       nextToolUsageId += 1;
       toolUsageRows.push({ id, ...input });
@@ -115,7 +126,10 @@ function createFakeStore() {
     },
     async linkSettledToolUsage(tokenId, toolUsageId) {
       const token = tokens.get(tokenId);
-      if (token) token.settledToolUsageId = toolUsageId;
+      if (token) {
+        token.settledToolUsageId = toolUsageId;
+        token.totals.settledToolUsageId = toolUsageId;
+      }
     },
   };
 
@@ -283,6 +297,42 @@ describe("settleBrokerToken", () => {
     expect(first.settled).toBe(true);
     expect(second).toEqual({ settled: false, reason: "already_settled" });
     expect(recordDebit).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a failed settlement claim so the sweeper can retry without duplicate usage rows", async () => {
+    const { store, tokens, toolUsageRows } = createFakeStore();
+    const minted = await mintBrokerToken(MINT_INPUT, store);
+    await store.recordSpend({
+      tokenId: minted.tokenId,
+      sessionId: "session-1",
+      endpoint: "chat.completions",
+      model: "anthropic/claude-sonnet-4.6",
+      streamed: true,
+      upstreamStatus: 200,
+      inputTokens: 100,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 20,
+      costUsdMicros: 100_000,
+      usageParsed: true,
+      latencyMs: 100,
+      rawUsage: {},
+    });
+
+    const { deps, recordDebit } = settlementDeps(store);
+    recordDebit.mockRejectedValueOnce(new Error("ledger unavailable"));
+
+    await expect(settleBrokerToken(minted.tokenId, deps)).rejects.toThrow("ledger unavailable");
+    expect(tokens.get(minted.tokenId)?.settled).toBe(false);
+    expect(tokens.get(minted.tokenId)?.settledToolUsageId).toBe(1);
+
+    await expect(settleBrokerToken(minted.tokenId, deps)).resolves.toMatchObject({
+      settled: true,
+      billed: true,
+      toolUsageId: 1,
+    });
+    expect(toolUsageRows).toHaveLength(1);
+    expect(recordDebit).toHaveBeenCalledTimes(2);
   });
 
   it("settles unused tokens as a billing no-op", async () => {

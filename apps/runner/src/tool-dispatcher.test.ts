@@ -107,6 +107,20 @@ describe("preflightSandboxToolArgs brain scope", () => {
       ).toThrow(/Generic file tools cannot access memory\/\. Use the memory tool/);
     }
   });
+
+  it("routes personal brain/ writes to personal-brain/ instead of silently losing them", () => {
+    for (const name of ["read_file", "write_file", "edit_file", "list_files"] as const) {
+      expect(() =>
+        preflightSandboxToolArgs({
+          name,
+          args: { path: "brain/wiki/notes.md" },
+          workdir: WORKDIR,
+          brainReferences: [],
+          personal: true,
+        }),
+      ).toThrow(/brain\/ is a company-session root.*personal-brain\/wiki\/notes\.md/s);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

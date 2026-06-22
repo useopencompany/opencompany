@@ -16,6 +16,7 @@ import { and, eq } from "drizzle-orm";
 import { buildPendingAgent, newAgentId } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
+import { type PersonalBrainFolder, personalBrainFolderOptions } from "@/lib/personal/brain-folders";
 
 // The /personal experiment agent defaults to Kimi for long-horizon coding and agent workflows.
 const PERSONAL_AGENT_MODEL: AgentModelId = "moonshotai/kimi-k2.6";
@@ -100,6 +101,15 @@ function personalizeTemplate(template: string, userName: string) {
   return template.replaceAll("{{userName}}", userName);
 }
 
+function personalBrainFolderReadme(folder: PersonalBrainFolder) {
+  const option = personalBrainFolderOptions.find((item) => item.value === folder);
+  const label = option?.label ?? folder;
+  return `# ${label}
+
+${option?.description ?? ""}
+`;
+}
+
 function ensureFixedPersonalAgentIdentity(body: string, userName: string) {
   const identity = `You are ${FIXED_PERSONAL_AGENT_NAME}, ${userName}'s personal agent.`;
   const trimmedStart = body.trimStart();
@@ -166,6 +176,7 @@ export async function ensurePersonalAgent(input: {
   userId: string;
   workspaceId: string;
   userName: string;
+  personalBrainFolders?: readonly PersonalBrainFolder[];
 }): Promise<PersonalAgentRef> {
   const db = getDb();
 
@@ -312,6 +323,16 @@ export async function ensurePersonalAgent(input: {
   const personalBrainReadme = personalizeTemplate(DEFAULT_PERSONAL_BRAIN_README, input.userName);
   const personalBrainReadmePath = `${agentBundleDir(path)}/personal-brain/README.md`;
   const personalBrainReadmeHash = hashBrainContent(personalBrainReadme);
+  const selectedPersonalBrainFolders = input.personalBrainFolders ?? [];
+  const personalBrainFolderFiles = selectedPersonalBrainFolders.map((folder) => {
+    const content = personalBrainFolderReadme(folder);
+    return {
+      path: `${agentBundleDir(path)}/personal-brain/${folder}/README.md`,
+      content,
+      contentHash: hashBrainContent(content),
+      sizeBytes: brainContentSize(content),
+    };
+  });
 
   await db.batch([
     db.insert(agents).values({
@@ -344,6 +365,17 @@ export async function ensurePersonalAgent(input: {
       sizeBytes: brainContentSize(personalBrainReadme),
       githubSyncStatus: "synced",
     }),
+    ...personalBrainFolderFiles.map((file) =>
+      db.insert(agentFiles).values({
+        workspaceId: input.workspaceId,
+        agentId: id,
+        path: file.path,
+        content: file.content,
+        contentHash: file.contentHash,
+        sizeBytes: file.sizeBytes,
+        githubSyncStatus: "synced",
+      }),
+    ),
   ]);
 
   await captureServerEvent("agent_created", input.userId, {
