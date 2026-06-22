@@ -294,14 +294,15 @@ export default function PersonalShell({
           arrangement survives navigation between personal sub-routes, and so the
           sidebar can act as a drag source into the session canvas. */}
       <PersonalSplitProvider>
-        <div className="relative flex h-dvh w-full overflow-hidden overflow-x-hidden bg-sidebar">
+        <div className="relative flex h-dvh w-full overflow-hidden overflow-x-hidden bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
           {/* Sidebar: an in-flow width-collapsing column on desktop; an off-canvas drawer on
               mobile that the swipe drags 1:1 and snaps. */}
           <div
             ref={drawerRef}
             className={cn(
               "shrink-0",
-              isMobile && "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out",
+              isMobile &&
+                "fixed inset-y-0 left-0 z-40 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] transition-transform duration-200 ease-out",
               isMobile && (drawerOpen ? "translate-x-0" : "-translate-x-full"),
             )}
             // While dragging, follow the finger 1:1: the inline transform overrides the

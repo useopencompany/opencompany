@@ -540,7 +540,7 @@ function AgentDetailContent({
       )}
 
       <aside
-        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
+        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out max-lg:pt-[calc(env(safe-area-inset-top)+1rem)] max-lg:pb-[calc(env(safe-area-inset-bottom)+1rem)] max-lg:pr-[calc(env(safe-area-inset-right)+1.25rem)] lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed
             ? "hidden"
             : "fixed inset-y-0 right-0 z-40 block w-[min(328px,calc(100vw-24px))] lg:static lg:z-auto lg:w-[328px]"

@@ -95,7 +95,8 @@ export function ShellChrome({ sidebar, children }: { sidebar: ReactNode; childre
         ref={drawerRef}
         className={cn(
           "shrink-0",
-          isMobile && "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out",
+          isMobile &&
+            "fixed inset-y-0 left-0 z-40 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] transition-transform duration-200 ease-out",
           isMobile && (open ? "translate-x-0" : "-translate-x-full"),
         )}
         // While dragging, follow the finger 1:1: the inline transform overrides the
