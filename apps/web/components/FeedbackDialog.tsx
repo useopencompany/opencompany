@@ -7,11 +7,16 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import { ComposerAttachments, type PendingAttachment } from "@/components/composer-attachments";
 import { uploadFeedbackImage } from "@/lib/feedback/upload-image";
 
+// Order is deliberate: Feedback sits in the middle and is the default selection,
+// so the most common kind is the resting state and one tap reaches Bug or Idea.
 const kindOptions = [
   { value: "bug", label: "Bug" },
   { value: "feedback", label: "Feedback" },
   { value: "idea", label: "Idea" },
 ] as const;
+
+type FeedbackKind = (typeof kindOptions)[number]["value"];
+const DEFAULT_KIND: FeedbackKind = "feedback";
 
 const MAX_FEEDBACK_IMAGES = 3;
 const IMAGE_MIME_TYPES = new Set<string>(ATTACHMENT_IMAGE_MIME_TYPES);
@@ -54,6 +59,7 @@ function FeedbackForm({
   const sessionId = sessionIdFromPathname(pathname);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [kind, setKind] = useState<FeedbackKind>(DEFAULT_KIND);
   const [error, setError] = useState<string | null>(null);
 
   const imagesEnabled = Boolean(workspaceId);
@@ -275,22 +281,37 @@ function FeedbackForm({
       </div>
 
       <div className="flex flex-col gap-4 px-4 py-4">
-        <label className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
             Type
           </span>
-          <select
-            name="kind"
-            defaultValue="bug"
-            className="h-8 rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none transition-colors focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
+          <div
+            role="radiogroup"
+            aria-label="Feedback type"
+            className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5"
           >
-            {kindOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            {kindOptions.map((option) => {
+              const selected = kind === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => setKind(option.value)}
+                  className={`flex h-[30px] items-center justify-center rounded-md border text-[13px] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                    selected
+                      ? "border-black/[0.05] bg-surface font-semibold text-ink shadow-[0_1px_2px_rgba(0,0,0,0.10)]"
+                      : "border-transparent font-medium text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <input type="hidden" name="kind" value={kind} />
+        </div>
 
         <label className="flex flex-col gap-1.5">
           <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
