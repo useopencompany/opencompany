@@ -110,9 +110,12 @@ export type SessionAggregateSnapshot = {
  * but as-of fetch time) with the live Durable-Stream overlay. The snapshot is the
  * floor: a message present only in the snapshot — e.g. a user message that only the
  * web's best-effort stream append was meant to publish, or any history that predates
- * the stream — is never dropped. The overlay's copy of a shared message wins (it
- * carries live deltas/status); messages new since the snapshot are appended in
- * stream order (they are chronologically newer). Keyed by message id.
+ * the stream — is never dropped. The overlay's copy of a shared message usually wins
+ * because it carries live deltas/status. The exception is a completed assistant
+ * overlay that lacks the snapshot's canonical final payload (`modelMessage`/content),
+ * which can happen when transient deltas or an older completion event were missed.
+ * Messages new since the snapshot are appended in stream order (they are
+ * chronologically newer). Keyed by message id.
  */
 export function mergeMessages(
   snapshot: SessionMessage[],
@@ -122,13 +125,38 @@ export function mergeMessages(
   const merged: SessionMessage[] = [];
   const seen = new Set<string>();
   for (const message of snapshot) {
-    merged.push(overlayById.get(message.id) ?? message);
+    const overlayMessage = overlayById.get(message.id);
+    merged.push(overlayMessage ? mergeSharedMessage(message, overlayMessage) : message);
     seen.add(message.id);
   }
   for (const message of overlay) {
     if (!seen.has(message.id)) merged.push(message);
   }
   return merged;
+}
+
+function mergeSharedMessage(snapshot: SessionMessage, overlay: SessionMessage): SessionMessage {
+  if (!shouldRestoreCompletedAssistantSnapshot(snapshot, overlay)) return overlay;
+
+  return {
+    ...overlay,
+    content: snapshot.content,
+    ...(snapshot.modelMessage !== undefined ? { modelMessage: snapshot.modelMessage } : {}),
+    completedAt: snapshot.completedAt ?? overlay.completedAt,
+    thinkingDurationSeconds: snapshot.thinkingDurationSeconds ?? overlay.thinkingDurationSeconds,
+    outputReasoningTokens: snapshot.outputReasoningTokens ?? overlay.outputReasoningTokens,
+  };
+}
+
+function shouldRestoreCompletedAssistantSnapshot(
+  snapshot: SessionMessage,
+  overlay: SessionMessage,
+) {
+  if (snapshot.role !== "assistant" || overlay.role !== "assistant") return false;
+  if (snapshot.status !== "completed" || overlay.status !== "completed") return false;
+  if (overlay.modelMessage) return false;
+  if (snapshot.modelMessage) return true;
+  return snapshot.content.length > overlay.content.length;
 }
 
 /**
