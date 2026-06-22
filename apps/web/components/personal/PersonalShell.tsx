@@ -294,7 +294,12 @@ export default function PersonalShell({
           arrangement survives navigation between personal sub-routes, and so the
           sidebar can act as a drag source into the session canvas. */}
       <PersonalSplitProvider>
-        <div className="relative flex h-dvh w-full overflow-hidden overflow-x-hidden bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+        {/* Root backdrop. The safe-area insets (#501) pad content into the visible area while the
+            background bleeds full-screen. On mobile the surface is full-bleed canvas (the sidebar is
+            an off-canvas drawer), so the root must be `bg-canvas` — otherwise the lighter `bg-sidebar`
+            shows through the top/bottom insets as bands. On desktop the root stays `bg-sidebar` so the
+            expanded main panel can float as a rounded card with the sidebar canvas peeking around it. */}
+        <div className="relative flex h-dvh w-full overflow-hidden overflow-x-hidden bg-canvas md:bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
           {/* Sidebar: an in-flow width-collapsing column on desktop; an off-canvas drawer on
               mobile that the swipe drags 1:1 and snaps. */}
           <div

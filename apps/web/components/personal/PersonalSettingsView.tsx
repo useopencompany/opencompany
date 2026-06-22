@@ -73,7 +73,7 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
   }
 
   return (
-    <div className="mx-auto w-full max-w-[760px] px-8 pb-16 pt-10">
+    <div className="mx-auto w-full max-w-[760px] px-5 pb-16 pt-10 md:px-8">
       <header className="pb-7">
         <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Settings</h1>
         <p className="mt-1 text-[13px] text-ink-muted">Personal preferences for your agent.</p>
@@ -185,7 +185,9 @@ function Section({
 }) {
   return (
     <section className="border-t border-border-subtle py-7 first:border-t-0 first:pt-0">
-      <div className="grid grid-cols-[200px_1fr] gap-8">
+      {/* Stack label over control on mobile; the fixed 200px label column only kicks in at md,
+          otherwise the content column collapses and overflows the viewport (clipping both edges). */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[200px_1fr] md:gap-8">
         <div>
           <h2 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">{title}</h2>
           {description && (
@@ -211,7 +213,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ReadOnly({ value }: { value: string }) {
   return (
-    <div className="w-fit min-w-[220px] rounded-md border border-border bg-surface/60 px-2.5 py-1.5 text-[13px] text-ink/85">
+    <div className="w-full md:w-fit md:min-w-[220px] rounded-md border border-border bg-surface/60 px-2.5 py-1.5 text-[13px] text-ink/85">
       {value}
     </div>
   );
