@@ -24,6 +24,10 @@ export default async function PersonalSettingsPage() {
             ...entry,
             createdAt: entry.createdAt.toISOString(),
           })),
+          settings: {
+            ...billing.settings,
+            weekResetsAt: billing.settings.weekResetsAt.toISOString(),
+          },
         }}
       />
     </div>

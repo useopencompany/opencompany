@@ -124,7 +124,12 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
       );
       if (!result.ok) {
         if ("redirectTo" in result) {
-          showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
+          showOutOfCreditsToast({
+            showToast,
+            router,
+            redirectTo: result.redirectTo,
+            reason: "reason" in result ? String(result.reason) : undefined,
+          });
           return;
         }
         setError(result.error);

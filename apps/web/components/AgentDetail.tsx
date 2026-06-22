@@ -408,7 +408,12 @@ function AgentDetailContent({
         const result = await runAgentScheduleNow(agent.id, triggerId);
         if (!result.ok) {
           if ("redirectTo" in result) {
-            showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
+            showOutOfCreditsToast({
+              showToast,
+              router,
+              redirectTo: result.redirectTo,
+              reason: "reason" in result ? String(result.reason) : undefined,
+            });
             return;
           }
           showError(result.error, "Could not run schedule");
@@ -460,6 +465,7 @@ function AgentDetailContent({
                           showToast,
                           router,
                           redirectTo: result.redirectTo,
+                          reason: "reason" in result ? String(result.reason) : undefined,
                         });
                         return;
                       }
