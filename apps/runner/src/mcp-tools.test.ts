@@ -180,6 +180,111 @@ describe("createMcpToolSet", () => {
     );
   });
 
+  it("registers a not-connected stub when OAuth client setup needs reauthorization", async () => {
+    db.queryResults = [[linearServerRow()], [linearOAuthConnectionRow()]];
+    vi.mocked(createMCPClient).mockRejectedValueOnce(
+      new Error("Linear MCP needs to be reconnected from workspace settings."),
+    );
+
+    const mcpTools = await createMcpToolSet(baseInput());
+    const tools = mcpTools.tools as ToolSet;
+    const stub = tools.linear__get_connection_status;
+
+    expect(stub).toBeDefined();
+    expect(tools.linear__search_tools).toBeUndefined();
+    expect(tools.linear__use_tool).toBeUndefined();
+
+    const output = await stub?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(output).toEqual({
+      ok: false,
+      error: {
+        message: "Linear MCP needs to be reconnected from workspace settings.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+    expect(observability.logger.error).toHaveBeenCalledWith(
+      "Linear MCP connection setup failed",
+      expect.objectContaining({ mcp_server: "linear" }),
+    );
+  });
+
+  it("registers a not-connected stub and closes the client when MCP tool discovery fails", async () => {
+    db.queryResults = [[linearServerRow()], [linearOAuthConnectionRow()]];
+    mcpClient.listTools.mockRejectedValueOnce(
+      new Error("Linear MCP needs to be reconnected from workspace settings."),
+    );
+
+    const mcpTools = await createMcpToolSet(baseInput());
+    const tools = mcpTools.tools as ToolSet;
+    const stub = tools.linear__get_connection_status;
+
+    expect(stub).toBeDefined();
+    expect(tools.linear__search_tools).toBeUndefined();
+    expect(tools.linear__use_tool).toBeUndefined();
+    expect(mcpClient.close).toHaveBeenCalledOnce();
+
+    const output = await stub?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(output).toMatchObject({
+      ok: false,
+      error: {
+        message: "Linear MCP needs to be reconnected from workspace settings.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+
+    await mcpTools.close();
+    expect(mcpClient.close).toHaveBeenCalledOnce();
+  });
+
+  it("persists a recoverable tool failure when approved MCP resume finds a disconnected provider", async () => {
+    db.queryResults = [[linearServerRow()], [linearOAuthConnectionRow()]];
+    mcpClient.listTools.mockRejectedValueOnce(
+      new Error("Linear MCP needs to be reconnected from workspace settings."),
+    );
+
+    const mcpTools = await createMcpToolSet(baseInput());
+    const run = mcpTools.runApprovedTool({
+      toolName: "linear__use_tool",
+      toolCallId: "call_resume",
+      args: { tool: "create_issue", arguments: { title: "Fix auth" } },
+    });
+    if (!run) throw new Error("Expected disconnected provider to persist a failed tool result.");
+
+    const output = await run;
+
+    expect(output).toMatchObject({
+      ok: false,
+      error: {
+        message: "Linear MCP needs to be reconnected from workspace settings.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "linear__use_tool", toolCallId: "call_resume" }),
+    );
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool.failed",
+        payload: expect.objectContaining({
+          name: "linear__use_tool",
+          toolCallId: "call_resume",
+          error: expect.objectContaining({ code: "mcp_not_connected", recoverable: true }),
+        }),
+      }),
+    );
+
+    await mcpTools.close();
+  });
+
   it("names the stub so it is auto-allowed (no approval suspend for a no-op)", async () => {
     const mcpTools = await createMcpToolSet(baseInput());
     const stubName = Object.keys(mcpTools.tools).find((name) => name.startsWith("linear__"))!;
