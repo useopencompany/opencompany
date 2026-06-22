@@ -381,13 +381,7 @@ function SessionViewQuery({
     if (lastElectricDetailRefreshRef.current === refreshKey) return;
     lastElectricDetailRefreshRef.current = refreshKey;
     void refetch();
-  }, [
-    detail,
-    electricSessionId,
-    electricSessionStatus,
-    electricSessionUpdatedAt,
-    refetch,
-  ]);
+  }, [detail, electricSessionId, electricSessionStatus, electricSessionUpdatedAt, refetch]);
 
   if (!detail && isPending) return <SessionPageSkeleton />;
 
