@@ -50,6 +50,48 @@ describe("mergeMessages", () => {
     expect(merged.map((m) => m.id)).toEqual(["msg_user", "msg_asst", "msg_user2"]);
   });
 
+  it("restores a completed assistant's canonical snapshot payload when the overlay missed it", () => {
+    const snapshot: SessionMessage[] = [
+      {
+        id: "msg_asst",
+        role: "assistant",
+        content: "Final answer.",
+        status: "completed",
+        completedAt: "2026-06-22T08:02:00.000Z",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_read",
+              toolName: "read_file",
+              input: { path: "README.md" },
+            },
+            { type: "text", text: "Final answer." },
+          ],
+        },
+      },
+    ];
+    const overlay: SessionMessage[] = [
+      {
+        id: "msg_asst",
+        role: "assistant",
+        content: "",
+        status: "completed",
+      },
+    ];
+
+    const merged = mergeMessages(snapshot, overlay);
+
+    expect(merged[0]).toMatchObject({
+      id: "msg_asst",
+      content: "Final answer.",
+      status: "completed",
+      completedAt: "2026-06-22T08:02:00.000Z",
+      modelMessage: snapshot[0]?.modelMessage,
+    });
+  });
+
   it("returns the snapshot unchanged when the overlay is empty", () => {
     const snapshot = [message("msg_user", "user", "Hi")];
     expect(mergeMessages(snapshot, [])).toEqual(snapshot);
