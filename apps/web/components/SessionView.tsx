@@ -329,6 +329,7 @@ function SessionViewQuery({
 }) {
   const { workspaceId } = useWorkspaceContext();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
+  const lastElectricDetailRefreshRef = useRef<string | null>(null);
   const {
     data: detail,
     dataUpdatedAt,
@@ -356,6 +357,31 @@ function SessionViewQuery({
     // the post-turn invalidation.
     placeholderData: placeholder,
   });
+
+  // The open transcript is primarily driven by Durable Streams, but the synced
+  // agent_sessions row is the low-volume durable signal that a turn yielded. If
+  // the stream tail is missed, use Electric's newer settled status to refresh the
+  // Postgres snapshot so the final assistant row appears without a page reload.
+  const electricSessionId = placeholder?.session.id;
+  const electricSessionStatus = placeholder?.session.status;
+  const electricSessionUpdatedAt = placeholder?.session.updatedAt;
+  useEffect(() => {
+    if (!detail || !electricSessionId || !electricSessionStatus || !electricSessionUpdatedAt) {
+      return;
+    }
+    if (electricSessionId !== detail.session.id) return;
+    if (!SETTLED_SNAPSHOT_STATUSES.has(electricSessionStatus)) return;
+
+    const electricUpdatedAt = Date.parse(electricSessionUpdatedAt);
+    const detailUpdatedAtMs = Date.parse(detail.session.updatedAt);
+    if (!Number.isFinite(electricUpdatedAt) || !Number.isFinite(detailUpdatedAtMs)) return;
+    if (electricUpdatedAt <= detailUpdatedAtMs) return;
+
+    const refreshKey = `${electricSessionId}:${electricSessionStatus}:${electricSessionUpdatedAt}`;
+    if (lastElectricDetailRefreshRef.current === refreshKey) return;
+    lastElectricDetailRefreshRef.current = refreshKey;
+    void refetch();
+  }, [detail, electricSessionId, electricSessionStatus, electricSessionUpdatedAt, refetch]);
 
   if (!detail && isPending) return <SessionPageSkeleton />;
 
