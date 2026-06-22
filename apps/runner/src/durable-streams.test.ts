@@ -1,8 +1,9 @@
-import { DurableStream, stream } from "@durable-streams/client";
+import { DurableStream, IdempotentProducer, stream } from "@durable-streams/client";
 import { DurableStreamTestServer } from "@durable-streams/server";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   __resetDurableStreamsForTests,
+  __setDurableStreamProducerForTests,
   closeSessionStream,
   detachSessionStream,
   flushAllSessionStreams,
@@ -169,6 +170,25 @@ describe("durable streams lifecycle", () => {
       .poll(async () => (await readAll(sessionId)).map((e) => e.id), { timeout: 5000 })
       .toEqual([1, 2]);
     expect(await isClosed(sessionId)).toBe(false);
+  });
+
+  it("evicts a closed cached producer and retries the append once", async () => {
+    process.env.DURABLE_STREAMS_URL = baseUrl;
+    const sessionId = "ses_closed_cached";
+    const handle = await DurableStream.create({
+      url: `${baseUrl}/${sessionStreamName(sessionId)}`,
+      contentType: "application/json",
+    });
+    const closedProducer = new IdempotentProducer(handle, `runner-${sessionId}-closed`);
+    await closedProducer.detach();
+    __setDurableStreamProducerForTests(sessionId, closedProducer);
+
+    publishToDurableStream(sessionId, durableEvent(1, "after_session.spawned", {}));
+    await flushSessionStream(sessionId);
+
+    await expect
+      .poll(async () => (await readAll(sessionId)).map((e) => e.type), { timeout: 5000 })
+      .toEqual(["after_session.spawned"]);
   });
 
   it("closeSessionStream closes the stream (EOF) through the cached producer", async () => {

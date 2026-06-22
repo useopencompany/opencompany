@@ -49,6 +49,7 @@ export function buildPersonalIntegrationDetails(input: {
     posthog: buildMcpDetail(input.mcp.posthog),
     betterstack: buildMcpDetail(input.mcp.betterstack),
     braintrust: buildMcpDetail(input.mcp.braintrust),
+    notion: buildMcpDetail(input.mcp.notion),
   };
 }
 

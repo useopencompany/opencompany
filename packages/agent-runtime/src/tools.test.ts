@@ -464,6 +464,8 @@ describe("partitionRuntimeToolNames", () => {
 describe("getRuntimeToolDefinition", () => {
   it("renders personal file tool descriptions without brain/ or memory/ file access", () => {
     const readFile = getRuntimeToolDefinition("read_file", { personalAgent: true });
+    const editFile = getRuntimeToolDefinition("edit_file", { personalAgent: true });
+    const writeFile = getRuntimeToolDefinition("write_file", { personalAgent: true });
     const listFiles = getRuntimeToolDefinition("list_files", { personalAgent: true });
     const shell = getRuntimeToolDefinition("shell", { personalAgent: true });
 
@@ -473,6 +475,8 @@ describe("getRuntimeToolDefinition", () => {
       description: expect.stringContaining("personal-brain/"),
     });
     expect(JSON.stringify(readFile?.parameters.properties.path)).not.toContain("memory/");
+    expect(editFile?.description).toContain("Only edit personal-brain/");
+    expect(writeFile?.description).toContain("Only write personal-brain/");
     expect(listFiles?.description).toContain("generic file tools cannot access memory/");
     expect(shell?.description).toContain("./personal-brain");
     expect(shell?.description).toContain("Personal shell commands cannot access memory/");
@@ -577,6 +581,7 @@ describe("buildCapabilityDiscovery", () => {
       "posthog",
       "betterstack",
       "braintrust",
+      "notion",
       "gmail",
       "google_calendar",
     ]) {

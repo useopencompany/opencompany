@@ -2,15 +2,23 @@
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
+import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { Composer } from "@/components/Composer";
+import {
+  ATTACHMENT_FILE_INPUT_ACCEPT,
+  ComposerAttachments,
+  ComposerDropOverlay,
+  toSubmitAttachments,
+} from "@/components/composer-attachments";
 import { PendingSessionView } from "@/components/personal/PendingSessionView";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { PersonalInbox } from "@/components/personal/PersonalInbox";
 import { useToast } from "@/components/ToastProvider";
+import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
@@ -42,7 +50,30 @@ export default function PersonalHome() {
   } | null>(null);
   const [, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const canSubmit = Boolean(input.trim() && !pendingSession);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Image/file attachments via the shared composer hook. No session exists yet — uploads land in
+  // a sessionless "pending/" path and the pointers ride into createAgentSessionFromPrompt.
+  const {
+    attachments,
+    setAttachments,
+    acceptFiles,
+    removeAttachment,
+    isDragActive,
+    isUploading,
+    handlePasteFiles,
+    dragHandlers,
+  } = useComposerAttachments({
+    workspaceId,
+    modelName: model || DEFAULT_MODEL_ID,
+    uploadScope: { kind: "pending" },
+  });
+  const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
+  const hasUploadError = attachments.some((a) => a.status === "error");
+  // Submit needs text OR a ready attachment, and is blocked while any upload is in flight or
+  // errored (so an image is never silently dropped, and a broken upload can't be sent).
+  const canSubmit = Boolean(
+    (input.trim() || ready.length > 0) && !pendingSession && !isUploading && !hasUploadError,
+  );
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -57,20 +88,30 @@ export default function PersonalHome() {
 
   const submit = () => {
     const content = input.trim();
-    if (!content || pendingSession) return;
+    if ((!content && ready.length === 0) || pendingSession || isUploading || hasUploadError) return;
     setError(null);
     setPendingSession({ content, submittedAt: new Date().toISOString() });
     startTransition(async () => {
-      const result = await createAgentSessionFromPrompt(agent.id, content, model || undefined);
+      const result = await createAgentSessionFromPrompt(
+        agent.id,
+        content,
+        model || undefined,
+        toSubmitAttachments(ready),
+        { surface: "personal" },
+      );
       if (!result.ok) {
         setPendingSession(null);
         if ("redirectTo" in result) {
-          router.push(result.redirectTo);
+          showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
           return;
         }
         setError(result.error);
         return;
       }
+      // Sent — the destination session paints the image from the persisted attachment (served via
+      // /api/attachments), so the local blob previews aren't needed: revoke + clear the tray.
+      attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+      setAttachments([]);
       // Seed the detail cache before navigating so SessionView paints synchronously from it —
       // the pending view is then replaced by an identical frame and only the URL changes.
       seedSessionQueries(queryClient, workspaceId, result.detail);
@@ -103,7 +144,22 @@ export default function PersonalHome() {
             event.preventDefault();
             submit();
           }}
+          className="relative"
+          {...dragHandlers}
         >
+          {isDragActive ? <ComposerDropOverlay className="rounded-2xl" /> : null}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ATTACHMENT_FILE_INPUT_ACCEPT}
+            className="hidden"
+            onChange={(event) => {
+              acceptFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
+          <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
           <Composer
             variant="expanded"
             error={error}
@@ -119,22 +175,9 @@ export default function PersonalHome() {
                   }
                 }}
                 onPaste={(event) => {
-                  const items = event.clipboardData?.items;
-                  if (!items) return;
-                  const itemArray = Array.from(items);
-                  const hasImage = itemArray.some(
-                    (item) => item.kind === "file" && item.type.startsWith("image/"),
-                  );
-                  if (!hasImage) return;
-                  const hasText = itemArray.some((item) => item.kind === "string");
-                  if (!hasText) event.preventDefault();
-                  showToast({
-                    title: "Image upload coming soon",
-                    description: hasText
-                      ? "The text was pasted; the image was ignored."
-                      : "Image attachments aren't supported yet.",
-                    tone: "default",
-                  });
+                  // Files in the clipboard (e.g. a screenshot) attach via the shared hook, which
+                  // also stops the browser pasting them into the textarea. Text pastes fall through.
+                  handlePasteFiles(event);
                 }}
                 rows={1}
                 placeholder={`Message ${agent.name}`}
@@ -143,11 +186,21 @@ export default function PersonalHome() {
               />
             }
             leftControls={
-              <ModelPicker
-                value={model || DEFAULT_MODEL_ID}
-                fallbackModelId={DEFAULT_MODEL_ID}
-                onChange={(modelId) => setModel(modelId)}
-              />
+              <>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Attach file"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+                >
+                  <Plus size={15} strokeWidth={1.75} />
+                </button>
+                <ModelPicker
+                  value={model || DEFAULT_MODEL_ID}
+                  fallbackModelId={DEFAULT_MODEL_ID}
+                  onChange={(modelId) => setModel(modelId)}
+                />
+              </>
             }
             action={
               <button

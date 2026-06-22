@@ -808,6 +808,7 @@ function makePersonalAgentContext(
       posthog: false,
       betterstack: false,
       braintrust: false,
+      notion: false,
     },
     integrationDetails: {},
     toolPolicies: {},
@@ -1248,6 +1249,39 @@ describe("SessionViewContent — user message attachments", () => {
     const pdfLink = screen.getByText("report.pdf").closest("a");
     expect(pdfLink).toHaveAttribute("href", "/api/attachments/att_pdf");
   });
+
+  it("prefers a local preview URL for an optimistic just-sent image (Bug 2)", () => {
+    // An optimistic message carries a local object-URL preview so the image shows instantly,
+    // before the `/api/attachments/{id}` row exists. The renderer must use that preview, not the
+    // not-yet-valid served URL.
+    const detail = makeDetail({
+      messages: [
+        {
+          id: "msg_optimistic",
+          role: "user",
+          content: "Just sent this",
+          status: "completed",
+          createdAt: "2026-06-05T10:00:00.000Z",
+          attachments: [
+            {
+              id: "att_local",
+              kind: "image",
+              mediaType: "image/png",
+              filename: "fresh.png",
+              previewUrl: "blob:fake-preview-url",
+            },
+          ],
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    const image = screen.getByAltText("fresh.png");
+    expect(image).toHaveAttribute("src", "blob:fake-preview-url");
+    // The open-in-new-tab link also points at the preview while optimistic.
+    expect(image.closest("a")).toHaveAttribute("href", "blob:fake-preview-url");
+  });
 });
 
 describe("SessionViewContent — optimistic send", () => {
@@ -1267,7 +1301,7 @@ describe("SessionViewContent — optimistic send", () => {
     await user.type(composer, "Fast replay");
     await user.keyboard("{Enter}");
 
-    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay", []);
+    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay", [], "steer");
     expect(composer).toHaveValue("");
     expect(screen.getByText("Fast replay")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();
@@ -2160,7 +2194,7 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     await waitFor(() => {
       expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_clear");
     });
-    expect(createAgentSession).toHaveBeenCalledWith("agent_001");
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "personal" });
     expect(seedSessionQueries).toHaveBeenCalledWith(
       expect.any(QueryClient),
       "wks_test",
@@ -2182,6 +2216,38 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     await waitFor(() => {
       expect(routerMock.push).toHaveBeenCalledWith("/company/session/sess_clear");
     });
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "company" });
+  });
+
+  it("shows an out-of-credits toast instead of redirecting immediately from /clear", async () => {
+    const user = userEvent.setup();
+    navigationMock.pathname = "/personal/session/sess_001";
+    vi.mocked(createAgentSession).mockResolvedValue({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
+    } as Awaited<ReturnType<typeof createAgentSession>>);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "completed" }) }));
+
+    setComposerValue("/clear ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "Add credits" }),
+          title: "You're out of credits",
+          tone: "error",
+        }),
+      );
+    });
+    expect(routerMock.push).not.toHaveBeenCalled();
+
+    const toast = toastMock.showToast.mock.calls.at(-1)?.[0];
+    toast?.action?.onClick();
+
+    expect(routerMock.push).toHaveBeenCalledWith("/personal/settings?billing=insufficient");
   });
 
   it("opens /btw-created sessions under /personal from the toast action", async () => {
@@ -2208,6 +2274,7 @@ describe("SessionViewContent — surface-aware slash command navigation", () => 
     toast?.action?.onClick();
 
     expect(routerMock.push).toHaveBeenCalledWith("/personal/session/sess_btw");
+    expect(createAgentSession).toHaveBeenCalledWith("agent_001", { surface: "personal" });
   });
 });
 

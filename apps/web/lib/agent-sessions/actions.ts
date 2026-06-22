@@ -45,6 +45,7 @@ import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validation";
 import { isSessionContinuable, isToolStepLimitResumable } from "@/lib/agent-sessions/resumable";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
+import type { SendMode } from "@/lib/agent-sessions/send-mode";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
 import { normalizeCompanyUrl } from "@/lib/onboarding/validation";
@@ -52,15 +53,28 @@ import {
   enablePersonalAgentIntegrations,
   type PersonalIntegrationId,
 } from "@/lib/personal/actions";
+import { personalPaths } from "@/lib/personal/paths";
 import { determineApprovalResolution } from "./approval-resolution";
 
-export async function createAgentSession(idOrPath: string) {
+type SessionStartSurface = "company" | "personal";
+
+type SessionStartOptions = {
+  surface?: SessionStartSurface;
+};
+
+function billingRedirectForSurface(surface: SessionStartSurface = "company") {
+  return surface === "personal"
+    ? `${personalPaths.settings}?billing=insufficient`
+    : "/company/settings?billing=insufficient";
+}
+
+export async function createAgentSession(idOrPath: string, options: SessionStartOptions = {}) {
   const { user, workspace } = await currentWorkspace();
   if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/company/settings?billing=insufficient",
+      redirectTo: billingRedirectForSurface(options.surface),
     } as const;
   }
   const agent = await loadAgentForSession(idOrPath, workspace.id, user.id);
@@ -107,10 +121,12 @@ export async function createAgentSessionFromPrompt(
   agentId: string,
   content: string,
   modelId?: string,
+  attachments: SubmitAttachmentInput[] = [],
+  options: SessionStartOptions = {},
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
-  if (!trimmed) {
+  if (!trimmed && attachments.length === 0) {
     return { ok: false, error: "Message is required." } as const;
   }
   const db = getDb();
@@ -123,7 +139,7 @@ export async function createAgentSessionFromPrompt(
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/company/settings?billing=insufficient",
+      redirectTo: billingRedirectForSurface(options.surface),
     } as const;
   }
   if (!agent) {
@@ -134,13 +150,26 @@ export async function createAgentSessionFromPrompt(
   // session only; an unknown/stale id is ignored in favor of the agent default.
   const modelName = modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
 
-  const { session, statusEvent, message, createdEvent } = await insertAgentSessionWithUserMessage({
+  // Re-validate attachments server-side against this session's model + the caller's workspace.
+  const attachmentCheck = validateSubmitAttachments(attachments, modelName, workspace.id);
+  if (!attachmentCheck.ok) {
+    return { ok: false, error: attachmentCheck.error } as const;
+  }
+
+  const {
+    session,
+    statusEvent,
+    message,
+    createdEvent,
+    attachments: messageAttachments,
+  } = await insertAgentSessionWithUserMessage({
     agent,
     title: titleFromPrompt(trimmed),
     userId: user.id,
     workspaceId: workspace.id,
     modelName,
     content: trimmed,
+    attachments,
   });
   const sessionId = session.id;
   const messageId = message.id;
@@ -180,6 +209,7 @@ export async function createAgentSessionFromPrompt(
     session,
     messages: [message],
     events: [statusEvent, createdEvent],
+    attachments: messageAttachments,
   });
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
@@ -355,10 +385,76 @@ export type SubmitAttachmentInput = {
   sizeBytes: number;
 };
 
+// Server-side re-validation of attachments — the client checks are advisory only. Enforces the
+// per-message limit, the MIME/size envelope, the model's image/pdf capability, and that every
+// blob pointer is scoped to the caller's workspace. Shared by the new-session prompt path and the
+// follow-up message path so both gates stay identical.
+function validateSubmitAttachments(
+  attachments: SubmitAttachmentInput[],
+  modelName: string,
+  workspaceId: string,
+): { ok: true } | { ok: false; error: string } {
+  if (attachments.length > ATTACHMENT_MAX_PER_MESSAGE) {
+    return { ok: false, error: "Too many attachments." };
+  }
+  const capability = modelSupportsAttachments(modelName);
+  for (const att of attachments) {
+    const result = validateAttachmentCandidate({
+      mediaType: att.mediaType,
+      sizeBytes: att.sizeBytes,
+      filename: att.filename,
+    });
+    if (!result.ok) {
+      return { ok: false, error: "Unsupported or oversized attachment." };
+    }
+    if (result.kind === "image" && !capability.images) {
+      return { ok: false, error: "This model can't read images." };
+    }
+    if (result.kind === "pdf" && !capability.pdf) {
+      return { ok: false, error: "This model can't read PDFs." };
+    }
+    if (!att.blobPathname.startsWith(`workspace/${workspaceId}/`)) {
+      return { ok: false, error: "Attachment outside workspace scope." };
+    }
+  }
+  return { ok: true };
+}
+
+// Build the attachment rows for a message. The attachment bytes never touch Postgres — these
+// rows persist metadata + the private-blob pointers; the runner hydrates the bytes from Blob at
+// run time. Shared by the prompt (new-session) and follow-up message inserts.
+function buildAttachmentRows(input: {
+  messageId: string;
+  sessionId: string;
+  workspaceId: string;
+  attachments: SubmitAttachmentInput[];
+}) {
+  return input.attachments.map((att) => {
+    const v = validateAttachmentCandidate({
+      mediaType: att.mediaType,
+      sizeBytes: att.sizeBytes,
+      filename: att.filename,
+    });
+    return {
+      id: newAgentSessionMessageAttachmentId(),
+      messageId: input.messageId,
+      sessionId: input.sessionId,
+      workspaceId: input.workspaceId,
+      kind: v.ok ? v.kind : ("image" as const),
+      mediaType: att.mediaType,
+      filename: att.filename,
+      sizeBytes: att.sizeBytes,
+      blobPathname: att.blobPathname,
+      blobUrl: att.blobUrl,
+    };
+  });
+}
+
 export async function submitAgentSessionMessage(
   sessionId: string,
   content: string,
   attachments: SubmitAttachmentInput[] = [],
+  sendMode: SendMode = "steer",
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
@@ -377,6 +473,7 @@ export async function submitAgentSessionMessage(
         agentId: agentSessions.agentId,
         modelProvider: agentSessions.modelProvider,
         modelName: agentSessions.modelName,
+        status: agentSessions.status,
       })
       .from(agentSessions)
       .where(
@@ -399,33 +496,11 @@ export async function submitAgentSessionMessage(
     return { ok: false, error: "Session not found." } as const;
   }
 
-  // Re-validate attachments server-side: the client checks are advisory only, so the
-  // limit, the MIME/size envelope, the model capability and the blob-path scoping are all
-  // re-enforced here against the session's actual model and the caller's workspace.
-  if (attachments.length > ATTACHMENT_MAX_PER_MESSAGE) {
-    return { ok: false, error: "Too many attachments." } as const;
-  }
-  const capability = modelSupportsAttachments(session.modelName);
-  for (const att of attachments) {
-    const result = validateAttachmentCandidate({
-      mediaType: att.mediaType,
-      sizeBytes: att.sizeBytes,
-      filename: att.filename,
-    });
-    if (!result.ok) {
-      return { ok: false, error: "Unsupported or oversized attachment." } as const;
-    }
-    // Image/PDF require the session's model to support them; text is always allowed
-    // (it is inlined as text, not sent as an image/file part).
-    if (result.kind === "image" && !capability.images) {
-      return { ok: false, error: "This model can't read images." } as const;
-    }
-    if (result.kind === "pdf" && !capability.pdf) {
-      return { ok: false, error: "This model can't read PDFs." } as const;
-    }
-    if (!att.blobPathname.startsWith(`workspace/${workspace.id}/`)) {
-      return { ok: false, error: "Attachment outside workspace scope." } as const;
-    }
+  // Re-validate attachments server-side: the client checks are advisory only. Enforced against
+  // the session's actual model and the caller's workspace (same gate as the new-session path).
+  const attachmentCheck = validateSubmitAttachments(attachments, session.modelName, workspace.id);
+  if (!attachmentCheck.ok) {
+    return { ok: false, error: attachmentCheck.error } as const;
   }
 
   // A freeform reply while an ask_user_question is pending supersedes it: the user chose to
@@ -448,17 +523,51 @@ export async function submitAgentSessionMessage(
       ),
     );
 
+  // Steering only applies mid-work — a message sent while a turn is actively in flight (or parked
+  // mid-turn awaiting input/approval). When the session is idle or the run is already done, this is
+  // just a normal message: we don't tag it with a send-mode, so the UI renders a plain bubble (not
+  // a "Steered" annotation) and a finished run is never re-steered. The runner still treats a NULL
+  // mode as steer if one somehow lands mid-run, so this only affects presentation, never delivery.
+  const midWork =
+    session.status === "running" ||
+    session.status === "awaiting_approval" ||
+    session.status === "awaiting_input";
+  const effectiveSendMode = midWork ? sendMode : null;
   const { message } = await insertUserMessage(sessionId, trimmed, {
     workspaceId: workspace.id,
     attachments,
+    sendMode: effectiveSendMode,
   });
   const messageId = message.id;
+
+  // Interrupt mode: the user aborted the in-flight turn to run this message now. Request the
+  // abort synchronously (off the time-to-first-token path it would otherwise share) so the
+  // runner stops at its next step/tool boundary as soon as possible; its abort-path
+  // continuation then answers this message next. Only meaningful while a turn is actually
+  // running — otherwise interrupt is just a normal send. Steer and queue never abort.
+  const interruptRunning = sendMode === "interrupt" && session.status === "running";
+  if (interruptRunning) {
+    await db
+      .update(agentSessions)
+      .set({ status: "aborting", abortRequestedAt: new Date(), updatedAt: new Date() })
+      .where(eq(agentSessions.id, sessionId));
+    await appendSessionStreamEvent(sessionId, {
+      id: null,
+      type: "session.status",
+      messageId: null,
+      payload: { status: "aborting" },
+      createdAt: new Date().toISOString(),
+    });
+  }
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
   // and therefore the runner dispatch. Run dispatch and analytics concurrently in
   // `after()` so neither sits on the time-to-first-token path.
   after(() =>
     Promise.all([
+      ...(interruptRunning
+        ? [dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id })]
+        : []),
       triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
       dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
       captureServerEvent("session_message_sent", user.id, {
@@ -968,6 +1077,57 @@ export async function setSessionStar(sessionId: string, starred: boolean) {
   return { ok: true, txid, starredAt: null } as const;
 }
 
+// Rename a session's sidebar title. The title is auto-generated from the first
+// message at creation; this lets the owning user override it. Returns the Postgres
+// txid of the write so the sidebar's optimistic update (agentSessions.update())
+// reconciles cleanly against the Electric replication stream.
+export async function renameAgentSession(sessionId: string, title: string) {
+  const { user, workspace } = await currentWorkspace();
+
+  // Trim, and cap defensively — the column is unbounded `text`, but a sidebar title
+  // has no business being longer than this.
+  const next = title.trim().slice(0, 200);
+  if (!next) {
+    return { ok: false, error: "Title cannot be empty." } as const;
+  }
+
+  const db = getDb();
+
+  // Guard: only the owning user may rename a session they can actually see.
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  const txid = await batchWithTxid(
+    db
+      .update(agentSessions)
+      .set({ title: next, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.workspaceId, workspace.id),
+          eq(agentSessions.userId, user.id),
+          isNull(agentSessions.archivedAt),
+        ),
+      ),
+  );
+
+  return { ok: true, txid } as const;
+}
+
 // Record that the current user has viewed this session, clearing its sidebar "unseen"
 // blue dot. Writes ONLY last_seen_at — deliberately not updatedAt, so viewing a session
 // never reshuffles the sidebar's recency order. Fire-and-forget from the open session
@@ -1131,57 +1291,75 @@ async function insertAgentSessionWithUserMessage(input: {
   workspaceId: string;
   modelName: string;
   content: string;
+  attachments?: SubmitAttachmentInput[];
 }) {
   const db = getDb();
   const sessionId = newAgentSessionId();
   const messageId = newAgentSessionMessageId();
   const now = new Date();
   const payload = { messageId, role: "user", content: input.content, status: "completed" };
+  const attachmentRows = buildAttachmentRows({
+    messageId,
+    sessionId,
+    workspaceId: input.workspaceId,
+    attachments: input.attachments ?? [],
+  });
 
-  const [sessionRows, statusEventRows, messageRows, createdEventRows] = await db.batch([
-    db
-      .insert(agentSessions)
-      .values({
-        id: sessionId,
-        workspaceId: input.workspaceId,
-        userId: input.userId,
-        agentId: input.agent.id,
-        title: input.title,
-        modelProvider: input.agent.config.model.provider,
-        modelName: input.modelName,
-      })
-      .returning(),
-    db
-      .insert(agentSessionEvents)
-      .values({
-        sessionId,
-        type: "session.status",
-        payload: { status: "created", message: "Session created" },
-      })
-      .returning({
-        id: agentSessionEvents.id,
-        type: agentSessionEvents.type,
-        messageId: agentSessionEvents.messageId,
-        payload: agentSessionEvents.payload,
-        createdAt: agentSessionEvents.createdAt,
-      }),
-    db
-      .insert(agentSessionMessages)
-      .values({
-        id: messageId,
-        sessionId,
-        role: "user",
-        status: "completed",
-        content: input.content,
-        modelMessage: { role: "user", content: input.content },
-        completedAt: now,
-      })
-      .returning(),
-    db
-      .insert(agentSessionEvents)
-      .values({ sessionId, messageId, type: "message.created", payload })
-      .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt }),
-  ]);
+  // db.batch is variadic-tuple typed, so a conditionally-pushed op fights the result-tuple
+  // inference. Branch into two explicit batch literals (with/without the attachment insert).
+  const sessionInsert = db
+    .insert(agentSessions)
+    .values({
+      id: sessionId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      agentId: input.agent.id,
+      title: input.title,
+      modelProvider: input.agent.config.model.provider,
+      modelName: input.modelName,
+    })
+    .returning();
+  const statusEventInsert = db
+    .insert(agentSessionEvents)
+    .values({
+      sessionId,
+      type: "session.status",
+      payload: { status: "created", message: "Session created" },
+    })
+    .returning({
+      id: agentSessionEvents.id,
+      type: agentSessionEvents.type,
+      messageId: agentSessionEvents.messageId,
+      payload: agentSessionEvents.payload,
+      createdAt: agentSessionEvents.createdAt,
+    });
+  const messageInsert = db
+    .insert(agentSessionMessages)
+    .values({
+      id: messageId,
+      sessionId,
+      role: "user",
+      status: "completed",
+      content: input.content,
+      modelMessage: { role: "user", content: input.content },
+      completedAt: now,
+    })
+    .returning();
+  const createdEventInsert = db
+    .insert(agentSessionEvents)
+    .values({ sessionId, messageId, type: "message.created", payload })
+    .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt });
+
+  const [sessionRows, statusEventRows, messageRows, createdEventRows] =
+    attachmentRows.length > 0
+      ? await db.batch([
+          sessionInsert,
+          statusEventInsert,
+          messageInsert,
+          createdEventInsert,
+          db.insert(agentSessionMessageAttachments).values(attachmentRows).returning(),
+        ])
+      : await db.batch([sessionInsert, statusEventInsert, messageInsert, createdEventInsert]);
 
   const session = sessionRows[0];
   const statusEvent = statusEventRows[0];
@@ -1210,41 +1388,42 @@ async function insertAgentSessionWithUserMessage(input: {
       payload,
       createdAt: createdEventRow.createdAt,
     },
+    // Client-safe attachment metadata for the synthesized detail so the destination session paints
+    // the image on first render (served via /api/attachments — the rows above already persisted).
+    attachments: attachmentRows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      mediaType: row.mediaType,
+      filename: row.filename,
+    })),
   };
 }
 
 async function insertUserMessage(
   sessionId: string,
   content: string,
-  options: { workspaceId: string; attachments: SubmitAttachmentInput[]; modelContent?: string },
+  options: {
+    workspaceId: string;
+    attachments: SubmitAttachmentInput[];
+    modelContent?: string;
+    sendMode?: SendMode | null;
+  },
 ) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
-  const payload = { messageId, role: "user", content, status: "completed" };
+  const sendMode = options.sendMode ?? null;
+  const payload = { messageId, role: "user", content, status: "completed", sendMode };
 
   // The model message stays TEXT-ONLY — attachment bytes never touch Postgres. The
   // attachment rows here only persist metadata + the private-blob pointers; the runner
   // hydrates the bytes from Blob at run time. `modelContent` lets a caller send the model a
   // richer prompt than the user-visible `content` (e.g. the interrupted-session continuation).
   const modelContent = options.modelContent ?? content;
-  const attachmentRows = options.attachments.map((att) => {
-    const v = validateAttachmentCandidate({
-      mediaType: att.mediaType,
-      sizeBytes: att.sizeBytes,
-      filename: att.filename,
-    });
-    return {
-      id: newAgentSessionMessageAttachmentId(),
-      messageId,
-      sessionId,
-      workspaceId: options.workspaceId,
-      kind: v.ok ? v.kind : ("image" as const),
-      mediaType: att.mediaType,
-      filename: att.filename,
-      sizeBytes: att.sizeBytes,
-      blobPathname: att.blobPathname,
-      blobUrl: att.blobUrl,
-    };
+  const attachmentRows = buildAttachmentRows({
+    messageId,
+    sessionId,
+    workspaceId: options.workspaceId,
+    attachments: options.attachments,
   });
 
   const messageInsert = db
@@ -1255,6 +1434,7 @@ async function insertUserMessage(
       role: "user",
       status: "completed",
       content,
+      sendMode,
       modelMessage: { role: "user", content: modelContent },
       completedAt: new Date(),
     })

@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { Eraser, type LucideIcon, MessageSquarePlus } from "lucide-react";
 import type { useRouter } from "next/navigation";
+import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import type { useToast } from "@/components/ToastProvider";
 import { createAgentSession, createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { type AgentSessionPayload, seedSessionQueries } from "@/lib/agent-sessions/payload";
@@ -13,6 +14,7 @@ import { type AgentSessionPayload, seedSessionQueries } from "@/lib/agent-sessio
 export type SlashCommandContext = {
   /** The session the command was invoked from (carries `agentId`, `agentName`, …). */
   session: AgentSessionPayload;
+  surface: "company" | "personal";
   workspaceId: string;
   router: ReturnType<typeof useRouter>;
   sessionHref: (sessionId: string) => string;
@@ -59,6 +61,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     keywords: ["new", "reset", "fresh", "restart"],
     run: async ({
       session,
+      surface,
       workspaceId,
       router,
       sessionHref,
@@ -71,11 +74,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       // immediately, like the home prompt). No text → a clean empty session.
       const prompt = args.trim();
       const result = prompt
-        ? await createAgentSessionFromPrompt(session.agentId, prompt)
-        : await createAgentSession(session.agentId);
+        ? await createAgentSessionFromPrompt(session.agentId, prompt, undefined, [], { surface })
+        : await createAgentSession(session.agentId, { surface });
       if (!result.ok) {
         if ("redirectTo" in result) {
-          router.push(result.redirectTo);
+          showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
           return;
         }
         showToast({
@@ -99,6 +102,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     keywords: ["background", "side", "parallel", "by the way", "new", "spawn", "aside"],
     run: async ({
       session,
+      surface,
       workspaceId,
       router,
       sessionHref,
@@ -113,11 +117,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       // clean empty session you can open later.
       const prompt = args.trim();
       const result = prompt
-        ? await createAgentSessionFromPrompt(session.agentId, prompt)
-        : await createAgentSession(session.agentId);
+        ? await createAgentSessionFromPrompt(session.agentId, prompt, undefined, [], { surface })
+        : await createAgentSession(session.agentId, { surface });
       if (!result.ok) {
-        // Unlike /clear, never redirect (e.g. to billing) — a /btw user is mid-flow and
-        // staying put is the point. The error message already says what to do.
+        if ("redirectTo" in result) {
+          showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
+          return;
+        }
         showToast({
           title: "Couldn't start a new session",
           description: result.error,

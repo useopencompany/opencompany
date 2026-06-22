@@ -30,6 +30,30 @@ if (typeof Range !== "undefined") {
   }
 }
 
+// jsdom does not implement matchMedia, but components subscribe to it via
+// useIsMobile and ThemeProvider. Without it, mounting any component that uses
+// those (e.g. ModelPicker inside SessionView/AgentDetail) throws
+// "window.matchMedia is not a function" from a passive effect and fails the run.
+// Provide a minimal desktop-default polyfill; individual tests that need a
+// specific match result still override it via vi.stubGlobal.
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    value: (query: string) =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+    writable: true,
+    configurable: true,
+  });
+}
+
 // The jsdom environment used here does not ship a working localStorage
 // implementation, so provide a minimal in-memory polyfill for tests that
 // read or clear it (e.g. AgentDetail's beforeEach).

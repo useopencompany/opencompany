@@ -40,7 +40,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
-import type { RunControlCheck } from "./run-control";
+import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
 import { prepareToolArgs, type ToolArgRepairConfig } from "./tool-arg-repair";
 import {
   formatRuntimePreview,
@@ -59,6 +59,8 @@ const BETTERSTACK_MCP_SERVER_KEY = "betterstack";
 const BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const BRAINTRUST_MCP_SERVER_KEY = "braintrust";
 const BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const NOTION_MCP_SERVER_KEY = "notion";
+const NOTION_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_READ_SCOPES = [
   "search:read.public",
   "search:read.private",
@@ -81,12 +83,13 @@ const SLACK_READ_SCOPES = [
 const ENCRYPTION_KEY_VERSION = 1;
 const logger = createLogger({ service: "opencompany-runner" });
 
-type McpProviderKey =
+export type McpProviderKey =
   | typeof LINEAR_MCP_SERVER_KEY
   | typeof SLACK_MCP_SERVER_KEY
   | typeof POSTHOG_MCP_SERVER_KEY
   | typeof BETTERSTACK_MCP_SERVER_KEY
-  | typeof BRAINTRUST_MCP_SERVER_KEY;
+  | typeof BRAINTRUST_MCP_SERVER_KEY
+  | typeof NOTION_MCP_SERVER_KEY;
 
 type McpProvider = {
   key: McpProviderKey;
@@ -137,6 +140,13 @@ const MCP_PROVIDER_CATALOG: Record<McpProviderKey, McpProvider> = {
     displayName: "Braintrust",
     oauthCredentialKind: BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
     // OAuth-only with Dynamic Client Registration (no static client) — same as Linear/PostHog.
+    supportsBearerToken: false,
+  },
+  notion: {
+    key: NOTION_MCP_SERVER_KEY,
+    displayName: "Notion",
+    oauthCredentialKind: NOTION_MCP_OAUTH_CREDENTIAL_KIND,
+    // OAuth-only with Dynamic Client Registration (no static client) — same as Braintrust.
     supportsBearerToken: false,
   },
 };
@@ -190,6 +200,7 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
   // Keyed by both meta-tool names (`{server}__search_tools` / `{server}__use_tool`) so
   // an approval resume can re-dispatch either without re-deriving which provider it hit.
   const providerByToolName = new Map<string, ConnectedMcpProvider>();
+  const failedProviderByToolName = new Map<string, FailedMcpProvider>();
 
   // Park on the approval gate, then run the body — shared by both meta-tools. A suspend
   // returns a discarded no-op (body runs in the resume run); a deny persists the
@@ -225,16 +236,92 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
 
   try {
     for (const provider of requestedProviders) {
-      let connection: Awaited<ReturnType<typeof loadMcpConnection>>;
+      let client: MCPClient | null = null;
       try {
-        connection = await loadMcpConnection(input, provider);
+        const connection = await loadMcpConnection(input, provider);
+        client = await createMCPClient({
+          clientName: "opencompany-runner",
+          version: "0.2.0",
+          transport: mcpTransportForConnection({
+            workspaceId: input.workspaceId,
+            provider,
+            integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
+            connection,
+          }),
+        });
+
+        const definitions = await client.listTools({ options: { signal: input.signal } });
+        const rawTools = client.toolsFromDefinitions(definitions);
+
+        // The catalog (name + description + JSON input schema) comes straight from the MCP
+        // listTools response so `search_tools` returns plain schemas the model can read.
+        const catalog: McpToolCatalogEntry[] =
+          (definitions as { tools?: McpToolCatalogEntry[] }).tools ?? [];
+        const bodyByRawName = new Map<string, McpToolBody>();
+        for (const [rawName, rawTool] of Object.entries(rawTools)) {
+          bodyByRawName.set(rawName, (rawTool as unknown as { execute?: McpToolBody }).execute);
+        }
+
+        clients.push(client);
+        client = null;
+
+        const connected: ConnectedMcpProvider = { provider, catalog, bodyByRawName };
+        const searchName = uniqueToolName(mcpSearchToolsName(provider.key), usedNames);
+        const useName = uniqueToolName(mcpUseToolName(provider.key), usedNames);
+        providerByToolName.set(searchName, connected);
+        providerByToolName.set(useName, connected);
+
+        tools[searchName] = tool({
+          description: searchToolsDescription(provider),
+          inputSchema: jsonSchema(MCP_SEARCH_TOOLS_INPUT_SCHEMA as never),
+          onInputAvailable: recordMetaToolStart(searchName),
+          execute: async (toolInput: unknown, options: { toolCallId: string }) =>
+            runGatedMetaTool({
+              toolName: searchName,
+              toolCallId: options.toolCallId,
+              run: () =>
+                executeMcpTool({
+                  ...input,
+                  mcpServer: provider.key,
+                  toolCallId: options.toolCallId,
+                  toolName: searchName,
+                  rawToolName: MCP_SEARCH_TOOLS_RAW_NAME,
+                  execute: () => buildMcpCatalogResult(connected, toolInput),
+                  args: toolInput,
+                }),
+            }),
+        } as never) as ToolSet[string];
+
+        tools[useName] = tool({
+          description: useToolDescription(provider),
+          inputSchema: jsonSchema(MCP_USE_TOOL_INPUT_SCHEMA as never),
+          onInputAvailable: recordMetaToolStart(useName),
+          execute: async (toolInput: unknown, options: { toolCallId: string }) =>
+            runGatedMetaTool({
+              toolName: useName,
+              toolCallId: options.toolCallId,
+              run: () =>
+                dispatchMcpUseTool({
+                  ...input,
+                  connected,
+                  toolCallId: options.toolCallId,
+                  args: toolInput,
+                }),
+            }),
+        } as never) as ToolSet[string];
       } catch (error: unknown) {
-        // The integration is enabled on the agent but not set up in the workspace
-        // (no credential, beta off, etc.). Don't abort the whole turn — register a
-        // stub tool that returns the reason to the model so it can ask the user to
-        // connect it. The real tool names can't be listed without a live connection,
-        // so a single stub per failed provider is the right granularity.
+        if (isFatalMcpSetupError(error, input.signal)) throw error;
+        if (client) await closeMcpClient(client);
+        // The integration is enabled on the agent but not usable in the workspace
+        // (no credential, stale OAuth, listTools failure, etc.). Don't abort the
+        // whole turn — register a stub tool that returns the reason to the model so
+        // it can ask the user to connect it. The real tool names can't be listed
+        // without a live connection, so a single stub per failed provider is the
+        // right granularity.
         logMcpConnectionSetupFailure({ error, input, provider });
+        const failedProvider = { provider, error };
+        failedProviderByToolName.set(mcpSearchToolsName(provider.key), failedProvider);
+        failedProviderByToolName.set(mcpUseToolName(provider.key), failedProvider);
         const stubName = uniqueToolName(
           `${provider.key}__${NOT_CONNECTED_STUB_RAW_NAME}`,
           usedNames,
@@ -246,74 +333,6 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
         });
         continue;
       }
-      const client = await createMCPClient({
-        clientName: "opencompany-runner",
-        version: "0.2.0",
-        transport: mcpTransportForConnection({
-          workspaceId: input.workspaceId,
-          provider,
-          integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
-          connection,
-        }),
-      });
-      clients.push(client);
-
-      const definitions = await client.listTools({ options: { signal: input.signal } });
-      const rawTools = client.toolsFromDefinitions(definitions);
-
-      // The catalog (name + description + JSON input schema) comes straight from the MCP
-      // listTools response so `search_tools` returns plain schemas the model can read.
-      const catalog: McpToolCatalogEntry[] =
-        (definitions as { tools?: McpToolCatalogEntry[] }).tools ?? [];
-      const bodyByRawName = new Map<string, McpToolBody>();
-      for (const [rawName, rawTool] of Object.entries(rawTools)) {
-        bodyByRawName.set(rawName, (rawTool as unknown as { execute?: McpToolBody }).execute);
-      }
-
-      const connected: ConnectedMcpProvider = { provider, catalog, bodyByRawName };
-      const searchName = uniqueToolName(mcpSearchToolsName(provider.key), usedNames);
-      const useName = uniqueToolName(mcpUseToolName(provider.key), usedNames);
-      providerByToolName.set(searchName, connected);
-      providerByToolName.set(useName, connected);
-
-      tools[searchName] = tool({
-        description: searchToolsDescription(provider),
-        inputSchema: jsonSchema(MCP_SEARCH_TOOLS_INPUT_SCHEMA as never),
-        onInputAvailable: recordMetaToolStart(searchName),
-        execute: async (toolInput: unknown, options: { toolCallId: string }) =>
-          runGatedMetaTool({
-            toolName: searchName,
-            toolCallId: options.toolCallId,
-            run: () =>
-              executeMcpTool({
-                ...input,
-                mcpServer: provider.key,
-                toolCallId: options.toolCallId,
-                toolName: searchName,
-                rawToolName: MCP_SEARCH_TOOLS_RAW_NAME,
-                execute: () => buildMcpCatalogResult(connected, toolInput),
-                args: toolInput,
-              }),
-          }),
-      } as never) as ToolSet[string];
-
-      tools[useName] = tool({
-        description: useToolDescription(provider),
-        inputSchema: jsonSchema(MCP_USE_TOOL_INPUT_SCHEMA as never),
-        onInputAvailable: recordMetaToolStart(useName),
-        execute: async (toolInput: unknown, options: { toolCallId: string }) =>
-          runGatedMetaTool({
-            toolName: useName,
-            toolCallId: options.toolCallId,
-            run: () =>
-              dispatchMcpUseTool({
-                ...input,
-                connected,
-                toolCallId: options.toolCallId,
-                args: toolInput,
-              }),
-          }),
-      } as never) as ToolSet[string];
     }
 
     return {
@@ -321,23 +340,95 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
       close: () => closeMcpClients(clients),
       runApprovedTool: ({ toolName, toolCallId, args }) => {
         const connected = providerByToolName.get(toolName);
-        if (!connected) return null;
-        if (toolName === mcpUseToolName(connected.provider.key)) {
-          return dispatchMcpUseTool({ ...input, connected, toolCallId, args });
+        if (connected) {
+          if (toolName === mcpUseToolName(connected.provider.key)) {
+            return dispatchMcpUseTool({ ...input, connected, toolCallId, args });
+          }
+          return executeMcpTool({
+            ...input,
+            mcpServer: connected.provider.key,
+            toolCallId,
+            toolName,
+            rawToolName: MCP_SEARCH_TOOLS_RAW_NAME,
+            execute: () => buildMcpCatalogResult(connected, args),
+            args,
+          });
         }
-        return executeMcpTool({
-          ...input,
-          mcpServer: connected.provider.key,
-          toolCallId,
-          toolName,
-          rawToolName: MCP_SEARCH_TOOLS_RAW_NAME,
-          execute: () => buildMcpCatalogResult(connected, args),
-          args,
-        });
+        const failedProvider = failedProviderByToolName.get(toolName);
+        if (failedProvider) {
+          return persistMcpNotConnectedToolResult({
+            ...input,
+            provider: failedProvider.provider,
+            error: failedProvider.error,
+            toolName,
+            toolCallId,
+          });
+        }
+        return null;
       },
     };
   } catch (error) {
     await closeMcpClients(clients);
+    throw error;
+  }
+}
+
+export type WorkspaceMcpToolClient = {
+  // Invoke an MCP tool on the connected server by its raw name (e.g. "save_issue").
+  callTool: (name: string, args: unknown) => Promise<unknown>;
+  // Raw tool names the connected server exposes (for capability checks).
+  listToolNames: () => string[];
+  close: () => Promise<void>;
+};
+
+// Connect to a single workspace-configured MCP provider (e.g. Linear) and return a thin client for
+// calling its tools programmatically from a runner-side tool handler — reusing the exact
+// credential-decrypt + OAuth transport path that powers the agent's `{server}__use_tool`. Unlike
+// createMcpToolSet, this registers no meta-tools and persists no tool messages; the caller owns the
+// result. Throws if the provider is not configured/connected for the workspace (the caller turns
+// that into a recoverable "connect <provider>" message). Always `close()` it when done.
+export async function connectWorkspaceMcpClient(input: {
+  workspaceId: string;
+  provider: McpProviderKey;
+  integrationCredentialEncryptionKey: Buffer;
+  signal: AbortSignal;
+}): Promise<WorkspaceMcpToolClient> {
+  const provider = MCP_PROVIDER_CATALOG[input.provider];
+  const connection = await loadMcpConnection(input, provider);
+  const client = await createMCPClient({
+    clientName: "opencompany-runner",
+    version: "0.2.0",
+    transport: mcpTransportForConnection({
+      workspaceId: input.workspaceId,
+      provider,
+      integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
+      connection,
+    }),
+  });
+  try {
+    const definitions = await client.listTools({ options: { signal: input.signal } });
+    const rawTools = client.toolsFromDefinitions(definitions);
+    // Extract each tool's executable body the same way createMcpToolSet does (cast through unknown,
+    // since the SDK's ToolExecutionOptions is wider than the { toolCallId } the body actually uses).
+    const bodyByName = new Map<string, McpToolBody>();
+    for (const [rawName, rawTool] of Object.entries(rawTools)) {
+      bodyByName.set(rawName, (rawTool as unknown as { execute?: McpToolBody }).execute);
+    }
+    return {
+      async callTool(name, args) {
+        const body = bodyByName.get(name);
+        if (!body) {
+          throw new Error(
+            `${provider.displayName} MCP tool "${name}" is not available on this connection.`,
+          );
+        }
+        return body(args, { toolCallId: `runner_internal_${name}` });
+      },
+      listToolNames: () => [...bodyByName.keys()],
+      close: () => closeMcpClient(client),
+    };
+  } catch (error) {
+    await closeMcpClient(client);
     throw error;
   }
 }
@@ -358,6 +449,11 @@ type ConnectedMcpProvider = {
   provider: McpProvider;
   catalog: McpToolCatalogEntry[];
   bodyByRawName: Map<string, McpToolBody>;
+};
+
+type FailedMcpProvider = {
+  provider: McpProvider;
+  error: unknown;
 };
 
 const MCP_SEARCH_TOOLS_INPUT_SCHEMA = {
@@ -583,6 +679,54 @@ async function persistMcpUseToolArgError(
   return output;
 }
 
+async function persistMcpNotConnectedToolResult(
+  input: McpToolContext & {
+    provider: McpProvider;
+    error: unknown;
+    toolName: string;
+    toolCallId: string;
+  },
+) {
+  const output = buildMcpNotConnectedToolOutput(input);
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          output,
+        }),
+      ),
+      toolName: input.toolName,
+      toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: input.toolName,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+      },
+    }),
+  );
+  return output;
+}
+
 function requestedMcpProviders(agentConfig: AgentConfig) {
   const seen = new Set<McpProviderKey>();
   const providers: McpProvider[] = [];
@@ -602,7 +746,8 @@ function isMcpProviderKey(value: string): value is McpProviderKey {
     value === SLACK_MCP_SERVER_KEY ||
     value === POSTHOG_MCP_SERVER_KEY ||
     value === BETTERSTACK_MCP_SERVER_KEY ||
-    value === BRAINTRUST_MCP_SERVER_KEY
+    value === BRAINTRUST_MCP_SERVER_KEY ||
+    value === NOTION_MCP_SERVER_KEY
   );
 }
 
@@ -792,6 +937,20 @@ function buildMcpFailedToolOutput(error: unknown) {
   };
 }
 
+function buildMcpNotConnectedToolOutput(input: { provider: McpProvider; error: unknown }) {
+  return {
+    ok: false,
+    error: {
+      message:
+        input.error instanceof Error
+          ? input.error.message
+          : `${input.provider.displayName} is not connected.`,
+      code: "mcp_not_connected",
+      recoverable: true,
+    },
+  };
+}
+
 // Raw (un-prefixed) name for the not-connected stub tool. The prefixed name
 // (`${provider}__${this}`) is classified by the permission system via a read-verb
 // heuristic — "get" resolves the stub to the `read` group, which defaults to "allow".
@@ -809,10 +968,6 @@ function buildNotConnectedStubTool(input: {
   error: unknown;
   checkAbort: RunControlCheck;
 }): ToolSet[string] {
-  const reason =
-    input.error instanceof Error
-      ? input.error.message
-      : `${input.provider.displayName} is not connected.`;
   return tool({
     description:
       `${input.provider.displayName} is enabled for this agent but not connected. ` +
@@ -822,14 +977,7 @@ function buildNotConnectedStubTool(input: {
     onInputAvailable: async () => {
       await input.checkAbort();
     },
-    execute: async () => ({
-      ok: false,
-      error: {
-        message: reason,
-        code: "mcp_not_connected",
-        recoverable: true,
-      },
-    }),
+    execute: async () => buildMcpNotConnectedToolOutput(input),
   } as never) as ToolSet[string];
 }
 
@@ -845,7 +993,10 @@ function isMcpFailedToolOutput(
   );
 }
 
-async function loadMcpConnection(input: McpToolContext, provider: McpProvider) {
+async function loadMcpConnection(
+  input: Pick<McpToolContext, "workspaceId" | "integrationCredentialEncryptionKey">,
+  provider: McpProvider,
+) {
   const db = getDb();
   const { workspaceId } = input;
   const [server] = await db
@@ -1233,6 +1384,10 @@ async function closeMcpClient(client: MCPClient) {
 
 async function closeMcpClients(clients: MCPClient[]) {
   await Promise.all(clients.map((client) => closeMcpClient(client)));
+}
+
+function isFatalMcpSetupError(error: unknown, signal: AbortSignal) {
+  return signal.aborted || error instanceof RunAbortError || error instanceof RunLeaseLostError;
 }
 
 function throwIfAborted(signal: AbortSignal) {

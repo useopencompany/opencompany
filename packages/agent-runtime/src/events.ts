@@ -219,6 +219,17 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      // Files that exceeded the personal-brain bundle caps and were NOT persisted.
+      // Surfaced (not just logged) so silent truncation can never repeat — PRO-244.
+      type: "agent_bundle.cap_exceeded";
+      payload: { droppedPaths: string[]; droppedCount: number };
+    }
+  | {
+      // Company-brain equivalent of agent_bundle.cap_exceeded.
+      type: "brain.cap_exceeded";
+      payload: { droppedPaths: string[]; droppedCount: number };
+    }
+  | {
       type: "agent.self_updated";
       payload: {
         version: number;

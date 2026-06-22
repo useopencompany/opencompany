@@ -31,6 +31,12 @@ vi.mock("@/components/FeedbackDialog", () => ({
   default: () => null,
 }));
 
+// SidebarAccountFooter imports the feedback server action directly (to send optimistically). Stub
+// it so the test doesn't pull the server-action import chain (auth → workos → next/cache) in.
+vi.mock("@/lib/feedback/actions", () => ({
+  submitFeedback: vi.fn(),
+}));
+
 // The sidebar reads its sessions from TanStack DB live queries and writes
 // through the workspace collections. Stub both so this status-menu test renders
 // without mounting CollectionsProvider (which pulls the server-action import

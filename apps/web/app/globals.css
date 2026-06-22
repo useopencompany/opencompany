@@ -138,6 +138,8 @@ body {
   color: var(--color-ink);
   color-scheme: light;
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   font-feature-settings: "cv11", "ss01";
   /* Stop inner scroll areas (chat, sidebar) from chaining their scroll to the
      page — no rubber-band / page shift when hitting top or bottom of the fold. */
@@ -163,6 +165,20 @@ body {
 
 * {
   border-color: var(--color-border);
+}
+
+/* Keep an element scrollable but fully hide its scrollbar so it doesn't
+   reserve layout width (PRO-157 — the personal sidebar session list). Mirrors
+   the chromeless sidebars in ChatGPT/Linear/Notion. Content stays scrollable
+   via wheel/trackpad; the scrollbar (incl. the macOS overlay) is suppressed. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chromium/Safari */
 }
 
 .tiptap-agent p {
@@ -486,6 +502,21 @@ body {
   }
 }
 
+/* One-shot half-turn when a "steered" caption appears, so the steer is visible as the wheel
+   turning. Plays once on mount; see SessionView's mid-run caption. */
+.steer-wheel-spin {
+  animation: steer-wheel-spin 0.55s ease-out;
+}
+
+@keyframes steer-wheel-spin {
+  from {
+    transform: rotate(-180deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .session-markdown[data-streaming="true"] {
     will-change: auto;
@@ -495,6 +526,10 @@ body {
     animation: none;
     color: var(--color-ink-muted);
     opacity: 1;
+  }
+
+  .steer-wheel-spin {
+    animation: none;
   }
 }
 

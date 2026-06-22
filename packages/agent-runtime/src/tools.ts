@@ -17,6 +17,8 @@ export type RuntimeToolName =
   | "inbox_add"
   | "inbox_update"
   | "fetch_transcript"
+  | "create_linear_issue"
+  | "restore_brain_file"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -304,6 +306,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     credentialSource: "workspace",
   },
   {
+    id: "notion",
+    type: "mcp",
+    server: "notion",
+    label: "notion",
+    description: "Use workspace-configured Notion MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
+  {
     id: "gmail",
     type: "hosted_tool",
     label: "gmail",
@@ -567,6 +579,84 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Only items in the current user's inbox can be updated.",
       "Marking an item done/dismissed stamps it resolved and removes it from the user's inbox view.",
+    ].join("\n"),
+  },
+  {
+    name: "create_linear_issue",
+    kind: "internal",
+    description:
+      "Create an issue in this workspace's connected Linear from the current chat. Use when the user asks to open/file a Linear issue, including from a screenshot they dropped into the chat. Posts to the workspace's OWN Linear (Settings → Integrations), not to OpenCompany's internal feedback tracker. Provide a concise title and a markdown description; pass `team` (a Linear team name or key) when the user names one, or when the workspace has more than one team. IMPORTANT: any image(s) the user attached to their most recent message are uploaded and attached to the new issue AUTOMATICALLY — you do NOT need a file, path, or URL, and you cannot upload the image yourself; just call this tool and the screenshot is included.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Short issue title. Required.",
+        },
+        description: {
+          type: "string",
+          description:
+            "Issue body in Markdown. Include the user's report. Any attached screenshot is added separately.",
+        },
+        team: {
+          type: "string",
+          description:
+            'Linear team name or key (e.g. "Engineering" or "ENG"). Optional when the workspace has a single team; required to disambiguate when several exist.',
+        },
+        include_attachments: {
+          type: "boolean",
+          description:
+            "Whether to attach the image(s) the user dropped onto their most recent message. Defaults to true. Set false only if the user explicitly wants a text-only issue.",
+        },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    help: [
+      "Targets the workspace's connected Linear, not OpenCompany's internal feedback Linear.",
+      "Dropped screenshots are attached automatically by the runner (it reads the bytes from secure storage) — never tell the user you can't attach the image, and never ask them for a file or URL.",
+      "If Linear is not connected, this returns a recoverable error — tell the user to connect Linear in Settings → Integrations.",
+      "If the workspace has multiple Linear teams and none was given, it returns the available team names so you can pass `team` and retry (or ask the user which team).",
+    ].join("\n"),
+  },
+  {
+    name: "restore_brain_file",
+    kind: "internal",
+    description:
+      'Roll a brain knowledge file back to a previously-saved version. Every time a brain file is overwritten or deleted, its prior content is automatically backed up; use this to recover from a bad edit or an accidental deletion ("step back a turn"). Pass the file `path`; with no version it restores the single most recent saved version, which undoes the last change. Set `list_only` to see the available versions (id, what changed it, size, when) before choosing, then re-call with `version_id`. Restoring is itself undoable — the current content is backed up first. For your own personal brain this targets personal-brain/ files; in a company workspace it targets the shared company brain.',
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            'The brain file path to restore. For the company brain use the logical brain path (e.g. "docs/context.md"); for a personal brain use the file\'s full repo path.',
+        },
+        version_id: {
+          type: "number",
+          description:
+            "Optional id of the specific saved version to restore (from list_only). Omit to restore the most recent saved version, undoing the last change.",
+        },
+        session_id: {
+          type: "string",
+          description:
+            "Optional session id to scope the restore to the most recent version saved during that session/turn. Ignored when version_id is given.",
+        },
+        list_only: {
+          type: "boolean",
+          description:
+            "When true, return the available saved versions for the path WITHOUT restoring anything. Use this first to pick a version_id.",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use restore_brain_file to recover brain content lost to a bad overwrite or an accidental delete.",
+      "Call once with list_only=true to inspect saved versions, then call again with the chosen version_id.",
+      'With no version_id and no session_id, it restores the single most recent saved version — the simplest "undo the last change".',
+      "Restoring a version whose change was a delete re-creates the file with that content.",
+      "The restore is recorded as a new version too, so it can itself be undone; a no-op restore (content unchanged) records nothing.",
     ].join("\n"),
   },
   {
@@ -887,7 +977,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "ask_user_question",
     kind: "internal",
     description:
-      "Pause and ask the user one or more structured questions when you genuinely cannot proceed without their input — a real decision, a missing requirement, or an ambiguity that changes the outcome. The run suspends until the user answers, so do not use this for things you can reasonably decide yourself, and never use it to narrate progress or ask for permission to use a tool. Prefer a single round of questions over many sequential pauses: batch everything you need now. Each question presents selectable options; set allowMultiple when several options can be chosen together, and set allowOther when a sensible answer might fall outside the options (this lets the user type their own). Keep headers to two or three words and questions to one clear sentence.",
+      'Pause and ask the user one or more structured questions when you genuinely cannot proceed without their input — a real decision, a missing requirement, or an ambiguity that changes the outcome. The run suspends until the user answers, so do not use this for things you can reasonably decide yourself, and never use it to narrate progress or ask for permission to use a tool. Prefer a single round of questions over many sequential pauses: batch everything you need now. Each question presents selectable options, plus a free-text "Other" answer that is always offered automatically — so you never need to add your own "other"/"something else" option, and you can give focused options knowing the user can always type their own. Set allowMultiple when several options can be chosen together. Keep headers to two or three words and questions to one clear sentence.',
     parameters: {
       type: "object",
       properties: {
@@ -929,12 +1019,6 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
                 description: "Whether the user may select more than one option. Defaults to false.",
                 default: false,
               },
-              allowOther: {
-                type: "boolean",
-                description:
-                  "Whether the user may provide a free-text answer outside the options. Defaults to false.",
-                default: false,
-              },
             },
             required: ["header", "question", "options"],
             additionalProperties: false,
@@ -947,7 +1031,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use ask_user_question only when user input is genuinely required to proceed correctly.",
       "Batch every question you need into one call; the run pauses until the user answers.",
-      "Set allowMultiple for multi-select questions; set allowOther to let the user type their own answer.",
+      'Set allowMultiple for multi-select questions; a free-text "Other" answer is always offered automatically, so do not add your own "other" option.',
       "Do not use it to narrate progress or to ask permission to run a tool.",
     ].join("\n"),
   },
@@ -2664,7 +2748,7 @@ function renderPersonalFileToolDefinition(
     return {
       ...definition,
       description:
-        "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+        "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites. Only edit personal-brain/ when the user clearly asked to save or update a persistent file. Use the memory tool for structured memory; generic file tools cannot access memory/.",
       parameters,
     };
   }
@@ -2672,7 +2756,7 @@ function renderPersonalFileToolDefinition(
     return {
       ...definition,
       description:
-        "Create or overwrite a UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, personal-brain/, or agent/. Use the memory tool for structured memory; generic file tools cannot access memory/.",
+        "Create or overwrite a UTF-8 text file inside ./work, ./personal-brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, personal-brain/, or agent/. Only write personal-brain/ when the user clearly asked for a saved persistent file or update. Use the memory tool for structured memory; generic file tools cannot access memory/.",
       parameters,
     };
   }
@@ -2814,6 +2898,8 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   inbox_add: "Add to inbox",
   inbox_update: "Update inbox item",
   fetch_transcript: "Fetch transcript",
+  create_linear_issue: "Create Linear issue",
+  restore_brain_file: "Restore brain file",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",

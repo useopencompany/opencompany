@@ -57,6 +57,7 @@ import {
   mcpConnectUrl,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
+import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -171,7 +172,7 @@ function AgentDetailContent({
 }) {
   const queryClient = useQueryClient();
   const { agents: agentsCollection } = useCollections();
-  const { showError } = useToast();
+  const { showError, showToast } = useToast();
   const { data: workspaceSkills } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
     queryFn: fetchWorkspaceSkills,
@@ -258,6 +259,10 @@ function AgentDetailContent({
     const enabledMcpToolIds: AgentToolId[] = [];
     if (agent.mcp.linearConfigured) enabledMcpToolIds.push("linear");
     if (agent.mcp.slackConfigured) enabledMcpToolIds.push("slack");
+    if (agent.mcp.posthogConfigured) enabledMcpToolIds.push("posthog");
+    if (agent.mcp.betterstackConfigured) enabledMcpToolIds.push("betterstack");
+    if (agent.mcp.braintrustConfigured) enabledMcpToolIds.push("braintrust");
+    if (agent.mcp.notionConfigured) enabledMcpToolIds.push("notion");
     return buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
       enabledMcpToolIds,
       agents: agent.workspaceAgents,
@@ -267,6 +272,10 @@ function AgentDetailContent({
     agent.brainPaths,
     agent.mcp.linearConfigured,
     agent.mcp.slackConfigured,
+    agent.mcp.posthogConfigured,
+    agent.mcp.betterstackConfigured,
+    agent.mcp.braintrustConfigured,
+    agent.mcp.notionConfigured,
     agent.usableGitHubIntegrationRepositories,
     agent.workspaceAgents,
     availableSkills,
@@ -399,7 +408,7 @@ function AgentDetailContent({
         const result = await runAgentScheduleNow(agent.id, triggerId);
         if (!result.ok) {
           if ("redirectTo" in result) {
-            router.push(result.redirectTo);
+            showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
             return;
           }
           showError(result.error, "Could not run schedule");
@@ -447,7 +456,11 @@ function AgentDetailContent({
                     const result = await createAgentSession(agent.id);
                     if (!result.ok) {
                       if ("redirectTo" in result) {
-                        router.push(result.redirectTo);
+                        showOutOfCreditsToast({
+                          showToast,
+                          router,
+                          redirectTo: result.redirectTo,
+                        });
                         return;
                       }
                       showError(result.error, "Could not start session");
@@ -527,7 +540,7 @@ function AgentDetailContent({
       )}
 
       <aside
-        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
+        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out max-lg:pt-[calc(env(safe-area-inset-top)+1rem)] max-lg:pb-[calc(env(safe-area-inset-bottom)+1rem)] max-lg:pr-[calc(env(safe-area-inset-right)+1.25rem)] lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed
             ? "hidden"
             : "fixed inset-y-0 right-0 z-40 block w-[min(328px,calc(100vw-24px))] lg:static lg:z-auto lg:w-[328px]"
@@ -1603,13 +1616,29 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
 // flow. Mirrors the picker logic in agent-editor/tools.ts.
 function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"]): AgentTool {
   const connected =
-    (tool.id === "linear" && mcp.linearConfigured) || (tool.id === "slack" && mcp.slackConfigured);
-  if ((tool.id !== "linear" && tool.id !== "slack") || connected) return tool;
+    (tool.id === "linear" && mcp.linearConfigured) ||
+    (tool.id === "slack" && mcp.slackConfigured) ||
+    (tool.id === "posthog" && mcp.posthogConfigured) ||
+    (tool.id === "betterstack" && mcp.betterstackConfigured) ||
+    (tool.id === "braintrust" && mcp.braintrustConfigured) ||
+    (tool.id === "notion" && mcp.notionConfigured);
+  if (!isMcpSetupAwareTool(tool.id) || connected) return tool;
   return {
     ...tool,
     needsSetup: true,
     connectUrl: mcpConnectUrl(tool.id),
   };
+}
+
+function isMcpSetupAwareTool(id: AgentToolId) {
+  return (
+    id === "linear" ||
+    id === "slack" ||
+    id === "posthog" ||
+    id === "betterstack" ||
+    id === "braintrust" ||
+    id === "notion"
+  );
 }
 
 function buildConfigPreview({

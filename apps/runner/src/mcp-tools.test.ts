@@ -115,6 +115,21 @@ const betterStackAgentConfig: AgentConfig = {
   ],
 };
 
+const notionAgentConfig: AgentConfig = {
+  ...agentConfig,
+  title: "Notion",
+  instructions: "Use @notion.",
+  tools: [
+    {
+      id: "notion",
+      type: "mcp",
+      server: "notion",
+      label: "notion",
+      description: "Use workspace-configured Notion MCP tools.",
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", credentialKey());
@@ -163,6 +178,111 @@ describe("createMcpToolSet", () => {
       "Linear MCP connection setup failed",
       expect.objectContaining({ mcp_server: "linear" }),
     );
+  });
+
+  it("registers a not-connected stub when OAuth client setup needs reauthorization", async () => {
+    db.queryResults = [[linearServerRow()], [linearOAuthConnectionRow()]];
+    vi.mocked(createMCPClient).mockRejectedValueOnce(
+      new Error("Linear MCP needs to be reconnected from workspace settings."),
+    );
+
+    const mcpTools = await createMcpToolSet(baseInput());
+    const tools = mcpTools.tools as ToolSet;
+    const stub = tools.linear__get_connection_status;
+
+    expect(stub).toBeDefined();
+    expect(tools.linear__search_tools).toBeUndefined();
+    expect(tools.linear__use_tool).toBeUndefined();
+
+    const output = await stub?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(output).toEqual({
+      ok: false,
+      error: {
+        message: "Linear MCP needs to be reconnected from workspace settings.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+    expect(observability.logger.error).toHaveBeenCalledWith(
+      "Linear MCP connection setup failed",
+      expect.objectContaining({ mcp_server: "linear" }),
+    );
+  });
+
+  it("registers a not-connected stub and closes the client when MCP tool discovery fails", async () => {
+    db.queryResults = [[linearServerRow()], [linearOAuthConnectionRow()]];
+    mcpClient.listTools.mockRejectedValueOnce(
+      new Error("Linear MCP needs to be reconnected from workspace settings."),
+    );
+
+    const mcpTools = await createMcpToolSet(baseInput());
+    const tools = mcpTools.tools as ToolSet;
+    const stub = tools.linear__get_connection_status;
+
+    expect(stub).toBeDefined();
+    expect(tools.linear__search_tools).toBeUndefined();
+    expect(tools.linear__use_tool).toBeUndefined();
+    expect(mcpClient.close).toHaveBeenCalledOnce();
+
+    const output = await stub?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(output).toMatchObject({
+      ok: false,
+      error: {
+        message: "Linear MCP needs to be reconnected from workspace settings.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+
+    await mcpTools.close();
+    expect(mcpClient.close).toHaveBeenCalledOnce();
+  });
+
+  it("persists a recoverable tool failure when approved MCP resume finds a disconnected provider", async () => {
+    db.queryResults = [[linearServerRow()], [linearOAuthConnectionRow()]];
+    mcpClient.listTools.mockRejectedValueOnce(
+      new Error("Linear MCP needs to be reconnected from workspace settings."),
+    );
+
+    const mcpTools = await createMcpToolSet(baseInput());
+    const run = mcpTools.runApprovedTool({
+      toolName: "linear__use_tool",
+      toolCallId: "call_resume",
+      args: { tool: "create_issue", arguments: { title: "Fix auth" } },
+    });
+    if (!run) throw new Error("Expected disconnected provider to persist a failed tool result.");
+
+    const output = await run;
+
+    expect(output).toMatchObject({
+      ok: false,
+      error: {
+        message: "Linear MCP needs to be reconnected from workspace settings.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "linear__use_tool", toolCallId: "call_resume" }),
+    );
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool.failed",
+        payload: expect.objectContaining({
+          name: "linear__use_tool",
+          toolCallId: "call_resume",
+          error: expect.objectContaining({ code: "mcp_not_connected", recoverable: true }),
+        }),
+      }),
+    );
+
+    await mcpTools.close();
   });
 
   it("names the stub so it is auto-allowed (no approval suspend for a no-op)", async () => {
@@ -646,6 +766,43 @@ describe("createMcpToolSet", () => {
 
     await mcpTools.close();
   });
+
+  it("loads Notion MCP OAuth tools with dynamic client credentials", async () => {
+    db.queryResults = [[notionServerRow()], [notionOAuthConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({
+      tools: [{ name: "notion-search", description: "Search Notion" }],
+    } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      "notion-search": { description: "Search Notion", execute: vi.fn() },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput(notionAgentConfig));
+
+    expect((mcpTools.tools as ToolSet).notion__search_tools).toBeDefined();
+    expect((mcpTools.tools as ToolSet).notion__use_tool).toBeDefined();
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          type: "http",
+          url: "https://mcp.notion.com/mcp",
+          authProvider: expect.any(Object),
+        }),
+      }),
+    );
+    const call = vi.mocked(createMCPClient).mock.calls.at(-1)?.[0] as {
+      transport?: { authProvider?: { tokens: () => unknown; clientInformation: () => unknown } };
+    };
+    expect(call.transport?.authProvider?.tokens()).toEqual({
+      access_token: "notion_access",
+      refresh_token: "notion_refresh",
+      token_type: "Bearer",
+    });
+    expect(call.transport?.authProvider?.clientInformation()).toEqual({
+      client_id: "notion_client",
+    });
+
+    await mcpTools.close();
+  });
 });
 
 function baseInput(
@@ -759,6 +916,34 @@ function betterStackOAuthConnectionRow() {
       },
       "oauth",
       "wmcps_betterstack",
+    ),
+  };
+}
+
+function notionServerRow() {
+  return {
+    id: "wmcps_notion",
+    endpointUrl: "https://mcp.notion.com/mcp",
+    status: "configured",
+  };
+}
+
+function notionOAuthConnectionRow() {
+  return {
+    serverId: "wmcps_notion",
+    credentialKind: "oauth",
+    encryptionKeyVersion: 1,
+    encryptedPayload: encryptPayload(
+      {
+        clientInformation: { client_id: "notion_client" },
+        tokens: {
+          access_token: "notion_access",
+          refresh_token: "notion_refresh",
+          token_type: "Bearer",
+        },
+      },
+      "oauth",
+      "wmcps_notion",
     ),
   };
 }

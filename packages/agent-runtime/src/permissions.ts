@@ -315,6 +315,38 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       generate_permalink: "read",
     },
   },
+  notion: {
+    providerKey: "notion",
+    displayName: "Notion",
+    groups: ["read", "post", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      read: "Search and fetch pages, databases, comments, teamspaces, and users",
+      post: "Create pages, databases, views, and comments",
+      modify: "Update or move pages, data sources, and views",
+      admin: "Run unclassified Notion tools",
+    },
+    toolGroups: {
+      notion_search: "read",
+      notion_fetch: "read",
+      notion_query_data_sources: "read",
+      notion_query_database_view: "read",
+      notion_get_comments: "read",
+      notion_get_teams: "read",
+      notion_get_users: "read",
+      notion_get_user: "read",
+      notion_get_self: "read",
+      notion_create_pages: "post",
+      notion_duplicate_page: "post",
+      notion_create_database: "post",
+      notion_create_view: "post",
+      notion_create_comment: "post",
+      notion_update_page: "modify",
+      notion_move_pages: "modify",
+      notion_update_data_source: "modify",
+      notion_update_view: "modify",
+    },
+  },
   github: {
     providerKey: "github",
     displayName: "GitHub",
@@ -513,6 +545,13 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   inbox_list: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   inbox_add: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   inbox_update: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
+  // Creates an issue in the workspace's OWN connected Linear (not OC's feedback Linear). A real
+  // external write, so it's gated "post" under the linear provider (ask-first by default).
+  create_linear_issue: { providerKey: "linear", group: "post" },
+  // Restores a brain file to a saved version. Like write_file/edit_file it mutates a sandbox-backed
+  // brain (company brain_files / personal agent_files) tree, so it sits in the ungated system
+  // "modify" group — the version row it writes first keeps the change itself recoverable.
+  restore_brain_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // Reads a mounted skill file from the sandbox.
   read_skill: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   // Self-edit of the agent's own definition; its safety flow (validation + skill-read

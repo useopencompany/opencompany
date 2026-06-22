@@ -81,7 +81,12 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("User first name: Ada");
     expect(resolved.systemPrompt).toContain("User last name: Lovelace");
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
+    expect(resolved.systemPrompt).toContain("make the tool call before answering");
+    expect(resolved.systemPrompt).toContain("do not say or imply you checked a source");
     expect(resolved.systemPrompt).toContain("call ask_user_question");
+    expect(resolved.systemPrompt).toContain(
+      "whether any durable file or memory update is clearly intended",
+    );
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
     expect(resolved.systemPrompt).toMatch(/Current date: \w+, \w+ \d{1,2}, \d{4}/);
@@ -148,6 +153,23 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain(
       "(empty — populate this as you learn who your user is)",
     );
+  });
+
+  it("requires internal source checks before claiming personal facts are unknown", () => {
+    const resolved = resolveAgentRuntimeConfig({ agent: profileConfig(), personalAgent: true });
+
+    expect(resolved.tools).toContain("memory");
+    expect(resolved.systemPrompt).toContain("Before saying you do not know");
+    expect(resolved.systemPrompt).toContain("query memory for durable facts");
+    expect(resolved.systemPrompt).toContain("use file tools on personal-brain/");
+    expect(resolved.systemPrompt).toContain("Ask the user only after those checks fail");
+  });
+
+  it("uses mounted brain refs, not personal-brain paths, for workspace source checks", () => {
+    const resolved = resolveAgentRuntimeConfig({ agent: profileConfig(), personalAgent: false });
+
+    expect(resolved.systemPrompt).toContain("use file tools on mounted brain/ refs");
+    expect(resolved.systemPrompt).not.toContain("use file tools on personal-brain/");
   });
 
   it("truncates an oversized profile with a marker and bounds its length", () => {
@@ -402,6 +424,14 @@ describe("resolveAgentRuntimeConfig", () => {
     const resolved = resolveAgentRuntimeConfig({ agent: config, personalAgent: true });
 
     expect(resolved.systemPrompt).toContain("personal-brain/");
+    expect(resolved.systemPrompt).toContain("create or update personal-brain/ only when");
+    expect(resolved.systemPrompt).toContain("This session has NO company brain/ root");
+    expect(resolved.systemPrompt).toContain("never leave anything intended to persist there");
+    expect(resolved.systemPrompt).toContain(
+      "If you are unsure whether the user wants a persistent file",
+    );
+    expect(resolved.systemPrompt).toContain("do not infer memory from casual wording");
+    expect(resolved.systemPrompt).not.toContain("When unsure, prefer personal-brain");
     expect(resolved.systemPrompt).toContain(
       "File tools require paths prefixed with work/, personal-brain/, or agent/.",
     );
@@ -682,6 +712,7 @@ describe("resolveAgentRuntimeConfig", () => {
     "zai/glm-5.1",
     "zai/glm-5-turbo",
     "zai/glm-5v-turbo",
+    "openrouter/fusion",
   ] as const)("marks %s as reasoning-capable without custom provider options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",

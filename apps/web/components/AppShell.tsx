@@ -2,8 +2,11 @@ import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { CollectionsProvider } from "@/components/CollectionsProvider";
+import { MobileInspectorProvider } from "@/components/MobileInspectorContext";
+import { MobileMenuButton } from "@/components/MobileMenuButton";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
 import QueryProvider from "@/components/QueryProvider";
+import { ShellChrome } from "@/components/ShellChrome";
 import Sidebar from "@/components/Sidebar";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
@@ -63,29 +66,41 @@ export default async function AppShell({ children }: { children: React.ReactNode
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-              <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-                <Suspense
-                  fallback={
-                    <Sidebar
-                      userName={userName}
-                      userEmail={authUser.email}
-                      workspaceName={workspace.name}
-                      initialCollapsed={initialSidebarCollapsed}
-                      initialSessions={[]}
-                      sessionsLoading
-                    />
-                  }
-                >
-                  <SidebarWithSessions
-                    userName={userName}
-                    userEmail={authUser.email}
-                    workspaceName={workspace.name}
-                    initialCollapsed={initialSidebarCollapsed}
-                    sessionsPromise={sessionsPromise}
-                  />
-                </Suspense>
-                {children}
-              </div>
+              {/* touch-pan-y: hand horizontal drags to the drawer swipe (useDrawerGesture)
+                  instead of letting iOS Safari treat them as back/forward navigation.
+                  MobileInspectorProvider sits above ShellChrome so the swipe gesture and
+                  a session page's right inspector (registered below) share one channel. */}
+              <MobileInspectorProvider>
+                <div className="flex h-dvh w-full touch-pan-y overflow-hidden overflow-x-hidden bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+                  <ShellChrome
+                    sidebar={
+                      <Suspense
+                        fallback={
+                          <Sidebar
+                            userName={userName}
+                            userEmail={authUser.email}
+                            workspaceName={workspace.name}
+                            initialCollapsed={initialSidebarCollapsed}
+                            initialSessions={[]}
+                            sessionsLoading
+                          />
+                        }
+                      >
+                        <SidebarWithSessions
+                          userName={userName}
+                          userEmail={authUser.email}
+                          workspaceName={workspace.name}
+                          initialCollapsed={initialSidebarCollapsed}
+                          sessionsPromise={sessionsPromise}
+                        />
+                      </Suspense>
+                    }
+                  >
+                    <MobileMenuButton />
+                    {children}
+                  </ShellChrome>
+                </div>
+              </MobileInspectorProvider>
             </ToastProvider>
           </CollectionsProvider>
         </WorkspaceProvider>

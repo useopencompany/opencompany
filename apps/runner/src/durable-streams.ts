@@ -130,6 +130,54 @@ async function ensureProducer(sessionId: string): Promise<IdempotentProducer | n
   return pending;
 }
 
+function isClosedProducerError(error: unknown): boolean {
+  return (
+    error instanceof DurableStreamError &&
+    (error.code === "ALREADY_CLOSED" || error.message === "Producer is closed")
+  );
+}
+
+async function evictProducerIfCurrent(
+  sessionId: string,
+  producer: IdempotentProducer,
+): Promise<void> {
+  const current = producers.get(sessionId);
+  if (!current) return;
+
+  try {
+    const currentProducer = await current;
+    if (currentProducer === producer && producers.get(sessionId) === current) {
+      producers.delete(sessionId);
+    }
+  } catch {
+    if (producers.get(sessionId) === current) {
+      producers.delete(sessionId);
+    }
+  }
+}
+
+async function appendToDurableStream(
+  sessionId: string,
+  event: RuntimeEventForStream,
+): Promise<void> {
+  const body = JSON.stringify(event);
+  const producer = await ensureProducer(sessionId);
+  if (!producer) return;
+
+  try {
+    producer.append(body);
+  } catch (error) {
+    if (!isClosedProducerError(error)) throw error;
+
+    // A run completion detaches producers fire-and-forget. If a later lifecycle
+    // event finds a closed producer still cached, treat it as stale and retry once
+    // with a fresh producer so low-volume after-session events are not dropped.
+    await evictProducerIfCurrent(sessionId, producer);
+    const retryProducer = await ensureProducer(sessionId);
+    retryProducer?.append(body);
+  }
+}
+
 /**
  * Append a runtime event to its session's Durable Stream. No-op when streaming is
  * unconfigured. Fire-and-forget: failures are logged, never thrown — the run and
@@ -139,8 +187,7 @@ export function publishToDurableStream(sessionId: string, event: RuntimeEventFor
   if (!isDurableStreamsEnabled()) return;
   void (async () => {
     try {
-      const producer = await ensureProducer(sessionId);
-      producer?.append(JSON.stringify(event));
+      await appendToDurableStream(sessionId, event);
     } catch (error) {
       logger.warn("Durable stream publish failed", {
         event: "opencompany.durable_stream_publish_failed",
@@ -244,4 +291,12 @@ export async function closeSessionStream(sessionId: string): Promise<void> {
 /** Test-only: clear the producer cache between cases. */
 export function __resetDurableStreamsForTests(): void {
   producers.clear();
+}
+
+/** Test-only: seed the cache with a specific producer. */
+export function __setDurableStreamProducerForTests(
+  sessionId: string,
+  producer: IdempotentProducer,
+): void {
+  producers.set(sessionId, Promise.resolve(producer));
 }

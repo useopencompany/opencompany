@@ -219,6 +219,19 @@ describe("createAgentSession", () => {
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
   });
 
+  it("returns a personal billing redirect for personal-surface session starts", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+
+    const result = await createAgentSession("agt_123", { surface: "personal" });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
+    });
+    expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
+  });
+
   it("returns an error when the agent cannot be found", async () => {
     getDbMock.mockReturnValue(dbWithAgent(null));
 
@@ -365,6 +378,22 @@ describe("createAgentSessionFromPrompt", () => {
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 
+  it("returns a personal billing redirect for personal-surface prompt starts", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Hello", undefined, [], {
+      surface: "personal",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/personal/settings?billing=insufficient",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
   it("returns an error when the agent cannot be found", async () => {
     getDbMock.mockReturnValue(dbWithAgent(null));
 
@@ -420,6 +449,90 @@ describe("createAgentSessionFromPrompt", () => {
       is_initial_message: true,
       message_length: "Ship it".length,
     });
+  });
+
+  it("persists a valid image attachment on the first message", async () => {
+    // Capture the rows handed to `.values(...)`: the prompt path builds every insert op (incl.
+    // the attachment rows) and passes them into db.batch, so the attachment payload shows up as
+    // a `values` call we can assert on.
+    const valuesCalls: unknown[] = [];
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn((rows) => {
+      valuesCalls.push(rows);
+      return { returning };
+    });
+    const insert = vi.fn(() => ({ values }));
+    const limit = vi.fn().mockResolvedValue([fakeAgent()]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const batch = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [fakeSessionRow()],
+        [statusEventRow],
+        [fakeMessageRow()],
+        [{ id: 2, createdAt: CREATED_AT }],
+      ]);
+    getDbMock.mockReturnValue({ select, insert, batch } as never);
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Look at this", undefined, [
+      {
+        blobPathname: "workspace/wks_123/pending/att1-x.png",
+        blobUrl: "https://blob.example/x.png",
+        mediaType: "image/png",
+        filename: "x.png",
+        sizeBytes: 1024,
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+    // The attachment row carries the blob pointer + scoped to the new session/message.
+    expect(valuesCalls).toContainEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          blobPathname: "workspace/wks_123/pending/att1-x.png",
+          blobUrl: "https://blob.example/x.png",
+          kind: "image",
+          sessionId: "ses_123",
+          messageId: "msg_123",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects an attachment that fails validation without creating a session", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+
+    const result = await createAgentSessionFromPrompt("agt_123", "hi", undefined, [
+      {
+        blobPathname: "workspace/wks_123/pending/att2-x.exe",
+        blobUrl: "https://blob.example/x.exe",
+        mediaType: "application/x-msdownload",
+        filename: "x.exe",
+        sizeBytes: 10,
+      },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an attachment scoped to another workspace", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+
+    const result = await createAgentSessionFromPrompt("agt_123", "hi", undefined, [
+      {
+        blobPathname: "workspace/wks_OTHER/pending/att3-x.png",
+        blobUrl: "https://blob.example/x.png",
+        mediaType: "image/png",
+        filename: "x.png",
+        sizeBytes: 1024,
+      },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 });
 

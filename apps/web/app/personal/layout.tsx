@@ -1,5 +1,6 @@
 import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { CollectionsProvider } from "@/components/CollectionsProvider";
+import { MobileInspectorProvider } from "@/components/MobileInspectorContext";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
 import PersonalShell from "@/components/personal/PersonalShell";
 import QueryProvider from "@/components/QueryProvider";
@@ -78,6 +79,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     posthog: mcpSettings.posthog.configured,
     betterstack: mcpSettings.betterstack.configured,
     braintrust: mcpSettings.braintrust.configured,
+    notion: mcpSettings.notion.configured,
   };
 
   // Richer per-integration detail (accounts, repositories/calendars, MCP endpoints) for the
@@ -103,24 +105,29 @@ export default async function PersonalLayout({ children }: { children: React.Rea
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-              <PersonalShell
-                agent={agent}
-                userName={userName}
-                userEmail={authUser.email}
-                workspaceName={workspace.name}
-                initialSessions={sessions}
-                contextFiles={contextFiles}
-                personalSkills={personalSkills}
-                githubIntegrationStatus={workspaceIntegrations.github.status}
-                githubRepositories={githubRepositories}
-                integrationConnections={integrationConnections}
-                integrationDetails={integrationDetails}
-                toolPolicies={toolPolicies}
-                proMode={user.proMode}
-                companySurfaceEnabled={user.companySurfaceEnabled}
-              >
-                {children}
-              </PersonalShell>
+              {/* Bridges the mobile right-edge swipe (driven in PersonalShell) to the session
+                  inspector that SessionView registers — must sit above both, which are descendants
+                  of PersonalShell. No-op on desktop. */}
+              <MobileInspectorProvider>
+                <PersonalShell
+                  agent={agent}
+                  userName={userName}
+                  userEmail={authUser.email}
+                  workspaceName={workspace.name}
+                  initialSessions={sessions}
+                  contextFiles={contextFiles}
+                  personalSkills={personalSkills}
+                  githubIntegrationStatus={workspaceIntegrations.github.status}
+                  githubRepositories={githubRepositories}
+                  integrationConnections={integrationConnections}
+                  integrationDetails={integrationDetails}
+                  toolPolicies={toolPolicies}
+                  proMode={user.proMode}
+                  companySurfaceEnabled={user.companySurfaceEnabled}
+                >
+                  {children}
+                </PersonalShell>
+              </MobileInspectorProvider>
             </ToastProvider>
           </CollectionsProvider>
         </WorkspaceProvider>

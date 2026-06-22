@@ -16,7 +16,6 @@ import {
   type LucideIcon,
   Plus,
   Search,
-  Sparkles,
   Wrench,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -31,6 +30,7 @@ import {
   type AgentTool,
   buildSkillMentionItems,
   findTool,
+  skillIconFor,
 } from "@/components/agent-editor/tools";
 import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -43,6 +43,7 @@ import {
   removeBetterStackMcpConnection,
   removeBraintrustMcpConnection,
   removeLinearMcpToken,
+  removeNotionMcpConnection,
   removePostHogMcpConnection,
   removeSlackMcpConnection,
 } from "@/lib/mcp/actions";
@@ -561,6 +562,7 @@ const MCP_DISCONNECT_ACTIONS: Partial<
   posthog: removePostHogMcpConnection,
   betterstack: removeBetterStackMcpConnection,
   braintrust: removeBraintrustMcpConnection,
+  notion: removeNotionMcpConnection,
 };
 
 async function disconnectIntegration(
@@ -1463,7 +1465,7 @@ function buildRows(
   if (section === "skills") {
     const referenced: IntegrationRow[] = (config.skills ?? []).map((skill) => ({
       id: skill.id,
-      icon: Sparkles,
+      icon: skillIconFor(skill.id),
       label: isExternalSkillReference(skill) ? skill.name || skill.id : skill.id,
       description: isExternalSkillReference(skill)
         ? skill.description || skill.source.url
@@ -1473,7 +1475,7 @@ function buildRows(
     // discovered from the bundle — not in `skills:` frontmatter — so they're flagged with a badge.
     const personal: IntegrationRow[] = personalSkills.map((skill) => ({
       id: `personal:${skill.id}`,
-      icon: Sparkles,
+      icon: skillIconFor(skill.id),
       label: skill.name,
       description: skill.description,
       badge: skill.provenance === "user" ? "Personal · you" : "Personal",

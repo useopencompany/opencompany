@@ -1,3 +1,4 @@
+import { Atom, Blocks, Brain, Feather, Sparkles } from "lucide-react";
 import { describe, expect, test } from "vitest";
 import {
   AGENT_MODELS,
@@ -5,6 +6,7 @@ import {
   buildBrainMentionItems,
   buildWorkspaceAgentMentionItems,
   findModel,
+  skillIconFor,
 } from "./tools";
 
 describe("agent editor mention tools", () => {
@@ -64,6 +66,7 @@ describe("agent editor mention tools", () => {
       "zai/glm-5.1",
       "zai/glm-5-turbo",
       "zai/glm-5v-turbo",
+      "openrouter/fusion",
     ]);
     expect(findModel("model:google/gemini-3-flash")).toMatchObject({
       id: "google/gemini-3-flash",
@@ -72,6 +75,10 @@ describe("agent editor mention tools", () => {
     expect(findModel("model:minimax/minimax-m3")).toMatchObject({
       id: "minimax/minimax-m3",
       displayLabel: "minimax/minimax-m3",
+    });
+    expect(findModel("model:openrouter/fusion")).toMatchObject({
+      id: "openrouter/fusion",
+      displayLabel: "openrouter/fusion",
     });
   });
 
@@ -135,6 +142,9 @@ describe("agent editor mention tools", () => {
     expect(
       buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:betterstack"),
     ).toBe(true);
+    expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:notion")).toBe(
+      true,
+    );
   });
 
   test("shows not-connected MCP tools with a needs-setup badge", () => {
@@ -144,6 +154,7 @@ describe("agent editor mention tools", () => {
     const linear = items.find((item) => item.mentionId === "tool:linear");
     const slack = items.find((item) => item.mentionId === "tool:slack");
     const betterstack = items.find((item) => item.mentionId === "tool:betterstack");
+    const notion = items.find((item) => item.mentionId === "tool:notion");
 
     // Connected provider behaves normally.
     expect(linear).toBeDefined();
@@ -158,6 +169,9 @@ describe("agent editor mention tools", () => {
     expect(betterstack?.connectUrl).toBe(
       "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fsettings",
     );
+    expect(notion).toBeDefined();
+    expect(notion?.needsSetup).toBe(true);
+    expect(notion?.connectUrl).toBe("/api/mcp/notion/start?returnTo=%2Fcompany%2Fsettings");
   });
 
   test("offers the addable built-in first-principles skill in the mention menu", () => {
@@ -172,6 +186,30 @@ describe("agent editor mention tools", () => {
         }),
       ]),
     );
+  });
+
+  test("offers the addable built-in Y Combinator knowledge skill in the mention menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skill",
+          mentionId: "skill/y-combinator-knowledge",
+          label: "skill/y-combinator-knowledge",
+          displayLabel: "Y Combinator knowledge",
+        }),
+      ]),
+    );
+  });
+
+  test("gives built-in skills distinct icons and external skills a neutral fallback", () => {
+    expect(skillIconFor("first-principles")).toBe(Atom);
+    expect(skillIconFor("humanizer")).toBe(Feather);
+    expect(skillIconFor("memory")).toBe(Brain);
+    // Unknown / external skill ids fall back to a neutral glyph rather than the
+    // old shared Sparkles placeholder.
+    expect(skillIconFor("some-external-github-skill")).toBe(Blocks);
+    expect(skillIconFor("first-principles")).not.toBe(Sparkles);
   });
 
   test("exposes workspace agents as stable agent slug mentions", () => {

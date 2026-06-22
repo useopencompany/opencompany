@@ -87,6 +87,7 @@ Which AI model runs this agent. Pick one of:
 | `zai/glm-5.1` | Latest GLM for coding-heavy and agentic engineering tasks. |
 | `zai/glm-5-turbo` | Faster GLM 5 variant for production agent workflows. |
 | `zai/glm-5v-turbo` | Multimodal GLM 5 model for visual coding and GUI tasks. |
+| `openrouter/fusion` | OpenRouter multi-model router for research, critique, and high-stakes answers. |
 
 If you type something that isn't on this list, opencompany falls back to `openai/gpt-5.4-mini`.
 
@@ -126,6 +127,7 @@ for coding tools, `--repo owner/repo` for `gh` commands).
 | `amp` | Coding work delegated into a sandboxed runtime, operating on an attached repository. |
 | `linear` | Workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Workspace MCP access to Slack search, messages, files, emoji, and users. |
+| `notion` | Workspace MCP access to Notion search, pages, databases, comments, users, and teamspaces. |
 
 Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file. Tool labels, descriptions, and runtime function names come from the platform catalog, not from this file.
 

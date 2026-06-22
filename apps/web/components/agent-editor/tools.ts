@@ -1,9 +1,17 @@
 import type { ModelRatings, ModelRatingTier } from "@opencompany/agent-runtime";
 import {
   AFTER_SESSION_TAG,
+  AGENT_SELF_EDIT_SKILL_ID,
   agentMentionIdForPath,
+  FIRST_PRINCIPLES_SKILL_ID,
+  HUMANIZER_SKILL_ID,
   listAddableBuiltinSkills,
+  MEMORY_SKILL_ID,
+  ONBOARDING_SKILL_ID,
+  OPENCOMPANY_SETUP_SKILL_ID,
   repositoryIdForFullName,
+  SKILL_CREATOR_SKILL_ID,
+  Y_COMBINATOR_KNOWLEDGE_SKILL_ID,
 } from "@opencompany/agent-runtime";
 import type {
   AgentGitHubRepositoryBinding,
@@ -12,16 +20,23 @@ import type {
   AgentToolId,
 } from "@opencompany/agent-runtime/types";
 import {
+  Atom,
   AtSign,
   BarChart3,
+  Blocks,
+  Brain,
+  Building2,
   CalendarDays,
   Clock3,
   Code2,
   Database,
+  Feather,
   FileText,
   FlaskConical,
   Folder,
   GitBranch,
+  Hammer,
+  Hand,
   ListTodo,
   type LucideIcon,
   Mail,
@@ -30,7 +45,9 @@ import {
   Monitor,
   Music2,
   Plus,
+  Rocket,
   Search,
+  SlidersHorizontal,
   Sparkles,
   SquarePlay,
 } from "lucide-react";
@@ -172,6 +189,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   posthog: BarChart3,
   betterstack: Monitor,
   braintrust: FlaskConical,
+  notion: FileText,
   gmail: Mail,
   google_calendar: CalendarDays,
 };
@@ -203,6 +221,7 @@ function modelIconFor(id: AgentModelId): LucideIcon {
 // model picker. Falls back to the raw prefix for unlisted providers.
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
+  openrouter: "OpenRouter",
   anthropic: "Anthropic",
   google: "Google",
   deepseek: "DeepSeek",
@@ -325,6 +344,26 @@ export function buildAgentMentionItems(
   ];
 }
 
+// Per-skill icons for the built-in skills (mirrors TOOL_ICONS). External and
+// personal skills have no shipped icon, so they fall back to a neutral glyph
+// rather than every skill sharing the same placeholder.
+const SKILL_ICONS: Record<string, LucideIcon> = {
+  [FIRST_PRINCIPLES_SKILL_ID]: Atom,
+  [HUMANIZER_SKILL_ID]: Feather,
+  [Y_COMBINATOR_KNOWLEDGE_SKILL_ID]: Rocket,
+  [MEMORY_SKILL_ID]: Brain,
+  [SKILL_CREATOR_SKILL_ID]: Hammer,
+  [AGENT_SELF_EDIT_SKILL_ID]: SlidersHorizontal,
+  [OPENCOMPANY_SETUP_SKILL_ID]: Building2,
+  [ONBOARDING_SKILL_ID]: Hand,
+};
+
+const FALLBACK_SKILL_ICON: LucideIcon = Blocks;
+
+export function skillIconFor(id: string): LucideIcon {
+  return SKILL_ICONS[id] ?? FALLBACK_SKILL_ICON;
+}
+
 // Addable built-in skills (shipped in code, off by default) plus the workspace's external
 // skills, all as @skill/<id> mentions, plus an "Add skill from GitHub URL" action that opens
 // the resolve dialog. The pill renders @skill/<id> in the body (so it matches the runtime
@@ -341,7 +380,7 @@ export function buildSkillMentionItems(skills: AgentSkillCatalogEntry[]): AgentS
     label: `skill/${skill.id}`,
     displayLabel: skill.name || `skill/${skill.id}`,
     description: skill.description || `skills/${skill.id}/SKILL.md`,
-    icon: Sparkles,
+    icon: skillIconFor(skill.id),
   }));
   items.push({
     id: ADD_SKILL_MENTION_ID,
@@ -410,7 +449,8 @@ function isMcpToolId(id: AgentToolId) {
     id === "slack" ||
     id === "posthog" ||
     id === "betterstack" ||
-    id === "braintrust"
+    id === "braintrust" ||
+    id === "notion"
   );
 }
 
