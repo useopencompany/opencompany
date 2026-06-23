@@ -203,20 +203,16 @@ export default function PersonalShell({
     if (!detectedTimezone) return;
     if (detectedTimezone === userTimezone && userTimezoneSource === "browser") return;
 
-    const previousTimezone = userTimezone;
-    const previousSource = userTimezoneSource;
-    setUserTimezone(detectedTimezone);
-    setUserTimezoneSource("browser");
+    let cancelled = false;
     void setUserTimezoneAction({ timezone: detectedTimezone, source: "browser" }).then((result) => {
-      if (!result.ok) {
-        setUserTimezone(previousTimezone);
-        setUserTimezoneSource(previousSource);
-        return;
-      }
+      if (cancelled || !result.ok) return;
       setUserTimezone(result.timezone);
       setUserTimezoneSource(result.source);
       if (result.config) setConfig(result.config);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [userTimezone, userTimezoneSource]);
 
   // The editable behavior body. Held in a ref (not state) because only the Behavior route reads
