@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { lockAxis, progressForSide, resolveGesture, shouldCommitOpen } from "./drawerGesture";
+import {
+  EDGE_GUARD_PX,
+  edgeGuardSide,
+  lockAxis,
+  progressForSide,
+  resolveGesture,
+  shouldCommitOpen,
+} from "./drawerGesture";
 
 const closed = { leftOpen: false, rightOpen: false, rightAvailable: true };
 
@@ -97,5 +104,36 @@ describe("shouldCommitOpen", () => {
     expect(shouldCommitOpen("right", false, 0.8, 0)).toBe(true);
     expect(shouldCommitOpen("right", false, 0.5, 0)).toBe(false);
     expect(shouldCommitOpen("right", false, 0.9, 0.7)).toBe(false);
+  });
+});
+
+describe("edgeGuardSide", () => {
+  const W = 400;
+  it("guards the left edge when the menu is closed (rightward swipe would open it)", () => {
+    expect(edgeGuardSide(5, W, { leftClosed: true, rightClosedAndAvailable: false })).toBe("left");
+  });
+  it("does not guard the left edge when the menu is already open", () => {
+    expect(edgeGuardSide(5, W, { leftClosed: false, rightClosedAndAvailable: false })).toBeNull();
+  });
+  it("guards the right edge when a closed details panel is available", () => {
+    expect(edgeGuardSide(W - 5, W, { leftClosed: true, rightClosedAndAvailable: true })).toBe(
+      "right",
+    );
+  });
+  it("does not guard the right edge when no details panel exists", () => {
+    expect(
+      edgeGuardSide(W - 5, W, { leftClosed: true, rightClosedAndAvailable: false }),
+    ).toBeNull();
+  });
+  it("leaves interior touches to the native gesture", () => {
+    expect(edgeGuardSide(W / 2, W, { leftClosed: true, rightClosedAndAvailable: true })).toBeNull();
+  });
+  it("treats the edge boundary as inclusive on both sides", () => {
+    expect(
+      edgeGuardSide(EDGE_GUARD_PX, W, { leftClosed: true, rightClosedAndAvailable: false }),
+    ).toBe("left");
+    expect(
+      edgeGuardSide(W - EDGE_GUARD_PX, W, { leftClosed: false, rightClosedAndAvailable: true }),
+    ).toBe("right");
   });
 });
