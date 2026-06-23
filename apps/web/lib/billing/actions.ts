@@ -325,6 +325,10 @@ export async function startAutoRefillSetup(returnPath?: string) {
     const metadata = { kind: "auto_refill_setup", workspaceId: workspace.id, userId: user.id };
     const session = await stripe.checkout.sessions.create({
       mode: "setup",
+      // Setup-mode Checkout uses dynamic payment methods, which require a currency to
+      // resolve eligible methods. Without it Stripe rejects the request ("currency is
+      // required in setup mode") — this is what broke "Add a card" in production.
+      currency: "usd",
       customer: customerId,
       success_url: `${appUrl}${safeReturnPath(returnPath)}?billing=card_saved`,
       cancel_url: `${appUrl}${safeReturnPath(returnPath)}?billing=cancelled`,
