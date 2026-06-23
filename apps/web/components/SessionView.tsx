@@ -997,8 +997,8 @@ function SessionViewContentBody({
         <div
           className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-5 after:content-[''] ${
             message.role === "user"
-              ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
-              : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
+              ? "max-w-[85%] md:max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+              : "max-w-full md:max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
           }`}
         >
           {message.role === "assistant" ? (
@@ -1055,7 +1055,7 @@ function SessionViewContentBody({
       {parts.map((part) =>
         part.type === "tool-call" ? (
           <div key={part.toolCall.id} className="flex justify-start">
-            <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
+            <div className="max-w-full md:max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
               <ToolCallCard toolCall={part.toolCall} sessionIsInterrupted={sessionIsInterrupted} />
             </div>
           </div>
@@ -1603,7 +1603,7 @@ function SessionViewContentBody({
             handlers here only drive the "Drop files to attach" overlay. */}
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-4 py-6 md:px-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
           onScroll={(event) => {

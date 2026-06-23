@@ -20,6 +20,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { cn } from "@/lib/utils";
 
 // Group models by provider (in catalog order) for the searchable picker. Shared across
@@ -73,6 +74,10 @@ export function ModelPicker({
   "aria-label": ariaLabel = "Model",
 }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
+  // On mobile, tapping a text input opens the on-screen keyboard. Most people pick a model by
+  // scanning the list, not typing, so we drop the search box on phones and stop the popover from
+  // auto-focusing anything — the list is just scrolled and tapped (desktop keeps instant search).
+  const isMobile = useIsMobile();
   const modelsByProvider = useModelsByProvider();
   const selectedModel = findModel(value) ?? findModel(fallbackModelId)!;
   const SelectedModelIcon = selectedModel.icon;
@@ -94,9 +99,15 @@ export function ModelPicker({
           <ChevronDown size={12} strokeWidth={1.9} className="ml-0.5 shrink-0" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align={align} className="w-[360px] p-0">
+      <PopoverContent
+        align={align}
+        className="w-[360px] max-w-[calc(100vw-1.5rem)] p-0"
+        onOpenAutoFocus={(event) => {
+          if (isMobile) event.preventDefault();
+        }}
+      >
         <Command>
-          <CommandInput placeholder="Search models or providers…" />
+          {!isMobile ? <CommandInput placeholder="Search models or providers…" /> : null}
           <div className="flex items-center justify-end px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
             Capability · Speed · Cost
           </div>

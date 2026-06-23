@@ -29,9 +29,11 @@ import {
 } from "@/lib/personal/actions";
 import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
+import { browserTimezone, type UserTimezoneSource } from "@/lib/timezones";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 import { useDrawerGesture } from "@/lib/useDrawerGesture";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { setUserTimezone as setUserTimezoneAction } from "@/lib/users/actions";
 import { cn } from "@/lib/utils";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
@@ -74,6 +76,8 @@ export type PersonalShellProps = {
   agent: PersonalAgent;
   userName: string;
   userEmail: string;
+  userTimezone: string;
+  userTimezoneSource: UserTimezoneSource;
   workspaceName: string;
   initialSessions: SidebarSessionPayload[];
   contextFiles: AgentBundleFilePayload[];
@@ -97,6 +101,8 @@ export default function PersonalShell({
   agent,
   userName,
   userEmail,
+  userTimezone: initialUserTimezone,
+  userTimezoneSource: initialUserTimezoneSource,
   workspaceName,
   initialSessions,
   contextFiles,
@@ -114,6 +120,9 @@ export default function PersonalShell({
   const [config, setConfig] = useState<AgentConfig>(agent.config);
   const [proMode, setProMode] = useState(initialProMode);
   const [companySurfaceEnabled, setCompanySurfaceEnabled] = useState(initialCompanySurfaceEnabled);
+  const [userTimezone, setUserTimezone] = useState(initialUserTimezone);
+  const [userTimezoneSource, setUserTimezoneSource] =
+    useState<UserTimezoneSource>(initialUserTimezoneSource);
   const [githubRequested, setGitHubRequested] = useState(() =>
     hasPersonalGitHubIntegrationRequest(agent.body),
   );
@@ -188,6 +197,24 @@ export default function PersonalShell({
 
   const bundleDir = agent.path ? agentBundleDir(agent.path) : null;
 
+  useEffect(() => {
+    if (userTimezoneSource === "manual") return;
+    const detectedTimezone = browserTimezone();
+    if (!detectedTimezone) return;
+    if (detectedTimezone === userTimezone && userTimezoneSource === "browser") return;
+
+    let cancelled = false;
+    void setUserTimezoneAction({ timezone: detectedTimezone, source: "browser" }).then((result) => {
+      if (cancelled || !result.ok) return;
+      setUserTimezone(result.timezone);
+      setUserTimezoneSource(result.source);
+      if (result.config) setConfig(result.config);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userTimezone, userTimezoneSource]);
+
   // The editable behavior body. Held in a ref (not state) because only the Behavior route reads
   // it — and only at mount — so updates here must not re-render the rest of the surface.
   const draftRef = useRef<{ body: string; content: typeof agent.content }>({
@@ -242,6 +269,8 @@ export default function PersonalShell({
       bundleDir,
       userName,
       userEmail,
+      userTimezone,
+      userTimezoneSource,
       workspaceName,
       initialSessions,
       personalSkills,
@@ -256,6 +285,8 @@ export default function PersonalShell({
       setProMode,
       companySurfaceEnabled,
       setCompanySurfaceEnabled,
+      setUserTimezone,
+      setUserTimezoneSource,
       githubRequested,
       getDraft: () => draftRef.current,
       setDraft: (body: string, content: typeof agent.content) => {
@@ -277,6 +308,8 @@ export default function PersonalShell({
       config,
       proMode,
       companySurfaceEnabled,
+      userTimezone,
+      userTimezoneSource,
       githubRequested,
       files,
       personalSkills,
@@ -294,7 +327,12 @@ export default function PersonalShell({
           arrangement survives navigation between personal sub-routes, and so the
           sidebar can act as a drag source into the session canvas. */}
       <PersonalSplitProvider>
-        <div className="relative flex h-dvh w-full overflow-hidden overflow-x-hidden bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+        {/* Root backdrop. The safe-area insets (#501) pad content into the visible area while the
+            background bleeds full-screen. On mobile the surface is full-bleed canvas (the sidebar is
+            an off-canvas drawer), so the root must be `bg-canvas` — otherwise the lighter `bg-sidebar`
+            shows through the top/bottom insets as bands. On desktop the root stays `bg-sidebar` so the
+            expanded main panel can float as a rounded card with the sidebar canvas peeking around it. */}
+        <div className="relative flex h-dvh w-full overflow-hidden overflow-x-hidden bg-canvas md:bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
           {/* Sidebar: an in-flow width-collapsing column on desktop; an off-canvas drawer on
               mobile that the swipe drags 1:1 and snaps. */}
           <div
