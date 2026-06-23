@@ -113,6 +113,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                   agent={agent}
                   userName={userName}
                   userEmail={authUser.email}
+                  userTimezone={user.timezone}
                   workspaceName={workspace.name}
                   initialSessions={sessions}
                   contextFiles={contextFiles}

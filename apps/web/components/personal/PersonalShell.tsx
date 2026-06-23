@@ -74,6 +74,7 @@ export type PersonalShellProps = {
   agent: PersonalAgent;
   userName: string;
   userEmail: string;
+  userTimezone: string;
   workspaceName: string;
   initialSessions: SidebarSessionPayload[];
   contextFiles: AgentBundleFilePayload[];
@@ -97,6 +98,7 @@ export default function PersonalShell({
   agent,
   userName,
   userEmail,
+  userTimezone: initialUserTimezone,
   workspaceName,
   initialSessions,
   contextFiles,
@@ -114,6 +116,7 @@ export default function PersonalShell({
   const [config, setConfig] = useState<AgentConfig>(agent.config);
   const [proMode, setProMode] = useState(initialProMode);
   const [companySurfaceEnabled, setCompanySurfaceEnabled] = useState(initialCompanySurfaceEnabled);
+  const [userTimezone, setUserTimezone] = useState(initialUserTimezone);
   const [githubRequested, setGitHubRequested] = useState(() =>
     hasPersonalGitHubIntegrationRequest(agent.body),
   );
@@ -242,6 +245,7 @@ export default function PersonalShell({
       bundleDir,
       userName,
       userEmail,
+      userTimezone,
       workspaceName,
       initialSessions,
       personalSkills,
@@ -256,6 +260,7 @@ export default function PersonalShell({
       setProMode,
       companySurfaceEnabled,
       setCompanySurfaceEnabled,
+      setUserTimezone,
       githubRequested,
       getDraft: () => draftRef.current,
       setDraft: (body: string, content: typeof agent.content) => {
@@ -277,6 +282,7 @@ export default function PersonalShell({
       config,
       proMode,
       companySurfaceEnabled,
+      userTimezone,
       githubRequested,
       files,
       personalSkills,

@@ -32,6 +32,7 @@ export type PersonalAgentContextValue = {
   bundleDir: string | null;
   userName: string;
   userEmail: string;
+  userTimezone: string;
   workspaceName: string;
   initialSessions: SidebarSessionPayload[];
   personalSkills: ResolvedSkillMetadata[];
@@ -60,6 +61,8 @@ export type PersonalAgentContextValue = {
   // the setter flips it optimistically so the sidebar's space switcher updates without a reload.
   companySurfaceEnabled: boolean;
   setCompanySurfaceEnabled: (next: boolean) => void;
+
+  setUserTimezone: (next: string) => void;
 
   // The behavior editor's live draft. Held as a ref-backed getter (not state) because only the
   // Behavior route reads it, and only at mount — it must not trigger re-renders elsewhere.

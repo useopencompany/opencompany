@@ -101,6 +101,9 @@ export const users = pgTable(
     // reach /company. Off for everyone until they opt in from personal Settings. Kept on `users`
     // (a tiny boolean) so the auth hot path loads it for free, mirroring `proMode`.
     companySurfaceEnabled: boolean("company_surface_enabled").notNull().default(false),
+    // IANA timezone used by user-owned scheduled routines. Individual personal routines derive
+    // from this setting so users manage their local time in one place.
+    timezone: text("timezone").notNull().default("UTC"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
