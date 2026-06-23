@@ -744,12 +744,16 @@ export function commandExitResult(error: unknown) {
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   if (record.name !== "CommandExitError") return null;
-  if (typeof record.exitCode !== "number") return null;
+  const result =
+    record.result && typeof record.result === "object"
+      ? (record.result as Record<string, unknown>)
+      : record;
+  if (typeof result.exitCode !== "number") return null;
 
   return {
-    stdout: typeof record.stdout === "string" ? record.stdout : "",
-    stderr: typeof record.stderr === "string" ? record.stderr : "",
-    exitCode: record.exitCode,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+    stderr: typeof result.stderr === "string" ? result.stderr : "",
+    exitCode: result.exitCode,
   };
 }
 

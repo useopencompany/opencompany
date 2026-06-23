@@ -214,7 +214,7 @@ export function toConfigTool(
   tool: AgentToolDefinition,
   overrides: Partial<AgentCodingToolConfig> = {},
 ): AgentConfigTool {
-  if (tool.id === "amp" || tool.id === "opencode") {
+  if (tool.id === "amp" || tool.id === "opencode" || tool.id === "codex") {
     return {
       id: tool.id,
       type: "coding_agent",

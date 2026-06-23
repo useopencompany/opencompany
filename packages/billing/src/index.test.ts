@@ -224,6 +224,27 @@ describe("fees and hosted tools", () => {
       },
     });
   });
+
+  it("labels broker-metered tool usage with the model catalog version in the cost basis", () => {
+    // LLM-broker settlement rows: the runner metered the upstream requests itself and
+    // priced them from the model catalog, so the catalog version applies.
+    expect(
+      calculateHostedToolUsageCost({
+        provider: "opencode",
+        operation: "brokered",
+        providerCostUsdMicros: 1_000_000,
+        costSource: "broker_metered",
+      }),
+    ).toMatchObject({
+      providerCostUsdMicros: 1_000_000,
+      platformFeeUsdMicros: 100_000,
+      totalCostUsdMicros: 1_100_000,
+      costBasis: {
+        costSource: "broker_metered",
+        pricingVersion: "2026-05-22.standard",
+      },
+    });
+  });
 });
 
 describe("calculateSandboxUsageCost", () => {

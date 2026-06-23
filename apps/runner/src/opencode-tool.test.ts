@@ -239,6 +239,20 @@ describe("buildOpencodeConfig", () => {
     expect(config.provider.gateway.options.apiKey).toBe("{env:VERCEL_AI_GATEWAY_API_KEY}");
     expect(config.provider.gateway.models["anthropic/claude-sonnet-4.6"]).toBeDefined();
   });
+
+  it("points opencode at the LLM broker when given a broker base URL", () => {
+    const config = JSON.parse(
+      buildOpencodeConfig("anthropic/claude-sonnet-4.6", {
+        baseURL: "https://runner.example.com/broker/gateway/v1",
+        apiKeyEnvVar: "OPENCOMPANY_LLM_BROKER_TOKEN",
+      }),
+    );
+    expect(config.model).toBe("gateway/anthropic/claude-sonnet-4.6");
+    expect(config.provider.gateway.options.baseURL).toBe(
+      "https://runner.example.com/broker/gateway/v1",
+    );
+    expect(config.provider.gateway.options.apiKey).toBe("{env:OPENCOMPANY_LLM_BROKER_TOKEN}");
+  });
 });
 
 describe("createOpencodeStreamAccumulator", () => {
@@ -412,6 +426,22 @@ describe("opencodeHostedToolUsage", () => {
     expect(usage?.costUsdMicros).toBe(250_000);
     expect(usage?.costSource).toBe("provider_reported");
     expect(usage?.rawUsage.cost_source).toBe("provider_reported");
+  });
+
+  it("records brokered runs display-only at cost 0 (broker settlement bills instead)", () => {
+    const usage = opencodeHostedToolUsage({
+      modelId: "anthropic/claude-sonnet-4.6",
+      summary: {
+        usage: { input_tokens: 1_000_000, output_tokens: 500_000 },
+        costUsdMicros: 123,
+      },
+      brokered: true,
+    });
+    expect(usage?.costUsdMicros).toBe(0);
+    expect(usage?.costSource).toBe("broker_metered");
+    expect(usage?.rawUsage.display_only).toBe(true);
+    expect(usage?.rawUsage.input_tokens).toBe(1_000_000);
+    expect(usage?.rawUsage.opencode_reported_cost_usd_micros).toBe(123);
   });
 
   it("returns null when the run produced neither tokens nor a reported cost", () => {

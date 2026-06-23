@@ -31,6 +31,7 @@ export type RuntimeToolName =
   | "ask_user_question"
   | "amp_coder"
   | "opencode_coder"
+  | "codex_coder"
   | "exa_search"
   | "exa_contents"
   | "exa_answer"
@@ -110,7 +111,7 @@ export type AgentToolWorkspaceResourceRequirement = {
 export type AgentToolDefinition = {
   id: AgentToolId;
   type: AgentConfigTool["type"];
-  provider?: "amp" | "opencode";
+  provider?: "amp" | "opencode" | "codex";
   server?: AgentMcpToolConfig["server"];
   label: string;
   description: string;
@@ -253,6 +254,18 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "mixed",
     requiredPlatformEnvVars: ["VERCEL_AI_GATEWAY_API_KEY"],
+    prCapableDefault: true,
+  },
+  {
+    id: "codex",
+    type: "coding_agent",
+    provider: "codex",
+    label: "Codex",
+    description: "Delegate coding work to Codex inside an E2B sandbox.",
+    runtimeTools: ["codex_coder"],
+    defaultEnabled: true,
+    credentialSource: "mixed",
+    requiredPlatformEnvVars: ["OPENAI_CODEX_API_KEY"],
     prCapableDefault: true,
   },
   {
@@ -1142,6 +1155,55 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "The tool output includes opencodeResult, opencodeStatus, opencodeSessionId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on opencodeResult when present.",
       "opencode has repository-scoped GitHub CLI and git push access for attached repositories. Public repositories are cloned without workspace GitHub credentials and return sandbox diffs only.",
       "Set createPullRequest=true only when the instructions call for a reviewable PR. opencode may create the PR itself for attached repositories; if it leaves publishable local work behind, the runner creates the draft PR after opencode finishes. Public repositories do not support platform-created pull requests.",
+      "The tool works on non-default branches and must never push directly to the default branch.",
+    ].join("\n"),
+  },
+  {
+    name: "codex_coder",
+    kind: "sandbox",
+    configToolId: "codex",
+    description:
+      "Delegate coding work to Codex in an attached GitHub repository or a public GitHub repository. Codex clones the repository into ./work/codex on demand. Use for multi-file implementation, debugging, refactors, and PR-ready code changes. When more than one repository is attached, set the repository argument.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "Specific coding task for Codex to perform in the target repository.",
+        },
+        repository: {
+          type: "string",
+          description:
+            "Target attached repository full name/id, public GitHub owner/repo, or public https://github.com/owner/repo URL. Required when no repository is attached or more than one repository is attached; optional when exactly one repository is attached.",
+        },
+        createPullRequest: {
+          type: "boolean",
+          description:
+            "Whether to commit changes to a generated branch and open a draft pull request after Codex finishes.",
+          default: false,
+        },
+        pullRequestTitle: {
+          type: "string",
+          description: "Optional draft pull request title when createPullRequest is true.",
+        },
+        codexSessionId: {
+          type: "string",
+          description:
+            "Existing codexSessionId from a previous codex_coder result to continue instead of starting a new Codex session.",
+        },
+      },
+      required: ["task"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use codex_coder for substantial codebase work that benefits from Codex's coding-agent loop.",
+      "Give Codex a concrete task and any constraints from the user or agent instructions.",
+      "Set the repository argument (owner/repo or id) when more than one repository is attached so Codex targets the right one. If no repository is attached, set repository to a public GitHub owner/repo or https://github.com/owner/repo URL.",
+      "Do not pass a model argument; the platform selects the Codex model for v1.",
+      "When the user asks for a follow-up to prior Codex work, pass the previous codexSessionId so Codex continues that session with its existing context.",
+      "The tool output includes codexResult, codexStatus, codexSessionId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on codexResult when present.",
+      "Codex has repository-scoped GitHub CLI and git push access for attached repositories. Public repositories are cloned without workspace GitHub credentials and return sandbox diffs only.",
+      "Set createPullRequest=true only when the instructions call for a reviewable PR. If Codex leaves publishable local work behind, the runner creates the draft PR after Codex finishes. Public repositories do not support platform-created pull requests.",
       "The tool works on non-default branches and must never push directly to the default branch.",
     ].join("\n"),
   },
@@ -2912,6 +2974,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   ask_user_question: "Ask a question",
   amp_coder: "Code with Amp",
   opencode_coder: "Code with opencode",
+  codex_coder: "Code with Codex",
   exa_search: "Web search",
   exa_contents: "Read web pages",
   exa_answer: "Web answer",

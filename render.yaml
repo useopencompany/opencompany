@@ -44,6 +44,17 @@ services:
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
+      # LLM broker (llm-broker.ts). The broker URL defaults to Render's own
+      # RENDER_EXTERNAL_URL, so these are optional overrides: the kill switch reverts
+      # sandboxed CLIs to direct key injection without a deploy, and the codex key is the
+      # server-side upstream credential for the broker's `openai` provider (use a
+      # budget-capped OpenAI project key).
+      - key: RUNNER_LLM_BROKER_ENABLED
+        sync: false
+      - key: RUNNER_LLM_BROKER_PUBLIC_URL
+        sync: false
+      - key: OPENAI_CODEX_API_KEY
+        sync: false
       # Private Vercel Blob store token. The runner downloads attachment bytes (images/PDFs)
       # to inline into model calls. Populated from Infisical prod `/runner`.
       - key: BLOB_READ_WRITE_TOKEN
