@@ -347,6 +347,7 @@ function SessionViewQuery({
 }) {
   const { workspaceId } = useWorkspaceContext();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
+  const lastElectricDetailRefreshRef = useRef<string | null>(null);
   const {
     data: detail,
     dataUpdatedAt,
@@ -374,6 +375,31 @@ function SessionViewQuery({
     // the post-turn invalidation.
     placeholderData: placeholder,
   });
+
+  // The open transcript is primarily driven by Durable Streams, but the synced
+  // agent_sessions row is the low-volume durable signal that a turn yielded. If
+  // the stream tail is missed, use Electric's newer settled status to refresh the
+  // Postgres snapshot so the final assistant row appears without a page reload.
+  const electricSessionId = placeholder?.session.id;
+  const electricSessionStatus = placeholder?.session.status;
+  const electricSessionUpdatedAt = placeholder?.session.updatedAt;
+  useEffect(() => {
+    if (!detail || !electricSessionId || !electricSessionStatus || !electricSessionUpdatedAt) {
+      return;
+    }
+    if (electricSessionId !== detail.session.id) return;
+    if (!SETTLED_SNAPSHOT_STATUSES.has(electricSessionStatus)) return;
+
+    const electricUpdatedAt = Date.parse(electricSessionUpdatedAt);
+    const detailUpdatedAtMs = Date.parse(detail.session.updatedAt);
+    if (!Number.isFinite(electricUpdatedAt) || !Number.isFinite(detailUpdatedAtMs)) return;
+    if (electricUpdatedAt <= detailUpdatedAtMs) return;
+
+    const refreshKey = `${electricSessionId}:${electricSessionStatus}:${electricSessionUpdatedAt}`;
+    if (lastElectricDetailRefreshRef.current === refreshKey) return;
+    lastElectricDetailRefreshRef.current = refreshKey;
+    void refetch();
+  }, [detail, electricSessionId, electricSessionStatus, electricSessionUpdatedAt, refetch]);
 
   if (!detail && isPending) return <SessionPageSkeleton />;
 
@@ -993,8 +1019,8 @@ function SessionViewContentBody({
         <div
           className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-5 after:content-[''] ${
             message.role === "user"
-              ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
-              : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
+              ? "max-w-[85%] md:max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+              : "max-w-full md:max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
           }`}
         >
           {message.role === "assistant" ? (
@@ -1051,7 +1077,7 @@ function SessionViewContentBody({
       {parts.map((part) =>
         part.type === "tool-call" ? (
           <div key={part.toolCall.id} className="flex justify-start">
-            <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
+            <div className="max-w-full md:max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
               <ToolCallCard toolCall={part.toolCall} sessionIsInterrupted={sessionIsInterrupted} />
             </div>
           </div>
@@ -1638,7 +1664,7 @@ function SessionViewContentBody({
             handlers here only drive the "Drop files to attach" overlay. */}
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-4 py-6 md:px-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
           onScroll={(event) => {
@@ -2026,7 +2052,7 @@ function SessionViewContentBody({
         className={`flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface-raised/95 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed && !inspectorDrag.dragging
             ? "hidden"
-            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] lg:static lg:z-auto lg:w-[392px]"
+            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] lg:static lg:z-auto lg:w-[392px] lg:pt-0 lg:pb-0 lg:pr-0"
         }`}
         // While swiping on mobile, track the finger 1:1 (inline transform overrides the
         // class; transition:none disables the snap until release). Driven by the global

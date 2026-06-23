@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   cronForSchedulePreset,
+  scheduleNextRunAt,
   schedulePresetFromCron,
   scheduleSummary,
   scheduleTriggerDueAt,
@@ -48,6 +49,43 @@ describe("agent schedules", () => {
           enabled: true,
         },
         new Date("2026-06-01T16:01:00.000Z"),
+      ),
+    ).toBeNull();
+  });
+
+  test("finds the next scheduled run after now", () => {
+    expect(
+      scheduleNextRunAt(
+        {
+          cron: "0 9 * * 1-5",
+          timezone: "America/Los_Angeles",
+          enabled: true,
+        },
+        new Date("2026-06-01T16:00:12.000Z"),
+      )?.toISOString(),
+    ).toBe("2026-06-02T16:00:00.000Z");
+
+    expect(
+      scheduleNextRunAt(
+        {
+          cron: "*/15 * * * *",
+          timezone: "UTC",
+          enabled: true,
+        },
+        new Date("2026-06-01T16:01:00.000Z"),
+      )?.toISOString(),
+    ).toBe("2026-06-01T16:15:00.000Z");
+  });
+
+  test("does not find next runs for disabled schedules", () => {
+    expect(
+      scheduleNextRunAt(
+        {
+          cron: "0 9 * * 1-5",
+          timezone: "UTC",
+          enabled: false,
+        },
+        new Date("2026-06-01T16:00:00.000Z"),
       ),
     ).toBeNull();
   });

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "timezone_source" text DEFAULT 'unset' NOT NULL;

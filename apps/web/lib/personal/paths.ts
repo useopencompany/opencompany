@@ -12,6 +12,7 @@ export type PersonalPanel =
   | "tools"
   | "channels"
   | "brain"
+  | "routines"
   | "memory"
   | "settings";
 
@@ -21,6 +22,7 @@ export const personalPaths = {
   agent: "/personal/agent",
   soul: "/personal/files/soul.md",
   brain: "/personal/brain",
+  routines: "/personal/routines",
   brainFile: (path: string) => {
     const encoded = encodeBrainPath(path);
     return encoded ? `/personal/brain/${encoded}` : "/personal/brain";

@@ -6,9 +6,11 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   Blocks,
+  Bot,
   Brain,
   BrainCircuit,
   ChevronDown,
+  Clock3,
   MessageCircle,
   PanelLeft,
   Pencil,
@@ -22,7 +24,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCollections } from "@/components/CollectionsProvider";
-import { PersonalAgentAvatar } from "@/components/personal/PersonalAgentAvatar";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
@@ -556,6 +557,7 @@ function useActivePersonalRoute() {
   const activePanel =
     section === "agent" ||
     section === "brain" ||
+    section === "routines" ||
     section === "memory" ||
     section === "settings" ||
     section === "skills" ||
@@ -786,6 +788,24 @@ function PersonalSidebarView({
             />
             <span className="truncate tracking-[-0.005em]">Personal Brain</span>
           </button>
+          <button
+            type="button"
+            onClick={() => router.push(personalPaths.routines)}
+            className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              activePanel === "routines"
+                ? "bg-surface-active text-ink"
+                : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+            }`}
+          >
+            <Clock3
+              size={14}
+              strokeWidth={1.75}
+              className={
+                activePanel === "routines" ? "text-ink" : "text-ink/60 group-hover:text-ink/80"
+              }
+            />
+            <span className="truncate tracking-[-0.005em]">Routines</span>
+          </button>
         </nav>
 
         {/* Scrollable body */}
@@ -825,7 +845,13 @@ function PersonalSidebarView({
                   : "text-ink/90 hover:bg-surface-hover hover:text-ink"
               }`}
             >
-              <PersonalAgentAvatar name={agent.name} size={14} />
+              <Bot
+                size={14}
+                strokeWidth={1.75}
+                className={
+                  activePanel === "agent" ? "text-ink" : "text-ink/60 group-hover:text-ink/80"
+                }
+              />
               <span className="truncate tracking-[-0.005em]">Behavior</span>
             </button>
             <CapabilityNavRow
