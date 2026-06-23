@@ -142,6 +142,22 @@ export function scheduleTriggerDueAt(
   return null;
 }
 
+export function scheduleNextRunAt(
+  trigger: Pick<AgentScheduleTriggerConfig, "cron" | "timezone" | "enabled">,
+  now = new Date(),
+): Date | null {
+  if (!trigger.enabled || !isSupportedScheduleCron(trigger.cron)) return null;
+
+  let cursor = new Date(truncateToMinute(now).getTime() + 60_000);
+  const end = new Date(cursor.getTime() + 8 * 24 * 60 * 60_000);
+  while (cursor <= end) {
+    const dueAt = scheduleTriggerDueAt(trigger, cursor);
+    if (dueAt) return dueAt;
+    cursor = new Date(cursor.getTime() + 60_000);
+  }
+  return null;
+}
+
 export function normalizeScheduleTimezone(value: string | null | undefined) {
   const timezone = value?.trim() || "UTC";
   return isValidTimezone(timezone) ? timezone : "UTC";
