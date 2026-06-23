@@ -108,7 +108,7 @@ describe("PersonalRoutinesView", () => {
     expect(screen.getByText("1 routine")).toBeInTheDocument();
     expect(screen.getByText("Weekdays at 09:00")).toBeInTheDocument();
     expect(screen.queryByText("0 9 * * 1-5")).not.toBeInTheDocument();
-    expect(screen.getByText("Runs in America/New_York")).toBeInTheDocument();
+    expect(screen.getByText(/Next run/)).toBeInTheDocument();
     expect(screen.getByText("Review yesterday's inbox.")).toBeInTheDocument();
     expect(screen.getByText("on")).toBeInTheDocument();
     expect(screen.queryByText("opencompany/web")).not.toBeInTheDocument();

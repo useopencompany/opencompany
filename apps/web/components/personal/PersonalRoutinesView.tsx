@@ -1,11 +1,11 @@
 "use client";
 
-import { scheduleSummary } from "@opencompany/agent-runtime";
+import { scheduleNextRunAt, scheduleSummary } from "@opencompany/agent-runtime";
 import type { AgentConfig, AgentScheduleTriggerConfig } from "@opencompany/agent-runtime/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock3, Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { ScheduleDialog } from "@/components/agent-schedules/ScheduleDialog";
 import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -39,6 +39,7 @@ function RoutineStatusPill({ enabled }: { enabled: boolean }) {
 
 function RoutineRow({
   routine,
+  now,
   isPending,
   isRunning,
   onEdit,
@@ -47,6 +48,7 @@ function RoutineRow({
   onRunNow,
 }: {
   routine: AgentScheduleTriggerConfig;
+  now: Date;
   isPending: boolean;
   isRunning: boolean;
   onEdit: () => void;
@@ -70,7 +72,7 @@ function RoutineRow({
                 <RoutineStatusPill enabled={routine.enabled} />
               </div>
               <p className="mt-1 truncate text-[11.5px] text-ink-subtle">
-                Runs in {routine.timezone}
+                {nextRunLabel(routine, now)}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -140,7 +142,13 @@ export function PersonalRoutinesView() {
   const [dialogSchedule, setDialogSchedule] = useState<AgentScheduleTriggerConfig | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
+  const [now, setNow] = useState(() => new Date());
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   function persistRoutines(next: AgentScheduleTriggerConfig[]) {
     const normalized = next.map((routine) => ({ ...routine, timezone: userTimezone }));
@@ -228,6 +236,7 @@ export function PersonalRoutinesView() {
             <RoutineRow
               key={routine.id}
               routine={routine}
+              now={now}
               isPending={isPending}
               isRunning={runningScheduleId === routine.id}
               onEdit={() => {
@@ -310,4 +319,55 @@ function upsertScheduleTrigger(
   const index = triggers.findIndex((trigger) => trigger.id === next.id);
   if (index === -1) return [...triggers, next];
   return triggers.map((trigger, triggerIndex) => (triggerIndex === index ? next : trigger));
+}
+
+function nextRunLabel(routine: AgentScheduleTriggerConfig, now: Date) {
+  if (!routine.enabled) return "Paused";
+  const nextRunAt = scheduleNextRunAt(routine, now);
+  if (!nextRunAt) return "No upcoming run";
+  return `Next run ${relativeNextRun(nextRunAt, now)} · ${localNextRunTime(
+    nextRunAt,
+    routine.timezone,
+    now,
+  )}`;
+}
+
+function relativeNextRun(nextRunAt: Date, now: Date) {
+  const minutes = Math.max(1, Math.ceil((nextRunAt.getTime() - now.getTime()) / 60_000));
+  if (minutes < 60) return `in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return `in about ${hours} ${hours === 1 ? "hour" : "hours"}`;
+  const days = Math.round(minutes / (24 * 60));
+  return `in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
+function localNextRunTime(nextRunAt: Date, timezone: string, now: Date) {
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(nextRunAt);
+  const nextKey = localDateKey(nextRunAt, timezone);
+  const todayKey = localDateKey(now, timezone);
+  const tomorrowKey = localDateKey(new Date(now.getTime() + 24 * 60 * 60_000), timezone);
+
+  if (nextKey === todayKey) return `today at ${time}`;
+  if (nextKey === tomorrowKey) return `tomorrow at ${time}`;
+
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "long",
+  }).format(nextRunAt);
+  return `${day} at ${time}`;
+}
+
+function localDateKey(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
 }
