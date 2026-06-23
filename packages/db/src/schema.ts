@@ -1122,6 +1122,17 @@ export const llmBrokerTokens = pgTable(
       "llm_broker_tokens_provider_check",
       sql`${table.provider} IN ('gateway', 'openai')`,
     ),
+    nonNegativeCountersCheck: check(
+      "llm_broker_tokens_non_negative_counters_check",
+      sql`(${table.budgetUsdMicros} IS NULL OR ${table.budgetUsdMicros} >= 0)
+        AND ${table.spentUsdMicros} >= 0
+        AND ${table.requestCount} >= 0
+        AND ${table.inputTokens} >= 0
+        AND ${table.inputCacheReadTokens} >= 0
+        AND ${table.inputCacheWriteTokens} >= 0
+        AND ${table.outputTokens} >= 0
+        AND ${table.unparsedRequestCount} >= 0`,
+    ),
   }),
 );
 
@@ -1155,6 +1166,15 @@ export const llmBrokerRequests = pgTable(
   },
   (table) => ({
     tokenIdx: index("llm_broker_requests_token_idx").on(table.tokenId),
+    nonNegativeCountersCheck: check(
+      "llm_broker_requests_non_negative_counters_check",
+      sql`${table.inputTokens} >= 0
+        AND ${table.inputCacheReadTokens} >= 0
+        AND ${table.inputCacheWriteTokens} >= 0
+        AND ${table.outputTokens} >= 0
+        AND ${table.costUsdMicros} >= 0
+        AND (${table.latencyMs} IS NULL OR ${table.latencyMs} >= 0)`,
+    ),
   }),
 );
 

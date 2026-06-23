@@ -687,19 +687,19 @@ export function createCodexStreamAccumulator() {
       usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens,
     );
     if (input != null) {
-      inputTokens += input;
+      inputTokens = input;
       sawTokens = true;
     }
     if (output != null) {
-      outputTokens += output;
+      outputTokens = output;
       sawTokens = true;
     }
     if (cacheRead != null) {
-      cacheReadTokens += cacheRead;
+      cacheReadTokens = cacheRead;
       sawTokens = true;
     }
     if (cacheWrite != null) {
-      cacheWriteTokens += cacheWrite;
+      cacheWriteTokens = cacheWrite;
       sawTokens = true;
     }
   }

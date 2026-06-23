@@ -2035,7 +2035,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     streamTokenSecret: "stream",
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
-    openaiCodexApiKey: undefined,
+    openaiCodexApiKey: "codex_test",
     publicUrl: undefined,
     llmBrokerEnabled: true,
     integrationCredentialEncryptionKey: Buffer.alloc(32, 0),

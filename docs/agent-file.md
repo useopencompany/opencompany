@@ -139,7 +139,7 @@ tools:
     type: coding_agent
     provider: codex
     label: Codex
-    description: Delegate coding work to Codex inside an E2B sandbox.
+    description: Delegate coding work to Codex inside an E2B sandbox, with attached or public GitHub repository support.
     prCapable: true
   - id: linear
     type: mcp

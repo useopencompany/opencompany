@@ -202,6 +202,38 @@ describe("createCodexStreamAccumulator", () => {
     });
   });
 
+  it("uses the latest cumulative token totals instead of summing repeated usage events", () => {
+    const stream = createCodexStreamAccumulator();
+
+    stream.push(
+      [
+        JSON.stringify({
+          type: "usage",
+          usage: {
+            input_tokens: 100,
+            cache_read_input_tokens: 20,
+            output_tokens: 40,
+          },
+        }),
+        JSON.stringify({
+          type: "usage",
+          usage: {
+            input_tokens: 150,
+            cache_read_input_tokens: 30,
+            output_tokens: 65,
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    stream.finish();
+
+    expect(stream.summary({ exitCode: 0, stdout: "", stderr: "" }).usage).toEqual({
+      input_tokens: 150,
+      cache_read_input_tokens: 30,
+      output_tokens: 65,
+    });
+  });
+
   it("reports timeout state without usage when no usage event is emitted", () => {
     const stream = createCodexStreamAccumulator();
     stream.push(`${JSON.stringify({ type: "assistant_message_delta", delta: "Partial" })}\n`);

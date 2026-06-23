@@ -4538,7 +4538,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "llm_broker_requests_non_negative_counters_check": {
+          "name": "llm_broker_requests_non_negative_counters_check",
+          "value": "\"llm_broker_requests\".\"input_tokens\" >= 0\n        AND \"llm_broker_requests\".\"input_cache_read_tokens\" >= 0\n        AND \"llm_broker_requests\".\"input_cache_write_tokens\" >= 0\n        AND \"llm_broker_requests\".\"output_tokens\" >= 0\n        AND \"llm_broker_requests\".\"cost_usd_micros\" >= 0\n        AND (\"llm_broker_requests\".\"latency_ms\" IS NULL OR \"llm_broker_requests\".\"latency_ms\" >= 0)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.llm_broker_tokens": {
@@ -4782,6 +4787,10 @@
         "llm_broker_tokens_provider_check": {
           "name": "llm_broker_tokens_provider_check",
           "value": "\"llm_broker_tokens\".\"provider\" IN ('gateway', 'openai')"
+        },
+        "llm_broker_tokens_non_negative_counters_check": {
+          "name": "llm_broker_tokens_non_negative_counters_check",
+          "value": "(\"llm_broker_tokens\".\"budget_usd_micros\" IS NULL OR \"llm_broker_tokens\".\"budget_usd_micros\" >= 0)\n        AND \"llm_broker_tokens\".\"spent_usd_micros\" >= 0\n        AND \"llm_broker_tokens\".\"request_count\" >= 0\n        AND \"llm_broker_tokens\".\"input_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"input_cache_read_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"input_cache_write_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"output_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"unparsed_request_count\" >= 0"
         }
       },
       "isRLSEnabled": false
