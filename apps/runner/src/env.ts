@@ -75,10 +75,18 @@ export function loadEnv(): RunnerEnv {
     // instance's ceiling with Render `numInstances`; the job + run leases make that safe.
     workerConcurrency: optionalPositiveIntegerEnv("RUNNER_WORKER_CONCURRENCY", 8),
     port: Number(process.env.PORT ?? "3040"),
-    allowedOrigins: (process.env.RUNNER_ALLOWED_ORIGINS ?? "http://localhost:3000")
-      .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean),
+    allowedOrigins: (() => {
+      const raw = process.env.RUNNER_ALLOWED_ORIGINS?.trim();
+      // This is a CORS allowlist (a security boundary); require it explicitly in
+      // production rather than silently defaulting to localhost.
+      if (!raw && process.env.NODE_ENV === "production") {
+        throw new Error("RUNNER_ALLOWED_ORIGINS is required in production.");
+      }
+      return (raw ?? "http://localhost:3000")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean);
+    })(),
     instanceId: optionalEnv("RUNNER_INSTANCE_ID") ?? defaultInstanceId(),
   };
 }

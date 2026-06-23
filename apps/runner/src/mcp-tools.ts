@@ -1322,8 +1322,16 @@ function newWorkspaceMcpCredentialId() {
 function mcpCallbackUrl(provider: McpProvider) {
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim().replace(/\/auth\/callback$/, "") ||
-    "http://localhost:3000";
+    process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim().replace(/\/auth\/callback$/, "");
+  if (!appUrl) {
+    // A localhost callback URL silently breaks the MCP OAuth handshake in production.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "NEXT_PUBLIC_APP_URL is required in production to build MCP OAuth callback URLs.",
+      );
+    }
+    return `http://localhost:3000/api/mcp/${provider.key}/callback`;
+  }
   return `${appUrl.replace(/\/$/, "")}/api/mcp/${provider.key}/callback`;
 }
 

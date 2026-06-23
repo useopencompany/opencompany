@@ -25,6 +25,13 @@ function getAppUrl() {
   const redirectUri = trimmed(process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI);
   if (redirectUri) return new URL(redirectUri).origin;
 
+  // Outbound emails embed this as the unsubscribe link base; a localhost link in
+  // production is broken for recipients (and a CAN-SPAM problem). Fail loudly instead.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "NEXT_PUBLIC_APP_URL (or NEXT_PUBLIC_WORKOS_REDIRECT_URI) is required in production to build email unsubscribe links.",
+    );
+  }
   return "http://localhost:3000";
 }
 

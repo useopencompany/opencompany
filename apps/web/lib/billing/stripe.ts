@@ -29,5 +29,11 @@ export function getAppUrl() {
     return new URL(redirectUri).origin;
   }
 
+  // Don't silently send customers to localhost after checkout in production.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "NEXT_PUBLIC_APP_URL (or NEXT_PUBLIC_WORKOS_REDIRECT_URI) is required in production to build billing redirect URLs.",
+    );
+  }
   return "http://localhost:3000";
 }

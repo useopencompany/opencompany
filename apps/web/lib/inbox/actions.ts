@@ -41,7 +41,9 @@ async function transitionInboxItem(
 
 export async function snoozeInboxItem(itemId: string): Promise<InboxActionResult> {
   return transitionInboxItem(itemId, "snoozed", {
-    snoozedUntil: sql`now() + interval '${sql.raw(String(SNOOZE_HOURS))} hours'`,
+    // make_interval binds SNOOZE_HOURS as a real parameter (not spliced text), so this
+    // stays injection-proof even if the hours value ever becomes dynamic.
+    snoozedUntil: sql`now() + make_interval(hours => ${SNOOZE_HOURS})`,
     resolvedAt: null,
   });
 }

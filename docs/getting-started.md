@@ -4,7 +4,7 @@ Goal: get a local dev environment running with auth and an isolated Neon branch 
 
 ## Prerequisites
 
-- Node 20+ and Bun 1.3+
+- Node 22 (pinned in `.nvmrc`; `>=20.20.0` minimum) and Bun 1.3+
 - A container runtime — [OrbStack](https://orbstack.dev) (`brew install orbstack`) or Docker
   Desktop. **Required:** `bun run setup` uses it to start local Electric, which the
   agents/sessions UI syncs through, and fails fast if it's missing. Also enable logical
@@ -33,7 +33,7 @@ First run:
 
 ```bash
 git clone <repo-url>
-cd lisbon-v4
+cd opencompany   # the directory git clone created
 nvm install
 nvm use
 bun install

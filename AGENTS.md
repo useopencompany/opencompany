@@ -11,7 +11,7 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 ## Repo Facts
 
 - Package manager: `bun@1.3.2`
-- Runtime: Node `>=20.20.0`
+- Runtime: Node `22` (pinned in `.nvmrc`; engines floor `>=20.20.0`)
 - Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, WorkOS AuthKit, Inngest, Vercel AI Gateway, GitHub App integration.
 - Main app: `apps/web`
 - Runner service: `apps/runner`
