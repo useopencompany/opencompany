@@ -13,6 +13,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { startRunnerJobWorker } from "./jobs";
+import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { assertPreviewIdentity } from "./preview-guard";
 import { createServer } from "./server";
 import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
@@ -39,7 +40,28 @@ assertRunnerDbConfig();
 await assertPreviewIdentity();
 const jobWorker = startRunnerJobWorker(env, {
   concurrency: env.workerConcurrency,
-  staleRunSweep: interruptStaleActiveRuns,
+  // Piggyback the LLM-broker leftover settlement on the 60s stale-run sweep: tokens left
+  // unsettled by a runner death mid-delegation get billed here. Cheap partial-index scan;
+  // the settlement CAS makes it safe across instances.
+  staleRunSweep: async () => {
+    const [interrupted, settledBrokerTokens] = await Promise.all([
+      interruptStaleActiveRuns(),
+      settleExpiredBrokerTokens().catch((error) => {
+        logger.warn("LLM broker leftover settlement failed", {
+          event: "opencompany.llm_broker_sweep_failed",
+          error,
+        });
+        return 0;
+      }),
+    ]);
+    if (settledBrokerTokens > 0) {
+      logger.info("Settled leftover LLM broker tokens", {
+        event: "opencompany.llm_broker_sweep_settled",
+        settled_count: settledBrokerTokens,
+      });
+    }
+    return interrupted;
+  },
 });
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 

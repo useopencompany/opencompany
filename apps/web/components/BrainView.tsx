@@ -14,6 +14,7 @@ import {
   FolderPlus,
   Loader2,
   MoreHorizontal,
+  PanelLeft,
   Pencil,
   Search,
   Trash2,
@@ -44,6 +45,8 @@ import {
   flattenVisibleTree,
   parentFolderPath,
 } from "@/lib/brain/tree";
+import { useDrawerGesture } from "@/lib/useDrawerGesture";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { MarkdownBrainEditor } from "./MarkdownBrainEditor";
 import { useBrainTreeKeyboard } from "./use-brain-tree-keyboard";
 
@@ -203,6 +206,26 @@ export default function BrainView({
   );
   const [focusedPath, setFocusedPath] = useState(initialSelection.selectedPath);
   const [treeHasFocus, setTreeHasFocus] = useState(false);
+  // Mobile: the file list shows first; swipe left (or tap a file) reveals the content
+  // full-width. The tree is an off-canvas drawer within the Memory page.
+  const isMobile = useIsMobile();
+  const [treeOpen, setTreeOpen] = useState(true);
+  const treeWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Mobile: the file tree is a left drawer. Reuse the app-wide swipe mechanic
+  // (useDrawerGesture, the same one the shell drawers use) so a swipe left collapses the
+  // tree → file content full-width and a swipe right brings the list back, with the same
+  // axis-lock, edge-guard and finger-tracking. No right side (the Memory page has no detail
+  // panel). `treeDrag` is the live 0→1 progress applied to the drawer transform below.
+  const treeConfig = useMemo(
+    () => ({
+      isOpen: () => treeOpen,
+      setOpen: setTreeOpen,
+      getWidth: () => treeWrapperRef.current?.getBoundingClientRect().width || 292,
+    }),
+    [treeOpen],
+  );
+  const { left: treeDrag } = useDrawerGesture({ isMobile, left: treeConfig, right: null });
   const treeScrollRef = useRef<HTMLDivElement>(null);
   const [draftContent, setDraftContent] = useState(initialSelection.draftContent);
   const [renamingPath, setRenamingPath] = useState("");
@@ -1113,49 +1136,89 @@ export default function BrainView({
 
   return (
     <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
-      <BrainSidebar
-        title={title}
-        files={files}
-        tree={tree}
-        query={query}
-        selectedPath={selected?.path ?? ""}
-        selectedContextPath={selectedContextPath}
-        expandedPaths={visibleExpandedPaths}
-        focusedPath={focusedPath}
-        treeHasFocus={treeHasFocus}
-        onFocusItem={focusBrainNode}
-        onTreeKeyDown={handleTreeKeyDown}
-        onTreeFocusChange={setTreeHasFocus}
-        treeScrollRef={treeScrollRef}
-        isSearching={Boolean(query.trim())}
-        onCreateFile={createFile}
-        onCreateFolder={createFolder}
-        onQueryChange={setQuery}
-        onSelectFile={selectFile}
-        onSelectRoot={selectRootContext}
-        renamingPath={renamingPath}
-        renamingName={renamingName}
-        renamingType={renamingType}
-        draggingItem={draggingItem}
-        dropTargetPath={dropTargetPath}
-        onStartRename={startRenameFile}
-        onStartRenameFolder={startRenameFolder}
-        onRenameNameChange={setRenamingName}
-        onCommitRename={commitRenameFile}
-        onCommitRenameFolder={commitRenameFolder}
-        onCancelRename={cancelRenameFile}
-        onToggleFolder={toggleFolder}
-        onDragStartItem={startDragItem}
-        onDragEndItem={finishDragItem}
-        onDropFileToFolder={moveFileToFolder}
-        onDropFolderToFolder={moveFolderToFolder}
-        onDropTargetChange={setDropTargetPath}
-        onAutoExpandFolder={autoExpandFolderPath}
-        onContextMenu={openContextMenu}
-      />
+      {/* On mobile the tree is an off-canvas drawer within the page (`contents` keeps the
+          desktop two-pane layout pixel-identical). While the swipe drags, follow the finger
+          1:1 (inline transform overrides the translate class, transition none until release). */}
+      <div
+        ref={treeWrapperRef}
+        className={
+          isMobile
+            ? `fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out ${treeOpen ? "translate-x-0" : "-translate-x-full"}`
+            : "contents"
+        }
+        style={
+          isMobile && treeDrag.dragging
+            ? { transform: `translateX(${(treeDrag.progress - 1) * 100}%)`, transition: "none" }
+            : undefined
+        }
+      >
+        <BrainSidebar
+          title={title}
+          files={files}
+          tree={tree}
+          query={query}
+          selectedPath={selected?.path ?? ""}
+          selectedContextPath={selectedContextPath}
+          expandedPaths={visibleExpandedPaths}
+          focusedPath={focusedPath}
+          treeHasFocus={treeHasFocus}
+          onFocusItem={focusBrainNode}
+          onTreeKeyDown={handleTreeKeyDown}
+          onTreeFocusChange={setTreeHasFocus}
+          treeScrollRef={treeScrollRef}
+          isSearching={Boolean(query.trim())}
+          onCreateFile={createFile}
+          onCreateFolder={createFolder}
+          onQueryChange={setQuery}
+          onSelectFile={(file) => {
+            selectFile(file);
+            setTreeOpen(false);
+          }}
+          onSelectRoot={selectRootContext}
+          renamingPath={renamingPath}
+          renamingName={renamingName}
+          renamingType={renamingType}
+          draggingItem={draggingItem}
+          dropTargetPath={dropTargetPath}
+          onStartRename={startRenameFile}
+          onStartRenameFolder={startRenameFolder}
+          onRenameNameChange={setRenamingName}
+          onCommitRename={commitRenameFile}
+          onCommitRenameFolder={commitRenameFolder}
+          onCancelRename={cancelRenameFile}
+          onToggleFolder={toggleFolder}
+          onDragStartItem={startDragItem}
+          onDragEndItem={finishDragItem}
+          onDropFileToFolder={moveFileToFolder}
+          onDropFolderToFolder={moveFolderToFolder}
+          onDropTargetChange={setDropTargetPath}
+          onAutoExpandFolder={autoExpandFolderPath}
+          onContextMenu={openContextMenu}
+        />
+      </div>
+      {isMobile && (treeOpen || treeDrag.dragging) ? (
+        <button
+          type="button"
+          aria-label="Close files"
+          onClick={() => setTreeOpen(false)}
+          className="fixed inset-0 z-30 bg-black/40"
+          // Fade the dim in step with the drag; full strength once open.
+          style={treeDrag.dragging ? { opacity: treeDrag.progress } : undefined}
+        />
+      ) : null}
 
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="relative z-10 flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
+          {isMobile ? (
+            <button
+              type="button"
+              aria-label="Open files"
+              onClick={() => setTreeOpen(true)}
+              className="-ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink"
+            >
+              <PanelLeft size={16} strokeWidth={1.75} />
+            </button>
+          ) : null}
           {selected ? (
             <>
               <div className="flex min-w-0 flex-1 items-center gap-2 text-[12.5px]">

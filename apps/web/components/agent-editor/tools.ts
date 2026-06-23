@@ -184,6 +184,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   neon: Database,
   amp: Code2,
   opencode: Code2,
+  codex: Code2,
   linear: ListTodo,
   slack: MessageSquare,
   posthog: BarChart3,

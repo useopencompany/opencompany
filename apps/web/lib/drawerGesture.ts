@@ -49,6 +49,32 @@ export function resolveGesture(state: DrawerState, direction: SwipeDirection): G
   return { side: "left", opening: true }; // open the menu
 }
 
+/** px from a screen edge within which a touch-start is treated as edge-guard territory. */
+export const EDGE_GUARD_PX = 20;
+
+/**
+ * Edge-guard decision, evaluated at `touchstart` — BEFORE the swipe direction is known.
+ * iOS' native edge-swipe-back fires from the very screen edge in the first few px, before
+ * `useDrawerGesture` reaches its axis-lock + preventDefault. To win that race we must claim
+ * the touch immediately, but only where a swipe would actually open a drawer (otherwise we'd
+ * needlessly swallow native gestures and scroll). Returns the side to guard, or null.
+ *
+ * Left edge + menu closed → the only sensible swipe from there is rightward = open the menu,
+ * which is exactly where iOS-back lurks. Right edge + a details panel that exists and is
+ * closed → symmetric open-the-details case (also covers `resolveGesture`'s null-bail that
+ * otherwise lets iOS-forward through). Anywhere else → leave the native gesture untouched.
+ */
+export function edgeGuardSide(
+  x: number,
+  viewportWidth: number,
+  state: { leftClosed: boolean; rightClosedAndAvailable: boolean },
+  edge = EDGE_GUARD_PX,
+): DrawerSide | null {
+  if (x <= edge && state.leftClosed) return "left";
+  if (x >= viewportWidth - edge && state.rightClosedAndAvailable) return "right";
+  return null;
+}
+
 /**
  * Lock the gesture to an axis once movement passes the slop threshold. A vertical
  * lock means the caller should bail so the page scrolls normally.

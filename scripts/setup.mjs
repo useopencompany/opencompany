@@ -80,10 +80,22 @@ const RUNNER_ENV_KEYS = [
   "X_API_BEARER_TOKEN",
   "SUPADATA_API_KEY",
   "AMP_API_KEY",
+  "OPENAI_CODEX_API_KEY",
   "OPENCOMPANY_E2B_TEMPLATE",
   "OPENCOMPANY_AMP_E2B_TEMPLATE",
   "RUNNER_E2B_IDLE_TIMEOUT_MS",
+  "RUNNER_LLM_BROKER_ENABLED",
+  "RUNNER_CODEX_MODEL",
+  "RUNNER_CODEX_TIMEOUT_MS",
   "RUNNER_INSTANCE_ID",
+];
+const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
+  "RUNNER_PUBLIC_URL",
+  "RUNNER_INTERNAL_URL",
+  "RUNNER_INTERNAL_TOKEN",
+  "RUNNER_STREAM_TOKEN_SECRET",
+  "E2B_API_KEY",
+  "VERCEL_AI_GATEWAY_API_KEY",
 ];
 const STRIPE_ENV_KEYS = ["STRIPE_SECRET_KEY"];
 const STRIPE_OPTIONAL_ENV_KEYS = [
@@ -276,6 +288,7 @@ function isPlaceholder(value) {
 function inspectState() {
   const env = readEffectiveLocalEnv();
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
+  const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -284,6 +297,8 @@ function inspectState() {
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
+    runner: runnerMissing.length === 0 ? "ready" : "placeholder",
+    runnerMissingKeys: runnerMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
@@ -489,6 +504,7 @@ function pullSharedDevEnvFromInfisical({
 
   const requiredKeys = [
     ...SHARED_DEV_ENV_KEYS,
+    ...LOCAL_RUNNER_REQUIRED_ENV_KEYS,
     ...(requireNeonProject ? NEON_ENV_KEYS : []),
     ...(requireDatabaseUrl ? ["DATABASE_URL"] : []),
   ];
@@ -571,6 +587,33 @@ async function ensureNeonProject(state) {
     throw new Error(`${source} env pull finished but NEON_PROJECT_ID is still missing.`);
   }
   ok(`Neon project configured from ${source}`);
+}
+
+async function ensureLocalRunnerEnv(state) {
+  step("Runner local credentials");
+  if (state.runner === "ready") {
+    ok("Runner env vars look set");
+    return;
+  }
+
+  warn(
+    `Runner env vars in .env.local are still placeholders (${state.runnerMissingKeys.join(
+      ", ",
+    )}). Pulling from Infisical.`,
+  );
+  const source = pullSharedDevEnv({
+    requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
+  });
+
+  const after = inspectState();
+  if (after.runner !== "ready") {
+    throw new Error(
+      `${source} env pull finished but runner values are still placeholders: ${after.runnerMissingKeys.join(
+        ", ",
+      )}. Add them in Infisical dev /runner, then run \`bun run env:pull\` again.`,
+    );
+  }
+  ok(`Runner credentials configured from ${source}`);
 }
 
 async function ensureSharedDatabaseUrl(state) {
@@ -800,11 +843,13 @@ async function main() {
     }
     if (
       state.workos === "placeholder" ||
+      state.runner === "placeholder" ||
       (!SHARED_DATABASE_MODE && state.neonProject === "placeholder") ||
       (SHARED_DATABASE_MODE && state.databaseUrl === "placeholder")
     ) {
       const missingShared = [
         ...state.workosMissingKeys,
+        ...state.runnerMissingKeys,
         ...(!SHARED_DATABASE_MODE && state.neonProject === "placeholder"
           ? ["NEON_PROJECT_ID"]
           : []),
@@ -880,6 +925,7 @@ async function main() {
   await ensureEnvFile(state);
   await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
+  await ensureLocalRunnerEnv(inspectState());
   if (SHARED_DATABASE_MODE) {
     await ensureSharedDatabaseUrl(inspectState());
   } else {

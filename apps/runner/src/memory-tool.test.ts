@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("e2b", () => ({ Sandbox: {} }));
 
+// Keep the brokered path DB-free: hand the delegation callback a fixed token instead of
+// minting one through the real (database-backed) store.
+vi.mock("./llm-broker-tokens", () => ({
+  withBrokerDelegation: vi.fn(
+    async (
+      _input: unknown,
+      fn: (token: { tokenId: string; token: string; expiresAt: Date }) => Promise<unknown>,
+    ) => fn({ tokenId: "token-1", token: "ocbt_test_token", expiresAt: new Date() }),
+  ),
+}));
+
 import { formatMemoryUsageReport, type GatewayUsageEntry } from "@opencompany/memory/usage";
 import { __test, runMemoryTool } from "./memory-tool";
 
@@ -116,6 +127,57 @@ describe("runMemoryTool", () => {
     });
 
     expect(result.usage).toBeUndefined();
+  });
+
+  it("brokered: injects a broker token + base URL instead of the raw key and bills display-only", async () => {
+    const entries: GatewayUsageEntry[] = [
+      {
+        model: "openai/text-embedding-3-small",
+        operation: "embeddings",
+        inputTokens: 1000,
+        outputTokens: 0,
+        totalTokens: 1000,
+        costUsd: 0.0005,
+      },
+    ];
+    const sandbox = fakeSandbox("results", `${formatMemoryUsageReport(entries)}\n`);
+
+    const result = await runMemoryTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      args: { args: "query acme" },
+      env: {
+        vercelAiGatewayApiKey: "gw_secret_key",
+        publicUrl: "https://runner.example.com",
+        llmBrokerEnabled: true,
+      } as never,
+      broker: {
+        sessionId: "session-1",
+        workspaceId: "workspace-1",
+        messageId: "message-1",
+        toolCallId: "tool-call-1",
+      },
+    });
+
+    const [command, options] = sandbox.commands.run.mock.calls[0] as unknown as [
+      string,
+      { envs?: Record<string, string> },
+    ];
+    expect(options.envs).toEqual({
+      VERCEL_AI_GATEWAY_API_KEY: "ocbt_test_token",
+      MEMORY_GATEWAY_BASE_URL: "https://runner.example.com/broker/gateway/v1",
+      MEMORY_ROOT: "/home/user/workspace/agent/memory",
+    });
+    expect(command).not.toContain("gw_secret_key");
+
+    // Display-only: the broker settlement row carries the money.
+    expect(result.usage).toMatchObject({
+      provider: "vercel-ai-gateway",
+      operation: "retrieval",
+      costUsdMicros: 0,
+      costSource: "broker_metered",
+      rawUsage: expect.objectContaining({ display_only: true }),
+    });
   });
 
   it("prices unknown override models at zero rather than guessing", () => {

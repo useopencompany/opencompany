@@ -23,6 +23,7 @@ describe("classifyRuntimeTool", () => {
     expect(classifyRuntimeTool("gh")).toEqual({ providerKey: "github", group: "admin" });
     expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "post" });
     expect(classifyRuntimeTool("opencode_coder")).toEqual({ providerKey: "github", group: "post" });
+    expect(classifyRuntimeTool("codex_coder")).toEqual({ providerKey: "github", group: "post" });
     expect(classifyRuntimeTool("x_search_posts")).toEqual({ providerKey: "x", group: "read" });
     expect(classifyRuntimeTool("youtube_get_transcript")).toEqual({
       providerKey: "youtube",

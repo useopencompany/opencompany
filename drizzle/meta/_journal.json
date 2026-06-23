@@ -428,6 +428,20 @@
       "when": 1782204668261,
       "tag": "0060_material_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1782206387255,
+      "tag": "0061_conscious_rage",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1782207319453,
+      "tag": "0062_married_satana",
+      "breakpoints": true
     }
   ]
 }

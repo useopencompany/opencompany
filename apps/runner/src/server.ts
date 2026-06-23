@@ -3,11 +3,25 @@ import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
 import type { RunnerEnv } from "./env";
 import { enqueueRunnerJob } from "./jobs";
+import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
-export function createServer(env: RunnerEnv, options: { onJobEnqueued?: () => void } = {}) {
+export function createServer(
+  env: RunnerEnv,
+  options: {
+    onJobEnqueued?: () => void;
+    llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
+  } = {},
+) {
   const app = Fastify({ logger: false });
+
+  // LLM broker (llm-broker.ts): authenticated reverse proxy for sandboxed CLIs. Lives
+  // in its own encapsulated plugin scope so its raw-buffer content-type parser cannot
+  // affect the JSON parsing of the /internal/* routes below.
+  app.register(async (instance) => {
+    registerLlmBrokerRoutes(instance, { env, ...options.llmBroker });
+  });
 
   // Nudge the in-process job worker as soon as a job lands so it claims the run on the
   // next tick instead of waiting out its poll interval. Best-effort: never block the

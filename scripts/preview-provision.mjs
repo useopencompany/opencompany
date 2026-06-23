@@ -61,6 +61,7 @@ const googleOAuthCallbackUrl = process.env.GOOGLE_OAUTH_CALLBACK_URL?.trim();
 const requiredRunnerRuntimeEnv = requiredEnvMap([
   "E2B_API_KEY",
   "VERCEL_AI_GATEWAY_API_KEY",
+  "OPENAI_CODEX_API_KEY",
   "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
   "GITHUB_APP_ID",
   "GITHUB_APP_INSTALLATION_ID",

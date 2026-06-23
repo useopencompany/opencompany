@@ -226,6 +226,24 @@ const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 // Padding above the snapped user message (matches py-6 = 24px of the scroll container).
 const SCROLL_TO_TOP_PADDING_PX = 24;
+// Below this, an anchored-leaf drift is treated as native scroll anchoring having already
+// held the position — so the reading-anchor safety net no-ops and never double-corrects.
+// Also absorbs sub-pixel getBoundingClientRect noise.
+const ANCHOR_CORRECTION_THRESHOLD_PX = 2;
+
+// The leaf element at the top edge of the scroll container's viewport, with its offset from that
+// edge. Used as the PRO-173 reading anchor: captured on a genuine user scroll, then held across
+// commits so a work-collapse above the fold can't yank the reader's position.
+function captureViewportTopAnchor(
+  container: HTMLElement,
+): { node: Element; viewportTop: number } | null {
+  // elementFromPoint is unavailable outside a real browser (e.g. jsdom) — degrade to no anchor.
+  if (typeof container.ownerDocument.elementFromPoint !== "function") return null;
+  const rect = container.getBoundingClientRect();
+  const node = container.ownerDocument.elementFromPoint(rect.left + rect.width / 2, rect.top + 1);
+  if (!node || !container.contains(node)) return null;
+  return { node, viewportTop: node.getBoundingClientRect().top - rect.top };
+}
 // Space reserved below the active turn, as a fraction of the viewport, so a just-sent
 // message can sit near the top with room for the reply to grow into. 1 = a full viewport
 // (message pins to the very top, but a short reply leaves a big void below); lower values
@@ -541,6 +559,10 @@ function SessionViewContentBody({
   // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Reading-position safety net: the exact leaf at the viewport top captured on the previous
+  // commit, so we can correct the residual jump native scroll anchoring leaves behind when the
+  // "work" block collapses above the fold (PRO-173).
+  const readingAnchorRef = useRef<{ node: Element; viewportTop: number } | null>(null);
   // Felt time-to-first-token: stamped at the Send click, resolved when the first
   // streamed delta paints. `isBusy` blocks concurrent turns, so a single timer is safe.
   const pendingTtftRef = useRef<{ startedAt: number; messageId: string | null } | null>(null);
@@ -1221,6 +1243,45 @@ function SessionViewContentBody({
     initialScrollSessionRef.current = session.id;
   }, [session.id, hasMessages, pendingScrollMessageId]);
 
+  // Reading-position safety net (PRO-173). Native scroll anchoring ([overflow-anchor:auto] on
+  // the container) holds the view across most content changes, but it does NOT compensate when
+  // the "work" block collapses above the fold (Thought / N-steps folding on completion, or a
+  // manual chevron toggle): the answer the user is reading lurches up by the collapsed height.
+  // The anchor (the exact leaf at the viewport top) is captured on a genuine user scroll in the
+  // onScroll handler — NOT here, so we never fight the user's own scrolling. This effect runs on
+  // every commit and only HOLDS that anchor: it nudges scrollTop by however far the anchored leaf
+  // drifted. When native anchoring already held the position the drift is ~0 → we no-op (never
+  // double-correct, never disturb streaming appends, which land below the anchor → zero drift).
+  // Running every commit (no deps) also covers manual card toggles, which don't change
+  // visibleMessages but do trigger a commit.
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+
+    // Defer to the effects that own these frames: the send-snap, the once-per-session
+    // open-at-bottom, and the streaming bottom-follow. Drop any stale anchor when not reading.
+    const reading =
+      pendingScrollMessageId === null &&
+      initialScrollSessionRef.current === session.id &&
+      !isPinnedAtBottomRef.current;
+    if (!reading) {
+      readingAnchorRef.current = null;
+      return;
+    }
+
+    const anchor = readingAnchorRef.current;
+    if (!anchor?.node.isConnected) return;
+
+    const containerTop = container.getBoundingClientRect().top;
+    const newTop = anchor.node.getBoundingClientRect().top - containerTop;
+    const delta = newTop - anchor.viewportTop; // how far the anchored leaf drifted in the viewport
+    if (Math.abs(delta) > ANCHOR_CORRECTION_THRESHOLD_PX) {
+      // Removing D px above the fold moves the leaf up (delta = -D); scrollTop + delta = scrollTop - D
+      // restores the reading position.
+      container.scrollTo({ top: container.scrollTop + delta, behavior: "auto" });
+    }
+  });
+
   // Keep the reserved-space height (--chat-vh) in sync with the scroll container's own
   // height. A single ResizeObserver means the CSS min-height on the last turn recomputes
   // on every viewport/container resize (window resize, sidebar toggle, devtools), so the
@@ -1617,6 +1678,12 @@ function SessionViewContentBody({
             const el = event.currentTarget;
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
             isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+            // Remember the leaf the user just scrolled to, so the reading-anchor effect can hold
+            // it across a work-collapse above the fold (PRO-173). Cleared at the bottom, where the
+            // streaming follow takes over instead.
+            readingAnchorRef.current = isPinnedAtBottomRef.current
+              ? null
+              : captureViewportTopAnchor(el);
           }}
           // Drop-overlay hover handlers come from the shared hook. The window-level drop handler
           // (inside the hook) does the actual preventDefault + accept, so a drop anywhere in the

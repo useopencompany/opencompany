@@ -37,6 +37,7 @@ import {
   runAmpCoderTool,
 } from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
+import { runCodexCoderTool } from "./codex-tool";
 import type { RunnerEnv } from "./env";
 import { publishTransientRuntimeEvent } from "./events";
 import { runFetchTranscriptTool } from "./fetch-transcript-tool";
@@ -885,6 +886,32 @@ async function executeRuntimeToolInner(
         }
         return opencodeResult;
       }
+      if (input.definition.name === "codex_coder") {
+        if (!input.workspaceId || !input.agentConfig) {
+          throw new Error("Codex requires workspace and agent configuration context.");
+        }
+        const codexResult = await runCodexCoderTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          sessionId: input.sessionId,
+          messageId: input.assistantMessageId,
+          workspaceId: input.workspaceId,
+          toolCallId: input.toolCallId,
+          agentConfig: input.agentConfig,
+          env: input.env,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
+          onOutput: async (delta) => {
+            await input.checkAbort();
+            commandOutput.push("stdout", delta);
+          },
+        });
+        if (codexResult.usage) {
+          usage = codexResult.usage;
+        }
+        return codexResult;
+      }
       if (input.definition.name === "memory") {
         const memoryResult = await runMemoryTool({
           sandbox: activeSandbox,
@@ -892,6 +919,18 @@ async function executeRuntimeToolInner(
           args: input.args,
           env: input.env,
           personal: input.personalAgent ?? false,
+          // LLM-broker delegation context; without a workspace id the tool falls back
+          // to direct key injection (broker tokens are workspace-scoped).
+          ...(input.workspaceId
+            ? {
+                broker: {
+                  sessionId: input.sessionId,
+                  workspaceId: input.workspaceId,
+                  messageId: input.assistantMessageId,
+                  toolCallId: input.toolCallId,
+                },
+              }
+            : {}),
           onOutput: async (stream, delta) => {
             await input.checkAbort();
             commandOutput.push(stream, delta);
