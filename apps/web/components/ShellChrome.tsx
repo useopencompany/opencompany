@@ -54,8 +54,11 @@ export function ShellChrome({ sidebar, children }: { sidebar: ReactNode; childre
     [handle],
   );
 
+  // The Memory (Brain) page owns the left-edge swipe for its own file-tree drawer, so the
+  // shell yields its nav-drawer gesture there (the nav stays reachable via the ☰ button).
+  const pageOwnsLeftSwipe = /\/brain(\/|$)/.test(pathname);
   const { left: leftDrag, right: rightDrag } = useDrawerGesture({
-    isMobile,
+    isMobile: isMobile && !pageOwnsLeftSwipe,
     left: leftConfig,
     right: rightConfig,
   });
