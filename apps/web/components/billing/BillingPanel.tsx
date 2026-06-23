@@ -1,12 +1,30 @@
 "use client";
 
-import { ChevronRight, CreditCard, ExternalLink, Gift, WalletCards } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  CreditCard,
+  ExternalLink,
+  Gift,
+  RefreshCw,
+  WalletCards,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { createCreditCheckoutSession, redeemCreditCode } from "@/lib/billing/actions";
 import {
+  createCreditCheckoutSession,
+  disableAutoRefill,
+  redeemCreditCode,
+  startAutoRefillSetup,
+  updateAutoRefillSettings,
+  updateSpendLimit,
+} from "@/lib/billing/actions";
+import {
+  isValidAutoRefillAmountCents,
+  isValidAutoRefillThresholdCents,
   isValidTopUpAmountCents,
+  isValidWeeklySpendLimitCents,
   MAX_TOP_UP_AMOUNT_CENTS,
   MIN_TOP_UP_AMOUNT_CENTS,
   TOP_UP_AMOUNTS_CENTS,
@@ -42,6 +60,19 @@ export type BillingData = {
     costBasis: Record<string, unknown>;
     metadata: Record<string, unknown>;
   }>;
+  settings: {
+    spendLimitEnabled: boolean;
+    weeklySpendLimitUsdMicros: number | null;
+    weeklySpendUsdMicros: number;
+    weekResetsAt: string;
+    autoRefillEnabled: boolean;
+    autoRefillThresholdUsdMicros: number | null;
+    autoRefillAmountUsdMicros: number | null;
+    autoRefillStatus: string;
+    hasSavedCard: boolean;
+    cardBrand: string | null;
+    cardLast4: string | null;
+  };
 };
 
 const FORMAT_LOCALE = "en-US";
@@ -81,6 +112,7 @@ function shortSessionId(sessionId: string) {
 function ledgerLabel(source: string) {
   if (source === "signup_bonus") return "Signup credit";
   if (source === "stripe_checkout") return "Credit top-up";
+  if (source === "auto_refill") return "Automatic refill";
   if (source === "credit_code") return "Redeemed code";
   if (source === "model_usage") return "Model usage";
   if (source === "tool_usage") return "Tool usage";
@@ -276,6 +308,307 @@ function CustomTopUpForm({
   );
 }
 
+// Micros -> a plain dollar string for editable number inputs (e.g. 27_000_000 -> "27").
+function microsToDollarInput(micros: number | null) {
+  if (micros == null) return "";
+  return String(micros / 1_000_000);
+}
+
+function SpendingLimitCard({ settings }: { settings: BillingData["settings"] }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [limitInput, setLimitInput] = useState(
+    microsToDollarInput(settings.weeklySpendLimitUsdMicros),
+  );
+
+  const limit = settings.weeklySpendLimitUsdMicros;
+  const active = settings.spendLimitEnabled && limit != null;
+  const spend = settings.weeklySpendUsdMicros;
+  const pct = active && limit > 0 ? Math.min(100, Math.round((spend / limit) * 100)) : 0;
+  const resetLabel = new Date(settings.weekResetsAt).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+
+  const save = (nextEnabled: boolean) => {
+    setError(null);
+    const dollars = Number.parseFloat(limitInput);
+    const cents = Math.round(dollars * 100);
+    if (nextEnabled && (!Number.isFinite(dollars) || !isValidWeeklySpendLimitCents(cents))) {
+      setError("Enter a weekly limit between $1 and $10,000.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateSpendLimit({
+        enabled: nextEnabled,
+        weeklyLimitCents: Number.isFinite(cents) ? cents : null,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+          <WalletCards size={15} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">Spending limit</div>
+          <div className="mt-0.5 text-[12px] leading-5 text-ink-muted">
+            Pause agents once weekly usage reaches your cap.
+          </div>
+
+          {active && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[12px] text-ink-muted">
+                <span className="font-medium text-ink">{formatUsdMicros(spend)} spent</span>
+                <span>
+                  {pct}% of {formatUsdMicros(limit)} · resets {resetLabel}
+                </span>
+              </div>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-surface-muted">
+                <div
+                  className={`h-full rounded-full ${pct >= 100 ? "bg-danger" : "bg-ink"}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="flex h-8 items-center rounded-md border border-border bg-surface focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15">
+              <span className="pl-2.5 text-[12.5px] text-ink-subtle">$</span>
+              <input
+                inputMode="decimal"
+                value={limitInput}
+                onChange={(event) => {
+                  setLimitInput(event.target.value);
+                  setError(null);
+                }}
+                placeholder="Weekly limit"
+                className="h-full w-[120px] bg-transparent px-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => save(true)}
+              className="inline-flex h-8 shrink-0 items-center rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isPending ? "Saving..." : active ? "Update limit" : "Set limit"}
+            </button>
+            {active && (
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => save(false)}
+                className="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Turn off
+              </button>
+            )}
+          </div>
+          {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AutomaticRefillCard({
+  settings,
+  returnPath,
+}: {
+  settings: BillingData["settings"];
+  returnPath: string;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [amountInput, setAmountInput] = useState(
+    microsToDollarInput(settings.autoRefillAmountUsdMicros) || "20",
+  );
+  const [thresholdInput, setThresholdInput] = useState(
+    microsToDollarInput(settings.autoRefillThresholdUsdMicros) || "5",
+  );
+
+  const needsAttention = settings.autoRefillStatus === "needs_attention";
+
+  const addCard = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await startAutoRefillSetup(returnPath);
+      // On success the action redirects to Stripe; we only get here on failure.
+      if (result && !result.ok) setError(result.error);
+    });
+  };
+
+  const save = (nextEnabled: boolean) => {
+    setError(null);
+    const amountCents = Math.round(Number.parseFloat(amountInput) * 100);
+    const thresholdCents = Math.round(Number.parseFloat(thresholdInput) * 100);
+    if (nextEnabled) {
+      if (!isValidAutoRefillAmountCents(amountCents)) {
+        setError("Refill amount must be between $5 and $1,000.");
+        return;
+      }
+      if (!isValidAutoRefillThresholdCents(thresholdCents)) {
+        setError("Enter a valid refill threshold.");
+        return;
+      }
+    }
+    startTransition(async () => {
+      const result = await updateAutoRefillSettings({
+        enabled: nextEnabled,
+        thresholdCents: Number.isFinite(thresholdCents) ? thresholdCents : 0,
+        amountCents: Number.isFinite(amountCents) ? amountCents : 0,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  const turnOff = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await disableAutoRefill();
+      if (result.ok) router.refresh();
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+          <RefreshCw size={15} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+              Automatic refill
+            </div>
+            {settings.autoRefillEnabled && !needsAttention && (
+              <span className="rounded-full bg-success/12 px-2 py-0.5 text-[11px] font-medium text-success">
+                On
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 text-[12px] leading-5 text-ink-muted">
+            Top up your balance automatically when it runs low.
+          </div>
+
+          {needsAttention && (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/8 px-3 py-2 text-[12px] leading-5 text-danger">
+              <AlertTriangle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
+              <span>
+                Your last automatic refill was declined. Update your card to re-enable refills.
+              </span>
+            </div>
+          )}
+
+          {settings.hasSavedCard ? (
+            <>
+              <div className="mt-3 flex items-center gap-2 text-[12px] text-ink-muted">
+                <CreditCard size={14} strokeWidth={1.8} />
+                <span>
+                  {settings.cardBrand ? `${settings.cardBrand} ` : "Card "}••••{" "}
+                  {settings.cardLast4 ?? "????"}
+                </span>
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={addCard}
+                  className="text-ink underline-offset-2 hover:underline disabled:opacity-40"
+                >
+                  Update card
+                </button>
+              </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                    Refill when below
+                  </span>
+                  <div className="mt-1 flex h-8 items-center rounded-md border border-border bg-surface focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15">
+                    <span className="pl-2.5 text-[12.5px] text-ink-subtle">$</span>
+                    <input
+                      inputMode="decimal"
+                      value={thresholdInput}
+                      onChange={(event) => {
+                        setThresholdInput(event.target.value);
+                        setError(null);
+                      }}
+                      className="h-full w-full bg-transparent px-1.5 text-[12.5px] text-ink outline-none"
+                    />
+                  </div>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                    Add this amount
+                  </span>
+                  <div className="mt-1 flex h-8 items-center rounded-md border border-border bg-surface focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15">
+                    <span className="pl-2.5 text-[12.5px] text-ink-subtle">$</span>
+                    <input
+                      inputMode="decimal"
+                      value={amountInput}
+                      onChange={(event) => {
+                        setAmountInput(event.target.value);
+                        setError(null);
+                      }}
+                      className="h-full w-full bg-transparent px-1.5 text-[12.5px] text-ink outline-none"
+                    />
+                  </div>
+                </label>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => save(true)}
+                  className="inline-flex h-8 shrink-0 items-center rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isPending ? "Saving..." : settings.autoRefillEnabled ? "Update" : "Enable"}
+                </button>
+                {settings.autoRefillEnabled && (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={turnOff}
+                    className="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Turn off
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={addCard}
+              className="mt-3 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <CreditCard size={14} strokeWidth={1.8} />
+              {isPending ? "Opening..." : "Add a card"}
+            </button>
+          )}
+          {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BillingPanel({
   billing,
   sessionPathPrefix,
@@ -344,6 +677,9 @@ export function BillingPanel({
         </div>
         {checkoutError && <div className="mt-2 text-[12px] text-danger">{checkoutError}</div>}
       </div>
+
+      <SpendingLimitCard settings={billing.settings} />
+      <AutomaticRefillCard settings={billing.settings} returnPath={settingsReturnPath} />
 
       <form
         onSubmit={(event) => {

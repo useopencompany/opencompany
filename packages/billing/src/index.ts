@@ -675,6 +675,157 @@ export async function hasPositiveWorkspaceBalance(input: {
   return Number.isFinite(balanceUsdMicros) && balanceUsdMicros > 0;
 }
 
+type ExecutableDb = {
+  execute: (query: string | SQLWrapper) => Promise<unknown>;
+};
+
+// Sources that represent money spent running agents (as opposed to top-ups,
+// signup bonuses, or promo credits). These count toward the weekly spend limit.
+const USAGE_LEDGER_SOURCES = ["model_usage", "tool_usage", "sandbox_usage"] as const;
+
+// Monday 00:00:00.000 UTC of the week containing `now`. The weekly spend limit
+// resets on this boundary; we use a fixed weekly cadence (not a rolling window)
+// so the UI can show a concrete "resets on <date>".
+export function getWeekStartUtc(now: Date): Date {
+  const daysSinceMonday = (now.getUTCDay() + 6) % 7; // getUTCDay: 0=Sun..6=Sat
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  start.setUTCDate(start.getUTCDate() - daysSinceMonday);
+  return start;
+}
+
+// Start of the next week — the moment the current week's spend resets to zero.
+export function getWeekResetAtUtc(now: Date): Date {
+  const next = getWeekStartUtc(now);
+  next.setUTCDate(next.getUTCDate() + 7);
+  return next;
+}
+
+function toFiniteNumber(value: number | string | null | undefined, fallback = 0): number {
+  if (value === null || value === undefined) return fallback;
+  const parsed = typeof value === "string" ? Number.parseInt(value, 10) : value;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+// Total usage spend (positive micros) recorded since `since`. Reads the ledger,
+// summing the magnitude of usage debits. Relies on the existing
+// (workspace_id, created_at) ledger index.
+export async function getUsageSpendSinceUsdMicros(input: {
+  db: ExecutableDb;
+  workspaceId: string;
+  since: Date;
+}): Promise<number> {
+  const result = await input.db.execute(sql`
+    SELECT COALESCE(SUM(-amount_usd_micros), 0) AS "spendUsdMicros"
+    FROM workspace_credit_ledger
+    WHERE workspace_id = ${input.workspaceId}
+      AND amount_usd_micros < 0
+      AND source IN (${sql.join(
+        USAGE_LEDGER_SOURCES.map((source) => sql`${source}`),
+        sql`, `,
+      )})
+      AND created_at >= ${input.since.toISOString()}
+  `);
+  const rows = rowsFromExecute<{ spendUsdMicros: number | string }>(result);
+  return toFiniteNumber(rows[0]?.spendUsdMicros);
+}
+
+export type RunAllowanceReason = "no_balance" | "weekly_limit_reached";
+
+export type WorkspaceRunAllowance = {
+  allowed: boolean;
+  reason: RunAllowanceReason | null;
+  balanceUsdMicros: number;
+  weeklySpendUsdMicros: number;
+  weeklySpendLimitUsdMicros: number | null;
+  spendLimitEnabled: boolean;
+  weekStartsAt: Date;
+};
+
+// Single-round-trip gate combining the positive-balance check with the weekly
+// spend limit. Read-only and side-effect free so it can be reused by run gates,
+// the auto-refill evaluator, and the billing UI.
+//
+// Reason priority: weekly_limit_reached takes precedence over no_balance, because
+// when the cap is hit adding credits (or auto-refilling) won't unblock the user —
+// they must raise the limit or wait for the weekly reset.
+export async function checkWorkspaceRunAllowance(input: {
+  db: ExecutableDb;
+  workspaceId: string;
+  now?: Date;
+}): Promise<WorkspaceRunAllowance> {
+  const now = input.now ?? new Date();
+  const weekStartsAt = getWeekStartUtc(now);
+
+  const result = await input.db.execute(sql`
+    WITH bal AS (
+      SELECT COALESCE(balance_usd_micros, balance_cents::bigint * ${USD_MICROS_PER_CENT}) AS balance
+      FROM workspace_credit_balances
+      WHERE workspace_id = ${input.workspaceId}
+      LIMIT 1
+    ),
+    settings AS (
+      SELECT spend_limit_enabled, weekly_spend_limit_usd_micros
+      FROM workspace_billing_settings
+      WHERE workspace_id = ${input.workspaceId}
+      LIMIT 1
+    ),
+    spend AS (
+      SELECT COALESCE(SUM(-amount_usd_micros), 0) AS weekly_spend
+      FROM workspace_credit_ledger
+      WHERE workspace_id = ${input.workspaceId}
+        AND amount_usd_micros < 0
+        AND source IN (${sql.join(
+          USAGE_LEDGER_SOURCES.map((source) => sql`${source}`),
+          sql`, `,
+        )})
+        AND created_at >= ${weekStartsAt.toISOString()}
+    )
+    SELECT
+      COALESCE((SELECT balance FROM bal), 0) AS "balanceUsdMicros",
+      COALESCE((SELECT spend_limit_enabled FROM settings), false) AS "spendLimitEnabled",
+      (SELECT weekly_spend_limit_usd_micros FROM settings) AS "weeklySpendLimitUsdMicros",
+      COALESCE((SELECT weekly_spend FROM spend), 0) AS "weeklySpendUsdMicros"
+  `);
+
+  const rows = rowsFromExecute<{
+    balanceUsdMicros: number | string;
+    spendLimitEnabled: boolean;
+    weeklySpendLimitUsdMicros: number | string | null;
+    weeklySpendUsdMicros: number | string;
+  }>(result);
+  const row = rows[0];
+
+  const balanceUsdMicros = toFiniteNumber(row?.balanceUsdMicros);
+  const spendLimitEnabled = row?.spendLimitEnabled === true;
+  const weeklySpendLimitUsdMicros =
+    row?.weeklySpendLimitUsdMicros === null || row?.weeklySpendLimitUsdMicros === undefined
+      ? null
+      : toFiniteNumber(row.weeklySpendLimitUsdMicros);
+  const weeklySpendUsdMicros = toFiniteNumber(row?.weeklySpendUsdMicros);
+
+  const base = {
+    balanceUsdMicros,
+    weeklySpendUsdMicros,
+    weeklySpendLimitUsdMicros,
+    spendLimitEnabled,
+    weekStartsAt,
+  };
+
+  if (
+    spendLimitEnabled &&
+    weeklySpendLimitUsdMicros !== null &&
+    weeklySpendUsdMicros >= weeklySpendLimitUsdMicros
+  ) {
+    return { allowed: false, reason: "weekly_limit_reached", ...base };
+  }
+
+  if (balanceUsdMicros <= 0) {
+    return { allowed: false, reason: "no_balance", ...base };
+  }
+
+  return { allowed: true, reason: null, ...base };
+}
+
 function tokenCost(tokens: number, usdMicrosPerMillionTokens: number) {
   return Math.round((safeTokenCount(tokens) * usdMicrosPerMillionTokens) / TOKENS_PER_MILLION);
 }

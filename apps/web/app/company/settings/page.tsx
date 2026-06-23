@@ -85,6 +85,10 @@ export default async function SettingsPage() {
           ...entry,
           createdAt: entry.createdAt.toISOString(),
         })),
+        settings: {
+          ...billing.settings,
+          weekResetsAt: billing.settings.weekResetsAt.toISOString(),
+        },
       }}
       mcp={mcp}
       toolPolicies={toolPolicies}

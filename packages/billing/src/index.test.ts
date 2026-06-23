@@ -4,6 +4,10 @@ import {
   calculateModelUsageCost,
   calculatePlatformFeeUsdMicros,
   calculateSandboxUsageCost,
+  checkWorkspaceRunAllowance,
+  getUsageSpendSinceUsdMicros,
+  getWeekResetAtUtc,
+  getWeekStartUtc,
   recordWorkspaceUsageDebit,
 } from ".";
 
@@ -313,5 +317,127 @@ describe("recordWorkspaceUsageDebit", () => {
       }),
     ).resolves.toEqual({ ok: true, ledgerId: 9, balanceUsdMicros: 88_003 });
     expect(captured).toBeDefined();
+  });
+});
+
+describe("getWeekStartUtc / getWeekResetAtUtc", () => {
+  it("returns Monday 00:00 UTC for a midweek timestamp", () => {
+    // 2026-06-17 is a Wednesday.
+    const start = getWeekStartUtc(new Date("2026-06-17T13:45:30.123Z"));
+    expect(start.toISOString()).toBe("2026-06-15T00:00:00.000Z");
+  });
+
+  it("treats Monday as the start of its own week", () => {
+    const start = getWeekStartUtc(new Date("2026-06-15T00:00:00.000Z"));
+    expect(start.toISOString()).toBe("2026-06-15T00:00:00.000Z");
+  });
+
+  it("rolls Sunday back to the preceding Monday", () => {
+    // 2026-06-21 is a Sunday.
+    const start = getWeekStartUtc(new Date("2026-06-21T23:59:59.000Z"));
+    expect(start.toISOString()).toBe("2026-06-15T00:00:00.000Z");
+  });
+
+  it("reset is exactly seven days after the week start", () => {
+    const reset = getWeekResetAtUtc(new Date("2026-06-17T13:45:30.123Z"));
+    expect(reset.toISOString()).toBe("2026-06-22T00:00:00.000Z");
+  });
+});
+
+describe("getUsageSpendSinceUsdMicros", () => {
+  it("returns the summed magnitude of usage debits", async () => {
+    const db = { execute: async () => ({ rows: [{ spendUsdMicros: 1_234_500 }] }) };
+    await expect(
+      getUsageSpendSinceUsdMicros({
+        db,
+        workspaceId: "wks_1",
+        since: new Date("2026-06-15T00:00:00Z"),
+      }),
+    ).resolves.toBe(1_234_500);
+  });
+
+  it("parses bigint string results and defaults to 0 when empty", async () => {
+    const stringDb = { execute: async () => ({ rows: [{ spendUsdMicros: "987650" }] }) };
+    await expect(
+      getUsageSpendSinceUsdMicros({ db: stringDb, workspaceId: "wks_1", since: new Date() }),
+    ).resolves.toBe(987_650);
+
+    const emptyDb = { execute: async () => ({ rows: [] }) };
+    await expect(
+      getUsageSpendSinceUsdMicros({ db: emptyDb, workspaceId: "wks_1", since: new Date() }),
+    ).resolves.toBe(0);
+  });
+});
+
+describe("checkWorkspaceRunAllowance", () => {
+  function dbReturning(row: Record<string, unknown>) {
+    return { execute: async () => ({ rows: [row] }) };
+  }
+
+  it("allows when balance is positive and no limit is configured", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 5_000_000,
+      spendLimitEnabled: false,
+      weeklySpendLimitUsdMicros: null,
+      weeklySpendUsdMicros: 0,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBeNull();
+  });
+
+  it("blocks with no_balance when balance is zero", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 0,
+      spendLimitEnabled: false,
+      weeklySpendLimitUsdMicros: null,
+      weeklySpendUsdMicros: 0,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result).toMatchObject({ allowed: false, reason: "no_balance" });
+  });
+
+  it("blocks with weekly_limit_reached when spend meets the enabled limit", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 5_000_000,
+      spendLimitEnabled: true,
+      weeklySpendLimitUsdMicros: 2_000_000,
+      weeklySpendUsdMicros: 2_000_000,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result).toMatchObject({ allowed: false, reason: "weekly_limit_reached" });
+  });
+
+  it("does not enforce the limit when spendLimitEnabled is false", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 5_000_000,
+      spendLimitEnabled: false,
+      weeklySpendLimitUsdMicros: 1_000_000,
+      weeklySpendUsdMicros: 9_000_000,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result.allowed).toBe(true);
+  });
+
+  it("prioritizes weekly_limit_reached over no_balance when both apply", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 0,
+      spendLimitEnabled: true,
+      weeklySpendLimitUsdMicros: 1_000_000,
+      weeklySpendUsdMicros: 1_500_000,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result.reason).toBe("weekly_limit_reached");
+  });
+
+  it("allows when spend is below the limit and balance is positive", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 3_000_000,
+      spendLimitEnabled: true,
+      weeklySpendLimitUsdMicros: 2_000_000,
+      weeklySpendUsdMicros: 1_999_999,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result.allowed).toBe(true);
   });
 });

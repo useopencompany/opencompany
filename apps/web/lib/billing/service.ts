@@ -1,14 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { centsToUsdMicros, USD_MICROS_PER_CENT, usdMicrosToCents } from "@opencompany/billing";
+import {
+  centsToUsdMicros,
+  getUsageSpendSinceUsdMicros,
+  getWeekResetAtUtc,
+  getWeekStartUtc,
+  USD_MICROS_PER_CENT,
+  usdMicrosToCents,
+} from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
+  autoRefillAttempts,
   creditCodeRedemptions,
   creditCodes,
   stripeCheckoutSessions,
+  type WorkspaceBillingSettings,
+  workspaceBillingSettings,
   workspaceCreditBalances,
   workspaceCreditLedger,
 } from "@opencompany/db/schema";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import { normalizeCreditCode } from "@/lib/billing/constants";
 
@@ -61,33 +71,36 @@ export function newStripeCheckoutRecordId() {
 
 export async function loadBillingOverview(workspaceId: string) {
   const db = getDb();
-  const [balanceRow, ledgerRows, spendRows, sessionChargeRows] = await Promise.all([
-    db
-      .select({
-        balanceCents: workspaceCreditBalances.balanceCents,
-        balanceUsdMicros: workspaceCreditBalances.balanceUsdMicros,
-      })
-      .from(workspaceCreditBalances)
-      .where(eq(workspaceCreditBalances.workspaceId, workspaceId))
-      .limit(1),
-    db
-      .select({
-        id: workspaceCreditLedger.id,
-        amountCents: workspaceCreditLedger.amountCents,
-        amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
-        source: workspaceCreditLedger.source,
-        sessionId: workspaceCreditLedger.sessionId,
-        providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
-        platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
-        createdAt: workspaceCreditLedger.createdAt,
-        costBasis: workspaceCreditLedger.costBasis,
-        metadata: workspaceCreditLedger.metadata,
-      })
-      .from(workspaceCreditLedger)
-      .where(eq(workspaceCreditLedger.workspaceId, workspaceId))
-      .orderBy(desc(workspaceCreditLedger.createdAt))
-      .limit(20),
-    db.execute(sql`
+  const now = new Date();
+  const weekStartsAt = getWeekStartUtc(now);
+  const [balanceRow, ledgerRows, spendRows, sessionChargeRows, settings, weeklySpendUsdMicros] =
+    await Promise.all([
+      db
+        .select({
+          balanceCents: workspaceCreditBalances.balanceCents,
+          balanceUsdMicros: workspaceCreditBalances.balanceUsdMicros,
+        })
+        .from(workspaceCreditBalances)
+        .where(eq(workspaceCreditBalances.workspaceId, workspaceId))
+        .limit(1),
+      db
+        .select({
+          id: workspaceCreditLedger.id,
+          amountCents: workspaceCreditLedger.amountCents,
+          amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
+          source: workspaceCreditLedger.source,
+          sessionId: workspaceCreditLedger.sessionId,
+          providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
+          platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
+          createdAt: workspaceCreditLedger.createdAt,
+          costBasis: workspaceCreditLedger.costBasis,
+          metadata: workspaceCreditLedger.metadata,
+        })
+        .from(workspaceCreditLedger)
+        .where(eq(workspaceCreditLedger.workspaceId, workspaceId))
+        .orderBy(desc(workspaceCreditLedger.createdAt))
+        .limit(20),
+      db.execute(sql`
       SELECT
         COALESCE(SUM(-amount_usd_micros) FILTER (
           WHERE amount_usd_micros < 0 AND created_at >= now() - interval '7 days'
@@ -98,7 +111,7 @@ export async function loadBillingOverview(workspaceId: string) {
       FROM workspace_credit_ledger
       WHERE workspace_id = ${workspaceId}
     `),
-    db.execute(sql`
+      db.execute(sql`
       WITH RECURSIVE session_tree(id, root_id, path) AS (
         SELECT id, id AS root_id, ARRAY[id]::text[]
         FROM agent_sessions
@@ -139,7 +152,9 @@ export async function loadBillingOverview(workspaceId: string) {
       ORDER BY MAX(ledger_with_root.created_at) DESC
       LIMIT 5
     `),
-  ]);
+      loadWorkspaceBillingSettings(workspaceId, db),
+      getUsageSpendSinceUsdMicros({ db, workspaceId, since: weekStartsAt }),
+    ]);
   const balanceUsdMicros =
     balanceRow[0]?.balanceUsdMicros ?? centsToUsdMicros(balanceRow[0]?.balanceCents ?? 0);
   const spend = rowsFromExecute<{
@@ -170,6 +185,19 @@ export async function loadBillingOverview(workspaceId: string) {
       ...row,
       createdAt: readTimestamp(row.createdAt),
     })) satisfies BillingLedgerEntry[],
+    settings: {
+      spendLimitEnabled: settings?.spendLimitEnabled ?? false,
+      weeklySpendLimitUsdMicros: settings?.weeklySpendLimitUsdMicros ?? null,
+      weeklySpendUsdMicros,
+      weekResetsAt: getWeekResetAtUtc(now),
+      autoRefillEnabled: settings?.autoRefillEnabled ?? false,
+      autoRefillThresholdUsdMicros: settings?.autoRefillThresholdUsdMicros ?? null,
+      autoRefillAmountUsdMicros: settings?.autoRefillAmountUsdMicros ?? null,
+      autoRefillStatus: settings?.autoRefillStatus ?? "ok",
+      hasSavedCard: Boolean(settings?.stripeDefaultPaymentMethodId),
+      cardBrand: settings?.cardBrand ?? null,
+      cardLast4: settings?.cardLast4 ?? null,
+    },
   };
 }
 
@@ -533,4 +561,264 @@ function readMicros(value: number | string | null | undefined) {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+// ── Workspace billing settings (weekly limit + auto-refill) ──────────────────
+
+export function newAutoRefillAttemptId() {
+  return `ar_${randomUUID()}`;
+}
+
+export async function loadWorkspaceBillingSettings(
+  workspaceId: string,
+  db = getDb(),
+): Promise<WorkspaceBillingSettings | null> {
+  const rows = await db
+    .select()
+    .from(workspaceBillingSettings)
+    .where(eq(workspaceBillingSettings.workspaceId, workspaceId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+type BillingSettingsPatch = Partial<
+  Pick<
+    WorkspaceBillingSettings,
+    | "spendLimitEnabled"
+    | "weeklySpendLimitUsdMicros"
+    | "autoRefillEnabled"
+    | "autoRefillThresholdUsdMicros"
+    | "autoRefillAmountUsdMicros"
+    | "stripeCustomerId"
+    | "stripeDefaultPaymentMethodId"
+    | "cardBrand"
+    | "cardLast4"
+    | "autoRefillStatus"
+  >
+>;
+
+export async function upsertWorkspaceBillingSettings(
+  workspaceId: string,
+  patch: BillingSettingsPatch,
+  db = getDb(),
+) {
+  const now = new Date();
+  await db
+    .insert(workspaceBillingSettings)
+    .values({ workspaceId, ...patch, updatedAt: now })
+    .onConflictDoUpdate({
+      target: workspaceBillingSettings.workspaceId,
+      set: { ...patch, updatedAt: now },
+    });
+}
+
+export async function insertAutoRefillAttempt(input: {
+  id: string;
+  workspaceId: string;
+  userId?: string | null;
+  amountUsdMicros: number;
+  db?: ReturnType<typeof getDb>;
+}) {
+  const db = input.db ?? getDb();
+  await db.insert(autoRefillAttempts).values({
+    id: input.id,
+    workspaceId: input.workspaceId,
+    userId: input.userId ?? null,
+    amountUsdMicros: input.amountUsdMicros,
+    status: "pending",
+  });
+}
+
+export async function markAutoRefillAttemptFailed(input: {
+  attemptId: string;
+  workspaceId: string;
+  stripePaymentIntentId?: string | null;
+  error: string;
+  needsAttention?: boolean;
+  db?: ReturnType<typeof getDb>;
+}) {
+  const db = input.db ?? getDb();
+  const now = new Date();
+  // Don't clobber an already-fulfilled attempt (webhook/inline races).
+  await db
+    .update(autoRefillAttempts)
+    .set({
+      status: "failed",
+      error: input.error.slice(0, 1000),
+      stripePaymentIntentId: input.stripePaymentIntentId ?? undefined,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(autoRefillAttempts.id, input.attemptId),
+        sql`${autoRefillAttempts.status} <> 'succeeded'`,
+      ),
+    );
+  if (input.needsAttention) {
+    await upsertWorkspaceBillingSettings(
+      input.workspaceId,
+      { autoRefillStatus: "needs_attention" },
+      db,
+    );
+  }
+}
+
+// True when an auto-refill was attempted within `withinMs` (succeeded or still
+// pending). Acts as a cooldown so concurrent run gates don't fire several charges.
+export async function hasRecentAutoRefillAttempt(
+  workspaceId: string,
+  withinMs: number,
+  db = getDb(),
+): Promise<boolean> {
+  const cutoff = new Date(Date.now() - withinMs);
+  const rows = await db
+    .select({ id: autoRefillAttempts.id })
+    .from(autoRefillAttempts)
+    .where(
+      and(
+        eq(autoRefillAttempts.workspaceId, workspaceId),
+        gt(autoRefillAttempts.createdAt, cutoff),
+        sql`${autoRefillAttempts.status} <> 'failed'`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+// Credits the workspace for a succeeded auto-refill. Idempotent: the attempt row
+// transitions pending -> succeeded exactly once, so calling this from both the
+// inline charge path and the webhook can never double-credit.
+export async function fulfillAutoRefill(input: {
+  attemptId: string;
+  stripePaymentIntentId: string;
+  eventId?: string | null;
+  db?: ReturnType<typeof getDb>;
+}) {
+  const db = input.db ?? getDb();
+  const result = await db.execute(sql`
+    WITH fulfilled AS (
+      UPDATE auto_refill_attempts
+      SET status = 'succeeded',
+          stripe_payment_intent_id = ${input.stripePaymentIntentId},
+          error = NULL,
+          fulfilled_at = now(),
+          updated_at = now()
+      WHERE id = ${input.attemptId} AND status <> 'succeeded'
+      RETURNING id, workspace_id, user_id, amount_usd_micros
+    ),
+    balance AS (
+      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
+      SELECT
+        workspace_id,
+        ROUND(amount_usd_micros::numeric / ${USD_MICROS_PER_CENT})::integer,
+        amount_usd_micros,
+        now()
+      FROM fulfilled
+      ON CONFLICT (workspace_id) DO UPDATE SET
+        balance_cents = workspace_credit_balances.balance_cents + excluded.balance_cents,
+        balance_usd_micros = workspace_credit_balances.balance_usd_micros + excluded.balance_usd_micros,
+        updated_at = now()
+      RETURNING workspace_id, balance_cents
+    ),
+    ledger AS (
+      INSERT INTO workspace_credit_ledger (workspace_id, user_id, amount_cents, amount_usd_micros, source, metadata)
+      SELECT
+        workspace_id,
+        user_id,
+        ROUND(amount_usd_micros::numeric / ${USD_MICROS_PER_CENT})::integer,
+        amount_usd_micros,
+        'auto_refill',
+        jsonb_build_object(
+          'autoRefillAttemptId', id,
+          'stripePaymentIntentId', ${input.stripePaymentIntentId}::text,
+          'stripeEventId', ${input.eventId ?? null}::text
+        )
+      FROM fulfilled
+      RETURNING id
+    )
+    SELECT
+      fulfilled.workspace_id AS "workspaceId",
+      fulfilled.user_id AS "userId",
+      fulfilled.amount_usd_micros AS "amountUsdMicros",
+      balance.balance_cents AS "balanceCents",
+      ledger.id AS "ledgerId"
+    FROM fulfilled
+    JOIN balance ON balance.workspace_id = fulfilled.workspace_id
+    JOIN ledger ON true
+  `);
+
+  const rows = rowsFromExecute<{
+    workspaceId: string;
+    userId: string | null;
+    amountUsdMicros: number | string;
+    balanceCents: number;
+    ledgerId: number;
+  }>(result);
+
+  const row = rows[0];
+  if (!row) {
+    // Already fulfilled (or the attempt vanished) — idempotent no-op.
+    return { ok: false as const, alreadyFulfilled: true as const };
+  }
+
+  return {
+    ok: true as const,
+    alreadyFulfilled: false as const,
+    workspaceId: row.workspaceId,
+    userId: row.userId,
+    amountUsdMicros: readMicros(row.amountUsdMicros),
+    balanceCents: row.balanceCents,
+    ledgerId: row.ledgerId,
+  };
+}
+
+// Persists the saved card after a setup-mode checkout. Marks auto-refill ready (ok)
+// and enabled in the same write, so finishing setup turns the feature on.
+export async function saveAutoRefillPaymentMethod(input: {
+  workspaceId: string;
+  stripeCustomerId: string;
+  paymentMethodId: string;
+  cardBrand: string | null;
+  cardLast4: string | null;
+  db?: ReturnType<typeof getDb>;
+}) {
+  await upsertWorkspaceBillingSettings(
+    input.workspaceId,
+    {
+      stripeCustomerId: input.stripeCustomerId,
+      stripeDefaultPaymentMethodId: input.paymentMethodId,
+      cardBrand: input.cardBrand,
+      cardLast4: input.cardLast4,
+      autoRefillEnabled: true,
+      autoRefillStatus: "ok",
+    },
+    input.db,
+  );
+}
+
+// Workspaces whose auto-refill should fire: enabled, healthy, with a saved card,
+// and a balance below their configured threshold. Used by the Inngest backstop.
+export async function listWorkspacesNeedingAutoRefill(
+  limit: number,
+  db = getDb(),
+): Promise<Array<{ workspaceId: string }>> {
+  const rows = await db
+    .select({ workspaceId: workspaceBillingSettings.workspaceId })
+    .from(workspaceBillingSettings)
+    .leftJoin(
+      workspaceCreditBalances,
+      eq(workspaceCreditBalances.workspaceId, workspaceBillingSettings.workspaceId),
+    )
+    .where(
+      and(
+        eq(workspaceBillingSettings.autoRefillEnabled, true),
+        eq(workspaceBillingSettings.autoRefillStatus, "ok"),
+        isNotNull(workspaceBillingSettings.stripeCustomerId),
+        isNotNull(workspaceBillingSettings.stripeDefaultPaymentMethodId),
+        isNotNull(workspaceBillingSettings.autoRefillThresholdUsdMicros),
+        sql`COALESCE(${workspaceCreditBalances.balanceUsdMicros}, 0) < ${workspaceBillingSettings.autoRefillThresholdUsdMicros}`,
+      ),
+    )
+    .limit(limit);
+  return rows;
 }
