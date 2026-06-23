@@ -24,6 +24,8 @@ import {
 } from "@/lib/agent-sessions/message-runner";
 import { ORPHANED_RUN_REAP_CRON, reapOrphanedRunningSessions } from "@/lib/agent-sessions/reaper";
 import { callRunner } from "@/lib/agent-sessions/runner";
+import { runAutoRefillForWorkspace } from "@/lib/billing/auto-refill";
+import { listWorkspacesNeedingAutoRefill } from "@/lib/billing/service";
 import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
 import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
@@ -134,6 +136,37 @@ export const sweepOrphanedRunningSessions = inngest.createFunction(
     return step.run("reap orphaned running sessions", async () => {
       return reapOrphanedRunningSessions();
     });
+  },
+);
+
+// Backstop for automatic refill: the reactive path tops up at the run gate, but a
+// workspace whose balance drifts below its threshold while idle won't hit a gate.
+// This sweep tops those up so the balance is ready before the next run.
+const AUTO_REFILL_SWEEP_CRON = "*/5 * * * *";
+const AUTO_REFILL_SWEEP_LIMIT = 50;
+
+export const sweepAutoRefills = inngest.createFunction(
+  {
+    id: "sweep-auto-refills",
+    name: "Top up workspaces with automatic refill enabled",
+    // Charges are guarded by a per-workspace cooldown + idempotency, so a single
+    // retry can't double-charge; keep retries low to avoid hammering Stripe.
+    retries: 1,
+    concurrency: { limit: 1 },
+    triggers: { cron: AUTO_REFILL_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    const workspaces = await step.run("list workspaces needing auto-refill", async () =>
+      listWorkspacesNeedingAutoRefill(AUTO_REFILL_SWEEP_LIMIT),
+    );
+    let recharged = 0;
+    for (const workspace of workspaces) {
+      const result = await step.run(`auto-refill ${workspace.workspaceId}`, async () =>
+        runAutoRefillForWorkspace(workspace.workspaceId),
+      );
+      if (result.recharged) recharged += 1;
+    }
+    return { scanned: workspaces.length, recharged };
   },
 );
 
@@ -568,6 +601,7 @@ export const inngestFunctions = [
   sweepWorkspaceSyncOutbox,
   sweepRecallIndex,
   sweepOrphanedRunningSessions,
+  sweepAutoRefills,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,

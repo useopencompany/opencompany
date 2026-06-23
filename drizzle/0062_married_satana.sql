@@ -15,7 +15,12 @@ CREATE TABLE "llm_broker_requests" (
 	"latency_ms" integer,
 	"raw_usage" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "llm_broker_requests_non_negative_counters_check" CHECK ("llm_broker_requests"."input_tokens" >= 0 AND "llm_broker_requests"."input_cache_read_tokens" >= 0 AND "llm_broker_requests"."input_cache_write_tokens" >= 0 AND "llm_broker_requests"."output_tokens" >= 0 AND "llm_broker_requests"."cost_usd_micros" >= 0 AND ("llm_broker_requests"."latency_ms" IS NULL OR "llm_broker_requests"."latency_ms" >= 0))
+	CONSTRAINT "llm_broker_requests_non_negative_counters_check" CHECK ("llm_broker_requests"."input_tokens" >= 0
+        AND "llm_broker_requests"."input_cache_read_tokens" >= 0
+        AND "llm_broker_requests"."input_cache_write_tokens" >= 0
+        AND "llm_broker_requests"."output_tokens" >= 0
+        AND "llm_broker_requests"."cost_usd_micros" >= 0
+        AND ("llm_broker_requests"."latency_ms" IS NULL OR "llm_broker_requests"."latency_ms" >= 0))
 );
 --> statement-breakpoint
 CREATE TABLE "llm_broker_tokens" (
@@ -42,7 +47,14 @@ CREATE TABLE "llm_broker_tokens" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"last_used_at" timestamp with time zone,
 	CONSTRAINT "llm_broker_tokens_provider_check" CHECK ("llm_broker_tokens"."provider" IN ('gateway', 'openai')),
-	CONSTRAINT "llm_broker_tokens_non_negative_counters_check" CHECK (("llm_broker_tokens"."budget_usd_micros" IS NULL OR "llm_broker_tokens"."budget_usd_micros" >= 0) AND "llm_broker_tokens"."spent_usd_micros" >= 0 AND "llm_broker_tokens"."request_count" >= 0 AND "llm_broker_tokens"."input_tokens" >= 0 AND "llm_broker_tokens"."input_cache_read_tokens" >= 0 AND "llm_broker_tokens"."input_cache_write_tokens" >= 0 AND "llm_broker_tokens"."output_tokens" >= 0 AND "llm_broker_tokens"."unparsed_request_count" >= 0)
+	CONSTRAINT "llm_broker_tokens_non_negative_counters_check" CHECK (("llm_broker_tokens"."budget_usd_micros" IS NULL OR "llm_broker_tokens"."budget_usd_micros" >= 0)
+        AND "llm_broker_tokens"."spent_usd_micros" >= 0
+        AND "llm_broker_tokens"."request_count" >= 0
+        AND "llm_broker_tokens"."input_tokens" >= 0
+        AND "llm_broker_tokens"."input_cache_read_tokens" >= 0
+        AND "llm_broker_tokens"."input_cache_write_tokens" >= 0
+        AND "llm_broker_tokens"."output_tokens" >= 0
+        AND "llm_broker_tokens"."unparsed_request_count" >= 0)
 );
 --> statement-breakpoint
 ALTER TABLE "llm_broker_requests" ADD CONSTRAINT "llm_broker_requests_token_id_llm_broker_tokens_id_fk" FOREIGN KEY ("token_id") REFERENCES "public"."llm_broker_tokens"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

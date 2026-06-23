@@ -11,7 +11,6 @@ import {
   validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
-import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
   type Agent,
@@ -47,6 +46,11 @@ import { isSessionContinuable, isToolStepLimitResumable } from "@/lib/agent-sess
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import type { SendMode } from "@/lib/agent-sessions/send-mode";
 import { currentWorkspace } from "@/lib/auth";
+import {
+  ensureWorkspaceRunAllowance,
+  type RunAllowanceReason,
+  runAllowanceErrorMessage,
+} from "@/lib/billing/run-allowance";
 import { batchWithTxid } from "@/lib/db/txid";
 import { normalizeCompanyUrl } from "@/lib/onboarding/validation";
 import {
@@ -62,19 +66,26 @@ type SessionStartOptions = {
   surface?: SessionStartSurface;
 };
 
-function billingRedirectForSurface(surface: SessionStartSurface = "company") {
-  return surface === "personal"
-    ? `${personalPaths.settings}?billing=insufficient`
-    : "/company/settings?billing=insufficient";
+function billingRedirectForSurface(
+  surface: SessionStartSurface = "company",
+  reason: RunAllowanceReason = "no_balance",
+) {
+  const query = reason === "weekly_limit_reached" ? "?billing=limit" : "?billing=insufficient";
+  return surface === "personal" ? `${personalPaths.settings}${query}` : `/company/settings${query}`;
 }
 
 export async function createAgentSession(idOrPath: string, options: SessionStartOptions = {}) {
   const { user, workspace } = await currentWorkspace();
-  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+  const allowance = await ensureWorkspaceRunAllowance({
+    workspaceId: workspace.id,
+    userId: user.id,
+  });
+  if (!allowance.allowed) {
     return {
       ok: false,
-      error: "Add workspace credits to start a session.",
-      redirectTo: billingRedirectForSurface(options.surface),
+      error: runAllowanceErrorMessage(allowance.reason, "start"),
+      redirectTo: billingRedirectForSurface(options.surface, allowance.reason),
+      reason: allowance.reason,
     } as const;
   }
   const agent = await loadAgentForSession(idOrPath, workspace.id, user.id);
@@ -130,16 +141,17 @@ export async function createAgentSessionFromPrompt(
     return { ok: false, error: "Message is required." } as const;
   }
   const db = getDb();
-  const [hasBalance, agent] = await Promise.all([
-    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+  const [allowance, agent] = await Promise.all([
+    ensureWorkspaceRunAllowance({ db, workspaceId: workspace.id, userId: user.id }),
     loadAgentForSession(agentId, workspace.id, user.id, db),
   ]);
 
-  if (!hasBalance) {
+  if (!allowance.allowed) {
     return {
       ok: false,
-      error: "Add workspace credits to start a session.",
-      redirectTo: billingRedirectForSurface(options.surface),
+      error: runAllowanceErrorMessage(allowance.reason, "start"),
+      redirectTo: billingRedirectForSurface(options.surface, allowance.reason),
+      reason: allowance.reason,
     } as const;
   }
   if (!agent) {
@@ -307,15 +319,19 @@ export async function createPersonalOnboardingSession(
   if (!trimmed) {
     return { ok: false, error: "Tell the agent what you'd like to get done." } as const;
   }
-  if (
-    !options.skipBillingCheck &&
-    !(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))
-  ) {
-    return {
-      ok: false,
-      error: "Add workspace credits to start a session.",
-      redirectTo: "/company/settings?billing=insufficient",
-    } as const;
+  if (!options.skipBillingCheck) {
+    const allowance = await ensureWorkspaceRunAllowance({
+      workspaceId: workspace.id,
+      userId: user.id,
+    });
+    if (!allowance.allowed) {
+      return {
+        ok: false,
+        error: runAllowanceErrorMessage(allowance.reason, "start"),
+        redirectTo: billingRedirectForSurface("company", allowance.reason),
+        reason: allowance.reason,
+      } as const;
+    }
   }
 
   // Persist the attribution survey + role/team/company (best-effort, never blocks the session).
@@ -465,8 +481,8 @@ export async function submitAgentSessionMessage(
   const db = getDb();
   // The balance check and the session-authz lookup are independent reads, so run them
   // concurrently — one round-trip on the message path instead of two.
-  const [hasBalance, sessionRows] = await Promise.all([
-    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+  const [allowance, sessionRows] = await Promise.all([
+    ensureWorkspaceRunAllowance({ db, workspaceId: workspace.id, userId: user.id }),
     db
       .select({
         id: agentSessions.id,
@@ -488,8 +504,8 @@ export async function submitAgentSessionMessage(
   ]);
 
   // Preserve the prior error precedence: credits before session existence.
-  if (!hasBalance) {
-    return { ok: false, error: "Add workspace credits to continue this session." } as const;
+  if (!allowance.allowed) {
+    return { ok: false, error: runAllowanceErrorMessage(allowance.reason, "continue") } as const;
   }
   const session = sessionRows[0];
   if (!session) {
@@ -626,8 +642,8 @@ export async function setAgentSessionModel(sessionId: string, modelId: string) {
 export async function continueInterruptedSession(sessionId: string) {
   const { user, workspace } = await currentWorkspace();
   const db = getDb();
-  const [hasBalance, sessionRows] = await Promise.all([
-    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+  const [allowance, sessionRows] = await Promise.all([
+    ensureWorkspaceRunAllowance({ db, workspaceId: workspace.id, userId: user.id }),
     db
       .select({
         id: agentSessions.id,
@@ -650,8 +666,8 @@ export async function continueInterruptedSession(sessionId: string) {
       .limit(1),
   ]);
 
-  if (!hasBalance) {
-    return { ok: false, error: "Add workspace credits to continue this session." } as const;
+  if (!allowance.allowed) {
+    return { ok: false, error: runAllowanceErrorMessage(allowance.reason, "continue") } as const;
   }
   const session = sessionRows[0];
   if (!session) {

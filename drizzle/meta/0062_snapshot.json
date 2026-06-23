@@ -1,6 +1,6 @@
 {
-  "id": "02200a8d-d357-4f01-a24b-b717d0fd04d4",
-  "prevId": "0b216cae-eaee-4d59-9eb4-0a4885e57ded",
+  "id": "7b980848-ca85-4810-aecb-0d1353c4768a",
+  "prevId": "ddd7feb0-71df-4151-94da-63cd661ddd6e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2487,6 +2487,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "agent_session_tool_usage_broker_request_idx": {
+          "name": "agent_session_tool_usage_broker_request_idx",
+          "columns": [
+            {
+              "expression": "provider_request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"agent_session_tool_usage\".\"provider_request_id\" LIKE 'broker:%'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3603,6 +3619,147 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.auto_refill_attempts": {
+      "name": "auto_refill_attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_payment_intent_id": {
+          "name": "stripe_payment_intent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_usd_micros": {
+          "name": "amount_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "fulfilled_at": {
+          "name": "fulfilled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "auto_refill_attempts_payment_intent_idx": {
+          "name": "auto_refill_attempts_payment_intent_idx",
+          "columns": [
+            {
+              "expression": "stripe_payment_intent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"auto_refill_attempts\".\"stripe_payment_intent_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "auto_refill_attempts_workspace_created_at_idx": {
+          "name": "auto_refill_attempts_workspace_created_at_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auto_refill_attempts_workspace_id_workspaces_id_fk": {
+          "name": "auto_refill_attempts_workspace_id_workspaces_id_fk",
+          "tableFrom": "auto_refill_attempts",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "auto_refill_attempts_user_id_users_id_fk": {
+          "name": "auto_refill_attempts_user_id_users_id_fk",
+          "tableFrom": "auto_refill_attempts",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.brain_file_versions": {
       "name": "brain_file_versions",
       "schema": "",
@@ -4373,6 +4530,408 @@
         "inbox_items_priority_check": {
           "name": "inbox_items_priority_check",
           "value": "\"inbox_items\".\"priority\" IS NULL OR \"inbox_items\".\"priority\" IN ('urgent', 'high', 'med', 'low')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.llm_broker_requests": {
+      "name": "llm_broker_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "token_id": {
+          "name": "token_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "endpoint": {
+          "name": "endpoint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "streamed": {
+          "name": "streamed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "upstream_status": {
+          "name": "upstream_status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "input_tokens": {
+          "name": "input_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "input_cache_read_tokens": {
+          "name": "input_cache_read_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "input_cache_write_tokens": {
+          "name": "input_cache_write_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "output_tokens": {
+          "name": "output_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "cost_usd_micros": {
+          "name": "cost_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "usage_parsed": {
+          "name": "usage_parsed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "latency_ms": {
+          "name": "latency_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_usage": {
+          "name": "raw_usage",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "llm_broker_requests_token_idx": {
+          "name": "llm_broker_requests_token_idx",
+          "columns": [
+            {
+              "expression": "token_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "llm_broker_requests_token_id_llm_broker_tokens_id_fk": {
+          "name": "llm_broker_requests_token_id_llm_broker_tokens_id_fk",
+          "tableFrom": "llm_broker_requests",
+          "tableTo": "llm_broker_tokens",
+          "columnsFrom": [
+            "token_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "llm_broker_requests_non_negative_counters_check": {
+          "name": "llm_broker_requests_non_negative_counters_check",
+          "value": "\"llm_broker_requests\".\"input_tokens\" >= 0\n        AND \"llm_broker_requests\".\"input_cache_read_tokens\" >= 0\n        AND \"llm_broker_requests\".\"input_cache_write_tokens\" >= 0\n        AND \"llm_broker_requests\".\"output_tokens\" >= 0\n        AND \"llm_broker_requests\".\"cost_usd_micros\" >= 0\n        AND (\"llm_broker_requests\".\"latency_ms\" IS NULL OR \"llm_broker_requests\".\"latency_ms\" >= 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.llm_broker_tokens": {
+      "name": "llm_broker_tokens",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tool_call_id": {
+          "name": "tool_call_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tool_name": {
+          "name": "tool_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "budget_usd_micros": {
+          "name": "budget_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "spent_usd_micros": {
+          "name": "spent_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "request_count": {
+          "name": "request_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "input_tokens": {
+          "name": "input_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "input_cache_read_tokens": {
+          "name": "input_cache_read_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "input_cache_write_tokens": {
+          "name": "input_cache_write_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "output_tokens": {
+          "name": "output_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "unparsed_request_count": {
+          "name": "unparsed_request_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settled_tool_usage_id": {
+          "name": "settled_tool_usage_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "llm_broker_tokens_token_hash_idx": {
+          "name": "llm_broker_tokens_token_hash_idx",
+          "columns": [
+            {
+              "expression": "token_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "llm_broker_tokens_session_idx": {
+          "name": "llm_broker_tokens_session_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "llm_broker_tokens_unsettled_idx": {
+          "name": "llm_broker_tokens_unsettled_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"llm_broker_tokens\".\"settled_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "llm_broker_tokens_session_id_agent_sessions_id_fk": {
+          "name": "llm_broker_tokens_session_id_agent_sessions_id_fk",
+          "tableFrom": "llm_broker_tokens",
+          "tableTo": "agent_sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "llm_broker_tokens_workspace_id_workspaces_id_fk": {
+          "name": "llm_broker_tokens_workspace_id_workspaces_id_fk",
+          "tableFrom": "llm_broker_tokens",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "llm_broker_tokens_settled_tool_usage_id_agent_session_tool_usage_id_fk": {
+          "name": "llm_broker_tokens_settled_tool_usage_id_agent_session_tool_usage_id_fk",
+          "tableFrom": "llm_broker_tokens",
+          "tableTo": "agent_session_tool_usage",
+          "columnsFrom": [
+            "settled_tool_usage_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "llm_broker_tokens_provider_check": {
+          "name": "llm_broker_tokens_provider_check",
+          "value": "\"llm_broker_tokens\".\"provider\" IN ('gateway', 'openai')"
+        },
+        "llm_broker_tokens_non_negative_counters_check": {
+          "name": "llm_broker_tokens_non_negative_counters_check",
+          "value": "(\"llm_broker_tokens\".\"budget_usd_micros\" IS NULL OR \"llm_broker_tokens\".\"budget_usd_micros\" >= 0)\n        AND \"llm_broker_tokens\".\"spent_usd_micros\" >= 0\n        AND \"llm_broker_tokens\".\"request_count\" >= 0\n        AND \"llm_broker_tokens\".\"input_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"input_cache_read_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"input_cache_write_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"output_tokens\" >= 0\n        AND \"llm_broker_tokens\".\"unparsed_request_count\" >= 0"
         }
       },
       "isRLSEnabled": false
@@ -5289,6 +5848,13 @@
           "notNull": true,
           "default": "'UTC'"
         },
+        "timezone_source": {
+          "name": "timezone_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unset'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5322,6 +5888,116 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.workspace_billing_settings": {
+      "name": "workspace_billing_settings",
+      "schema": "",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "spend_limit_enabled": {
+          "name": "spend_limit_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "weekly_spend_limit_usd_micros": {
+          "name": "weekly_spend_limit_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "auto_refill_enabled": {
+          "name": "auto_refill_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "auto_refill_threshold_usd_micros": {
+          "name": "auto_refill_threshold_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "auto_refill_amount_usd_micros": {
+          "name": "auto_refill_amount_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_customer_id": {
+          "name": "stripe_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_default_payment_method_id": {
+          "name": "stripe_default_payment_method_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "card_brand": {
+          "name": "card_brand",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "card_last4": {
+          "name": "card_last4",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "auto_refill_status": {
+          "name": "auto_refill_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ok'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "workspace_billing_settings_workspace_id_workspaces_id_fk": {
+          "name": "workspace_billing_settings_workspace_id_workspaces_id_fk",
+          "tableFrom": "workspace_billing_settings",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

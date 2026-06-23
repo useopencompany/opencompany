@@ -1,10 +1,18 @@
 "use server";
 
+import {
+  AGENT_SCHEDULE_TRIGGER_TYPE,
+  FIXED_PERSONAL_AGENT_NAME,
+  normalizeAgentConfig,
+  serializeAgentFile,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { userAvatars, users } from "@opencompany/db/schema";
-import { eq } from "drizzle-orm";
+import { agents, userAvatars, users } from "@opencompany/db/schema";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { hashAgentSource } from "@/lib/agents/hash";
 import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
+import { normalizeUserTimezone, type UserTimezoneSource } from "@/lib/timezones";
 
 // Avatars are resized to ~256px webp on the client; this is a generous hard cap so a
 // crafted request can't push large blobs into Postgres.
@@ -111,6 +119,87 @@ export async function setCompanySurfaceEnabled(next: boolean) {
 
   revalidatePath("/personal", "layout");
   return { ok: true as const };
+}
+
+export async function setUserTimezone(
+  input: string | { timezone: string; source?: Exclude<UserTimezoneSource, "unset"> },
+) {
+  const context = await currentWorkspace({ optional: true });
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  const rawTimezone = typeof input === "string" ? input : input.timezone;
+  const timezone = normalizeUserTimezone(rawTimezone);
+  if (!timezone) {
+    return { ok: false as const, error: "Choose a valid timezone." };
+  }
+  const source: Exclude<UserTimezoneSource, "unset"> =
+    typeof input === "string" ? "manual" : input.source === "browser" ? "browser" : "manual";
+  const db = getDb();
+  const now = new Date();
+  let updatedConfig = null;
+
+  try {
+    await db
+      .update(users)
+      .set({ timezone, timezoneSource: source, updatedAt: now })
+      .where(eq(users.id, context.user.id));
+
+    const [agent] = await db
+      .select({
+        id: agents.id,
+        body: agents.body,
+        config: agents.config,
+        version: agents.version,
+      })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.workspaceId, context.workspace.id),
+          eq(agents.userId, context.user.id),
+          eq(agents.isDefault, true),
+        ),
+      )
+      .limit(1);
+
+    if (agent) {
+      const currentConfig = normalizeAgentConfig(agent.config);
+      const nextConfig = {
+        ...currentConfig,
+        triggers: currentConfig.triggers.map((trigger) =>
+          trigger.type === AGENT_SCHEDULE_TRIGGER_TYPE ? { ...trigger, timezone } : trigger,
+        ),
+      };
+      const source = serializeAgentFile({
+        title: FIXED_PERSONAL_AGENT_NAME,
+        body: agent.body,
+        model: nextConfig.model.name,
+        tools: nextConfig.tools,
+        brain: nextConfig.brain,
+        agents: nextConfig.agents ?? [],
+        skills: nextConfig.skills ?? [],
+        integrations: nextConfig.integrations,
+        triggers: nextConfig.triggers,
+      });
+
+      await db
+        .update(agents)
+        .set({
+          config: nextConfig,
+          contentHash: hashAgentSource(source),
+          version: agent.version + 1,
+          updatedAt: now,
+        })
+        .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, context.workspace.id)));
+      updatedConfig = nextConfig;
+    }
+  } catch {
+    return { ok: false as const, error: "Could not update timezone. Please try again." };
+  }
+
+  revalidatePath("/personal", "layout");
+  return { ok: true as const, timezone, source, config: updatedConfig };
 }
 
 export async function removeAvatar() {

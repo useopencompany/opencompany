@@ -1,9 +1,9 @@
-import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { agentScheduleRuns } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatchAgentAfterSessionCheck } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
+import { ensureWorkspaceRunAllowance } from "@/lib/billing/run-allowance";
 import { runScheduledAgent, sweepAgentSchedules } from "./runner";
 
 vi.mock("@opencompany/agent-runtime", async (importOriginal) => {
@@ -15,8 +15,8 @@ vi.mock("@opencompany/agent-runtime", async (importOriginal) => {
   };
 });
 
-vi.mock("@opencompany/billing", () => ({
-  hasPositiveWorkspaceBalance: vi.fn(),
+vi.mock("@/lib/billing/run-allowance", () => ({
+  ensureWorkspaceRunAllowance: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -36,14 +36,34 @@ vi.mock("@/lib/agent-sessions/message-runner", () => ({
 }));
 
 const getDbMock = vi.mocked(getDb);
-const hasPositiveWorkspaceBalanceMock = vi.mocked(hasPositiveWorkspaceBalance);
+const ensureWorkspaceRunAllowanceMock = vi.mocked(ensureWorkspaceRunAllowance);
+
+function allowanceResult(
+  allowed: boolean,
+  reason: "no_balance" | "weekly_limit_reached" = "no_balance",
+) {
+  const base = {
+    balanceUsdMicros: allowed ? 1_000_000 : 0,
+    weeklySpendUsdMicros: 0,
+    weeklySpendLimitUsdMicros: null,
+    spendLimitEnabled: false,
+    weekStartsAt: new Date(0),
+  };
+  return allowed
+    ? ({ allowed: true, allowance: { allowed: true, reason: null, ...base } } as const)
+    : ({
+        allowed: false,
+        reason,
+        allowance: { allowed: false, reason, ...base },
+      } as const);
+}
 const triggerAgentMessageRunMock = vi.mocked(triggerAgentMessageRun);
 const dispatchAgentAfterSessionCheckMock = vi.mocked(dispatchAgentAfterSessionCheck);
 
 describe("sweepAgentSchedules", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(true));
   });
 
   it("creates a visible session and dispatches the runner for a due schedule", async () => {
@@ -136,7 +156,7 @@ describe("sweepAgentSchedules", () => {
   it("marks a reserved run failed when the workspace has no credits", async () => {
     const db = fakeDb({ reserveRows: [{ id: 1, reservationToken: "claim_123" }] });
     getDbMock.mockReturnValue(db as never);
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
 
     const result = await sweepAgentSchedules(new Date("2026-06-01T09:00:00.000Z"));
 

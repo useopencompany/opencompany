@@ -7,7 +7,6 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentScheduleTriggerConfig } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
-import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import type { Agent, AgentScheduleRun } from "@opencompany/db/schema";
 import {
@@ -21,6 +20,7 @@ import {
 import { and, eq, gt, lt } from "drizzle-orm";
 import { dispatchAgentAfterSessionCheck } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
+import { ensureWorkspaceRunAllowance } from "@/lib/billing/run-allowance";
 
 export const AGENT_SCHEDULE_SWEEP_CRON = "* * * * *";
 const PENDING_RESERVATION_TTL_MS = 10 * 60 * 1000;
@@ -79,7 +79,15 @@ export async function runScheduledAgent(input: {
   if (!reserved) return { status: "duplicate" as const };
 
   try {
-    if (!(await hasPositiveWorkspaceBalance({ db, workspaceId: input.agent.workspaceId }))) {
+    const allowance = await ensureWorkspaceRunAllowance({
+      db,
+      workspaceId: input.agent.workspaceId,
+    });
+    if (!allowance.allowed) {
+      if (allowance.reason === "weekly_limit_reached") {
+        await failScheduleRun(reserved, "Workspace weekly spending limit reached.");
+        return { status: "failed" as const, reason: "spend_limit_reached" };
+      }
       await failScheduleRun(reserved, "Workspace has no credits.");
       return { status: "failed" as const, reason: "insufficient_credits" };
     }

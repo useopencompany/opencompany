@@ -147,6 +147,27 @@ export type AnalyticsEventPropertiesByName = {
     amount_cents: number;
     balance_cents: number;
   };
+  spend_limit_updated: {
+    workspace_id: string;
+    enabled: boolean;
+    weekly_limit_cents: number | null;
+  };
+  auto_refill_enabled: {
+    workspace_id: string;
+    enabled: boolean;
+    threshold_cents: number;
+    amount_cents: number;
+  };
+  auto_refill_succeeded: {
+    workspace_id: string;
+    amount_cents: number;
+    attempt_id: string;
+  };
+  auto_refill_failed: {
+    workspace_id: string;
+    attempt_id: string;
+    error: string;
+  };
   sign_out: {
     user_id: string;
     workspace_id: string;
@@ -343,6 +364,26 @@ export const analyticsEvents = {
       "amount_cents",
       "balance_cents",
     ],
+  },
+  spend_limit_updated: {
+    name: "spend_limit_updated",
+    description: "A workspace changed its weekly spending limit.",
+    safeProperties: ["workspace_id", "enabled", "weekly_limit_cents"],
+  },
+  auto_refill_enabled: {
+    name: "auto_refill_enabled",
+    description: "A workspace changed its automatic refill settings.",
+    safeProperties: ["workspace_id", "enabled", "threshold_cents", "amount_cents"],
+  },
+  auto_refill_succeeded: {
+    name: "auto_refill_succeeded",
+    description: "An off-session automatic refill charge credited a workspace balance.",
+    safeProperties: ["workspace_id", "amount_cents", "attempt_id"],
+  },
+  auto_refill_failed: {
+    name: "auto_refill_failed",
+    description: "An automatic refill charge failed (declined or needs authentication).",
+    safeProperties: ["workspace_id", "attempt_id", "error"],
   },
   sign_out: {
     name: "sign_out",

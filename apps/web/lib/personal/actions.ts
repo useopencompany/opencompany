@@ -1,6 +1,7 @@
 "use server";
 
 import {
+  AGENT_SCHEDULE_TRIGGER_TYPE,
   agentBundleDir,
   agentDefinitionFileNameForPath,
   buildAgentTiptapDoc,
@@ -9,7 +10,10 @@ import {
   extractMentionIds,
   FIXED_PERSONAL_AGENT_NAME,
   isExternalSkillReference,
+  isSupportedScheduleCron,
   listAddableBuiltinSkills,
+  normalizeAgentConfig,
+  normalizeScheduleTimezone,
   parseAgentFile,
   SUPPORTED_AGENT_TOOLS,
   serializeAgentFile,
@@ -17,6 +21,7 @@ import {
 import type {
   AgentConfig,
   AgentModelId,
+  AgentScheduleTriggerConfig,
   AgentToolId,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
@@ -40,6 +45,7 @@ import { MAX_BRAIN_FILE_BYTES } from "@/lib/brain/paths";
 import { listWorkspaceSkillSnapshots, toExternalSkillReference } from "@/lib/skills/snapshots";
 
 type UpdateBehaviorResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
+type UpdateSchedulesResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
 
 // The personal agent's `.agent` body is the single source of truth: @-mentioned tools, skills,
 // repositories, and integrations are re-derived from it on every save. This re-runs that canonical
@@ -170,6 +176,121 @@ export async function updatePersonalAgentBehavior(
   });
 
   return { ok: true, config: saved.config };
+}
+
+export async function updatePersonalAgentSchedules(
+  agentId: string,
+  schedules: readonly unknown[],
+): Promise<UpdateSchedulesResult> {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+
+  const [agent] = await db
+    .select({
+      id: agents.id,
+      body: agents.body,
+      config: agents.config,
+      version: agents.version,
+    })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.id, agentId),
+        eq(agents.workspaceId, workspace.id),
+        eq(agents.userId, user.id),
+        eq(agents.isDefault, true),
+      ),
+    )
+    .limit(1);
+
+  if (!agent) {
+    return { ok: false, error: "Personal agent not found." };
+  }
+
+  const parsed = parsePersonalScheduleTriggers(schedules, user.timezone);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  const currentConfig = normalizeAgentConfig(agent.config);
+  const nextConfig: AgentConfig = {
+    ...currentConfig,
+    triggers: [
+      ...parsed.value,
+      ...currentConfig.triggers.filter((trigger) => trigger.type !== AGENT_SCHEDULE_TRIGGER_TYPE),
+    ],
+  };
+  const source = serializeAgentFile({
+    title: FIXED_PERSONAL_AGENT_NAME,
+    body: agent.body,
+    model: nextConfig.model.name,
+    tools: nextConfig.tools,
+    brain: nextConfig.brain,
+    agents: nextConfig.agents ?? [],
+    skills: nextConfig.skills ?? [],
+    integrations: nextConfig.integrations,
+    triggers: nextConfig.triggers,
+  });
+
+  await db
+    .update(agents)
+    .set({
+      config: nextConfig,
+      contentHash: hashAgentSource(source),
+      version: agent.version + 1,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)));
+
+  await captureServerEvent("agent_saved", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent.id,
+    changed_fields: ["config"],
+  });
+
+  return { ok: true, config: nextConfig };
+}
+
+function parsePersonalScheduleTriggers(
+  schedules: readonly unknown[],
+  userTimezone: string,
+): { ok: true; value: AgentScheduleTriggerConfig[] } | { ok: false; error: string } {
+  if (!Array.isArray(schedules)) {
+    return { ok: false, error: "Routines must be a list." };
+  }
+
+  const timezone = normalizeScheduleTimezone(userTimezone);
+  const ids = new Set<string>();
+  const triggers: AgentScheduleTriggerConfig[] = [];
+
+  for (const [index, item] of schedules.entries()) {
+    const label = `Routine ${index + 1}`;
+    if (!item || typeof item !== "object") {
+      return { ok: false, error: `${label} is invalid.` };
+    }
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    const cron = typeof record.cron === "string" ? record.cron.trim() : "";
+    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+
+    if (!id) return { ok: false, error: `${label} needs an id.` };
+    if (ids.has(id)) return { ok: false, error: `Duplicate routine id "${id}".` };
+    if (!cron || !isSupportedScheduleCron(cron)) {
+      return { ok: false, error: `${label} has an unsupported schedule.` };
+    }
+    if (!prompt) return { ok: false, error: `${label} needs a prompt.` };
+
+    ids.add(id);
+    triggers.push({
+      id,
+      type: AGENT_SCHEDULE_TRIGGER_TYPE,
+      cron,
+      timezone,
+      prompt,
+      enabled: record.enabled === true,
+    });
+  }
+
+  return { ok: true, value: triggers };
 }
 
 type ResetPersonalAgentResult = { ok: true } | { ok: false; error: string };

@@ -1,6 +1,6 @@
 {
-  "id": "02200a8d-d357-4f01-a24b-b717d0fd04d4",
-  "prevId": "0b216cae-eaee-4d59-9eb4-0a4885e57ded",
+  "id": "72fa67d9-b397-4f51-8d92-8400820f99a2",
+  "prevId": "02200a8d-d357-4f01-a24b-b717d0fd04d4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5288,6 +5288,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'UTC'"
+        },
+        "timezone_source": {
+          "name": "timezone_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unset'"
         },
         "created_at": {
           "name": "created_at",

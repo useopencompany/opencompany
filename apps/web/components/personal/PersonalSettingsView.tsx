@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { type BillingData, BillingPanel } from "@/components/billing/BillingPanel";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { ResetPersonalAgentDialog } from "@/components/personal/ResetPersonalAgentDialog";
+import { TimezonePicker } from "@/components/personal/TimezonePicker";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useToast } from "@/components/ToastProvider";
 import { Toggle } from "@/components/ui/toggle";
@@ -12,6 +13,7 @@ import { resetPersonalAgent } from "@/lib/personal/actions";
 import {
   setCompanySurfaceEnabled as setCompanySurfaceEnabledAction,
   setProMode as setProModeAction,
+  setUserTimezone as setUserTimezoneAction,
 } from "@/lib/users/actions";
 
 // Lightweight settings for the /personal surface: the Pro mode toggle (DB-backed), appearance,
@@ -25,6 +27,11 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     setProMode,
     companySurfaceEnabled,
     setCompanySurfaceEnabled,
+    userTimezone,
+    userTimezoneSource,
+    setUserTimezone,
+    setUserTimezoneSource,
+    setConfig,
   } = usePersonalAgent();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
@@ -69,6 +76,25 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
         setCompanySurfaceEnabled(!next);
         showError(result.error, "Could not update company access");
       }
+    });
+  }
+
+  function onSaveTimezone(next: string, source: "browser" | "manual") {
+    const previous = userTimezone;
+    const previousSource = userTimezoneSource;
+    setUserTimezone(next);
+    setUserTimezoneSource(source);
+    startTransition(async () => {
+      const result = await setUserTimezoneAction({ timezone: next, source });
+      if (!result.ok) {
+        setUserTimezone(previous);
+        setUserTimezoneSource(previousSource);
+        showError(result.error, "Could not update timezone");
+        return;
+      }
+      setUserTimezone(result.timezone);
+      setUserTimezoneSource(result.source);
+      if (result.config) setConfig(result.config);
     });
   }
 
@@ -122,6 +148,17 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
       <Section title="Appearance" description="Choose how the interface looks.">
         <Field label="Theme">
           <AppearanceSection />
+        </Field>
+      </Section>
+
+      <Section title="Routines" description="Choose the timezone used by scheduled routines.">
+        <Field label="Timezone">
+          <TimezonePicker
+            value={userTimezone}
+            source={userTimezoneSource}
+            disabled={isPending}
+            onChange={onSaveTimezone}
+          />
         </Field>
       </Section>
 
