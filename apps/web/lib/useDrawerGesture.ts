@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   type DrawerSide,
+  edgeGuardSide,
   type GestureStart,
   lockAxis,
   progressForSide,
@@ -135,6 +136,23 @@ export function useDrawerGesture({ isMobile, left, right }: Options): {
       end();
     };
 
+    // iOS' native edge-swipe-back starts from the very screen edge in the first few px —
+    // before onMove reaches its axis-lock + preventDefault, so it would win the race and
+    // navigate away instead of opening the menu. preventDefault on a NON-PASSIVE touchstart
+    // stops WebKit from ever starting that gesture; the pointer handlers above then drive
+    // the drawer 1:1 as usual. Scoped to the edge zone + only where a drawer would open, so
+    // interior touches and pages without a matching drawer keep native behaviour.
+    const onTouchStart = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (!touch || e.touches.length !== 1) return;
+      const { left: L, right: R } = latest.current;
+      const side = edgeGuardSide(touch.clientX, window.innerWidth, {
+        leftClosed: !L.isOpen(),
+        rightClosedAndAvailable: !!R && !R.isOpen(),
+      });
+      if (side) e.preventDefault();
+    };
+
     // Capture phase: document sees the event before any descendant, so a child that
     // calls stopPropagation() can't swallow the swipe. pointermove is non-passive so it
     // can preventDefault once the gesture owns the horizontal axis.
@@ -143,11 +161,13 @@ export function useDrawerGesture({ isMobile, left, right }: Options): {
     document.addEventListener("pointermove", onMove, { ...opts, passive: false });
     document.addEventListener("pointerup", onUp, { ...opts, passive: true });
     document.addEventListener("pointercancel", onUp, { ...opts, passive: true });
+    document.addEventListener("touchstart", onTouchStart, { ...opts, passive: false });
     return () => {
       document.removeEventListener("pointerdown", onDown, opts);
       document.removeEventListener("pointermove", onMove, opts);
       document.removeEventListener("pointerup", onUp, opts);
       document.removeEventListener("pointercancel", onUp, opts);
+      document.removeEventListener("touchstart", onTouchStart, opts);
     };
   }, [isMobile]);
 
