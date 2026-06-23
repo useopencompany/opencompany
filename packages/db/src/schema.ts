@@ -104,6 +104,10 @@ export const users = pgTable(
     // IANA timezone used by user-owned scheduled routines. Individual personal routines derive
     // from this setting so users manage their local time in one place.
     timezone: text("timezone").notNull().default("UTC"),
+    // Where `timezone` came from. `unset` means we have not initialized it from the browser yet;
+    // `browser` means the app can keep it in sync with browser timezone changes; `manual` means
+    // the user chose a fixed timezone in Settings and automatic detection must not override it.
+    timezoneSource: text("timezone_source").notNull().default("unset"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -10,6 +10,7 @@ import type { GitHubIntegrationRepositoryPayload } from "@/lib/agents/payload";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
 import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
+import type { UserTimezoneSource } from "@/lib/timezones";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 // The immutable identity of the personal agent the surface is rendering. Mutable surfaces
@@ -33,6 +34,7 @@ export type PersonalAgentContextValue = {
   userName: string;
   userEmail: string;
   userTimezone: string;
+  userTimezoneSource: UserTimezoneSource;
   workspaceName: string;
   initialSessions: SidebarSessionPayload[];
   personalSkills: ResolvedSkillMetadata[];
@@ -63,6 +65,7 @@ export type PersonalAgentContextValue = {
   setCompanySurfaceEnabled: (next: boolean) => void;
 
   setUserTimezone: (next: string) => void;
+  setUserTimezoneSource: (next: UserTimezoneSource) => void;
 
   // The behavior editor's live draft. Held as a ref-backed getter (not state) because only the
   // Behavior route reads it, and only at mount — it must not trigger re-renders elsewhere.

@@ -17,6 +17,7 @@ import { loadPersonalAgentContextFiles, loadPersonalSkills } from "@/lib/persona
 import { buildPersonalIntegrationDetails } from "@/lib/personal/integration-details-server";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
+import { normalizeUserTimezoneSource } from "@/lib/timezones";
 import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it does
@@ -114,6 +115,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                   userName={userName}
                   userEmail={authUser.email}
                   userTimezone={user.timezone}
+                  userTimezoneSource={normalizeUserTimezoneSource(user.timezoneSource)}
                   workspaceName={workspace.name}
                   initialSessions={sessions}
                   contextFiles={contextFiles}

@@ -74,6 +74,9 @@ function personalAgent(config: AgentConfig) {
     config,
     setConfig: vi.fn(),
     userTimezone: "America/New_York",
+    userTimezoneSource: "manual",
+    setUserTimezone: vi.fn(),
+    setUserTimezoneSource: vi.fn(),
   };
 }
 

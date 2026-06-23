@@ -4,7 +4,6 @@ import {
   AGENT_SCHEDULE_TRIGGER_TYPE,
   FIXED_PERSONAL_AGENT_NAME,
   normalizeAgentConfig,
-  normalizeScheduleTimezone,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
@@ -13,6 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
+import { normalizeUserTimezone, type UserTimezoneSource } from "@/lib/timezones";
 
 // Avatars are resized to ~256px webp on the client; this is a generous hard cap so a
 // crafted request can't push large blobs into Postgres.
@@ -121,19 +121,30 @@ export async function setCompanySurfaceEnabled(next: boolean) {
   return { ok: true as const };
 }
 
-export async function setUserTimezone(next: string) {
+export async function setUserTimezone(
+  input: string | { timezone: string; source?: Exclude<UserTimezoneSource, "unset"> },
+) {
   const context = await currentWorkspace({ optional: true });
   if (!context) {
     return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
   }
 
-  const timezone = normalizeScheduleTimezone(next);
+  const rawTimezone = typeof input === "string" ? input : input.timezone;
+  const timezone = normalizeUserTimezone(rawTimezone);
+  if (!timezone) {
+    return { ok: false as const, error: "Choose a valid timezone." };
+  }
+  const source: Exclude<UserTimezoneSource, "unset"> =
+    typeof input === "string" ? "manual" : input.source === "browser" ? "browser" : "manual";
   const db = getDb();
   const now = new Date();
   let updatedConfig = null;
 
   try {
-    await db.update(users).set({ timezone, updatedAt: now }).where(eq(users.id, context.user.id));
+    await db
+      .update(users)
+      .set({ timezone, timezoneSource: source, updatedAt: now })
+      .where(eq(users.id, context.user.id));
 
     const [agent] = await db
       .select({
@@ -188,7 +199,7 @@ export async function setUserTimezone(next: string) {
   }
 
   revalidatePath("/personal", "layout");
-  return { ok: true as const, timezone, config: updatedConfig };
+  return { ok: true as const, timezone, source, config: updatedConfig };
 }
 
 export async function removeAvatar() {

@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { type BillingData, BillingPanel } from "@/components/billing/BillingPanel";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { ResetPersonalAgentDialog } from "@/components/personal/ResetPersonalAgentDialog";
+import { TimezonePicker } from "@/components/personal/TimezonePicker";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useToast } from "@/components/ToastProvider";
 import { Toggle } from "@/components/ui/toggle";
@@ -27,13 +28,14 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     companySurfaceEnabled,
     setCompanySurfaceEnabled,
     userTimezone,
+    userTimezoneSource,
     setUserTimezone,
+    setUserTimezoneSource,
     setConfig,
   } = usePersonalAgent();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  const [timezoneDraft, setTimezoneDraft] = useState(userTimezone);
   // Tracked outside useTransition: the pending state must survive until the full-page
   // navigation below lands, not just until the server action resolves.
   const [isResetting, setIsResetting] = useState(false);
@@ -77,37 +79,23 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     });
   }
 
-  function onSaveTimezone(nextValue = timezoneDraft) {
-    const next = nextValue.trim();
-    if (!next) {
-      showError("Timezone is required.", "Could not update timezone");
-      return;
-    }
-
+  function onSaveTimezone(next: string, source: "browser" | "manual") {
     const previous = userTimezone;
+    const previousSource = userTimezoneSource;
     setUserTimezone(next);
-    setTimezoneDraft(next);
+    setUserTimezoneSource(source);
     startTransition(async () => {
-      const result = await setUserTimezoneAction(next);
+      const result = await setUserTimezoneAction({ timezone: next, source });
       if (!result.ok) {
         setUserTimezone(previous);
-        setTimezoneDraft(previous);
+        setUserTimezoneSource(previousSource);
         showError(result.error, "Could not update timezone");
         return;
       }
       setUserTimezone(result.timezone);
-      setTimezoneDraft(result.timezone);
+      setUserTimezoneSource(result.source);
       if (result.config) setConfig(result.config);
     });
-  }
-
-  function onUseBrowserTimezone() {
-    const next = browserTimezone();
-    if (!next) {
-      showError("Could not detect your browser timezone.", "Could not update timezone");
-      return;
-    }
-    onSaveTimezone(next);
   }
 
   return (
@@ -165,26 +153,12 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
 
       <Section title="Routines" description="Choose the timezone used by scheduled routines.">
         <Field label="Timezone">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              aria-label="Timezone"
-              value={timezoneDraft}
-              onChange={(event) => setTimezoneDraft(event.target.value)}
-              onBlur={() => {
-                if (timezoneDraft.trim() !== userTimezone) onSaveTimezone();
-              }}
-              disabled={isPending}
-              className="h-8 w-full max-w-[260px] rounded-md border border-border bg-surface px-2 text-[12.5px] text-ink outline-none transition-colors duration-150 focus:border-ink/25 focus:ring-1 focus:ring-ink/15 disabled:cursor-not-allowed disabled:opacity-65"
-            />
-            <button
-              type="button"
-              onClick={onUseBrowserTimezone}
-              disabled={isPending}
-              className="inline-flex h-8 w-fit items-center rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-65"
-            >
-              Use browser timezone
-            </button>
-          </div>
+          <TimezonePicker
+            value={userTimezone}
+            source={userTimezoneSource}
+            disabled={isPending}
+            onChange={onSaveTimezone}
+          />
         </Field>
       </Section>
 
@@ -235,11 +209,6 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
       />
     </div>
   );
-}
-
-function browserTimezone() {
-  if (typeof window === "undefined") return null;
-  return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
 }
 
 function Section({
