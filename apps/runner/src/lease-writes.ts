@@ -646,8 +646,21 @@ export async function releaseRunLease(
   leaseId: string,
   leaseOwner: string,
   status: "completed",
+  // Internal after-session/memory-keeper releases pass { markTurnFinished: false } so the
+  // background pass never re-arms the sidebar's "unseen" dot on an already-read session.
+  // Omitted for normal user turns, which stamp the marker as before.
+  options?: { markTurnFinished?: boolean },
 ) {
-  return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: null });
+  return finishDbRunLease({
+    sessionId,
+    leaseId,
+    leaseOwner,
+    status,
+    lastError: null,
+    ...(options?.markTurnFinished !== undefined
+      ? { markTurnFinished: options.markTurnFinished }
+      : {}),
+  });
 }
 
 export async function failRunLease(
