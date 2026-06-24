@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Database,
   ExternalLink,
+  Files,
   GitBranch,
   type LucideIcon,
   Mail,
@@ -42,7 +43,7 @@ type IntegrationStatus =
   | "sync_failed"
   | "error";
 type ResourceStatus = "available" | "permission_lost" | "archived" | "sync_failed";
-type IntegrationProviderId = "github" | "neon" | "gmail" | "google_calendar";
+type IntegrationProviderId = "github" | "neon" | "gmail" | "google_calendar" | "google_drive";
 type IntegrationCategory = "Code" | "Data" | "Communication" | "Productivity";
 
 type WorkspaceIntegrationState = {
@@ -69,6 +70,7 @@ type WorkspaceIntegrationState = {
   };
   gmail: GoogleProviderState;
   google_calendar: GoogleProviderState;
+  google_drive: GoogleProviderState;
   neon: {
     status: IntegrationStatus;
     connections: Array<{
@@ -164,6 +166,13 @@ const INTEGRATIONS: IntegrationDefinition[] = [
     category: "Productivity",
     description: "Let agents read and manage events on selected calendars (read & write).",
     icon: CalendarDays,
+  },
+  {
+    id: "google_drive",
+    name: "Google Drive",
+    category: "Productivity",
+    description: "Let agents find, read, create, and update documents in connected Drive accounts.",
+    icon: Files,
   },
 ];
 
@@ -343,6 +352,8 @@ function IntegrationControls({
       return (
         <GoogleControls provider="google_calendar" integration={integrations.google_calendar} />
       );
+    case "google_drive":
+      return <GoogleControls provider="google_drive" integration={integrations.google_drive} />;
   }
   return assertNever(provider);
 }
@@ -666,7 +677,7 @@ function GoogleControls({
   provider,
   integration,
 }: {
-  provider: "gmail" | "google_calendar";
+  provider: "gmail" | "google_calendar" | "google_drive";
   integration: GoogleProviderState;
 }) {
   const router = useRouter();
@@ -674,8 +685,18 @@ function GoogleControls({
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<DisconnectFeedback | null>(null);
 
-  const routeSegment = provider === "gmail" ? "gmail" : "google-calendar";
-  const name = provider === "gmail" ? "Gmail" : "Google Calendar";
+  const routeSegment =
+    provider === "gmail"
+      ? "gmail"
+      : provider === "google_calendar"
+        ? "google-calendar"
+        : "google-drive";
+  const name =
+    provider === "gmail"
+      ? "Gmail"
+      : provider === "google_calendar"
+        ? "Google Calendar"
+        : "Google Drive";
   const connected = integration.connections.length > 0;
 
   function disconnect(connection: GoogleConnectionState) {
@@ -1136,6 +1157,8 @@ function integrationState(
       return googleIntegrationState(integrations.gmail.status, "Gmail");
     case "google_calendar":
       return googleIntegrationState(integrations.google_calendar.status, "Google Calendar");
+    case "google_drive":
+      return googleIntegrationState(integrations.google_drive.status, "Google Drive");
   }
   return assertNever(provider);
 }

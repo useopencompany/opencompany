@@ -28,7 +28,7 @@ export type RunnerEnv = {
   apifyApiToken?: string | undefined;
   supadataApiKey: string | undefined;
   ampApiKey: string | undefined;
-  // Google OAuth client, shared by the Gmail and Google Calendar integrations. The runner
+  // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
   googleOAuthClientId?: string | undefined;
   googleOAuthClientSecret?: string | undefined;

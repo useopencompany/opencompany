@@ -57,6 +57,18 @@ describe("classifyRuntimeTool", () => {
       providerKey: "neon",
       group: "admin",
     });
+    expect(classifyRuntimeTool("drive_search_files")).toEqual({
+      providerKey: "google_drive",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("drive_create_document")).toEqual({
+      providerKey: "google_drive",
+      group: "post",
+    });
+    expect(classifyRuntimeTool("drive_update_document")).toEqual({
+      providerKey: "google_drive",
+      group: "modify",
+    });
   });
 
   it("maps session-history, inbox, and self-edit tools to the system provider", () => {

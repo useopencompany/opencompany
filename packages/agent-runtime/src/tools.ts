@@ -80,6 +80,12 @@ export type RuntimeToolName =
   | "calendar_create_event"
   | "calendar_update_event"
   | "calendar_delete_event"
+  | "drive_search_files"
+  | "drive_get_file"
+  | "drive_export_file"
+  | "drive_create_document"
+  | "drive_update_document"
+  | "drive_update_file_metadata"
   | "web_fetch"
   | "tool_help"
   | "find_tools"
@@ -360,6 +366,24 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
       "calendar_create_event",
       "calendar_update_event",
       "calendar_delete_event",
+    ],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+    requiredPlatformEnvVars: ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"],
+  },
+  {
+    id: "google_drive",
+    type: "hosted_tool",
+    label: "google_drive",
+    description:
+      "Find, read, create, and update documents in workspace-connected Google Drive accounts.",
+    runtimeTools: [
+      "drive_search_files",
+      "drive_get_file",
+      "drive_export_file",
+      "drive_create_document",
+      "drive_update_document",
+      "drive_update_file_metadata",
     ],
     defaultEnabled: true,
     credentialSource: "workspace",
@@ -1209,7 +1233,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   },
 ];
 
-// Shared parameter fragments for the Google (Gmail + Calendar) hosted tools.
+// Shared parameter fragments for the Google (Gmail + Calendar + Drive) hosted tools.
 const GOOGLE_ACCOUNT_PARAMETER = {
   type: "string",
   description:
@@ -1239,6 +1263,17 @@ const GOOGLE_SEND_UPDATES_PARAMETER = {
   enum: ["all", "externalOnly", "none"],
   description: "Who gets email notifications about the change. Defaults to none.",
   default: "none",
+} as const;
+
+const GOOGLE_DRIVE_FILE_ID_PARAMETER = {
+  type: "string",
+  description: "Google Drive file id.",
+} as const;
+
+const GOOGLE_DRIVE_MIME_TYPE_PARAMETER = {
+  type: "string",
+  description:
+    "Requested export/download MIME type. Defaults to text/plain for Google Docs and native text for supported files.",
 } as const;
 
 export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
@@ -2512,6 +2547,184 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
   },
   {
+    name: "drive_search_files",
+    kind: "hosted",
+    configToolId: "google_drive",
+    description:
+      "Search Google Drive files and folders in a connected account. Returns metadata only; use drive_get_file or drive_export_file to read content.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        query: {
+          type: "string",
+          description:
+            "Optional text to match against file name and full text. For advanced Drive query terms, use driveQuery.",
+        },
+        driveQuery: {
+          type: "string",
+          description:
+            "Optional raw Drive API q expression, e.g. \"name contains 'roadmap' and trashed = false\". Combined with other filters.",
+        },
+        mimeType: {
+          type: "string",
+          description:
+            "Optional exact MIME type filter, e.g. application/vnd.google-apps.document.",
+        },
+        folderId: {
+          type: "string",
+          description: "Optional parent folder id to search within.",
+        },
+        modifiedAfter: {
+          type: "string",
+          description: "Optional RFC3339 modifiedTime lower bound.",
+        },
+        starred: { type: "boolean", description: "Optional starred-state filter." },
+        sharedWithMe: {
+          type: "boolean",
+          description: "When true, only return files shared with the connected account.",
+        },
+        includeTrashed: {
+          type: "boolean",
+          description: "When true, include trashed files. Defaults to false.",
+          default: false,
+        },
+        maxResults: {
+          type: "number",
+          description: "How many files to return. Defaults to 20. Maximum 100.",
+          default: 20,
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "drive_get_file",
+    kind: "hosted",
+    configToolId: "google_drive",
+    description:
+      "Fetch Drive file metadata, and optionally exported/downloaded text content for Google Docs and text-like files.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        fileId: GOOGLE_DRIVE_FILE_ID_PARAMETER,
+        includeContent: {
+          type: "boolean",
+          description: "Whether to include exported/downloaded text content. Defaults to true.",
+          default: true,
+        },
+        mimeType: GOOGLE_DRIVE_MIME_TYPE_PARAMETER,
+      },
+      required: ["fileId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "drive_export_file",
+    kind: "hosted",
+    configToolId: "google_drive",
+    description:
+      "Export a Google Workspace file or download a text-like Drive file in a requested MIME type.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        fileId: GOOGLE_DRIVE_FILE_ID_PARAMETER,
+        mimeType: GOOGLE_DRIVE_MIME_TYPE_PARAMETER,
+      },
+      required: ["fileId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "drive_create_document",
+    kind: "hosted",
+    configToolId: "google_drive",
+    description: "Create a Google Docs document in Drive, optionally with initial text.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        title: { type: "string", description: "Document title." },
+        text: { type: "string", description: "Optional initial document text." },
+        folderId: { type: "string", description: "Optional Drive folder id to create the doc in." },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "drive_update_document",
+    kind: "hosted",
+    configToolId: "google_drive",
+    description:
+      "Update a native Google Docs document with a narrow edit operation: append text, replace all matching text, insert text at an index, or delete a range.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        documentId: {
+          type: "string",
+          description: "Google Docs document id, which is also the Drive file id.",
+        },
+        operation: {
+          type: "string",
+          enum: ["append_text", "replace_all_text", "insert_text", "delete_range"],
+          description: "Edit operation to apply.",
+        },
+        text: {
+          type: "string",
+          description: "Text to append or insert, or replacement text for replace_all_text.",
+        },
+        matchText: {
+          type: "string",
+          description: "Text to find when operation is replace_all_text.",
+        },
+        startIndex: {
+          type: "number",
+          description: "Start index for insert_text or delete_range.",
+        },
+        endIndex: {
+          type: "number",
+          description: "End index for delete_range.",
+        },
+        requiredRevisionId: {
+          type: "string",
+          description: "Optional Docs revision id for optimistic concurrency.",
+        },
+      },
+      required: ["documentId", "operation"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "drive_update_file_metadata",
+    kind: "hosted",
+    configToolId: "google_drive",
+    description:
+      "Update basic Drive file metadata: rename a file, star/unstar it, or move it to another folder.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        fileId: GOOGLE_DRIVE_FILE_ID_PARAMETER,
+        name: { type: "string", description: "Optional new file name." },
+        starred: { type: "boolean", description: "Optional starred-state update." },
+        addParentFolderId: {
+          type: "string",
+          description: "Optional folder id to add as a parent, usually the destination folder.",
+        },
+        removeParentFolderId: {
+          type: "string",
+          description: "Optional folder id to remove as a parent when moving files.",
+        },
+      },
+      required: ["fileId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "neon_list_databases",
     kind: "hosted",
     configToolId: "neon",
@@ -3023,6 +3236,12 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   calendar_create_event: "Create event",
   calendar_update_event: "Update event",
   calendar_delete_event: "Delete event",
+  drive_search_files: "Search Drive",
+  drive_get_file: "Read Drive file",
+  drive_export_file: "Export Drive file",
+  drive_create_document: "Create Google Doc",
+  drive_update_document: "Update Google Doc",
+  drive_update_file_metadata: "Update Drive file",
   web_fetch: "Fetch web page",
   tool_help: "Tool help",
   find_tools: "Find tools",
@@ -3195,7 +3414,7 @@ export type CapabilityDiscoveryResult = {
 // Capabilities whose eligibility this v1 can determine honestly and synchronously: those gated only
 // on a platform secret (`"platform"`) or a platform secret plus an attached repo (`"mixed"`).
 // `"workspace"`-credentialed capabilities (MCP servers like Linear/Slack, and the Google tools
-// Gmail/Calendar) are intentionally excluded — their eligibility needs per-workspace/per-account
+// Gmail/Calendar/Drive) are intentionally excluded — their eligibility needs per-workspace/per-account
 // OAuth connection state that isn't available in this pure path, and the agent cannot self-connect
 // them anyway. They're a clean phase-2 follow-up once that state is threaded into the session.
 const DISCOVERABLE_CREDENTIAL_SOURCES = new Set<AgentToolDefinition["credentialSource"]>([

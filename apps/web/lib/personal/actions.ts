@@ -358,6 +358,7 @@ const PERSONAL_INTEGRATION_MENTIONS = {
   github: "@github",
   gmail: "@gmail",
   google_calendar: "@google_calendar",
+  google_drive: "@google_drive",
   linear: "@linear",
   slack: "@slack",
   posthog: "@posthog",
@@ -377,6 +378,7 @@ type AddIntegrationResult = AddCapabilityResult;
 const PERSONAL_TOOL_EXCLUDED_TOOL_IDS = new Set<AgentToolId>([
   "gmail",
   "google_calendar",
+  "google_drive",
   "linear",
   "slack",
   "posthog",

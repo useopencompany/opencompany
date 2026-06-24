@@ -573,7 +573,11 @@ async function disconnectIntegration(
     if (!accountId) return { ok: false, message: "Missing connection id." };
     return disconnectGitHubIntegrationAction(accountId);
   }
-  if (integrationId === "gmail" || integrationId === "google_calendar") {
+  if (
+    integrationId === "gmail" ||
+    integrationId === "google_calendar" ||
+    integrationId === "google_drive"
+  ) {
     if (!accountId) return { ok: false, message: "Missing connection id." };
     return disconnectGoogleIntegrationAction({ provider: integrationId, integrationId: accountId });
   }
@@ -1298,7 +1302,7 @@ export function hasPersonalGitHubIntegrationRequest(body: string) {
 }
 
 // Count every integration attached to the agent: the @github request, each connected repository,
-// and each non-GitHub integration tool (Gmail/Calendar/Linear/Slack/PostHog). Drives the sidebar
+// and each non-GitHub integration tool (Gmail/Calendar/Drive/Linear/Slack/PostHog). Drives the sidebar
 // badge.
 export function personalIntegrationCount(input: { config: AgentConfig; githubRequested: boolean }) {
   const toolIntegrations = input.config.tools.filter((tool) =>
@@ -1450,7 +1454,7 @@ function buildRows(
   personalSkills: ResolvedSkillMetadata[],
 ): IntegrationRow[] {
   if (section === "tools") {
-    // Integration-backed tools (Gmail/Calendar/Linear/Slack/PostHog) live under Integrations, so
+    // Integration-backed tools (Gmail/Calendar/Drive/Linear/Slack/PostHog) live under Integrations, so
     // they're excluded here to avoid showing each integration in two tabs.
     return config.tools
       .filter((tool) => !PERSONAL_INTEGRATION_TOOL_IDS.has(tool.id))
