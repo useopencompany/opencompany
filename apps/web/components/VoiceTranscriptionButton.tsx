@@ -102,26 +102,28 @@ export function VoiceTranscriptionButton({
             ))}
           </span>
         </span>
-        <button
-          type="button"
-          disabled={recordingExit !== null}
-          onClick={() => playRecordingExit("discard", cancel)}
-          aria-label="Discard recording"
-          title="Discard recording"
-          className="voice-chatgpt-control relative z-20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:pointer-events-none"
-        >
-          <X size={18} strokeWidth={1.9} />
-        </button>
-        <button
-          type="button"
-          disabled={recordingExit !== null}
-          onClick={() => playRecordingExit("finish", stop)}
-          aria-label="Finish recording"
-          title="Finish recording"
-          className="voice-chatgpt-control voice-chatgpt-accept relative z-20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:pointer-events-none"
-        >
-          <Check size={19} strokeWidth={1.9} />
-        </button>
+        <span className="voice-chatgpt-controls relative z-20 inline-flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={recordingExit !== null}
+            onClick={() => playRecordingExit("discard", cancel)}
+            aria-label="Discard recording"
+            title="Discard recording"
+            className="voice-chatgpt-control flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:pointer-events-none"
+          >
+            <X size={18} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
+            disabled={recordingExit !== null}
+            onClick={() => playRecordingExit("finish", stop)}
+            aria-label="Finish recording"
+            title="Finish recording"
+            className="voice-chatgpt-control voice-chatgpt-accept flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:pointer-events-none"
+          >
+            <Check size={19} strokeWidth={1.9} />
+          </button>
+        </span>
       </span>
     );
   }
