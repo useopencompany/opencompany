@@ -635,8 +635,9 @@ describe("searchRuntimeTools", () => {
       "restore_brain_file",
     ];
 
-    expect(searchRuntimeTools({ query: "memory" }, enabledStandalone).map((result) => result.name))
-      .not.toContain("memory");
+    expect(
+      searchRuntimeTools({ query: "memory" }, enabledStandalone).map((result) => result.name),
+    ).not.toContain("memory");
     expect(
       searchRuntimeTools({ query: "subagent" }, enabledStandalone).map((result) => result.name),
     ).toEqual(["run_subagent"]);
