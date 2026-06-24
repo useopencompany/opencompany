@@ -9,15 +9,171 @@ type VoiceTranscriptionOptions = {
   onTranscription: (text: string) => void;
 };
 
+type VoiceAudioInputDevice = {
+  id: string;
+  label: string;
+  isBluetooth: boolean;
+};
+
+const AUDIO_LEVEL_COUNT = 96;
+const BASE_AUDIO_LEVEL = 0.12;
+const AUDIO_LEVEL_UPDATE_MS = 56;
+const AUDIO_LEVELS_PER_UPDATE = 1;
+const RECORDING_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  channelCount: 1,
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
+function initialAudioLevels() {
+  return Array.from({ length: AUDIO_LEVEL_COUNT }, (_, index) => {
+    const wave = Math.sin(index * 0.62) * 0.035 + Math.sin(index * 0.19) * 0.025;
+    return clampAudioLevel(BASE_AUDIO_LEVEL + wave);
+  });
+}
+
+function recordingEntryAudioLevels() {
+  return Array.from({ length: AUDIO_LEVEL_COUNT }, (_, index) => {
+    const wave = Math.sin(index * 0.42) * 0.028 + Math.sin(index * 0.13) * 0.018;
+    return clampAudioLevel(0.15 + wave);
+  });
+}
+
+function audioLevelBurst(level: number, offset: number) {
+  return Array.from({ length: AUDIO_LEVELS_PER_UPDATE }, (_, index) => {
+    const position = offset + index;
+    const wave = Math.sin(position * 0.54) * 0.055 + Math.sin(position * 0.18) * 0.03;
+    return clampAudioLevel(level + wave);
+  });
+}
+
+function clampAudioLevel(level: number) {
+  return Math.max(BASE_AUDIO_LEVEL, Math.min(1, level));
+}
+
+async function openRecordingStream() {
+  return openBestQualityRecordingStream();
+}
+
+async function openBestQualityRecordingStream() {
+  const preferredDeviceId = await getPreferredAudioInputDeviceId();
+  if (preferredDeviceId) {
+    try {
+      return await getRecordingStreamForDevice(preferredDeviceId);
+    } catch {
+      // The preferred mic may have disappeared since enumeration; retry with the browser default.
+    }
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: RECORDING_AUDIO_CONSTRAINTS,
+  });
+  const selectedTrackLabel = stream.getAudioTracks()[0]?.label ?? "";
+  if (!isBluetoothMicrophoneLabel(selectedTrackLabel)) return stream;
+
+  const fallbackDeviceId = await getPreferredAudioInputDeviceId();
+  if (!fallbackDeviceId) return stream;
+
+  try {
+    const fallbackStream = await getRecordingStreamForDevice(fallbackDeviceId);
+    stopStream(stream);
+    return fallbackStream;
+  } catch {
+    return stream;
+  }
+}
+
+async function getPreferredAudioInputDeviceId() {
+  const devices = await listAudioInputDevices();
+  return devices
+    .filter((device) => !device.isBluetooth)
+    .sort((a, b) => scoreAudioInputDevice(b) - scoreAudioInputDevice(a))[0]?.id;
+}
+
+async function listAudioInputDevices(): Promise<VoiceAudioInputDevice[]> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
+    return [];
+  }
+
+  let devices: MediaDeviceInfo[];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch {
+    return [];
+  }
+
+  return devices
+    .filter((device) => device.kind === "audioinput" && device.deviceId && device.label.trim())
+    .map((device) => ({
+      id: device.deviceId,
+      label: cleanAudioInputLabel(device.label),
+      isBluetooth: isBluetoothMicrophoneLabel(device.label),
+    }));
+}
+
+function getRecordingStreamForDevice(deviceId: string) {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      ...RECORDING_AUDIO_CONSTRAINTS,
+      deviceId: { exact: deviceId },
+    },
+  });
+}
+
+function scoreAudioInputDevice(device: VoiceAudioInputDevice) {
+  const label = normalizeDeviceLabel(device.label);
+  let score = 0;
+  if (
+    /\b(macbook|built[- ]?in|internal|studio display|imac|iphone microphone|continuity)\b/.test(
+      label,
+    )
+  ) {
+    score += 80;
+  }
+  if (/\b(usb|external|microphone|mikrofon|mic)\b/.test(label)) score += 30;
+  if (!isAliasAudioDeviceId(device.id)) score += 20;
+  return score;
+}
+
+function isBluetoothMicrophoneLabel(label: string) {
+  return /\b(airpods?|bluetooth|hands[- ]?free|beats|buds|earbuds|pods pro|wh-\d|wf-\d|jabra|soundcore)\b/.test(
+    normalizeDeviceLabel(label),
+  );
+}
+
+function isAliasAudioDeviceId(deviceId: string) {
+  return deviceId === "default" || deviceId === "communications";
+}
+
+function normalizeDeviceLabel(label: string) {
+  return label.toLowerCase();
+}
+
+function cleanAudioInputLabel(label: string) {
+  return label.replace(/\s+/g, " ").trim();
+}
+
+function stopStream(stream: MediaStream) {
+  stream.getTracks().forEach((track) => track.stop());
+}
+
 export function useVoiceTranscription({ onTranscription }: VoiceTranscriptionOptions) {
   const { showToast } = useToast();
   const [status, setStatus] = useState<VoiceTranscriptionStatus>("idle");
+  const [audioLevels, setAudioLevels] = useState<number[]>(initialAudioLevels);
   const isSupported = canRecordAudio();
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const meterContextRef = useRef<AudioContext | null>(null);
+  const meterFrameRef = useRef<number | null>(null);
+  const meterLastUpdateRef = useRef(0);
+  const meterSmoothedLevelRef = useRef(BASE_AUDIO_LEVEL);
+  const meterBurstOffsetRef = useRef(0);
   const chunksRef = useRef<Blob[]>([]);
   const mountedRef = useRef(true);
   const cancelRef = useRef(false);
+  const startRequestRef = useRef(0);
   const onTranscriptionRef = useRef(onTranscription);
 
   useEffect(() => {
@@ -31,10 +187,76 @@ export function useVoiceTranscription({ onTranscription }: VoiceTranscriptionOpt
     };
   }, []);
 
-  const cleanupStream = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+  const cleanupAudioMeter = useCallback(() => {
+    if (meterFrameRef.current !== null) {
+      cancelAnimationFrame(meterFrameRef.current);
+      meterFrameRef.current = null;
+    }
+    const context = meterContextRef.current;
+    meterContextRef.current = null;
+    meterLastUpdateRef.current = 0;
+    meterSmoothedLevelRef.current = BASE_AUDIO_LEVEL;
+    meterBurstOffsetRef.current = 0;
+    if (mountedRef.current) setAudioLevels(initialAudioLevels());
+    if (context && context.state !== "closed") {
+      void context.close().catch(() => undefined);
+    }
   }, []);
+
+  const cleanupStream = useCallback(() => {
+    cleanupAudioMeter();
+    if (streamRef.current) stopStream(streamRef.current);
+    streamRef.current = null;
+  }, [cleanupAudioMeter]);
+
+  const startAudioMeter = useCallback(
+    (stream: MediaStream) => {
+      const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+      if (!AudioContextCtor) return;
+      try {
+        meterSmoothedLevelRef.current = 0.16;
+        meterBurstOffsetRef.current = 0;
+        setAudioLevels(recordingEntryAudioLevels());
+        const context = new AudioContextCtor();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.86;
+        context.createMediaStreamSource(stream).connect(analyser);
+        const data = new Uint8Array(analyser.fftSize);
+        meterContextRef.current = context;
+
+        const tick = (time: number) => {
+          if (!mountedRef.current || streamRef.current !== stream) return;
+          analyser.getByteTimeDomainData(data);
+          let sumSquares = 0;
+          for (const value of data) {
+            const centered = (value - 128) / 128;
+            sumSquares += centered * centered;
+          }
+          const rms = Math.sqrt(sumSquares / data.length);
+          const rawLevel = Math.min(1, rms * 6.8);
+          const previousLevel = meterSmoothedLevelRef.current;
+          const attack = rawLevel > previousLevel ? 0.24 : 0.1;
+          const smoothedLevel = previousLevel * (1 - attack) + rawLevel * attack;
+          meterSmoothedLevelRef.current = smoothedLevel;
+
+          if (time - meterLastUpdateRef.current >= AUDIO_LEVEL_UPDATE_MS) {
+            const nextLevel = clampAudioLevel(smoothedLevel);
+            const nextBurst = audioLevelBurst(nextLevel, meterBurstOffsetRef.current);
+            setAudioLevels((levels) => [...levels.slice(nextBurst.length), ...nextBurst]);
+            meterBurstOffsetRef.current += nextBurst.length;
+            meterLastUpdateRef.current = time;
+          }
+          meterFrameRef.current = requestAnimationFrame(tick);
+        };
+
+        meterFrameRef.current = requestAnimationFrame(tick);
+      } catch {
+        cleanupAudioMeter();
+      }
+    },
+    [cleanupAudioMeter],
+  );
 
   const showError = useCallback(
     (description: string) => {
@@ -78,12 +300,24 @@ export function useVoiceTranscription({ onTranscription }: VoiceTranscriptionOpt
       showError("This browser does not support microphone recording.");
       return;
     }
+    const requestId = startRequestRef.current + 1;
+    startRequestRef.current = requestId;
+    cancelRef.current = false;
+    chunksRef.current = [];
+    setAudioLevels(recordingEntryAudioLevels());
+    setStatus("recording");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-      });
+      const stream = await openRecordingStream();
+      if (startRequestRef.current !== requestId || cancelRef.current || !mountedRef.current) {
+        stopStream(stream);
+        if (startRequestRef.current === requestId) {
+          cancelRef.current = false;
+          if (mountedRef.current) setStatus("idle");
+        }
+        return;
+      }
       streamRef.current = stream;
-      chunksRef.current = [];
+      startAudioMeter(stream);
       const recorder = new MediaRecorder(stream, preferredRecorderOptions());
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
@@ -108,15 +342,15 @@ export function useVoiceTranscription({ onTranscription }: VoiceTranscriptionOpt
         }
         void transcribeBlob(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
       };
-      cancelRef.current = false;
       recorder.start();
-      setStatus("recording");
     } catch (error) {
+      if (startRequestRef.current !== requestId) return;
+      cancelRef.current = false;
       cleanupStream();
       setStatus("idle");
       showError(error instanceof Error ? error.message : "Microphone permission was denied.");
     }
-  }, [cleanupStream, isSupported, showError, status, transcribeBlob]);
+  }, [cleanupStream, isSupported, showError, startAudioMeter, status, transcribeBlob]);
 
   const stop = useCallback(() => {
     const recorder = recorderRef.current;
@@ -126,10 +360,16 @@ export function useVoiceTranscription({ onTranscription }: VoiceTranscriptionOpt
 
   const cancel = useCallback(() => {
     const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
+    if (!recorder || recorder.state === "inactive") {
+      startRequestRef.current += 1;
+      cancelRef.current = true;
+      cleanupStream();
+      setStatus("idle");
+      return;
+    }
     cancelRef.current = true;
     recorder.stop();
-  }, []);
+  }, [cleanupStream]);
 
   useEffect(() => {
     return () => {
@@ -144,6 +384,7 @@ export function useVoiceTranscription({ onTranscription }: VoiceTranscriptionOpt
 
   return {
     status,
+    audioLevels,
     isRecording: status === "recording",
     isTranscribing: status === "transcribing",
     isSupported,

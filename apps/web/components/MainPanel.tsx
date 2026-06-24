@@ -50,6 +50,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const router = useRouter();
   const { showToast } = useToast();
   const [input, setInput] = useState("");
+  const [voiceRecording, setVoiceRecording] = useState(false);
   const [selectedAgentIdOverride, setSelectedAgentIdOverride] = useState("");
   // An explicit model pick, scoped to the agent it was made for. Scoping it this way means a
   // pick for agent A doesn't carry over when you switch to agent B — the selector falls back to
@@ -94,7 +95,8 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
       selectedAgentId &&
       !isPending &&
       !isUploading &&
-      !hasUploadError,
+      !hasUploadError &&
+      !voiceRecording,
   );
 
   useEffect(() => {
@@ -125,7 +127,14 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
   const submit = () => {
     const content = input.trim();
-    if ((!content && ready.length === 0) || isPending || isUploading || hasUploadError) return;
+    if (
+      (!content && ready.length === 0) ||
+      isPending ||
+      isUploading ||
+      hasUploadError ||
+      voiceRecording
+    )
+      return;
     if (!selectedAgentId) {
       setError("Create an agent first before starting a session.");
       return;
@@ -190,8 +199,13 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
           <textarea
             ref={textareaRef}
             value={input}
+            readOnly={voiceRecording}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
+              if (voiceRecording) {
+                event.preventDefault();
+                return;
+              }
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit();
@@ -250,21 +264,24 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
           <div className="flex items-center gap-1.5">
             <VoiceTranscriptionButton
               onTranscription={insertTranscription}
+              onRecordingChange={setVoiceRecording}
               disabled={isPending}
               variant="action"
             />
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label={isPending ? "Starting session…" : "Start session"}
-            >
-              {isPending ? (
-                <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
-              ) : (
-                <ArrowUp size={13} strokeWidth={2} />
-              )}
-            </button>
+            {!voiceRecording ? (
+              <button
+                type="submit"
+                disabled={!canSubmit}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={isPending ? "Starting session…" : "Start session"}
+              >
+                {isPending ? (
+                  <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
+                ) : (
+                  <ArrowUp size={13} strokeWidth={2} />
+                )}
+              </button>
+            ) : null}
           </div>
         }
         rightControls={

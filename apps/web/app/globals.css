@@ -517,6 +517,175 @@ body {
   }
 }
 
+.oc-composer-input-region:has(.voice-chatgpt-recording) .oc-composer-input-slot {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.voice-chatgpt-recording {
+  position: absolute;
+  top: 50%;
+  right: 5.6rem;
+  left: 0.75rem;
+  z-index: 1;
+  display: flex;
+  min-width: 5rem;
+  transform: translateY(-50%);
+  animation: voice-chatgpt-wave-entry 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  pointer-events: none;
+  will-change: clip-path, opacity;
+}
+
+.voice-chatgpt-waveform {
+  display: flex;
+  height: 48px;
+  min-width: 0;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 4px;
+  overflow: hidden;
+  padding: 0 0 4px;
+  color: var(--color-ink-muted);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, black 9%, black 100%);
+  mask-image: linear-gradient(90deg, transparent 0, black 9%, black 100%);
+}
+
+.voice-chatgpt-bar {
+  flex: 0 0 4px;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: bottom;
+  transition:
+    height 210ms cubic-bezier(0.2, 0, 0.2, 1),
+    opacity 210ms ease-out;
+}
+
+.voice-chatgpt-control {
+  color: var(--color-ink-muted);
+}
+
+.voice-chatgpt-control:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-ink);
+}
+
+.voice-chatgpt-accept {
+  background: var(--color-ink);
+  color: var(--color-canvas);
+}
+
+.voice-chatgpt-accept:hover {
+  background: color-mix(in srgb, var(--color-ink) 86%, transparent);
+  color: var(--color-canvas);
+}
+
+@media (max-width: 640px) {
+  .voice-chatgpt-recording {
+    right: 5.35rem;
+    left: 0.65rem;
+  }
+}
+
+.voice-recording-button {
+  isolation: isolate;
+  position: relative;
+}
+
+.voice-recording-button::before,
+.voice-recording-button::after {
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  position: absolute;
+}
+
+.voice-recording-button::before {
+  border: 1px solid currentColor;
+  inset: -5px;
+  opacity: 0;
+  transform: scale(0.72);
+  animation: voice-recording-ring 1.55s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.voice-recording-button::after {
+  background: currentColor;
+  filter: blur(4px);
+  inset: 3px;
+  opacity: 0.08;
+  transform: scale(0.9);
+  animation: voice-recording-glow 1.15s ease-in-out infinite;
+}
+
+.voice-recording-button > * {
+  position: relative;
+  z-index: 1;
+}
+
+.voice-recording-icon {
+  display: inline-flex;
+  animation: voice-recording-icon-breathe 1.15s ease-in-out infinite;
+}
+
+.voice-recording-discard {
+  animation: voice-recording-discard-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes voice-chatgpt-wave-entry {
+  from {
+    clip-path: inset(0 0 0 78%);
+    opacity: 0.7;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+@keyframes voice-recording-ring {
+  0% {
+    opacity: 0.46;
+    transform: scale(0.76);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.36);
+  }
+}
+
+@keyframes voice-recording-glow {
+  0%,
+  100% {
+    opacity: 0.08;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.16;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes voice-recording-icon-breathe {
+  0%,
+  100% {
+    transform: scale(0.94);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+@keyframes voice-recording-discard-in {
+  from {
+    opacity: 0;
+    transform: translateX(4px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .session-markdown[data-streaming="true"] {
     will-change: auto;
@@ -530,6 +699,22 @@ body {
 
   .steer-wheel-spin {
     animation: none;
+  }
+
+  .voice-recording-button::before,
+  .voice-recording-button::after,
+  .voice-recording-icon,
+  .voice-recording-discard,
+  .voice-chatgpt-recording,
+  .voice-chatgpt-waveform,
+  .voice-chatgpt-bar {
+    animation: none;
+    transition: none;
+  }
+
+  .voice-recording-button::before,
+  .voice-recording-button::after {
+    opacity: 0;
   }
 }
 

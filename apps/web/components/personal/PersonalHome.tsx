@@ -41,6 +41,7 @@ export default function PersonalHome() {
   const router = useRouter();
   const { showToast } = useToast();
   const [input, setInput] = useState("");
+  const [voiceRecording, setVoiceRecording] = useState(false);
   const [model, setModel] = useState<string>(agent.defaultModel || DEFAULT_MODEL_ID);
   const [error, setError] = useState<string | null>(null);
   // The just-submitted prompt, rendered as the optimistic session view until navigation to
@@ -74,7 +75,11 @@ export default function PersonalHome() {
   // Submit needs text OR a ready attachment, and is blocked while any upload is in flight or
   // errored (so an image is never silently dropped, and a broken upload can't be sent).
   const canSubmit = Boolean(
-    (input.trim() || ready.length > 0) && !pendingSession && !isUploading && !hasUploadError,
+    (input.trim() || ready.length > 0) &&
+      !pendingSession &&
+      !isUploading &&
+      !hasUploadError &&
+      !voiceRecording,
   );
 
   useEffect(() => {
@@ -105,7 +110,14 @@ export default function PersonalHome() {
 
   const submit = () => {
     const content = input.trim();
-    if ((!content && ready.length === 0) || pendingSession || isUploading || hasUploadError) return;
+    if (
+      (!content && ready.length === 0) ||
+      pendingSession ||
+      isUploading ||
+      hasUploadError ||
+      voiceRecording
+    )
+      return;
     setError(null);
     setPendingSession({ content, submittedAt: new Date().toISOString() });
     startTransition(async () => {
@@ -189,8 +201,13 @@ export default function PersonalHome() {
               <textarea
                 ref={textareaRef}
                 value={input}
+                readOnly={voiceRecording}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
+                  if (voiceRecording) {
+                    event.preventDefault();
+                    return;
+                  }
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                     event.preventDefault();
                     submit();
@@ -228,17 +245,20 @@ export default function PersonalHome() {
               <div className="flex items-center gap-1.5">
                 <VoiceTranscriptionButton
                   onTranscription={insertTranscription}
+                  onRecordingChange={setVoiceRecording}
                   disabled={Boolean(pendingSession)}
                   variant="action"
                 />
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-                  aria-label="Start session"
-                >
-                  <ArrowUp size={13} strokeWidth={2} />
-                </button>
+                {!voiceRecording ? (
+                  <button
+                    type="submit"
+                    disabled={!canSubmit}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Start session"
+                  >
+                    <ArrowUp size={13} strokeWidth={2} />
+                  </button>
+                ) : null}
               </div>
             }
           />

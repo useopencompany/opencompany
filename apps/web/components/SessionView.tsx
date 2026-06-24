@@ -505,6 +505,7 @@ function SessionViewContentBody({
     return () => registerMobileInspector(null);
   }, [registerMobileInspector]);
   const [input, setInput] = useState("");
+  const [voiceRecording, setVoiceRecording] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
   const [isPending, startTransition] = useTransition();
@@ -1823,12 +1824,17 @@ function SessionViewContentBody({
                   <textarea
                     ref={textareaRef}
                     value={input}
+                    readOnly={voiceRecording}
                     onChange={(event) => {
                       setInput(event.target.value);
                       setCaret(event.target.selectionStart ?? event.target.value.length);
                     }}
                     onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
                     onKeyDown={(event) => {
+                      if (voiceRecording) {
+                        event.preventDefault();
+                        return;
+                      }
                       // While the slash menu is open it owns navigation keys; focus
                       // stays in the textarea so typing keeps filtering the list.
                       if (slashMenuOpen && !event.nativeEvent.isComposing) {
@@ -1873,6 +1879,10 @@ function SessionViewContentBody({
                       }
                     }}
                     onPaste={(event) => {
+                      if (voiceRecording) {
+                        event.preventDefault();
+                        return;
+                      }
                       // Files in the clipboard (e.g. a screenshot) are taken as attachments by the
                       // shared hook, which also stops the browser pasting them into the textarea.
                       if (handlePasteFiles(event)) return;
@@ -1968,30 +1978,33 @@ function SessionViewContentBody({
                     <div className="flex items-center gap-1.5">
                       <VoiceTranscriptionButton
                         onTranscription={insertTranscription}
+                        onRecordingChange={setVoiceRecording}
                         disabled={isPending}
                         variant="action"
                       />
-                      <button
-                        type="button"
-                        disabled={sendDisabled}
-                        onClick={handleSend}
-                        aria-label={runActive ? "Steer the running agent" : "Send message"}
-                        title={runActive ? "Steer the running agent" : "Send message"}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
-                          runActive
-                            ? "text-ink-subtle hover:text-ink-muted"
-                            : "bg-ink text-canvas hover:bg-ink/85"
-                        }`}
-                      >
-                        {runActive ? (
-                          <SteerWheelIcon
-                            key="send-wheel"
-                            className="steer-wheel-spin h-3.5 w-3.5"
-                          />
-                        ) : (
-                          <ArrowUp size={13} strokeWidth={2} />
-                        )}
-                      </button>
+                      {!voiceRecording ? (
+                        <button
+                          type="button"
+                          disabled={sendDisabled}
+                          onClick={handleSend}
+                          aria-label={runActive ? "Steer the running agent" : "Send message"}
+                          title={runActive ? "Steer the running agent" : "Send message"}
+                          className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+                            runActive
+                              ? "text-ink-subtle hover:text-ink-muted"
+                              : "bg-ink text-canvas hover:bg-ink/85"
+                          }`}
+                        >
+                          {runActive ? (
+                            <SteerWheelIcon
+                              key="send-wheel"
+                              className="steer-wheel-spin h-3.5 w-3.5"
+                            />
+                          ) : (
+                            <ArrowUp size={13} strokeWidth={2} />
+                          )}
+                        </button>
+                      ) : null}
                       {runActive ? (
                         <button
                           type="button"

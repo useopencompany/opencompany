@@ -68,19 +68,26 @@ export function Composer({
       {banner}
       <div
         className={cn(
+          "oc-composer-card",
           "relative border border-border bg-surface shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]",
           styles.card,
         )}
       >
         {overlay}
-        <div className={cn("relative flex items-end gap-2", styles.inputRegion)}>
-          <div className="min-w-0 flex-1">{input}</div>
+        <div
+          className={cn(
+            "oc-composer-input-region relative flex items-end gap-2",
+            styles.inputRegion,
+          )}
+        >
+          <div className="oc-composer-input-slot min-w-0 flex-1">{input}</div>
           {/* min-h matches the single-line textarea so items-center vertically centers the
               button on one line, while items-end keeps it by the last line as it grows. */}
           {action ? <div className="flex min-h-9 shrink-0 items-center">{action}</div> : null}
         </div>
         <div
           className={cn(
+            "oc-composer-toolbar",
             "flex items-center justify-between gap-2 border-t border-border bg-canvas",
             styles.bar,
           )}
