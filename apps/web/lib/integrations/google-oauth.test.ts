@@ -9,6 +9,7 @@ import {
 } from "@/lib/integrations/google-oauth";
 
 const gmailConfig = GOOGLE_PROVIDER_CONFIG.gmail;
+const driveConfig = GOOGLE_PROVIDER_CONFIG.google_drive;
 
 describe("Google OAuth helpers", () => {
   beforeEach(() => {
@@ -38,6 +39,17 @@ describe("Google OAuth helpers", () => {
 
     expect(url.searchParams.get("redirect_uri")).toBe(
       "https://oauth.opencompany.cloud/api/google/callback",
+    );
+  });
+
+  it("uses the production-safe per-file Drive scope", () => {
+    const url = new URL(buildGoogleAuthorizationUrl(driveConfig, "signed-state"));
+    const scopes = url.searchParams.get("scope")?.split(" ") ?? [];
+
+    expect(scopes).toContain("https://www.googleapis.com/auth/drive.file");
+    expect(scopes).not.toContain("https://www.googleapis.com/auth/drive");
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "https://app.opencompany.cloud/api/integrations/google-drive/callback",
     );
   });
 

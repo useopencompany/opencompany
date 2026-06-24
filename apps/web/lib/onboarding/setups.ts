@@ -121,7 +121,7 @@ export const ONBOARDING_INTEGRATIONS: OnboardingIntegration[] = [
   {
     id: "google_drive",
     label: "Google Drive",
-    description: "Find, read, and update docs in Drive.",
+    description: "Create and update accessible Drive docs.",
     icon: Files,
     connectHref: `/api/integrations/google-drive/start?returnTo=${ONBOARDING_RETURN_TO}`,
   },

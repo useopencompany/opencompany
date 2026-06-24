@@ -91,13 +91,13 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
   {
     id: "google_drive",
     label: "Google Drive",
-    description: "Find, read, create, and update documents in a connected Drive account.",
+    description: "Create and update Drive documents OpenCompany can access.",
     icon: Files,
     kind: "google",
     connectUrl: (returnTo) =>
       `/api/integrations/google-drive/start?returnTo=${encodeURIComponent(returnTo)}`,
     permissions: [
-      "Search and read files in the connected Drive account",
+      "Search and read files created by or shared with OpenCompany",
       "Export Google Docs and supported Drive files for agent use",
       "Create and update Google Docs and file metadata",
     ],

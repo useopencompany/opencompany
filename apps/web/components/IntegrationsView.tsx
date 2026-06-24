@@ -171,7 +171,7 @@ const INTEGRATIONS: IntegrationDefinition[] = [
     id: "google_drive",
     name: "Google Drive",
     category: "Productivity",
-    description: "Let agents find, read, create, and update documents in connected Drive accounts.",
+    description: "Let agents create and update Drive documents OpenCompany can access.",
     icon: Files,
   },
 ];

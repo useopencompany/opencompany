@@ -376,7 +376,7 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     type: "hosted_tool",
     label: "google_drive",
     description:
-      "Find, read, create, and update documents in workspace-connected Google Drive accounts.",
+      "Find, read, create, and update documents that OpenCompany can access in connected Google Drive accounts.",
     runtimeTools: [
       "drive_search_files",
       "drive_get_file",
@@ -2551,7 +2551,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     kind: "hosted",
     configToolId: "google_drive",
     description:
-      "Search Google Drive files and folders in a connected account. Returns metadata only; use drive_get_file or drive_export_file to read content.",
+      "Search Google Drive files and folders OpenCompany can access in a connected account. Returns metadata only; use drive_get_file or drive_export_file to read content.",
     parameters: {
       type: "object",
       properties: {

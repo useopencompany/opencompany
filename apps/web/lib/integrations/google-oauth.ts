@@ -45,9 +45,9 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
     provider: "google_drive",
     routeSegment: "google-drive",
     displayName: "Google Drive",
-    // Full Drive access is required for agents to find, read, create, and update existing files.
-    // This is a restricted Google scope and requires Google verification before broad production use.
-    scopes: ["https://www.googleapis.com/auth/drive", ...OPENID_SCOPES],
+    // Use Drive's per-file scope in production. Full-drive scopes are restricted and can block
+    // OAuth until Google finishes restricted-scope verification for the app.
+    scopes: ["https://www.googleapis.com/auth/drive.file", ...OPENID_SCOPES],
     syncsCalendars: false,
   },
 };

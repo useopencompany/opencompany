@@ -435,7 +435,7 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
     groups: ["read", "post", "modify"],
     gated: true,
     permissionDescriptions: {
-      read: "Search, read, and export Drive files",
+      read: "Search, read, and export accessible Drive files",
       post: "Create new Google Docs",
       modify: "Update Google Docs and Drive file metadata",
     },
