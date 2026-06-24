@@ -631,19 +631,19 @@ body {
 }
 
 .voice-chatgpt-shell-exit-finish .voice-chatgpt-recording {
-  animation: voice-chatgpt-wave-exit-left 260ms cubic-bezier(0.32, 0, 0.67, 0) both;
+  animation: voice-chatgpt-wave-exit-left 340ms cubic-bezier(0.33, 0, 0.2, 1) both;
 }
 
 .voice-chatgpt-shell-exit-finish .voice-chatgpt-control {
-  animation: voice-chatgpt-control-exit-left 180ms ease-in both;
+  animation: voice-chatgpt-control-exit-left 220ms ease-out both;
 }
 
 .voice-chatgpt-shell-exit-discard .voice-chatgpt-recording {
-  animation: voice-chatgpt-delete-down 240ms cubic-bezier(0.32, 0, 0.67, 0) both;
+  animation: voice-chatgpt-delete-down 320ms cubic-bezier(0.32, 0, 0.67, 0) both;
 }
 
 .voice-chatgpt-shell-exit-discard .voice-chatgpt-control {
-  animation: voice-chatgpt-control-delete-down 180ms ease-in both;
+  animation: voice-chatgpt-control-delete-down 240ms cubic-bezier(0.32, 0, 0.67, 0) both;
 }
 
 @keyframes voice-chatgpt-wave-entry {
@@ -665,8 +665,8 @@ body {
   }
   to {
     clip-path: inset(0 100% 0 0);
-    opacity: 0.36;
-    transform: translateY(-50%) translateX(-10px);
+    opacity: 0;
+    transform: translateY(-50%) translateX(-18px) scaleX(0.94);
   }
 }
 
@@ -677,7 +677,7 @@ body {
   }
   to {
     opacity: 0;
-    transform: translateX(-6px) scale(0.94);
+    transform: translateX(-10px) scale(0.92);
   }
 }
 
@@ -688,9 +688,9 @@ body {
     transform: translateY(-50%) scale(1);
   }
   to {
-    clip-path: inset(24% 0 0 0);
+    clip-path: inset(42% 0 0 0);
     opacity: 0;
-    transform: translateY(-22%) scale(0.98);
+    transform: translateY(-2%) scale(0.94);
   }
 }
 
@@ -701,7 +701,7 @@ body {
   }
   to {
     opacity: 0;
-    transform: translateY(10px) scale(0.9);
+    transform: translateY(16px) scale(0.88);
   }
 }
 

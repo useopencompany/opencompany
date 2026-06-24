@@ -6,7 +6,7 @@ import { useVoiceTranscription } from "@/components/useVoiceTranscription";
 
 type RecordingExit = "finish" | "discard" | null;
 
-const RECORDING_EXIT_MS = 280;
+const RECORDING_EXIT_MS = 360;
 
 export function VoiceTranscriptionButton({
   onTranscription,
@@ -24,6 +24,7 @@ export function VoiceTranscriptionButton({
       onTranscription,
     });
   const [recordingExit, setRecordingExit] = useState<RecordingExit>(null);
+  const [exitAudioLevels, setExitAudioLevels] = useState<number[] | null>(null);
   const recordingExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export function VoiceTranscriptionButton({
       recordingExitTimerRef.current = null;
     }
     setRecordingExit(null);
+    setExitAudioLevels(null);
   }, [isRecording]);
 
   useEffect(() => {
@@ -50,6 +52,8 @@ export function VoiceTranscriptionButton({
 
   const busy = isRecording || isTranscribing;
   const showActionRecording = variant === "action" && (isRecording || recordingExit !== null);
+  const visibleAudioLevels =
+    recordingExit !== null ? (exitAudioLevels ?? audioLevels) : audioLevels;
   const sizeClass = variant === "action" ? "h-8 w-8 rounded-full" : "h-7 w-7 rounded-md";
   const discardSizeClass = variant === "action" ? "h-8 w-8" : "h-7 w-7";
   const recordingAnimationClass = isRecording ? "voice-recording-button" : "";
@@ -64,11 +68,13 @@ export function VoiceTranscriptionButton({
 
   const playRecordingExit = (nextExit: Exclude<RecordingExit, null>, action: () => void) => {
     if (recordingExit) return;
+    setExitAudioLevels([...audioLevels]);
     setRecordingExit(nextExit);
     action();
     if (recordingExitTimerRef.current) clearTimeout(recordingExitTimerRef.current);
     recordingExitTimerRef.current = setTimeout(() => {
       setRecordingExit(null);
+      setExitAudioLevels(null);
       recordingExitTimerRef.current = null;
     }, RECORDING_EXIT_MS);
   };
@@ -84,7 +90,7 @@ export function VoiceTranscriptionButton({
       <span className={`inline-flex items-center gap-1.5 ${shellExitClass}`}>
         <span aria-hidden="true" className="voice-chatgpt-recording">
           <span aria-hidden="true" className="voice-chatgpt-waveform min-w-0 flex-1">
-            {audioLevels.map((level, index) => (
+            {visibleAudioLevels.map((level, index) => (
               <span
                 key={index}
                 className="voice-chatgpt-bar"
