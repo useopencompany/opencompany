@@ -805,6 +805,7 @@ function makePersonalAgentContext(
       github: false,
       gmail: false,
       google_calendar: false,
+      google_drive: false,
       linear: false,
       slack: false,
       posthog: false,

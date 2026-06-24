@@ -8,12 +8,12 @@ import {
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import type { HostedToolResult } from "./hosted-tools";
 
-// First-party Gmail (read-only) and Google Calendar (read/write) tools. Each call resolves a
-// connected Google account, decrypts its OAuth tokens, refreshes the access token if expired,
-// and talks directly to the Google REST APIs. Credentials are stored by the web app in
-// workspace_integration_credentials with the same AES-256-GCM scheme used here.
+// First-party Gmail (read-only), Google Calendar (read/write), and Google Drive (read/write)
+// tools. Each call resolves a connected Google account, decrypts its OAuth tokens, refreshes the
+// access token if expired, and talks directly to the Google REST APIs. Credentials are stored by
+// the web app in workspace_integration_credentials with the same AES-256-GCM scheme used here.
 
-export type GoogleProviderKey = "gmail" | "google_calendar";
+export type GoogleProviderKey = "gmail" | "google_calendar" | "google_drive";
 
 export type GoogleToolContext = {
   workspaceId: string;
@@ -39,17 +39,47 @@ const CALENDAR_TOOLS = new Set([
   "calendar_update_event",
   "calendar_delete_event",
 ]);
+const DRIVE_TOOLS = new Set([
+  "drive_search_files",
+  "drive_get_file",
+  "drive_export_file",
+  "drive_create_document",
+  "drive_update_document",
+  "drive_update_file_metadata",
+]);
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const CALENDAR_BASE = "https://www.googleapis.com/calendar/v3";
+const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
+const DOCS_BASE = "https://docs.googleapis.com/v1";
 const ENCRYPTION_KEY_VERSION = 1;
 // Refresh a little before the real expiry to absorb clock skew and request latency.
 const REFRESH_SKEW_MS = 60_000;
 const MAX_MESSAGE_BODY_CHARS = 12_000;
+const MAX_DRIVE_TEXT_CHARS = 50_000;
+const GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document";
+const GOOGLE_WORKSPACE_MIME_PREFIX = "application/vnd.google-apps.";
+const DRIVE_FILE_FIELDS = [
+  "id",
+  "name",
+  "mimeType",
+  "description",
+  "webViewLink",
+  "iconLink",
+  "createdTime",
+  "modifiedTime",
+  "owners(displayName,emailAddress)",
+  "lastModifyingUser(displayName,emailAddress)",
+  "size",
+  "parents",
+  "starred",
+  "trashed",
+  "shared",
+].join(",");
 
 export function isGoogleHostedTool(name: string): boolean {
-  return GMAIL_TOOLS.has(name) || CALENDAR_TOOLS.has(name);
+  return GMAIL_TOOLS.has(name) || CALENDAR_TOOLS.has(name) || DRIVE_TOOLS.has(name);
 }
 
 export async function executeGoogleHostedTool(input: {
@@ -63,7 +93,11 @@ export async function executeGoogleHostedTool(input: {
     throw new Error("Google tools require a workspace context and are not available in this run.");
   }
 
-  const provider: GoogleProviderKey = GMAIL_TOOLS.has(input.name) ? "gmail" : "google_calendar";
+  const provider: GoogleProviderKey = GMAIL_TOOLS.has(input.name)
+    ? "gmail"
+    : CALENDAR_TOOLS.has(input.name)
+      ? "google_calendar"
+      : "google_drive";
   const args = asRecord(input.args);
   const account = await resolveAccount(context, provider, readString(args, "account"));
 
@@ -404,6 +438,43 @@ async function googleApiCall(input: {
   return text ? JSON.parse(text) : {};
 }
 
+async function googleTextCall(input: {
+  context: GoogleToolContext;
+  account: ResolvedAccount;
+  method: string;
+  url: string;
+  accept?: string;
+  signal: AbortSignal;
+}): Promise<{ text: string; contentType: string | null }> {
+  const run = async (token: string) =>
+    fetch(input.url, {
+      method: input.method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(input.accept ? { Accept: input.accept } : {}),
+      },
+      signal: input.signal,
+    });
+
+  let token = await getAccessToken(input.context, input.account, { signal: input.signal });
+  let response = await run(token);
+  if (response.status === 401) {
+    token = await getAccessToken(input.context, input.account, {
+      forceRefresh: true,
+      signal: input.signal,
+    });
+    response = await run(token);
+  }
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `${displayName(input.account.provider)} API ${input.method} ${pathOf(input.url)} failed with ${response.status}: ${truncate(text, 400)}`,
+    );
+  }
+  return { text, contentType: response.headers.get("content-type") };
+}
+
 // --- tool dispatch ---------------------------------------------------------
 
 async function dispatchGoogleTool(input: {
@@ -422,6 +493,15 @@ async function dispatchGoogleTool(input: {
       url,
       signal,
       ...(body !== undefined ? { body } : {}),
+    });
+  const textCall = (method: string, url: string, accept?: string) =>
+    googleTextCall({
+      context,
+      account,
+      method,
+      url,
+      signal,
+      ...(accept ? { accept } : {}),
     });
 
   switch (name) {
@@ -459,12 +539,29 @@ async function dispatchGoogleTool(input: {
       return calendarUpdateEvent({ args, call, context, account });
     case "calendar_delete_event":
       return calendarDeleteEvent({ args, call, context, account });
+    case "drive_search_files":
+      return driveSearchFiles({ args, call });
+    case "drive_get_file":
+      return driveGetFile({ args, call, textCall });
+    case "drive_export_file":
+      return driveExportFile({ args, call, textCall });
+    case "drive_create_document":
+      return driveCreateDocument({ args, call });
+    case "drive_update_document":
+      return driveUpdateDocument({ args, call });
+    case "drive_update_file_metadata":
+      return driveUpdateFileMetadata({ args, call });
     default:
       throw new Error(`Unknown Google tool: ${name}`);
   }
 }
 
 type Caller = (method: string, url: string, body?: unknown) => Promise<unknown>;
+type TextCaller = (
+  method: string,
+  url: string,
+  accept?: string,
+) => Promise<{ text: string; contentType: string | null }>;
 
 async function gmailListMessages(input: {
   args: Record<string, unknown>;
@@ -690,6 +787,341 @@ async function calendarDeleteEvent(input: {
   return { deleted: true, eventId, calendarId };
 }
 
+// --- Drive + Docs handlers -------------------------------------------------
+
+async function driveSearchFiles(input: { args: Record<string, unknown>; call: Caller }) {
+  const url = new URL(`${DRIVE_BASE}/files`);
+  url.searchParams.set(
+    "pageSize",
+    String(clampInt(readNumber(input.args, "maxResults"), 20, 1, 100)),
+  );
+  url.searchParams.set("fields", `nextPageToken,files(${DRIVE_FILE_FIELDS})`);
+  url.searchParams.set("orderBy", "modifiedTime desc");
+  url.searchParams.set("supportsAllDrives", "true");
+  url.searchParams.set("includeItemsFromAllDrives", "true");
+
+  const query = buildDriveQuery(input.args);
+  if (query) url.searchParams.set("q", query);
+
+  const data = asRecord(await input.call("GET", url.toString()));
+  return {
+    files: asArray(data.files).map((file) => summarizeDriveFile(asRecord(file))),
+    nextPageToken: readString(data, "nextPageToken"),
+  };
+}
+
+async function driveGetFile(input: {
+  args: Record<string, unknown>;
+  call: Caller;
+  textCall: TextCaller;
+}) {
+  const fileId = requireString(input.args, "fileId");
+  const file = await driveGetFileMetadata(fileId, input.call);
+  const includeContent = readBoolean(input.args, "includeContent") !== false;
+  if (!includeContent) return { file };
+
+  return {
+    file,
+    content: await driveReadFileContent({
+      file,
+      requestedMimeType: readString(input.args, "mimeType"),
+      textCall: input.textCall,
+    }),
+  };
+}
+
+async function driveExportFile(input: {
+  args: Record<string, unknown>;
+  call: Caller;
+  textCall: TextCaller;
+}) {
+  const fileId = requireString(input.args, "fileId");
+  const file = await driveGetFileMetadata(fileId, input.call);
+  return {
+    file,
+    content: await driveReadFileContent({
+      file,
+      requestedMimeType: readString(input.args, "mimeType"),
+      textCall: input.textCall,
+    }),
+  };
+}
+
+async function driveCreateDocument(input: { args: Record<string, unknown>; call: Caller }) {
+  const title = requireString(input.args, "title");
+  const folderId = readString(input.args, "folderId");
+  const metadata: Record<string, unknown> = {
+    name: title,
+    mimeType: GOOGLE_DOC_MIME_TYPE,
+  };
+  if (folderId) metadata.parents = [folderId];
+
+  const url = new URL(`${DRIVE_BASE}/files`);
+  url.searchParams.set("fields", DRIVE_FILE_FIELDS);
+  url.searchParams.set("supportsAllDrives", "true");
+  const file = summarizeDriveFile(asRecord(await input.call("POST", url.toString(), metadata)));
+  if (!file.id) {
+    throw new Error("Google Drive did not return an id for the created document.");
+  }
+
+  const text = readString(input.args, "text");
+  if (text) {
+    await docsBatchUpdate(input.call, file.id, [{ insertText: { location: { index: 1 }, text } }]);
+  }
+
+  return { file, documentId: file.id, webViewLink: file.webViewLink };
+}
+
+async function driveUpdateDocument(input: { args: Record<string, unknown>; call: Caller }) {
+  const documentId = requireString(input.args, "documentId");
+  const operation = requireString(input.args, "operation");
+  const requiredRevisionId = readString(input.args, "requiredRevisionId");
+  const requests = await buildDocsUpdateRequests(input.call, documentId, operation, input.args);
+
+  const result = await docsBatchUpdate(input.call, documentId, requests, requiredRevisionId);
+  return {
+    documentId,
+    operation,
+    replies: asArray(result.replies),
+    writeControl: asRecord(result.writeControl),
+  };
+}
+
+async function driveUpdateFileMetadata(input: { args: Record<string, unknown>; call: Caller }) {
+  const fileId = requireString(input.args, "fileId");
+  const name = readString(input.args, "name");
+  const starred = readBoolean(input.args, "starred");
+  const addParentFolderId = readString(input.args, "addParentFolderId");
+  const removeParentFolderId = readString(input.args, "removeParentFolderId");
+  const body: Record<string, unknown> = {};
+
+  if (name !== undefined) body.name = name;
+  if (starred !== undefined) body.starred = starred;
+
+  if (Object.keys(body).length === 0 && !addParentFolderId && !removeParentFolderId) {
+    throw new Error(
+      "Provide at least one metadata change (name, starred, addParentFolderId, or removeParentFolderId).",
+    );
+  }
+
+  const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}`);
+  url.searchParams.set("fields", DRIVE_FILE_FIELDS);
+  url.searchParams.set("supportsAllDrives", "true");
+  if (addParentFolderId) url.searchParams.set("addParents", addParentFolderId);
+  if (removeParentFolderId) url.searchParams.set("removeParents", removeParentFolderId);
+
+  return { file: summarizeDriveFile(asRecord(await input.call("PATCH", url.toString(), body))) };
+}
+
+async function driveGetFileMetadata(fileId: string, call: Caller) {
+  const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}`);
+  url.searchParams.set("fields", DRIVE_FILE_FIELDS);
+  url.searchParams.set("supportsAllDrives", "true");
+  return summarizeDriveFile(asRecord(await call("GET", url.toString())));
+}
+
+async function driveReadFileContent(input: {
+  file: ReturnType<typeof summarizeDriveFile>;
+  requestedMimeType: string | undefined;
+  textCall: TextCaller;
+}) {
+  const exportMimeType = input.requestedMimeType ?? defaultDriveExportMimeType(input.file.mimeType);
+
+  if (isGoogleWorkspaceMimeType(input.file.mimeType)) {
+    if (!exportMimeType) {
+      throw new Error(`Google Drive file ${input.file.id} cannot be exported as text.`);
+    }
+    const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(input.file.id)}/export`);
+    url.searchParams.set("mimeType", exportMimeType);
+    const { text, contentType } = await input.textCall("GET", url.toString(), exportMimeType);
+    return textContentResult("export", exportMimeType, contentType, text);
+  }
+
+  if (!isTextLikeMimeType(input.file.mimeType)) {
+    throw new Error(
+      `Drive file ${input.file.id} has MIME type ${input.file.mimeType ?? "unknown"} and is not a text-like file. Native Google Docs can be exported; binary files are not supported in this v1 tool.`,
+    );
+  }
+
+  const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(input.file.id)}`);
+  url.searchParams.set("alt", "media");
+  url.searchParams.set("supportsAllDrives", "true");
+  const { text, contentType } = await input.textCall(
+    "GET",
+    url.toString(),
+    exportMimeType ?? input.file.mimeType ?? "text/plain",
+  );
+  return textContentResult("download", input.file.mimeType, contentType, text);
+}
+
+async function docsBatchUpdate(
+  call: Caller,
+  documentId: string,
+  requests: unknown[],
+  requiredRevisionId?: string,
+) {
+  const body: Record<string, unknown> = { requests };
+  if (requiredRevisionId) body.writeControl = { requiredRevisionId };
+  return asRecord(
+    await call(
+      "POST",
+      `${DOCS_BASE}/documents/${encodeURIComponent(documentId)}:batchUpdate`,
+      body,
+    ),
+  );
+}
+
+async function buildDocsUpdateRequests(
+  call: Caller,
+  documentId: string,
+  operation: string,
+  args: Record<string, unknown>,
+): Promise<unknown[]> {
+  switch (operation) {
+    case "append_text": {
+      const text = requireString(args, "text");
+      const endIndex = await docsEndIndex(call, documentId);
+      return [{ insertText: { location: { index: Math.max(1, endIndex - 1) }, text } }];
+    }
+    case "replace_all_text": {
+      const matchText = requireString(args, "matchText");
+      const text = requireString(args, "text");
+      return [
+        {
+          replaceAllText: {
+            containsText: { text: matchText, matchCase: false },
+            replaceText: text,
+          },
+        },
+      ];
+    }
+    case "insert_text": {
+      const text = requireString(args, "text");
+      const startIndex = requireInteger(args, "startIndex");
+      return [{ insertText: { location: { index: startIndex }, text } }];
+    }
+    case "delete_range": {
+      const startIndex = requireInteger(args, "startIndex");
+      const endIndex = requireInteger(args, "endIndex");
+      if (endIndex <= startIndex) {
+        throw new Error("endIndex must be greater than startIndex.");
+      }
+      return [{ deleteContentRange: { range: { startIndex, endIndex } } }];
+    }
+    default:
+      throw new Error(
+        "operation must be one of append_text, replace_all_text, insert_text, or delete_range.",
+      );
+  }
+}
+
+async function docsEndIndex(call: Caller, documentId: string): Promise<number> {
+  const url = new URL(`${DOCS_BASE}/documents/${encodeURIComponent(documentId)}`);
+  url.searchParams.set("fields", "body/content/endIndex");
+  const document = asRecord(await call("GET", url.toString()));
+  const content = asArray(asRecord(document.body).content);
+  const indexes = content
+    .map((entry) => readNumber(asRecord(entry), "endIndex"))
+    .filter((index): index is number => typeof index === "number" && Number.isFinite(index));
+  return indexes.length > 0 ? Math.max(...indexes) : 1;
+}
+
+function buildDriveQuery(args: Record<string, unknown>) {
+  const terms: string[] = [];
+  const query = readString(args, "query")?.trim();
+  const driveQuery = readString(args, "driveQuery")?.trim();
+  const mimeType = readString(args, "mimeType");
+  const folderId = readString(args, "folderId");
+  const modifiedAfter = readString(args, "modifiedAfter");
+  const starred = readBoolean(args, "starred");
+  const sharedWithMe = readBoolean(args, "sharedWithMe");
+  const includeTrashed = readBoolean(args, "includeTrashed") === true;
+
+  if (driveQuery) terms.push(`(${driveQuery})`);
+  if (query) {
+    const literal = driveQueryLiteral(query);
+    terms.push(`(name contains '${literal}' or fullText contains '${literal}')`);
+  }
+  if (mimeType) terms.push(`mimeType = '${driveQueryLiteral(mimeType)}'`);
+  if (folderId) terms.push(`'${driveQueryLiteral(folderId)}' in parents`);
+  if (modifiedAfter) terms.push(`modifiedTime > '${driveQueryLiteral(modifiedAfter)}'`);
+  if (starred !== undefined) terms.push(`starred = ${starred ? "true" : "false"}`);
+  if (sharedWithMe === true) terms.push("sharedWithMe = true");
+  if (!includeTrashed) terms.push("trashed = false");
+
+  return terms.join(" and ");
+}
+
+function summarizeDriveFile(file: Record<string, unknown>) {
+  return {
+    id: readString(file, "id") ?? "",
+    name: readString(file, "name") ?? "",
+    mimeType: readString(file, "mimeType"),
+    description: readString(file, "description"),
+    webViewLink: readString(file, "webViewLink"),
+    iconLink: readString(file, "iconLink"),
+    createdTime: readString(file, "createdTime"),
+    modifiedTime: readString(file, "modifiedTime"),
+    owners: asArray(file.owners).map((owner) => summarizeGooglePerson(asRecord(owner))),
+    lastModifyingUser: summarizeGooglePerson(asRecord(file.lastModifyingUser)),
+    size: readString(file, "size"),
+    parents: asArray(file.parents).filter((parent): parent is string => typeof parent === "string"),
+    starred: readBoolean(file, "starred") ?? false,
+    trashed: readBoolean(file, "trashed") ?? false,
+    shared: readBoolean(file, "shared") ?? false,
+  };
+}
+
+function summarizeGooglePerson(value: Record<string, unknown>) {
+  return {
+    displayName: readString(value, "displayName"),
+    emailAddress: readString(value, "emailAddress"),
+  };
+}
+
+function textContentResult(
+  source: "export" | "download",
+  mimeType: string | undefined,
+  contentType: string | null,
+  text: string,
+) {
+  return {
+    source,
+    mimeType,
+    contentType,
+    text: truncate(text, MAX_DRIVE_TEXT_CHARS),
+    truncated: text.length > MAX_DRIVE_TEXT_CHARS,
+  };
+}
+
+function defaultDriveExportMimeType(mimeType: string | undefined) {
+  if (mimeType === GOOGLE_DOC_MIME_TYPE) return "text/plain";
+  if (mimeType === "application/vnd.google-apps.spreadsheet") return "text/csv";
+  if (mimeType === "application/vnd.google-apps.presentation") return "text/plain";
+  return undefined;
+}
+
+function isGoogleWorkspaceMimeType(mimeType: string | undefined) {
+  return Boolean(mimeType?.startsWith(GOOGLE_WORKSPACE_MIME_PREFIX));
+}
+
+function isTextLikeMimeType(mimeType: string | undefined) {
+  if (!mimeType) return false;
+  if (mimeType.startsWith("text/")) return true;
+  return [
+    "application/json",
+    "application/xml",
+    "application/csv",
+    "application/x-ndjson",
+    "application/rtf",
+    "application/vnd.oasis.opendocument.text",
+  ].includes(mimeType);
+}
+
+function driveQueryLiteral(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
 // --- calendar selection enforcement ---------------------------------------
 
 type SelectedCalendar = { externalId: string; name: string; primary: boolean };
@@ -897,7 +1329,9 @@ function findPart(payload: Record<string, unknown>, mimeType: string): string | 
 // --- small utilities -------------------------------------------------------
 
 function displayName(provider: GoogleProviderKey) {
-  return provider === "gmail" ? "Gmail" : "Google Calendar";
+  if (provider === "gmail") return "Gmail";
+  if (provider === "google_calendar") return "Google Calendar";
+  return "Google Drive";
 }
 
 function connectedList(rows: Array<{ accountEmail: string | null }>) {
@@ -964,4 +1398,17 @@ function requireString(record: Record<string, unknown>, key: string): string {
 function readNumber(record: Record<string, unknown>, key: string): number | undefined {
   const value = record[key];
   return typeof value === "number" ? value : undefined;
+}
+
+function readBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function requireInteger(record: Record<string, unknown>, key: string): number {
+  const value = readNumber(record, key);
+  if (value === undefined || !Number.isInteger(value)) {
+    throw new Error(`${key} must be an integer.`);
+  }
+  return value;
 }

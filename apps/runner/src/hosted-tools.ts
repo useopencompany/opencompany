@@ -229,7 +229,7 @@ export async function executeHostedTool(input: {
   hasAttachedRepository?: boolean;
   personalAgent?: boolean;
 }): Promise<HostedToolResult> {
-  // Google (Gmail + Calendar) tools resolve per-account workspace credentials rather than a
+  // Google (Gmail + Calendar + Drive) tools resolve per-account workspace credentials rather than a
   // platform env var, so they take a different path with the credential context attached.
   if (isGoogleHostedTool(input.name)) {
     return executeGoogleHostedTool({

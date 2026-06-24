@@ -75,6 +75,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     github: workspaceIntegrations.github.status === "connected",
     gmail: googleState.gmail.status === "connected",
     google_calendar: googleState.google_calendar.status === "connected",
+    google_drive: googleState.google_drive.status === "connected",
     linear: mcpSettings.linear.configured,
     slack: mcpSettings.slack.configured,
     posthog: mcpSettings.posthog.configured,
