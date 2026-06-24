@@ -54,7 +54,32 @@ export type ClaimRunLeaseInput = RunLeaseIdentity & {
 export type FinishRunLeaseInput = RunLeaseIdentity & {
   status: "completed" | "aborting" | "failed" | "awaiting_approval" | "awaiting_input";
   lastError?: string | null;
+  // Whether this lease release is a turn yielding back to the user, and so should advance
+  // `lastTurnFinishedAt` (the marker the sidebar's "unseen" dot reads). Defaults to true.
+  // Internal background runs that produce nothing the user can see — the after-session /
+  // memory-keeper pass — set this false: they must never re-arm the dot on a session the
+  // user has already read. See {@link shouldStampTurnFinished}.
+  markTurnFinished?: boolean;
 };
+
+/**
+ * Decide whether a lease release should advance `lastTurnFinishedAt` — the single marker the
+ * sidebar's "unseen" blue dot is derived from (`lastSeenAt < lastTurnFinishedAt`).
+ *
+ * It is stamped only for a genuine *yield back to the user*: a turn that completed, failed, or
+ * parked for approval/input. It is deliberately NOT stamped for:
+ *   - `aborting` — a user-initiated stop; they caused it, so it isn't new activity to flag.
+ *   - `markTurnFinished === false` — an internal background run (the after-session/memory-keeper
+ *     pass) that yields nothing visible. Stamping here would re-arm the dot on a session the user
+ *     already read, which is the bug this guards against.
+ */
+export function shouldStampTurnFinished(input: {
+  status: FinishRunLeaseInput["status"];
+  markTurnFinished?: boolean;
+}): boolean {
+  if (input.markTurnFinished === false) return false;
+  return input.status !== "aborting";
+}
 
 /**
  * A run-control check. Cheap, synchronous local-abort detection happens on every
@@ -155,10 +180,11 @@ export function createDbRunControlStore(): RunControlStore {
           runLeaseExpiresAt: null,
           runHeartbeatAt: null,
           lastError: input.lastError ?? null,
-          // Stamp the turn-finished marker the sidebar's "unseen" dot reads. This is the
-          // single chokepoint for every yield back to the user (completed/failed/awaiting_*),
-          // so the dot can never fire mid-turn. Skip user-initiated abort — they caused it.
-          ...(input.status === "aborting" ? {} : { lastTurnFinishedAt: now }),
+          // Stamp the turn-finished marker the sidebar's "unseen" dot reads. This is the single
+          // chokepoint for every yield back to the user, so the dot can never fire mid-turn.
+          // Skipped for a user-initiated abort and for internal after-session runs — see
+          // shouldStampTurnFinished.
+          ...(shouldStampTurnFinished(input) ? { lastTurnFinishedAt: now } : {}),
           updatedAt: now,
         })
         .where(

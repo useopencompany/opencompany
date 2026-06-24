@@ -1041,7 +1041,13 @@ async function executeStreamingTurn(input: {
     sandboxBilling: input.sandboxAcquirer.billingSnapshot(),
   });
 
-  await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
+  // An internal run (the after-session/memory-keeper pass) yields nothing the user can see, so
+  // it must not advance lastTurnFinishedAt and re-arm the sidebar's "unseen" dot on a read session.
+  await requireLeaseWrite(
+    releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed", {
+      markTurnFinished: !input.internal,
+    }),
+  );
 
   return { outcome: "completed", assistantContent };
 }
@@ -1095,6 +1101,14 @@ async function runAfterSessionWithContext(
   const sandboxRef: { id: string | undefined } = { id: undefined };
   let outcome = "unknown";
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
+
+  // After-session is an internal background pass: release its parent lease WITHOUT advancing
+  // lastTurnFinishedAt, so a memory update never re-arms the sidebar's "unseen" dot on a session
+  // the user has already read. (ctx.leaseId/leaseOwner are read at call time, post-acquire.)
+  const releaseAfterSessionLease = () =>
+    releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed", {
+      markTurnFinished: false,
+    });
 
   try {
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
@@ -1226,7 +1240,7 @@ async function runAfterSessionWithContext(
     );
     if (!afterRun) {
       outcome = "skipped_duplicate";
-      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      await releaseAfterSessionLease();
       return;
     }
     afterSessionRunId = afterRun.id;
@@ -1248,7 +1262,7 @@ async function runAfterSessionWithContext(
           status: "skipped",
           skippedReason: "archived_session",
         });
-        await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+        await releaseAfterSessionLease();
         return;
       }
       const { childSessionId } = await observeRunStep(ctx, "spawn_memory_keeper", () =>
@@ -1269,7 +1283,7 @@ async function runAfterSessionWithContext(
         type: "after_session.spawned",
         payload: { runId: afterSessionRunId, messageId: input.messageId, childSessionId },
       });
-      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      await releaseAfterSessionLease();
       outcome = "spawned_memory_keeper";
       logger.info("Runner memory-keeper spawned", {
         event: "opencompany.memory_keeper_spawned",
@@ -1287,7 +1301,7 @@ async function runAfterSessionWithContext(
     // explicit `#after-session` prompt. `afterSession` is guaranteed enabled here.
     if (!afterSession) {
       outcome = "skipped_disabled";
-      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      await releaseAfterSessionLease();
       return;
     }
 
@@ -1327,7 +1341,7 @@ async function runAfterSessionWithContext(
     );
     if (!assistantCreated) {
       outcome = "skipped_assistant_exists";
-      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      await releaseAfterSessionLease();
       return;
     }
 
@@ -1527,7 +1541,7 @@ async function runAfterSessionWithContext(
           message,
         },
       });
-      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      await releaseAfterSessionLease();
     } else {
       await appendRuntimeEvent(ctx.db, {
         sessionId: input.sessionId,
