@@ -35,10 +35,13 @@ function createDbMock(selectResults: unknown[][]) {
   const where = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ where }));
   const select = vi.fn(() => ({ from }));
+  const onConflictDoNothing = vi.fn(() => ({ query: "insert" }));
   const insert = vi.fn((table: unknown) => ({
     values: vi.fn((value: unknown) => {
       insertedValues.push({ table, value });
-      return { query: "insert" };
+      // `.values()` is consumed two ways: passed straight into db.batch([...]) by the new-agent
+      // seed, and chained with `.onConflictDoNothing()` by the soul.md backfill — support both.
+      return { query: "insert", onConflictDoNothing };
     }),
   }));
   const batch = vi.fn(async (queries: unknown[]) => queries);
@@ -48,6 +51,7 @@ function createDbMock(selectResults: unknown[][]) {
     insertedValues,
     batch,
     insert,
+    onConflictDoNothing,
   };
 }
 
@@ -151,7 +155,7 @@ describe("ensurePersonalAgent", () => {
     });
   });
 
-  it("returns the existing agent without seeding anything", async () => {
+  it("returns the existing agent without seeding when soul.md already exists", async () => {
     const { db, insert, batch } = createDbMock([
       [
         {
@@ -168,6 +172,9 @@ describe("ensurePersonalAgent", () => {
           version: 1,
         },
       ],
+      // soul.md lookup: already present and already in the fixed-identity form, so the
+      // normalize-on-boot step is a no-op and nothing is written.
+      [{ content: DEFAULT_PERSONAL_SOUL_MD.replaceAll("{{userName}}", "Ada") }],
     ]);
     getDbMock.mockReturnValue(db as never);
 
@@ -180,6 +187,62 @@ describe("ensurePersonalAgent", () => {
     expect(result.id).toBe("agt_existing");
     expect(insert).not.toHaveBeenCalled();
     expect(batch).not.toHaveBeenCalled();
+    expect(captureServerEventMock).not.toHaveBeenCalled();
+  });
+
+  it("backfills a personalized soul.md for an existing agent that is missing it", async () => {
+    const { db, insertedValues, insert, batch, onConflictDoNothing } = createDbMock([
+      [
+        {
+          id: "agt_existing",
+          name: "Leo",
+          path: "agents/personal-existing/personal-existing.agent",
+          body: "You are Leo, Ada's personal agent.\n\nexisting body",
+          content: null,
+          config: {
+            title: "Leo",
+            instructions: "You are Leo, Ada's personal agent.\n\nexisting body",
+            model: { name: "moonshotai/kimi-k2.6" },
+          },
+          version: 1,
+        },
+      ],
+      // soul.md lookup returns nothing — the agent predates soul.md seeding (#442).
+      [],
+    ]);
+    getDbMock.mockReturnValue(db as never);
+
+    const result = await ensurePersonalAgent({
+      userId: "usr_123",
+      workspaceId: "wks_123",
+      userName: "Ada",
+    });
+
+    expect(result.id).toBe("agt_existing");
+    // Backfilled outside any batch (single insert), so the Soul nav stops redirecting to /personal.
+    expect(insert).toHaveBeenCalledOnce();
+    expect(batch).not.toHaveBeenCalled();
+    // Race-safe: concurrent first-loads must not collide on the unique (workspaceId, path) index.
+    expect(onConflictDoNothing).toHaveBeenCalledOnce();
+
+    const soulInsert = insertedValues.find((entry) => entry.table === agentFiles)?.value as {
+      workspaceId: string;
+      agentId: string;
+      path: string;
+      content: string;
+      githubSyncStatus: string;
+    };
+    expect(soulInsert).toMatchObject({
+      workspaceId: "wks_123",
+      agentId: "agt_existing",
+      path: "agents/personal-existing/soul.md",
+      content: DEFAULT_PERSONAL_SOUL_MD.replaceAll("{{userName}}", "Ada"),
+      githubSyncStatus: "synced",
+    });
+    expect(soulInsert.content).toContain("Ada");
+    expect(soulInsert.content).toContain("Leo");
+    expect(soulInsert.content).not.toContain("{{userName}}");
+    // Re-scaffolding an existing agent is not an "agent_created" event.
     expect(captureServerEventMock).not.toHaveBeenCalled();
   });
 });
