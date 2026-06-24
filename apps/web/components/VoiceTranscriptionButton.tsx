@@ -32,15 +32,17 @@ export function VoiceTranscriptionButton({
     return () => onRecordingChange?.(false);
   }, [isRecording, onRecordingChange]);
 
-  useEffect(() => {
-    if (!isRecording) return;
+  const clearRecordingExit = () => {
+    if (recordingExit === null && exitAudioLevels === null && !recordingExitTimerRef.current) {
+      return;
+    }
     if (recordingExitTimerRef.current) {
       clearTimeout(recordingExitTimerRef.current);
       recordingExitTimerRef.current = null;
     }
     setRecordingExit(null);
     setExitAudioLevels(null);
-  }, [isRecording]);
+  };
 
   useEffect(() => {
     return () => {
@@ -77,6 +79,11 @@ export function VoiceTranscriptionButton({
       setExitAudioLevels(null);
       recordingExitTimerRef.current = null;
     }, RECORDING_EXIT_MS);
+  };
+
+  const handleStart = () => {
+    clearRecordingExit();
+    start();
   };
 
   if (showActionRecording) {
@@ -144,7 +151,7 @@ export function VoiceTranscriptionButton({
       <button
         type="button"
         disabled={disabled || isTranscribing}
-        onClick={isRecording ? stop : start}
+        onClick={isRecording ? stop : handleStart}
         aria-label={
           isTranscribing
             ? "Transcribing voice message"
