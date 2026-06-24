@@ -1,8 +1,12 @@
 "use client";
 
 import { Check, LoaderCircle, Mic, Square, Trash2, X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVoiceTranscription } from "@/components/useVoiceTranscription";
+
+type RecordingExit = "finish" | "discard" | null;
+
+const RECORDING_EXIT_MS = 280;
 
 export function VoiceTranscriptionButton({
   onTranscription,
@@ -19,15 +23,33 @@ export function VoiceTranscriptionButton({
     useVoiceTranscription({
       onTranscription,
     });
+  const [recordingExit, setRecordingExit] = useState<RecordingExit>(null);
+  const recordingExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     onRecordingChange?.(isRecording);
     return () => onRecordingChange?.(false);
   }, [isRecording, onRecordingChange]);
 
+  useEffect(() => {
+    if (!isRecording) return;
+    if (recordingExitTimerRef.current) {
+      clearTimeout(recordingExitTimerRef.current);
+      recordingExitTimerRef.current = null;
+    }
+    setRecordingExit(null);
+  }, [isRecording]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingExitTimerRef.current) clearTimeout(recordingExitTimerRef.current);
+    };
+  }, []);
+
   if (!isSupported) return null;
 
   const busy = isRecording || isTranscribing;
+  const showActionRecording = variant === "action" && (isRecording || recordingExit !== null);
   const sizeClass = variant === "action" ? "h-8 w-8 rounded-full" : "h-7 w-7 rounded-md";
   const discardSizeClass = variant === "action" ? "h-8 w-8" : "h-7 w-7";
   const recordingAnimationClass = isRecording ? "voice-recording-button" : "";
@@ -40,9 +62,26 @@ export function VoiceTranscriptionButton({
       ? "bg-surface-hover text-ink-muted shadow-[inset_0_0_0_1px_rgba(17,17,17,0.04)]"
       : "text-ink-muted";
 
-  if (isRecording && variant === "action") {
+  const playRecordingExit = (nextExit: Exclude<RecordingExit, null>, action: () => void) => {
+    if (recordingExit) return;
+    setRecordingExit(nextExit);
+    action();
+    if (recordingExitTimerRef.current) clearTimeout(recordingExitTimerRef.current);
+    recordingExitTimerRef.current = setTimeout(() => {
+      setRecordingExit(null);
+      recordingExitTimerRef.current = null;
+    }, RECORDING_EXIT_MS);
+  };
+
+  if (showActionRecording) {
+    const shellExitClass =
+      recordingExit === "finish"
+        ? "voice-chatgpt-shell-exit-finish"
+        : recordingExit === "discard"
+          ? "voice-chatgpt-shell-exit-discard"
+          : "";
     return (
-      <span className="inline-flex items-center gap-1.5">
+      <span className={`inline-flex items-center gap-1.5 ${shellExitClass}`}>
         <span aria-hidden="true" className="voice-chatgpt-recording">
           <span aria-hidden="true" className="voice-chatgpt-waveform min-w-0 flex-1">
             {audioLevels.map((level, index) => (
@@ -59,19 +98,21 @@ export function VoiceTranscriptionButton({
         </span>
         <button
           type="button"
-          onClick={cancel}
+          disabled={recordingExit !== null}
+          onClick={() => playRecordingExit("discard", cancel)}
           aria-label="Discard recording"
           title="Discard recording"
-          className="voice-chatgpt-control relative z-20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors"
+          className="voice-chatgpt-control relative z-20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:pointer-events-none"
         >
           <X size={18} strokeWidth={1.9} />
         </button>
         <button
           type="button"
-          onClick={stop}
+          disabled={recordingExit !== null}
+          onClick={() => playRecordingExit("finish", stop)}
           aria-label="Finish recording"
           title="Finish recording"
-          className="voice-chatgpt-control voice-chatgpt-accept relative z-20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors"
+          className="voice-chatgpt-control voice-chatgpt-accept relative z-20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:pointer-events-none"
         >
           <Check size={19} strokeWidth={1.9} />
         </button>

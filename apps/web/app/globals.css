@@ -630,6 +630,22 @@ body {
   animation: voice-recording-discard-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.voice-chatgpt-shell-exit-finish .voice-chatgpt-recording {
+  animation: voice-chatgpt-wave-exit-left 260ms cubic-bezier(0.32, 0, 0.67, 0) both;
+}
+
+.voice-chatgpt-shell-exit-finish .voice-chatgpt-control {
+  animation: voice-chatgpt-control-exit-left 180ms ease-in both;
+}
+
+.voice-chatgpt-shell-exit-discard .voice-chatgpt-recording {
+  animation: voice-chatgpt-delete-down 240ms cubic-bezier(0.32, 0, 0.67, 0) both;
+}
+
+.voice-chatgpt-shell-exit-discard .voice-chatgpt-control {
+  animation: voice-chatgpt-control-delete-down 180ms ease-in both;
+}
+
 @keyframes voice-chatgpt-wave-entry {
   from {
     clip-path: inset(0 0 0 78%);
@@ -638,6 +654,54 @@ body {
   to {
     clip-path: inset(0 0 0 0);
     opacity: 1;
+  }
+}
+
+@keyframes voice-chatgpt-wave-exit-left {
+  from {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+  to {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0.36;
+    transform: translateY(-50%) translateX(-10px);
+  }
+}
+
+@keyframes voice-chatgpt-control-exit-left {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-6px) scale(0.94);
+  }
+}
+
+@keyframes voice-chatgpt-delete-down {
+  from {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  to {
+    clip-path: inset(24% 0 0 0);
+    opacity: 0;
+    transform: translateY(-22%) scale(0.98);
+  }
+}
+
+@keyframes voice-chatgpt-control-delete-down {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
   }
 }
 
@@ -706,6 +770,7 @@ body {
   .voice-recording-icon,
   .voice-recording-discard,
   .voice-chatgpt-recording,
+  .voice-chatgpt-control,
   .voice-chatgpt-waveform,
   .voice-chatgpt-bar {
     animation: none;

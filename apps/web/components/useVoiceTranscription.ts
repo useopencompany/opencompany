@@ -354,9 +354,15 @@ export function useVoiceTranscription({ onTranscription }: VoiceTranscriptionOpt
 
   const stop = useCallback(() => {
     const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
+    if (!recorder || recorder.state === "inactive") {
+      startRequestRef.current += 1;
+      cancelRef.current = true;
+      cleanupStream();
+      setStatus("idle");
+      return;
+    }
     recorder.stop();
-  }, []);
+  }, [cleanupStream]);
 
   const cancel = useCallback(() => {
     const recorder = recorderRef.current;
