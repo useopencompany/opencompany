@@ -267,6 +267,27 @@ export async function ensurePersonalAgent(input: {
               ),
             );
         }
+      } else {
+        // Backfill soul.md for personal agents created before it was seeded (#442). Without it,
+        // the Soul nav (→ /personal/files/soul.md) finds no file and the file route redirects to
+        // /personal — the "clicking Soul jumps to a new chat" bug. Mirrors the new-agent seed's
+        // content. onConflictDoNothing keeps it race-safe: this runs on every /personal load until
+        // the row exists, so two concurrent loads would otherwise both insert and the second would
+        // hit the unique (workspaceId, path) index and 500 the layout. The next
+        // loadPersonalAgentContextFiles() in the same request picks up whichever insert won.
+        const soul = personalizeTemplate(DEFAULT_PERSONAL_SOUL_MD, userName);
+        await db
+          .insert(agentFiles)
+          .values({
+            workspaceId: input.workspaceId,
+            agentId: existing.id,
+            path: soulPath,
+            content: soul,
+            contentHash: hashBrainContent(soul),
+            sizeBytes: brainContentSize(soul),
+            githubSyncStatus: "synced",
+          })
+          .onConflictDoNothing();
       }
     }
 
