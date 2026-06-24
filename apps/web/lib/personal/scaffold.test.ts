@@ -94,7 +94,7 @@ describe("ensurePersonalAgent", () => {
     expect(result.defaultModel).toBe("moonshotai/kimi-k2.6");
 
     // The body's @-mentions are the source of truth for the default capability set: research
-    // tools (exa/youtube/instagram), personal integrations (gmail/google_calendar/slack), and
+    // tools (exa/youtube/instagram), personal integrations (gmail/google_calendar/google_drive/slack), and
     // the thinking/writing skills — plus the dormant onboarding skill appended in code.
     expect(agentInsert.config.tools.map((tool) => tool.id)).toEqual([
       "exa",
@@ -102,6 +102,7 @@ describe("ensurePersonalAgent", () => {
       "instagram",
       "gmail",
       "google_calendar",
+      "google_drive",
       "slack",
     ]);
     expect(agentInsert.config.skills?.map((skill) => skill.id)).toEqual([

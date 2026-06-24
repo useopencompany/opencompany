@@ -170,7 +170,7 @@ const educationKeys = new Set<StepKey>([
 const companyUrlContextHint =
   "Your website helps make opencompany better for your product and customers. We recommend adding it, but you can continue without it.";
 const onboardingIntegrationOptions = PERSONAL_INTEGRATIONS_CATALOG.filter((entry) =>
-  ["github", "gmail", "google_calendar", "linear", "slack"].includes(entry.id),
+  ["github", "gmail", "google_calendar", "google_drive", "linear", "slack"].includes(entry.id),
 );
 
 function firstErrorMessage(errors: OnboardingActionState["errors"]) {

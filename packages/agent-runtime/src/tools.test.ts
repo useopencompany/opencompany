@@ -627,6 +627,7 @@ describe("buildCapabilityDiscovery", () => {
       "notion",
       "gmail",
       "google_calendar",
+      "google_drive",
     ]) {
       expect(ids).not.toContain(excluded);
     }

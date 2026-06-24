@@ -218,16 +218,19 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
   stable ngrok domain when testing the user-facing GitHub work integration locally. ngrok is required
   for the smoothest developer experience on callback/webhook integrations. See
   [github-local-dev.md](./github-local-dev.md).
-- **Google (Gmail + Calendar) integration bootstrap only:** create an OAuth client in the Google
-  Cloud console (APIs & Services → Credentials → OAuth client ID, type "Web application"). Add
-  `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback` and
-  `${NEXT_PUBLIC_APP_URL}/api/integrations/google-calendar/callback` as authorized redirect URIs,
-  enable the Gmail and Google Calendar APIs, and put `GOOGLE_OAUTH_CLIENT_ID`,
-  `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_INTEGRATION_STATE_SECRET` in Infisical `dev` + `/web`
-  and `/runner`. On the OAuth consent screen, Gmail's `gmail.readonly` is a **restricted** scope and
-  Calendar is **sensitive**: for external/production users Google requires app verification (and a
-  CASA security assessment for Gmail). Until verification, add yourself as a **test user** on the
-  consent screen — the flow works fully for test users.
+- **Google (Gmail + Calendar + Drive) integration bootstrap only:** create an OAuth client in the
+  Google Cloud console (APIs & Services → Credentials → OAuth client ID, type "Web application").
+  Add `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback`,
+  `${NEXT_PUBLIC_APP_URL}/api/integrations/google-calendar/callback`, and
+  `${NEXT_PUBLIC_APP_URL}/api/integrations/google-drive/callback` as authorized redirect URIs,
+  enable the Gmail, Google Calendar, Google Drive, and Google Docs APIs, and put
+  `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
+  `GOOGLE_INTEGRATION_STATE_SECRET` in Infisical `dev` + `/web` and `/runner`. On the OAuth consent
+  screen, Gmail's `gmail.readonly` scope is **restricted** and Calendar is **sensitive**, while
+  Drive uses the non-sensitive `drive.file` per-file scope: for external/production users Google
+  still requires app verification for the sensitive/restricted scopes already in use. Until
+  verification, add yourself as a **test user** on the consent screen — the flow works fully for
+  test users.
 - **Neon logical replication (one-time per project):** enable logical replication in the Neon console
   (project → Settings) so Electric can create its replication slot. Project-level, so it covers every
   branch. `bun run setup` starts Electric but cannot flip this toggle for you.
