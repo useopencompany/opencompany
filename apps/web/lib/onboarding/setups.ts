@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  Files,
   FlaskConical,
   GitBranch,
   type LucideIcon,
@@ -72,7 +73,8 @@ export const ONBOARDING_CONNECTED_MESSAGE = "oc-integration-connected" as const;
 
 export type OnboardingConnectedMessage = {
   type: typeof ONBOARDING_CONNECTED_MESSAGE;
-  // Equals a PersonalIntegrationId (github, gmail, google_calendar, linear, slack, posthog, betterstack).
+  // Equals a PersonalIntegrationId (github, gmail, google_calendar, google_drive, linear, slack,
+  // posthog, betterstack).
   provider: string | null;
   status: string | null;
   reason: string | null;
@@ -115,6 +117,13 @@ export const ONBOARDING_INTEGRATIONS: OnboardingIntegration[] = [
     description: "Read and manage events across your calendars.",
     icon: CalendarDays,
     connectHref: `/api/integrations/google-calendar/start?returnTo=${ONBOARDING_RETURN_TO}`,
+  },
+  {
+    id: "google_drive",
+    label: "Google Drive",
+    description: "Find, read, and update docs in Drive.",
+    icon: Files,
+    connectHref: `/api/integrations/google-drive/start?returnTo=${ONBOARDING_RETURN_TO}`,
   },
   {
     id: "linear",

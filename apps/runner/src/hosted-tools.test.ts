@@ -1996,6 +1996,7 @@ describe("executeHostedTool (discover_capabilities)", () => {
     expect(output.howToEnable).toContain("ask_user_question");
     // Workspace-OAuth capabilities are excluded from v1 discovery.
     expect(output.capabilities.map((capability) => capability.id)).not.toContain("gmail");
+    expect(output.capabilities.map((capability) => capability.id)).not.toContain("google_drive");
     expect(output.capabilities.map((capability) => capability.id)).not.toContain("linear");
   });
 

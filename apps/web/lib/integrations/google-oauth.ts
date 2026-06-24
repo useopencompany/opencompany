@@ -1,13 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getAppUrl } from "@/lib/billing/stripe";
 
-// Gmail and Google Calendar are modeled as two separate integrations that share a single
-// Google OAuth client. They differ only by the scopes they request and whether the callback
-// syncs the account's calendars. Everything Google-specific (scopes, endpoints, token shape)
-// lives here; the DB persistence lives in google-service.ts and the route glue in
-// google-routes.ts.
+// Gmail, Google Calendar, and Google Drive are modeled as separate integrations that share a
+// single Google OAuth client. They differ by the scopes they request and whether the callback syncs
+// provider-specific resources. Everything Google-specific (scopes, endpoints, token shape) lives
+// here; the DB persistence lives in google-service.ts and the route glue in google-routes.ts.
 
-export type GoogleIntegrationProvider = "gmail" | "google_calendar";
+export type GoogleIntegrationProvider = "gmail" | "google_calendar" | "google_drive";
 
 export type GoogleProviderConfig = {
   provider: GoogleIntegrationProvider;
@@ -41,6 +40,15 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
       ...OPENID_SCOPES,
     ],
     syncsCalendars: true,
+  },
+  google_drive: {
+    provider: "google_drive",
+    routeSegment: "google-drive",
+    displayName: "Google Drive",
+    // Full Drive access is required for agents to find, read, create, and update existing files.
+    // This is a restricted Google scope and requires Google verification before broad production use.
+    scopes: ["https://www.googleapis.com/auth/drive", ...OPENID_SCOPES],
+    syncsCalendars: false,
   },
 };
 
@@ -328,7 +336,9 @@ function isGoogleIntegrationStatePayload(value: unknown): value is GoogleIntegra
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
-    (record.provider === "gmail" || record.provider === "google_calendar") &&
+    (record.provider === "gmail" ||
+      record.provider === "google_calendar" ||
+      record.provider === "google_drive") &&
     typeof record.workspaceId === "string" &&
     typeof record.userId === "string" &&
     typeof record.returnTo === "string" &&

@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  Files,
   FileText,
   FlaskConical,
   GitBranch,
@@ -85,6 +86,20 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
       "List the account's calendars",
       "Read events on selected calendars",
       "Create, update, and delete events",
+    ],
+  },
+  {
+    id: "google_drive",
+    label: "Google Drive",
+    description: "Find, read, create, and update documents in a connected Drive account.",
+    icon: Files,
+    kind: "google",
+    connectUrl: (returnTo) =>
+      `/api/integrations/google-drive/start?returnTo=${encodeURIComponent(returnTo)}`,
+    permissions: [
+      "Search and read files in the connected Drive account",
+      "Export Google Docs and supported Drive files for agent use",
+      "Create and update Google Docs and file metadata",
     ],
   },
   {
@@ -186,6 +201,7 @@ export function personalIntegrationConnectUrl(entry: PersonalIntegrationCatalogE
 export const PERSONAL_INTEGRATION_TOOL_IDS = new Set<string>([
   "gmail",
   "google_calendar",
+  "google_drive",
   "linear",
   "slack",
   "posthog",

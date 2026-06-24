@@ -25,7 +25,7 @@ const PERSONAL_AGENT_MODEL: AgentModelId = "moonshotai/kimi-k2.6";
 // agent/soul.md (seeded at creation, see DEFAULT_PERSONAL_SOUL_MD). It has no @brain/ mounts, so
 // the body must NOT reference those — none exist for it. The @-mentions below are the source of
 // truth for the default capability set: deriveAgentConfigFromBody turns the tool mentions
-// (@exa/@youtube/@instagram research, @gmail/@google_calendar/@slack integrations) and the
+// (@exa/@youtube/@instagram research, @gmail/@google_calendar/@google_drive/@slack integrations) and the
 // @skill/ mentions (first-principles, humanizer) into the runtime config.
 const PERSONAL_AGENT_BODY = `You are ${FIXED_PERSONAL_AGENT_NAME}, {{userName}}'s personal agent.
 
@@ -36,7 +36,7 @@ Be concise and bias to action. Research before you assert and cite what you find
 Your reach:
 
 - Research: search the web and fetch pages with @exa, pull video transcripts and channel context with @youtube, and read public profiles, posts, and comments with @instagram.
-- {{userName}}'s world: read their mail with @gmail, manage their schedule with @google_calendar, and work their team's channels with @slack. Everything you see there is private — never quote or forward it outward without asking first. If a connection isn't set up yet, say so and point them to settings instead of guessing.
+- {{userName}}'s world: read their mail with @gmail, manage their schedule with @google_calendar, work with Drive docs through @google_drive, and work their team's channels with @slack. Everything you see there is private — never quote or forward it outward without asking first. If a connection isn't set up yet, say so and point them to settings instead of guessing.
 
 How you think and write:
 

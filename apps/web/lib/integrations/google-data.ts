@@ -29,7 +29,7 @@ export type GoogleConnectionState = {
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected";
   statusReason: string | null;
   updatedAt: string;
-  /** Empty for Gmail; the account's calendars for Google Calendar. */
+  /** Empty for Gmail/Drive; the account's calendars for Google Calendar. */
   calendars: GoogleCalendarResourceState[];
 };
 
@@ -42,9 +42,10 @@ export type GoogleProviderState = {
 export type GoogleIntegrationState = {
   gmail: GoogleProviderState;
   google_calendar: GoogleProviderState;
+  google_drive: GoogleProviderState;
 };
 
-const GOOGLE_PROVIDERS: GoogleIntegrationProvider[] = ["gmail", "google_calendar"];
+const GOOGLE_PROVIDERS: GoogleIntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
 
 export async function loadGoogleIntegrationState(): Promise<GoogleIntegrationState> {
   const { workspace } = await currentWorkspace();
@@ -136,6 +137,7 @@ export async function loadGoogleIntegrationStateForWorkspace(
   return {
     gmail: buildProviderState("gmail"),
     google_calendar: buildProviderState("google_calendar"),
+    google_drive: buildProviderState("google_drive"),
   };
 }
 
