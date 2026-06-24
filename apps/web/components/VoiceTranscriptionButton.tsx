@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, LoaderCircle, Mic, Square, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useVoiceTranscription } from "@/components/useVoiceTranscription";
 
 type RecordingExit = "finish" | "discard" | null;
@@ -27,7 +27,7 @@ export function VoiceTranscriptionButton({
   const [exitAudioLevels, setExitAudioLevels] = useState<number[] | null>(null);
   const recordingExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onRecordingChange?.(isRecording);
     return () => onRecordingChange?.(false);
   }, [isRecording, onRecordingChange]);
