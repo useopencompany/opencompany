@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-06-22
+
+### Fixed
+- Completed assistant replies now appear live when the final stream payload is missed, without needing a page reload (#496) — @louis.
+
+## [0.16.0] - 2026-06-19
+
+### Added
+- Personal sessions on mobile can now swipe from the opposite edge for session details, while filmstrip gestures respect swipe direction (#492, #495) — @jasper.
+- The personal agent sidebar now includes a tabbed session details inspector (#489) — @louis.
+
+### Changed
+- Feedback reports now submit optimistically and archive actions show a confirmation toast (#491) — @jasper.
+- Personal Brain and after-session memory guidance is stricter, so agents only save persistent files or memories when user intent is clear (#485) — @louis.
+- The personal sidebar home entry is now labeled New Session and uses the send icon (#487) — @louis.
+- Personal sidebar session lists now hide scrollbars while remaining scrollable (#494) — @jasper.
+
+### Fixed
+- Agent replies no longer reorder in the transcript when stream events arrive out of order (#493) — @jasper.
+- Mobile drawer swipes now work more reliably in Safari while preserving normal vertical page scrolling (#490) — @jasper.
+
+## [0.15.0] - 2026-06-18
+
+### Added
+- Personal Brain now keeps restorable file versions, with restore tooling, caps, and runner guidance for safer durable writes (#483) — @jasper.
+- Mobile users can now swipe to open the main navigation drawer (#484) — @jasper.
+
+### Fixed
+- The onboarding wizard no longer resets when setting tool policies during the capabilities step (#481) — @jasper.
+- The three-dot menu in the brain file view no longer renders behind the file text (#480) — @jasper.
+- GitHub work repositories granted after connecting now resolve via a live lookup instead of being missed (#479) — @jasper.
+- Various mobile and phone UI fixes (#478) — @jasper.
+
+## [0.14.0] - 2026-06-16
+
 ### Added
 - OpenRouter Fusion models are now supported (#473) — @louis.
 - Messages sent mid-run now offer Steer, Queue, and Interrupt send-modes (#468) — @jasper.
@@ -20,10 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typed @mentions in the agent editor are no longer auto-converted as you type (#470) — @jasper.
 
 ### Fixed
-- The onboarding wizard no longer resets when setting tool policies during the capabilities step (#481) — @jasper.
-- The three-dot menu in the brain file view no longer renders behind the file text (#480) — @jasper.
-- GitHub work repositories granted after connecting now resolve via a live lookup instead of being missed (#479) — @jasper.
-- Various mobile and phone UI fixes (#478) — @jasper.
 - Near-identical person records in memory are now deduplicated (#477) — @jasper.
 - The thinking trace now separates distinct reasoning phases instead of running them together (#476) — @jasper.
 - The "Updated memory" card no longer overlaps the message footer (#469) — @jasper.

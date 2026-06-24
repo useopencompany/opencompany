@@ -21,6 +21,9 @@ export async function loadProviders(
 
   const gateway = createGateway({
     apiKey,
+    // The runner points this at its LLM broker when brokered (the api key is then a
+    // short-lived broker token rather than the raw Gateway key).
+    ...(env.MEMORY_GATEWAY_BASE_URL ? { baseUrl: env.MEMORY_GATEWAY_BASE_URL } : {}),
     ...(env.MEMORY_EMBEDDING_MODEL ? { embeddingModel: env.MEMORY_EMBEDDING_MODEL } : {}),
     ...(env.MEMORY_RETRIEVAL_MODEL ? { chatModel: env.MEMORY_RETRIEVAL_MODEL } : {}),
     ...(onUsage ? { onUsage } : {}),

@@ -794,6 +794,8 @@ function makePersonalAgentContext(
     bundleDir: "agents/personal",
     userName: "Test User",
     userEmail: "test@example.com",
+    userTimezone: "UTC",
+    userTimezoneSource: "manual",
     workspaceName: "Test Workspace",
     initialSessions: [],
     personalSkills: [],
@@ -803,6 +805,7 @@ function makePersonalAgentContext(
       github: false,
       gmail: false,
       google_calendar: false,
+      google_drive: false,
       linear: false,
       slack: false,
       posthog: false,
@@ -819,6 +822,8 @@ function makePersonalAgentContext(
     setProMode: vi.fn(),
     companySurfaceEnabled: false,
     setCompanySurfaceEnabled: vi.fn(),
+    setUserTimezone: vi.fn(),
+    setUserTimezoneSource: vi.fn(),
     getDraft: () => ({ body: "Help me.", content: { type: "doc" } }),
     setDraft: vi.fn(),
     files: [],
@@ -1839,6 +1844,160 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     rerender(
       <QueryClientProvider client={queryClient}>
         <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// ── PRO-173: reading-position safety net across a work-collapse ─────────────
+//
+// When the "work" block (reasoning / N-steps) collapses ABOVE the fold while the user is
+// scrolled up reading, native overflow-anchor does not compensate and the answer lurches up.
+// The safety-net layout effect anchors to the leaf at the viewport top (captured on a genuine
+// scroll) and nudges scrollTop so that leaf — and the answer the user is reading — holds still.
+
+describe("SessionViewContent — PRO-173: reading-position safety net across work-collapse", () => {
+  let scrollToSpy: ReturnType<typeof vi.fn>;
+  let originalScrollTo: PropertyDescriptor | undefined;
+  let originalRect: PropertyDescriptor | undefined;
+  let originalEFP: PropertyDescriptor | undefined;
+  // Per-element viewport top, so we can move the anchored leaf to simulate a collapse above it.
+  const rectTop = new WeakMap<Element, number>();
+
+  beforeEach(() => {
+    scrollToSpy = vi.fn();
+    originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo");
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollToSpy,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => 800,
+    });
+    // Far from the bottom (distanceFromBottom = 1000 - 0 - 800 = 200 > 80) so a user scroll
+    // leaves isPinnedAtBottom = false → reading mode.
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 1000,
+    });
+    originalRect = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      writable: true,
+      value(this: HTMLElement) {
+        const top = rectTop.get(this) ?? 0; // container defaults to viewport top 0
+        return {
+          top,
+          bottom: top + 20,
+          left: 0,
+          right: 800,
+          width: 800,
+          height: 20,
+          x: 0,
+          y: top,
+          toJSON() {},
+        } as DOMRect;
+      },
+    });
+    originalEFP = Object.getOwnPropertyDescriptor(Document.prototype, "elementFromPoint");
+  });
+
+  afterEach(() => {
+    if (originalScrollTo) {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
+    } else {
+      // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+      delete (HTMLElement.prototype as unknown as { scrollTo?: unknown }).scrollTo;
+    }
+    if (originalRect) {
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", originalRect);
+    }
+    if (originalEFP) {
+      Object.defineProperty(Document.prototype, "elementFromPoint", originalEFP);
+    } else {
+      // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+      delete (Document.prototype as unknown as { elementFromPoint?: unknown }).elementFromPoint;
+    }
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { clientHeight?: unknown }).clientHeight;
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { scrollHeight?: unknown }).scrollHeight;
+    // (rectTop is a WeakMap keyed by per-test DOM nodes — stale entries are GC'd, no clear needed)
+    vi.clearAllMocks();
+  });
+
+  function renderScrolledUp() {
+    const detail = makeDetail({
+      messages: [
+        { id: "msg_u", role: "user", content: "Question", status: "completed" },
+        {
+          id: "msg_a",
+          role: "assistant",
+          content: "A long completed answer with collapsible work above it.",
+          status: "completed",
+        },
+      ],
+    });
+    streamMock.status = "live";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+    const scroller = view.container.querySelector(".overflow-y-auto") as HTMLElement;
+    const anchor = scroller.querySelector("[data-message-id]") as HTMLElement;
+    // elementFromPoint resolves to the leaf at the viewport top → our anchor.
+    Object.defineProperty(Document.prototype, "elementFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => anchor,
+    });
+    return { view, queryClient, detail, scroller, anchor };
+  }
+
+  it("corrects scrollTop when work collapses above the reading position", async () => {
+    const { view, queryClient, detail, scroller, anchor } = renderScrolledUp();
+    // The user is reading: the anchored leaf sits 400px below the container's top edge.
+    rectTop.set(anchor, 400);
+    fireEvent.wheel(scroller);
+    fireEvent.scroll(scroller); // onScroll: not pinned → captures the anchor at viewportTop 400
+    scrollToSpy.mockClear();
+
+    // Work above the fold collapses by 318px → the anchored leaf moves UP to 82.
+    rectTop.set(anchor, 82);
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // The safety net pulls scrollTop back by the 318px drift (scrollTop 0 + (82 - 400)),
+    // so the reading position is preserved.
+    await waitFor(() => {
+      expect(scrollToSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ top: -318, behavior: "auto" }),
+      );
+    });
+  });
+
+  it("does not correct when the anchored leaf stays put (e.g. streaming appends below it)", async () => {
+    const { view, queryClient, detail, scroller, anchor } = renderScrolledUp();
+    rectTop.set(anchor, 400);
+    fireEvent.wheel(scroller);
+    fireEvent.scroll(scroller);
+    scrollToSpy.mockClear();
+
+    // A later render where the anchored leaf does NOT move (content changed below it).
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
       </QueryClientProvider>,
     );
 

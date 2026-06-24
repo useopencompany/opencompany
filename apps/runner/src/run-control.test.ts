@@ -7,6 +7,7 @@ import {
   type RunControlStore,
   RunLeaseLostError,
   type RunLeaseState,
+  shouldStampTurnFinished,
   withRunControlChecks,
 } from "./run-control";
 
@@ -225,5 +226,37 @@ describe("createRunControlGate", () => {
     await expect(gate()).rejects.toThrow(RunAbortError);
     // No throttle wait, no extra DB round-trip — local abort is instant.
     expect(heartbeatAndLoadState).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("shouldStampTurnFinished", () => {
+  // This is the contract behind the sidebar's "unseen" blue dot: lastTurnFinishedAt may only
+  // advance on a genuine yield back to the user. The bug this guards against — a background
+  // after-session/memory-keeper pass re-arming the dot on a session the user already read —
+  // is exactly the markTurnFinished:false case below.
+
+  it("stamps on a normal user-facing turn completion", () => {
+    expect(shouldStampTurnFinished({ status: "completed" })).toBe(true);
+  });
+
+  it("stamps when a turn fails or parks for approval/input (still a yield to the user)", () => {
+    expect(shouldStampTurnFinished({ status: "failed" })).toBe(true);
+    expect(shouldStampTurnFinished({ status: "awaiting_approval" })).toBe(true);
+    expect(shouldStampTurnFinished({ status: "awaiting_input" })).toBe(true);
+  });
+
+  it("does NOT stamp on a user-initiated abort", () => {
+    expect(shouldStampTurnFinished({ status: "aborting" })).toBe(false);
+  });
+
+  it("does NOT stamp an internal after-session run, regardless of status", () => {
+    // The regression guard: a memory-keeper / after-session release must never advance the
+    // marker, so it can't re-show the dot on a session the user has already read.
+    expect(shouldStampTurnFinished({ status: "completed", markTurnFinished: false })).toBe(false);
+    expect(shouldStampTurnFinished({ status: "failed", markTurnFinished: false })).toBe(false);
+  });
+
+  it("treats an explicit markTurnFinished:true like the default (stamps)", () => {
+    expect(shouldStampTurnFinished({ status: "completed", markTurnFinished: true })).toBe(true);
   });
 });

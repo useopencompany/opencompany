@@ -271,6 +271,8 @@ export async function persistAssistantCompletion(input: {
       type: "message.completed",
       payload: {
         messageId: input.assistantMessageId,
+        content: input.assistantContent,
+        modelMessage: persistedAssistantModelMessage,
         ...(input.internal ? { internal: true } : {}),
       },
     }),

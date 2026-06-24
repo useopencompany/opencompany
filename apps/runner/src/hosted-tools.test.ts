@@ -1996,6 +1996,7 @@ describe("executeHostedTool (discover_capabilities)", () => {
     expect(output.howToEnable).toContain("ask_user_question");
     // Workspace-OAuth capabilities are excluded from v1 discovery.
     expect(output.capabilities.map((capability) => capability.id)).not.toContain("gmail");
+    expect(output.capabilities.map((capability) => capability.id)).not.toContain("google_drive");
     expect(output.capabilities.map((capability) => capability.id)).not.toContain("linear");
   });
 
@@ -2035,6 +2036,9 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     streamTokenSecret: "stream",
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
+    openaiCodexApiKey: "codex_test",
+    publicUrl: undefined,
+    llmBrokerEnabled: true,
     integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
     exaApiKey: "exa_test",
     xApiBearerToken: "x_test",
@@ -2045,6 +2049,8 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     opencodeTimeoutMs: 1_200_000,
+    codexTimeoutMs: 1_200_000,
+    codexModel: "gpt-5.2-codex",
     toolArgRepairEnabled: false,
     jobLeaseTtlMs: 300_000,
     jobMaxLeaseBusyAttempts: 10,

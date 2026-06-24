@@ -50,6 +50,48 @@ describe("mergeMessages", () => {
     expect(merged.map((m) => m.id)).toEqual(["msg_user", "msg_asst", "msg_user2"]);
   });
 
+  it("restores a completed assistant's canonical snapshot payload when the overlay missed it", () => {
+    const snapshot: SessionMessage[] = [
+      {
+        id: "msg_asst",
+        role: "assistant",
+        content: "Final answer.",
+        status: "completed",
+        completedAt: "2026-06-22T08:02:00.000Z",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_read",
+              toolName: "read_file",
+              input: { path: "README.md" },
+            },
+            { type: "text", text: "Final answer." },
+          ],
+        },
+      },
+    ];
+    const overlay: SessionMessage[] = [
+      {
+        id: "msg_asst",
+        role: "assistant",
+        content: "",
+        status: "completed",
+      },
+    ];
+
+    const merged = mergeMessages(snapshot, overlay);
+
+    expect(merged[0]).toMatchObject({
+      id: "msg_asst",
+      content: "Final answer.",
+      status: "completed",
+      completedAt: "2026-06-22T08:02:00.000Z",
+      modelMessage: snapshot[0]?.modelMessage,
+    });
+  });
+
   it("returns the snapshot unchanged when the overlay is empty", () => {
     const snapshot = [message("msg_user", "user", "Hi")];
     expect(mergeMessages(snapshot, [])).toEqual(snapshot);
@@ -3060,3 +3102,83 @@ function event(
 ): RuntimeEvent {
   return { id, type, payload, messageId: null, ...(createdAt ? { createdAt } : {}) };
 }
+
+describe("buildAssistantTurnParts ordering is delivery-order independent", () => {
+  // The streaming render (no modelMessage yet) must show parts in the SAME order as the
+  // refetched snapshot (modelMessage.content). Durable events carry a monotonic id that
+  // matches the snapshot's order, but the live Durable Stream can deliver them out of
+  // order (reconnect/replay). The render must follow the id, not array arrival order —
+  // otherwise the list visibly reorders when the snapshot replaces the live overlay.
+  it("orders tool calls by durable event id even when events arrive out of order", () => {
+    const toolIds = (parts: ReturnType<typeof buildAssistantTurnParts>) =>
+      parts.flatMap((part) => (part.type === "tool-call" ? [part.toolCall.id] : []));
+
+    const started = (id: number, call: string, path: string) =>
+      event(id, "tool.started", {
+        messageId: "msg_a",
+        toolCallId: call,
+        name: "read_file",
+        input: { path },
+      });
+    const completed = (id: number, call: string, out: string) =>
+      event(id, "tool.completed", {
+        messageId: "msg_a",
+        toolCallId: call,
+        name: "read_file",
+        output: { content: out },
+      });
+
+    // Ids reflect the canonical (declaration) order — call_1 < call_2 < call_3 — but the
+    // array is shuffled, as if the stream delivered call_2's and call_3's events first.
+    const events: RuntimeEvent[] = [
+      started(3, "call_2", "b.md"),
+      completed(4, "call_2", "B"),
+      started(5, "call_3", "c.md"),
+      completed(6, "call_3", "C"),
+      started(1, "call_1", "a.md"),
+      completed(2, "call_1", "A"),
+    ];
+
+    const liveParts = buildAssistantTurnParts(
+      { id: "msg_a", role: "assistant", content: "", status: "running" },
+      events,
+    );
+
+    const finalParts = buildAssistantTurnParts(
+      {
+        id: "msg_a",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_1",
+              toolName: "read_file",
+              input: { path: "a.md" },
+            },
+            {
+              type: "tool-call",
+              toolCallId: "call_2",
+              toolName: "read_file",
+              input: { path: "b.md" },
+            },
+            {
+              type: "tool-call",
+              toolCallId: "call_3",
+              toolName: "read_file",
+              input: { path: "c.md" },
+            },
+          ],
+        },
+      },
+      events,
+    );
+
+    expect(toolIds(finalParts)).toEqual(["call_1", "call_2", "call_3"]);
+    // The live view must match the snapshot — no visible reorder on the swap.
+    expect(toolIds(liveParts)).toEqual(toolIds(finalParts));
+  });
+});

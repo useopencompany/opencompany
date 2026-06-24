@@ -8,13 +8,27 @@ export type RunnerEnv = {
   streamTokenSecret: string;
   e2bApiKey: string;
   vercelAiGatewayApiKey: string;
+  // Platform OpenAI key for codex_coder runs, used only server-side by the LLM broker
+  // (llm-broker.ts) as the upstream credential for the "openai" provider. Never enters
+  // the sandbox.
+  openaiCodexApiKey: string | undefined;
+  // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
+  // RUNNER_LLM_BROKER_PUBLIC_URL to override). Sandboxed CLIs reach the LLM broker
+  // through it. Unset (local dev, where E2B cloud sandboxes cannot reach a laptop)
+  // disables the broker and falls back to direct provider-key injection. Deliberately
+  // NOT the web-side RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that
+  // var points at localhost in local dev and would wrongly activate the broker.
+  publicUrl: string | undefined;
+  // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
+  // direct key injection without a deploy.
+  llmBrokerEnabled: boolean;
   integrationCredentialEncryptionKey: Buffer;
   exaApiKey: string | undefined;
   xApiBearerToken: string | undefined;
   apifyApiToken?: string | undefined;
   supadataApiKey: string | undefined;
   ampApiKey: string | undefined;
-  // Google OAuth client, shared by the Gmail and Google Calendar integrations. The runner
+  // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
   googleOAuthClientId?: string | undefined;
   googleOAuthClientSecret?: string | undefined;
@@ -27,6 +41,10 @@ export type RunnerEnv = {
   // away its work — the partial diff + resumable opencode session id are surfaced (opencode-tool.ts).
   // The job lease TTL (jobs.ts) must comfortably exceed this so a long run is not re-claimed.
   opencodeTimeoutMs: number;
+  // Wall-clock ceiling for a single codex_coder delegation. Mirrors opencode timeout
+  // behavior: timeouts surface a partial diff but never publish a pull request.
+  codexTimeoutMs: number;
+  codexModel: string;
   // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
   // validation + coercion always run; this only gates the small-model fallback. Default on.
   toolArgRepairEnabled: boolean;
@@ -52,6 +70,9 @@ export function loadEnv(): RunnerEnv {
     streamTokenSecret: requiredEnv("RUNNER_STREAM_TOKEN_SECRET"),
     e2bApiKey: requiredEnv("E2B_API_KEY"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
+    openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
+    publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
+    llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     xApiBearerToken: optionalEnv("X_API_BEARER_TOKEN"),
@@ -65,6 +86,8 @@ export function loadEnv(): RunnerEnv {
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
+    codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", 1_200_000),
+    codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.2-codex",
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),
@@ -121,4 +144,16 @@ function optionalPositiveIntegerEnv(name: string, fallback: number) {
 
 function defaultInstanceId() {
   return `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
+}
+
+// Whether sandboxed CLIs route their model calls through the runner's LLM broker. Both
+// conditions matter: without a public URL the sandbox cannot reach the broker (local
+// dev), and the env flag is the no-deploy kill switch.
+export function brokerActive(env: Pick<RunnerEnv, "publicUrl" | "llmBrokerEnabled">): boolean {
+  return env.llmBrokerEnabled && Boolean(env.publicUrl);
+}
+
+// Base URL the sandbox-side CLI config points at for a given broker provider.
+export function brokerBaseUrl(publicUrl: string, provider: "gateway" | "openai"): string {
+  return `${publicUrl.replace(/\/+$/, "")}/broker/${provider}/v1`;
 }

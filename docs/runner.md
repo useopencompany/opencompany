@@ -134,6 +134,8 @@ V1 tools:
 - `update_agent_file` when the saved agent enables the `agent-self-edit` skill; validates and
   persists version-guarded changes to the agent's own `.agent` configuration and queues GitHub sync
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
+- `opencode_coder` when the saved agent enables the opencode coding-agent tool
+- `codex_coder` when the saved agent enables the Codex coding-agent tool
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
   experiment on, and Linear MCP has workspace OAuth or bearer-token credentials configured
 - `slack__*` dynamic tools when the saved agent enables `@slack`, the workspace has the `mcp`
@@ -257,6 +259,11 @@ Required environment variables:
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
+- `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Activates the LLM broker — sandboxed CLIs call models via `/broker/*` with short-lived per-delegation tokens instead of raw provider keys. Unset locally.)
+- `RUNNER_LLM_BROKER_ENABLED` (optional, defaults to `true`; no-deploy kill switch back to direct key injection)
+- `OPENAI_CODEX_API_KEY` (optional; server-side upstream credential for the broker's `openai` provider and local-dev `codex_coder` fallback)
+- `RUNNER_CODEX_MODEL` (optional, defaults to `gpt-5.2-codex`)
+- `RUNNER_CODEX_TIMEOUT_MS` (optional, defaults to `1200000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`

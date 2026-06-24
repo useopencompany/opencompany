@@ -1,6 +1,11 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { after, NextResponse } from "next/server";
 import Stripe from "stripe";
+import {
+  completeAutoRefillSetup,
+  handleAutoRefillPaymentIntentFailed,
+  handleAutoRefillPaymentIntentSucceeded,
+} from "@/lib/billing/auto-refill";
 import { fulfillCheckoutSession } from "@/lib/billing/service";
 import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
 
@@ -25,20 +30,31 @@ export async function POST(request: Request) {
   }
 
   if (event.type === "checkout.session.completed") {
-    const result = await fulfillCheckoutSession(event.data.object, { eventId: event.id });
+    const session = event.data.object;
+    // Setup-mode checkouts save a card for auto-refill; payment-mode checkouts are
+    // one-time credit top-ups handled by fulfillCheckoutSession.
+    if (session.mode === "setup") {
+      await completeAutoRefillSetup(session);
+    } else {
+      const result = await fulfillCheckoutSession(session, { eventId: event.id });
 
-    if (result.ok) {
-      after(() =>
-        captureServerEvent("credit_top_up_completed", result.userId, {
-          user_id: result.userId,
-          workspace_id: result.workspaceId,
-          checkout_record_id: result.checkoutRecordId,
-          ledger_id: result.ledgerId,
-          amount_cents: result.amountCents,
-          balance_cents: result.balanceCents,
-        }),
-      );
+      if (result.ok) {
+        after(() =>
+          captureServerEvent("credit_top_up_completed", result.userId, {
+            user_id: result.userId,
+            workspace_id: result.workspaceId,
+            checkout_record_id: result.checkoutRecordId,
+            ledger_id: result.ledgerId,
+            amount_cents: result.amountCents,
+            balance_cents: result.balanceCents,
+          }),
+        );
+      }
     }
+  } else if (event.type === "payment_intent.succeeded") {
+    await handleAutoRefillPaymentIntentSucceeded(event.data.object, event.id);
+  } else if (event.type === "payment_intent.payment_failed") {
+    await handleAutoRefillPaymentIntentFailed(event.data.object);
   }
 
   return NextResponse.json({ received: true });

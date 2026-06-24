@@ -308,7 +308,9 @@ export type AgentRuntimeEvent =
       type: "session.tool_usage";
       payload: {
         messageId: string;
-        runLeaseId: string;
+        // Absent for LLM-broker settlement rows, which bill outside any run lease
+        // (upstream spend must be recorded even after a lease was reclaimed).
+        runLeaseId?: string;
         toolCallId: string;
         toolName: string;
         provider: string;

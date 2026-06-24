@@ -1,5 +1,6 @@
 import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { CollectionsProvider } from "@/components/CollectionsProvider";
+import { MobileInspectorProvider } from "@/components/MobileInspectorContext";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
 import PersonalShell from "@/components/personal/PersonalShell";
 import QueryProvider from "@/components/QueryProvider";
@@ -16,6 +17,7 @@ import { loadPersonalAgentContextFiles, loadPersonalSkills } from "@/lib/persona
 import { buildPersonalIntegrationDetails } from "@/lib/personal/integration-details-server";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
+import { normalizeUserTimezoneSource } from "@/lib/timezones";
 import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it does
@@ -73,6 +75,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     github: workspaceIntegrations.github.status === "connected",
     gmail: googleState.gmail.status === "connected",
     google_calendar: googleState.google_calendar.status === "connected",
+    google_drive: googleState.google_drive.status === "connected",
     linear: mcpSettings.linear.configured,
     slack: mcpSettings.slack.configured,
     posthog: mcpSettings.posthog.configured,
@@ -104,24 +107,31 @@ export default async function PersonalLayout({ children }: { children: React.Rea
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-              <PersonalShell
-                agent={agent}
-                userName={userName}
-                userEmail={authUser.email}
-                workspaceName={workspace.name}
-                initialSessions={sessions}
-                contextFiles={contextFiles}
-                personalSkills={personalSkills}
-                githubIntegrationStatus={workspaceIntegrations.github.status}
-                githubRepositories={githubRepositories}
-                integrationConnections={integrationConnections}
-                integrationDetails={integrationDetails}
-                toolPolicies={toolPolicies}
-                proMode={user.proMode}
-                companySurfaceEnabled={user.companySurfaceEnabled}
-              >
-                {children}
-              </PersonalShell>
+              {/* Bridges the mobile right-edge swipe (driven in PersonalShell) to the session
+                  inspector that SessionView registers — must sit above both, which are descendants
+                  of PersonalShell. No-op on desktop. */}
+              <MobileInspectorProvider>
+                <PersonalShell
+                  agent={agent}
+                  userName={userName}
+                  userEmail={authUser.email}
+                  userTimezone={user.timezone}
+                  userTimezoneSource={normalizeUserTimezoneSource(user.timezoneSource)}
+                  workspaceName={workspace.name}
+                  initialSessions={sessions}
+                  contextFiles={contextFiles}
+                  personalSkills={personalSkills}
+                  githubIntegrationStatus={workspaceIntegrations.github.status}
+                  githubRepositories={githubRepositories}
+                  integrationConnections={integrationConnections}
+                  integrationDetails={integrationDetails}
+                  toolPolicies={toolPolicies}
+                  proMode={user.proMode}
+                  companySurfaceEnabled={user.companySurfaceEnabled}
+                >
+                  {children}
+                </PersonalShell>
+              </MobileInspectorProvider>
             </ToastProvider>
           </CollectionsProvider>
         </WorkspaceProvider>

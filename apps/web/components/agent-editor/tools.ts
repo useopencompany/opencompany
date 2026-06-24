@@ -31,6 +31,7 @@ import {
   Code2,
   Database,
   Feather,
+  Files,
   FileText,
   FlaskConical,
   Folder,
@@ -184,6 +185,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   neon: Database,
   amp: Code2,
   opencode: Code2,
+  codex: Code2,
   linear: ListTodo,
   slack: MessageSquare,
   posthog: BarChart3,
@@ -192,6 +194,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   notion: FileText,
   gmail: Mail,
   google_calendar: CalendarDays,
+  google_drive: Files,
 };
 
 // Real brand logos keyed by the provider prefix of the model id (the part

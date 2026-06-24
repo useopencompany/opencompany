@@ -62,6 +62,7 @@ import {
   toSubmitAttachments,
 } from "@/components/composer-attachments";
 import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
+import { type RightPanelHandle, useMobileInspector } from "@/components/MobileInspectorContext";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
@@ -225,6 +226,24 @@ const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 // Padding above the snapped user message (matches py-6 = 24px of the scroll container).
 const SCROLL_TO_TOP_PADDING_PX = 24;
+// Below this, an anchored-leaf drift is treated as native scroll anchoring having already
+// held the position — so the reading-anchor safety net no-ops and never double-corrects.
+// Also absorbs sub-pixel getBoundingClientRect noise.
+const ANCHOR_CORRECTION_THRESHOLD_PX = 2;
+
+// The leaf element at the top edge of the scroll container's viewport, with its offset from that
+// edge. Used as the PRO-173 reading anchor: captured on a genuine user scroll, then held across
+// commits so a work-collapse above the fold can't yank the reader's position.
+function captureViewportTopAnchor(
+  container: HTMLElement,
+): { node: Element; viewportTop: number } | null {
+  // elementFromPoint is unavailable outside a real browser (e.g. jsdom) — degrade to no anchor.
+  if (typeof container.ownerDocument.elementFromPoint !== "function") return null;
+  const rect = container.getBoundingClientRect();
+  const node = container.ownerDocument.elementFromPoint(rect.left + rect.width / 2, rect.top + 1);
+  if (!node || !container.contains(node)) return null;
+  return { node, viewportTop: node.getBoundingClientRect().top - rect.top };
+}
 // Space reserved below the active turn, as a fraction of the viewport, so a just-sent
 // message can sit near the top with room for the reply to grow into. 1 = a full viewport
 // (message pins to the very top, but a short reply leaves a big void below); lower values
@@ -328,6 +347,7 @@ function SessionViewQuery({
 }) {
   const { workspaceId } = useWorkspaceContext();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
+  const lastElectricDetailRefreshRef = useRef<string | null>(null);
   const {
     data: detail,
     dataUpdatedAt,
@@ -355,6 +375,31 @@ function SessionViewQuery({
     // the post-turn invalidation.
     placeholderData: placeholder,
   });
+
+  // The open transcript is primarily driven by Durable Streams, but the synced
+  // agent_sessions row is the low-volume durable signal that a turn yielded. If
+  // the stream tail is missed, use Electric's newer settled status to refresh the
+  // Postgres snapshot so the final assistant row appears without a page reload.
+  const electricSessionId = placeholder?.session.id;
+  const electricSessionStatus = placeholder?.session.status;
+  const electricSessionUpdatedAt = placeholder?.session.updatedAt;
+  useEffect(() => {
+    if (!detail || !electricSessionId || !electricSessionStatus || !electricSessionUpdatedAt) {
+      return;
+    }
+    if (electricSessionId !== detail.session.id) return;
+    if (!SETTLED_SNAPSHOT_STATUSES.has(electricSessionStatus)) return;
+
+    const electricUpdatedAt = Date.parse(electricSessionUpdatedAt);
+    const detailUpdatedAtMs = Date.parse(detail.session.updatedAt);
+    if (!Number.isFinite(electricUpdatedAt) || !Number.isFinite(detailUpdatedAtMs)) return;
+    if (electricUpdatedAt <= detailUpdatedAtMs) return;
+
+    const refreshKey = `${electricSessionId}:${electricSessionStatus}:${electricSessionUpdatedAt}`;
+    if (lastElectricDetailRefreshRef.current === refreshKey) return;
+    lastElectricDetailRefreshRef.current = refreshKey;
+    void refetch();
+  }, [detail, electricSessionId, electricSessionStatus, electricSessionUpdatedAt, refetch]);
 
   if (!detail && isPending) return <SessionPageSkeleton />;
 
@@ -431,6 +476,32 @@ function SessionViewContentBody({
   const session = detail.session;
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("info");
+  // Mobile right-edge swipe drives this inspector via the global gesture in ShellChrome.
+  // We register a handle it can read/open/close and finger-drag; a live ref keeps the
+  // open state current for the gesture's pointer-down. No-op off the company shell.
+  const [inspectorDrag, setInspectorDrag] = useState({ dragging: false, progress: 0 });
+  const inspectorAsideRef = useRef<HTMLElement>(null);
+  const inspectorCollapsedRef = useRef(inspectorCollapsed);
+  useEffect(() => {
+    inspectorCollapsedRef.current = inspectorCollapsed;
+  }, [inspectorCollapsed]);
+  const { register: registerMobileInspector } = useMobileInspector();
+  const mobileInspectorHandle = useRef<RightPanelHandle>({
+    isOpen: () => !inspectorCollapsedRef.current,
+    setOpen: (open) => setInspectorCollapsed(!open),
+    setDrag: (dragging, progress) => setInspectorDrag({ dragging, progress }),
+    // While collapsed the panel is display:none, so it measures 0 — fall back to the
+    // width it WILL have once shown (mirrors the `w-[min(392px,calc(100vw-16px))]` class)
+    // so the swipe maps the finger 1:1 from the very first move.
+    getWidth: () => {
+      const measured = inspectorAsideRef.current?.getBoundingClientRect().width ?? 0;
+      return measured > 1 ? measured : Math.min(392, window.innerWidth - 16);
+    },
+  });
+  useEffect(() => {
+    registerMobileInspector(mobileInspectorHandle.current);
+    return () => registerMobileInspector(null);
+  }, [registerMobileInspector]);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
@@ -488,6 +559,10 @@ function SessionViewContentBody({
   // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Reading-position safety net: the exact leaf at the viewport top captured on the previous
+  // commit, so we can correct the residual jump native scroll anchoring leaves behind when the
+  // "work" block collapses above the fold (PRO-173).
+  const readingAnchorRef = useRef<{ node: Element; viewportTop: number } | null>(null);
   // Felt time-to-first-token: stamped at the Send click, resolved when the first
   // streamed delta paints. `isBusy` blocks concurrent turns, so a single timer is safe.
   const pendingTtftRef = useRef<{ startedAt: number; messageId: string | null } | null>(null);
@@ -944,8 +1019,8 @@ function SessionViewContentBody({
         <div
           className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-5 after:content-[''] ${
             message.role === "user"
-              ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
-              : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
+              ? "max-w-[85%] md:max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+              : "max-w-full md:max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
           }`}
         >
           {message.role === "assistant" ? (
@@ -1002,7 +1077,7 @@ function SessionViewContentBody({
       {parts.map((part) =>
         part.type === "tool-call" ? (
           <div key={part.toolCall.id} className="flex justify-start">
-            <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
+            <div className="max-w-full md:max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
               <ToolCallCard toolCall={part.toolCall} sessionIsInterrupted={sessionIsInterrupted} />
             </div>
           </div>
@@ -1167,6 +1242,45 @@ function SessionViewContentBody({
     isPinnedAtBottomRef.current = true;
     initialScrollSessionRef.current = session.id;
   }, [session.id, hasMessages, pendingScrollMessageId]);
+
+  // Reading-position safety net (PRO-173). Native scroll anchoring ([overflow-anchor:auto] on
+  // the container) holds the view across most content changes, but it does NOT compensate when
+  // the "work" block collapses above the fold (Thought / N-steps folding on completion, or a
+  // manual chevron toggle): the answer the user is reading lurches up by the collapsed height.
+  // The anchor (the exact leaf at the viewport top) is captured on a genuine user scroll in the
+  // onScroll handler — NOT here, so we never fight the user's own scrolling. This effect runs on
+  // every commit and only HOLDS that anchor: it nudges scrollTop by however far the anchored leaf
+  // drifted. When native anchoring already held the position the drift is ~0 → we no-op (never
+  // double-correct, never disturb streaming appends, which land below the anchor → zero drift).
+  // Running every commit (no deps) also covers manual card toggles, which don't change
+  // visibleMessages but do trigger a commit.
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+
+    // Defer to the effects that own these frames: the send-snap, the once-per-session
+    // open-at-bottom, and the streaming bottom-follow. Drop any stale anchor when not reading.
+    const reading =
+      pendingScrollMessageId === null &&
+      initialScrollSessionRef.current === session.id &&
+      !isPinnedAtBottomRef.current;
+    if (!reading) {
+      readingAnchorRef.current = null;
+      return;
+    }
+
+    const anchor = readingAnchorRef.current;
+    if (!anchor?.node.isConnected) return;
+
+    const containerTop = container.getBoundingClientRect().top;
+    const newTop = anchor.node.getBoundingClientRect().top - containerTop;
+    const delta = newTop - anchor.viewportTop; // how far the anchored leaf drifted in the viewport
+    if (Math.abs(delta) > ANCHOR_CORRECTION_THRESHOLD_PX) {
+      // Removing D px above the fold moves the leaf up (delta = -D); scrollTop + delta = scrollTop - D
+      // restores the reading position.
+      container.scrollTo({ top: container.scrollTop + delta, behavior: "auto" });
+    }
+  });
 
   // Keep the reserved-space height (--chat-vh) in sync with the scroll container's own
   // height. A single ResizeObserver means the CSS min-height on the last turn recomputes
@@ -1550,7 +1664,7 @@ function SessionViewContentBody({
             handlers here only drive the "Drop files to attach" overlay. */}
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-4 py-6 md:px-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
           onScroll={(event) => {
@@ -1564,6 +1678,12 @@ function SessionViewContentBody({
             const el = event.currentTarget;
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
             isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+            // Remember the leaf the user just scrolled to, so the reading-anchor effect can hold
+            // it across a work-collapse above the fold (PRO-173). Cleared at the bottom, where the
+            // streaming follow takes over instead.
+            readingAnchorRef.current = isPinnedAtBottomRef.current
+              ? null
+              : captureViewportTopAnchor(el);
           }}
           // Drop-overlay hover handlers come from the shared hook. The window-level drop handler
           // (inside the hook) does the actual preventDefault + accept, so a drop anywhere in the
@@ -1916,22 +2036,36 @@ function SessionViewContentBody({
         )}
       </div>
 
-      {!inspectorCollapsed && (
+      {!inspectorCollapsed || inspectorDrag.dragging ? (
         <button
           type="button"
           aria-label="Collapse runtime details"
           className="fixed inset-0 z-30 bg-ink/[0.06] lg:hidden"
+          // Fade the dim in step with a swipe; full strength once open.
+          style={inspectorDrag.dragging ? { opacity: inspectorDrag.progress } : undefined}
           onClick={() => updateInspectorCollapsed(true)}
         />
-      )}
+      ) : null}
 
       <aside
+        ref={inspectorAsideRef}
         className={`flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface-raised/95 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:shadow-none lg:backdrop-blur-0 ${
-          inspectorCollapsed
+          inspectorCollapsed && !inspectorDrag.dragging
             ? "hidden"
-            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] lg:static lg:z-auto lg:w-[392px]"
+            : "fixed inset-y-0 right-0 z-40 w-[min(392px,calc(100vw-16px))] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] lg:static lg:z-auto lg:w-[392px] lg:pt-0 lg:pb-0 lg:pr-0"
         }`}
-        aria-hidden={inspectorCollapsed}
+        // While swiping on mobile, track the finger 1:1 (inline transform overrides the
+        // class; transition:none disables the snap until release). Driven by the global
+        // gesture via MobileInspectorContext.
+        style={
+          inspectorDrag.dragging
+            ? {
+                transform: `translateX(${(1 - inspectorDrag.progress) * 100}%)`,
+                transition: "none",
+              }
+            : undefined
+        }
+        aria-hidden={inspectorCollapsed && !inspectorDrag.dragging}
       >
         <Tabs
           value={inspectorTab}

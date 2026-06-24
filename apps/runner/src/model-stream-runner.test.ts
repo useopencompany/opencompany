@@ -9,6 +9,7 @@ import {
   detectIncompleteTurn,
   isToolStepLimitExceeded,
   MAX_MODEL_STEPS,
+  persistAssistantCompletion,
   SOFT_FINALIZATION_STEP,
   softFinalizationStepSettings,
 } from "./model-turn";
@@ -37,6 +38,7 @@ const leaseWrites = vi.hoisted(() => ({
     await eventMocks.appendRuntimeEvent(undefined, event);
     return true;
   }),
+  completeAssistantMessageForLease: vi.fn(async () => true),
   insertToolMessageForLease: vi.fn(async () => true),
   insertToolApprovalForLease: vi.fn(async () => "inserted"),
   requireLeaseWrite: vi.fn(async (value: unknown) => value),
@@ -554,6 +556,61 @@ describe("collectAssistantStream", () => {
       type: "message.reasoning_completed",
       payload: { messageId: "msg_assistant" },
     });
+  });
+});
+
+describe("persistAssistantCompletion", () => {
+  it("publishes the canonical final content and model message on completion", async () => {
+    await persistAssistantCompletion({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      assistantContent: "Final answer.",
+      assistantReplayParts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_read",
+          toolName: "read_file",
+          input: { path: "README.md" },
+        },
+        { type: "text", text: "Final answer." },
+      ],
+      reasoningSummary: "",
+      reasoningContent: "",
+      internal: false,
+    });
+
+    expect(leaseWrites.completeAssistantMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        content: "Final answer.",
+        modelMessage: expect.objectContaining({
+          role: "assistant",
+          content: expect.arrayContaining([
+            expect.objectContaining({ type: "tool-call", toolCallId: "call_read" }),
+            { type: "text", text: "Final answer." },
+          ]),
+        }),
+      }),
+    );
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "message.completed",
+        payload: expect.objectContaining({
+          messageId: "msg_assistant",
+          content: "Final answer.",
+          modelMessage: expect.objectContaining({
+            role: "assistant",
+            content: expect.arrayContaining([
+              expect.objectContaining({ type: "tool-call", toolCallId: "call_read" }),
+              { type: "text", text: "Final answer." },
+            ]),
+          }),
+        }),
+      }),
+    );
   });
 });
 

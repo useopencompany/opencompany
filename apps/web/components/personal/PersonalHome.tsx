@@ -102,7 +102,12 @@ export default function PersonalHome() {
       if (!result.ok) {
         setPendingSession(null);
         if ("redirectTo" in result) {
-          showOutOfCreditsToast({ showToast, router, redirectTo: result.redirectTo });
+          showOutOfCreditsToast({
+            showToast,
+            router,
+            redirectTo: result.redirectTo,
+            reason: "reason" in result ? String(result.reason) : undefined,
+          });
           return;
         }
         setError(result.error);

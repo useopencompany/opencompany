@@ -57,6 +57,7 @@ export type AgentToolId =
   | "neon"
   | "amp"
   | "opencode"
+  | "codex"
   | "linear"
   | "slack"
   | "posthog"
@@ -64,7 +65,8 @@ export type AgentToolId =
   | "braintrust"
   | "notion"
   | "gmail"
-  | "google_calendar";
+  | "google_calendar"
+  | "google_drive";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -106,16 +108,25 @@ export type AgentModelId =
   | "openrouter/fusion";
 
 export type AgentHostedToolConfig = {
-  id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "neon" | "gmail" | "google_calendar";
+  id:
+    | "exa"
+    | "x"
+    | "youtube"
+    | "tiktok"
+    | "instagram"
+    | "neon"
+    | "gmail"
+    | "google_calendar"
+    | "google_drive";
   type: "tool" | "hosted_tool";
   label: string;
   description: string;
 };
 
 export type AgentCodingToolConfig = {
-  id: "amp" | "opencode";
+  id: "amp" | "opencode" | "codex";
   type: "coding_agent";
-  provider: "amp" | "opencode";
+  provider: "amp" | "opencode" | "codex";
   label: string;
   description: string;
   prCapable: boolean;

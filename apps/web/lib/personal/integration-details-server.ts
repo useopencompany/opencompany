@@ -44,6 +44,7 @@ export function buildPersonalIntegrationDetails(input: {
     github: buildGitHubDetail(input.github),
     gmail: buildGoogleDetail(input.google.gmail.connections, null),
     google_calendar: buildGoogleDetail(input.google.google_calendar.connections, "Calendars"),
+    google_drive: buildGoogleDetail(input.google.google_drive.connections, null),
     linear: buildMcpDetail(input.mcp.linear),
     slack: buildMcpDetail(input.mcp.slack),
     posthog: buildMcpDetail(input.mcp.posthog),

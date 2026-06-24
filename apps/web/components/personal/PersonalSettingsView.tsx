@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { type BillingData, BillingPanel } from "@/components/billing/BillingPanel";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { ResetPersonalAgentDialog } from "@/components/personal/ResetPersonalAgentDialog";
+import { TimezonePicker } from "@/components/personal/TimezonePicker";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useToast } from "@/components/ToastProvider";
 import { Toggle } from "@/components/ui/toggle";
@@ -12,6 +13,7 @@ import { resetPersonalAgent } from "@/lib/personal/actions";
 import {
   setCompanySurfaceEnabled as setCompanySurfaceEnabledAction,
   setProMode as setProModeAction,
+  setUserTimezone as setUserTimezoneAction,
 } from "@/lib/users/actions";
 
 // Lightweight settings for the /personal surface: the Pro mode toggle (DB-backed), appearance,
@@ -25,6 +27,11 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     setProMode,
     companySurfaceEnabled,
     setCompanySurfaceEnabled,
+    userTimezone,
+    userTimezoneSource,
+    setUserTimezone,
+    setUserTimezoneSource,
+    setConfig,
   } = usePersonalAgent();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
@@ -72,8 +79,27 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     });
   }
 
+  function onSaveTimezone(next: string, source: "browser" | "manual") {
+    const previous = userTimezone;
+    const previousSource = userTimezoneSource;
+    setUserTimezone(next);
+    setUserTimezoneSource(source);
+    startTransition(async () => {
+      const result = await setUserTimezoneAction({ timezone: next, source });
+      if (!result.ok) {
+        setUserTimezone(previous);
+        setUserTimezoneSource(previousSource);
+        showError(result.error, "Could not update timezone");
+        return;
+      }
+      setUserTimezone(result.timezone);
+      setUserTimezoneSource(result.source);
+      if (result.config) setConfig(result.config);
+    });
+  }
+
   return (
-    <div className="mx-auto w-full max-w-[760px] px-8 pb-16 pt-10">
+    <div className="mx-auto w-full max-w-[760px] px-5 pb-16 pt-10 md:px-8">
       <header className="pb-7">
         <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Settings</h1>
         <p className="mt-1 text-[13px] text-ink-muted">Personal preferences for your agent.</p>
@@ -122,6 +148,17 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
       <Section title="Appearance" description="Choose how the interface looks.">
         <Field label="Theme">
           <AppearanceSection />
+        </Field>
+      </Section>
+
+      <Section title="Routines" description="Choose the timezone used by scheduled routines.">
+        <Field label="Timezone">
+          <TimezonePicker
+            value={userTimezone}
+            source={userTimezoneSource}
+            disabled={isPending}
+            onChange={onSaveTimezone}
+          />
         </Field>
       </Section>
 
@@ -185,7 +222,9 @@ function Section({
 }) {
   return (
     <section className="border-t border-border-subtle py-7 first:border-t-0 first:pt-0">
-      <div className="grid grid-cols-[200px_1fr] gap-8">
+      {/* Stack label over control on mobile; the fixed 200px label column only kicks in at md,
+          otherwise the content column collapses and overflows the viewport (clipping both edges). */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[200px_1fr] md:gap-8">
         <div>
           <h2 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">{title}</h2>
           {description && (
@@ -211,7 +250,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ReadOnly({ value }: { value: string }) {
   return (
-    <div className="w-fit min-w-[220px] rounded-md border border-border bg-surface/60 px-2.5 py-1.5 text-[13px] text-ink/85">
+    <div className="w-full md:w-fit md:min-w-[220px] rounded-md border border-border bg-surface/60 px-2.5 py-1.5 text-[13px] text-ink/85">
       {value}
     </div>
   );

@@ -328,6 +328,38 @@ describe("resolveAgentRuntimeConfig", () => {
     );
   });
 
+  it("explains Codex can target public GitHub repositories without an attached repository", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Codex agent",
+      instructions: "@codex",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [
+        {
+          id: "codex",
+          type: "coding_agent",
+          provider: "codex",
+          label: "Codex",
+          description: "Delegate coding work to Codex inside an E2B sandbox.",
+          prCapable: true,
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("codex_coder");
+    expect(resolved.systemPrompt).toContain(
+      "Codex can work without an attached GitHub repository when the user provides a public GitHub owner/repo",
+    );
+    expect(resolved.systemPrompt).toContain(
+      "Public repositories are cloned without workspace GitHub credentials",
+    );
+  });
+
   it("enables hosted runtime tools from selected agent config tools", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",

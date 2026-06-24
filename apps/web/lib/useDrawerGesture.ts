@@ -2,116 +2,177 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  type GestureMode,
-  gestureModeFor,
+  type DrawerSide,
+  edgeGuardSide,
+  type GestureStart,
   lockAxis,
-  progressFor,
+  progressForSide,
+  resolveGesture,
   shouldCommitOpen,
 } from "./drawerGesture";
 
-type Options = {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  isMobile: boolean;
-  /** Measures the live drawer width (px) for progress; falls back when unmeasured. */
+/** One swipeable drawer. `isOpen` is read live (the right panel's state lives elsewhere). */
+export type DrawerSideConfig = {
+  isOpen: () => boolean;
+  setOpen: (open: boolean) => void;
+  /** Live drawer width in px, for progress math; the hook falls back to 1 if unmeasured. */
   getWidth: () => number;
 };
 
-/**
- * Drives the existing off-canvas drawer with a finger drag: edge-swipe to open,
- * drag-left to close, tracking the pointer 1:1. Returns `dragging` + `progress`
- * (0 closed → 1 open) so the shell can apply a live transform and fade the scrim.
- *
- * Listens on `document` so the open-edge, the drawer and the scrim all feed one
- * handler; gated by `isMobile` so desktop is completely untouched. Decision logic
- * lives in `drawerGesture.ts`.
- */
-export function useDrawerGesture({ open, setOpen, isMobile, getWidth }: Options): {
-  dragging: boolean;
-  progress: number;
-} {
-  const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(0);
+type Options = {
+  isMobile: boolean;
+  left: DrawerSideConfig;
+  /** Omit/null when no right panel exists on this page (e.g. not in a chat). */
+  right: DrawerSideConfig | null;
+};
 
-  // Keep the latest props available to the once-bound listeners without re-binding.
-  const latest = useRef({ open, setOpen, getWidth });
+export type DragState = { dragging: boolean; progress: number };
+const IDLE: DragState = { dragging: false, progress: 0 };
+
+/**
+ * Finger-driven swipe modeled as a horizontal filmstrip `[ MENU | CHAT | DETAILS ]`:
+ * a leftward swipe steps toward details (close menu, else open the right panel), a
+ * rightward swipe steps toward the menu (close details, else open the left drawer).
+ * Decision logic — including the mutual exclusion that keeps menu and details from
+ * ever showing together — lives in `drawerGesture.ts`.
+ *
+ * Listens on `document` in the CAPTURE phase so the swipe still fires even when a child
+ * stops pointer-event propagation (chat widgets, menus). Which drawer a swipe drives is
+ * resolved at axis-lock from the drag DIRECTION, not the pointer-down position, so a
+ * swipe can start anywhere on the surface. Gated by `isMobile` so desktop is untouched.
+ *
+ * Returns live `{ dragging, progress }` per side so the shell can apply a 1:1 transform
+ * (the right side's values are forwarded to the registered panel via the bridge context).
+ */
+export function useDrawerGesture({ isMobile, left, right }: Options): {
+  left: DragState;
+  right: DragState;
+} {
+  const [active, setActive] = useState<{ side: DrawerSide; progress: number } | null>(null);
+  const latest = useRef({ left, right });
   useEffect(() => {
-    latest.current = { open, setOpen, getWidth };
+    latest.current = { left, right };
   });
 
   useEffect(() => {
     if (!isMobile) return;
 
-    let mode: GestureMode | null = null;
+    // Captured at pointer-down; the side/intent is only resolved once the gesture locks
+    // to the horizontal axis and its direction is known.
+    let snapshot: { leftOpen: boolean; rightOpen: boolean; rightAvailable: boolean } | null = null;
+    let start: GestureStart | null = null;
     let axis: "x" | "y" | null = null;
-    let pointerId = -1;
-    let startX = 0;
-    let startY = 0;
-    let lastX = 0;
-    let lastT = 0;
-    let velocity = 0;
+    let pid = -1;
+    let sx = 0;
+    let sy = 0;
+    let lx = 0;
+    let lt = 0;
+    let vel = 0;
     let width = 1;
 
     const end = () => {
-      mode = null;
+      snapshot = null;
+      start = null;
       axis = null;
-      pointerId = -1;
-      setDragging(false);
+      pid = -1;
+      setActive(null);
     };
 
     const onDown = (e: PointerEvent) => {
-      if (mode !== null) return; // already tracking a pointer
+      if (snapshot || start) return;
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      const next = gestureModeFor(latest.current.open, e.clientX);
-      if (!next) return;
-      mode = next;
-      pointerId = e.pointerId;
-      startX = lastX = e.clientX;
-      startY = e.clientY;
-      lastT = e.timeStamp;
-      velocity = 0;
-      width = latest.current.getWidth() || 1;
+      const { left: L, right: R } = latest.current;
+      // Snapshot what's open now; the direction (and thus which drawer) comes later.
+      snapshot = {
+        leftOpen: L.isOpen(),
+        rightOpen: R?.isOpen() ?? false,
+        rightAvailable: !!R,
+      };
+      pid = e.pointerId;
+      sx = lx = e.clientX;
+      sy = e.clientY;
+      lt = e.timeStamp;
+      vel = 0;
     };
 
     const onMove = (e: PointerEvent) => {
-      if (mode === null || e.pointerId !== pointerId) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
+      if (e.pointerId !== pid) return;
+      if (!snapshot && !start) return;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
       if (axis === null) {
         const locked = lockAxis(dx, dy);
         if (!locked) return;
         if (locked === "y") return end(); // vertical → let the page scroll
         axis = "x";
-        setDragging(true);
+        // Direction is known now → decide which drawer this swipe drives.
+        const g = snapshot ? resolveGesture(snapshot, dx < 0 ? -1 : 1) : null;
+        if (!g) return end(); // nothing to do in this direction → leave the drag to the page
+        start = g;
+        const { left: L, right: R } = latest.current;
+        width = (g.side === "left" ? L.getWidth() : (R?.getWidth() ?? 0)) || 1;
+        snapshot = null;
       }
+      if (!start) return;
       e.preventDefault();
-      const dt = e.timeStamp - lastT;
-      if (dt > 0) velocity = (e.clientX - lastX) / dt;
-      lastX = e.clientX;
-      lastT = e.timeStamp;
-      setProgress(progressFor(mode, dx, width));
+      const dt = e.timeStamp - lt;
+      if (dt > 0) vel = (e.clientX - lx) / dt;
+      lx = e.clientX;
+      lt = e.timeStamp;
+      setActive({
+        side: start.side,
+        progress: progressForSide(start.side, start.opening, dx, width),
+      });
     };
 
     const onUp = (e: PointerEvent) => {
-      if (mode === null || e.pointerId !== pointerId) return;
-      if (axis === "x") {
-        const p = progressFor(mode, e.clientX - startX, width);
-        latest.current.setOpen(shouldCommitOpen(mode, p, velocity));
+      if (e.pointerId !== pid) return;
+      if (start && axis === "x") {
+        const dx = e.clientX - sx;
+        const p = progressForSide(start.side, start.opening, dx, width);
+        const open = shouldCommitOpen(start.side, start.opening, p, vel);
+        (start.side === "left" ? latest.current.left : latest.current.right)?.setOpen(open);
       }
       end();
     };
 
-    document.addEventListener("pointerdown", onDown, { passive: true });
-    document.addEventListener("pointermove", onMove, { passive: false });
-    document.addEventListener("pointerup", onUp, { passive: true });
-    document.addEventListener("pointercancel", onUp, { passive: true });
+    // iOS' native edge-swipe-back starts from the very screen edge in the first few px —
+    // before onMove reaches its axis-lock + preventDefault, so it would win the race and
+    // navigate away instead of opening the menu. preventDefault on a NON-PASSIVE touchstart
+    // stops WebKit from ever starting that gesture; the pointer handlers above then drive
+    // the drawer 1:1 as usual. Scoped to the edge zone + only where a drawer would open, so
+    // interior touches and pages without a matching drawer keep native behaviour.
+    const onTouchStart = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (!touch || e.touches.length !== 1) return;
+      const { left: L, right: R } = latest.current;
+      const side = edgeGuardSide(touch.clientX, window.innerWidth, {
+        leftClosed: !L.isOpen(),
+        rightClosedAndAvailable: !!R && !R.isOpen(),
+      });
+      if (side) e.preventDefault();
+    };
+
+    // Capture phase: document sees the event before any descendant, so a child that
+    // calls stopPropagation() can't swallow the swipe. pointermove is non-passive so it
+    // can preventDefault once the gesture owns the horizontal axis.
+    const opts = { capture: true } as const;
+    document.addEventListener("pointerdown", onDown, { ...opts, passive: true });
+    document.addEventListener("pointermove", onMove, { ...opts, passive: false });
+    document.addEventListener("pointerup", onUp, { ...opts, passive: true });
+    document.addEventListener("pointercancel", onUp, { ...opts, passive: true });
+    document.addEventListener("touchstart", onTouchStart, { ...opts, passive: false });
     return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("pointercancel", onUp);
+      document.removeEventListener("pointerdown", onDown, opts);
+      document.removeEventListener("pointermove", onMove, opts);
+      document.removeEventListener("pointerup", onUp, opts);
+      document.removeEventListener("pointercancel", onUp, opts);
+      document.removeEventListener("touchstart", onTouchStart, opts);
     };
   }, [isMobile]);
 
-  return { dragging, progress };
+  return {
+    left: active?.side === "left" ? { dragging: true, progress: active.progress } : IDLE,
+    right: active?.side === "right" ? { dragging: true, progress: active.progress } : IDLE,
+  };
 }

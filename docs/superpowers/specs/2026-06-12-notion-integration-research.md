@@ -133,4 +133,3 @@ Do not add a Notion REST public connection in this slice. Put that behind a late
 - Use the standard runner not-connected stub when `@notion` is enabled but credentials are absent.
 - Document Notion's rate limits and avoid any v1 background polling.
 - Use existing MCP dynamic-client tests to cover Notion as a dynamic provider.
-

@@ -1,6 +1,5 @@
 import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
-import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -13,6 +12,7 @@ import {
 } from "@/lib/agent-sessions/message-runner";
 import { TOOL_STEP_LIMIT_EXCEEDED_MESSAGE } from "@/lib/agent-sessions/resumable";
 import { currentWorkspace } from "@/lib/auth";
+import { ensureWorkspaceRunAllowance } from "@/lib/billing/run-allowance";
 import {
   continueInterruptedSession,
   createAgentSession,
@@ -35,8 +35,19 @@ vi.mock(import("@opencompany/agent-runtime"), async (importOriginal) => {
   };
 });
 
-vi.mock("@opencompany/billing", () => ({
-  hasPositiveWorkspaceBalance: vi.fn(),
+vi.mock("@/lib/billing/run-allowance", () => ({
+  ensureWorkspaceRunAllowance: vi.fn(),
+  // Keep the real wording so error-message assertions stay meaningful.
+  runAllowanceErrorMessage: (reason: string, action: "start" | "continue") => {
+    if (reason === "weekly_limit_reached") {
+      return action === "start"
+        ? "Weekly spending limit reached. Raise the limit in billing settings to start a session."
+        : "Weekly spending limit reached. Raise the limit in billing settings to continue this session.";
+    }
+    return action === "start"
+      ? "Add workspace credits to start a session."
+      : "Add workspace credits to continue this session.";
+  },
 }));
 
 vi.mock("@opencompany/analytics/server", () => ({
@@ -82,7 +93,29 @@ vi.mock("@/lib/agent-sessions/runner", () => ({
 }));
 
 const currentWorkspaceMock = vi.mocked(currentWorkspace);
-const hasPositiveWorkspaceBalanceMock = vi.mocked(hasPositiveWorkspaceBalance);
+const ensureWorkspaceRunAllowanceMock = vi.mocked(ensureWorkspaceRunAllowance);
+
+// Builds an ensureWorkspaceRunAllowance result. `true` => allowed; otherwise a
+// blocked outcome with the given reason (defaults to an empty balance).
+function allowanceResult(
+  allowed: boolean,
+  reason: "no_balance" | "weekly_limit_reached" = "no_balance",
+) {
+  const base = {
+    balanceUsdMicros: allowed ? 1_000_000 : 0,
+    weeklySpendUsdMicros: 0,
+    weeklySpendLimitUsdMicros: null,
+    spendLimitEnabled: false,
+    weekStartsAt: new Date(0),
+  };
+  return allowed
+    ? ({ allowed: true, allowance: { allowed: true, reason: null, ...base } } as const)
+    : ({
+        allowed: false,
+        reason,
+        allowance: { allowed: false, reason, ...base },
+      } as const);
+}
 const getDbMock = vi.mocked(getDb);
 const newAgentSessionIdMock = vi.mocked(newAgentSessionId);
 const newAgentSessionMessageIdMock = vi.mocked(newAgentSessionMessageId);
@@ -200,13 +233,13 @@ describe("createAgentSession", () => {
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(true));
     newAgentSessionIdMock.mockReturnValue("ses_123");
     newAgentSessionMessageIdMock.mockReturnValue("msg_123");
   });
 
   it("returns a billing redirect when the workspace has no credit", async () => {
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
 
     const result = await createAgentSession("agt_123");
 
@@ -214,13 +247,13 @@ describe("createAgentSession", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
+      reason: "no_balance",
     });
-    expect(getDbMock).toHaveBeenCalled();
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
   });
 
   it("returns a personal billing redirect for personal-surface session starts", async () => {
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
 
     const result = await createAgentSession("agt_123", { surface: "personal" });
 
@@ -228,6 +261,7 @@ describe("createAgentSession", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/personal/settings?billing=insufficient",
+      reason: "no_balance",
     });
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
   });
@@ -298,14 +332,14 @@ describe("createPersonalOnboardingSession", () => {
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(true));
   });
 
   it("skips the onboarding gate — the caller has not completed onboarding yet", async () => {
     // Regression: without skipOnboarding, currentWorkspace() redirects the submit straight back
     // to /onboarding (the survey row that marks completion is only written inside this
     // action), trapping the user in an onboarding loop.
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
 
     const result = await createPersonalOnboardingSession(
       "agt_123",
@@ -318,11 +352,12 @@ describe("createPersonalOnboardingSession", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
+      reason: "no_balance",
     });
   });
 
   it("can start the first onboarding session before the workspace has credits", async () => {
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
     getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
     newAgentSessionIdMock.mockReturnValue("ses_123");
     newAgentSessionMessageIdMock.mockReturnValue("msg_123");
@@ -335,7 +370,7 @@ describe("createPersonalOnboardingSession", () => {
     );
 
     if (!result.ok) throw new Error("expected ok result");
-    expect(hasPositiveWorkspaceBalanceMock).not.toHaveBeenCalled();
+    expect(ensureWorkspaceRunAllowanceMock).not.toHaveBeenCalled();
     expect(result.session).toMatchObject({ id: "ses_123", status: "created" });
     expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
@@ -352,7 +387,7 @@ describe("createAgentSessionFromPrompt", () => {
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(true));
     newAgentSessionIdMock.mockReturnValue("ses_123");
     newAgentSessionMessageIdMock.mockReturnValue("msg_123");
   });
@@ -365,7 +400,7 @@ describe("createAgentSessionFromPrompt", () => {
   });
 
   it("returns a billing redirect when the workspace has no credit", async () => {
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
     getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
 
     const result = await createAgentSessionFromPrompt("agt_123", "Hello");
@@ -374,12 +409,13 @@ describe("createAgentSessionFromPrompt", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
+      reason: "no_balance",
     });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 
   it("returns a personal billing redirect for personal-surface prompt starts", async () => {
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
     getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
 
     const result = await createAgentSessionFromPrompt("agt_123", "Hello", undefined, [], {
@@ -390,6 +426,7 @@ describe("createAgentSessionFromPrompt", () => {
       ok: false,
       error: "Add workspace credits to start a session.",
       redirectTo: "/personal/settings?billing=insufficient",
+      reason: "no_balance",
     });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
@@ -610,7 +647,7 @@ describe("submitAgentSessionMessage", () => {
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(true));
     newAgentSessionMessageIdMock.mockReturnValue("msg_456");
   });
 
@@ -669,7 +706,7 @@ describe("submitAgentSessionMessage", () => {
   });
 
   it("reports missing credits before session existence", async () => {
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
     // Session lookup runs concurrently with the balance check, so it must still resolve.
     const limit = vi.fn().mockResolvedValue([]);
     const where = vi.fn(() => ({ limit }));
@@ -707,7 +744,7 @@ describe("continueInterruptedSession", () => {
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(true));
     newAgentSessionMessageIdMock.mockReturnValue("msg_continue");
   });
 
@@ -774,7 +811,7 @@ describe("continueInterruptedSession", () => {
   });
 
   it("rejects no-balance workspaces before dispatching work", async () => {
-    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(allowanceResult(false));
     const { db } = dbForContinue(interruptedSession);
     getDbMock.mockReturnValue(db);
 

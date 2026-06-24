@@ -124,6 +124,8 @@ details are catalog data in code, not `.agent` file data.
 | `tiktok` | Inspect public TikTok profiles, recent videos, comments, and search results through Apify; fetch direct-video metadata/transcripts through Supadata. |
 | `instagram` | Inspect public Instagram profiles, recent posts/reels, comments, and profile search results through Apify; fetch direct-media metadata/transcripts through Supadata. |
 | `amp` | Coding agent delegated into a sandboxed runtime. |
+| `opencode` | Coding agent delegated into a sandboxed runtime, with attached or public GitHub repository support. |
+| `codex` | Codex coding agent delegated into a sandboxed runtime, with attached or public GitHub repository support. |
 | `linear` | Experimental workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Experimental workspace MCP access to Slack search, messages, files, emoji, and users. |
 | `notion` | Workspace MCP access to Notion search, pages, databases, comments, users, and teamspaces. |
@@ -133,7 +135,12 @@ tools:
   - id: amp
     type: coding_agent
     provider: amp
-    repository: opencompany-web
+    prCapable: true
+  - id: codex
+    type: coding_agent
+    provider: codex
+    label: Codex
+    description: Delegate coding work to Codex inside an E2B sandbox, with attached or public GitHub repository support.
     prCapable: true
   - id: linear
     type: mcp

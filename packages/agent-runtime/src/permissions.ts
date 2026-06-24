@@ -429,6 +429,17 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       admin: "Delete events",
     },
   },
+  google_drive: {
+    providerKey: "google_drive",
+    displayName: "Google Drive",
+    groups: ["read", "post", "modify"],
+    gated: true,
+    permissionDescriptions: {
+      read: "Search, read, and export accessible Drive files",
+      post: "Create new Google Docs",
+      modify: "Update Google Docs and Drive file metadata",
+    },
+  },
   neon: {
     providerKey: "neon",
     displayName: "Neon",
@@ -518,6 +529,13 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   calendar_create_event: { providerKey: "google_calendar", group: "post" },
   calendar_update_event: { providerKey: "google_calendar", group: "modify" },
   calendar_delete_event: { providerKey: "google_calendar", group: "admin" },
+  // Google Drive hosted tools — reads vs writes split across groups.
+  drive_search_files: { providerKey: "google_drive", group: "read" },
+  drive_get_file: { providerKey: "google_drive", group: "read" },
+  drive_export_file: { providerKey: "google_drive", group: "read" },
+  drive_create_document: { providerKey: "google_drive", group: "post" },
+  drive_update_document: { providerKey: "google_drive", group: "modify" },
+  drive_update_file_metadata: { providerKey: "google_drive", group: "modify" },
   // Neon hosted database tools. `neon_run_sql` is reclassified from its SQL text in
   // resolveToolDecision; the static admin group is the safe fallback when SQL is missing/invalid.
   neon_list_databases: { providerKey: "neon", group: "read" },
@@ -564,6 +582,7 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   gh: { providerKey: "github", group: "admin" },
   amp_coder: { providerKey: "github", group: "post" },
   opencode_coder: { providerKey: "github", group: "post" },
+  codex_coder: { providerKey: "github", group: "post" },
   // Never gated.
   run_subagent: null,
   delegate_to_agent: null,

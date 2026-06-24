@@ -6,9 +6,11 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   Blocks,
+  Bot,
   Brain,
   BrainCircuit,
   ChevronDown,
+  Clock3,
   MessageCircle,
   PanelLeft,
   Pencil,
@@ -22,7 +24,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCollections } from "@/components/CollectionsProvider";
-import { PersonalAgentAvatar } from "@/components/personal/PersonalAgentAvatar";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
@@ -384,13 +385,6 @@ function SessionRow({
     }, ARCHIVE_HIGHLIGHT_DELAY_MS);
   }, [active, onArchive, session.id]);
 
-  const showStatusDot =
-    session.status === "running" ||
-    session.status === "provisioning" ||
-    session.status === "awaiting_approval" ||
-    session.status === "awaiting_input" ||
-    session.status === "interrupted";
-
   return (
     <div
       draggable={Boolean(drag) && !editing}
@@ -451,7 +445,21 @@ function SessionRow({
           title={session.lastError ?? session.title}
           className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
-          {showStatusDot ? <SessionStatusDot status={session.status} pulse /> : null}
+          {session.status === "running" || session.status === "provisioning" ? (
+            <SessionStatusDot status={session.status} pulse />
+          ) : session.unseen && !active ? (
+            // Unseen finished turn (completed/failed/awaiting_*) on a session you're not
+            // looking at — the "new activity" blue dot. Suppressed for the active session.
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: "var(--color-info)" }}
+              aria-label="New activity"
+            />
+          ) : session.status === "awaiting_approval" ||
+            session.status === "awaiting_input" ||
+            session.status === "interrupted" ? (
+            <SessionStatusDot status={session.status} pulse />
+          ) : null}
           <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
           {session.source === "whatsapp" ? (
             <MessageCircle
@@ -556,6 +564,7 @@ function useActivePersonalRoute() {
   const activePanel =
     section === "agent" ||
     section === "brain" ||
+    section === "routines" ||
     section === "memory" ||
     section === "settings" ||
     section === "skills" ||
@@ -786,10 +795,28 @@ function PersonalSidebarView({
             />
             <span className="truncate tracking-[-0.005em]">Personal Brain</span>
           </button>
+          <button
+            type="button"
+            onClick={() => router.push(personalPaths.routines)}
+            className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              activePanel === "routines"
+                ? "bg-surface-active text-ink"
+                : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+            }`}
+          >
+            <Clock3
+              size={14}
+              strokeWidth={1.75}
+              className={
+                activePanel === "routines" ? "text-ink" : "text-ink/60 group-hover:text-ink/80"
+              }
+            />
+            <span className="truncate tracking-[-0.005em]">Routines</span>
+          </button>
         </nav>
 
         {/* Scrollable body */}
-        <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
+        <div className="no-scrollbar mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
           {starredSessions.length > 0 && (
             <div className="px-2 pt-3">
               <div className="flex items-center gap-1 px-2 pb-1">
@@ -825,7 +852,13 @@ function PersonalSidebarView({
                   : "text-ink/90 hover:bg-surface-hover hover:text-ink"
               }`}
             >
-              <PersonalAgentAvatar name={agent.name} size={14} />
+              <Bot
+                size={14}
+                strokeWidth={1.75}
+                className={
+                  activePanel === "agent" ? "text-ink" : "text-ink/60 group-hover:text-ink/80"
+                }
+              />
               <span className="truncate tracking-[-0.005em]">Behavior</span>
             </button>
             <CapabilityNavRow
