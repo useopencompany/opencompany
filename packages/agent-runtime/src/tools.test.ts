@@ -164,7 +164,7 @@ describe("AGENT_TOOL_CATALOG", () => {
 });
 
 describe("run_subagent runtime tool", () => {
-  it("is always-on, directly callable, and documented in the runtime registry", () => {
+  it("is always-on, deferred, and documented in the runtime registry", () => {
     const definition = getRuntimeToolDefinition("run_subagent");
 
     expect(definition).toMatchObject({
@@ -173,8 +173,8 @@ describe("run_subagent runtime tool", () => {
     });
     expect(definition?.configToolId).toBeUndefined();
     expect(partitionRuntimeToolNames(["run_subagent"] as RuntimeToolName[])).toEqual({
-      direct: ["run_subagent"],
-      deferred: [],
+      direct: [],
+      deferred: ["run_subagent"],
     });
   });
 });
@@ -466,35 +466,58 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
 });
 
 describe("partitionRuntimeToolNames", () => {
-  it("defers capability tools and update_agent_file, keeps the core/conditional tools direct", () => {
+  it("defers capability and non-essential standalone tools, keeping only the minimal core direct", () => {
     const enabled: RuntimeToolName[] = [
       "read_file",
       "edit_file",
       "shell",
       "find_tools",
       "update_agent_file",
+      "memory",
+      "recall",
+      "fetch_transcript",
+      "inbox_add",
+      "run_subagent",
+      "delegate_to_agent",
+      "create_linear_issue",
+      "restore_brain_file",
       "exa_search",
       "instagram_get_profile",
       "amp_coder",
     ];
     const { direct, deferred } = partitionRuntimeToolNames(enabled);
-    expect(direct).toEqual(["read_file", "edit_file", "shell", "find_tools"]);
+    expect(direct).toEqual(["read_file", "edit_file", "shell", "find_tools", "memory"]);
     expect(deferred).toEqual([
       "update_agent_file",
+      "recall",
+      "fetch_transcript",
+      "inbox_add",
+      "run_subagent",
+      "delegate_to_agent",
+      "create_linear_issue",
+      "restore_brain_file",
       "exa_search",
       "instagram_get_profile",
       "amp_coder",
     ]);
   });
 
-  it("classifies hosted tools, coding agents and update_agent_file as deferrable, core tools as not", () => {
+  it("classifies hosted tools, coding agents and non-essential standalone tools as deferrable", () => {
     expect(isDeferrableRuntimeTool("exa_search")).toBe(true);
     expect(isDeferrableRuntimeTool("amp_coder")).toBe(true);
     expect(isDeferrableRuntimeTool("web_fetch")).toBe(true);
     expect(isDeferrableRuntimeTool("update_agent_file")).toBe(true);
+    expect(isDeferrableRuntimeTool("recall")).toBe(true);
+    expect(isDeferrableRuntimeTool("fetch_transcript")).toBe(true);
+    expect(isDeferrableRuntimeTool("inbox_add")).toBe(true);
+    expect(isDeferrableRuntimeTool("run_subagent")).toBe(true);
+    expect(isDeferrableRuntimeTool("delegate_to_agent")).toBe(true);
+    expect(isDeferrableRuntimeTool("create_linear_issue")).toBe(true);
+    expect(isDeferrableRuntimeTool("restore_brain_file")).toBe(true);
     expect(isDeferrableRuntimeTool("read_file")).toBe(false);
     expect(isDeferrableRuntimeTool("shell")).toBe(false);
     expect(isDeferrableRuntimeTool("gh")).toBe(false);
+    expect(isDeferrableRuntimeTool("memory")).toBe(false);
     expect(isDeferrableRuntimeTool("find_tools")).toBe(false);
     // ask_user_question stays direct so its durable turn-suspend (keyed on the literal call name)
     // is not wrapped behind use_tool.
@@ -597,6 +620,29 @@ describe("searchRuntimeTools", () => {
     const match = results.find((result) => result.name === "update_agent_file");
     expect(match).toBeDefined();
     expect(match?.parameters.type).toBe("object");
+  });
+
+  it("discovers deferred standalone tools by query when enabled", () => {
+    const enabledStandalone: RuntimeToolName[] = [
+      "find_tools",
+      "memory",
+      "recall",
+      "fetch_transcript",
+      "inbox_add",
+      "run_subagent",
+      "delegate_to_agent",
+      "create_linear_issue",
+      "restore_brain_file",
+    ];
+
+    expect(searchRuntimeTools({ query: "memory" }, enabledStandalone).map((result) => result.name))
+      .not.toContain("memory");
+    expect(
+      searchRuntimeTools({ query: "subagent" }, enabledStandalone).map((result) => result.name),
+    ).toEqual(["run_subagent"]);
+    expect(
+      searchRuntimeTools({ query: "linear" }, enabledStandalone).map((result) => result.name),
+    ).toEqual(["create_linear_issue"]);
   });
 });
 

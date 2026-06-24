@@ -298,6 +298,7 @@ function buildToolsIndexSection(input: {
       "read_skill",
       ...(input.ghEnabled ? ["gh"] : []),
     ].join(", ")}) are available directly.`,
+    "Other built-in tools may be available on demand when enabled, including memory, recall, fetch_transcript, inbox tools, run_subagent, delegate_to_agent, create_linear_issue, restore_brain_file, and update_agent_file. Use find_tools to list exact available names and schemas, then run one with use_tool.",
     "This list is only what's enabled now — more opinionated capabilities are available to add. When a task needs something you can't currently do, call discover_capabilities to see what you could enable; if one fits, confirm with the user (ask_user_question), then enable it durably via self-edit (update_agent_file).",
   ];
   if (builtinCapabilities.length > 0) {

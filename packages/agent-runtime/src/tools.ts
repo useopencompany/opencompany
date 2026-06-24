@@ -3054,43 +3054,42 @@ export function effectiveToolCall(name: string, input: unknown): { name: string;
   return { name, input };
 }
 
-// Tools whose full schema is registered eagerly (always directly callable). These are the
-// core file/shell/ask tools used constantly and always relevant — deferring them behind a
-// `find_tools` round-trip would add latency with no token win — plus the conditional core
-// tools (gh, delegation) that are not capability-catalog entries and are advertised by their
-// own system-prompt guidance. Everything else (capability tools, plus standalone deferrables
-// like update_agent_file) is deferred.
+// Tools whose full schema is registered eagerly (always directly callable). Keep this list to the
+// minimal turn-critical surface: file/shell/git inspection, skill loading, GitHub CLI, user
+// questions (which suspend by literal tool name), and the discovery/dispatcher tools. Everything
+// else is reachable through find_tools/use_tool so low-frequency schemas do not bloat every turn.
 export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "read_file",
   "write_file",
   "edit_file",
   "list_files",
   "git_diff",
-  "run_subagent",
   "shell",
   "read_skill",
   "gh",
   "memory",
-  "recall",
-  "inbox_list",
-  "inbox_add",
-  "inbox_update",
-  "fetch_transcript",
   "ask_user_question",
-  "delegate_to_agent",
   "tool_help",
   "find_tools",
   "discover_capabilities",
 ];
 
 // Deferrable runtime tools that are not capability-catalog entries but are still loaded on demand
-// rather than registered eagerly. `update_agent_file` carries a heavy agent-definition schema yet is
-// almost never called, and is already gated behind a mandatory read of the agent-self-edit skill —
-// so the `find_tools`/`use_tool` round-trip adds no latency the gate did not already impose, while
-// the schema leaves the eager tool set. ask_user_question is intentionally NOT here: its durable
+// rather than registered eagerly. ask_user_question is intentionally NOT here: its durable
 // turn-suspend is keyed on the literal tool-call name in the model stream runner, so wrapping it in
 // `use_tool` would stop it from suspending.
-const STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES: readonly RuntimeToolName[] = ["update_agent_file"];
+const STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES: readonly RuntimeToolName[] = [
+  "recall",
+  "fetch_transcript",
+  "inbox_list",
+  "inbox_add",
+  "inbox_update",
+  "run_subagent",
+  "delegate_to_agent",
+  "create_linear_issue",
+  "restore_brain_file",
+  "update_agent_file",
+];
 
 // Runtime tools whose full schema is loaded on demand via `find_tools` and executed via `use_tool`,
 // rather than being registered eagerly in the model's tool set. Capability tools (hosted tools +
