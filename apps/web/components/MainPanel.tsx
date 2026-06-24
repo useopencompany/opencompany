@@ -26,10 +26,12 @@ import {
 } from "@/components/ui/select";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
+import { VoiceTranscriptionButton } from "@/components/VoiceTranscriptionButton";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { agentRowToListItem, sortAgentsByUpdatedDesc } from "@/lib/collections/selectors";
+import { insertTranscriptDraft } from "@/lib/transcription/insert";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
@@ -105,6 +107,21 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [input]);
+
+  const insertTranscription = (text: string) => {
+    const el = textareaRef.current;
+    const next = insertTranscriptDraft({
+      value: input,
+      transcript: text,
+      selectionStart: el?.selectionStart ?? input.length,
+      selectionEnd: el?.selectionEnd ?? input.length,
+    });
+    setInput(next.value);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
 
   const submit = () => {
     const content = input.trim();
@@ -230,18 +247,25 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
           </>
         }
         action={
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label={isPending ? "Starting session…" : "Start session"}
-          >
-            {isPending ? (
-              <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
-            ) : (
-              <ArrowUp size={13} strokeWidth={2} />
-            )}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <VoiceTranscriptionButton
+              onTranscription={insertTranscription}
+              disabled={isPending}
+              variant="action"
+            />
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label={isPending ? "Starting session…" : "Start session"}
+            >
+              {isPending ? (
+                <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
+              ) : (
+                <ArrowUp size={13} strokeWidth={2} />
+              )}
+            </button>
+          </div>
         }
         rightControls={
           <div className="hidden items-center gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/composer:opacity-100 sm:flex">

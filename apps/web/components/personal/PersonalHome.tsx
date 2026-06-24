@@ -19,10 +19,12 @@ import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { PersonalInbox } from "@/components/personal/PersonalInbox";
 import { useToast } from "@/components/ToastProvider";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
+import { VoiceTranscriptionButton } from "@/components/VoiceTranscriptionButton";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { personalPaths } from "@/lib/personal/paths";
+import { insertTranscriptDraft } from "@/lib/transcription/insert";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "moonshotai/kimi-k2.6";
@@ -85,6 +87,21 @@ export default function PersonalHome() {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [input]);
+
+  const insertTranscription = (text: string) => {
+    const el = textareaRef.current;
+    const next = insertTranscriptDraft({
+      value: input,
+      transcript: text,
+      selectionStart: el?.selectionStart ?? input.length,
+      selectionEnd: el?.selectionEnd ?? input.length,
+    });
+    setInput(next.value);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
 
   const submit = () => {
     const content = input.trim();
@@ -208,14 +225,21 @@ export default function PersonalHome() {
               </>
             }
             action={
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label="Start session"
-              >
-                <ArrowUp size={13} strokeWidth={2} />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <VoiceTranscriptionButton
+                  onTranscription={insertTranscription}
+                  disabled={Boolean(pendingSession)}
+                  variant="action"
+                />
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Start session"
+                >
+                  <ArrowUp size={13} strokeWidth={2} />
+                </button>
+              </div>
             }
           />
         </form>

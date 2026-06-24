@@ -73,6 +73,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
+import { VoiceTranscriptionButton } from "@/components/VoiceTranscriptionButton";
 import { formatElapsed, useElapsedSeconds, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
@@ -130,6 +131,7 @@ import {
   buildSkillSlashCommands,
   type SkillCommandSource,
 } from "@/lib/slash-commands/skill-commands";
+import { insertTranscriptDraft } from "@/lib/transcription/insert";
 
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
@@ -1145,6 +1147,23 @@ function SessionViewContentBody({
   // Window-wide drop interception + the blur-reset for the drop overlay now live in the
   // useComposerAttachments hook (shared with the home composers).
 
+  const insertTranscription = (text: string) => {
+    const el = textareaRef.current;
+    const next = insertTranscriptDraft({
+      value: input,
+      transcript: text,
+      selectionStart: el?.selectionStart ?? input.length,
+      selectionEnd: el?.selectionEnd ?? input.length,
+    });
+    setInput(next.value);
+    setCaret(next.caret);
+    setSlashDismissed(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
   // Durable Stream recovery lives in useSessionStream: the client reconnects +
   // resumes from its offset on transient failures, and a DEAD subscription (the
   // hidden-tab pause/resume race, an exhausted retry budget) is re-opened when the
@@ -1947,6 +1966,11 @@ function SessionViewContentBody({
                       attachments.length === 0);
                   return (
                     <div className="flex items-center gap-1.5">
+                      <VoiceTranscriptionButton
+                        onTranscription={insertTranscription}
+                        disabled={isPending}
+                        variant="action"
+                      />
                       <button
                         type="button"
                         disabled={sendDisabled}
