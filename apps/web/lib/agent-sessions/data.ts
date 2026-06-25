@@ -535,6 +535,31 @@ export async function loadAgentSessionDetailForWorkspace(
   });
 }
 
+export async function loadAgentSessionPreviewTargetForWorkspace(
+  sessionId: string,
+  userId: string,
+  workspaceId: string,
+) {
+  const [session] = await getDb()
+    .select({
+      id: agentSessions.id,
+      engine: agentSessions.engine,
+      e2bSandboxId: agentSessions.e2bSandboxId,
+    })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspaceId),
+        eq(agentSessions.userId, userId),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  return session ?? null;
+}
+
 type CreatedSessionRow = typeof agentSessions.$inferSelect;
 type CreatedMessageRow = typeof agentSessionMessages.$inferSelect;
 type CreatedEventRow = {

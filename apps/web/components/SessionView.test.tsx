@@ -142,13 +142,25 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
 }));
 
 const payloadMocks = vi.hoisted(() => ({
+  fetchAgentSessionPreview: vi.fn(async () => ({
+    available: false,
+    reason: "no_sandbox",
+    message: "No active sandbox has been attached to this session yet.",
+  })),
   seedSessionQueries: vi.fn(),
 }));
 vi.mock("@/lib/agent-sessions/payload", () => ({
   fetchAgentSession: vi.fn(async () => null),
+  fetchAgentSessionPreview: payloadMocks.fetchAgentSessionPreview,
   seedSessionQueries: payloadMocks.seedSessionQueries,
   sessionQueryKeys: {
     detail: (workspaceId: string, id: string) => ["session-detail", workspaceId, id],
+    preview: (workspaceId: string, id: string, sandboxId: string) => [
+      "session-preview",
+      workspaceId,
+      id,
+      sandboxId,
+    ],
   },
   SESSIONS_QUERY_STALE_TIME_MS: 30_000,
 }));
@@ -170,6 +182,12 @@ afterEach(() => {
   actionMocks.resolveToolApproval.mockReset();
   actionMocks.submitAgentSessionQuestionResponse.mockReset();
   actionMocks.submitAgentSessionMessage.mockReset();
+  payloadMocks.fetchAgentSessionPreview.mockReset();
+  payloadMocks.fetchAgentSessionPreview.mockResolvedValue({
+    available: false,
+    reason: "no_sandbox",
+    message: "No active sandbox has been attached to this session yet.",
+  });
   payloadMocks.seedSessionQueries.mockReset();
   routerMock.prefetch.mockReset();
   routerMock.push.mockReset();
@@ -992,6 +1010,48 @@ function setComposerValue(value: string) {
   });
   composer.focus();
 }
+
+describe("SessionViewContent — Codex sandbox preview", () => {
+  it("shows the preview URL in the top bar and inspector", async () => {
+    payloadMocks.fetchAgentSessionPreview.mockResolvedValueOnce({
+      available: true,
+      url: "https://preview.example.com",
+      port: 3000,
+      previews: [
+        { url: "https://preview.example.com", port: 3000 },
+        { url: "https://vite.example.com", port: 5173 },
+      ],
+      sandboxId: "sbx_123",
+      detectedAt: "2026-06-25T10:00:00.000Z",
+    } as never);
+    renderSessionViewContent(
+      makeDetail({
+        session: makeSession({
+          engine: "codex",
+          modelProvider: "openai",
+          modelName: "openai/gpt-5.5",
+          e2bSandboxId: "sbx_123",
+        }),
+      }),
+    );
+
+    const nextPreviewLink = await screen.findByRole("link", {
+      name: "Open preview on port 3000",
+    });
+    expect(nextPreviewLink).toHaveAttribute("href", "https://preview.example.com");
+    expect(await screen.findByRole("link", { name: "Open preview on port 5173" })).toHaveAttribute(
+      "href",
+      "https://vite.example.com",
+    );
+    expect(await screen.findByText("Preview :3000")).toBeInTheDocument();
+    expect(await screen.findByText("Preview :5173")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Expand runtime details" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Other" }));
+    expect(await screen.findByText(/3000: https:\/\/preview\.example\.com/)).toBeInTheDocument();
+    expect(await screen.findByText(/5173: https:\/\/vite\.example\.com/)).toBeInTheDocument();
+  });
+});
 
 describe("SessionViewContent — stream-sourced pending turn", () => {
   it("shows waiting state, not the previous terminal error, after a new user message starts a turn", () => {

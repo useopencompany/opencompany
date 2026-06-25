@@ -2,13 +2,17 @@
 
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "@opencompany/agent-runtime";
 import { useLiveQuery } from "@tanstack/react-db";
-import { PanelRight, Sparkles } from "lucide-react";
+import { ExternalLink, PanelRight, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
 import { OpenAIIcon } from "@/components/icons/model-provider-icons";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type {
+  SessionPreviewLinkPayload,
+  SessionPreviewPayload,
+} from "@/lib/agent-sessions/payload";
 import { agentRowToListItem } from "@/lib/collections/selectors";
 
 export function formatUsdMicros(value: number) {
@@ -24,6 +28,7 @@ export function SessionTopBar({
   session,
   currentContextTokens,
   totalCostUsdMicros,
+  preview,
   inspectorCollapsed,
   onToggleInspector,
 }: {
@@ -35,6 +40,7 @@ export function SessionTopBar({
   };
   currentContextTokens: number;
   totalCostUsdMicros: number;
+  preview?: SessionPreviewPayload | null;
   inspectorCollapsed: boolean;
   onToggleInspector: () => void;
 }) {
@@ -56,6 +62,7 @@ export function SessionTopBar({
   // On the /personal shell the "expand sidebar" button floats over this bar's top-left while the
   // sidebar is collapsed; widen the left padding so the agent name clears it. (false elsewhere.)
   const floatingNavInset = useFloatingNavInset();
+  const previewLinks = previewLinkList(preview);
 
   return (
     <header
@@ -97,6 +104,20 @@ export function SessionTopBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {previewLinks.map((link) => (
+          <a
+            key={`${link.port}-${link.url}`}
+            href={link.url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open preview on port ${link.port}`}
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <ExternalLink size={12} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
+            <span className="hidden sm:inline">Preview :{link.port}</span>
+            <span className="sm:hidden">:{link.port}</span>
+          </a>
+        ))}
         {currentContextTokens > 0 ? (
           <ContextWindowMeter
             used={currentContextTokens}
@@ -116,6 +137,15 @@ export function SessionTopBar({
       </div>
     </header>
   );
+}
+
+function previewLinkList(
+  preview: SessionPreviewPayload | null | undefined,
+): SessionPreviewLinkPayload[] {
+  if (!preview?.available) return [];
+  return preview.previews.length > 0
+    ? preview.previews
+    : [{ url: preview.url, port: preview.port }];
 }
 
 // Compact token formatter for the context gauge tooltip: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".

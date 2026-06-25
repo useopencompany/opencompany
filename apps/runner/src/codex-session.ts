@@ -955,6 +955,7 @@ function buildCodexTask(input: {
       : "No workspace GitHub installation token is available. Public repositories may still be cloned if needed.",
     "Use the user's request to decide whether and what repository to clone or inspect.",
     "When the user asks you to start a background or long-running process that should survive future turns, detach it from the command shell, for example `nohup setsid <command> >/tmp/<name>.log 2>&1 < /dev/null & echo $!`. Do not report transient shell job ids from plain `<command> &` as durable process ids.",
+    "Dev servers and any HTTP service the user may want to open must bind to 0.0.0.0 (all interfaces), not 127.0.0.1/localhost. The sandbox preview URL only forwards to services listening on 0.0.0.0; a loopback-only server is unreachable from outside the sandbox even though it responds to in-sandbox curl.",
     "",
     "Agent instructions:",
     input.agentInstructions.trim() || "No additional agent instructions.",

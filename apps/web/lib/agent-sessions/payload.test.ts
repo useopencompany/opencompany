@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentSessionDetailPayload,
   parseAgentSessionDetailResponse,
+  parseAgentSessionPreviewResponse,
   parseSidebarSessionPayload,
   parseSidebarSessionsResponse,
   seedSessionQueries,
@@ -70,6 +71,29 @@ describe("session payload cache helpers", () => {
     });
     expect(parseSidebarSessionsResponse({ sessions: [sidebarSession("ses_1", "One")] })).toEqual({
       sessions: [sidebarSession("ses_1", "One")],
+    });
+  });
+
+  it("normalizes legacy single-link preview payloads", () => {
+    expect(
+      parseAgentSessionPreviewResponse({
+        preview: {
+          available: true,
+          url: "https://preview.example.com",
+          port: 3000,
+          sandboxId: "sbx_123",
+          detectedAt: "2026-06-25T10:00:00.000Z",
+        },
+      }),
+    ).toEqual({
+      preview: {
+        available: true,
+        url: "https://preview.example.com",
+        port: 3000,
+        previews: [{ url: "https://preview.example.com", port: 3000 }],
+        sandboxId: "sbx_123",
+        detectedAt: "2026-06-25T10:00:00.000Z",
+      },
     });
   });
 

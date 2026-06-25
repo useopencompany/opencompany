@@ -80,6 +80,34 @@ export type RelatedSessionPayload = {
 // the "Copy Debug JSON" export. Loosely typed: it is debug-only and tolerant of legacy field names.
 export type ModelRequestSnapshotPayload = Record<string, unknown>;
 
+export type SessionPreviewUnavailableReason =
+  | "not_codex"
+  | "no_sandbox"
+  | "sandbox_not_found"
+  | "no_http_ports"
+  | "runner_unconfigured"
+  | "runner_error";
+
+export type SessionPreviewLinkPayload = {
+  url: string;
+  port: number;
+};
+
+export type SessionPreviewPayload =
+  | {
+      available: true;
+      url: string;
+      port: number;
+      previews: SessionPreviewLinkPayload[];
+      sandboxId: string;
+      detectedAt: string;
+    }
+  | {
+      available: false;
+      reason: SessionPreviewUnavailableReason;
+      message: string;
+    };
+
 export type AgentSessionDetailPayload = {
   session: AgentSessionPayload;
   related: {
@@ -146,6 +174,8 @@ export type RelatedSessionSerializable = Omit<RelatedSessionPayload, "createdAt"
 
 export const sessionQueryKeys = {
   detail: (workspaceId: string, sessionId: string) => ["session", workspaceId, sessionId] as const,
+  preview: (workspaceId: string, sessionId: string, sandboxId: string) =>
+    ["session-preview", workspaceId, sessionId, sandboxId] as const,
 };
 
 export function serializeSidebarSession(
@@ -262,6 +292,15 @@ export async function fetchAgentSession(
   return parseAgentSessionDetailResponse(body).detail;
 }
 
+export async function fetchAgentSessionPreview(sessionId: string): Promise<SessionPreviewPayload> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview`, {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  const body = await readJson(response);
+  return parseAgentSessionPreviewResponse(body).preview;
+}
+
 export function seedSessionQueries(
   queryClient: QueryClient,
   workspaceId: string,
@@ -283,6 +322,53 @@ export function parseAgentSessionDetailResponse(value: unknown): {
 } {
   const record = assertRecord(value, "session detail response");
   return { detail: parseAgentSessionDetailPayload(record.detail) };
+}
+
+export function parseAgentSessionPreviewResponse(value: unknown): {
+  preview: SessionPreviewPayload;
+} {
+  const record = assertRecord(value, "session preview response");
+  return { preview: parseSessionPreviewPayload(record.preview) };
+}
+
+function parseSessionPreviewPayload(value: unknown): SessionPreviewPayload {
+  const record = assertRecord(value, "session preview");
+  const available = readBooleanField(record, "available");
+  if (available) {
+    const primary = {
+      url: readNonEmptyStringField(record, "url"),
+      port: readNumberField(record, "port"),
+    };
+    const previews =
+      record.previews === undefined
+        ? [primary]
+        : assertArray(record.previews, "session preview links").map(parseSessionPreviewLink);
+    return {
+      available: true,
+      ...primary,
+      previews: previews.length > 0 ? previews : [primary],
+      sandboxId: readNonEmptyStringField(record, "sandboxId"),
+      detectedAt: readNonEmptyStringField(record, "detectedAt"),
+    };
+  }
+
+  const reason = readStringField(record, "reason");
+  if (!isSessionPreviewUnavailableReason(reason)) {
+    throw new Error("Invalid preview reason.");
+  }
+  return {
+    available: false,
+    reason,
+    message: readNonEmptyStringField(record, "message"),
+  };
+}
+
+function parseSessionPreviewLink(value: unknown): SessionPreviewLinkPayload {
+  const record = assertRecord(value, "session preview link");
+  return {
+    url: readNonEmptyStringField(record, "url"),
+    port: readNumberField(record, "port"),
+  };
 }
 
 export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayload {
@@ -645,6 +731,12 @@ function readOptionalBooleanField(record: Record<string, unknown>, field: string
   return value;
 }
 
+function readBooleanField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (typeof value !== "boolean") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
 function readNumberField(record: Record<string, unknown>, field: string) {
   const value = record[field];
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
@@ -661,6 +753,19 @@ function readOptionalNumberField(record: Record<string, unknown>, field: string)
 function readNullableRecord(value: unknown) {
   if (value === null || value === undefined) return null;
   return assertRecord(value, "record field");
+}
+
+function isSessionPreviewUnavailableReason(
+  value: string,
+): value is SessionPreviewUnavailableReason {
+  return (
+    value === "not_codex" ||
+    value === "no_sandbox" ||
+    value === "sandbox_not_found" ||
+    value === "no_http_ports" ||
+    value === "runner_unconfigured" ||
+    value === "runner_error"
+  );
 }
 
 async function readJson(response: Response): Promise<unknown> {

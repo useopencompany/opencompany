@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { enqueueRunnerJob } from "./jobs";
+import { resolveSessionPreviewUrl } from "./preview-url";
 import { createServer } from "./server";
 
 vi.mock("./agent-loop", () => ({
@@ -13,6 +14,18 @@ vi.mock("./jobs", () => ({
     status: "pending",
   })),
 }));
+
+vi.mock("./preview-url", () => ({
+  resolveSessionPreviewUrl: vi.fn(async () => ({
+    available: false,
+    reason: "no_http_ports",
+    message: "No HTTP dev server is currently listening in the sandbox.",
+  })),
+}));
+
+const resolveSessionPreviewUrlMock = resolveSessionPreviewUrl as unknown as {
+  mockResolvedValueOnce: (value: Awaited<ReturnType<typeof resolveSessionPreviewUrl>>) => void;
+};
 
 const env = {
   databaseUrl: "postgres://example",
@@ -197,5 +210,66 @@ describe("internal after-session endpoint", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "messageId is required." });
+  });
+});
+
+describe("internal preview URL endpoint", () => {
+  it("requires internal auth before resolving preview URLs", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/preview-url",
+      headers: { authorization: "Bearer wrong-token" },
+      payload: { workspaceId: "wks_123" },
+    });
+
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(resolveSessionPreviewUrl).not.toHaveBeenCalled();
+  });
+
+  it("returns the resolved Codex sandbox preview payload", async () => {
+    resolveSessionPreviewUrlMock.mockResolvedValueOnce({
+      available: true,
+      url: "https://preview.example.com",
+      port: 3000,
+      previews: [
+        { url: "https://preview.example.com", port: 3000 },
+        { url: "https://vite.example.com", port: 5173 },
+      ],
+      sandboxId: "sbx_123",
+      detectedAt: "2026-06-25T10:00:00.000Z",
+    });
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/preview-url",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: { workspaceId: "wks_123" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      ok: true,
+      preview: {
+        available: true,
+        url: "https://preview.example.com",
+        port: 3000,
+        previews: [
+          { url: "https://preview.example.com", port: 3000 },
+          { url: "https://vite.example.com", port: 5173 },
+        ],
+        sandboxId: "sbx_123",
+        detectedAt: "2026-06-25T10:00:00.000Z",
+      },
+    });
+    expect(resolveSessionPreviewUrl).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      workspaceId: "wks_123",
+      env,
+    });
   });
 });

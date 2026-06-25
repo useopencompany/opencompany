@@ -5,6 +5,7 @@ import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth"
 import type { RunnerEnv } from "./env";
 import { enqueueRunnerJob } from "./jobs";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
+import { resolveSessionPreviewUrl } from "./preview-url";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
@@ -257,6 +258,25 @@ export function createServer(
     const { id } = request.params as { id: string };
     await archiveSession(id);
     reply.send({ ok: true });
+  });
+
+  app.post("/internal/sessions/:id/preview-url", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { id } = request.params as { id: string };
+    const body = request.body as { workspaceId?: string } | undefined;
+    const workspaceId = body?.workspaceId?.trim();
+    if (!workspaceId) {
+      reply.status(400).send({ error: "workspaceId is required." });
+      return;
+    }
+
+    const preview = await resolveSessionPreviewUrl({ sessionId: id, workspaceId, env });
+    if (!preview) {
+      reply.status(404).send({ error: "Session not found." });
+      return;
+    }
+
+    reply.send({ ok: true, preview });
   });
 
   return app;

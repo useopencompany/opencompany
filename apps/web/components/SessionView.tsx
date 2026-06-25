@@ -108,7 +108,9 @@ import {
 import {
   type AgentSessionDetailPayload,
   fetchAgentSession,
+  fetchAgentSessionPreview,
   SESSIONS_QUERY_STALE_TIME_MS,
+  type SessionPreviewPayload,
   sessionQueryKeys,
 } from "@/lib/agent-sessions/payload";
 import { isToolStepLimitResumable } from "@/lib/agent-sessions/resumable";
@@ -320,6 +322,7 @@ const LAST_TURN_MIN_HEIGHT_FACTOR = 0.5;
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
+  liveSession?: AgentSessionDetailPayload["session"] | null;
   // When the snapshot was last fetched (react-query `dataUpdatedAt`, epoch ms). The
   // stream/snapshot authority rule reads it: an overlay that has delivered nothing
   // since this time AND is behind on durable events is a dead stream's leftovers and
@@ -517,6 +520,7 @@ function SessionViewQuery({
       key={detail.session.id}
       detail={detail}
       workspaceId={workspaceId}
+      liveSession={placeholder?.session ?? null}
       detailUpdatedAt={dataUpdatedAt}
     />
   );
@@ -533,6 +537,7 @@ export function SessionViewContent(props: SessionViewContentProps) {
 function SessionViewContentBody({
   detail,
   workspaceId,
+  liveSession,
   detailUpdatedAt = 0,
 }: SessionViewContentProps) {
   const queryClient = useQueryClient();
@@ -541,6 +546,10 @@ function SessionViewContentBody({
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
+  const previewSandboxId =
+    liveSession?.id === session.id
+      ? (liveSession.e2bSandboxId ?? session.e2bSandboxId)
+      : session.e2bSandboxId;
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("info");
   // Mobile right-edge swipe drives this inspector via the global gesture in ShellChrome.
@@ -776,6 +785,20 @@ function SessionViewContentBody({
       lastError: null,
     };
   }, [baseRuntime, optimisticUserMessages]);
+  const previewQueryEnabled = session.engine === "codex" && Boolean(previewSandboxId);
+  const { data: sessionPreview } = useQuery({
+    queryKey: previewSandboxId
+      ? sessionQueryKeys.preview(workspaceId, session.id, previewSandboxId)
+      : ["session-preview", workspaceId, session.id, "none"],
+    queryFn: () => fetchAgentSessionPreview(session.id),
+    enabled: previewQueryEnabled,
+    staleTime: 15_000,
+    refetchInterval: () => {
+      const shouldPoll = previewQueryEnabled && runtime.currentStatus === "running";
+      return shouldPoll ? 5_000 : false;
+    },
+    retry: false,
+  });
 
   // Once a just-sent optimistic message is backed by its durable server message (which serves the
   // image via /api/attachments), its local object-URL previews are no longer needed: revoke them.
@@ -1797,6 +1820,7 @@ function SessionViewContentBody({
           session={session}
           currentContextTokens={runtime.currentContextTokens}
           totalCostUsdMicros={runtime.cost.totalCostUsdMicros}
+          preview={sessionPreview ?? null}
           inspectorCollapsed={inspectorCollapsed}
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
         />
@@ -2295,6 +2319,8 @@ function SessionViewContentBody({
                   usage={runtime.usage}
                   toolUsage={runtime.toolUsage}
                   cost={runtime.cost}
+                  preview={sessionPreview ?? null}
+                  previewSandboxId={previewSandboxId}
                   recentEvents={inspectorEvents.slice(-16)}
                   canAbort={canAbort}
                   isPending={isPending}
@@ -3909,6 +3935,8 @@ function SessionInspector({
   usage,
   toolUsage,
   cost,
+  preview,
+  previewSandboxId,
   recentEvents,
   canAbort,
   isPending,
@@ -3928,6 +3956,8 @@ function SessionInspector({
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
+  preview?: SessionPreviewPayload | null;
+  previewSandboxId?: string | null;
   recentEvents: RuntimeEvent[];
   canAbort: boolean;
   isPending: boolean;
@@ -4039,9 +4069,22 @@ function SessionInspector({
             <div className="col-span-2">
               <InspectorField label="Workdir" value={session.workdir} mono />
             </div>
-            {session.e2bSandboxId ? (
+            {(previewSandboxId ?? session.e2bSandboxId) ? (
               <div className="col-span-2">
-                <InspectorField label="Sandbox" value={session.e2bSandboxId} mono />
+                <InspectorField
+                  label="Sandbox"
+                  value={previewSandboxId ?? session.e2bSandboxId ?? ""}
+                  mono
+                />
+              </div>
+            ) : null}
+            {session.engine === "codex" ? (
+              <div className="col-span-2">
+                <InspectorField
+                  label="Preview"
+                  value={previewFieldValue(preview, previewSandboxId)}
+                  mono={preview?.available === true}
+                />
               </div>
             ) : null}
           </div>
@@ -4231,6 +4274,21 @@ function InspectorStatusField({ status, lastError }: { status: string; lastError
       </div>
     </div>
   );
+}
+
+function previewFieldValue(
+  preview: SessionPreviewPayload | null | undefined,
+  sandboxId?: string | null,
+) {
+  if (preview?.available) {
+    const previews =
+      preview.previews.length > 0 ? preview.previews : [{ url: preview.url, port: preview.port }];
+    return previews.map((item) => `${item.port}: ${item.url}`).join(" · ");
+  }
+  if (preview) return preview.message;
+  return sandboxId
+    ? "Detecting preview URL..."
+    : "No active sandbox has been attached to this session yet.";
 }
 
 function InspectorRelatedSession({
