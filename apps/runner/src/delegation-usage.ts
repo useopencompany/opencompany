@@ -1,13 +1,15 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
-import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
+import { appendRuntimeEvent } from "./events";
 import { rowsFromExecute } from "./sql-exec";
 
-export async function emitDelegatedUsageRollupForLease(input: {
+// Roll a delegated child's (sub)tree usage onto the parent session, emitting only the delta since
+// the last emit so resumes / multi-child trees never double-count. This is the non-lease variant
+// used by the child-finish hook: by the time a child finishes, no run owns the parent's lease, so
+// the event is appended directly. The delta dedup makes concurrent/duplicate emits idempotent.
+export async function emitDelegatedUsageRollup(input: {
   parentSessionId: string;
-  parentMessageId: string;
-  parentRunLeaseId: string;
-  parentRunLeaseOwner: string;
+  parentMessageId: string | null;
   childSessionId: string;
   parentToolCallId: string;
 }) {
@@ -20,22 +22,18 @@ export async function emitDelegatedUsageRollupForLease(input: {
   const delta = subtractSessionTreeUsageRollup(rollup, alreadyEmitted);
   if (!hasUsageRollupValue(delta)) return;
 
-  await requireLeaseWrite(
-    appendRuntimeEventForLease({
-      sessionId: input.parentSessionId,
-      messageId: input.parentMessageId,
-      leaseId: input.parentRunLeaseId,
-      leaseOwner: input.parentRunLeaseOwner,
-      type: "session.delegated_usage",
-      payload: {
-        childSessionId: input.childSessionId,
-        parentToolCallId: input.parentToolCallId,
-        usage: delta.usage,
-        toolUsage: delta.toolUsage,
-        cost: delta.cost,
-      },
-    }),
-  );
+  await appendRuntimeEvent(getDb(), {
+    sessionId: input.parentSessionId,
+    messageId: input.parentMessageId,
+    type: "session.delegated_usage",
+    payload: {
+      childSessionId: input.childSessionId,
+      parentToolCallId: input.parentToolCallId,
+      usage: delta.usage,
+      toolUsage: delta.toolUsage,
+      cost: delta.cost,
+    },
+  });
 }
 
 export type SessionTreeUsageRollup = {

@@ -24,7 +24,7 @@ import {
   logBraintrustSpan,
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
-import { and, asc, desc, eq, gt, isNull, ne, notExists, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, ne, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
 import { materializeAgentBundleForSession } from "./agent-bundle";
@@ -1058,6 +1058,33 @@ export async function abortSession(sessionId: string) {
     type: "session.status",
     payload: { status: "aborting", message: "Abort requested" },
   });
+  // Cascade to live delegated children: with each child running under its own lease, aborting the
+  // parent must also stop its children (no point finishing work for an aborted parent). Bounded by
+  // the source='agent' filter and the depth-2 delegation cap; each recursion aborts that child's
+  // own children in turn.
+  const liveChildren = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.parentSessionId, sessionId),
+        eq(agentSessions.source, "agent"),
+        isNull(agentSessions.archivedAt),
+        inArray(agentSessions.status, [
+          "created",
+          "ready",
+          "provisioning",
+          "running",
+          "aborting",
+          "awaiting_approval",
+          "awaiting_input",
+          "awaiting_delegation",
+        ]),
+      ),
+    );
+  for (const child of liveChildren) {
+    await abortSession(child.id);
+  }
   logger.info("Runner session abort requested", {
     event: "opencompany.runner_session_abort_requested",
     session_id: sessionId,

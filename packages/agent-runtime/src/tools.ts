@@ -27,6 +27,7 @@ export type RuntimeToolName =
   | "git_diff"
   | "run_subagent"
   | "delegate_to_agent"
+  | "await_agents"
   | "update_agent_file"
   | "ask_user_question"
   | "amp_coder"
@@ -907,7 +908,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "delegate_to_agent",
     kind: "internal",
     description:
-      "Delegate a focused task to another workspace agent referenced in this agent's instructions, or continue a prior delegated child session by sessionId. The delegated agent runs in an inspectable child session that is hidden from sidebar history, and this tool returns its final answer.",
+      "Delegate a focused task to another workspace agent referenced in this agent's instructions, or continue a prior delegated child session by sessionId. The delegated agent runs on its own engine in an inspectable child session (hidden from sidebar history). By default this returns immediately with the child's sessionId and status; the child keeps running in the background. Use await_agents to collect results, or pass wait:true to block on a single delegation and get its final answer directly.",
     parameters: {
       type: "object",
       properties: {
@@ -926,6 +927,11 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           description:
             "Specific task for the target agent. Include the relevant context and the output shape you need back.",
         },
+        wait: {
+          type: "boolean",
+          description:
+            "When true, block until this single delegated child finishes and return its final answer directly (the single-delegation shortcut). When false or omitted, return immediately with the child sessionId so you can fan out more delegations and collect them later with await_agents.",
+        },
       },
       required: ["prompt"],
       additionalProperties: false,
@@ -934,9 +940,41 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Use delegate_to_agent when another configured workspace agent is better suited to a focused subtask.",
       "To start a new delegated session, pass one target agent from the configured agent references and a self-contained prompt.",
       "To continue a prior delegated child session, pass its childSessionId back as sessionId with the next prompt, and omit agent.",
-      "The tool blocks until the child session completes or fails, then returns the child answer and session id.",
+      "Default (async): the call returns { childSessionId, status:'running' } immediately and the child runs in the background. Spawn several in one turn to fan out, then call await_agents to collect their answers.",
+      "Single one-shot delegation: pass wait:true to block until the child finishes and get its answer back from this same call.",
       "Resume a child session only when continuity matters; start a new delegated session for independent subtasks.",
       "Keep delegated prompts bounded; do not delegate recursively unless the user's task clearly requires it.",
+    ].join("\n"),
+  },
+  {
+    name: "await_agents",
+    kind: "internal",
+    description:
+      "Wait for delegated child agents (spawned earlier with delegate_to_agent) to finish, then collect their final answers. Use this after fanning out one or more delegate_to_agent calls. The parent run parks while the children work and resumes automatically when they finish — it does not burn turns polling.",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionIds: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Child session ids to wait for (as returned by delegate_to_agent). Omit to wait for all of this session's currently-running delegated children.",
+        },
+        mode: {
+          type: "string",
+          enum: ["all", "any", "poll"],
+          description:
+            "all (default): resume once every targeted child has finished. any: resume as soon as the first finishes. poll: do not wait — return the current status/answers of the targeted children right now.",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    help: [
+      "Call await_agents after delegate_to_agent calls to gather the children's results.",
+      "Omit sessionIds to wait on all running children; pass sessionIds to wait on a specific subset.",
+      "mode:'all' waits for everyone, mode:'any' returns after the first finishes, mode:'poll' returns immediately with current states.",
+      "Each returned agent includes its childSessionId, status, and (when finished) its answer or error.",
     ].join("\n"),
   },
   {
@@ -3065,6 +3103,7 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
     // Skill- and reference-gated tools are added below, not unconditionally.
     if (
       tool.name === "delegate_to_agent" ||
+      tool.name === "await_agents" ||
       tool.name === "update_agent_file" ||
       tool.name === "memory" ||
       tool.name === "recall" ||
@@ -3117,6 +3156,7 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
 
   if ((input.agents ?? []).length > 0) {
     names.add("delegate_to_agent");
+    names.add("await_agents");
   }
 
   return Array.from(names);
@@ -3183,6 +3223,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   git_diff: "Review changes",
   run_subagent: "Run subagent",
   delegate_to_agent: "Delegate to agent",
+  await_agents: "Await delegated agents",
   update_agent_file: "Update agent config",
   ask_user_question: "Ask a question",
   amp_coder: "Code with Amp",

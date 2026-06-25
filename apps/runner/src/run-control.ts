@@ -52,7 +52,13 @@ export type ClaimRunLeaseInput = RunLeaseIdentity & {
 };
 
 export type FinishRunLeaseInput = RunLeaseIdentity & {
-  status: "completed" | "aborting" | "failed" | "awaiting_approval" | "awaiting_input";
+  status:
+    | "completed"
+    | "aborting"
+    | "failed"
+    | "awaiting_approval"
+    | "awaiting_input"
+    | "awaiting_delegation";
   lastError?: string | null;
   // Whether this lease release is a turn yielding back to the user, and so should advance
   // `lastTurnFinishedAt` (the marker the sidebar's "unseen" dot reads). Defaults to true.
@@ -69,6 +75,9 @@ export type FinishRunLeaseInput = RunLeaseIdentity & {
  * It is stamped only for a genuine *yield back to the user*: a turn that completed, failed, or
  * parked for approval/input. It is deliberately NOT stamped for:
  *   - `aborting` — a user-initiated stop; they caused it, so it isn't new activity to flag.
+ *   - `awaiting_delegation` — the run parked itself to wait on delegated children; it will auto-
+ *     resume when they finish without any user action, so it is not new activity to flag and must
+ *     not re-arm the dot on a session the user already read.
  *   - `markTurnFinished === false` — an internal background run (the after-session/memory-keeper
  *     pass) that yields nothing visible. Stamping here would re-arm the dot on a session the user
  *     already read, which is the bug this guards against.
@@ -78,7 +87,7 @@ export function shouldStampTurnFinished(input: {
   markTurnFinished?: boolean;
 }): boolean {
   if (input.markTurnFinished === false) return false;
-  return input.status !== "aborting";
+  return input.status !== "aborting" && input.status !== "awaiting_delegation";
 }
 
 /**

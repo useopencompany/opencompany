@@ -470,6 +470,13 @@
       "when": 1782393626677,
       "tag": "0066_special_colonel_america",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1782407507990,
+      "tag": "0067_delegation_depth_and_resume_delegation",
+      "breakpoints": true
     }
   ]
 }

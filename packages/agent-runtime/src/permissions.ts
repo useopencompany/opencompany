@@ -586,6 +586,7 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   // Never gated.
   run_subagent: null,
   delegate_to_agent: null,
+  await_agents: null,
   tool_help: null,
   // Pure capability discovery — no side effects.
   find_tools: null,

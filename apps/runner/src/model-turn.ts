@@ -10,6 +10,7 @@ import { timeAsync } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import type { ModelMessage, StopCondition, ToolSet } from "ai";
 import * as ai from "ai";
+import type { DelegationSuspensionCheck } from "./delegation";
 import {
   appendRuntimeEventForLease,
   completeAssistantMessageForLease,
@@ -68,6 +69,7 @@ export async function streamAssistantResponse(input: {
   checkAbort: RunControlCheck;
   policy: WorkspaceToolPolicyMap;
   suspendable: boolean;
+  delegationSuspension?: DelegationSuspensionCheck | undefined;
   extraStopConditions?: StopCondition<ToolSet>[];
 }) {
   const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
@@ -192,6 +194,9 @@ export async function streamAssistantResponse(input: {
           toolStartCoordinator: input.toolStartCoordinator,
           policy: input.policy,
           suspendable: input.suspendable,
+          ...(input.delegationSuspension
+            ? { delegationSuspension: input.delegationSuspension }
+            : {}),
         });
       },
       {

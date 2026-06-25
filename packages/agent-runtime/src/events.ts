@@ -12,6 +12,7 @@ export type AgentSessionStatus =
   | "running"
   | "awaiting_approval"
   | "awaiting_input"
+  | "awaiting_delegation"
   | "aborting"
   | "archiving"
   | "archived"
@@ -379,6 +380,20 @@ export type AgentRuntimeEvent =
           toolCostUsdMicros: number;
           sandboxCostUsdMicros: number;
         };
+      };
+    }
+  | {
+      // Internal marker written when a parent run parks awaiting delegated children (await_agents
+      // or delegate_to_agent with wait:true). Records which children the suspended tool call is
+      // waiting on so the resume_delegation handler and the child-finish wake can find them. Not
+      // rendered in the transcript.
+      type: "delegation.awaiting";
+      payload: {
+        toolCallId: string;
+        toolName: "delegate_to_agent" | "await_agents";
+        mode: "all" | "any" | "poll";
+        childSessionIds: string[];
+        assistantMessageId: string;
       };
     }
   | {

@@ -4,6 +4,7 @@ import {
   type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
+import type { DelegationSuspensionCheck } from "./delegation";
 import { publishTransientRuntimeEvent } from "./events";
 import {
   appendRuntimeEventForLease,
@@ -56,6 +57,10 @@ export async function collectAssistantStream(input: {
   // scheduled runs can (they have a resumable session a human can approve in). Delegated
   // children and after-session/background runs cannot, so their "ask" collapses to "deny".
   suspendable: boolean;
+  // When present, await_agents / delegate_to_agent(wait:true) tool calls can park the run to wait
+  // on delegated children (resumes in a resume_delegation job). Absent on runs that can't park that
+  // way (after-session/background), where those tools fall through to their async execute() body.
+  delegationSuspension?: DelegationSuspensionCheck | undefined;
   onFirstOutputPart?: () => void;
 }) {
   let assistantContent = "";
@@ -267,6 +272,39 @@ export async function collectAssistantStream(input: {
           }
         }
 
+        // await_agents and delegate_to_agent(wait:true) park the run to wait on delegated children,
+        // the same way ask_user_question parks for input. The check spawns (for delegate-wait) or
+        // inspects the targeted children and records the await marker; "suspend" unwinds the turn
+        // (the resume_delegation job re-enters once a child finishes), "proceed" falls through to
+        // the tool's execute() body (async spawn / poll / re-validate).
+        if (
+          input.delegationSuspension &&
+          input.suspendable &&
+          (toolStart.name === "await_agents" ||
+            (toolStart.name === "delegate_to_agent" && readDelegateWaitFlag(toolStart.input)))
+        ) {
+          const decision = await input.delegationSuspension({
+            toolName: toolStart.name as "delegate_to_agent" | "await_agents",
+            toolInput: toolStart.input,
+            toolCallId: part.toolCallId,
+            assistantMessageId: input.assistantMessageId,
+          });
+          if (decision.action === "suspend") {
+            assistantReplayParts.push(buildToolCallReplayPart(part, toolStart));
+            input.toolStartCoordinator.suspend();
+            throw new RunSuspendedError({
+              reason: "delegation",
+              toolCallId: part.toolCallId,
+              providerKey: "system",
+              group: "read",
+              assistantContent,
+              assistantReplayParts,
+              reasoningSummary,
+              reasoningContent,
+            });
+          }
+        }
+
         // Evaluate the workspace permission policy for this tool call. This is the
         // hard gate: the tool's execute() is parked on waitForStarted() and only the
         // verdict we attach via markStarted() decides whether the real body runs.
@@ -440,6 +478,10 @@ async function persistRecoverableToolStreamError(input: {
       },
     }),
   );
+}
+
+function readDelegateWaitFlag(input: unknown): boolean {
+  return Boolean(input && typeof input === "object" && (input as { wait?: unknown }).wait === true);
 }
 
 function isModelOutputPart(part: TextStreamPart<ToolSet>, reasoningDelta: string) {

@@ -781,6 +781,7 @@ function handlers(overrides: Partial<RunnerJobHandlers> = {}): RunnerJobHandlers
     runAfterSession: async () => undefined,
     resumeApproval: async () => undefined,
     resumeQuestionResponse: async () => undefined,
+    resumeDelegation: async () => undefined,
   };
   return { ...base, ...overrides };
 }
