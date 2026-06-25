@@ -43,6 +43,7 @@ function externalSkill(
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     schemaVersion: "agent.v1",
+    engine: "opencompany",
     title: "Test agent",
     instructions: "Do the thing.",
     model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },

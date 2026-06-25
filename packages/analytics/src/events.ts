@@ -1,3 +1,5 @@
+type AgentEngine = "opencompany" | "codex";
+
 export type AnalyticsEventPropertiesByName = {
   signup_started: {
     entrypoint: "signup_page";
@@ -46,6 +48,7 @@ export type AnalyticsEventPropertiesByName = {
     session_id: string;
     model_provider: string;
     model_name: string;
+    engine: AgentEngine;
     source: "agent" | "prompt" | "schedule" | "onboarding";
     trigger_id?: string;
   };
@@ -57,6 +60,7 @@ export type AnalyticsEventPropertiesByName = {
     message_id: string;
     model_provider: string;
     model_name: string;
+    engine: AgentEngine;
     is_initial_message: boolean;
     message_length: number;
   };
@@ -244,6 +248,7 @@ export const analyticsEvents = {
       "session_id",
       "model_provider",
       "model_name",
+      "engine",
       "source",
     ],
   },
@@ -258,6 +263,7 @@ export const analyticsEvents = {
       "message_id",
       "model_provider",
       "model_name",
+      "engine",
       "is_initial_message",
       "message_length",
     ],

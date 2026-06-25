@@ -42,6 +42,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("builds the system prompt and keeps the configured Vercel AI Gateway model", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Ops agent",
       instructions: "Check the workspace and summarize risk.",
       model: {
@@ -101,6 +102,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("falls back to email for user context when WorkOS has not provided a name", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Ops agent",
       instructions: "Check the workspace and summarize risk.",
       model: {
@@ -125,6 +127,7 @@ describe("resolveAgentRuntimeConfig", () => {
 
   const profileConfig = (): AgentConfig => ({
     schemaVersion: "agent.v1",
+    engine: "opencompany",
     title: "Personal agent",
     instructions: "Help the user.",
     model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -190,6 +193,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("nudges the agent to read the self-edit skill before update_agent_file", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Ops agent",
       instructions: "Do the work.",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -214,6 +218,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("advertises attached GitHub repositories and exposes the gh tool", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Repo agent",
       instructions: "Work in the repo.",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -249,6 +254,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("requires explicit repo selection for multi-repo gh commands", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Repo agent",
       instructions: "Work across repos.",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -277,6 +283,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("omits GitHub repository context and the gh tool when no repository is attached", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "No repo agent",
       instructions: "Just chat.",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -299,6 +306,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("explains opencode can target public GitHub repositories without an attached repository", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "opencode agent",
       instructions: "@opencode",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -331,6 +339,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("explains Codex can target public GitHub repositories without an attached repository", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Codex agent",
       instructions: "@codex",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -363,6 +372,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("enables hosted runtime tools from selected agent config tools", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Research agent",
       instructions: "Research the web.",
       model: {
@@ -403,6 +413,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("renders a Tools index of capabilities without leaking deferred tool schemas", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Research agent",
       instructions: "Research things.",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -444,6 +455,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("renders personal file-root guidance without generic brain or memory file access", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Personal agent",
       instructions: "Help the user.",
       model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -475,6 +487,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("keeps MCP tools separate from static runtime tools", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Linear agent",
       instructions: "Triage Linear.",
       model: {
@@ -505,6 +518,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("includes workspace tool policy guidance for enabled MCP providers", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Linear agent",
       instructions: "Triage Linear.",
       model: {
@@ -548,6 +562,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("includes workspace tool policy guidance for Neon hosted tools", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Database agent",
       instructions: "Inspect Neon.",
       model: {
@@ -583,6 +598,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("enables agent delegation when workspace agent references are configured", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Coordinator",
       instructions: "Delegate focused work.",
       model: {
@@ -607,6 +623,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("does not enable agent delegation without configured agent references", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Solo",
       instructions: "Work alone.",
       model: {
@@ -627,6 +644,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("formats the root Brain mount clearly in the system prompt", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Research agent",
       instructions: "Use shared context.",
       model: {
@@ -649,6 +667,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("ignores stale unknown config tools", () => {
     const config = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Legacy agent",
       instructions: "Use old tools.",
       model: {
@@ -670,6 +689,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("does not add reasoning provider options for non-reasoning models", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Fast agent",
       instructions: "Summarize the thread.",
       model: {
@@ -705,6 +725,7 @@ describe("resolveAgentRuntimeConfig", () => {
   ] as const)("keeps %s on AI Gateway without provider-specific options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Gateway agent",
       instructions: "Do the work.",
       model: {
@@ -749,6 +770,7 @@ describe("resolveAgentRuntimeConfig", () => {
   ] as const)("marks %s as reasoning-capable without custom provider options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Reasoning agent",
       instructions: "Plan carefully.",
       model: {
@@ -780,6 +802,7 @@ describe("resolveAgentRuntimeConfig", () => {
   ] as const)("exposes raw reasoning content for %s", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Kimi agent",
       instructions: "Plan carefully.",
       model: {
@@ -806,6 +829,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("applies OpenAI reasoning options to GPT 5.2 Codex", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Codex agent",
       instructions: "Work on code.",
       model: {
@@ -838,6 +862,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("uses a valid modelOverride in place of the agent default", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Override agent",
       instructions: "Do the work.",
       model: {
@@ -863,6 +888,7 @@ describe("resolveAgentRuntimeConfig", () => {
   it("falls back to the agent default when modelOverride is unknown", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Override agent",
       instructions: "Do the work.",
       model: {
@@ -888,6 +914,7 @@ describe("normalizeAgentConfig", () => {
   it("fills arrays and GitHub integrations missing from legacy persisted configs", () => {
     const config = {
       schemaVersion: "agent.v1",
+      engine: "opencompany",
       title: "Legacy agent",
       instructions: "Use old persisted config.",
       model: {

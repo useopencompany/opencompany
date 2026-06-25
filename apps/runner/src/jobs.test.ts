@@ -32,9 +32,14 @@ describe("runner job enqueue", () => {
       { kind: "after_session", sessionId: "ses_123", messageId: "msg_123" },
       store,
     );
+    await enqueueRunnerJob(
+      { kind: "codex_turn", sessionId: "ses_123", messageId: "msg_123" },
+      store,
+    );
 
     expect(store.jobs.map((job) => job.idempotencyKey).sort()).toEqual([
       "after_session:ses_123:msg_123",
+      "codex_turn:ses_123:msg_123",
       "message:ses_123:msg_123",
       "start:ses_123",
       "title:ses_123:msg_123",
@@ -199,6 +204,31 @@ describe("runner job execution", () => {
 
     expect(resumeApproval).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "ses_123", toolCallId: "call_ask", env: env() }),
+    );
+    expect(firstJob(store)).toMatchObject({ status: "completed" });
+  });
+
+  it("dispatches codex_turn jobs to the Codex runner handler", async () => {
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "codex_turn",
+        status: "running",
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+    const runCodexTurn = vi.fn(async () => undefined);
+
+    await runClaimedRunnerJob({
+      job: firstJob(store),
+      env: env(),
+      store,
+      handlers: handlers({ runCodexTurn }),
+    });
+
+    expect(runCodexTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "ses_123", messageId: "msg_123", env: env() }),
     );
     expect(firstJob(store)).toMatchObject({ status: "completed" });
   });
@@ -746,6 +776,7 @@ function handlers(overrides: Partial<RunnerJobHandlers> = {}): RunnerJobHandlers
   const base: RunnerJobHandlers = {
     startSession: async () => undefined,
     runMessage: async () => undefined,
+    runCodexTurn: async () => undefined,
     generateSessionTitleForMessage: async () => ({ ok: true as const, title: "Generated title" }),
     runAfterSession: async () => undefined,
     resumeApproval: async () => undefined,
@@ -781,10 +812,12 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     openaiCodexApiKey: "codex_test",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
+    codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     opencodeTimeoutMs: 1_200_000,
     codexTimeoutMs: 1_200_000,
-    codexModel: "gpt-5.2-codex",
+    codexModel: "gpt-5.5",
+    codexAppServerEnabled: false,
     toolArgRepairEnabled: false,
     jobLeaseTtlMs: 300_000,
     jobMaxLeaseBusyAttempts: 10,

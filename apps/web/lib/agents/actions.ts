@@ -277,10 +277,12 @@ export async function updateAgent(
       : []),
   ];
   const requestedTriggers = patch.config?.triggers ?? currentConfig.triggers;
+  const requestedEngine = patch.config?.engine ?? currentConfig.engine;
   const derivedFromTiptap = sanitizedContent
     ? derivePreviewConfigFromTiptapDoc({
         title,
         content: sanitizedContent,
+        engine: requestedEngine,
         model: patch.model ?? currentConfig.model.name,
         repositories: derivationRepositories,
         agents: workspaceAgentReferences,
@@ -297,6 +299,7 @@ export async function updateAgent(
       ? deriveAgentConfigFromBody({
           title,
           body: patch.body,
+          engine: requestedEngine,
           model: patch.model ?? currentConfig.model.name,
           repositories: derivationRepositories,
           agents: workspaceAgentReferences,
@@ -312,6 +315,7 @@ export async function updateAgent(
   });
   const body = typeof patch.body === "string" ? patch.body : (derived?.body ?? agent.body);
   const model = derived?.config.model.name ?? patch.model ?? currentConfig.model.name;
+  const nextEngine = derived?.config.engine ?? patch.config?.engine ?? currentConfig.engine;
   const nextIntegrations =
     derived?.config.integrations ?? patch.config?.integrations ?? currentConfig.integrations;
   const nextTools = derived?.config.tools ?? patch.config?.tools ?? currentConfig.tools;
@@ -327,6 +331,7 @@ export async function updateAgent(
   const source = serializeAgentFile({
     title,
     body,
+    engine: nextEngine,
     model,
     tools: nextTools,
     brain: nextBrain,
@@ -793,6 +798,7 @@ export async function syncAgentsFromWorkspaceRepository() {
       serializeAgentFile({
         title: parsed.title,
         body: parsed.body,
+        engine: parsed.config.engine,
         model: parsed.config.model.name,
         tools: parsed.config.tools,
         brain: parsed.config.brain,

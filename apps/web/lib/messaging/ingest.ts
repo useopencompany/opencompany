@@ -1,4 +1,9 @@
-import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import {
+  newAgentSessionId,
+  newAgentSessionMessageId,
+  normalizeAgentConfig,
+} from "@opencompany/agent-runtime";
+import type { AgentEngine } from "@opencompany/agent-runtime/types";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -87,7 +92,8 @@ async function ingestLinkedMessage(input: {
     return;
   }
 
-  const sessionId = await routeSession(channel);
+  const routedSession = await routeSession(channel);
+  const sessionId = routedSession.id;
   const userMessageId = await insertChannelUserMessage(sessionId, text);
 
   await db
@@ -116,12 +122,17 @@ async function ingestLinkedMessage(input: {
       sessionId,
       messageId: userMessageId,
       workspaceId: channel.workspaceId,
+      engine: routedSession.engine,
     }),
-    dispatchAgentAfterSessionCheck({
-      sessionId,
-      messageId: userMessageId,
-      workspaceId: channel.workspaceId,
-    }),
+    ...(routedSession.engine === "opencompany"
+      ? [
+          dispatchAgentAfterSessionCheck({
+            sessionId,
+            messageId: userMessageId,
+            workspaceId: channel.workspaceId,
+          }),
+        ]
+      : []),
     dispatchDeliverWhatsappReply({
       channelId: channel.id,
       sessionId,
@@ -134,7 +145,9 @@ async function ingestLinkedMessage(input: {
 
 // Resolve which session this inbound message belongs to. Reuse the channel's active session while it
 // has been active within the idle window and is still usable; otherwise hard-start a fresh one.
-async function routeSession(channel: MessagingChannel): Promise<string> {
+async function routeSession(
+  channel: MessagingChannel,
+): Promise<{ id: string; engine: AgentEngine }> {
   const db = getDb();
   const withinWindow =
     channel.activeSessionId &&
@@ -143,17 +156,25 @@ async function routeSession(channel: MessagingChannel): Promise<string> {
 
   if (withinWindow && channel.activeSessionId) {
     const [existing] = await db
-      .select({ id: agentSessions.id, archivedAt: agentSessions.archivedAt })
+      .select({
+        id: agentSessions.id,
+        archivedAt: agentSessions.archivedAt,
+        engine: agentSessions.engine,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.id, channel.activeSessionId))
       .limit(1);
-    if (existing && !existing.archivedAt) return existing.id;
+    if (existing && !existing.archivedAt) {
+      return { id: existing.id, engine: existing.engine };
+    }
   }
 
   return createChannelSession(channel);
 }
 
-async function createChannelSession(channel: MessagingChannel): Promise<string> {
+async function createChannelSession(
+  channel: MessagingChannel,
+): Promise<{ id: string; engine: AgentEngine }> {
   const db = getDb();
   const [agent] = await db
     .select({ config: agents.config })
@@ -162,6 +183,7 @@ async function createChannelSession(channel: MessagingChannel): Promise<string> 
     .limit(1);
 
   const model = agent?.config?.model;
+  const engine = agent ? normalizeAgentConfig(agent.config).engine : "opencompany";
   const sessionId = newAgentSessionId();
 
   await db.batch([
@@ -173,6 +195,7 @@ async function createChannelSession(channel: MessagingChannel): Promise<string> 
       title: "WhatsApp",
       // Marks the thread as WhatsApp-originated for the unified sidebar badge + source filter.
       source: "whatsapp",
+      engine,
       ...(model?.provider ? { modelProvider: model.provider } : {}),
       ...(model?.name ? { modelName: model.name } : {}),
     }),
@@ -183,7 +206,7 @@ async function createChannelSession(channel: MessagingChannel): Promise<string> 
     }),
   ]);
 
-  return sessionId;
+  return { id: sessionId, engine };
 }
 
 // Insert a user message onto a session. Mirrors agent-sessions/actions.insertUserMessage (batched

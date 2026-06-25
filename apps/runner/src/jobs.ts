@@ -8,6 +8,7 @@ import {
   runMessage,
   startSession,
 } from "./agent-loop";
+import { runCodexTurn } from "./codex-session";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { RunLeaseBusyError } from "./run-control";
@@ -46,6 +47,7 @@ const DEFAULT_WORKER_POLL_INTERVAL_MS = 1_000;
 export type RunnerJobKind =
   | "start"
   | "message"
+  | "codex_turn"
   | "title"
   | "after_session"
   | "resume_approval"
@@ -535,6 +537,7 @@ export function startRunnerJobWorker(
 export type RunnerJobHandlers = {
   startSession: typeof startSession;
   runMessage: typeof runMessage;
+  runCodexTurn: typeof runCodexTurn;
   generateSessionTitleForMessage: typeof generateSessionTitleForMessage;
   runAfterSession: typeof runAfterSession;
   resumeApproval: typeof resumeApproval;
@@ -544,6 +547,7 @@ export type RunnerJobHandlers = {
 const defaultRunnerJobHandlers: RunnerJobHandlers = {
   startSession,
   runMessage,
+  runCodexTurn,
   generateSessionTitleForMessage,
   runAfterSession,
   resumeApproval,
@@ -564,6 +568,10 @@ async function dispatchRunnerJob(
   const messageId = requireJobMessageId(job);
   if (job.kind === "message") {
     await handlers.runMessage({ sessionId: job.sessionId, messageId, env, externalSignal });
+    return;
+  }
+  if (job.kind === "codex_turn") {
+    await handlers.runCodexTurn({ sessionId: job.sessionId, messageId, env, externalSignal });
     return;
   }
   if (job.kind === "title") {

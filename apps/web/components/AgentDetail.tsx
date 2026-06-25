@@ -8,6 +8,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
+  AgentEngine,
   AgentExternalSkillReference,
   AgentModelId,
   AgentReference,
@@ -24,6 +25,7 @@ import {
   CircleAlert,
   Clock3,
   Cloud,
+  Cpu,
   FileCode2,
   FileText,
   Folder,
@@ -58,6 +60,13 @@ import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
@@ -126,7 +135,7 @@ function updateAgentQueries(
 }
 
 export default function AgentDetail({ initialAgent, idOrPath }: Props) {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, codexEngineEnabled } = useWorkspaceContext();
   const { data: agent } = useQuery({
     queryKey: agentQueryKeys.detail(workspaceId, idOrPath),
     queryFn: () => fetchAgent(idOrPath),
@@ -147,17 +156,26 @@ export default function AgentDetail({ initialAgent, idOrPath }: Props) {
     return <AgentDetailSkeleton />;
   }
 
-  return <AgentDetailContent agent={agent} idOrPath={idOrPath} workspaceId={workspaceId} />;
+  return (
+    <AgentDetailContent
+      agent={agent}
+      idOrPath={idOrPath}
+      workspaceId={workspaceId}
+      codexEngineEnabled={codexEngineEnabled}
+    />
+  );
 }
 
 function AgentDetailContent({
   agent,
   idOrPath,
   workspaceId,
+  codexEngineEnabled,
 }: {
   agent: AgentDetailPayload;
   idOrPath: string;
   workspaceId: string;
+  codexEngineEnabled: boolean;
 }) {
   const queryClient = useQueryClient();
   const { agents: agentsCollection } = useCollections();
@@ -174,6 +192,9 @@ function AgentDetailContent({
   const [triggers, setTriggers] = useState<AgentConfig["triggers"]>(agent.config.triggers);
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
     findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
+  );
+  const [selectedEngine, setSelectedEngine] = useState<AgentEngine>(
+    agent.config.engine ?? "opencompany",
   );
   const availableSkills = useMemo(
     () => mergeSkillCatalog(agent.config.skills ?? [], workspaceSkills ?? []),
@@ -199,7 +220,7 @@ function AgentDetailContent({
     body?: string;
     content?: TiptapDoc;
     model?: AgentModelId;
-    config?: { triggers: AgentConfig["triggers"] };
+    config?: { triggers?: AgentConfig["triggers"]; engine?: AgentEngine };
   }>({});
   const submittedPatchRef = useRef<typeof pendingRef.current | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -210,6 +231,7 @@ function AgentDetailContent({
         content,
         fallback: agent.config,
         selectedModelId,
+        selectedEngine,
         repositories: agent.githubIntegrationRepositories,
         agents: agent.workspaceAgents,
         skills: derivationSkills,
@@ -227,6 +249,7 @@ function AgentDetailContent({
       hasEditorDraft,
       name,
       selectedModelId,
+      selectedEngine,
       triggers,
     ],
   );
@@ -286,6 +309,7 @@ function AgentDetailContent({
     setHasEditorDraft(false);
     setTriggers(agent.config.triggers);
     setSelectedModelId(findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID);
+    setSelectedEngine(agent.config.engine ?? "opencompany");
   }, [
     agent.id,
     agent.name,
@@ -293,6 +317,7 @@ function AgentDetailContent({
     agent.content,
     agent.config.instructions,
     agent.config.model.name,
+    agent.config.engine,
     agent.config.triggers,
   ]);
 
@@ -370,7 +395,13 @@ function AgentDetailContent({
 
   const updateTriggers = (next: AgentConfig["triggers"]) => {
     setTriggers(next);
-    pendingRef.current.config = { triggers: next };
+    pendingRef.current.config = { ...pendingRef.current.config, triggers: next };
+    schedule();
+  };
+
+  const updateEngine = (next: AgentEngine) => {
+    setSelectedEngine(next);
+    pendingRef.current.config = { ...pendingRef.current.config, engine: next };
     schedule();
   };
 
@@ -489,7 +520,7 @@ function AgentDetailContent({
             className="mt-6 w-full bg-transparent text-[24px] font-semibold tracking-[-0.01em] text-ink outline-none placeholder:text-ink-subtle/60"
           />
 
-          <div className="mt-2 flex items-center">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <ModelPicker
               value={selectedModelId}
               fallbackModelId={DEFAULT_MODEL_ID}
@@ -499,6 +530,12 @@ function AgentDetailContent({
                 schedule();
               }}
             />
+            {/* The engine selector is gated behind the per-user "Codex runtime" feature flag
+                (Settings → Feature flags). Hidden by default so agents stay on the OpenCompany
+                runtime; the saved engine value is preserved either way. */}
+            {codexEngineEnabled ? (
+              <EngineSelect value={selectedEngine} onChange={updateEngine} />
+            ) : null}
           </div>
 
           <div className="mt-6">
@@ -1350,6 +1387,7 @@ function buildConfigPreview({
   content,
   fallback,
   selectedModelId,
+  selectedEngine,
   repositories,
   agents,
   skills,
@@ -1361,6 +1399,7 @@ function buildConfigPreview({
   content: TiptapDoc;
   fallback: AgentConfig;
   selectedModelId: AgentModelId;
+  selectedEngine: AgentEngine;
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
   agents: AgentReference[];
   skills: AgentExternalSkillReference[];
@@ -1372,6 +1411,7 @@ function buildConfigPreview({
     ? derivePreviewConfigFromTiptapDoc({
         title,
         content,
+        engine: selectedEngine,
         model: selectedModelId,
         repositories,
         agents,
@@ -1384,6 +1424,7 @@ function buildConfigPreview({
     : {
         ...fallback,
         title: normalizePreviewTitle(title),
+        engine: selectedEngine,
         model: {
           ...fallback.model,
           name: selectedModelId,
@@ -1407,6 +1448,7 @@ function buildConfigPreview({
     config,
     fullConfig: serializeAgentFrontmatter({
       title: config.title,
+      engine: config.engine,
       model: config.model.name,
       tools: config.tools,
       brain: config.brain,
@@ -1421,6 +1463,34 @@ function buildConfigPreview({
 function normalizePreviewTitle(title: string) {
   const trimmed = title.trim();
   return trimmed.length > 0 ? trimmed : "Untitled agent";
+}
+
+function EngineSelect({
+  value,
+  onChange,
+}: {
+  value: AgentEngine;
+  onChange: (engine: AgentEngine) => void;
+}) {
+  return (
+    <Select value={value} onValueChange={(next) => onChange(readAgentEngine(next))}>
+      <SelectTrigger
+        aria-label="Engine"
+        className="h-6 w-auto justify-start gap-1.5 border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none transition-colors hover:bg-surface-subtle/70 focus:ring-0 focus-visible:bg-surface-subtle/70 data-[state=open]:bg-surface-subtle/70"
+      >
+        <Cpu size={12} strokeWidth={1.9} className="shrink-0" />
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="start">
+        <SelectItem value="opencompany">OpenCompany</SelectItem>
+        <SelectItem value="codex">Codex</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function readAgentEngine(value: string): AgentEngine {
+  return value === "codex" ? "codex" : "opencompany";
 }
 
 function upsertScheduleTrigger(

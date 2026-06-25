@@ -116,8 +116,14 @@ Important details:
 - AMP owns its coding checkout and may clone the selected connected repository directly into
   `work/` for that tool run.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
+- Codex engine sessions launch Codex from `/home/user/workspace/codex`, a plain top-level work
+  folder outside the runner-managed scratch Git repository at `work/`.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
-  the full serialized `.agent` source and Brain manifest.
+  the full serialized `.agent` source and Brain manifest. This directory is root-owned and not
+  used for tool runtime state.
+- Codex engine runtime state lives outside the model work tree under the user-writable private
+  `/home/user/.opencompany-codex/session` directory, including the session `CODEX_HOME` files and
+  file-backed Codex auth cache.
 
 V1 tools:
 
@@ -257,13 +263,15 @@ Required environment variables:
 - `SUPADATA_API_KEY` (optional; required only for agents that enable YouTube or Instagram/TikTok direct-media transcript/metadata tools)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
+- `OPENCOMPANY_CODEX_E2B_TEMPLATE` (optional; Codex sessions default to E2B's `codex` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Activates the LLM broker — sandboxed CLIs call models via `/broker/*` with short-lived per-delegation tokens instead of raw provider keys. Unset locally.)
 - `RUNNER_LLM_BROKER_ENABLED` (optional, defaults to `true`; no-deploy kill switch back to direct key injection)
 - `OPENAI_CODEX_API_KEY` (optional; server-side upstream credential for the broker's `openai` provider and local-dev `codex_coder` fallback)
-- `RUNNER_CODEX_MODEL` (optional, defaults to `gpt-5.2-codex`)
-- `RUNNER_CODEX_TIMEOUT_MS` (optional, defaults to `1200000`)
+- `RUNNER_CODEX_MODEL` (optional, defaults to `gpt-5.5`)
+- `RUNNER_CODEX_TIMEOUT_MS` (optional, defaults to `3600000`; 1 hour)
+- `RUNNER_CODEX_APP_SERVER_ENABLED` (optional, defaults to `false`; routes Codex engine turns through a persistent `codex app-server` daemon. `codex_coder` is unaffected.)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`

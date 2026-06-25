@@ -1,6 +1,11 @@
 "use client";
 
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  CODEX_AGENT_MODEL_IDS,
+  CODEX_DEFAULT_MODEL_ID,
+  isCodexModelId,
+} from "@opencompany/agent-runtime";
+import type { AgentEngine, AgentModelId } from "@opencompany/agent-runtime/types";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle, Plus } from "lucide-react";
@@ -40,6 +45,7 @@ type AgentOption = {
   // The agent's saved default model. The composer's model selector starts here and
   // re-syncs to it whenever the selected agent changes.
   defaultModel: string;
+  engine: AgentEngine;
 };
 
 function Prompt({ agents }: { agents: AgentOption[] }) {
@@ -61,12 +67,22 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents.at(0);
+  const selectedAgentIsCodex = selectedAgent?.engine === "codex";
+  const defaultModelForSelectedAgent =
+    selectedAgentIsCodex && selectedAgent
+      ? isCodexModelId(selectedAgent.defaultModel)
+        ? selectedAgent.defaultModel
+        : CODEX_DEFAULT_MODEL_ID
+      : selectedAgent?.defaultModel;
   // The model used for the new session: an explicit pick for THIS agent wins, otherwise the
   // selected agent's saved default. Picking a model here never changes the agent's default.
+  const scopedModelOverride =
+    modelOverride?.agentId === selectedAgentId ? modelOverride.modelId : null;
   const selectedModel =
-    (modelOverride?.agentId === selectedAgentId ? modelOverride.modelId : null) ??
-    selectedAgent?.defaultModel ??
-    "";
+    selectedAgentIsCodex && scopedModelOverride && !isCodexModelId(scopedModelOverride)
+      ? CODEX_DEFAULT_MODEL_ID
+      : (scopedModelOverride ?? defaultModelForSelectedAgent ?? "");
+  const attachmentsEnabled = !selectedAgentIsCodex;
   // Image/file attachments via the shared composer hook. No session exists yet — uploads land in
   // a sessionless "pending/" path and the pointers ride into createAgentSessionFromPrompt.
   const {
@@ -82,18 +98,28 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     workspaceId,
     modelName: selectedModel,
     uploadScope: { kind: "pending" },
+    enabled: attachmentsEnabled,
   });
   const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
   const hasUploadError = attachments.some((a) => a.status === "error");
   // Submit needs text OR a ready attachment, and is blocked while any upload is in flight or
   // errored (so an image is never silently dropped, and a broken upload can't be sent).
   const canSubmit = Boolean(
-    (input.trim() || ready.length > 0) &&
+    (input.trim() || (attachmentsEnabled && ready.length > 0)) &&
       selectedAgentId &&
       !isPending &&
-      !isUploading &&
-      !hasUploadError,
+      (!attachmentsEnabled || (!isUploading && !hasUploadError)),
   );
+
+  useEffect(() => {
+    if (attachmentsEnabled) return;
+    setAttachments((current) => {
+      current.forEach((attachment) => {
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      });
+      return [];
+    });
+  }, [attachmentsEnabled, setAttachments]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -108,7 +134,13 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
   const submit = () => {
     const content = input.trim();
-    if ((!content && ready.length === 0) || isPending || isUploading || hasUploadError) return;
+    const submitReady = attachmentsEnabled ? ready : [];
+    if (
+      (!content && submitReady.length === 0) ||
+      isPending ||
+      (attachmentsEnabled && (isUploading || hasUploadError))
+    )
+      return;
     if (!selectedAgentId) {
       setError("Create an agent first before starting a session.");
       return;
@@ -120,7 +152,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         selectedAgentId,
         content,
         selectedModel || undefined,
-        toSubmitAttachments(ready),
+        toSubmitAttachments(submitReady),
       );
       if (!result.ok) {
         if ("redirectTo" in result) {
@@ -151,21 +183,25 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         submit();
       }}
       className="relative"
-      {...dragHandlers}
+      {...(attachmentsEnabled ? dragHandlers : {})}
     >
-      {isDragActive ? <ComposerDropOverlay className="rounded-2xl" /> : null}
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
-        className="hidden"
-        onChange={(event) => {
-          acceptFiles(Array.from(event.target.files ?? []));
-          event.target.value = "";
-        }}
-      />
-      <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+      {attachmentsEnabled && isDragActive ? <ComposerDropOverlay className="rounded-2xl" /> : null}
+      {attachmentsEnabled ? (
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ATTACHMENT_FILE_INPUT_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            acceptFiles(Array.from(event.target.files ?? []));
+            event.target.value = "";
+          }}
+        />
+      ) : null}
+      {attachmentsEnabled ? (
+        <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+      ) : null}
       <Composer
         variant="expanded"
         error={error}
@@ -183,7 +219,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             onPaste={(event) => {
               // Files in the clipboard (e.g. a screenshot) attach via the shared hook, which also
               // stops the browser pasting them into the textarea. Text pastes fall through.
-              handlePasteFiles(event);
+              if (attachmentsEnabled) handlePasteFiles(event);
             }}
             rows={1}
             placeholder="Ask Open Company to build, fix bugs, explore"
@@ -193,14 +229,16 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         }
         leftControls={
           <>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Attach file"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
-            >
-              <Plus size={15} strokeWidth={1.75} />
-            </button>
+            {attachmentsEnabled ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Attach file"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+              >
+                <Plus size={15} strokeWidth={1.75} />
+              </button>
+            ) : null}
             <Select
               disabled={agents.length === 0}
               value={selectedAgentId}
@@ -223,7 +261,8 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             {selectedModel ? (
               <ModelPicker
                 value={selectedModel}
-                fallbackModelId={DEFAULT_MODEL_ID}
+                fallbackModelId={selectedAgentIsCodex ? CODEX_DEFAULT_MODEL_ID : DEFAULT_MODEL_ID}
+                {...(selectedAgentIsCodex ? { modelIds: CODEX_AGENT_MODEL_IDS } : {})}
                 onChange={(modelId) => setModelOverride({ agentId: selectedAgentId, modelId })}
               />
             ) : null}
@@ -295,6 +334,7 @@ function MainPanelLive({
       id: agent.id,
       name: agent.name,
       defaultModel: agent.config.model.name,
+      engine: agent.config.engine,
     }));
   }, [isLoading, initialAgents, rows]);
 

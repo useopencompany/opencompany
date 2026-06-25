@@ -10,6 +10,7 @@ An `.agent` file has two parts: a short header with metadata, and a body of inst
 ```yaml
 ---
 title: "Fundraising copilot"
+engine: opencompany
 model: openai/gpt-5.4
 tools:
   - exa
@@ -48,7 +49,7 @@ If you leave it empty, opencompany fills in `"Untitled agent"` so the file is al
 
 ### `model`
 
-Which AI model runs this agent. Pick one of:
+Which AI model runs this agent when `engine` is `opencompany`. Pick one of:
 
 | ID | What it's good for |
 | --- | --- |
@@ -93,6 +94,16 @@ Which AI model runs this agent. Pick one of:
 If you type something that isn't on this list, opencompany falls back to `openai/gpt-5.4-mini`.
 
 All models are accessed through Vercel AI Gateway, so you never deal with provider API keys directly.
+
+### `engine`
+
+Which session engine runs new sessions for this agent.
+
+```yaml
+engine: opencompany
+```
+
+Use `opencompany` for the native OpenCompany runner. Use `codex` to start sessions backed by the Codex CLI runner. Existing files without this field keep working as `opencompany`. Codex sessions use Codex-compatible session models and per-session reasoning settings; `RUNNER_CODEX_MODEL` remains the legacy/fallback CLI model. Codex sessions are text-only in v1.
 
 ### `tools`
 
@@ -314,6 +325,7 @@ The filename comes from the title — lowercased, with spaces turned into dashes
 ```yaml
 ---
 title: "Notes"
+engine: opencompany
 model: openai/gpt-5.4-mini
 tools: []
 ---
@@ -326,6 +338,7 @@ Summarize whatever I paste below in three bullets. Skip preamble.
 ```yaml
 ---
 title: "Investor research"
+engine: opencompany
 model: openai/gpt-5.4
 tools:
   - exa
@@ -348,6 +361,7 @@ You can write only the instructions and let opencompany figure out the header:
 ```yaml
 ---
 title: "Research"
+engine: opencompany
 model: openai/gpt-5.4-mini
 tools:
   - exa
@@ -356,13 +370,14 @@ tools:
 Find investors with @exa. Write a concise brief before sending.
 ```
 
-After saving, the header above is what ends up in the file — even though you only wrote the body. The `@exa` mention added the tool. The model remains explicit per-agent config.
+After saving, the header above is what ends up in the file — even though you only wrote the body. The `@exa` mention added the tool. The engine and model remain explicit per-agent config.
 
 ### A coding agent for a repo
 
 ```yaml
 ---
 title: "Web code reviewer"
+engine: opencompany
 model: openai/gpt-5.4-mini
 tools:
   - id: amp

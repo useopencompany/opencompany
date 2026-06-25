@@ -110,6 +110,7 @@ export async function applyAgentSelfUpdate(input: {
   const source = serializeAgentFile({
     title: row.isDefault ? FIXED_PERSONAL_AGENT_NAME : (title ?? row.name),
     body,
+    engine: current.engine,
     model: model ?? current.model.name,
     agents: current.agents ?? [],
     skills: nextSkills,

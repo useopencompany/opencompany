@@ -68,6 +68,14 @@ export type WorkspaceUsageDebitInput = {
 };
 
 const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
+  "openai/gpt-5.5": {
+    model: "openai/gpt-5.5",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 5_000_000,
+    cachedInputUsdMicrosPerMillion: 500_000,
+    cacheWriteUsdMicrosPerMillion: 5_000_000,
+    outputUsdMicrosPerMillion: 30_000_000,
+  },
   "openai/gpt-5.4-mini": {
     model: "openai/gpt-5.4-mini",
     provider: "openai",
@@ -493,7 +501,8 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
 export type HostedToolCostSource =
   | "provider_reported"
   | "platform_model_pricing"
-  | "broker_metered";
+  | "broker_metered"
+  | "subscription";
 
 // Pricing fallback for gateway models that are not part of the agent model catalog
 // (MODEL_PRICING), e.g. the memory CLI's embedding/nano retrieval models. Values are

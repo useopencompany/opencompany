@@ -30,10 +30,12 @@ const env = {
   ampApiKey: undefined,
   e2bTemplate: undefined,
   ampE2bTemplate: undefined,
+  codexE2bTemplate: undefined,
   e2bSandboxIdleTimeoutMs: 30_000,
   opencodeTimeoutMs: 1_200_000,
   codexTimeoutMs: 1_200_000,
-  codexModel: "gpt-5.2-codex",
+  codexModel: "gpt-5.5",
+  codexAppServerEnabled: false,
   toolArgRepairEnabled: false,
   jobLeaseTtlMs: 300_000,
   jobMaxLeaseBusyAttempts: 10,
@@ -117,6 +119,25 @@ describe("internal message run endpoint", () => {
     expect(response.json()).toEqual({ ok: true });
     expect(enqueueRunnerJob).toHaveBeenCalledWith({
       kind: "message",
+      sessionId: "ses_123",
+      messageId: "msg_123",
+    });
+  });
+
+  it("persists a Codex turn job before accepting authenticated Codex message requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/messages/msg_123/codex-turn",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(enqueueRunnerJob).toHaveBeenCalledWith({
+      kind: "codex_turn",
       sessionId: "ses_123",
       messageId: "msg_123",
     });

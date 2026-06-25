@@ -71,6 +71,7 @@ vi.mock("@/components/ToolPolicyEditor", () => ({
 
 const baseConfig: AgentConfig = {
   schemaVersion: "agent.v1",
+  engine: "opencompany",
   title: "Personal",
   instructions: "Use @github when code is involved.",
   model: {

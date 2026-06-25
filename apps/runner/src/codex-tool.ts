@@ -1,6 +1,20 @@
-import { type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
-import type { AgentGitHubRepositoryConfig, AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  type AgentConfig,
+  type AgentRuntimeEvent,
+  CODEX_DEFAULT_MODEL_ID,
+  shellQuote,
+} from "@opencompany/agent-runtime";
+import type {
+  AgentGitHubRepositoryConfig,
+  AgentModelId,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import { calculateModelUsageCost, type HostedToolCostSource } from "@opencompany/billing";
+import {
+  loadWorkspaceCodexCredential,
+  markWorkspaceCodexCredentialNeedsReauth,
+  rotateWorkspaceCodexCredential,
+} from "@opencompany/db/codex-auth";
 import { agentSessionArtifacts } from "@opencompany/db/schema";
 import { loadGitHubWorkRepository, loadGitHubWorkRepositoryByFullName } from "./amp-tool";
 import {
@@ -40,14 +54,14 @@ import {
 } from "./sandbox";
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
-const CODEX_FALLBACK_NPM_PACKAGE = "@openai/codex@0.132.0";
+export const CODEX_FALLBACK_NPM_PACKAGE = "@openai/codex@0.132.0";
 const CODEX_PROVIDER_ID = "opencompany";
 const CODEX_PROVIDER_NAME = "OpenCompany";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";
 const CODEX_DIRECT_API_KEY_ENV_VAR = "CODEX_API_KEY";
 const BROKER_TOKEN_ENV_VAR = "OPENCOMPANY_LLM_BROKER_TOKEN";
-const DEFAULT_CODEX_MODEL = "gpt-5.2-codex";
-const DEFAULT_CODEX_BILLING_MODEL: AgentModelId = "openai/gpt-5.2-codex";
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_CODEX_BILLING_MODEL: AgentModelId = CODEX_DEFAULT_MODEL_ID;
 const CODEX_WORK_DIR = "codex";
 const CODEX_STATE_DIR = ".codex";
 const CODEX_GIT_EXCLUDE_PATHSPEC = ":(exclude).codex";
@@ -68,7 +82,21 @@ type CodexTarget =
 
 type MaterializedCodexTarget = Exclude<CodexTarget, { kind: "workspace" }>;
 
-async function ensureCodexInstalled(sandbox: SandboxHandle) {
+export type CodexCliAuth =
+  | {
+      kind: "api";
+      baseUrl: string;
+      apiKeyEnvVar: string;
+      apiKeyValue: string;
+      brokered: boolean;
+    }
+  | {
+      kind: "chatgpt";
+      authJson: Record<string, unknown>;
+      brokered: false;
+    };
+
+export async function ensureCodexInstalled(sandbox: SandboxHandle) {
   const check = await sandbox.commands.run(
     `command -v codex || test -x "$HOME/.codex/bin/codex" && echo found || true`,
     { timeoutMs: 30_000 },
@@ -155,14 +183,11 @@ export async function runCodexCoderTool(input: {
 
   const model = input.env.codexModel;
 
-  const runWithModelAuth = async (auth: {
-    baseUrl: string;
-    apiKeyEnvVar: string;
-    apiKeyValue: string;
-    brokered: boolean;
-  }) => {
+  const runWithModelAuth = async (auth: CodexCliAuth) => {
+    const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
     const redact = createKnownSecretRedactor([
-      auth.apiKeyValue,
+      auth.kind === "api" ? auth.apiKeyValue : null,
+      serializedAuthJson,
       input.env.openaiCodexApiKey,
       githubToken,
       githubAuthHeader,
@@ -182,17 +207,14 @@ export async function runCodexCoderTool(input: {
       `cd ${shellQuote(codexWorkRoot)} && grep -qxF '/${CODEX_STATE_DIR}/' .git/info/exclude || printf '\\n/${CODEX_STATE_DIR}/\\n' >> .git/info/exclude`,
       { timeoutMs: 30_000 },
     );
-    await input.sandbox.files.write(
-      configPath,
-      buildCodexConfig({
-        baseUrl: auth.baseUrl,
-        apiKeyEnvVar: auth.apiKeyEnvVar,
-      }),
-    );
+    await input.sandbox.files.write(configPath, buildCodexConfigForAuth(auth));
+    if (serializedAuthJson) {
+      await input.sandbox.files.write(`${codexHome}/auth.json`, serializedAuthJson);
+    }
 
     const codexEnv = {
       CODEX_HOME: codexHome,
-      [auth.apiKeyEnvVar]: auth.apiKeyValue,
+      ...(auth.kind === "api" ? { [auth.apiKeyEnvVar]: auth.apiKeyValue } : {}),
       ...(target.kind === "attached" && githubToken && githubAuthHeader
         ? buildGitHubCommandEnv({
             githubAuthHeader,
@@ -252,6 +274,12 @@ export async function runCodexCoderTool(input: {
       stdout: redact(String(result.stdout ?? "")),
       stderr: redact(String(result.stderr ?? "")),
       timedOut,
+    });
+    await persistRefreshedWorkspaceCodexAuth({
+      sandbox: input.sandbox,
+      codexHome,
+      workspaceId: input.workspaceId,
+      auth,
     });
 
     await input.sandbox.commands.run(
@@ -414,6 +442,7 @@ export async function runCodexCoderTool(input: {
       model,
       summary,
       brokered: auth.brokered,
+      subscriptionBacked: auth.kind === "chatgpt",
     });
     return {
       repository: repositoryFullName,
@@ -433,6 +462,13 @@ export async function runCodexCoderTool(input: {
     };
   };
 
+  const workspaceCodexAuth = await loadWorkspaceCodexCliAuth(input.workspaceId);
+  if (workspaceCodexAuth) return runWithModelAuth(workspaceCodexAuth);
+
+  if (!codexApiKeyFallbackEnabled()) {
+    throw new Error("Connect Codex in company settings before running Codex.");
+  }
+
   if (brokerActive(input.env) && input.env.publicUrl) {
     return withBrokerDelegation(
       {
@@ -446,6 +482,7 @@ export async function runCodexCoderTool(input: {
       },
       (minted) =>
         runWithModelAuth({
+          kind: "api",
           baseUrl: brokerBaseUrl(input.env.publicUrl as string, "openai"),
           apiKeyEnvVar: BROKER_TOKEN_ENV_VAR,
           apiKeyValue: minted.token,
@@ -460,6 +497,7 @@ export async function runCodexCoderTool(input: {
   }
 
   return runWithModelAuth({
+    kind: "api",
     baseUrl: CODEX_DIRECT_BASE_URL,
     apiKeyEnvVar: CODEX_DIRECT_API_KEY_ENV_VAR,
     apiKeyValue: codexApiKey,
@@ -472,6 +510,8 @@ export function buildCodexCommand(input: {
   workRoot: string;
   model: string;
   sessionId?: string | null;
+  reasoningEffort?: CodexReasoningEffort | null;
+  planModeReasoningEffort?: CodexReasoningEffort | null;
 }) {
   const parts = [
     "codex",
@@ -481,6 +521,15 @@ export function buildCodexCommand(input: {
     shellQuote(input.workRoot),
     "--sandbox",
     "workspace-write",
+    "--skip-git-repo-check",
+  ];
+  const configArgs = [
+    ...(input.reasoningEffort
+      ? ["-c", shellQuote(`model_reasoning_effort=${input.reasoningEffort}`)]
+      : []),
+    ...(input.planModeReasoningEffort
+      ? ["-c", shellQuote(`plan_mode_reasoning_effort=${input.planModeReasoningEffort}`)]
+      : []),
   ];
   const sessionId = input.sessionId?.trim();
   if (sessionId) {
@@ -488,12 +537,13 @@ export function buildCodexCommand(input: {
       "resume",
       "-m",
       shellQuote(input.model),
+      ...configArgs,
       shellQuote(sessionId),
       shellQuote(input.task),
     );
     return parts.join(" ");
   }
-  parts.push("-m", shellQuote(input.model), shellQuote(input.task));
+  parts.push("-m", shellQuote(input.model), ...configArgs, shellQuote(input.task));
   return parts.join(" ");
 }
 
@@ -523,6 +573,9 @@ export function buildCodexConfig(input: { baseUrl: string; apiKeyEnvVar: string 
     `model_provider = ${tomlString(CODEX_PROVIDER_ID)}`,
     `model_verbosity = "medium"`,
     "",
+    "[sandbox_workspace_write]",
+    "network_access = true",
+    "",
     `[model_providers.${CODEX_PROVIDER_ID}]`,
     `name = ${tomlString(CODEX_PROVIDER_NAME)}`,
     `base_url = ${tomlString(input.baseUrl)}`,
@@ -530,6 +583,103 @@ export function buildCodexConfig(input: { baseUrl: string; apiKeyEnvVar: string 
     `wire_api = "responses"`,
     "",
   ].join("\n");
+}
+
+export function buildCodexSubscriptionConfig() {
+  return [
+    'cli_auth_credentials_store = "file"',
+    'forced_login_method = "chatgpt"',
+    `model_verbosity = "medium"`,
+    "",
+    "[sandbox_workspace_write]",
+    "network_access = true",
+    "",
+  ].join("\n");
+}
+
+export function buildCodexConfigForAuth(auth: CodexCliAuth) {
+  if (auth.kind === "chatgpt") return buildCodexSubscriptionConfig();
+  return buildCodexConfig({
+    baseUrl: auth.baseUrl,
+    apiKeyEnvVar: auth.apiKeyEnvVar,
+  });
+}
+
+export async function loadWorkspaceCodexCliAuth(workspaceId: string): Promise<CodexCliAuth | null> {
+  let credential: Awaited<ReturnType<typeof loadWorkspaceCodexCredential>>;
+  try {
+    credential = await loadWorkspaceCodexCredential({ db: getDb(), workspaceId });
+  } catch {
+    await markWorkspaceCodexCredentialNeedsReauth({
+      db: getDb(),
+      workspaceId,
+      statusReason: "Codex credentials could not be decrypted. Reconnect Codex in settings.",
+    });
+    return null;
+  }
+  if (!credential || credential.status !== "connected") return null;
+  return {
+    kind: "chatgpt",
+    authJson: credential.authJson,
+    brokered: false,
+  };
+}
+
+export async function persistRefreshedWorkspaceCodexAuth(input: {
+  sandbox: SandboxHandle;
+  codexHome: string;
+  workspaceId: string;
+  auth: CodexCliAuth;
+}) {
+  if (input.auth.kind !== "chatgpt") return;
+  let content: string;
+  try {
+    content = sandboxFileContentToText(
+      await input.sandbox.files.read(`${input.codexHome}/auth.json`),
+    );
+  } catch {
+    await markWorkspaceCodexCredentialNeedsReauth({
+      db: getDb(),
+      workspaceId: input.workspaceId,
+      statusReason: "Codex did not leave a readable auth cache after running.",
+    });
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    await markWorkspaceCodexCredentialNeedsReauth({
+      db: getDb(),
+      workspaceId: input.workspaceId,
+      statusReason: "Codex auth cache was malformed after running.",
+    });
+    return;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    await markWorkspaceCodexCredentialNeedsReauth({
+      db: getDb(),
+      workspaceId: input.workspaceId,
+      statusReason: "Codex auth cache was malformed after running.",
+    });
+    return;
+  }
+  await rotateWorkspaceCodexCredential({
+    db: getDb(),
+    workspaceId: input.workspaceId,
+    authJson: parsed as Record<string, unknown>,
+  });
+}
+
+function sandboxFileContentToText(content: string | Uint8Array) {
+  return typeof content === "string" ? content : new TextDecoder().decode(content);
+}
+
+export function codexApiKeyFallbackEnabled() {
+  const value = process.env.RUNNER_CODEX_API_KEY_FALLBACK_ENABLED?.trim().toLowerCase();
+  if (value === "true" || value === "1") return true;
+  if (value === "false" || value === "0") return false;
+  return process.env.NODE_ENV !== "production";
 }
 
 export function resolveCodexTarget(input: {
@@ -632,6 +782,7 @@ export function createCodexStreamAccumulator() {
   let sessionId: string | null = null;
   let resultText = "";
   let error: string | null = null;
+  let parsedEvents: Record<string, unknown>[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let cacheReadTokens = 0;
@@ -640,24 +791,20 @@ export function createCodexStreamAccumulator() {
 
   function ingestEvent(event: unknown): string | null {
     if (!isRecord(event)) return null;
-    const foundSessionId = firstDeepString(event, [
-      "session_id",
-      "sessionId",
-      "thread_id",
-      "threadId",
-      "conversation_id",
-      "conversationId",
-      "id",
-    ]);
+    parsedEvents.push(event);
+    const foundSessionId = codexSessionIdFromEvent(event);
     if (foundSessionId && !sessionId) sessionId = foundSessionId;
 
-    const type = firstString(event.type, isRecord(event.msg) ? event.msg.type : undefined) ?? "";
+    const type = normalizeCodexEventType(codexEventType(event));
     const text = firstDeepString(event, ["delta", "text", "content", "message"]);
     let activity: string | null = null;
     if (text && isAssistantTextEvent(type, event)) {
       resultText += text;
       activity = compactActivity(`Codex: ${text}`);
-    } else if (/tool|exec|command|patch|file/i.test(type)) {
+    } else if (
+      type !== "item.commandexecution.outputdelta" &&
+      /tool|exec|command|patch|file/i.test(type)
+    ) {
       const label = firstDeepString(event, ["name", "command", "path", "title"]);
       activity = compactActivity(`Codex: ${label ?? type}`);
     }
@@ -730,6 +877,11 @@ export function createCodexStreamAccumulator() {
       if (buffer.trim()) consumeLine(buffer);
       buffer = "";
     },
+    drainEvents() {
+      const events = parsedEvents;
+      parsedEvents = [];
+      return events;
+    },
     summary(input: {
       exitCode: number | null;
       stdout: string;
@@ -767,14 +919,170 @@ export function createCodexStreamAccumulator() {
   };
 }
 
+export function codexRuntimeEventsFromJsonEvent(
+  event: unknown,
+  messageId: string,
+): AgentRuntimeEvent[] {
+  if (!isRecord(event)) return [];
+  const eventType = codexEventType(event);
+  const normalizedType = normalizeCodexEventType(eventType);
+  const params = codexEventParams(event);
+
+  if (normalizedType === "assistant_message_delta") {
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    return delta ? [{ type: "message.delta", payload: { messageId, delta } }] : [];
+  }
+
+  if (normalizedType === "item.agentmessage.delta" || normalizedType === "item.plan.delta") {
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    return delta ? [{ type: "message.delta", payload: { messageId, delta } }] : [];
+  }
+
+  if (
+    normalizedType === "item.reasoning.summarytextdelta" ||
+    normalizedType === "item.reasoning.textdelta"
+  ) {
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    return delta ? [{ type: "message.reasoning_delta", payload: { messageId, delta } }] : [];
+  }
+
+  if (normalizedType === "item.commandexecution.outputdelta") {
+    const toolCallId = codexToolCallIdFromEvent(event);
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    if (!toolCallId || !delta) return [];
+    return [
+      {
+        type: "command.output",
+        payload: {
+          command: codexCommandString(params?.command ?? event.command) ?? toolCallId,
+          toolCallId,
+          stream: firstString(params?.stream, event.stream) === "stderr" ? "stderr" : "stdout",
+          delta,
+        },
+      },
+    ];
+  }
+
+  if (normalizedType === "turn.completed") {
+    return [
+      {
+        type: "engine.activity",
+        payload: {
+          messageId,
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        },
+      },
+    ];
+  }
+
+  if (normalizedType !== "item.started" && normalizedType !== "item.completed") return [];
+
+  const item = codexItemFromEvent(event);
+  const itemType = normalizeCodexItemType(firstString(item?.type));
+  if (
+    normalizedType === "item.completed" &&
+    itemType === "agentmessage" &&
+    !isSlashCodexEvent(event)
+  ) {
+    const text = firstNonEmptyRawString(item?.text, item?.content);
+    return text ? [{ type: "message.delta", payload: { messageId, delta: text } }] : [];
+  }
+
+  if (!item || itemType !== "commandexecution") return [];
+
+  const itemId = firstString(item.id);
+  const command = codexCommandString(item.command);
+  if (!itemId || !command) return [];
+
+  const toolCallId = `codex:${itemId}`;
+  if (normalizedType === "item.started") {
+    return [
+      {
+        type: "tool.started",
+        payload: {
+          messageId,
+          toolCallId,
+          name: "shell",
+          input: { command },
+        },
+      },
+    ];
+  }
+
+  const exitCode = numberFrom(item.exit_code ?? item.exitCode);
+  const status = firstString(item.status);
+  const outputPreview = firstString(item.aggregated_output, item.aggregatedOutput) ?? "";
+  if (status === "failed" || (exitCode != null && exitCode !== 0)) {
+    const message =
+      exitCode == null ? "Codex command failed." : `Codex command exited with code ${exitCode}.`;
+    return [
+      {
+        type: "tool.failed",
+        payload: {
+          messageId,
+          toolCallId,
+          name: "shell",
+          ...(outputPreview ? { outputPreview } : {}),
+          output: {
+            command,
+            exitCode,
+            output: outputPreview,
+          },
+          error: {
+            message,
+            code: "codex_command_failed",
+            recoverable: true,
+          },
+        },
+      },
+    ];
+  }
+
+  return [
+    {
+      type: "tool.completed",
+      payload: {
+        messageId,
+        toolCallId,
+        name: "shell",
+        ...(outputPreview ? { outputPreview } : {}),
+        output: {
+          command,
+          exitCode,
+          output: outputPreview,
+        },
+      },
+    },
+  ];
+}
+
 export function codexHostedToolUsage(input: {
   model: string;
   summary: Pick<CodexStreamSummary, "usage">;
   brokered?: boolean;
+  subscriptionBacked?: boolean;
 }): HostedToolUsage | null {
   const tokens = input.summary.usage;
   if (!tokens) return null;
   const billingModel = codexBillingModel(input.model);
+  if (input.subscriptionBacked) {
+    return {
+      provider: "codex",
+      operation: "session",
+      costUsdMicros: 0,
+      costSource: "subscription",
+      rawUsage: {
+        ...tokens,
+        model: input.model,
+        billing_model: billingModel,
+        cost_source: "subscription",
+        display_only: true,
+      },
+    } satisfies HostedToolUsage;
+  }
   if (input.brokered) {
     return {
       provider: "codex",
@@ -826,6 +1134,9 @@ function codexBillingModel(model: string): AgentModelId {
 
 function isAssistantTextEvent(type: string, event: Record<string, unknown>) {
   if (/assistant|agent|message|text|delta|response/i.test(type)) return true;
+  const item = codexItemFromEvent(event);
+  const itemType = normalizeCodexItemType(firstString(item?.type));
+  if (itemType && /assistant|agentmessage|message/i.test(itemType)) return true;
   const role = firstDeepString(event, ["role"]);
   return role === "assistant";
 }
@@ -833,6 +1144,105 @@ function isAssistantTextEvent(type: string, event: Record<string, unknown>) {
 function firstString(...values: unknown[]): string | null {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function firstNonEmptyRawString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+function codexEventType(event: Record<string, unknown>): string {
+  const msg = isRecord(event.msg) ? event.msg : null;
+  return firstString(event.type, event.method, msg?.type, msg?.method) ?? "";
+}
+
+function normalizeCodexEventType(type: string) {
+  return type.replace(/\//g, ".").toLowerCase();
+}
+
+function isSlashCodexEvent(event: Record<string, unknown>) {
+  const msg = isRecord(event.msg) ? event.msg : null;
+  const type = firstString(event.type, event.method, msg?.type, msg?.method);
+  return Boolean(type?.includes("/"));
+}
+
+function codexEventParams(event: Record<string, unknown>): Record<string, unknown> | null {
+  if (isRecord(event.params)) return event.params;
+  const msg = isRecord(event.msg) ? event.msg : null;
+  if (isRecord(msg?.params)) return msg.params;
+  return null;
+}
+
+function codexItemFromEvent(event: Record<string, unknown>): Record<string, unknown> | null {
+  if (isRecord(event.item)) return event.item;
+  const msg = isRecord(event.msg) ? event.msg : null;
+  if (isRecord(msg?.item)) return msg.item;
+  const params = codexEventParams(event);
+  if (isRecord(params?.item)) return params.item;
+  return null;
+}
+
+function codexToolCallIdFromEvent(event: Record<string, unknown>): string | null {
+  const params = codexEventParams(event);
+  const item = codexItemFromEvent(event);
+  const itemId = firstString(event.itemId, params?.itemId, item?.id);
+  return itemId ? `codex:${itemId}` : null;
+}
+
+function normalizeCodexItemType(type: string | null) {
+  return (type ?? "").replace(/_/g, "").toLowerCase();
+}
+
+function codexCommandString(value: unknown): string | null {
+  const command = firstString(value);
+  if (command) return command;
+  if (Array.isArray(value) && value.every((part) => typeof part === "string")) {
+    return value.join(" ").trim() || null;
+  }
+  return null;
+}
+
+function codexSessionIdFromEvent(event: Record<string, unknown>): string | null {
+  const params = codexEventParams(event);
+  const direct = firstString(
+    event.session_id,
+    event.sessionId,
+    event.thread_id,
+    event.threadId,
+    event.conversation_id,
+    event.conversationId,
+    params?.session_id,
+    params?.sessionId,
+    params?.thread_id,
+    params?.threadId,
+    params?.conversation_id,
+    params?.conversationId,
+  );
+  if (direct) return direct;
+
+  const msg = isRecord(event.msg) ? event.msg : null;
+  const msgId = msg
+    ? firstString(
+        msg.session_id,
+        msg.sessionId,
+        msg.thread_id,
+        msg.threadId,
+        msg.conversation_id,
+        msg.conversationId,
+      )
+    : null;
+  if (msgId) return msgId;
+
+  const type = normalizeCodexEventType(codexEventType(event));
+  if (/^(session|thread|conversation)\.started$/i.test(type)) {
+    const thread = isRecord(params?.thread) ? params.thread : null;
+    const session = isRecord(params?.session) ? params.session : null;
+    const conversation = isRecord(params?.conversation) ? params.conversation : null;
+    return firstString(event.id, msg?.id, thread?.id, session?.id, conversation?.id);
   }
   return null;
 }

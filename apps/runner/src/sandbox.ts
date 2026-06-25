@@ -81,6 +81,7 @@ export function sandboxLayout(workdir: string, personal = false) {
     workspaceRoot: workdir,
     agentRoot: `${workdir}/agent`,
     brainRoot: `${workdir}/brain`,
+    codexRoot: `${workdir}/codex`,
     workRoot: `${workdir}/work`,
     skillsRoot: `${workdir}/skills`,
     // Personal: memory/ is its own top-level root. Company: it stays under the agent bundle.
@@ -102,44 +103,55 @@ export async function createOrConnectSandbox(input: {
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   if (input.sandboxId) {
-    const startedAt = performance.now();
-    try {
-      const sandbox = await Sandbox.connect(input.sandboxId, {
-        timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
-        requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
-      });
+    const sandbox = await connectSandbox({
+      sandboxId: input.sandboxId,
+      ...(input.onLatency ? { onLatency: input.onLatency } : {}),
+    });
+    if (sandbox) return sandbox;
+  }
+
+  return createSandbox(input);
+}
+
+export async function connectSandbox(input: {
+  sandboxId: string;
+  onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
+}) {
+  const startedAt = performance.now();
+  try {
+    const sandbox = await Sandbox.connect(input.sandboxId, {
+      timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    emitSandboxLatency(input.onLatency, {
+      operation: "connect",
+      outcome: "success",
+      latencyMs: elapsedMs(startedAt),
+      sandboxId: sandbox.sandboxId,
+      requestedSandboxId: input.sandboxId,
+    });
+    return sandbox;
+  } catch (error) {
+    const name = errorName(error);
+    if (!isSandboxNotFound(error)) {
       emitSandboxLatency(input.onLatency, {
         operation: "connect",
-        outcome: "success",
-        latencyMs: elapsedMs(startedAt),
-        sandboxId: sandbox.sandboxId,
-        requestedSandboxId: input.sandboxId,
-      });
-      return sandbox;
-    } catch (error) {
-      if (!isSandboxNotFound(error)) {
-        const name = errorName(error);
-        emitSandboxLatency(input.onLatency, {
-          operation: "connect",
-          outcome: "error",
-          latencyMs: elapsedMs(startedAt),
-          requestedSandboxId: input.sandboxId,
-          ...(name ? { errorName: name } : {}),
-        });
-        throw error;
-      }
-      const name = errorName(error);
-      emitSandboxLatency(input.onLatency, {
-        operation: "connect",
-        outcome: "not_found",
+        outcome: "error",
         latencyMs: elapsedMs(startedAt),
         requestedSandboxId: input.sandboxId,
         ...(name ? { errorName: name } : {}),
       });
+      throw error;
     }
+    emitSandboxLatency(input.onLatency, {
+      operation: "connect",
+      outcome: "not_found",
+      latencyMs: elapsedMs(startedAt),
+      requestedSandboxId: input.sandboxId,
+      ...(name ? { errorName: name } : {}),
+    });
+    return null;
   }
-
-  return createSandbox(input);
 }
 
 async function createSandbox(input: {
@@ -234,6 +246,7 @@ export async function prepareWorkspace(input: {
   workdir: string;
   agentFile: string;
   personal?: boolean;
+  createCodexRoot?: boolean;
   configureGitCredentialHelper?: boolean;
 }) {
   const layout = sandboxLayout(input.workdir, input.personal ?? false);
@@ -244,6 +257,9 @@ export async function prepareWorkspace(input: {
   const layoutDirs = layout.personal
     ? [layout.agentRoot, layout.memoryRoot, layout.personalBrainRoot, layout.workRoot]
     : [layout.agentRoot, layout.brainRoot, layout.workRoot];
+  if (input.createCodexRoot) {
+    layoutDirs.push(layout.codexRoot);
+  }
 
   await runSandboxPreparationCommand({
     sandbox: input.sandbox,
@@ -744,17 +760,58 @@ export function commandExitResult(error: unknown) {
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   if (record.name !== "CommandExitError") return null;
-  const result =
-    record.result && typeof record.result === "object"
-      ? (record.result as Record<string, unknown>)
-      : record;
-  if (typeof result.exitCode !== "number") return null;
+  const result = readRecordProperty(record, "result");
+  const candidates = result ? [result, record] : [record];
+  const exitCode =
+    candidates.map((candidate) => readNumberProperty(candidate, "exitCode")).find(isNumber) ??
+    candidates.map((candidate) => readNumberProperty(candidate, "exit_code")).find(isNumber);
+  if (exitCode == null) return null;
 
   return {
-    stdout: typeof result.stdout === "string" ? result.stdout : "",
-    stderr: typeof result.stderr === "string" ? result.stderr : "",
-    exitCode: result.exitCode,
+    stdout:
+      candidates.map((candidate) => readStringProperty(candidate, "stdout")).find(isString) ?? "",
+    stderr:
+      candidates.map((candidate) => readStringProperty(candidate, "stderr")).find(isString) ?? "",
+    exitCode,
   };
+}
+
+function readRecordProperty(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  try {
+    const value = record[key];
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readNumberProperty(record: Record<string, unknown>, key: string): number | null {
+  try {
+    const value = record[key];
+    return typeof value === "number" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStringProperty(record: Record<string, unknown>, key: string): string | null {
+  try {
+    const value = record[key];
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function isNumber(value: number | null): value is number {
+  return typeof value === "number";
+}
+
+function isString(value: string | null): value is string {
+  return typeof value === "string";
 }
 
 // E2B raises a `TimeoutError` when a command exceeds its `timeoutMs` (the process is killed

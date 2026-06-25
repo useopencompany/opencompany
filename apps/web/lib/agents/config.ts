@@ -7,6 +7,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
+  AgentEngine,
   AgentGitHubRepositoryBinding,
   AgentModelId,
   AgentReference,
@@ -24,6 +25,7 @@ export { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@opencompany/agen
 export function derivePreviewConfigFromTiptapDoc(input: {
   title: string;
   content: unknown;
+  engine?: AgentEngine;
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
   neonDatabases?: AgentConfigDerivationNeonDatabase[];
@@ -47,6 +49,7 @@ export function derivePreviewConfigFromTiptapDoc(input: {
     agents: input.agents ?? [],
     skills: input.skills ?? [],
     preferredRepositories,
+    ...(input.engine ? { engine: input.engine } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.triggers ? { triggers: input.triggers } : {}),
   });

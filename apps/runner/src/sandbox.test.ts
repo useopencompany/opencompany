@@ -20,6 +20,7 @@ import {
   armSandboxIdleTimeout,
   cloneGitHubRepositoryIntoWorkdir,
   commandExitResult,
+  connectSandbox,
   createOrConnectSandbox,
   githubRemoteMatches,
   guardCommandStreamCallbacks,
@@ -36,6 +37,88 @@ import {
 
 afterEach(() => {
   vi.resetAllMocks();
+});
+
+describe("connectSandbox", () => {
+  it("connects to an existing sandbox and emits success latency", async () => {
+    const sandbox = {
+      sandboxId: "sbx_existing",
+    };
+    e2bMocks.connect.mockResolvedValue(sandbox);
+    const observations: unknown[] = [];
+
+    await expect(
+      connectSandbox({
+        sandboxId: "sbx_existing",
+        onLatency: (observation) => {
+          observations.push(observation);
+        },
+      }),
+    ).resolves.toBe(sandbox);
+
+    expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_existing", {
+      timeoutMs: 3_600_000,
+      requestTimeoutMs: 30_000,
+    });
+    expect(observations).toEqual([
+      expect.objectContaining({
+        operation: "connect",
+        outcome: "success",
+        sandboxId: "sbx_existing",
+        requestedSandboxId: "sbx_existing",
+        latencyMs: expect.any(Number),
+      }),
+    ]);
+  });
+
+  it("returns null and emits not-found latency for stale sandbox ids", async () => {
+    e2bMocks.connect.mockRejectedValue(new Error("sandbox not found"));
+    const observations: unknown[] = [];
+
+    await expect(
+      connectSandbox({
+        sandboxId: "sbx_missing",
+        onLatency: (observation) => {
+          observations.push(observation);
+        },
+      }),
+    ).resolves.toBeNull();
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        operation: "connect",
+        outcome: "not_found",
+        requestedSandboxId: "sbx_missing",
+        latencyMs: expect.any(Number),
+      }),
+    ]);
+  });
+
+  it("throws and emits error latency for non-not-found connect failures", async () => {
+    const error = new Error("permission denied");
+    error.name = "E2BPermissionError";
+    e2bMocks.connect.mockRejectedValue(error);
+    const observations: unknown[] = [];
+
+    await expect(
+      connectSandbox({
+        sandboxId: "sbx_denied",
+        onLatency: (observation) => {
+          observations.push(observation);
+        },
+      }),
+    ).rejects.toThrow("permission denied");
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        operation: "connect",
+        outcome: "error",
+        requestedSandboxId: "sbx_denied",
+        errorName: "E2BPermissionError",
+        latencyMs: expect.any(Number),
+      }),
+    ]);
+  });
 });
 
 describe("createOrConnectSandbox", () => {
@@ -242,6 +325,29 @@ describe("prepareWorkspace", () => {
           String(command).includes("!gh auth git-credential"),
       ),
     ).toBe(true);
+  });
+
+  it("creates the top-level Codex work root only for Codex engine sessions", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: "agent",
+      createCodexRoot: true,
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("'/home/user/workspace/codex'"),
+      { user: "root", timeoutMs: 30_000 },
+    );
   });
 
   it("skips the GitHub credential helper when authenticated git is not needed", async () => {
@@ -1498,6 +1604,27 @@ describe("commandExitResult", () => {
       exitCode: 2,
       stdout: "out",
       stderr: "err",
+    });
+  });
+
+  it("normalizes CommandExitError objects that expose command output through getters", () => {
+    const error = Object.create({
+      get exitCode() {
+        return 1;
+      },
+      get stdout() {
+        return "getter out";
+      },
+      get stderr() {
+        return "getter err";
+      },
+    }) as { name: string };
+    error.name = "CommandExitError";
+
+    expect(commandExitResult(error)).toEqual({
+      exitCode: 1,
+      stdout: "getter out",
+      stderr: "getter err",
     });
   });
 });

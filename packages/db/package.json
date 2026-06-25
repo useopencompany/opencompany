@@ -12,6 +12,10 @@
       "types": "./src/client.ts",
       "default": "./src/client.ts"
     },
+    "./codex-auth": {
+      "types": "./src/codex-auth.ts",
+      "default": "./src/codex-auth.ts"
+    },
     "./schema": {
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"

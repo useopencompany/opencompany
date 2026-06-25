@@ -96,6 +96,7 @@ export async function runScheduledAgent(input: {
     const messageId = newAgentSessionMessageId();
     const now = new Date();
     const title = titleFromPrompt(input.trigger.prompt);
+    const engine = normalizeAgentConfig(input.agent.config).engine;
 
     await db.batch([
       db.insert(agentSessions).values({
@@ -104,6 +105,7 @@ export async function runScheduledAgent(input: {
         userId: input.userId,
         agentId: input.agent.id,
         title,
+        engine,
         modelProvider: input.agent.config.model.provider,
         modelName: input.agent.config.model.name,
       }),
@@ -161,14 +163,23 @@ export async function runScheduledAgent(input: {
         ),
     ]);
 
-    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: input.agent.workspaceId });
+    await triggerAgentMessageRun({
+      sessionId,
+      messageId,
+      workspaceId: input.agent.workspaceId,
+      engine,
+    });
 
     await Promise.allSettled([
-      dispatchAgentAfterSessionCheck({
-        sessionId,
-        messageId,
-        workspaceId: input.agent.workspaceId,
-      }),
+      ...(engine === "opencompany"
+        ? [
+            dispatchAgentAfterSessionCheck({
+              sessionId,
+              messageId,
+              workspaceId: input.agent.workspaceId,
+            }),
+          ]
+        : []),
       captureServerEvent("session_started", input.userId, {
         user_id: input.userId,
         workspace_id: input.agent.workspaceId,
@@ -176,6 +187,7 @@ export async function runScheduledAgent(input: {
         session_id: sessionId,
         model_provider: input.agent.config.model.provider,
         model_name: input.agent.config.model.name,
+        engine,
         source: "schedule",
         trigger_id: input.trigger.id,
       }),

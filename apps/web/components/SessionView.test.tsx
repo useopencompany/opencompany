@@ -210,6 +210,28 @@ function makeToolCallPart(status: "running" | "completed" = "running"): Assistan
   };
 }
 
+function makeShellToolCallPart(input: {
+  command: string;
+  outputPreview?: string;
+  status?: RuntimeToolCall["status"];
+}): AssistantTurnPart {
+  return {
+    type: "tool-call",
+    toolCall: {
+      id: "call_shell",
+      name: "shell",
+      label: `Running ${input.command}`,
+      status: input.status ?? "completed",
+      inputPreview: JSON.stringify({ command: input.command }, null, 2),
+      activityPreview: "",
+      outputPreview: input.outputPreview ?? "",
+      command: input.command,
+      startedEventId: 1,
+      completedEventId: input.status === "running" ? null : 2,
+    },
+  };
+}
+
 function makeApprovalToolCallPart(
   approval: NonNullable<RuntimeToolCall["approval"]>,
 ): AssistantTurnPart {
@@ -303,6 +325,51 @@ describe("AssistantMessageContent — Phase B: running with parts renders all pa
     expect(screen.getByText("Thought for 5 seconds")).toBeInTheDocument();
     // WorkingIndicator still visible as footer
     expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("shows Bash tool calls with the unwrapped command as a secondary chip", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeShellToolCallPart({
+        command: "/bin/bash -lc 'git status --short --untracked-files=all'",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+    expect(screen.getByText("git status --short --untracked-files=all")).toBeInTheDocument();
+    expect(screen.queryByText("/bin/bash", { exact: false })).not.toBeInTheDocument();
+  });
+
+  it("shows Codex read-like shell commands as line-counted file reads", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeShellToolCallPart({
+        command: "/bin/bash -lc 'sed -n 1,220p /tmp/OpenCompany-2026-06-24-090910.ips'",
+        outputPreview: "partial preview",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("Read 220 lines")).toBeInTheDocument();
+    expect(screen.getByText("OpenCompany-2026-06-24-090910.ips")).toBeInTheDocument();
+  });
+
+  it("shows grep-like shell commands as search rows with match counts", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeShellToolCallPart({
+        command: "/bin/bash -lc 'rg -n \"apps/mac/.build\" apps/mac'",
+        outputPreview: Array.from({ length: 13 }, (_, index) => `match ${index + 1}`).join("\n"),
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("grep for 'apps/mac/.build' in mac")).toBeInTheDocument();
+    expect(screen.getByText("13 matches")).toBeInTheDocument();
   });
 });
 
@@ -566,6 +633,47 @@ describe("AssistantMessageContent — completed message regression", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("keeps completed Codex work collapsed before the final answer", () => {
+    const message = makeMessage({ status: "completed" });
+    const parts: AssistantTurnPart[] = [
+      { type: "text", text: "Checking the repository first.", tone: "work" },
+      makeShellToolCallPart({ command: "git status --short" }),
+      makeTextPart("Final answer."),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+    expect(screen.getByText("Final answer.")).toBeInTheDocument();
+    expect(screen.queryByText("Checking the repository first.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("collapses completed Codex work before durable message completion", () => {
+    const message = makeMessage({ status: "running" });
+    const parts: AssistantTurnPart[] = [
+      { type: "text", text: "Inspecting the workspace first.", tone: "work" },
+      makeShellToolCallPart({ command: "pwd && rg --files -uu | head -100" }),
+      makeTextPart("Created the basic Next.js project."),
+    ];
+
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={parts}
+        sessionCanGenerate={true}
+        collapseWorkBeforeFinalAnswer={true}
+      />,
+    );
+
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+    expect(screen.getByText("Created the basic Next.js project.")).toBeInTheDocument();
+    expect(screen.queryByText("Inspecting the workspace first.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
   it("renders reasoning part without WorkingIndicator when completed", () => {
     const message = makeMessage({ status: "completed" });
     const parts = [makeReasoningPart()];
@@ -681,8 +789,12 @@ function makeSession(
     title: "Test Session",
     status: "running",
     source: "user",
+    engine: "opencompany",
     modelProvider: "anthropic",
     modelName: "claude-3-5-sonnet",
+    codexReasoningEffort: "medium",
+    codexPlanModeEnabled: false,
+    codexPlanModeReasoningEffort: "high",
     parentSessionId: null,
     parentMessageId: null,
     parentToolCallId: null,
@@ -771,6 +883,7 @@ function makePersonalAgentContext(
 ): PersonalAgentContextValue {
   const config: PersonalAgentContextValue["config"] = {
     schemaVersion: "agent.v1",
+    engine: "opencompany",
     title: "Personal Agent",
     instructions: "Help me.",
     model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
@@ -822,6 +935,8 @@ function makePersonalAgentContext(
     setProMode: vi.fn(),
     companySurfaceEnabled: false,
     setCompanySurfaceEnabled: vi.fn(),
+    codexEngineEnabled: false,
+    setCodexEngineEnabled: vi.fn(),
     setUserTimezone: vi.fn(),
     setUserTimezoneSource: vi.fn(),
     getDraft: () => ({ body: "Help me.", content: { type: "doc" } }),
@@ -1502,6 +1617,40 @@ describe("SessionViewContent — active turn timer", () => {
 });
 
 describe("SessionViewContent — live reasoning rendering", () => {
+  it("hides Codex engine activity rows while keeping the bottom working indicator", () => {
+    const detail = makeDetail({
+      session: makeSession({ engine: "codex", status: "running" }),
+      messages: [
+        {
+          id: "msg_codex",
+          role: "assistant",
+          content: "",
+          status: "running",
+          createdAt: "2026-06-25T12:00:00.000Z",
+        },
+      ],
+      events: [
+        {
+          id: 1,
+          type: "engine.activity",
+          messageId: "msg_codex",
+          payload: {
+            messageId: "msg_codex",
+            engine: "codex",
+            label: "Codex",
+            status: "running",
+            activity: "Codex is starting",
+          },
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail, "live");
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByText("Codex is starting")).not.toBeInTheDocument();
+  });
+
   it("shows live reasoning delta text inside the expandable reasoning card", async () => {
     const user = userEvent.setup();
     const detail = makeDetail({

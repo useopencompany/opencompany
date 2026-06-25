@@ -41,6 +41,7 @@ vi.mock("@opencompany/observability", () => ({
 
 const agentConfig: AgentConfig = {
   schemaVersion: "agent.v1",
+  engine: "opencompany",
   title: "Research",
   instructions: "Research.",
   model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },

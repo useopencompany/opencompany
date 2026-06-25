@@ -206,15 +206,21 @@ export const runAgentSessionMessage = inngest.createFunction(
   },
   async ({ event, step }) => {
     return step.run("run runner message", async () => {
-      await callRunner(
-        `/internal/sessions/${event.data.sessionId}/messages/${event.data.messageId}/run`,
-        {
-          event: "opencompany.inngest_run_message_failed",
-          workspace_id: event.data.workspaceId,
-          session_id: event.data.sessionId,
-          message_id: event.data.messageId,
-        },
-      );
+      const engine = event.data.engine === "codex" ? "codex" : "opencompany";
+      const route =
+        engine === "codex"
+          ? `/internal/sessions/${event.data.sessionId}/messages/${event.data.messageId}/codex-turn`
+          : `/internal/sessions/${event.data.sessionId}/messages/${event.data.messageId}/run`;
+      await callRunner(route, {
+        event:
+          engine === "codex"
+            ? "opencompany.inngest_run_codex_turn_failed"
+            : "opencompany.inngest_run_message_failed",
+        workspace_id: event.data.workspaceId,
+        session_id: event.data.sessionId,
+        message_id: event.data.messageId,
+        engine,
+      });
       return { ok: true };
     });
   },

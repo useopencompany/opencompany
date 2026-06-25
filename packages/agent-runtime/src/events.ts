@@ -264,6 +264,16 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "engine.activity";
+      payload: {
+        messageId: string;
+        engine: "codex";
+        label: string;
+        status: "running" | "completed" | "failed";
+        activity?: string;
+      };
+    }
+  | {
       type: "session.error";
       payload: { message: string };
     }

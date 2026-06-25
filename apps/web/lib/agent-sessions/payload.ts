@@ -1,3 +1,5 @@
+import { isCodexReasoningEffort } from "@opencompany/agent-runtime";
+import type { AgentEngine, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   type RuntimeEvent,
@@ -17,6 +19,7 @@ export type SidebarSessionPayload = {
   // Where the session originated: "user" (web), "agent" (delegated), "memory" (memory-keeper pass),
   // or "whatsapp" (messaging channel). Drives the source badge + which surface lists it.
   source: "user" | "agent" | "memory" | "whatsapp";
+  engine: AgentEngine;
   modelName: string;
   lastError: string | null;
   createdAt: string;
@@ -37,8 +40,12 @@ export type AgentSessionPayload = {
   title: string;
   status: string;
   source: "user" | "agent" | "memory" | "whatsapp";
+  engine: AgentEngine;
   modelProvider: string;
   modelName: string;
+  codexReasoningEffort: CodexReasoningEffort;
+  codexPlanModeEnabled: boolean;
+  codexPlanModeReasoningEffort: CodexReasoningEffort;
   parentSessionId: string | null;
   parentMessageId: string | null;
   parentToolCallId: string | null;
@@ -228,6 +235,7 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
     title: detail.session.title,
     status: detail.session.status,
     source: detail.session.source,
+    engine: detail.session.engine,
     modelName: detail.session.modelName,
     lastError: detail.session.lastError,
     createdAt: detail.session.createdAt,
@@ -285,6 +293,7 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
     status: readNonEmptyStringField(record, "status"),
     // Tolerant of payloads cached before `source` was carried on the sidebar shape.
     source: readOptionalSessionSource(record, "source") ?? "user",
+    engine: readOptionalSessionEngine(record, "engine") ?? "opencompany",
     modelName: readNonEmptyStringField(record, "modelName"),
     lastError: readNullableStringField(record, "lastError"),
     createdAt: readStringField(record, "createdAt"),
@@ -370,8 +379,14 @@ function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
     title: readStringField(record, "title"),
     status: readStringField(record, "status"),
     source: readSessionSource(record, "source"),
+    engine: readOptionalSessionEngine(record, "engine") ?? "opencompany",
     modelProvider: readStringField(record, "modelProvider"),
     modelName: readStringField(record, "modelName"),
+    codexReasoningEffort:
+      readOptionalCodexReasoningEffort(record, "codexReasoningEffort") ?? "high",
+    codexPlanModeEnabled: readOptionalBooleanField(record, "codexPlanModeEnabled") ?? false,
+    codexPlanModeReasoningEffort:
+      readOptionalCodexReasoningEffort(record, "codexPlanModeReasoningEffort") ?? "high",
     parentSessionId: readNullableStringField(record, "parentSessionId"),
     parentMessageId: readNullableStringField(record, "parentMessageId"),
     parentToolCallId: readNullableStringField(record, "parentToolCallId"),
@@ -580,6 +595,26 @@ function readSessionSourceOrDefault(
     return value;
   }
   return fallback;
+}
+
+function readOptionalSessionEngine(
+  record: Record<string, unknown>,
+  field: string,
+): AgentEngine | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (value === "opencompany" || value === "codex") return value;
+  throw new Error(`Invalid ${field}.`);
+}
+
+function readOptionalCodexReasoningEffort(
+  record: Record<string, unknown>,
+  field: string,
+): CodexReasoningEffort | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && isCodexReasoningEffort(value)) return value;
+  throw new Error(`Invalid ${field}.`);
 }
 
 function readOptionalStringField(record: Record<string, unknown>, field: string) {

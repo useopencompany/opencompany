@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Codex E2B toolbox templates now include Playwright and Playwright-managed Chromium for browser-ready coding sessions.
+
 ## [0.17.0] - 2026-06-22
 
 ### Fixed

@@ -15,6 +15,7 @@ import type {
   AgentBrainReference,
   AgentConfig,
   AgentConfigTool,
+  AgentEngine,
   AgentFile,
   AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
@@ -31,6 +32,7 @@ import type {
 import { isExternalSkillReference } from "./types";
 
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+const DEFAULT_ENGINE: AgentEngine = "opencompany";
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));
 const GITHUB_PULL_REQUEST_EVENTS = new Set<AgentGitHubPullRequestTriggerConfig["events"][number]>([
   "opened",
@@ -42,6 +44,7 @@ const GITHUB_PULL_REQUEST_EVENTS = new Set<AgentGitHubPullRequestTriggerConfig["
 type Frontmatter = {
   schemaVersion?: unknown;
   title?: unknown;
+  engine?: unknown;
   model?: unknown;
   tools?: unknown;
   brain?: unknown;
@@ -52,6 +55,7 @@ type Frontmatter = {
 };
 
 export type AgentConfigPatch = {
+  engine?: AgentEngine;
   tools?: AgentConfigTool[];
   brain?: AgentBrainReference[];
   agents?: AgentReference[];
@@ -63,6 +67,7 @@ export type AgentConfigPatch = {
 export function parseAgentFile(source: string): AgentFile {
   const { frontmatter, body } = splitFrontmatter(source);
   const title = normalizeTitle(readString(frontmatter.title) ?? "Untitled agent");
+  const engine = normalizeEngine(readString(frontmatter.engine));
   const model = normalizeModelId(readString(frontmatter.model) ?? DEFAULT_MODEL_ID);
   const brain = normalizeBrainReferences(frontmatter.brain);
   const agents = normalizeAgentReferences(frontmatter.agents);
@@ -79,6 +84,7 @@ export function parseAgentFile(source: string): AgentFile {
     config: buildAgentConfig({
       title,
       body,
+      engine,
       model,
       tools,
       brain,
@@ -154,6 +160,11 @@ export function validateAgentFileSource(source: string): AgentFileValidationResu
     errors.push(`Unknown model "${rawModel}". Use one of the supported model ids.`);
   }
 
+  const rawEngine = readString(frontmatter.engine);
+  if (rawEngine && rawEngine !== "opencompany" && rawEngine !== "codex") {
+    errors.push('`engine` must be either "opencompany" or "codex".');
+  }
+
   const body = normalized.slice(fenceEnd + 4).replace(/^\n+/, "");
   if (!normalizeBody(body)) {
     errors.push("The instructions body must not be empty.");
@@ -169,6 +180,7 @@ export function validateAgentFileSource(source: string): AgentFileValidationResu
       title: parsed.title,
       body: parsed.body,
       model: parsed.config.model.name,
+      engine: parsed.config.engine,
       tools: parsed.config.tools,
       brain: parsed.config.brain,
       agents: parsed.config.agents ?? [],
@@ -179,6 +191,7 @@ export function validateAgentFileSource(source: string): AgentFileValidationResu
   );
   if (
     reparsed.title !== parsed.title ||
+    reparsed.config.engine !== parsed.config.engine ||
     reparsed.config.model.name !== parsed.config.model.name ||
     reparsed.config.instructions !== parsed.config.instructions ||
     JSON.stringify(reparsed.config.skills ?? []) !== JSON.stringify(parsed.config.skills ?? [])
@@ -196,6 +209,7 @@ export function serializeAgentFile(input: {
   title: string;
   body: string;
   model?: AgentModelId;
+  engine?: AgentEngine;
   tools?: AgentConfigTool[];
   brain?: AgentBrainReference[];
   agents?: AgentReference[];
@@ -206,6 +220,7 @@ export function serializeAgentFile(input: {
   const title = normalizeTitle(input.title);
   const body = normalizeBody(input.body);
   const fromMentions = extractConfigFromMentions(body);
+  const engine = normalizeEngine(input.engine);
   const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const brainInput = input.brain && input.brain.length > 0 ? input.brain : fromMentions.brain;
   const brain = normalizeBrainReferences(brainInput);
@@ -221,6 +236,7 @@ export function serializeAgentFile(input: {
   return [
     serializeAgentFrontmatter({
       title,
+      engine,
       model,
       tools,
       brain,
@@ -261,6 +277,7 @@ function serializeSkillReference(skill: AgentSkillReference): string | Record<st
 export function serializeAgentFrontmatter(input: {
   title: string;
   model: AgentModelId;
+  engine?: AgentEngine;
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
   agents?: AgentReference[];
@@ -269,6 +286,7 @@ export function serializeAgentFrontmatter(input: {
   triggers?: AgentTriggerConfig[];
 }) {
   const title = normalizeTitle(input.title);
+  const engine = normalizeEngine(input.engine);
   const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const repositories = normalizeGitHubRepositories(input.integrations);
   const githubAllRepositories = normalizeGitHubAllRepositories(input.integrations);
@@ -281,6 +299,7 @@ export function serializeAgentFrontmatter(input: {
   const frontmatter = {
     schemaVersion: "agent.v1",
     title,
+    engine,
     model,
     tools: serializeTools(tools),
     brain: brain.map((reference) => reference.path),
@@ -313,6 +332,7 @@ export function buildAgentFile(input: {
   const body = normalizeBody(input.body);
   const title = normalizeTitle(input.title);
   const mentioned = extractConfigFromMentions(body);
+  const engine = normalizeEngine(input.config?.engine);
   const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const brain = normalizeBrainReferences(input.config?.brain ?? mentioned.brain);
   const agents = normalizeAgentReferences(input.config?.agents ?? mentioned.agents);
@@ -328,6 +348,7 @@ export function buildAgentFile(input: {
     config: buildAgentConfig({
       title,
       body,
+      engine,
       model,
       tools,
       brain,
@@ -386,6 +407,7 @@ export function agentDefinitionFileNameForPath(path: string) {
 function buildAgentConfig(input: {
   title: string;
   body: string;
+  engine: AgentEngine;
   model: AgentModelId;
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
@@ -402,6 +424,7 @@ function buildAgentConfig(input: {
     schemaVersion: "agent.v1",
     title: input.title,
     instructions: input.body,
+    engine: input.engine,
     model: {
       provider: "vercel-ai-gateway",
       name: input.model,
@@ -470,6 +493,10 @@ function normalizeBody(body: string) {
 
 function normalizeModelId(id: string): AgentModelId {
   return normalizeAgentModelId(id);
+}
+
+function normalizeEngine(value: string | undefined | null): AgentEngine {
+  return value === "codex" ? "codex" : DEFAULT_ENGINE;
 }
 
 function normalizeTools(value: unknown) {

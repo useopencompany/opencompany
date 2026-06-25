@@ -37,6 +37,25 @@ describe(".agent files", () => {
     expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa"]);
   });
 
+  test("defaults missing engine to opencompany", () => {
+    const parsed = parseAgentFile(
+      ["---", 'title: "Ops"', "model: openai/gpt-5.4", "---", "", "Do the work."].join("\n"),
+    );
+
+    expect(parsed.config.engine).toBe("opencompany");
+  });
+
+  test("round-trips codex engine through serialized frontmatter", () => {
+    const source = serializeAgentFile({
+      title: "Codex agent",
+      body: "Use Codex for implementation work.",
+      engine: "codex",
+    });
+
+    expect(source).toContain("engine: codex");
+    expect(parseAgentFile(source).config.engine).toBe("codex");
+  });
+
   test("defaults invalid or missing model and tools", () => {
     const parsed = parseAgentFile(
       [
@@ -784,6 +803,14 @@ describe("validateAgentFileSource", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors.join(" ")).toMatch(/model/i);
+  });
+
+  test("rejects an unknown engine instead of silently defaulting", () => {
+    const result = validateAgentFileSource(
+      '---\ntitle: "Agent"\nengine: spaceship\nmodel: openai/gpt-5.4\n---\n\nBody.',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/engine/i);
   });
 
   test("rejects an empty body", () => {

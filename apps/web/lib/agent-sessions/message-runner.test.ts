@@ -32,7 +32,10 @@ describe("triggerAgentMessageRun", () => {
   it("dispatches the shared event when the runner cannot be called directly", async () => {
     await triggerAgentMessageRun(input);
 
-    expect(dispatchAgentMessageSubmittedMock).toHaveBeenCalledWith(input);
+    expect(dispatchAgentMessageSubmittedMock).toHaveBeenCalledWith({
+      ...input,
+      engine: "opencompany",
+    });
     expect(callRunnerMock).not.toHaveBeenCalled();
   });
 
@@ -51,6 +54,7 @@ describe("triggerAgentMessageRun", () => {
         workspace_id: "wks_123",
         session_id: "ses_123",
         message_id: "msg_123",
+        engine: "opencompany",
       },
     );
     expect(callRunnerMock).toHaveBeenNthCalledWith(
@@ -66,6 +70,25 @@ describe("triggerAgentMessageRun", () => {
     expect(dispatchAgentMessageSubmittedMock).not.toHaveBeenCalled();
   });
 
+  it("calls the Codex turn endpoint when the session engine is codex", async () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "http://runner.local");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "secret");
+
+    await triggerAgentMessageRun({ ...input, engine: "codex" });
+
+    expect(callRunnerMock).toHaveBeenNthCalledWith(
+      1,
+      "/internal/sessions/ses_123/messages/msg_123/codex-turn",
+      {
+        event: "opencompany.direct_run_codex_turn_failed",
+        workspace_id: "wks_123",
+        session_id: "ses_123",
+        message_id: "msg_123",
+        engine: "codex",
+      },
+    );
+  });
+
   it("falls back to the shared event when the direct run request fails", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "http://runner.local");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "secret");
@@ -74,7 +97,10 @@ describe("triggerAgentMessageRun", () => {
     await triggerAgentMessageRun(input);
 
     expect(callRunnerMock).toHaveBeenCalledTimes(1);
-    expect(dispatchAgentMessageSubmittedMock).toHaveBeenCalledWith(input);
+    expect(dispatchAgentMessageSubmittedMock).toHaveBeenCalledWith({
+      ...input,
+      engine: "opencompany",
+    });
   });
 
   it("does not dispatch the shared event when only direct title generation fails", async () => {

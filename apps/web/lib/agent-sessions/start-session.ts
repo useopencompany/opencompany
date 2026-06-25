@@ -1,4 +1,8 @@
-import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import {
+  newAgentSessionId,
+  newAgentSessionMessageId,
+  normalizeAgentConfig,
+} from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -76,6 +80,7 @@ export async function startSeededAgentSession(input: {
   const sessionId = newAgentSessionId();
   const messageId = newAgentSessionMessageId();
   const now = new Date();
+  const engine = normalizeAgentConfig(agent.config).engine;
 
   await db.batch([
     db.insert(agentSessions).values({
@@ -84,6 +89,7 @@ export async function startSeededAgentSession(input: {
       userId: input.userId,
       agentId: agent.id,
       title: titleFromPrompt(input.prompt),
+      engine,
       modelProvider: agent.config.model.provider,
       modelName: agent.config.model.name,
     }),
@@ -128,17 +134,22 @@ export async function startSeededAgentSession(input: {
             sessionId,
             messageId,
             workspaceId: input.workspaceId,
+            engine,
           }),
       },
-      {
-        name: "after_session_check",
-        run: () =>
-          dispatchAgentAfterSessionCheck({
-            sessionId,
-            messageId,
-            workspaceId: input.workspaceId,
-          }),
-      },
+      ...(engine === "opencompany"
+        ? [
+            {
+              name: "after_session_check",
+              run: () =>
+                dispatchAgentAfterSessionCheck({
+                  sessionId,
+                  messageId,
+                  workspaceId: input.workspaceId,
+                }),
+            },
+          ]
+        : []),
       {
         name: "analytics",
         run: () =>
@@ -149,6 +160,7 @@ export async function startSeededAgentSession(input: {
             session_id: sessionId,
             model_provider: agent.config.model.provider,
             model_name: agent.config.model.name,
+            engine,
             source: input.source,
           }),
       },

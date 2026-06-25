@@ -286,6 +286,7 @@ export type RuntimeToolCall = {
   inputPreview: string;
   activityPreview: string;
   outputPreview: string;
+  command?: string | undefined;
   brainFile?: RuntimeBrainFileReference | undefined;
   // Legacy company-Brain shortcut. New UI should prefer `brainFile`, which also
   // identifies Personal Brain writes from `personal-brain/`.
@@ -321,13 +322,21 @@ export type RuntimeBrainFileReference = {
   path: string;
 };
 
+export type RuntimeEngineActivity = {
+  engine: "codex";
+  label: string;
+  status: "running" | "completed" | "failed";
+  activity: string;
+};
+
 export type AssistantTurnPart =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; tone?: "work" | undefined }
   | {
       type: "reasoning";
       text: string | undefined;
       durationSeconds?: number | undefined;
     }
+  | { type: "engine-activity"; activity: RuntimeEngineActivity }
   | { type: "tool-call"; toolCall: RuntimeToolCall };
 
 export function applyRuntimeEventToState(
@@ -758,6 +767,9 @@ export function buildAssistantTurnParts(
     readReasoningContent(events, message.id) || readModelReasoning(modelParts);
   const liveReasoning = readReasoningDeltas(events, message.id);
   const reasoningText = reasoningSummary || reasoningContent || liveReasoning || undefined;
+  const engineActivity = latestEngineActivityForMessage(events, message.id);
+  const codexWorkCompleted =
+    engineActivity?.engine === "codex" && engineActivity.status === "completed";
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const hasReasoningEvidence =
@@ -779,6 +791,14 @@ export function buildAssistantTurnParts(
 
   if (modelParts) {
     const turnParts: AssistantTurnPart[] = [...reasoningParts];
+    const isCodexEngine = engineActivity?.engine === "codex";
+    if (isCodexEngine) {
+      turnParts.push(
+        ...buildEventAssistantTurnParts(events, message.id, toolCallsById, {
+          textTone: "work",
+        }),
+      );
+    }
 
     for (const part of modelParts) {
       if (part.type === "text") {
@@ -805,6 +825,7 @@ export function buildAssistantTurnParts(
         part.input ?? part.args,
       );
       const label = matchingToolCall?.label ?? display.label;
+      const command = matchingToolCall?.command ?? commandStringFromPayload(display.input);
 
       turnParts.push({
         type: "tool-call",
@@ -817,6 +838,7 @@ export function buildAssistantTurnParts(
           activityPreview: matchingToolCall?.activityPreview ?? "",
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
+          ...(command ? { command } : {}),
           ...(brainFile ? { brainFile } : {}),
           ...(brainFile?.scope === "company" ? { brainPath: brainFile.path } : {}),
           ...(issueUrl ? { issueUrl } : {}),
@@ -831,13 +853,17 @@ export function buildAssistantTurnParts(
     return normalizeAssistantTurnParts(turnParts);
   }
 
-  const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById);
+  const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById, {
+    textTone: engineActivity?.engine === "codex" ? "work" : undefined,
+    promoteTrailingTextAfterLastToolCall: codexWorkCompleted,
+  });
+  const contentText = assistantDisplayContent(message.content);
   if (eventParts.length > 0) return normalizeAssistantTurnParts([...reasoningParts, ...eventParts]);
-  if (reasoningParts.length > 0 && message.content) {
-    return [...reasoningParts, { type: "text", text: message.content }];
+  if (reasoningParts.length > 0 && contentText) {
+    return [...reasoningParts, { type: "text", text: contentText }];
   }
   if (reasoningParts.length > 0) return reasoningParts;
-  return message.content ? [{ type: "text", text: message.content }] : [];
+  return contentText ? [{ type: "text", text: contentText }] : [];
 }
 
 // Assistant text streams in across model steps, which produces two artifacts: a chunk
@@ -868,7 +894,7 @@ function normalizeAssistantTurnParts(parts: AssistantTurnPart[]): AssistantTurnP
     text = text.replace(/^\s+/, "");
     if (!text) continue;
 
-    result.push({ type: "text", text });
+    result.push({ type: "text", text, ...(part.tone ? { tone: part.tone } : {}) });
     lastTextIndex = result.length - 1;
   }
 
@@ -1056,8 +1082,9 @@ export function buildRuntimeToolCallsForMessage(
       const command = readString(event.payload.command);
       const delta = readString(event.payload.delta);
       const toolCallId = readString(event.payload.toolCallId);
-      const call = toolCallId ? callsById.get(toolCallId) : findLatestToolCall(calls, command);
+      const call = toolCallId ? getCall(toolCallId) : findLatestToolCall(calls, command);
       if (call && delta) {
+        if (command && !call.command) call.command = command;
         call.activityPreview = truncateRuntimePreview(`${call.activityPreview}${delta}`);
       }
       continue;
@@ -1216,6 +1243,8 @@ export function buildRuntimeToolCallsForMessage(
       call.name = display.name || call.name;
       call.label = display.label ?? call.label;
       call.inputPreview = formatRuntimePreview(display.input) || call.inputPreview;
+      const command = commandStringFromPayload(display.input);
+      if (command) call.command = command;
       if (call.approval?.status === "required") {
         call.approval = {
           ...call.approval,
@@ -1243,6 +1272,8 @@ export function buildRuntimeToolCallsForMessage(
       // rather than letting the raw use_tool envelope name overwrite it.
       const rawName = readString(event.payload.name);
       if (rawName && rawName !== BUILTIN_USE_TOOL_NAME) call.name = rawName;
+      const command = commandStringFromPayload(event.payload.output);
+      if (command && !call.command) call.command = command;
       call.status = event.type === "tool.failed" ? "failed" : "completed";
       call.outputPreview =
         event.type === "tool.failed"
@@ -1294,6 +1325,10 @@ function buildEventAssistantTurnParts(
   events: RuntimeEvent[],
   messageId: string,
   toolCallsById: Map<string, RuntimeToolCall>,
+  options: {
+    textTone?: "work" | undefined;
+    promoteTrailingTextAfterLastToolCall?: boolean | undefined;
+  } = {},
 ): AssistantTurnPart[] {
   const parts: AssistantTurnPart[] = [];
   const renderedToolCallIds = new Set<string>();
@@ -1301,7 +1336,7 @@ function buildEventAssistantTurnParts(
 
   function flushText() {
     if (!text) return;
-    parts.push({ type: "text", text });
+    parts.push({ type: "text", text, ...(options.textTone ? { tone: options.textTone } : {}) });
     text = "";
   }
 
@@ -1360,7 +1395,85 @@ function buildEventAssistantTurnParts(
   }
 
   flushText();
-  return parts;
+  return options.promoteTrailingTextAfterLastToolCall
+    ? promoteTrailingTextAfterLastToolCall(parts)
+    : parts;
+}
+
+function promoteTrailingTextAfterLastToolCall(parts: AssistantTurnPart[]): AssistantTurnPart[] {
+  let lastToolCallIndex = -1;
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index]?.type === "tool-call") lastToolCallIndex = index;
+  }
+  if (lastToolCallIndex < 0) return parts;
+
+  return parts.map((part, index) =>
+    index > lastToolCallIndex && part.type === "text" ? { type: "text", text: part.text } : part,
+  );
+}
+
+function latestEngineActivityForMessage(
+  events: RuntimeEvent[],
+  messageId: string,
+): RuntimeEngineActivity | null {
+  let latest: RuntimeEngineActivity | null = null;
+  for (const event of events) {
+    if (event.type !== "engine.activity" || !eventBelongsToMessage(event, messageId)) continue;
+    const engine = readString(event.payload.engine);
+    if (engine !== "codex") continue;
+    const status = readEngineActivityStatus(event.payload.status);
+    latest = {
+      engine,
+      label: readString(event.payload.label) || "Codex",
+      status,
+      activity: readString(event.payload.activity) || defaultEngineActivity(status),
+    };
+  }
+  return latest;
+}
+
+function readEngineActivityStatus(value: unknown): RuntimeEngineActivity["status"] {
+  return value === "completed" || value === "failed" ? value : "running";
+}
+
+function defaultEngineActivity(status: RuntimeEngineActivity["status"]) {
+  if (status === "completed") return "Codex completed";
+  if (status === "failed") return "Codex failed";
+  return "Codex is working";
+}
+
+function assistantDisplayContent(content: string) {
+  return codexJsonlAssistantText(content) ?? content;
+}
+
+function codexJsonlAssistantText(content: string): string | null {
+  if (!content.includes('"type"') || !content.includes("turn.")) return null;
+  let sawCodexJsonl = false;
+  const textParts: string[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const event = JSON.parse(trimmed) as unknown;
+      if (!isRecord(event)) continue;
+      const type = readString(event.type);
+      if (/^(thread|turn|item)\./.test(type)) sawCodexJsonl = true;
+      const item = isRecord(event.item) ? event.item : null;
+      const itemType = readString(item?.type);
+      const itemText = readString(item?.text);
+      if (type === "item.completed" && itemType === "agent_message" && itemText) {
+        textParts.push(itemText);
+      }
+      const delta = readString(event.delta);
+      if (/assistant|agent|message|text|delta|response/i.test(type) && delta) {
+        textParts.push(delta);
+      }
+    } catch {
+      return null;
+    }
+  }
+  if (!sawCodexJsonl || textParts.length === 0) return null;
+  return textParts.join("").trim() || null;
 }
 
 function latestSessionErrorAfter(events: RuntimeEvent[], messageId: string) {
@@ -1543,6 +1656,11 @@ function formatToolResultOutput(output: unknown) {
 
 export function readString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function commandStringFromPayload(payload: unknown) {
+  if (!isRecord(payload)) return "";
+  return readString(payload.command || payload.cmd).trim();
 }
 
 function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" | undefined {

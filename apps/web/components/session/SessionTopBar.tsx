@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
+import { OpenAIIcon } from "@/components/icons/model-provider-icons";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { agentRowToListItem } from "@/lib/collections/selectors";
 
@@ -26,7 +27,12 @@ export function SessionTopBar({
   inspectorCollapsed,
   onToggleInspector,
 }: {
-  session: { agentId: string; agentName: string; modelName: string };
+  session: {
+    agentId: string;
+    agentName: string;
+    modelName: string;
+    engine?: "opencompany" | "codex";
+  };
   currentContextTokens: number;
   totalCostUsdMicros: number;
   inspectorCollapsed: boolean;
@@ -62,10 +68,23 @@ export function SessionTopBar({
         <span className="shrink-0 text-ink-subtle/60" aria-hidden>
           ·
         </span>
-        <span className="flex min-w-0 shrink items-center gap-1.5">
-          <ModelIcon size={12} className="shrink-0 text-ink-muted" />
-          <span className="truncate">{modelLabel}</span>
-        </span>
+        {session.engine === "codex" ? (
+          <>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <OpenAIIcon size={12} className="shrink-0 text-ink-muted" />
+              <span>Codex</span>
+            </span>
+            <span className="shrink-0 text-ink-subtle/60" aria-hidden>
+              ·
+            </span>
+            <span className="min-w-0 shrink truncate">{modelLabel}</span>
+          </>
+        ) : (
+          <span className="flex min-w-0 shrink items-center gap-1.5">
+            <ModelIcon size={12} className="shrink-0 text-ink-muted" />
+            <span className="truncate">{modelLabel}</span>
+          </span>
+        )}
         {capabilityCount && capabilityCount > 0 ? (
           <>
             <span className="shrink-0 text-ink-subtle/60" aria-hidden>

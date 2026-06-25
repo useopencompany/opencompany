@@ -26,11 +26,13 @@ import { cn } from "@/lib/utils";
 // Group models by provider (in catalog order) for the searchable picker. Shared across
 // every model picker (agent editor, root composer, session composer) so grouping stays
 // consistent in one place.
-function useModelsByProvider() {
+function useModelsByProvider(modelIds?: readonly AgentModelId[]) {
   return useMemo(() => {
+    const allowedModelIds = modelIds ? new Set<string>(modelIds) : null;
     const order: string[] = [];
     const byProvider = new Map<string, AgentModel[]>();
     for (const model of AGENT_MODELS) {
+      if (allowedModelIds && !allowedModelIds.has(model.id)) continue;
       const provider = modelProviderId(model.id);
       const bucket = byProvider.get(provider);
       if (bucket) {
@@ -45,7 +47,7 @@ function useModelsByProvider() {
       label: modelProviderLabel(provider),
       models: byProvider.get(provider) ?? [],
     }));
-  }, []);
+  }, [modelIds]);
 }
 
 type ModelPickerProps = {
@@ -57,6 +59,8 @@ type ModelPickerProps = {
   align?: "start" | "center" | "end";
   /** Extra classes for the trigger button so call sites can size it to their chrome. */
   triggerClassName?: string;
+  /** Restrict selectable models to this subset, preserving catalog order and provider grouping. */
+  modelIds?: readonly AgentModelId[];
   "aria-label"?: string;
 };
 
@@ -71,6 +75,7 @@ export function ModelPicker({
   disabled,
   align = "start",
   triggerClassName,
+  modelIds,
   "aria-label": ariaLabel = "Model",
 }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
@@ -78,8 +83,10 @@ export function ModelPicker({
   // scanning the list, not typing, so we drop the search box on phones and stop the popover from
   // auto-focusing anything — the list is just scrolled and tapped (desktop keeps instant search).
   const isMobile = useIsMobile();
-  const modelsByProvider = useModelsByProvider();
-  const selectedModel = findModel(value) ?? findModel(fallbackModelId)!;
+  const modelsByProvider = useModelsByProvider(modelIds);
+  const modelIdSet = useMemo(() => (modelIds ? new Set<string>(modelIds) : null), [modelIds]);
+  const selectedModel =
+    (modelIdSet && !modelIdSet.has(value) ? null : findModel(value)) ?? findModel(fallbackModelId)!;
   const SelectedModelIcon = selectedModel.icon;
 
   return (

@@ -44,6 +44,7 @@ vi.mock("@/lib/personal/actions", () => ({
 
 const baseConfig: AgentConfig = {
   schemaVersion: "agent.v1",
+  engine: "opencompany",
   title: "Leo",
   instructions: "Help me.",
   model: {

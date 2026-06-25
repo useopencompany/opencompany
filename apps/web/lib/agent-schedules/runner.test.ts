@@ -78,6 +78,7 @@ describe("sweepAgentSchedules", () => {
       sessionId: "ses_schedule",
       messageId: "msg_schedule",
       workspaceId: "wks_123",
+      engine: "opencompany",
     });
     expect(dispatchAgentAfterSessionCheckMock).toHaveBeenCalledWith({
       sessionId: "ses_schedule",
@@ -139,7 +140,29 @@ describe("sweepAgentSchedules", () => {
       sessionId: "ses_schedule",
       messageId: "msg_schedule",
       workspaceId: "wks_123",
+      engine: "opencompany",
     });
+  });
+
+  it("routes Codex scheduled sessions to Codex turns without after-session checks", async () => {
+    const db = fakeDb({ reserveRows: [{ id: 1, reservationToken: "claim_123" }] });
+    getDbMock.mockReturnValue(db as never);
+
+    const result = await runScheduledAgent({
+      agent: fakeAgent("codex"),
+      trigger: fakeScheduleTrigger(),
+      scheduledFor: new Date("2026-06-01T12:34:56.789Z"),
+      userId: "usr_clicked",
+    });
+
+    expect(result).toMatchObject({ status: "started", sessionId: "ses_schedule" });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_schedule",
+      messageId: "msg_schedule",
+      workspaceId: "wks_123",
+      engine: "codex",
+    });
+    expect(dispatchAgentAfterSessionCheckMock).not.toHaveBeenCalled();
   });
 
   it("does not dispatch duplicate schedule runs", async () => {
@@ -205,7 +228,7 @@ function fakeScheduleTrigger() {
   };
 }
 
-function fakeAgent() {
+function fakeAgent(engine: "opencompany" | "codex" = "opencompany") {
   const now = new Date("2026-06-01T00:00:00.000Z");
   return {
     id: "agt_123",
@@ -225,6 +248,7 @@ function fakeAgent() {
     content: { type: "doc", content: [] },
     config: {
       schemaVersion: "agent.v1" as const,
+      engine,
       title: "Briefing",
       instructions: "Prepare updates.",
       model: { provider: "vercel-ai-gateway" as const, name: "openai/gpt-5.4-mini" as const },
