@@ -957,8 +957,7 @@ function SessionViewContentBody({
       message.role === "assistant"
         ? (backgroundPartsAfterMessageId.get(message.id) ?? [])
             .filter(
-              (part) =>
-                part.type === "tool-call" && part.toolCall.name === AFTER_SESSION_TOOL_NAME,
+              (part) => part.type === "tool-call" && part.toolCall.name === AFTER_SESSION_TOOL_NAME,
             )
             .map((part) => (part as { toolCall: RuntimeToolCall }).toolCall)
         : [];
