@@ -14,6 +14,8 @@ import type { InboxItemArtifact } from "@opencompany/db/schema";
 export type AgentRow = {
   id: string;
   workspace_id: string;
+  user_id: string | null;
+  is_default: boolean;
   path: string | null;
   name: string;
   body: string;
