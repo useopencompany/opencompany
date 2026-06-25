@@ -1778,10 +1778,10 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
   it("engages the streaming follow when the user is scrolled to the bottom", async () => {
     const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
 
-    // A genuine user gesture (wheel) flags the scroll as user-driven, and it lands within
-    // the bottom threshold → the streaming follow keeps the latest content in view.
+    // A genuine user gesture (a vertical down-wheel) flags the scroll as user-driven, and it
+    // lands within the bottom threshold → the streaming follow keeps the latest content in view.
     if (scroller) {
-      fireEvent.wheel(scroller);
+      fireEvent.wheel(scroller, { deltaY: 30 });
       fireEvent.scroll(scroller);
     }
     rerender(
@@ -1811,7 +1811,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       get: () => 1000,
     });
     if (scroller) {
-      fireEvent.wheel(scroller);
+      fireEvent.wheel(scroller, { deltaY: -30 }); // upward gesture
       fireEvent.scroll(scroller);
     }
     scrollToSpy.mockClear();
@@ -1824,6 +1824,219 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     // The bottom-follow must not scroll — the user's just-chosen position is untouched.
     await waitFor(() => {
       expect(scrollToSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // PRO-271: a deliberate SMALL upward scroll — one that stays well inside the 80px bottom
+  // band — must still detach the follow. The old symmetric logic (isPinned = distance ≤ 80)
+  // re-pinned here and yanked the view back to the bottom on the next token. The fix reads
+  // gesture *direction* (wheel deltaY): an upward gesture un-pins; 80px is only the re-pin
+  // threshold, applied on downward gestures.
+  it("detaches on a SMALL upward wheel inside the 80px band — does not snap back (PRO-271)", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    // jsdom's scrollTop is a constant 0; make it mutable so distanceFromBottom is meaningful.
+    // scrollHeight 860 / clientHeight 800 → max scrollTop 60, so 0..60 lives inside the 80px band.
+    let scrollTop = 60; // at the very bottom
+    if (scroller) {
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => scrollTop });
+    }
+    // deltaY < 0 = upward gesture, deltaY > 0 = downward.
+    const tick = (deltaY: number) => {
+      if (scroller) {
+        fireEvent.wheel(scroller, { deltaY });
+        fireEvent.scroll(scroller);
+      }
+    };
+
+    tick(30); // 1) settle at the bottom (downward) → pinned, follow armed
+    scrollTop = 40; // 2) scroll UP — still in-band (distance 20 ≤ 80), but an upward gesture
+    tick(-20);
+    scrollToSpy.mockClear();
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // No bottom-follow (which targets scrollHeight ≥ clientHeight 800) may fire.
+    await waitFor(() => {
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(false);
+    });
+  });
+
+  // PRO-271 (other half): re-pin is preserved. Once the user scrolls back DOWN into the
+  // bottom band, the follow re-engages on the next streamed token.
+  it("re-pins when the user scrolls back DOWN to the bottom band after detaching (PRO-271)", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    // Roomier geometry so the re-pinned follow has somewhere to scroll (distance > 1):
+    // scrollHeight 1000 / clientHeight 800 → max scrollTop 200, distance = 200 − scrollTop.
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 1000,
+    });
+    let scrollTop = 200; // at the bottom
+    if (scroller) {
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => scrollTop });
+    }
+    const tick = (deltaY: number) => {
+      if (scroller) {
+        fireEvent.wheel(scroller, { deltaY });
+        fireEvent.scroll(scroller);
+      }
+    };
+
+    tick(30); // settle at the bottom (downward) → pinned
+    scrollTop = 160; // UP gesture (distance 40, in-band) → detached
+    tick(-30);
+    scrollToSpy.mockClear();
+    scrollTop = 190; // back DOWN into the band (distance 10, > 1) → re-pinned
+    tick(30);
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(true);
+    });
+  });
+
+  // PRO-271 regression (the "won't re-stick at the bottom sometimes" report): while pinned at
+  // the bottom, a mid-stream reflow above the fold (markdown re-layout, a thought/tool block
+  // collapsing) makes the browser pull scrollTop UP on its own — a bare `scroll` with NO wheel.
+  // If that lands inside the post-wheel intent window, scrollTop-delta direction reads it as a
+  // user upward scroll and unpins. Gesture-direction (last wheel was DOWN) must keep us pinned.
+  it("stays pinned through a mid-stream reflow that nudges scrollTop up at the bottom (PRO-271)", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 1000,
+    });
+    let scrollTop = 190; // bottom band (distance 10)
+    if (scroller) {
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => scrollTop });
+    }
+
+    // User scrolls DOWN into the band → pinned (last gesture direction = down).
+    if (scroller) {
+      fireEvent.wheel(scroller, { deltaY: 30 });
+      fireEvent.scroll(scroller);
+    }
+    scrollToSpy.mockClear();
+
+    // Reflow: content above the fold shrinks → scrollTop is pulled up to 150 with NO wheel,
+    // still inside the wheel's 250ms intent window. Must NOT be read as a user upward scroll.
+    scrollTop = 150; // distance 50, still in band, but scrollTop DECREASED
+    if (scroller) fireEvent.scroll(scroller);
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Still pinned → the streaming follow re-engages toward the bottom.
+    await waitFor(() => {
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(true);
+    });
+  });
+
+  // PRO-271 hardening: a horizontal / diagonal swipe carries a small deltaY of either sign as
+  // noise. A near-horizontal wheel whose deltaY happens to be negative must NOT be read as an
+  // upward gesture and detach at the bottom — only vertical-dominant wheels move the pin.
+  it("ignores a horizontal/diagonal wheel at the bottom — stays pinned (PRO-271 hardening)", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 1000,
+    });
+    let scrollTop = 190; // bottom band (distance 10)
+    if (scroller) {
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => scrollTop });
+    }
+
+    // Settle at the bottom with a vertical down-wheel → pinned.
+    if (scroller) {
+      fireEvent.wheel(scroller, { deltaY: 30 });
+      fireEvent.scroll(scroller);
+    }
+    scrollToSpy.mockClear();
+
+    // A near-horizontal swipe (|deltaX| ≫ |deltaY|) with a negative deltaY. Pre-hardening this
+    // flipped direction to "up" and unpinned; now it's ignored entirely.
+    scrollTop = 150;
+    if (scroller) {
+      fireEvent.wheel(scroller, { deltaY: -2, deltaX: -40 });
+      fireEvent.scroll(scroller);
+    }
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Direction never flipped → still pinned → follow re-engages toward the bottom.
+    await waitFor(() => {
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(true);
+    });
+  });
+
+  // PRO-271 touch path: a touch gesture's direction is tracked by the finger's identifier.
+  // An upward gesture (finger pressing then moving DOWN the screen → content scrolls up)
+  // detaches the follow even at the bottom, exactly like an upward wheel.
+  it("detaches on an upward TOUCH gesture at the bottom (PRO-271 touch path)", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 1000,
+    });
+    let scrollTop = 190; // bottom band
+    if (scroller) {
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => scrollTop });
+    }
+
+    // Finger 1 presses at clientY 100, then moves DOWN the screen to 160 → upward scroll.
+    if (scroller) {
+      fireEvent.touchStart(scroller, { changedTouches: [{ identifier: 1, clientY: 100 }] });
+      fireEvent.touchMove(scroller, { touches: [{ identifier: 1, clientY: 160 }] });
+      scrollTop = 150;
+      fireEvent.scroll(scroller);
+    }
+    scrollToSpy.mockClear();
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Detached → the streaming follow must not yank back to the bottom.
+    await waitFor(() => {
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(false);
     });
   });
 
@@ -1966,7 +2179,7 @@ describe("SessionViewContent — PRO-173: reading-position safety net across wor
     const { view, queryClient, detail, scroller, anchor } = renderScrolledUp();
     // The user is reading: the anchored leaf sits 400px below the container's top edge.
     rectTop.set(anchor, 400);
-    fireEvent.wheel(scroller);
+    fireEvent.wheel(scroller, { deltaY: -30 }); // upward gesture → not pinned
     fireEvent.scroll(scroller); // onScroll: not pinned → captures the anchor at viewportTop 400
     scrollToSpy.mockClear();
 
@@ -1990,7 +2203,7 @@ describe("SessionViewContent — PRO-173: reading-position safety net across wor
   it("does not correct when the anchored leaf stays put (e.g. streaming appends below it)", async () => {
     const { view, queryClient, detail, scroller, anchor } = renderScrolledUp();
     rectTop.set(anchor, 400);
-    fireEvent.wheel(scroller);
+    fireEvent.wheel(scroller, { deltaY: -30 }); // upward gesture → not pinned
     fireEvent.scroll(scroller);
     scrollToSpy.mockClear();
 

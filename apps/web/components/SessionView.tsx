@@ -246,6 +246,19 @@ function captureViewportTopAnchor(
   if (!node || !container.contains(node)) return null;
   return { node, viewportTop: node.getBoundingClientRect().top - rect.top };
 }
+// Find a specific finger in a touch list by its stable identifier (touches[0] reorders as
+// fingers lift mid-gesture). Structural + indexed access (not .item()) so it accepts React's
+// synthetic TouchList, the DOM TouchList, and the plain-array touch lists jsdom hands tests.
+function findTouchById<T extends { identifier: number }>(
+  list: { length: number; [index: number]: T },
+  id: number,
+): T | null {
+  for (let i = 0; i < list.length; i++) {
+    const touch = list[i];
+    if (touch && touch.identifier === id) return touch;
+  }
+  return null;
+}
 // Space reserved below the active turn, as a fraction of the viewport, so a just-sent
 // message can sit near the top with room for the reply to grow into. 1 = a full viewport
 // (message pins to the very top, but a short reply leaves a big void below); lower values
@@ -561,6 +574,17 @@ function SessionViewContentBody({
   // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Direction of the most recent USER scroll gesture, read straight from the wheel deltaY /
+  // touch movement — NOT from scrollTop deltas. The browser also moves scrollTop on its own
+  // when content above the fold reflows mid-stream (markdown re-layout, a thought/tool block
+  // collapsing), and that must NOT read as a user scroll. onScroll uses this: a deliberate
+  // upward gesture detaches the follow even inside the bottom band (PRO-271); a downward
+  // gesture re-pins once back in the band.
+  const userScrollDirectionRef = useRef<"up" | "down">("down");
+  // The single touch we follow for a gesture, tracked by its stable Touch.identifier (NOT
+  // touches[0], which reorders as fingers lift in a multi-touch gesture). Cleared on touchend
+  // so the next gesture starts fresh instead of diffing against a stale Y from the last one.
+  const trackedTouchRef = useRef<{ id: number; y: number } | null>(null);
   // Reading-position safety net: the exact leaf at the viewport top captured on the previous
   // commit, so we can correct the residual jump native scroll anchoring leaves behind when the
   // "work" block collapses above the fold (PRO-173).
@@ -1696,8 +1720,46 @@ function SessionViewContentBody({
         <div
           ref={scrollContainerRef}
           className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-4 py-6 md:px-6"
-          onWheel={markUserScrollIntent}
-          onTouchMove={markUserScrollIntent}
+          onWheel={(event) => {
+            // Only a VERTICAL-dominant wheel counts as a follow gesture. A horizontal / diagonal
+            // swipe carries a small deltaY of either sign as noise, and trusting that sign would
+            // flip the pin (a finer version of the PRO-271 false-positive). Ignoring those — and
+            // deltaY === 0 — also avoids opening the intent window with a stale direction. A plain
+            // vertical scroll has deltaX 0, so even a 1px deltaY passes (slow scrolls still register).
+            if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+            // A momentum tail keeps the same sign, so direction stays stable across a flick.
+            userScrollDirectionRef.current = event.deltaY < 0 ? "up" : "down";
+            markUserScrollIntent();
+          }}
+          onTouchStart={(event) => {
+            // Track the finger that starts the gesture, by its identifier.
+            const t = event.changedTouches[0];
+            if (t) trackedTouchRef.current = { id: t.identifier, y: t.clientY };
+          }}
+          onTouchMove={(event) => {
+            const tracked = trackedTouchRef.current;
+            if (!tracked) return;
+            // Follow the SAME finger across the move, by identifier — touches[0] can be a
+            // different finger once a second touch lifts mid-gesture.
+            const current = findTouchById(event.touches, tracked.id);
+            if (!current) return;
+            // Finger moving DOWN the screen (clientY increasing) scrolls the content UP toward
+            // earlier messages, and vice-versa.
+            if (current.clientY > tracked.y) userScrollDirectionRef.current = "up";
+            else if (current.clientY < tracked.y) userScrollDirectionRef.current = "down";
+            tracked.y = current.clientY;
+            markUserScrollIntent();
+          }}
+          onTouchEnd={(event) => {
+            // Drop tracking once our finger lifts, so the next gesture re-seeds from its own
+            // touchstart rather than diffing against this gesture's final Y.
+            const tracked = trackedTouchRef.current;
+            if (!tracked) return;
+            if (findTouchById(event.changedTouches, tracked.id)) trackedTouchRef.current = null;
+          }}
+          onTouchCancel={() => {
+            trackedTouchRef.current = null;
+          }}
           onScroll={(event) => {
             // Only a genuine user scroll (flagged by the wheel/touch handlers above)
             // updates the pinned-at-bottom state. Programmatic scrolls (snap + follow),
@@ -1708,7 +1770,17 @@ function SessionViewContentBody({
             if (!userScrollIntentRef.current) return;
             const el = event.currentTarget;
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-            isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+            if (userScrollDirectionRef.current === "up") {
+              // Deliberate UPWARD gesture → detach the follow immediately, even within the 80px
+              // band (PRO-271). Direction comes from the gesture, NOT from a scrollTop delta, so a
+              // mid-stream reflow that nudges scrollTop up can't masquerade as a user scroll — that
+              // false-positive was the "won't re-stick at the bottom" regression.
+              isPinnedAtBottomRef.current = false;
+            } else {
+              // Downward gesture / at rest → re-pin once back inside the bottom band. 80px is the
+              // re-pin threshold, not the un-pin threshold.
+              isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+            }
             // Remember the leaf the user just scrolled to, so the reading-anchor effect can hold
             // it across a work-collapse above the fold (PRO-173). Cleared at the bottom, where the
             // streaming follow takes over instead.
