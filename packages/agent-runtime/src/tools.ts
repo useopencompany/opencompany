@@ -622,7 +622,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "create_linear_issue",
     kind: "internal",
     description:
-      "Create an issue in this workspace's connected Linear from the current chat. Use when the user asks to open/file a Linear issue, including from a screenshot they dropped into the chat. Posts to the workspace's OWN Linear (Settings → Integrations), not to OpenCompany's internal feedback tracker. Provide a concise title and a markdown description; pass `team` (a Linear team name or key) when the user names one, or when the workspace has more than one team. IMPORTANT: any image(s) the user attached to their most recent message are uploaded and attached to the new issue AUTOMATICALLY — you do NOT need a file, path, or URL, and you cannot upload the image yourself; just call this tool and the screenshot is included.",
+      "Create an issue in this workspace's connected Linear from the current chat. Use when the user asks to open/file a Linear issue, including from a screenshot they dropped into the chat. Posts to the workspace's OWN Linear (Integrations tab), not to OpenCompany's internal feedback tracker. Provide a concise title and a markdown description; pass `team` (a Linear team name or key) when the user names one, or when the workspace has more than one team. IMPORTANT: any image(s) the user attached to their most recent message are uploaded and attached to the new issue AUTOMATICALLY — you do NOT need a file, path, or URL, and you cannot upload the image yourself; just call this tool and the screenshot is included.",
     parameters: {
       type: "object",
       properties: {
@@ -652,7 +652,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Targets the workspace's connected Linear, not OpenCompany's internal feedback Linear.",
       "Dropped screenshots are attached automatically by the runner (it reads the bytes from secure storage) — never tell the user you can't attach the image, and never ask them for a file or URL.",
-      "If Linear is not connected, this returns a recoverable error — tell the user to connect Linear in Settings → Integrations.",
+      "If Linear is not connected, this returns a recoverable error — tell the user to connect Linear in the Integrations tab.",
       "If the workspace has multiple Linear teams and none was given, it returns the available team names so you can pass `team` and retry (or ask the user which team).",
     ].join("\n"),
   },

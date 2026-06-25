@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
+import { WorkspaceMcpIntegrations } from "@/components/WorkspaceMcpIntegrations";
 import {
   disconnectGitHubIntegrationAction,
   refreshGitHubRepositories,
@@ -33,6 +34,7 @@ import {
   saveNeonApiKeyAction,
   setNeonDatabaseSelectionAction,
 } from "@/lib/integrations/neon";
+import type { WorkspaceMcpSettings } from "@/lib/mcp/data";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 type IntegrationStatus =
@@ -178,9 +180,11 @@ const INTEGRATIONS: IntegrationDefinition[] = [
 
 export default function IntegrationsView({
   integrations,
+  mcp,
   toolPolicies,
 }: {
   integrations: WorkspaceIntegrationState;
+  mcp: WorkspaceMcpSettings;
   toolPolicies: WorkspaceToolPolicyOverrides;
 }) {
   const [query, setQuery] = useState("");
@@ -264,6 +268,14 @@ export default function IntegrationsView({
               />
             ))}
           </div>
+        </section>
+
+        <section className="mt-8">
+          <SectionHeader
+            title="MCP servers"
+            description="Workspace MCP servers agents can use after they opt in from agent configuration."
+          />
+          <WorkspaceMcpIntegrations mcp={mcp} toolPolicies={toolPolicies} />
         </section>
       </div>
     </main>
@@ -426,7 +438,7 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
         {configured ? (
           <a
             href={`/api/integrations/github/start?intent=settings&returnTo=${encodeURIComponent(
-              "/company/settings/integrations",
+              "/company/integrations",
             )}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85"
           >
@@ -737,7 +749,7 @@ function GoogleControls({
         {integration.configured ? (
           <a
             href={`/api/integrations/${routeSegment}/start?returnTo=${encodeURIComponent(
-              "/company/settings/integrations",
+              "/company/integrations",
             )}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85"
           >
@@ -777,7 +789,7 @@ function GoogleControls({
                   {connection.status !== "connected" ? (
                     <a
                       href={`/api/integrations/${routeSegment}/start?returnTo=${encodeURIComponent(
-                        "/company/settings/integrations",
+                        "/company/integrations",
                       )}`}
                       className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-canvas"
                     >

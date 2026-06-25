@@ -62,7 +62,7 @@ describe("GitHub integration state", () => {
       workspaceId: "wks_123",
       userId: "usr_123",
       intent: "settings",
-      returnTo: "/settings/integrations",
+      returnTo: "/company/integrations",
     });
     const [body, signature] = state.split(".");
     const payload = JSON.parse(Buffer.from(body!, "base64url").toString("utf8"));
@@ -82,7 +82,7 @@ describe("GitHub integration state", () => {
       returnTo: "https://example.com/phish",
     });
 
-    expect(verifyGitHubIntegrationState(state).returnTo).toBe("/company/settings/integrations");
+    expect(verifyGitHubIntegrationState(state).returnTo).toBe("/company/integrations");
   });
 
   it("reports whether work integration env vars are configured", () => {

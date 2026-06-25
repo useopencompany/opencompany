@@ -13,6 +13,7 @@ import {
   MessageSquarePlus,
   PanelLeft,
   Pin,
+  Plug,
   Search,
   X,
   // Sparkles,
@@ -503,6 +504,12 @@ function SidebarContent({
               icon={Brain}
               label="Brain"
               active={isActive(BRAIN_BASE_PATH)}
+            />
+            <NavItem
+              href="/company/integrations"
+              icon={Plug}
+              label="Integrations"
+              active={isActive("/company/integrations")}
             />
             <NavItem
               href="/company/inbox"

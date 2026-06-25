@@ -31,7 +31,7 @@ export async function handleGoogleOAuthStart(
   // marked complete; the default gate would render the onboarding stepper inside the popup.
   const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/company/settings/integrations";
+  const returnTo = url.searchParams.get("returnTo") ?? "/company/integrations";
   const config = GOOGLE_PROVIDER_CONFIG[provider];
   const oauthRedirectUri = googleOAuthRedirectUri(config);
   const targetOrigin = googleOAuthTargetOriginForState();
@@ -74,7 +74,7 @@ export async function handleGoogleOAuthCallback(
       reason: "invalid_state",
       provider,
     });
-    return errorRedirect("/company/settings/integrations");
+    return errorRedirect("/company/integrations");
   }
 
   if (

@@ -4,8 +4,6 @@ import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
 import { loadBillingOverview } from "@/lib/billing/service";
-import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
-import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 import { loadWorkspaceSyncStatus } from "@/lib/workspace-state/status";
 
 function initialsFor(name: string, email: string) {
@@ -33,7 +31,7 @@ function formatDate(date: Date) {
 export default async function SettingsPage() {
   const { authUser, user, workspace } = await currentWorkspace();
   const db = getDb();
-  const [syncStatus, [avatar], billing, mcp, toolPolicies] = await Promise.all([
+  const [syncStatus, [avatar], billing] = await Promise.all([
     loadWorkspaceSyncStatus(db, workspace.id),
     db
       .select({ updatedAt: userAvatars.updatedAt })
@@ -41,8 +39,6 @@ export default async function SettingsPage() {
       .where(eq(userAvatars.userId, user.id))
       .limit(1),
     loadBillingOverview(workspace.id),
-    loadWorkspaceMcpSettingsForWorkspace(workspace.id),
-    loadWorkspaceToolPolicyOverrides(workspace.id),
   ]);
   const customAvatarUrl = avatar
     ? `/api/avatar/${user.id}?v=${new Date(avatar.updatedAt).getTime()}`
@@ -90,8 +86,6 @@ export default async function SettingsPage() {
           weekResetsAt: billing.settings.weekResetsAt.toISOString(),
         },
       }}
-      mcp={mcp}
-      toolPolicies={toolPolicies}
     />
   );
 }
