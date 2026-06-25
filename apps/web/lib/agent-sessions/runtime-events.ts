@@ -312,6 +312,9 @@ export type RuntimeToolCall = {
   completedEventId: number | null;
   // ISO timestamp from tool.started event, used to show an elapsed counter for long-running tools.
   startedAt?: string | undefined;
+  // For after-session/memory passes: the spawned child session that ran the pass, so the
+  // transcript can link straight to it from the memory badge.
+  childSessionId?: string | undefined;
 };
 
 export type RuntimeBrainFileReference = {
@@ -998,10 +1001,14 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
     if (event.type === "after_session.spawned") {
       call.status = "running";
       call.startedEventId = event.id ?? null;
+      const childSessionId = readString(event.payload.childSessionId);
+      if (childSessionId) call.childSessionId = childSessionId;
     }
     if (event.type === "after_session.completed") {
       call.status = "completed";
       call.label = "Updated memory";
+      const childSessionId = readString(event.payload.childSessionId);
+      if (childSessionId) call.childSessionId = childSessionId;
       // The memory pass forwards the keeper's one-line closing note as `summary` — what was
       // actually stored (or "Nothing new worth saving."). Fall back for events that predate it.
       const summary = readString(event.payload.summary);

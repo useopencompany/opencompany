@@ -48,6 +48,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
+  createElement,
   Fragment,
   useContext,
   useEffect,
@@ -71,6 +72,7 @@ import {
   type PendingAttachment,
   toSubmitAttachments,
 } from "@/components/composer-attachments";
+import { toolServiceIcon } from "@/components/icons/tool-service-icon";
 import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
 import { type RightPanelHandle, useMobileInspector } from "@/components/MobileInspectorContext";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -915,6 +917,8 @@ function SessionViewContentBody({
     const afterMessageId = new Map<string, AssistantTurnPart[]>();
     const trailing: AssistantTurnPart[] = [];
     for (const entry of backgroundActivity) {
+      const isMemoryPass =
+        entry.part.type === "tool-call" && entry.part.toolCall.name === AFTER_SESSION_TOOL_NAME;
       const anchorIndex = entry.anchorMessageId
         ? visibleMessages.findIndex((message) => message.id === entry.anchorMessageId)
         : -1;
@@ -925,11 +929,18 @@ function SessionViewContentBody({
           break;
         }
       }
-      if (anchorIndex < 0 || nextUserIndex <= 0) {
-        trailing.push(entry.part);
-        continue;
+      // The turn's last message: the one before the next user turn. A memory pass following the
+      // most recent turn (no next user message yet) anchors to the last assistant message so its
+      // brain badge still lands in that turn's footer instead of dropping to the trailing block.
+      let afterIndex = -1;
+      if (anchorIndex >= 0) {
+        if (nextUserIndex > 0) {
+          afterIndex = nextUserIndex - 1;
+        } else if (isMemoryPass && visibleMessages.at(-1)?.role === "assistant") {
+          afterIndex = visibleMessages.length - 1;
+        }
       }
-      const afterId = visibleMessages[nextUserIndex - 1]?.id;
+      const afterId = afterIndex >= 0 ? visibleMessages[afterIndex]?.id : undefined;
       if (!afterId) {
         trailing.push(entry.part);
         continue;
@@ -1034,6 +1045,16 @@ function SessionViewContentBody({
         brainFiles.push(brainFile);
       }
     }
+    // Memory passes that followed this turn. They render as a compact brain badge in the footer
+    // (next to the timestamp); clicking it opens the memory-pass session.
+    const memoryPasses: RuntimeToolCall[] =
+      message.role === "assistant"
+        ? (backgroundPartsAfterMessageId.get(message.id) ?? [])
+            .filter(
+              (part) => part.type === "tool-call" && part.toolCall.name === AFTER_SESSION_TOOL_NAME,
+            )
+            .map((part) => (part as { toolCall: RuntimeToolCall }).toolCall)
+        : [];
     const copyText =
       message.role === "assistant"
         ? extractAssistantText(assistantParts) || message.content
@@ -1142,7 +1163,9 @@ function SessionViewContentBody({
               {attachmentsBlock}
             </div>
           )}
-          {(canCopy || brainFiles.length > 0) && message.status !== "running" && !awaitingInput ? (
+          {(canCopy || brainFiles.length > 0 || memoryPasses.length > 0) &&
+          message.status !== "running" &&
+          !awaitingInput ? (
             <div
               className={`${
                 opts?.footerInFlow && message.role === "assistant"
@@ -1161,6 +1184,9 @@ function SessionViewContentBody({
                 </span>
               ) : null}
               {brainFiles.length > 0 ? <BrainAttachments files={brainFiles} /> : null}
+              {memoryPasses.map((pass) => (
+                <MemoryPassBadge key={pass.id} toolCall={pass} surface={surface} />
+              ))}
             </div>
           ) : null}
         </div>
@@ -1188,11 +1214,16 @@ function SessionViewContentBody({
   // update that followed this turn renders here, at its true position in the conversation).
   const renderMessageRow = (message: SessionMessage) => {
     const anchoredParts = backgroundPartsAfterMessageId.get(message.id);
-    if (!anchoredParts?.length) return renderMessage(message);
+    // Memory passes now render as a compact brain badge in the message footer (renderMessage),
+    // so only non-memory background parts still render as cards below the turn.
+    const cardParts = anchoredParts?.filter(
+      (part) => !(part.type === "tool-call" && part.toolCall.name === AFTER_SESSION_TOOL_NAME),
+    );
+    if (!cardParts?.length) return renderMessage(message);
     return (
       <Fragment key={`${message.id}-row`}>
         {renderMessage(message, { footerInFlow: true })}
-        {renderBackgroundParts(anchoredParts)}
+        {renderBackgroundParts(cardParts)}
       </Fragment>
     );
   };
@@ -3015,6 +3046,9 @@ function ToolCallCardDefault({
   const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
   const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
   const display = toolCallDisplay(toolCall);
+  // Badge external service tools (Linear, Gmail, etc.) while preserving specialized
+  // icons for shell/read/file/memory calls from toolCallDisplay.
+  const serviceIcon = display.icon === "tool" ? toolServiceIcon(toolCall.name) : null;
 
   const submitDecision = (decision: "approved" | "denied") => {
     if (!approvalContext) return;
@@ -3047,7 +3081,11 @@ function ToolCallCardDefault({
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-            <ToolCallDisplayIcon icon={display.icon} />
+            {serviceIcon ? (
+              createElement(serviceIcon, { size: 11 })
+            ) : (
+              <ToolCallDisplayIcon icon={display.icon} />
+            )}
           </span>
           <span className="min-w-0 truncate font-medium text-ink/65" title={display.title}>
             {display.label}
@@ -3732,6 +3770,55 @@ function ToolApprovalPrompt({
         </button>
       </div>
     </div>
+  );
+}
+
+// The minimalist memory-pass affordance: a single brain glyph that sits in a turn's footer next
+// to the timestamp. The full one-line summary is the tooltip; clicking it opens the memory-pass
+// session (when one was spawned) so the details live one click away instead of in the transcript.
+function MemoryPassBadge({
+  toolCall,
+  surface,
+}: {
+  toolCall: RuntimeToolCall;
+  surface: "personal" | "company";
+}) {
+  const summary = latestActivityLine(toolCall.activityPreview) || toolCall.outputPreview.trim();
+  const isFailed = toolCall.status === "failed";
+  const isRunning = toolCall.status === "running";
+  const label = isFailed
+    ? "Memory update failed"
+    : isRunning
+      ? "Updating memory…"
+      : "Updated memory";
+  const title = summary ? `${label} — ${summary}` : label;
+  const className = `inline-flex h-4 w-4 items-center justify-center rounded-md transition-colors ${
+    isFailed
+      ? "text-danger/70 hover:bg-danger-bg hover:text-danger"
+      : "text-ink-subtle/60 hover:bg-surface-hover/65 hover:text-ink/75"
+  }`;
+  const icon = (
+    <Brain size={11} strokeWidth={1.9} className={isRunning ? "animate-pulse" : undefined} />
+  );
+
+  if (toolCall.childSessionId) {
+    return (
+      <Link
+        href={sessionHrefForSurface(surface, toolCall.childSessionId)}
+        target="_blank"
+        rel="noreferrer"
+        title={title}
+        aria-label={title}
+        className={className}
+      >
+        {icon}
+      </Link>
+    );
+  }
+  return (
+    <span title={title} aria-label={title} className={className}>
+      {icon}
+    </span>
   );
 }
 
