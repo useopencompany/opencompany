@@ -3355,6 +3355,122 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
     ]);
   });
 
+  it("deduplicates completed Codex replay text when persisted content equals all streamed text", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_a",
+        role: "assistant",
+        content: "Inspecting.Done.",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "Inspecting.Done." }],
+        },
+      },
+      [
+        event(1, "engine.activity", {
+          messageId: "msg_a",
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        }),
+        event(2, "message.delta", { messageId: "msg_a", delta: "Inspecting." }),
+        event(3, "tool.started", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          input: { command: "pwd" },
+        }),
+        event(4, "tool.completed", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+        }),
+        event(5, "message.delta", { messageId: "msg_a", delta: "Done." }),
+      ],
+    );
+
+    expect(parts.map((part) => (part.type === "text" ? part.text : part.type))).toEqual([
+      "Inspecting.",
+      "tool-call",
+      "Done.",
+    ]);
+    expect(parts[0]).toMatchObject({ type: "text", tone: "work" });
+    expect(parts[2]).toEqual({ type: "text", text: "Done." });
+  });
+
+  it("drops trailing Codex event text when it is already the persisted final answer", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_a",
+        role: "assistant",
+        content: "Done.",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done." }],
+        },
+      },
+      [
+        event(1, "engine.activity", {
+          messageId: "msg_a",
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        }),
+        event(2, "message.delta", { messageId: "msg_a", delta: "Inspecting." }),
+        event(3, "tool.started", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          input: { command: "pwd" },
+        }),
+        event(4, "tool.completed", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+        }),
+        event(5, "message.delta", { messageId: "msg_a", delta: "Done." }),
+      ],
+    );
+
+    expect(parts.map((part) => (part.type === "text" ? part.text : part.type))).toEqual([
+      "Inspecting.",
+      "tool-call",
+      "Done.",
+    ]);
+    expect(parts.filter((part) => part.type === "text" && part.text === "Done.")).toHaveLength(1);
+  });
+
+  it("does not render duplicate Codex text for completed no-tool replies", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_a",
+        role: "assistant",
+        content: "Done.",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done." }],
+        },
+      },
+      [
+        event(1, "engine.activity", {
+          messageId: "msg_a",
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        }),
+        event(2, "message.delta", { messageId: "msg_a", delta: "Done." }),
+      ],
+    );
+
+    expect(parts).toEqual([{ type: "text", text: "Done." }]);
+  });
+
   it("renders persisted Codex JSONL fallback content as assistant text", () => {
     const content =
       [

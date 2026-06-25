@@ -780,7 +780,9 @@ type CodexStreamSummary = {
 export function createCodexStreamAccumulator() {
   let buffer = "";
   let sessionId: string | null = null;
-  let resultText = "";
+  let legacyAssistantText = "";
+  let latestAgentMessageText = "";
+  const agentMessageTextByItemId = new Map<string, string>();
   let error: string | null = null;
   let parsedEvents: Record<string, unknown>[] = [];
   let inputTokens = 0;
@@ -798,8 +800,23 @@ export function createCodexStreamAccumulator() {
     const type = normalizeCodexEventType(codexEventType(event));
     const text = firstDeepString(event, ["delta", "text", "content", "message"]);
     let activity: string | null = null;
-    if (text && isAssistantTextEvent(type, event)) {
-      resultText += text;
+    const agentMessageText = codexAgentMessageText(event, type);
+    if (agentMessageText) {
+      if (agentMessageText.kind === "legacy") {
+        legacyAssistantText += agentMessageText.text;
+      } else if (agentMessageText.kind === "completed") {
+        latestAgentMessageText = agentMessageText.text;
+        if (agentMessageText.itemId) {
+          agentMessageTextByItemId.set(agentMessageText.itemId, agentMessageText.text);
+        }
+      } else {
+        const current = agentMessageTextByItemId.get(agentMessageText.itemId) ?? "";
+        const next = `${current}${agentMessageText.text}`;
+        agentMessageTextByItemId.set(agentMessageText.itemId, next);
+        latestAgentMessageText = next;
+      }
+      activity = compactActivity(`Codex: ${agentMessageText.text}`);
+    } else if (text && isAssistantTextEvent(type, event)) {
       activity = compactActivity(`Codex: ${text}`);
     } else if (
       type !== "item.commandexecution.outputdelta" &&
@@ -908,7 +925,7 @@ export function createCodexStreamAccumulator() {
       return {
         sessionId,
         status,
-        result: resultText.trim() || input.stdout.trim(),
+        result: latestAgentMessageText.trim() || legacyAssistantText.trim() || input.stdout.trim(),
         error:
           status === "timeout"
             ? "Codex timed out before finishing. The partial diff is shown below."
@@ -917,6 +934,38 @@ export function createCodexStreamAccumulator() {
       };
     },
   };
+}
+
+type CodexAgentMessageText =
+  | { kind: "legacy"; text: string }
+  | { kind: "delta"; itemId: string; text: string }
+  | { kind: "completed"; itemId: string | null; text: string };
+
+function codexAgentMessageText(
+  event: Record<string, unknown>,
+  normalizedType: string,
+): CodexAgentMessageText | null {
+  const params = codexEventParams(event);
+  const item = codexItemFromEvent(event);
+  const itemType = normalizeCodexItemType(firstString(item?.type));
+
+  if (normalizedType === "assistant_message_delta") {
+    const text = firstNonEmptyRawString(event.delta, params?.delta);
+    return text ? { kind: "legacy", text } : null;
+  }
+
+  if (normalizedType === "item.agentmessage.delta") {
+    const itemId = firstString(event.itemId, params?.itemId, item?.id) ?? "__default_agent_message";
+    const text = firstNonEmptyRawString(event.delta, params?.delta);
+    return text ? { kind: "delta", itemId, text } : null;
+  }
+
+  if (normalizedType === "item.completed" && itemType === "agentmessage") {
+    const text = firstNonEmptyRawString(item?.text, item?.content);
+    return text ? { kind: "completed", itemId: firstString(item?.id, params?.itemId), text } : null;
+  }
+
+  return null;
 }
 
 export function codexRuntimeEventsFromJsonEvent(
