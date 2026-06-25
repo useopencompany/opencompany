@@ -23,7 +23,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
-import { SidebarPreviewBadge } from "@/components/SidebarPreviewBadge";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
@@ -481,7 +480,6 @@ function SidebarContent({
             >
               <PanelLeft size={15} strokeWidth={1.75} />
             </button>
-            <SidebarPreviewBadge />
             <SpaceSwitcher
               activeSpace="workspace"
               workspaceName={workspaceName}

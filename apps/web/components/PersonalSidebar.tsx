@@ -28,7 +28,6 @@ import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
-import { SidebarPreviewBadge } from "@/components/SidebarPreviewBadge";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useOptionalOpenSession } from "@/components/session-split/PersonalSessionSplit";
 import { useOptionalSessionDrag } from "@/components/session-split/SessionDragContext";
@@ -744,7 +743,6 @@ function PersonalSidebarView({
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
-          <SidebarPreviewBadge />
           {/* Personal-first users only see the company tab after opting in from Settings. */}
           {companySurfaceEnabled && (
             <SpaceSwitcher
