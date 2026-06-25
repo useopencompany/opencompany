@@ -60,13 +60,18 @@ const SIDEBAR_RECENCY_LIMIT = 50;
 export function deriveSidebarSessions(
   sessions: AgentSessionRow[],
   stars: SessionStarRow[],
+  agents: AgentRow[],
 ): SidebarSessionPayload[] {
   const starredAtBySession = new Map(stars.map((star) => [star.session_id, star.starred_at]));
+  const workspaceAgentIds = new Set(
+    agents.filter((agent) => agent.user_id === null).map((agent) => agent.id),
+  );
 
   const visible = sessions
     .filter(
       (row) =>
         row.source === "user" &&
+        workspaceAgentIds.has(row.agent_id) &&
         row.archived_at === null &&
         !SIDEBAR_HIDDEN_STATUSES.has(row.status),
     )

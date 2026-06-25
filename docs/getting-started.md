@@ -99,6 +99,7 @@ These are the root commands a contributor is expected to run directly:
 | `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
 | `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, a local Durable Streams server (auto-sets `DURABLE_STREAMS_URL`), and ngrok when available. |
 | `bun run dev:stream` | Start the same full local stack with streaming logs instead of the Turbo TUI. |
+| `bun run dev:logs` | Read the latest local dev logs from `.context/logs/dev-turbo.json`; use `-- --source runner`, `-- --source web`, `-- --errors`, `-- --grep <text>`, or `-- --follow`. |
 | `bun run dev:web` | Start only the Next.js web app. |
 | `bun run dev:runner` | Start only the runner service. |
 | `bun run electric:dev` | Run the local Electric sync container in the foreground to tail its logs or restart it against a freshly rebranched database. `bun run setup` already starts it detached. |
@@ -143,6 +144,17 @@ If you want setup to launch the dev server after migrations, run `bun run setup:
 That gives integrations such as GitHub a public callback URL without a separate command. Set
 `OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel. WorkOS still redirects to localhost for local
 sign-in.
+
+`bun run dev` and `bun run dev:stream` also write Turbo's structured task output to
+`.context/logs/dev-turbo.json` for local debugging. The file is gitignored and captures the same
+output that appears in the dev terminal, including possible secrets, so do not paste raw excerpts
+outside trusted debugging contexts. Useful reads:
+
+```bash
+bun run dev:logs -- --source runner --tail 100
+bun run dev:logs -- --source web --grep ECONNREFUSED
+bun run dev:logs -- --errors --follow
+```
 
 `bun run dev` additionally starts a local Durable Streams server (in-memory, no Docker) and injects
 `DURABLE_STREAMS_URL` into the web and runner processes so live session transcripts stream out of the

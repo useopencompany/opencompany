@@ -1,5 +1,9 @@
+"use client";
+
+import { Check, ChevronsUpDown } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 type Space = "personal" | "workspace";
@@ -21,56 +25,78 @@ export function SpaceSwitcher({
   hideWorkspace?: boolean;
   className?: string;
 }) {
+  const [open, setOpen] = useState(false);
+
+  const activeLabel = activeSpace === "personal" ? "Personal" : workspaceName;
+
   return (
-    <div className={cn("px-2 pb-2", className)}>
-      <nav
-        aria-label="Space"
-        className={cn(
-          "grid gap-0.5 rounded-md border border-border bg-surface/45 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.36)]",
-          hideWorkspace ? "grid-cols-1" : "grid-cols-2",
-        )}
-      >
-        <SpaceLink href={personalHref} active={activeSpace === "personal"}>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Switch space"
+          className={cn(
+            "flex h-6 min-w-0 items-center gap-1 rounded-md px-1.5 text-[12px] font-medium tracking-[-0.005em] text-ink outline-none transition-colors duration-150 hover:bg-surface-hover focus-visible:ring-1 focus-visible:ring-ink/20 data-[state=open]:bg-surface-hover",
+            className,
+          )}
+        >
+          <span className="min-w-0 truncate">{activeLabel}</span>
+          <ChevronsUpDown size={12} strokeWidth={1.9} className="ml-0.5 shrink-0 text-ink/50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-[200px] p-1">
+        <SpaceOption
+          href={personalHref}
+          active={activeSpace === "personal"}
+          onSelect={() => setOpen(false)}
+        >
           Personal
-        </SpaceLink>
+        </SpaceOption>
         {hideWorkspace ? null : (
-          <SpaceLink
+          <SpaceOption
             href={workspaceHref}
             active={activeSpace === "workspace"}
             title={workspaceName}
+            onSelect={() => setOpen(false)}
           >
             {workspaceName}
-          </SpaceLink>
+          </SpaceOption>
         )}
-      </nav>
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
-function SpaceLink({
+function SpaceOption({
   href,
   active,
   title,
+  onSelect,
   children,
 }: {
   href: string;
   active: boolean;
   title?: string;
-  children: ReactNode;
+  onSelect: () => void;
+  children: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
       title={title}
+      onClick={onSelect}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex h-6 min-w-0 items-center justify-center rounded-[5px] px-1.5 text-[11.5px] font-medium tracking-[-0.005em] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
-        active
-          ? "bg-surface-active text-ink shadow-[inset_0_0_0_1px_rgba(15,15,15,0.06),0_1px_1px_rgba(15,15,15,0.05)]"
-          : "text-ink-subtle hover:bg-surface-hover hover:text-ink",
+        "flex h-7 min-w-0 items-center gap-2 rounded-[5px] px-2 text-[12.5px] font-medium tracking-[-0.005em] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
+        active ? "text-ink" : "text-ink-subtle hover:bg-surface-hover hover:text-ink",
       )}
     >
-      <span className="min-w-0 truncate">{children}</span>
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <Check
+        size={13}
+        strokeWidth={2}
+        className={cn("shrink-0 text-ink", active ? "opacity-100" : "opacity-0")}
+      />
     </Link>
   );
 }
