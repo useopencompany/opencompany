@@ -3,7 +3,7 @@
 
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
 import {
   DURABLE_STREAMS_DEV_URL,
@@ -22,6 +22,7 @@ const turboArgs = process.argv.slice(2);
 const port = valueFor(turboArgs, "--port") ?? process.env.PORT ?? "3000";
 const isCI = process.env.CI === "true" || process.env.CI === "1";
 const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
+configureDevLogFile(turboArgs);
 let ngrok;
 let tunnelEnv = {};
 
@@ -56,6 +57,21 @@ function stopDurableStreams() {
     durableStreams.stop().catch(() => {});
     durableStreams = null;
   }
+}
+
+function configureDevLogFile(args) {
+  if (isCI) return null;
+  if (args.some((arg) => arg === "--log-file" || arg.startsWith("--log-file="))) return null;
+
+  const configured = process.env.OPENCOMPANY_DEV_LOG_FILE?.trim();
+  if (configured === "0" || configured === "false" || configured === "off") return null;
+
+  const logFile = configured || ".context/logs/dev-turbo.json";
+  mkdirSync(".context/logs", { recursive: true });
+  args.push(`--log-file=${logFile}`);
+  console.log(`\nDev logs: ${logFile}`);
+  console.log("Read them with: bun run dev:logs -- --tail 100 --source runner\n");
+  return logFile;
 }
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

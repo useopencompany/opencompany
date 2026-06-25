@@ -257,6 +257,5 @@ function readGitHubRepositoryMetadata(metadata: Record<string, unknown>) {
 
 function revalidateIntegrationPaths() {
   revalidatePath("/company/agents");
-  revalidatePath("/company/settings");
-  revalidatePath("/company/settings/integrations");
+  revalidatePath("/company/integrations");
 }

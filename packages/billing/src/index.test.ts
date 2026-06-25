@@ -73,6 +73,7 @@ describe("calculateModelUsageCost", () => {
     ["xai/grok-4.1-fast-non-reasoning", 950],
     ["xai/grok-build-0.1", 4_200],
     ["zai/glm-5.1", 7_460],
+    ["zai/glm-5.2", 7_460],
     ["zai/glm-5-turbo", 6_640],
     ["zai/glm-5v-turbo", 6_640],
   ])("prices %s from Vercel AI Gateway published rates", (modelName, expectedProviderCost) => {

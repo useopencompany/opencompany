@@ -65,6 +65,7 @@ describe("agent editor mention tools", () => {
       "xai/grok-4.1-fast-non-reasoning",
       "xai/grok-build-0.1",
       "zai/glm-5.1",
+      "zai/glm-5.2",
       "zai/glm-5-turbo",
       "zai/glm-5v-turbo",
       "openrouter/fusion",
@@ -164,15 +165,15 @@ describe("agent editor mention tools", () => {
     // Not-connected provider stays selectable but is flagged + linkable.
     expect(slack).toBeDefined();
     expect(slack?.needsSetup).toBe(true);
-    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fcompany%2Fsettings");
+    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fcompany%2Fintegrations");
     expect(betterstack).toBeDefined();
     expect(betterstack?.needsSetup).toBe(true);
     expect(betterstack?.connectUrl).toBe(
-      "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fsettings",
+      "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fintegrations",
     );
     expect(notion).toBeDefined();
     expect(notion?.needsSetup).toBe(true);
-    expect(notion?.connectUrl).toBe("/api/mcp/notion/start?returnTo=%2Fcompany%2Fsettings");
+    expect(notion?.connectUrl).toBe("/api/mcp/notion/start?returnTo=%2Fcompany%2Fintegrations");
   });
 
   test("offers the addable built-in first-principles skill in the mention menu", () => {

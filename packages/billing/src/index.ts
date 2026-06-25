@@ -368,6 +368,14 @@ const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 1_400_000,
     outputUsdMicrosPerMillion: 4_400_000,
   },
+  "zai/glm-5.2": {
+    model: "zai/glm-5.2",
+    provider: "zai",
+    inputUsdMicrosPerMillion: 1_400_000,
+    cachedInputUsdMicrosPerMillion: 260_000,
+    cacheWriteUsdMicrosPerMillion: 1_400_000,
+    outputUsdMicrosPerMillion: 4_400_000,
+  },
   "zai/glm-5-turbo": {
     model: "zai/glm-5-turbo",
     provider: "zai",

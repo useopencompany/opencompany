@@ -306,6 +306,14 @@ Run the app, Inngest dev server, and runner together:
 bun run dev
 ```
 
+Local dev runs write Turbo task output to `.context/logs/dev-turbo.json`, so the runner stream can
+be inspected even when Turbo's TUI is open:
+
+```sh
+bun run dev:logs -- --source runner --tail 100
+bun run dev:logs -- --source runner --errors
+```
+
 Or run the runner separately:
 
 ```sh

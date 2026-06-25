@@ -45,10 +45,37 @@ function makeStarRow(overrides: Partial<SessionStarRow> = {}): SessionStarRow {
 function makeAgentRow(overrides: Partial<AgentRow> = {}): AgentRow {
   return {
     id: "agt_1",
+    workspace_id: "wks_1",
+    user_id: null,
+    is_default: false,
     name: "Builder",
     path: "team/builder",
+    body: "",
+    commit_sha: null,
+    content_hash: null,
+    version: 1,
+    github_blob_sha: null,
+    github_commit_sha: null,
+    github_synced_hash: null,
+    github_synced_at: null,
+    github_sync_status: "synced",
+    github_sync_error: null,
+    content: { type: "doc", content: [] },
+    config: {
+      schemaVersion: "agent.v1",
+      title: "Builder",
+      instructions: "",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [],
+      agents: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    },
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-02T00:00:00.000Z",
     ...overrides,
-  } as unknown as AgentRow;
+  };
 }
 
 describe("deriveSessionDetailPlaceholder", () => {
@@ -203,9 +230,47 @@ describe("deriveSidebarSessions", () => {
       }),
     ];
 
-    expect(deriveSidebarSessions(sessions, []).map((session) => session.id)).toEqual([
-      "newer-created",
-      "older-updated",
+    expect(
+      deriveSidebarSessions(sessions, [], [makeAgentRow()]).map((session) => session.id),
+    ).toEqual(["newer-created", "older-updated"]);
+  });
+
+  it("keeps personal-agent sessions out of company recents", () => {
+    const sessions = [
+      makeSessionRow({ id: "company", agent_id: "agt_company" }),
+      makeSessionRow({ id: "personal", agent_id: "agt_personal" }),
+    ];
+    const agents = [makeAgentRow({ id: "agt_company" })];
+
+    expect(deriveSidebarSessions(sessions, [], agents).map((session) => session.id)).toEqual([
+      "company",
     ]);
+  });
+
+  it("keeps pinned personal-agent sessions out of company pins", () => {
+    const base = Date.parse("2026-01-02T00:00:00.000Z");
+    const sessions = Array.from({ length: 50 }, (_, index) =>
+      makeSessionRow({
+        id: `company_${index}`,
+        agent_id: "agt_company",
+        created_at: new Date(base - index * 60_000).toISOString(),
+      }),
+    );
+    sessions.push(
+      makeSessionRow({
+        id: "pinned-personal",
+        agent_id: "agt_personal",
+        created_at: new Date(base - 51 * 60_000).toISOString(),
+      }),
+    );
+
+    const derived = deriveSidebarSessions(
+      sessions,
+      [makeStarRow({ session_id: "pinned-personal" })],
+      [makeAgentRow({ id: "agt_company" })],
+    );
+
+    expect(derived).toHaveLength(50);
+    expect(derived.map((session) => session.id)).not.toContain("pinned-personal");
   });
 });

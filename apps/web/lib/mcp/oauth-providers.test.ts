@@ -171,9 +171,9 @@ describe("MCP OAuth provider factory", () => {
     expect(linearMcpOAuth.appendSetupStatus("//evil.example", "connected")).toBe(
       `${SAFE_FALLBACK_RETURN_TO}?mcp=linear&setup=connected`,
     );
-    expect(slackMcpOAuth.appendSetupStatus("/company/settings", "error", "session_mismatch")).toBe(
-      "/company/settings?mcp=slack&setup=error&reason=session_mismatch",
-    );
+    expect(
+      slackMcpOAuth.appendSetupStatus("/company/integrations", "error", "session_mismatch"),
+    ).toBe("/company/integrations?mcp=slack&setup=error&reason=session_mismatch");
   });
 
   it("drops malformed tokens and client information when parsing stored payloads", async () => {

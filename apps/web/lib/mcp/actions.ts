@@ -250,6 +250,6 @@ function newWorkspaceMcpServerId() {
 }
 
 function revalidateMcpPaths() {
-  revalidatePath("/company/settings");
   revalidatePath("/company/agents");
+  revalidatePath("/company/integrations");
 }

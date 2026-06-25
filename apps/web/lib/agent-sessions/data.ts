@@ -51,6 +51,7 @@ export async function loadSidebarSessionsForWorkspace(
     eq(agentSessions.workspaceId, workspaceId),
     eq(agentSessions.userId, userId),
     eq(agentSessions.source, "user"),
+    isNull(agents.userId),
     isNull(agentSessions.archivedAt),
   );
 
@@ -67,6 +68,7 @@ export async function loadSidebarSessionsForWorkspace(
     db
       .select(baseColumns)
       .from(agentSessions)
+      .innerJoin(agents, eq(agentSessions.agentId, agents.id))
       .leftJoin(sessionStars, starJoin)
       .where(visibilityFilter)
       .orderBy(desc(agentSessions.createdAt))
@@ -74,6 +76,7 @@ export async function loadSidebarSessionsForWorkspace(
     db
       .select(baseColumns)
       .from(agentSessions)
+      .innerJoin(agents, eq(agentSessions.agentId, agents.id))
       .innerJoin(sessionStars, starJoin)
       .where(and(visibilityFilter, isNotNull(sessionStars.starredAt)))
       .orderBy(desc(agentSessions.createdAt)),
