@@ -227,6 +227,7 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
+| `OPENCOMPANY_CODEX_E2B_TEMPLATE` | No | Optional Codex-specific E2B template; defaults to `codex`. Build `apps/runner/e2b/codex` as `opencompany-codex-toolbox` and set this in runner envs to roll onto the custom toolbox image. |
 | `RUNNER_LLM_BROKER_PUBLIC_URL` | No | Public base URL of the runner for the LLM broker (`/broker/*`). Defaults to Render's `RENDER_EXTERNAL_URL`; unset (local dev) disables the broker and falls back to direct provider-key injection into the sandbox. Distinct from the web-side `RUNNER_PUBLIC_URL`, which points at localhost in local dev. |
 | `RUNNER_LLM_BROKER_ENABLED` | No | Kill switch for the LLM broker, defaults to `true`. Set `false` to revert sandboxed CLIs to direct key injection without a deploy. |
 | `RUNNER_CODEX_API_KEY_FALLBACK_ENABLED` | No | Explicit kill switch for the legacy Codex API-key path when no workspace Codex account is connected. Defaults to disabled in production and enabled outside production. Set `false` locally to force device-auth testing. |

@@ -2047,6 +2047,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     ampApiKey: undefined,
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
+    codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     opencodeTimeoutMs: 1_200_000,
     codexTimeoutMs: 1_200_000,

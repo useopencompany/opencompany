@@ -34,6 +34,7 @@ const env = {
   ampApiKey: undefined,
   e2bTemplate: undefined,
   ampE2bTemplate: undefined,
+  codexE2bTemplate: undefined,
   e2bSandboxIdleTimeoutMs: 30_000,
   opencodeTimeoutMs: 1_200_000,
   toolArgRepairEnabled: false,

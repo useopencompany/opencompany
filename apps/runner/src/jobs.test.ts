@@ -812,6 +812,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     openaiCodexApiKey: "codex_test",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
+    codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     opencodeTimeoutMs: 1_200_000,
     codexTimeoutMs: 1_200_000,

@@ -81,6 +81,7 @@ agent sessions.
 - `apps/runner/src/agent-loop.ts`.
 - `apps/runner/src/env.ts`.
 - `E2B_API_KEY`, `OPENCOMPANY_E2B_TEMPLATE`, `OPENCOMPANY_AMP_E2B_TEMPLATE`,
+  `OPENCOMPANY_CODEX_E2B_TEMPLATE`,
   `RUNNER_E2B_IDLE_TIMEOUT_MS` in `.env.example`.
 - `docs/runner.md`.
 
@@ -293,9 +294,12 @@ defaulting to a fixed platform model when omitted. The memory CLI's model-backed
 through the same broker (`MEMORY_GATEWAY_BASE_URL` + token in place of the raw key).
 
 Codex runs headless as `codex exec --json --sandbox workspace-write --ask-for-approval never`
-inside the E2B `codex` template. That template is expected to be provisioned with 8 vCPU and
-8192 MB RAM; the runner records Codex sandbox usage against that allocation for billing and
-observability. Production/company runs use the workspace Codex account connected in company
+inside the template selected by `OPENCOMPANY_CODEX_E2B_TEMPLATE`, defaulting to E2B's `codex`
+template. Codex templates are expected to be provisioned with 8 vCPU and 8192 MB RAM; the runner
+records Codex sandbox usage against that allocation for billing and observability. The repo-owned
+`apps/runner/e2b/codex` template builds `opencompany-codex-toolbox`, extending E2B's `codex`
+template with `rg`, `fd`, `jq`, `curl`, `git`, `gh`, Bun, Node/npm, and the pinned Codex CLI.
+Production/company runs use the workspace Codex account connected in company
 settings: the runner writes an isolated `${CODEX_HOME}/config.toml` with file-backed ChatGPT auth,
 injects the encrypted workspace `auth.json` cache into that home, and rotates the encrypted cache
 after successful runs because the CLI may refresh tokens. Codex token usage from this
@@ -317,10 +321,10 @@ for legacy rows and `codex_coder`. Missing JSONL usage is noted in artifact meta
 > integrations intentionally use the simpler one-shot CLI paths that mirror AMP.
 
 These harnesses run in coding sandbox templates (`OPENCOMPANY_AMP_E2B_TEMPLATE` for AMP/opencode
-and E2B's `codex` template for Codex). The `opencode` and `codex` CLIs are made available
-defensively: their tool files check for the binary and install on demand if missing, so the tools
-work on the current template without a rebuild. The durable option for AMP/opencode is to bake the
-CLI into `OPENCOMPANY_AMP_E2B_TEMPLATE` and keep the on-demand install path as a fallback.
+and `OPENCOMPANY_CODEX_E2B_TEMPLATE` for Codex). The `opencode` and `codex` CLIs are made
+available defensively: their tool files check for the binary and install on demand if missing, so the
+tools work on older templates without a rebuild. The durable option is to bake the CLI into the
+coding template and keep the on-demand install path as a fallback.
 
 MCP tools are enabled by workspace setup plus agent configuration:
 

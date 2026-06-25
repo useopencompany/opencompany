@@ -489,10 +489,10 @@ function errorName(error: unknown) {
   return error instanceof Error ? error.name : undefined;
 }
 
-// Codex engine sessions run on E2B's Codex template. Other coding/GitHub-capable sessions use the
-// richer AMP template; plain chat agents get the lighter default template.
+// Codex engine sessions run on the Codex template family. Other coding/GitHub-capable sessions use
+// the richer AMP template; plain chat agents get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
-  if (agentConfig.engine === "codex") return "codex";
+  if (agentConfig.engine === "codex") return env.codexE2bTemplate ?? "codex";
   return needsAuthenticatedGit(agentConfig) ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
 
@@ -507,8 +507,9 @@ function needsAuthenticatedGit(agentConfig: AgentConfig) {
 
 // Per-template resource overrides used to price sandbox compute. E2B resource sizing is a
 // template-build property, so this must match the provisioned template allocation.
+const CODEX_SANDBOX_RESOURCES = { vcpu: 8, ramMiB: 8192 } satisfies SandboxResourceConfig;
 const SANDBOX_TEMPLATE_RESOURCES: Record<string, SandboxResourceConfig> = {
-  codex: { vcpu: 8, ramMiB: 8192 },
+  codex: CODEX_SANDBOX_RESOURCES,
 };
 
 export type SandboxBillingInfo = {
@@ -523,6 +524,13 @@ export type SandboxBillingInfo = {
 export function resolveSandboxBilling(row: LoadedSession, env: RunnerEnv): SandboxBillingInfo {
   const agentConfig = normalizeAgentConfig(row.agent.config);
   const template = resolveSandboxTemplate(agentConfig, env) ?? null;
+  if (agentConfig.engine === "codex") {
+    return {
+      template,
+      vcpu: CODEX_SANDBOX_RESOURCES.vcpu,
+      ramMib: CODEX_SANDBOX_RESOURCES.ramMiB,
+    };
+  }
   const resources =
     (template ? SANDBOX_TEMPLATE_RESOURCES[template] : undefined) ?? DEFAULT_SANDBOX_RESOURCES;
   return { template, vcpu: resources.vcpu, ramMib: resources.ramMiB };

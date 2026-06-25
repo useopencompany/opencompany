@@ -36,6 +36,7 @@ export type RunnerEnv = {
   googleOAuthClientSecret?: string | undefined;
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
+  codexE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
   blobReadWriteToken?: string | undefined;
   // Wall-clock ceiling for a single opencode_coder delegation. Large monorepo tasks routinely
@@ -85,6 +86,7 @@ export function loadEnv(): RunnerEnv {
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
+    codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),

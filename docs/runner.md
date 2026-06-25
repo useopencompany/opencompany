@@ -263,6 +263,7 @@ Required environment variables:
 - `SUPADATA_API_KEY` (optional; required only for agents that enable YouTube or Instagram/TikTok direct-media transcript/metadata tools)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
+- `OPENCOMPANY_CODEX_E2B_TEMPLATE` (optional; Codex sessions default to E2B's `codex` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Activates the LLM broker — sandboxed CLIs call models via `/broker/*` with short-lived per-delegation tokens instead of raw provider keys. Unset locally.)

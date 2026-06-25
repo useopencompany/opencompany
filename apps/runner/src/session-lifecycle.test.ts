@@ -397,6 +397,31 @@ describe("acquireCodexSandboxForTurn", () => {
     expect(materializeMocks.materializeSkillsForSession).toHaveBeenCalled();
   });
 
+  it("uses the custom Codex template when configured", async () => {
+    const sandbox = hydratedSandbox("sbx_new");
+    e2bMocks.create.mockResolvedValue(sandbox);
+
+    const row = loadedSessionRow({ e2bSandboxId: null, engine: "codex" });
+
+    await expect(
+      acquireCodexSandboxForTurn(
+        row as never,
+        env({
+          ampE2bTemplate: "custom-amp-template",
+          codexE2bTemplate: "opencompany-codex-toolbox",
+        }),
+      ),
+    ).resolves.toBe(sandbox);
+
+    expect(e2bMocks.create).toHaveBeenCalledWith(
+      "opencompany-codex-toolbox",
+      expect.objectContaining({
+        timeoutMs: 30_000,
+        lifecycle: { onTimeout: "pause", autoResume: true },
+      }),
+    );
+  });
+
   it("falls back to full hydration for stale sandbox ids without a second connect attempt", async () => {
     const sandbox = hydratedSandbox("sbx_replacement");
     e2bMocks.connect.mockRejectedValue(new Error("sandbox not found"));
@@ -436,6 +461,18 @@ describe("resolveSandboxBilling", () => {
       resolveSandboxBilling(row as never, env({ ampE2bTemplate: "custom-amp-template" })),
     ).toEqual({
       template: "codex",
+      vcpu: 8,
+      ramMib: 8192,
+    });
+  });
+
+  it("keeps the Codex allocation when a custom Codex template is configured", () => {
+    const row = loadedSessionRow({ e2bSandboxId: null, engine: "codex" });
+
+    expect(
+      resolveSandboxBilling(row as never, env({ codexE2bTemplate: "opencompany-codex-toolbox" })),
+    ).toEqual({
+      template: "opencompany-codex-toolbox",
       vcpu: 8,
       ramMib: 8192,
     });
