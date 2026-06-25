@@ -138,7 +138,10 @@ export async function setCodexEngineEnabled(next: boolean) {
       .set({ codexEngineEnabled: next, updatedAt: new Date() })
       .where(eq(users.id, context.user.id));
   } catch {
-    return { ok: false as const, error: "Could not update the Codex runtime flag. Please try again." };
+    return {
+      ok: false as const,
+      error: "Could not update the Codex runtime flag. Please try again.",
+    };
   }
 
   revalidatePath("/personal", "layout");
