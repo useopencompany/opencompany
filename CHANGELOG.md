@@ -7,8 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-06-25
+
 ### Added
-- Codex E2B toolbox templates now include Playwright and Playwright-managed Chromium for browser-ready coding sessions.
+- Agents can now run Codex-backed sessions with persisted auth, sandbox lifecycle support, runtime event ingestion, and transcript UI support behind the Codex engine flag (#525) — @louis.
+- Google Drive is now available as a first-party integration with OAuth, Drive search/read/export tools, and Google Docs create/update tools (#515) — @louis.
+- Company workspaces now have a dedicated Integrations tab for first-party and MCP integration controls (#522) — @louis.
+- Personal routines now include scheduling with create, edit, delete, toggle, run-now, next-run, and timezone controls (#458, #507) — @louis.
+- Billing now supports weekly spending limits and automatic credit refills with saved cards (#505) — @jasper.
+- Delegated coding and memory tools now use a runner-hosted LLM token broker, keeping raw provider keys out of sandboxes while metering brokered usage server-side (#439) — @louis.
+- Z.ai GLM-5.2 is now available in the model catalog with billing and reasoning-capable model support (#486) — @opencompany-bot.
+- Local development can now persist Turbo logs and inspect them through `bun run dev:logs` (#518) — @louis.
+- Codex E2B toolbox templates now include Playwright and Playwright-managed Chromium for browser-ready coding sessions (#525) — @louis.
+
+### Changed
+- Mobile Memory pages now let users swipe the file tree away for a full-width file view, while guarding iOS edge-back gestures (#510) — @jasper.
+- Tool-call cards now show the brand icon for external services like Linear, Slack, Gmail, GitHub, Notion, PostHog, Google Calendar, Google Drive, and Neon (#524) — @jasper.
+- After-session memory updates now appear as a compact footer badge with a tooltip and link to the spawned memory-pass session (#526) — @louis.
+- The personal and company sidebar space switcher is now a dropdown, and the private beta badge has been removed (#520) — @louis.
+- Feedback reports now use a one-tap Bug, Feedback, and Idea segmented selector with Feedback selected by default (#499) — @jasper.
+- Company and personal route navigation now uses faster links, debounced prefetching, and loading skeletons for slow routes (#523) — @louis.
+
+### Fixed
+- Google Drive OAuth now uses the narrower `drive.file` scope so production connections are not blocked by full-Drive restricted-scope verification (#517) — @louis.
+- iOS PWA layouts now respect safe-area insets, avoid keyboard popups in the mobile model picker, use full-width chat messages on phones, and prevent mobile settings clipping (#501, #504) — @jasper.
+- MCP reconnect and tool-discovery failures now return recoverable tool outputs instead of failing the whole session (#503) — @louis.
+- Durable Stream publishing now retries with a fresh producer when a cached producer has already closed, improving live delivery for lifecycle and memory events (#502) — @louis.
+- The automatic-refill Add a card flow now passes the required Stripe Checkout currency (#511) — @jasper.
+- Personal session unread dots are visible again and are no longer re-armed by background after-session memory passes (#509, #513) — @jasper.
+- Existing personal agents now backfill missing `soul.md` files so the Soul nav opens the editor instead of jumping to a new chat (#514) — @jasper.
+- Company sidebars no longer show personal-agent threads in recent or pinned session history (#521) — @louis.
+- Reading position is preserved when completed work blocks collapse or expand in long session transcripts (#508) — @jasper.
 
 ## [0.17.0] - 2026-06-22
 
