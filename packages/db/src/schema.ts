@@ -471,7 +471,7 @@ export const agentSessions = pgTable(
     codexReasoningEffort: text("codex_reasoning_effort")
       .$type<CodexReasoningEffort>()
       .notNull()
-      .default("medium"),
+      .default("high"),
     codexPlanModeEnabled: boolean("codex_plan_mode_enabled").notNull().default(false),
     codexPlanModeReasoningEffort: text("codex_plan_mode_reasoning_effort")
       .$type<CodexReasoningEffort>()

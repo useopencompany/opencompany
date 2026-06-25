@@ -118,6 +118,7 @@ export async function ensureSandbox(
           sandbox: readySandbox,
           workdir: row.session.workdir,
           personal,
+          createCodexRoot: agentConfig.engine === "codex",
           configureGitCredentialHelper: needsAuthenticatedGit(agentConfig),
           agentFile: serializeAgentFile({
             title: agentConfig.title,

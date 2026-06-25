@@ -81,6 +81,7 @@ export function sandboxLayout(workdir: string, personal = false) {
     workspaceRoot: workdir,
     agentRoot: `${workdir}/agent`,
     brainRoot: `${workdir}/brain`,
+    codexRoot: `${workdir}/codex`,
     workRoot: `${workdir}/work`,
     skillsRoot: `${workdir}/skills`,
     // Personal: memory/ is its own top-level root. Company: it stays under the agent bundle.
@@ -245,6 +246,7 @@ export async function prepareWorkspace(input: {
   workdir: string;
   agentFile: string;
   personal?: boolean;
+  createCodexRoot?: boolean;
   configureGitCredentialHelper?: boolean;
 }) {
   const layout = sandboxLayout(input.workdir, input.personal ?? false);
@@ -255,6 +257,9 @@ export async function prepareWorkspace(input: {
   const layoutDirs = layout.personal
     ? [layout.agentRoot, layout.memoryRoot, layout.personalBrainRoot, layout.workRoot]
     : [layout.agentRoot, layout.brainRoot, layout.workRoot];
+  if (input.createCodexRoot) {
+    layoutDirs.push(layout.codexRoot);
+  }
 
   await runSandboxPreparationCommand({
     sandbox: input.sandbox,

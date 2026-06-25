@@ -20,7 +20,6 @@ import { loadConnectedGitHubInstallation } from "./amp-tool";
 import {
   buildCodexCommand,
   buildCodexConfigForAuth,
-  buildCodexWorkRoot,
   type CodexCliAuth,
   codexApiKeyFallbackEnabled,
   codexHostedToolUsage,
@@ -568,7 +567,7 @@ async function runCodexCli(input: {
       input.githubAuth.githubAuthHeader,
     ]);
     const commandPlan = buildCodexSessionCommandPlan({
-      workRoot: layout.workRoot,
+      codexWorkRoot: layout.codexRoot,
       task: input.task,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
@@ -731,7 +730,7 @@ function formatCodexCommandStageFailure(
 }
 
 export function buildCodexSessionCommandPlan(input: {
-  workRoot: string;
+  codexWorkRoot: string;
   task: string;
   model: string;
   reasoningEffort?: CodexReasoningEffort | null;
@@ -740,7 +739,7 @@ export function buildCodexSessionCommandPlan(input: {
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
 }) {
-  const codexWorkRoot = buildCodexWorkRoot(input.workRoot);
+  const codexWorkRoot = input.codexWorkRoot;
   const codexHome = CODEX_SESSION_HOME;
   const codexEnv = {
     CODEX_HOME: codexHome,

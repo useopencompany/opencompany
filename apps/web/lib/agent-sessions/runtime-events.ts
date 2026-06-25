@@ -286,6 +286,7 @@ export type RuntimeToolCall = {
   inputPreview: string;
   activityPreview: string;
   outputPreview: string;
+  command?: string | undefined;
   brainFile?: RuntimeBrainFileReference | undefined;
   // Legacy company-Brain shortcut. New UI should prefer `brainFile`, which also
   // identifies Personal Brain writes from `personal-brain/`.
@@ -326,7 +327,7 @@ export type RuntimeEngineActivity = {
 };
 
 export type AssistantTurnPart =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; tone?: "work" | undefined }
   | {
       type: "reasoning";
       text: string | undefined;
@@ -764,6 +765,8 @@ export function buildAssistantTurnParts(
   const liveReasoning = readReasoningDeltas(events, message.id);
   const reasoningText = reasoningSummary || reasoningContent || liveReasoning || undefined;
   const engineActivity = latestEngineActivityForMessage(events, message.id);
+  const codexWorkCompleted =
+    engineActivity?.engine === "codex" && engineActivity.status === "completed";
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const hasReasoningEvidence =
@@ -785,9 +788,13 @@ export function buildAssistantTurnParts(
 
   if (modelParts) {
     const turnParts: AssistantTurnPart[] = [...reasoningParts];
-    if (engineActivity) turnParts.push({ type: "engine-activity", activity: engineActivity });
-    if (engineActivity?.engine === "codex") {
-      turnParts.push(...buildEventAssistantTurnParts(events, message.id, toolCallsById));
+    const isCodexEngine = engineActivity?.engine === "codex";
+    if (isCodexEngine) {
+      turnParts.push(
+        ...buildEventAssistantTurnParts(events, message.id, toolCallsById, {
+          textTone: "work",
+        }),
+      );
     }
 
     for (const part of modelParts) {
@@ -815,6 +822,7 @@ export function buildAssistantTurnParts(
         part.input ?? part.args,
       );
       const label = matchingToolCall?.label ?? display.label;
+      const command = matchingToolCall?.command ?? commandStringFromPayload(display.input);
 
       turnParts.push({
         type: "tool-call",
@@ -827,6 +835,7 @@ export function buildAssistantTurnParts(
           activityPreview: matchingToolCall?.activityPreview ?? "",
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
+          ...(command ? { command } : {}),
           ...(brainFile ? { brainFile } : {}),
           ...(brainFile?.scope === "company" ? { brainPath: brainFile.path } : {}),
           ...(issueUrl ? { issueUrl } : {}),
@@ -841,18 +850,16 @@ export function buildAssistantTurnParts(
     return normalizeAssistantTurnParts(turnParts);
   }
 
-  const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById);
-  const engineParts: AssistantTurnPart[] = engineActivity
-    ? [{ type: "engine-activity", activity: engineActivity }]
-    : [];
+  const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById, {
+    textTone: engineActivity?.engine === "codex" ? "work" : undefined,
+    promoteTrailingTextAfterLastToolCall: codexWorkCompleted,
+  });
   const contentText = assistantDisplayContent(message.content);
-  if (eventParts.length > 0)
-    return normalizeAssistantTurnParts([...reasoningParts, ...engineParts, ...eventParts]);
-  if ((reasoningParts.length > 0 || engineParts.length > 0) && contentText) {
-    return [...reasoningParts, ...engineParts, { type: "text", text: contentText }];
+  if (eventParts.length > 0) return normalizeAssistantTurnParts([...reasoningParts, ...eventParts]);
+  if (reasoningParts.length > 0 && contentText) {
+    return [...reasoningParts, { type: "text", text: contentText }];
   }
-  if (reasoningParts.length > 0 || engineParts.length > 0)
-    return [...reasoningParts, ...engineParts];
+  if (reasoningParts.length > 0) return reasoningParts;
   return contentText ? [{ type: "text", text: contentText }] : [];
 }
 
@@ -884,7 +891,7 @@ function normalizeAssistantTurnParts(parts: AssistantTurnPart[]): AssistantTurnP
     text = text.replace(/^\s+/, "");
     if (!text) continue;
 
-    result.push({ type: "text", text });
+    result.push({ type: "text", text, ...(part.tone ? { tone: part.tone } : {}) });
     lastTextIndex = result.length - 1;
   }
 
@@ -1068,8 +1075,9 @@ export function buildRuntimeToolCallsForMessage(
       const command = readString(event.payload.command);
       const delta = readString(event.payload.delta);
       const toolCallId = readString(event.payload.toolCallId);
-      const call = toolCallId ? callsById.get(toolCallId) : findLatestToolCall(calls, command);
+      const call = toolCallId ? getCall(toolCallId) : findLatestToolCall(calls, command);
       if (call && delta) {
+        if (command && !call.command) call.command = command;
         call.activityPreview = truncateRuntimePreview(`${call.activityPreview}${delta}`);
       }
       continue;
@@ -1228,6 +1236,8 @@ export function buildRuntimeToolCallsForMessage(
       call.name = display.name || call.name;
       call.label = display.label ?? call.label;
       call.inputPreview = formatRuntimePreview(display.input) || call.inputPreview;
+      const command = commandStringFromPayload(display.input);
+      if (command) call.command = command;
       if (call.approval?.status === "required") {
         call.approval = {
           ...call.approval,
@@ -1255,6 +1265,8 @@ export function buildRuntimeToolCallsForMessage(
       // rather than letting the raw use_tool envelope name overwrite it.
       const rawName = readString(event.payload.name);
       if (rawName && rawName !== BUILTIN_USE_TOOL_NAME) call.name = rawName;
+      const command = commandStringFromPayload(event.payload.output);
+      if (command && !call.command) call.command = command;
       call.status = event.type === "tool.failed" ? "failed" : "completed";
       call.outputPreview =
         event.type === "tool.failed"
@@ -1306,6 +1318,10 @@ function buildEventAssistantTurnParts(
   events: RuntimeEvent[],
   messageId: string,
   toolCallsById: Map<string, RuntimeToolCall>,
+  options: {
+    textTone?: "work" | undefined;
+    promoteTrailingTextAfterLastToolCall?: boolean | undefined;
+  } = {},
 ): AssistantTurnPart[] {
   const parts: AssistantTurnPart[] = [];
   const renderedToolCallIds = new Set<string>();
@@ -1313,7 +1329,7 @@ function buildEventAssistantTurnParts(
 
   function flushText() {
     if (!text) return;
-    parts.push({ type: "text", text });
+    parts.push({ type: "text", text, ...(options.textTone ? { tone: options.textTone } : {}) });
     text = "";
   }
 
@@ -1372,7 +1388,21 @@ function buildEventAssistantTurnParts(
   }
 
   flushText();
-  return parts;
+  return options.promoteTrailingTextAfterLastToolCall
+    ? promoteTrailingTextAfterLastToolCall(parts)
+    : parts;
+}
+
+function promoteTrailingTextAfterLastToolCall(parts: AssistantTurnPart[]): AssistantTurnPart[] {
+  let lastToolCallIndex = -1;
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index]?.type === "tool-call") lastToolCallIndex = index;
+  }
+  if (lastToolCallIndex < 0) return parts;
+
+  return parts.map((part, index) =>
+    index > lastToolCallIndex && part.type === "text" ? { type: "text", text: part.text } : part,
+  );
 }
 
 function latestEngineActivityForMessage(
@@ -1619,6 +1649,11 @@ function formatToolResultOutput(output: unknown) {
 
 export function readString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function commandStringFromPayload(payload: unknown) {
+  if (!isRecord(payload)) return "";
+  return readString(payload.command || payload.cmd).trim();
 }
 
 function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" | undefined {

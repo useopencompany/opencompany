@@ -1,0 +1,1 @@
+ALTER TABLE "agent_sessions" ALTER COLUMN "codex_reasoning_effort" SET DEFAULT 'high';

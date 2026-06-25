@@ -13,7 +13,7 @@ const codexSessionHome = "/home/user/.opencompany-codex/session";
 describe("buildCodexSessionCommandPlan", () => {
   it("runs Codex in the session work area without pre-cloning a repository", () => {
     const plan = buildCodexSessionCommandPlan({
-      workRoot: "/home/user/workspace/work",
+      codexWorkRoot: "/home/user/workspace/codex",
       task: "implement the requested issue",
       model: "gpt-5.5",
       existingEngineSessionId: null,
@@ -21,7 +21,7 @@ describe("buildCodexSessionCommandPlan", () => {
       githubAuth: { githubToken: null, githubAuthHeader: null },
     });
 
-    expect(plan.codexWorkRoot).toBe("/home/user/workspace/work/codex");
+    expect(plan.codexWorkRoot).toBe("/home/user/workspace/codex");
     // CODEX_HOME lives outside the `--cd` work root so the workspace ChatGPT auth.json never sits
     // in the tree the model operates on.
     expect(plan.codexHome).toBe(codexSessionHome);
@@ -31,8 +31,8 @@ describe("buildCodexSessionCommandPlan", () => {
       CODEX_HOME: codexSessionHome,
       CODEX_API_KEY: "codex_secret_123",
     });
-    expect(plan.command).toContain("cd '/home/user/workspace/work/codex'");
-    expect(plan.command).toContain("--cd '/home/user/workspace/work/codex'");
+    expect(plan.command).toContain("cd '/home/user/workspace/codex'");
+    expect(plan.command).toContain("--cd '/home/user/workspace/codex'");
     expect(plan.command).toContain("--skip-git-repo-check");
     expect(plan.command).toContain("codex exec --json");
     expect(plan.command).not.toContain("resume");
@@ -42,7 +42,7 @@ describe("buildCodexSessionCommandPlan", () => {
 
   it("resumes an existing Codex CLI session when the engine session id is stored", () => {
     const plan = buildCodexSessionCommandPlan({
-      workRoot: "/home/user/workspace/work",
+      codexWorkRoot: "/home/user/workspace/codex",
       task: "continue the prior work",
       model: "gpt-5.5",
       existingEngineSessionId: "codex-session-123",
@@ -57,7 +57,7 @@ describe("buildCodexSessionCommandPlan", () => {
 
   it("passes Codex reasoning config overrides", () => {
     const plan = buildCodexSessionCommandPlan({
-      workRoot: "/home/user/workspace/work",
+      codexWorkRoot: "/home/user/workspace/codex",
       task: "reason carefully",
       model: "gpt-5.5",
       reasoningEffort: "high",
@@ -74,7 +74,7 @@ describe("buildCodexSessionCommandPlan", () => {
 
   it("passes GitHub auth without setting a default repository", () => {
     const plan = buildCodexSessionCommandPlan({
-      workRoot: "/home/user/workspace/work",
+      codexWorkRoot: "/home/user/workspace/codex",
       task: "clone the right repo if needed",
       model: "gpt-5.5",
       existingEngineSessionId: null,
@@ -101,7 +101,7 @@ describe("buildCodexSessionCommandPlan", () => {
 
   it("uses saved ChatGPT auth without API key environment variables", () => {
     const plan = buildCodexSessionCommandPlan({
-      workRoot: "/home/user/workspace/work",
+      codexWorkRoot: "/home/user/workspace/codex",
       task: "use workspace subscription",
       model: "gpt-5.5",
       existingEngineSessionId: null,

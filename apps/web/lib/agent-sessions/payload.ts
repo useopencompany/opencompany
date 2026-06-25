@@ -383,7 +383,7 @@ function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
     modelProvider: readStringField(record, "modelProvider"),
     modelName: readStringField(record, "modelName"),
     codexReasoningEffort:
-      readOptionalCodexReasoningEffort(record, "codexReasoningEffort") ?? "medium",
+      readOptionalCodexReasoningEffort(record, "codexReasoningEffort") ?? "high",
     codexPlanModeEnabled: readOptionalBooleanField(record, "codexPlanModeEnabled") ?? false,
     codexPlanModeReasoningEffort:
       readOptionalCodexReasoningEffort(record, "codexPlanModeReasoningEffort") ?? "high",

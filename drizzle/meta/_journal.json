@@ -463,6 +463,13 @@
       "when": 1782386471220,
       "tag": "0065_parallel_pestilence",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1782393626677,
+      "tag": "0066_special_colonel_america",
+      "breakpoints": true
     }
   ]
 }

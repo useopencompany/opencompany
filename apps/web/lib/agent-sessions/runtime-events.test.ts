@@ -3182,7 +3182,7 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
     expect(toolIds(liveParts)).toEqual(toolIds(finalParts));
   });
 
-  it("renders Codex engine activity from durable events during live and replay states", () => {
+  it("keeps Codex engine activity internal during live and replay states", () => {
     const events: RuntimeEvent[] = [
       event(1, "engine.activity", {
         messageId: "msg_a",
@@ -3204,17 +3204,7 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
       { id: "msg_a", role: "assistant", content: "", status: "running" },
       events,
     );
-    expect(liveParts).toEqual([
-      {
-        type: "engine-activity",
-        activity: {
-          engine: "codex",
-          label: "Codex",
-          status: "completed",
-          activity: "Codex completed",
-        },
-      },
-    ]);
+    expect(liveParts).toEqual([]);
 
     const replayParts = buildAssistantTurnParts(
       {
@@ -3227,11 +3217,7 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
       events,
     );
 
-    expect(replayParts[0]).toMatchObject({
-      type: "engine-activity",
-      activity: { engine: "codex", status: "completed", activity: "Codex completed" },
-    });
-    expect(replayParts[1]).toEqual({ type: "text", text: "Done." });
+    expect(replayParts).toEqual([{ type: "text", text: "Done." }]);
   });
 
   it("renders Codex command tool calls before the final replay message", () => {
@@ -3254,13 +3240,23 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
           status: "completed",
           activity: "Codex completed",
         }),
-        event(2, "tool.started", {
+        event(2, "message.delta", {
+          messageId: "msg_a",
+          delta: "Checking the repository first.",
+        }),
+        event(3, "tool.started", {
           messageId: "msg_a",
           toolCallId: "codex:item_0",
           name: "shell",
           input: { command: "git clone https://github.com/octocat/Hello-World.git hello-world" },
         }),
-        event(3, "tool.completed", {
+        event(4, "command.output", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          command: "git clone https://github.com/octocat/Hello-World.git hello-world",
+          delta: "Cloning into 'hello-world'...\n",
+        }),
+        event(5, "tool.completed", {
           messageId: "msg_a",
           toolCallId: "codex:item_0",
           name: "shell",
@@ -3270,15 +3266,7 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
     );
 
     expect(parts).toEqual([
-      {
-        type: "engine-activity",
-        activity: {
-          engine: "codex",
-          label: "Codex",
-          status: "completed",
-          activity: "Codex completed",
-        },
-      },
+      { type: "text", text: "Checking the repository first.", tone: "work" },
       {
         type: "tool-call",
         toolCall: {
@@ -3288,13 +3276,82 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
           status: "completed",
           inputPreview:
             '{\n  "command": "git clone https://github.com/octocat/Hello-World.git hello-world"\n}',
-          activityPreview: "",
+          activityPreview: "Cloning into 'hello-world'...",
           outputPreview: "Cloning into 'hello-world'...",
-          startedEventId: 2,
-          completedEventId: 3,
+          command: "git clone https://github.com/octocat/Hello-World.git hello-world",
+          startedEventId: 3,
+          completedEventId: 5,
         },
       },
       { type: "text", text: "Updated hello-world/README." },
+    ]);
+  });
+
+  it("promotes trailing Codex text to answer text once Codex turn completion arrives", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_a",
+        role: "assistant",
+        content: "",
+        status: "running",
+        modelMessage: null,
+      },
+      [
+        event(1, "engine.activity", {
+          messageId: "msg_a",
+          engine: "codex",
+          label: "Codex",
+          status: "running",
+          activity: "Codex is running",
+        }),
+        event(2, "message.delta", {
+          messageId: "msg_a",
+          delta: "I’ll inspect the workspace first.",
+        }),
+        event(3, "tool.started", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          input: { command: "pwd && rg --files -uu | head -100" },
+        }),
+        event(4, "tool.completed", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          outputPreview: "",
+        }),
+        event(5, "message.delta", {
+          messageId: "msg_a",
+          delta: "Created the basic Next.js project.",
+        }),
+        event(6, "engine.activity", {
+          messageId: "msg_a",
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      { type: "text", text: "I’ll inspect the workspace first.", tone: "work" },
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "codex:item_0",
+          name: "shell",
+          label: "Running pwd && rg --files -uu | head -100",
+          status: "completed",
+          inputPreview: '{\n  "command": "pwd && rg --files -uu | head -100"\n}',
+          activityPreview: "",
+          outputPreview: "",
+          command: "pwd && rg --files -uu | head -100",
+          startedEventId: 3,
+          completedEventId: 4,
+        },
+      },
+      { type: "text", text: "Created the basic Next.js project." },
     ]);
   });
 
@@ -3338,17 +3395,6 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
       ],
     );
 
-    expect(parts).toEqual([
-      {
-        type: "engine-activity",
-        activity: {
-          engine: "codex",
-          label: "Codex",
-          status: "completed",
-          activity: "Codex completed",
-        },
-      },
-      { type: "text", text: "Got it. What should I test or work on?" },
-    ]);
+    expect(parts).toEqual([{ type: "text", text: "Got it. What should I test or work on?" }]);
   });
 });

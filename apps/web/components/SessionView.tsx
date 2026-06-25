@@ -32,10 +32,12 @@ import {
   CircleStop,
   Copy,
   ExternalLink,
+  FileText,
   LoaderCircle,
   MessageCircleQuestion,
   Play,
   Plus,
+  Search,
   ShieldAlert,
   TerminalSquare,
   Upload,
@@ -75,15 +77,13 @@ import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentCon
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
+import {
+  type ToolCallDisplay,
+  type ToolCallDisplayDetailModel,
+  toolCallDisplay,
+} from "@/components/session/toolCallDisplay";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
@@ -232,6 +232,49 @@ const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 
 function codexReasoningLabel(effort: CodexReasoningEffort) {
   return effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
+// Advances to the next reasoning effort, wrapping xhigh → low, so the toolbar pill
+// cycles through every level on repeated clicks instead of opening a dropdown.
+function nextCodexReasoningEffort(current: CodexReasoningEffort): CodexReasoningEffort {
+  const idx = CODEX_REASONING_EFFORTS.indexOf(current);
+  return CODEX_REASONING_EFFORTS[(idx + 1) % CODEX_REASONING_EFFORTS.length] ?? current;
+}
+
+// Four ascending bars; the first N (N = the level's 1-based rank, low=1 … xhigh=4)
+// render at full strength and the rest fade out, so the icon reads as a signal meter.
+function ReasoningBars({ effort, size = 12 }: { effort: CodexReasoningEffort; size?: number }) {
+  const active = CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
+  // x is evenly spaced; each bar is bottom-aligned at y=14 with an ascending height.
+  const bars = [
+    { x: 1, height: 4.5 },
+    { x: 5, height: 7 },
+    { x: 9, height: 9.5 },
+    { x: 13, height: 12 },
+  ];
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      {bars.map((bar, i) => (
+        <rect
+          key={bar.x}
+          x={bar.x}
+          y={14 - bar.height}
+          width={2}
+          height={bar.height}
+          rx={1}
+          fill="currentColor"
+          opacity={i < active ? 1 : 0.28}
+        />
+      ))}
+    </svg>
+  );
 }
 
 // Wraps an oversized composer paste in a File so it rides the normal attachment pipeline.
@@ -1088,6 +1131,10 @@ function SessionViewContentBody({
               }
               reasoningActive={isReasoningInProgress(message, runtime.events)}
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
+              collapseWorkBeforeFinalAnswer={codexWorkCompletedForMessage(
+                message.id,
+                runtime.events,
+              )}
             />
           ) : (
             <div className="flex flex-col gap-2">
@@ -2008,27 +2055,20 @@ function SessionViewContentBody({
                     />
                     {session.engine === "codex" ? (
                       <>
-                        <Select
-                          value={codexReasoningEffort}
-                          onValueChange={(value) =>
-                            handleCodexReasoningChange(value as CodexReasoningEffort)
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCodexReasoningChange(
+                              nextCodexReasoningEffort(codexReasoningEffort),
+                            )
                           }
+                          aria-label={`Codex reasoning effort: ${codexReasoningLabel(codexReasoningEffort)} (click to cycle)`}
+                          title="Reasoning effort — click to cycle"
+                          className="flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted transition-colors hover:bg-surface-subtle/70 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
                         >
-                          <SelectTrigger
-                            aria-label="Codex reasoning effort"
-                            className="h-6 w-auto border-transparent bg-transparent px-1.5 py-0 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-surface-subtle/70 focus:ring-1 focus:ring-ink/20"
-                          >
-                            <Brain size={12} strokeWidth={1.9} className="mr-1.5 shrink-0" />
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent align="start">
-                            {CODEX_REASONING_EFFORTS.map((effort) => (
-                              <SelectItem key={effort} value={effort}>
-                                Reasoning {codexReasoningLabel(effort)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <ReasoningBars effort={codexReasoningEffort} size={12} />
+                          {codexReasoningLabel(codexReasoningEffort)}
+                        </button>
                         <TooltipProvider delayDuration={150}>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -2319,7 +2359,7 @@ function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean
 // intentionally excluded so what you paste matches the final assistant answer.
 function extractAssistantText(parts: AssistantTurnPart[]): string {
   return parts
-    .map((part) => (part.type === "text" ? part.text : ""))
+    .map((part) => (part.type === "text" && part.tone !== "work" ? part.text : ""))
     .filter((chunk) => chunk.length > 0)
     .join("\n\n");
 }
@@ -2486,6 +2526,7 @@ export function AssistantMessageContent({
   stoppedError = null,
   reasoningActive = false,
   activeStartedAt,
+  collapseWorkBeforeFinalAnswer = false,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
@@ -2495,6 +2536,7 @@ export function AssistantMessageContent({
   stoppedError?: string | null;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
+  collapseWorkBeforeFinalAnswer?: boolean;
 }) {
   const hasParts = parts.length > 0;
   const isRunning = message.status === "running" && sessionCanGenerate;
@@ -2552,13 +2594,14 @@ export function AssistantMessageContent({
     | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
     | { kind: "process"; parts: AssistantTurnPart[]; key: string };
 
-  const deliverableStart = isCompleted
+  const canCollapseWork = isCompleted || collapseWorkBeforeFinalAnswer;
+  const deliverableStart = canCollapseWork
     ? deliverableStartIndex(normalizedParts)
     : normalizedParts.length;
   // While paused at a tool gate or running a resumed tool, keep the steps expanded inline
   // rather than folding the completed message into a "N steps" summary that would hide it.
   const collapseWork =
-    isCompleted &&
+    canCollapseWork &&
     !awaitingApproval &&
     !hasRunningTool &&
     !hasQuestionPart &&
@@ -2591,12 +2634,19 @@ export function AssistantMessageContent({
         if (group.kind === "part") {
           const part = group.part;
           if (part.type === "text") {
-            return (
+            const markdown = (
               <AssistantMarkdown
-                key={group.key}
                 content={part.text}
                 streaming={group.key === streamingTextGroupKey}
               />
+            );
+            return (
+              <div
+                key={group.key}
+                className={part.tone === "work" ? "text-[13px] leading-6 text-ink-muted" : ""}
+              >
+                {markdown}
+              </div>
             );
           }
           if (part.type === "reasoning") {
@@ -2662,6 +2712,19 @@ export function AssistantMessageContent({
       {hasParts && isStopped ? <AssistantStoppedNotice errorMessage={stoppedError} /> : null}
     </div>
   );
+}
+
+function codexWorkCompletedForMessage(messageId: string, events: RuntimeEvent[]) {
+  let completed = false;
+  for (const event of events) {
+    if (event.type !== "engine.activity") continue;
+    if (event.messageId !== messageId && readString(event.payload.messageId) !== messageId) {
+      continue;
+    }
+    if (readString(event.payload.engine) !== "codex") continue;
+    completed = readString(event.payload.status) === "completed";
+  }
+  return completed;
 }
 
 function activeStartForAssistantMessage(
@@ -2749,7 +2812,12 @@ function CompletedStepGroup({
             part.type === "tool-call" ? (
               <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
             ) : part.type === "text" ? (
-              <AssistantMarkdown key={`text:${index}`} content={part.text} />
+              <div
+                key={`text:${index}`}
+                className={part.tone === "work" ? "text-[13px] leading-6 text-ink-muted" : ""}
+              >
+                <AssistantMarkdown content={part.text} />
+              </div>
             ) : part.type === "engine-activity" ? (
               <EngineActivityCard key={`engine:${index}`} activity={part.activity} />
             ) : null,
@@ -2946,6 +3014,7 @@ function ToolCallCardDefault({
   const awaitingApproval = toolCall.approval?.status === "required" && optimisticDecision === null;
   const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
   const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
+  const display = toolCallDisplay(toolCall);
 
   const submitDecision = (decision: "approved" | "denied") => {
     if (!approvalContext) return;
@@ -2978,15 +3047,12 @@ function ToolCallCardDefault({
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-            {toolCall.name === AFTER_SESSION_TOOL_NAME ? (
-              <Brain size={11} strokeWidth={1.75} />
-            ) : (
-              <Wrench size={11} strokeWidth={1.75} />
-            )}
+            <ToolCallDisplayIcon icon={display.icon} />
           </span>
-          <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
-            {toolCall.label || formatToolName(toolCall.name)}
+          <span className="min-w-0 truncate font-medium text-ink/65" title={display.title}>
+            {display.label}
           </span>
+          {display.detail ? <ToolCallDisplayDetail detail={display.detail} /> : null}
           {toolCall.brainFile || toolCall.brainPath ? (
             <span
               title={`Updated ${brainFileTitle(
@@ -3089,6 +3155,32 @@ function ToolCallCardDefault({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ToolCallDisplayIcon({ icon }: { icon: ToolCallDisplay["icon"] }) {
+  if (icon === "brain") return <Brain size={11} strokeWidth={1.75} />;
+  if (icon === "file") return <FileText size={11} strokeWidth={1.75} />;
+  if (icon === "search") return <Search size={11} strokeWidth={1.75} />;
+  if (icon === "terminal") return <TerminalSquare size={11} strokeWidth={1.75} />;
+  return <Wrench size={11} strokeWidth={1.75} />;
+}
+
+function ToolCallDisplayDetail({ detail }: { detail: ToolCallDisplayDetailModel }) {
+  const className =
+    detail.kind === "command"
+      ? "inline-flex min-w-0 max-w-[min(420px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+      : detail.kind === "file"
+        ? "inline-flex min-w-0 max-w-[min(260px,calc(100vw-180px))] items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-px text-[10.5px] leading-4 text-ink/60"
+        : "inline-flex shrink-0 items-center text-[10.5px] leading-4 text-ink-subtle";
+
+  return (
+    <span title={detail.title ?? detail.label} className={className}>
+      {detail.kind === "file" ? (
+        <FileText size={10} strokeWidth={1.8} className="shrink-0" />
+      ) : null}
+      <span className="min-w-0 truncate">{detail.label}</span>
+    </span>
   );
 }
 
@@ -3714,12 +3806,6 @@ function SubagentProgressView({
       </div>
     </div>
   );
-}
-
-function formatToolName(name: string) {
-  const normalized = name.replace(/[_-]+/g, " ").trim();
-  if (!normalized) return "Tool call";
-  return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
 }
 
 function SessionInspector({

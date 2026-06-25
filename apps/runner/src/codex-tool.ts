@@ -963,6 +963,21 @@ export function codexRuntimeEventsFromJsonEvent(
     ];
   }
 
+  if (normalizedType === "turn.completed") {
+    return [
+      {
+        type: "engine.activity",
+        payload: {
+          messageId,
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        },
+      },
+    ];
+  }
+
   if (normalizedType !== "item.started" && normalizedType !== "item.completed") return [];
 
   const item = codexItemFromEvent(event);

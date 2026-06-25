@@ -518,6 +518,32 @@ describe("codexRuntimeEventsFromJsonEvent", () => {
     ]);
   });
 
+  it("maps Codex turn completion to an internal completed engine activity", () => {
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          type: "turn.completed",
+          usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "engine.activity",
+        payload: {
+          messageId: "msg_assistant",
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        },
+      },
+    ]);
+  });
+
   it("maps Codex command execution JSONL to shell tool events", () => {
     expect(
       codexRuntimeEventsFromJsonEvent(

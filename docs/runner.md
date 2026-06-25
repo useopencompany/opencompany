@@ -116,6 +116,8 @@ Important details:
 - AMP owns its coding checkout and may clone the selected connected repository directly into
   `work/` for that tool run.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
+- Codex engine sessions launch Codex from `/home/user/workspace/codex`, a plain top-level work
+  folder outside the runner-managed scratch Git repository at `work/`.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
   the full serialized `.agent` source and Brain manifest. This directory is root-owned and not
   used for tool runtime state.

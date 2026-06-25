@@ -327,6 +327,29 @@ describe("prepareWorkspace", () => {
     ).toBe(true);
   });
 
+  it("creates the top-level Codex work root only for Codex engine sessions", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: "agent",
+      createCodexRoot: true,
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("'/home/user/workspace/codex'"),
+      { user: "root", timeoutMs: 30_000 },
+    );
+  });
+
   it("skips the GitHub credential helper when authenticated git is not needed", async () => {
     const sandbox = {
       commands: {
