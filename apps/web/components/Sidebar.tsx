@@ -332,7 +332,7 @@ function SidebarLive({
 }: SidebarChromeProps & { initialSessions: SidebarSession[] }) {
   const router = useRouter();
   const { userId } = useWorkspaceContext();
-  const { agentSessions, sessionStars } = useCollections();
+  const { agents, agentSessions, sessionStars } = useCollections();
   const { showError, showToast } = useToast();
   // Sessions with an in-flight pin toggle. Guards rapid re-clicks from firing an
   // insert against an already-optimistically-inserted star (duplicate key).
@@ -341,14 +341,15 @@ function SidebarLive({
   const { data: sessionRows, isLoading: sessionsBusy } = useLiveQuery((q) =>
     q.from({ session: agentSessions }),
   );
+  const { data: agentRows, isLoading: agentsBusy } = useLiveQuery((q) => q.from({ agent: agents }));
   const { data: starRows } = useLiveQuery((q) => q.from({ star: sessionStars }));
   const liveSessions = useMemo(
-    () => deriveSidebarSessions(sessionRows ?? [], starRows ?? []),
-    [sessionRows, starRows],
+    () => deriveSidebarSessions(sessionRows ?? [], starRows ?? [], agentRows ?? []),
+    [sessionRows, starRows, agentRows],
   );
   // Keep showing the server list until the collection has hydrated, so there is
   // no skeleton flash on navigation.
-  const sessions = sessionsBusy ? initialSessions : liveSessions;
+  const sessions = sessionsBusy || agentsBusy ? initialSessions : liveSessions;
 
   // Star state is server-truth (per user, persisted, cross-device). Toggling
   // inserts/deletes a row in the session_stars collection optimistically; the
