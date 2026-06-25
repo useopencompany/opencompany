@@ -792,18 +792,25 @@ export function buildAssistantTurnParts(
   if (modelParts) {
     const turnParts: AssistantTurnPart[] = [...reasoningParts];
     const isCodexEngine = engineActivity?.engine === "codex";
-    if (isCodexEngine) {
-      turnParts.push(
-        ...buildEventAssistantTurnParts(events, message.id, toolCallsById, {
+    const codexEventParts = isCodexEngine
+      ? buildEventAssistantTurnParts(events, message.id, toolCallsById, {
           textTone: "work",
-        }),
-      );
+        })
+      : [];
+    const codexModelText = isCodexEngine ? modelTextFromParts(modelParts) : "";
+    const codexReplayPlan = isCodexEngine
+      ? reconcileCompletedCodexTextParts(codexEventParts, codexModelText)
+      : { eventParts: [], skipModelText: false };
+    if (isCodexEngine) {
+      turnParts.push(...codexReplayPlan.eventParts);
     }
 
     for (const part of modelParts) {
       if (part.type === "text") {
         const text = readString(part.text);
-        if (text) turnParts.push({ type: "text", text });
+        if (text && !(codexReplayPlan.skipModelText && text === codexModelText)) {
+          turnParts.push({ type: "text", text });
+        }
         continue;
       }
 
@@ -1398,6 +1405,60 @@ function buildEventAssistantTurnParts(
   return options.promoteTrailingTextAfterLastToolCall
     ? promoteTrailingTextAfterLastToolCall(parts)
     : parts;
+}
+
+function modelTextFromParts(parts: Record<string, unknown>[]) {
+  return parts
+    .filter((part) => part.type === "text")
+    .map((part) => readString(part.text))
+    .join("")
+    .trim();
+}
+
+function reconcileCompletedCodexTextParts(
+  eventParts: AssistantTurnPart[],
+  modelText: string,
+): { eventParts: AssistantTurnPart[]; skipModelText: boolean } {
+  if (!modelText || eventParts.length === 0) return { eventParts, skipModelText: false };
+
+  const eventText = assistantPartText(eventParts);
+  if (!eventText) return { eventParts, skipModelText: false };
+
+  const lastToolCallIndex = eventParts.findLastIndex((part) => part.type === "tool-call");
+  if (lastToolCallIndex < 0) {
+    return textEquivalent(eventText, modelText)
+      ? { eventParts: [], skipModelText: false }
+      : { eventParts, skipModelText: false };
+  }
+
+  const trailingText = assistantPartText(eventParts.slice(lastToolCallIndex + 1));
+  if (trailingText && textEquivalent(trailingText, modelText)) {
+    return {
+      eventParts: eventParts.slice(0, lastToolCallIndex + 1),
+      skipModelText: false,
+    };
+  }
+
+  if (textEquivalent(eventText, modelText)) {
+    return {
+      eventParts: promoteTrailingTextAfterLastToolCall(eventParts),
+      skipModelText: true,
+    };
+  }
+
+  return { eventParts, skipModelText: false };
+}
+
+function assistantPartText(parts: AssistantTurnPart[]) {
+  return parts
+    .filter((part): part is Extract<AssistantTurnPart, { type: "text" }> => part.type === "text")
+    .map((part) => part.text)
+    .join("")
+    .trim();
+}
+
+function textEquivalent(left: string, right: string) {
+  return left.trim() === right.trim();
 }
 
 function promoteTrailingTextAfterLastToolCall(parts: AssistantTurnPart[]): AssistantTurnPart[] {

@@ -678,7 +678,8 @@ class CodexAppServerRpcError extends Error {
 
 export function createCodexAppServerAccumulator() {
   let sessionId: string | null = null;
-  let deltaText = "";
+  let latestAgentMessageText = "";
+  const agentMessageTextByItemId = new Map<string, string>();
   let finalAgentText = "";
   let error: string | null = null;
   let usage: CodexUsage | null = null;
@@ -697,7 +698,12 @@ export function createCodexAppServerAccumulator() {
 
       if (notification.method === "item/agentMessage/delta") {
         const delta = rawString(params?.delta);
-        if (delta) deltaText += delta;
+        if (delta) {
+          const itemId = firstString(params?.itemId) ?? "__default_agent_message";
+          const next = `${agentMessageTextByItemId.get(itemId) ?? ""}${delta}`;
+          agentMessageTextByItemId.set(itemId, next);
+          latestAgentMessageText = next;
+        }
         return delta?.trim() ? compactActivity(`Codex: ${delta}`) : null;
       }
 
@@ -746,7 +752,7 @@ export function createCodexAppServerAccumulator() {
       return null;
     },
     summary(): CodexAppServerSummary {
-      const result = (finalAgentText || deltaText).trim();
+      const result = (finalAgentText || latestAgentMessageText).trim();
       return {
         sessionId,
         status: error && status === "unknown" ? "error" : status,

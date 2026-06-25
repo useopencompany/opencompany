@@ -125,6 +125,34 @@ describe("createCodexAppServerAccumulator", () => {
     expect(accumulator.summary().result).toBe("Hello world");
   });
 
+  it("uses only the latest agent-message delta item as the fallback final result", async () => {
+    const accumulator = createCodexAppServerAccumulator();
+
+    accumulator.push({
+      method: "item/agentMessage/delta",
+      params: { itemId: "item_progress", delta: "I am checking " },
+    });
+    accumulator.push({
+      method: "item/agentMessage/delta",
+      params: { itemId: "item_progress", delta: "the repository." },
+    });
+    accumulator.push({
+      method: "item/agentMessage/delta",
+      params: { itemId: "item_final", delta: "Done" },
+    });
+    accumulator.push({
+      method: "item/agentMessage/delta",
+      params: { itemId: "item_final", delta: "." },
+    });
+    accumulator.push({
+      method: "turn/completed",
+      params: { threadId: "thread_123", turn: { status: "completed" } },
+    });
+    await accumulator.completed;
+
+    expect(accumulator.summary().result).toBe("Done.");
+  });
+
   it("maps interrupted turns to an error summary", async () => {
     const accumulator = createCodexAppServerAccumulator();
 
