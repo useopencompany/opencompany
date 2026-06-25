@@ -222,6 +222,16 @@ describe("runCodexAppServerTurn", () => {
       "thread/start",
       "turn/start",
     ]);
+    expect(
+      sandbox.sentMessages().find((message) => message.method === "thread/start"),
+    ).toMatchObject({
+      params: {
+        config: {
+          model_reasoning_effort: "high",
+          plan_mode_reasoning_effort: "xhigh",
+        },
+      },
+    });
     expect(sandbox.startedCommands()).toEqual(
       expect.arrayContaining([
         expect.stringContaining("codex app-server --listen"),
@@ -265,8 +275,17 @@ describe("runCodexAppServerTurn", () => {
     expect(
       sandbox.sentMessages().find((message) => message.method === "thread/resume"),
     ).toMatchObject({
-      params: { threadId: "thread_existing" },
+      params: {
+        threadId: "thread_existing",
+        config: {
+          model_reasoning_effort: "medium",
+        },
+      },
     });
+    const resumeMessage = sandbox
+      .sentMessages()
+      .find((message) => message.method === "thread/resume");
+    expect(JSON.stringify(resumeMessage?.params)).not.toContain("plan_mode_reasoning_effort");
     expect(summary.sessionId).toBe("thread_existing");
   });
 

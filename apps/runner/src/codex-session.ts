@@ -17,25 +17,17 @@ import { flushBraintrust, traceBraintrust } from "@opencompany/observability/bra
 import { and, eq, isNull } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { loadConnectedGitHubInstallation } from "./amp-tool";
-import { runCodexAppServerTurn } from "./codex-app-server";
+import { type CodexAppServerSummary, runCodexAppServerTurn } from "./codex-app-server";
 import {
-  buildCodexCommand,
-  buildCodexConfigForAuth,
   type CodexCliAuth,
   codexApiKeyFallbackEnabled,
   codexHostedToolUsage,
   codexRuntimeEventsFromJsonEvent,
-  createCodexStreamAccumulator,
   ensureCodexInstalled,
   loadWorkspaceCodexCliAuth,
   persistRefreshedWorkspaceCodexAuth,
 } from "./codex-tool";
-import {
-  buildGitHubCommandEnv,
-  createKnownSecretRedactor,
-  gitAuthHeader,
-  truncateText,
-} from "./coding-agent-shared";
+import { createKnownSecretRedactor, gitAuthHeader, truncateText } from "./coding-agent-shared";
 import { getDb } from "./db";
 import { brokerActive, brokerBaseUrl, type RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
@@ -60,21 +52,9 @@ import {
   recordSandboxUsageBestEffort,
   type SandboxBillingSnapshot,
 } from "./run-context";
-import {
-  RunAbortError,
-  RunLeaseBusyError,
-  RunLeaseLostError,
-  withRunControlChecks,
-} from "./run-control";
+import { RunAbortError, RunLeaseBusyError, RunLeaseLostError } from "./run-control";
 import { MessageTurnFailedError } from "./runner-errors";
-import {
-  commandExitResult,
-  guardCommandStreamCallbacks,
-  isCommandTimeoutError,
-  killSandbox,
-  type SandboxHandle,
-  sandboxLayout,
-} from "./sandbox";
+import { commandExitResult, killSandbox, type SandboxHandle, sandboxLayout } from "./sandbox";
 import {
   acquireCodexSandboxForTurn,
   isSessionArchived,
@@ -88,7 +68,6 @@ import { recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "codex-session" });
 
-const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
 // CODEX_HOME for session runs lives OUTSIDE the work root the model operates in (Codex is
 // launched with `--cd ${codexWorkRoot}`). It must still be user-writable because Codex refreshes
 // file-backed ChatGPT credentials during runs, so it intentionally does not live under the
@@ -107,7 +86,7 @@ type CodexUserMessage = {
 };
 
 type CodexGitHubAuth = Awaited<ReturnType<typeof loadGitHubAuth>>;
-type CodexCliSummary = ReturnType<ReturnType<typeof createCodexStreamAccumulator>["summary"]> & {
+type CodexSessionSummary = CodexAppServerSummary & {
   brokered: boolean;
   subscriptionBacked: boolean;
 };
@@ -258,6 +237,18 @@ async function runCodexTurnWithContext(
     setActiveRun(input.sessionId, ctx.leaseId, ctx.leaseOwner, ctx.controller);
     const checkAbort = createLeaseAbortCheck(ctx);
     await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
+    const planModeReasoningEffort = row.session.codexPlanModeEnabled
+      ? codexReasoningEffortForSession(row.session.codexPlanModeReasoningEffort)
+      : null;
+    if (row.session.codexPlanModeEnabled) {
+      await observeRunStep(ctx, "consume_codex_plan_mode", () =>
+        consumeCodexPlanModeForLease({
+          sessionId: input.sessionId,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+        }),
+      );
+    }
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -322,16 +313,14 @@ async function runCodexTurnWithContext(
       userMessage: codexUserMessage,
       hasGitHubAuth: Boolean(githubAuth.githubToken),
     });
-    const summary = await runCodexCli({
+    const summary = await runCodexAppServerSession({
       ctx,
       sandbox,
       row,
       task,
       model: codexModel,
       reasoningEffort: codexReasoningEffortForSession(row.session.codexReasoningEffort),
-      planModeReasoningEffort: row.session.codexPlanModeEnabled
-        ? codexReasoningEffortForSession(row.session.codexPlanModeReasoningEffort)
-        : null,
+      planModeReasoningEffort,
       existingEngineSessionId: row.session.engineSessionId,
       assistantMessageId,
       checkAbort,
@@ -543,7 +532,7 @@ async function runCodexTurnWithContext(
   }
 }
 
-async function runCodexCli(input: {
+async function runCodexAppServerSession(input: {
   ctx: ReturnType<typeof createRunContext>;
   sandbox: SandboxHandle;
   row: Awaited<ReturnType<typeof loadSession>>;
@@ -556,9 +545,11 @@ async function runCodexCli(input: {
   checkAbort: ReturnType<typeof createLeaseAbortCheck>;
   env: RunnerEnv;
   githubAuth: CodexGitHubAuth;
-}): Promise<CodexCliSummary> {
+}): Promise<CodexSessionSummary> {
   const runWithAuth = async (auth: CodexCliAuth) => {
     const layout = sandboxLayout(input.row.session.workdir, input.row.agent.isDefault);
+    const codexWorkRoot = layout.codexRoot;
+    const codexHome = CODEX_SESSION_HOME;
     const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
     const redact = createKnownSecretRedactor([
       auth.kind === "api" ? auth.apiKeyValue : null,
@@ -567,8 +558,25 @@ async function runCodexCli(input: {
       input.githubAuth.githubToken,
       input.githubAuth.githubAuthHeader,
     ]);
-    const commandPlan = buildCodexSessionCommandPlan({
-      codexWorkRoot: layout.codexRoot,
+
+    await runCodexCommandStage("CLI setup", redact, () => ensureCodexInstalled(input.sandbox));
+    await runCodexCommandStage("workspace setup", redact, () =>
+      input.sandbox.commands.run(
+        [
+          `mkdir -p ${shellQuote(codexWorkRoot)} ${shellQuote(codexHome)}`,
+          `chmod 700 ${shellQuote(codexHome)}`,
+        ].join(" && "),
+        { timeoutMs: 30_000 },
+      ),
+    );
+    if (serializedAuthJson) {
+      await input.sandbox.files.write(`${codexHome}/auth.json`, serializedAuthJson);
+    }
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: input.sandbox,
+      codexWorkRoot,
+      codexHome,
       task: input.task,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
@@ -576,131 +584,35 @@ async function runCodexCli(input: {
       existingEngineSessionId: input.existingEngineSessionId,
       auth,
       githubAuth: input.githubAuth,
-    });
-
-    await runCodexCommandStage("CLI setup", redact, () => ensureCodexInstalled(input.sandbox));
-    await runCodexCommandStage("workspace setup", redact, () =>
-      input.sandbox.commands.run(
-        [
-          `mkdir -p ${shellQuote(commandPlan.codexWorkRoot)} ${shellQuote(commandPlan.codexHome)}`,
-          `chmod 700 ${shellQuote(commandPlan.codexHome)}`,
-        ].join(" && "),
-        { timeoutMs: 30_000 },
-      ),
-    );
-    await input.sandbox.files.write(`${commandPlan.codexHome}/config.toml`, commandPlan.config);
-    if (serializedAuthJson) {
-      await input.sandbox.files.write(`${commandPlan.codexHome}/auth.json`, serializedAuthJson);
-    }
-
-    if (input.env.codexAppServerEnabled) {
-      const summary = await runCodexAppServerTurn({
-        sandbox: input.sandbox,
-        codexWorkRoot: commandPlan.codexWorkRoot,
-        codexHome: commandPlan.codexHome,
-        task: input.task,
-        model: input.model,
-        reasoningEffort: input.reasoningEffort,
-        planModeReasoningEffort: input.planModeReasoningEffort,
-        existingEngineSessionId: input.existingEngineSessionId,
-        auth,
-        githubAuth: input.githubAuth,
-        timeoutMs: input.env.codexTimeoutMs,
-        checkAbort: input.checkAbort,
-        onRuntimeEvents: async (events) =>
-          appendCodexRuntimeEvents({
-            ctx: input.ctx,
-            assistantMessageId: input.assistantMessageId,
-            events: events.map((event) => redactJsonEvent(event, redact)),
-          }),
-        onActivity: async (activity) =>
-          appendCodexActivity({
-            ctx: input.ctx,
-            assistantMessageId: input.assistantMessageId,
-            status: "running",
-            activity: truncateText(redact(activity.trim()), 500),
-          }),
-      });
-      await persistRefreshedWorkspaceCodexAuth({
-        sandbox: input.sandbox,
-        codexHome: commandPlan.codexHome,
-        workspaceId: input.row.workspace.id,
-        auth,
-      });
-      return {
-        ...summary,
-        result: redact(summary.result),
-        error: summary.error ? redact(summary.error) : null,
-        brokered: auth.brokered,
-        subscriptionBacked: auth.kind === "chatgpt",
-      };
-    }
-
-    const stream = createCodexStreamAccumulator();
-    let timedOut = false;
-    let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
-    const guardedRun = guardCommandStreamCallbacks({
-      envs: commandPlan.codexEnv,
       timeoutMs: input.env.codexTimeoutMs,
-      onStdout: async (data: string) => {
-        const activity = stream.push(redact(data));
-        await appendCodexRuntimeEvents({
+      checkAbort: input.checkAbort,
+      onRuntimeEvents: async (events) =>
+        appendCodexRuntimeEvents({
           ctx: input.ctx,
           assistantMessageId: input.assistantMessageId,
-          events: stream.drainEvents(),
-        });
-        if (activity) {
-          await appendCodexActivity({
-            ctx: input.ctx,
-            assistantMessageId: input.assistantMessageId,
-            status: "running",
-            activity: truncateText(activity.trim(), 500),
-          });
-        }
-      },
-    });
-
-    result = await withRunControlChecks(input.checkAbort, async () => {
-      try {
-        return await input.sandbox.commands.run(commandPlan.command, guardedRun.options);
-      } catch (error) {
-        const exitResult = commandExitResult(error);
-        if (exitResult) return exitResult;
-        if (isCommandTimeoutError(error)) {
-          timedOut = true;
-          await appendCodexActivity({
-            ctx: input.ctx,
-            assistantMessageId: input.assistantMessageId,
-            status: "running",
-            activity: "Codex timed out while collecting partial output",
-          });
-          return { stdout: "", stderr: "", exitCode: null };
-        }
-        throw error;
-      } finally {
-        await guardedRun.rethrow();
-      }
-    });
-
-    stream.finish();
-    await appendCodexRuntimeEvents({
-      ctx: input.ctx,
-      assistantMessageId: input.assistantMessageId,
-      events: stream.drainEvents(),
-    });
-    const summary = stream.summary({
-      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-      stdout: redact(String(result.stdout ?? "")),
-      stderr: redact(String(result.stderr ?? "")),
-      timedOut,
+          events: events.map((event) => redactJsonEvent(event, redact)),
+        }),
+      onActivity: async (activity) =>
+        appendCodexActivity({
+          ctx: input.ctx,
+          assistantMessageId: input.assistantMessageId,
+          status: "running",
+          activity: truncateText(redact(activity.trim()), 500),
+        }),
     });
     await persistRefreshedWorkspaceCodexAuth({
       sandbox: input.sandbox,
-      codexHome: commandPlan.codexHome,
+      codexHome,
       workspaceId: input.row.workspace.id,
       auth,
     });
-    return { ...summary, brokered: auth.brokered, subscriptionBacked: auth.kind === "chatgpt" };
+    return {
+      ...summary,
+      result: redact(summary.result),
+      error: summary.error ? redact(summary.error) : null,
+      brokered: auth.brokered,
+      subscriptionBacked: auth.kind === "chatgpt",
+    };
   };
 
   const workspaceCodexAuth = await loadWorkspaceCodexCliAuth(input.row.workspace.id);
@@ -773,51 +685,6 @@ function formatCodexCommandStageFailure(
   return `Codex ${stage} failed with exit code ${result.exitCode}.${suffix}`;
 }
 
-export function buildCodexSessionCommandPlan(input: {
-  codexWorkRoot: string;
-  task: string;
-  model: string;
-  reasoningEffort?: CodexReasoningEffort | null;
-  planModeReasoningEffort?: CodexReasoningEffort | null;
-  existingEngineSessionId: string | null;
-  auth: CodexCliAuth;
-  githubAuth: CodexGitHubAuth;
-}) {
-  const codexWorkRoot = input.codexWorkRoot;
-  const codexHome = CODEX_SESSION_HOME;
-  const codexEnv = {
-    CODEX_HOME: codexHome,
-    ...(input.auth.kind === "api" ? { [input.auth.apiKeyEnvVar]: input.auth.apiKeyValue } : {}),
-    ...(input.githubAuth.githubToken && input.githubAuth.githubAuthHeader
-      ? buildGitHubCommandEnv({
-          githubAuthHeader: input.githubAuth.githubAuthHeader,
-          githubToken: input.githubAuth.githubToken,
-          toolCallId: CODEX_TOOL_CALL_ID,
-        })
-      : {}),
-  };
-  const command = [
-    `cd ${shellQuote(codexWorkRoot)}`,
-    `export PATH=${CODEX_BIN_PATH}:"$PATH"`,
-    buildCodexCommand({
-      task: input.task,
-      workRoot: codexWorkRoot,
-      model: input.model,
-      sessionId: input.existingEngineSessionId,
-      reasoningEffort: input.reasoningEffort ?? null,
-      planModeReasoningEffort: input.planModeReasoningEffort ?? null,
-    }),
-  ].join(" && ");
-
-  return {
-    codexWorkRoot,
-    codexHome,
-    codexEnv,
-    command,
-    config: buildCodexConfigForAuth(input.auth),
-  };
-}
-
 async function loadCodexUserMessage(
   sessionId: string,
   messageId: string,
@@ -881,6 +748,27 @@ async function persistEngineSessionIdForLease(input: {
         eq(agentSessions.id, input.sessionId),
         eq(agentSessions.runLeaseId, input.leaseId),
         eq(agentSessions.runLeaseOwner, input.leaseOwner),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .returning({ id: agentSessions.id });
+  await requireLeaseWrite(Boolean(updated));
+}
+
+export async function consumeCodexPlanModeForLease(input: {
+  sessionId: string;
+  leaseId: string;
+  leaseOwner: string;
+}) {
+  const [updated] = await getDb()
+    .update(agentSessions)
+    .set({ codexPlanModeEnabled: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(agentSessions.id, input.sessionId),
+        eq(agentSessions.runLeaseId, input.leaseId),
+        eq(agentSessions.runLeaseOwner, input.leaseOwner),
+        eq(agentSessions.codexPlanModeEnabled, true),
         isNull(agentSessions.archivedAt),
       ),
     )
@@ -986,7 +874,7 @@ function codexAssistantContent(input: {
 // The engine session id is persisted whenever Codex produced one, regardless of turn status: a
 // failed or timed-out turn still leaves a resumable Codex thread (partial rollout), so the user's
 // next message continues the same context instead of starting cold.
-export function resumableCodexSessionId(input: Pick<CodexCliSummary, "sessionId">) {
+export function resumableCodexSessionId(input: Pick<CodexSessionSummary, "sessionId">) {
   return input.sessionId;
 }
 
