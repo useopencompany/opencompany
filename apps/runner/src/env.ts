@@ -48,6 +48,9 @@ export type RunnerEnv = {
   // opencode timeout behavior: timeouts surface partial output but never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
+  // Feature flag for the persistent Codex app-server runner path. Disabled by default while the
+  // existing `codex exec --json` path remains the production fallback.
+  codexAppServerEnabled: boolean;
   // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
   // validation + coercion always run; this only gates the small-model fallback. Default on.
   toolArgRepairEnabled: boolean;
@@ -92,6 +95,7 @@ export function loadEnv(): RunnerEnv {
     opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.5",
+    codexAppServerEnabled: optionalBooleanEnv("RUNNER_CODEX_APP_SERVER_ENABLED", false),
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),

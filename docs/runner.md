@@ -271,6 +271,7 @@ Required environment variables:
 - `OPENAI_CODEX_API_KEY` (optional; server-side upstream credential for the broker's `openai` provider and local-dev `codex_coder` fallback)
 - `RUNNER_CODEX_MODEL` (optional, defaults to `gpt-5.5`)
 - `RUNNER_CODEX_TIMEOUT_MS` (optional, defaults to `3600000`; 1 hour)
+- `RUNNER_CODEX_APP_SERVER_ENABLED` (optional, defaults to `false`; routes Codex engine turns through a persistent `codex app-server` daemon. `codex_coder` is unaffected.)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`

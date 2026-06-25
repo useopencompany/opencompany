@@ -1,7 +1,8 @@
 # Codex E2B Toolbox Template
 
 This template extends E2B's `codex` template and bakes in the runner's repo workflow toolbox:
-`rg`, `fd`, `jq`, `curl`, `git`, `gh`, Node/npm, Bun `1.3.2`, and `@openai/codex@0.132.0`.
+`rg`, `fd`, `jq`, `curl`, `git`, `gh`, Node/npm, Bun `1.3.2`,
+`@openai/codex@0.132.0`, Playwright `1.60.0`, and Playwright-managed Chromium.
 
 ## Build
 
@@ -28,6 +29,9 @@ bun --version
 node --version
 npm --version
 codex --version
+playwright --version
+playwright screenshot --browser chromium about:blank /tmp/playwright-chromium-smoke.png
+rm -f /tmp/playwright-chromium-smoke.png
 ```
 
 ## Rollout

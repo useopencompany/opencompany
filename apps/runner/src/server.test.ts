@@ -35,6 +35,7 @@ const env = {
   opencodeTimeoutMs: 1_200_000,
   codexTimeoutMs: 1_200_000,
   codexModel: "gpt-5.5",
+  codexAppServerEnabled: false,
   toolArgRepairEnabled: false,
   jobLeaseTtlMs: 300_000,
   jobMaxLeaseBusyAttempts: 10,

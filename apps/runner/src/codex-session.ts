@@ -17,6 +17,7 @@ import { flushBraintrust, traceBraintrust } from "@opencompany/observability/bra
 import { and, eq, isNull } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { loadConnectedGitHubInstallation } from "./amp-tool";
+import { runCodexAppServerTurn } from "./codex-app-server";
 import {
   buildCodexCommand,
   buildCodexConfigForAuth,
@@ -592,6 +593,49 @@ async function runCodexCli(input: {
       await input.sandbox.files.write(`${commandPlan.codexHome}/auth.json`, serializedAuthJson);
     }
 
+    if (input.env.codexAppServerEnabled) {
+      const summary = await runCodexAppServerTurn({
+        sandbox: input.sandbox,
+        codexWorkRoot: commandPlan.codexWorkRoot,
+        codexHome: commandPlan.codexHome,
+        task: input.task,
+        model: input.model,
+        reasoningEffort: input.reasoningEffort,
+        planModeReasoningEffort: input.planModeReasoningEffort,
+        existingEngineSessionId: input.existingEngineSessionId,
+        auth,
+        githubAuth: input.githubAuth,
+        timeoutMs: input.env.codexTimeoutMs,
+        checkAbort: input.checkAbort,
+        onRuntimeEvents: async (events) =>
+          appendCodexRuntimeEvents({
+            ctx: input.ctx,
+            assistantMessageId: input.assistantMessageId,
+            events: events.map((event) => redactJsonEvent(event, redact)),
+          }),
+        onActivity: async (activity) =>
+          appendCodexActivity({
+            ctx: input.ctx,
+            assistantMessageId: input.assistantMessageId,
+            status: "running",
+            activity: truncateText(redact(activity.trim()), 500),
+          }),
+      });
+      await persistRefreshedWorkspaceCodexAuth({
+        sandbox: input.sandbox,
+        codexHome: commandPlan.codexHome,
+        workspaceId: input.row.workspace.id,
+        auth,
+      });
+      return {
+        ...summary,
+        result: redact(summary.result),
+        error: summary.error ? redact(summary.error) : null,
+        brokered: auth.brokered,
+        subscriptionBacked: auth.kind === "chatgpt",
+      };
+    }
+
     const stream = createCodexStreamAccumulator();
     let timedOut = false;
     let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
@@ -888,6 +932,14 @@ async function appendCodexRuntimeEvents(input: {
   }
 }
 
+function redactJsonEvent(event: Record<string, unknown>, redact: (value: string) => string) {
+  try {
+    return JSON.parse(redact(JSON.stringify(event))) as Record<string, unknown>;
+  } catch {
+    return event;
+  }
+}
+
 function buildCodexTask(input: {
   agentInstructions: string;
   userMessage: CodexUserMessage;
@@ -902,6 +954,7 @@ function buildCodexTask(input: {
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Do not rely on GH_REPO."
       : "No workspace GitHub installation token is available. Public repositories may still be cloned if needed.",
     "Use the user's request to decide whether and what repository to clone or inspect.",
+    "When the user asks you to start a background or long-running process that should survive future turns, detach it from the command shell, for example `nohup setsid <command> >/tmp/<name>.log 2>&1 < /dev/null & echo $!`. Do not report transient shell job ids from plain `<command> &` as durable process ids.",
     "",
     "Agent instructions:",
     input.agentInstructions.trim() || "No additional agent instructions.",

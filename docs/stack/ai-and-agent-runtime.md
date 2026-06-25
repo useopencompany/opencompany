@@ -293,12 +293,17 @@ per tool call via the optional `model` argument (validated against `AGENT_MODEL_
 defaulting to a fixed platform model when omitted. The memory CLI's model-backed retrieval routes
 through the same broker (`MEMORY_GATEWAY_BASE_URL` + token in place of the raw key).
 
-Codex runs headless as `codex exec --json --sandbox workspace-write --ask-for-approval never`
-inside the template selected by `OPENCOMPANY_CODEX_E2B_TEMPLATE`, defaulting to E2B's `codex`
-template. Codex templates are expected to be provisioned with 8 vCPU and 8192 MB RAM; the runner
-records Codex sandbox usage against that allocation for billing and observability. The repo-owned
-`apps/runner/e2b/codex` template builds `opencompany-codex-toolbox`, extending E2B's `codex`
-template with `rg`, `fd`, `jq`, `curl`, `git`, `gh`, Bun, Node/npm, and the pinned Codex CLI.
+Codex engine sessions run headless inside the template selected by
+`OPENCOMPANY_CODEX_E2B_TEMPLATE`, defaulting to E2B's `codex` template. By default the runner
+spawns one `codex exec --json --sandbox workspace-write` process per turn. When
+`RUNNER_CODEX_APP_SERVER_ENABLED=true`, Codex engine turns instead route through a persistent
+`codex app-server --listen ws://127.0.0.1:...` daemon in the same E2B sandbox, with a short-lived
+per-turn Bun JSONL bridge to the app-server websocket. `codex_coder` remains on `codex exec`.
+Codex templates are expected to be
+provisioned with 8 vCPU and 8192 MB RAM; the runner records Codex sandbox usage against that
+allocation for billing and observability. The repo-owned `apps/runner/e2b/codex` template builds
+`opencompany-codex-toolbox`, extending E2B's `codex` template with `rg`, `fd`, `jq`, `curl`, `git`,
+`gh`, Bun, Node/npm, the pinned Codex CLI, Playwright, and Playwright-managed Chromium.
 Production/company runs use the workspace Codex account connected in company
 settings: the runner writes an isolated `${CODEX_HOME}/config.toml` with file-backed ChatGPT auth,
 injects the encrypted workspace `auth.json` cache into that home, and rotates the encrypted cache
