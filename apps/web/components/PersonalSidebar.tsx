@@ -20,6 +20,7 @@ import {
   Sparkles,
   Wrench,
 } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -42,6 +43,8 @@ import { writeSessionDragPayload } from "@/types/session-layout";
 
 // How long the red highlight shows on a session row before it is optimistically removed.
 const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
+// Debounce session route prefetches so moving across history rows does not stampede the dev server.
+const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 
 type SidebarSession = SidebarSessionPayload;
 
@@ -53,19 +56,18 @@ function CapabilityNavRow({
   active,
   count,
   proBadge,
-  onClick,
+  href,
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
   count?: number;
   proBadge?: boolean;
-  onClick: () => void;
+  href: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <Link
+      href={href}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
@@ -86,7 +88,7 @@ function CapabilityNavRow({
           {count}
         </span>
       )}
-    </button>
+    </Link>
   );
 }
 
@@ -318,7 +320,9 @@ function SessionRow({
   onArchive: (sessionId: string, active: boolean) => void;
   onRename: (sessionId: string, title: string) => void;
 }) {
+  const router = useRouter();
   const [archiving, setArchiving] = useState(false);
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const archiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Inline rename: double-click the title (or pick Rename from the right-click menu)
   // to edit in place. `editing` swaps the title button for an input; `menu` holds the
@@ -334,9 +338,25 @@ function SessionRow({
   // canvas can swap/flash panes even when the URL doesn't change.
   const drag = useOptionalSessionDrag();
   const openSession = useOptionalOpenSession();
+  const href = personalPaths.session(session.id);
+
+  const schedulePrefetch = useCallback(() => {
+    if (prefetchTimerRef.current) return;
+    prefetchTimerRef.current = setTimeout(() => {
+      prefetchTimerRef.current = null;
+      router.prefetch(href);
+    }, SESSION_PREFETCH_HOVER_DELAY_MS);
+  }, [href, router]);
+
+  const cancelPrefetch = useCallback(() => {
+    if (!prefetchTimerRef.current) return;
+    clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  }, []);
 
   useEffect(() => {
     return () => {
+      if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
       if (archiveTimerRef.current) clearTimeout(archiveTimerRef.current);
     };
   }, []);
@@ -433,6 +453,11 @@ function SessionRow({
       ) : (
         <button
           type="button"
+          onMouseEnter={schedulePrefetch}
+          onMouseLeave={cancelPrefetch}
+          onFocus={schedulePrefetch}
+          onBlur={cancelPrefetch}
+          onTouchStart={schedulePrefetch}
           onClick={() => {
             openSession?.openSession({ id: session.id, name: session.title });
             onSelect(session.id);
@@ -755,9 +780,8 @@ function PersonalSidebarView({
 
         {/* Primary nav */}
         <nav className="flex flex-col gap-px px-2 pt-2">
-          <button
-            type="button"
-            onClick={() => router.push(personalPaths.home)}
+          <Link
+            href={personalPaths.home}
             className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
               inboxActive
                 ? "bg-surface-active text-ink"
@@ -774,10 +798,9 @@ function PersonalSidebarView({
                 {inboxCount}
               </span>
             ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push(personalPaths.brain)}
+          </Link>
+          <Link
+            href={personalPaths.brain}
             className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
               activePanel === "brain"
                 ? "bg-surface-active text-ink"
@@ -792,10 +815,9 @@ function PersonalSidebarView({
               }
             />
             <span className="truncate tracking-[-0.005em]">Personal Brain</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push(personalPaths.routines)}
+          </Link>
+          <Link
+            href={personalPaths.routines}
             className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
               activePanel === "routines"
                 ? "bg-surface-active text-ink"
@@ -810,7 +832,7 @@ function PersonalSidebarView({
               }
             />
             <span className="truncate tracking-[-0.005em]">Routines</span>
-          </button>
+          </Link>
         </nav>
 
         {/* Scrollable body */}
@@ -841,9 +863,8 @@ function PersonalSidebarView({
           )}
 
           <Section title="Configuration">
-            <button
-              type="button"
-              onClick={() => router.push(personalPaths.agent)}
+            <Link
+              href={personalPaths.agent}
               className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
                 activePanel === "agent"
                   ? "bg-surface-active text-ink"
@@ -858,12 +879,12 @@ function PersonalSidebarView({
                 }
               />
               <span className="truncate tracking-[-0.005em]">Behavior</span>
-            </button>
+            </Link>
             <CapabilityNavRow
               icon={ScrollText}
               label="Soul"
               active={activeFilePath === "soul.md"}
-              onClick={() => router.push(personalPaths.soul)}
+              href={personalPaths.soul}
             />
             {proMode && (
               <CapabilityNavRow
@@ -871,7 +892,7 @@ function PersonalSidebarView({
                 label="Memory"
                 active={activePanel === "memory"}
                 proBadge
-                onClick={() => router.push(personalPaths.memory)}
+                href={personalPaths.memory}
               />
             )}
             <CapabilityGroupRow
@@ -889,27 +910,27 @@ function PersonalSidebarView({
                 label="Skills"
                 count={skillCount}
                 active={activePanel === "skills"}
-                onClick={() => router.push(personalPaths.skills)}
+                href={personalPaths.skills}
               />
               <CapabilityNavRow
                 icon={Plug}
                 label="Integrations"
                 count={integrationCount}
                 active={activePanel === "integrations"}
-                onClick={() => router.push(personalPaths.integrations)}
+                href={personalPaths.integrations}
               />
               <CapabilityNavRow
                 icon={Wrench}
                 label="Tools"
                 count={toolCount}
                 active={activePanel === "tools"}
-                onClick={() => router.push(personalPaths.tools)}
+                href={personalPaths.tools}
               />
               <CapabilityNavRow
                 icon={MessageCircle}
                 label="Channels"
                 active={activePanel === "channels"}
-                onClick={() => router.push(personalPaths.channels)}
+                href={personalPaths.channels}
               />
             </CapabilityGroupRow>
           </Section>
