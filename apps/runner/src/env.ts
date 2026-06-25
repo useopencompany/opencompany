@@ -87,7 +87,7 @@ export function loadEnv(): RunnerEnv {
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", 1_200_000),
-    codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.2-codex",
+    codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.5",
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildCodexSessionCommandPlan } from "./codex-session";
 
 const auth = {
+  kind: "api" as const,
   baseUrl: "https://api.openai.com/v1",
   apiKeyEnvVar: "CODEX_API_KEY",
   apiKeyValue: "codex_secret_123",
@@ -13,7 +14,7 @@ describe("buildCodexSessionCommandPlan", () => {
     const plan = buildCodexSessionCommandPlan({
       workRoot: "/home/user/workspace/work",
       task: "implement the requested issue",
-      model: "gpt-5.2-codex",
+      model: "gpt-5.5",
       existingEngineSessionId: null,
       auth,
       githubAuth: { githubToken: null, githubAuthHeader: null },
@@ -38,22 +39,39 @@ describe("buildCodexSessionCommandPlan", () => {
     const plan = buildCodexSessionCommandPlan({
       workRoot: "/home/user/workspace/work",
       task: "continue the prior work",
-      model: "gpt-5.2-codex",
+      model: "gpt-5.5",
       existingEngineSessionId: "codex-session-123",
       auth,
       githubAuth: { githubToken: null, githubAuthHeader: null },
     });
 
     expect(plan.command).toContain(
-      "resume -m 'gpt-5.2-codex' 'codex-session-123' 'continue the prior work'",
+      "resume -m 'gpt-5.5' 'codex-session-123' 'continue the prior work'",
     );
+  });
+
+  it("passes Codex reasoning config overrides", () => {
+    const plan = buildCodexSessionCommandPlan({
+      workRoot: "/home/user/workspace/work",
+      task: "reason carefully",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: "xhigh",
+      existingEngineSessionId: null,
+      auth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+    });
+
+    expect(plan.command).toContain("-m 'gpt-5.5'");
+    expect(plan.command).toContain("-c 'model_reasoning_effort=high'");
+    expect(plan.command).toContain("-c 'plan_mode_reasoning_effort=xhigh'");
   });
 
   it("passes GitHub auth without setting a default repository", () => {
     const plan = buildCodexSessionCommandPlan({
       workRoot: "/home/user/workspace/work",
       task: "clone the right repo if needed",
-      model: "gpt-5.2-codex",
+      model: "gpt-5.5",
       existingEngineSessionId: null,
       auth,
       githubAuth: {
@@ -74,5 +92,24 @@ describe("buildCodexSessionCommandPlan", () => {
     expect(plan.codexEnv).not.toHaveProperty("GH_REPO");
     expect(plan.command).not.toContain("github_token_123");
     expect(plan.command).not.toContain("github_basic_secret");
+  });
+
+  it("uses saved ChatGPT auth without API key environment variables", () => {
+    const plan = buildCodexSessionCommandPlan({
+      workRoot: "/home/user/workspace/work",
+      task: "use workspace subscription",
+      model: "gpt-5.5",
+      existingEngineSessionId: null,
+      auth: { kind: "chatgpt", authJson: { OPENAI_REFRESH_TOKEN: "secret" }, brokered: false },
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+    });
+
+    expect(plan.codexEnv).toEqual({
+      CODEX_HOME: "/home/user/workspace/work/codex/.codex",
+    });
+    expect(plan.config).toContain('cli_auth_credentials_store = "file"');
+    expect(plan.config).toContain('forced_login_method = "chatgpt"');
+    expect(plan.config).not.toContain("model_provider");
+    expect(plan.config).not.toContain("env_key");
   });
 });

@@ -815,7 +815,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bSandboxIdleTimeoutMs: 30_000,
     opencodeTimeoutMs: 1_200_000,
     codexTimeoutMs: 1_200_000,
-    codexModel: "gpt-5.2-codex",
+    codexModel: "gpt-5.5",
     toolArgRepairEnabled: false,
     jobLeaseTtlMs: 300_000,
     jobMaxLeaseBusyAttempts: 10,

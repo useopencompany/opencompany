@@ -1,4 +1,9 @@
-import type { AgentConfig, AgentEngine, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentEngine,
+  CodexReasoningEffort,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import type { InboxItemArtifact } from "@opencompany/db/schema";
 
 /**
@@ -43,6 +48,9 @@ export type AgentSessionRow = {
   source: "user" | "agent" | "memory" | "whatsapp";
   model_provider: string;
   model_name: string;
+  codex_reasoning_effort: CodexReasoningEffort;
+  codex_plan_mode_enabled: boolean;
+  codex_plan_mode_reasoning_effort: CodexReasoningEffort;
   parent_session_id: string | null;
   parent_message_id: string | null;
   parent_tool_call_id: string | null;

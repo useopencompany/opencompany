@@ -1,4 +1,4 @@
-import type { AgentModelId, JsonValue } from "./types";
+import type { AgentModelId, CodexReasoningEffort, JsonValue } from "./types";
 
 export type ModelProviderOptions = Record<string, Record<string, JsonValue>>;
 export type ReasoningExposure = "hidden" | "summary" | "raw";
@@ -43,6 +43,36 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
   },
 } satisfies ModelProviderOptions;
 
+export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.5";
+export const CODEX_AGENT_MODEL_IDS = [
+  "openai/gpt-5.5",
+  "openai/gpt-5.4",
+  "openai/gpt-5.4-mini",
+] as const satisfies readonly AgentModelId[];
+export const CODEX_REASONING_EFFORTS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly CodexReasoningEffort[];
+
+const CODEX_MODEL_ID_SET = new Set<string>(CODEX_AGENT_MODEL_IDS);
+const CODEX_REASONING_EFFORT_SET = new Set<string>(CODEX_REASONING_EFFORTS);
+
+export function isCodexModelId(value: string): value is AgentModelId {
+  return CODEX_MODEL_ID_SET.has(value);
+}
+
+export function isCodexReasoningEffort(value: string): value is CodexReasoningEffort {
+  return CODEX_REASONING_EFFORT_SET.has(value);
+}
+
+export function codexCliModelNameForModelId(modelId: string): string | null {
+  return isCodexModelId(modelId) || modelId === "openai/gpt-5.2-codex"
+    ? modelId.replace(/^openai\//, "")
+    : null;
+}
+
 // Ratings were seeded from public data on 2026-06-03 (Artificial Analysis
 // Intelligence Index, output tokens/sec; OpenRouter / provider output pricing)
 // using these buckets. Keep new models consistent with them:
@@ -54,6 +84,27 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 // lists them. openrouter/fusion is a variable panel + judge router and is rated
 // qualitatively from OpenRouter's Fusion defaults rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
+  {
+    id: "openai/gpt-5.5",
+    type: "model",
+    contextWindowTokens: 272_000,
+    label: "GPT 5.5",
+    description: "Recommended default Codex model for agentic coding sessions.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
   {
     id: "openai/gpt-5.4-mini",
     type: "model",
@@ -122,7 +173,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     type: "model",
     contextWindowTokens: 400_000,
     label: "GPT 5.2 Codex",
-    description: "OpenAI coding model optimized for long-horizon agentic engineering tasks.",
+    description: "Deprecated Codex model retained so old sessions and agent files keep loading.",
     category: "Deep",
     supportsReasoning: true,
     supportsImages: false,

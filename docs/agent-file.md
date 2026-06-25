@@ -69,7 +69,7 @@ Which session engine runs new sessions for the agent:
 | Value | Behavior |
 | ----- | -------- |
 | `opencompany` | Default. Uses OpenCompany's native runner loop, model routing, tools, sandbox lifecycle, attachments, and after-session hooks. |
-| `codex` | Uses the Codex CLI runner path for turns. The agent still keeps `model:` for compatibility, but Codex sessions use the runner's `RUNNER_CODEX_MODEL` instead. Codex sessions are text-only in v1. |
+| `codex` | Uses the Codex CLI runner path for turns. Codex sessions use Codex-compatible session models and per-session reasoning settings; `RUNNER_CODEX_MODEL` remains the legacy/fallback CLI model. Codex sessions are text-only in v1. |
 
 Missing `engine:` defaults to `opencompany` so existing agent files keep working. Generated files serialize the field explicitly.
 

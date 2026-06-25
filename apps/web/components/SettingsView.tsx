@@ -11,6 +11,7 @@ import {
   FlaskConical,
   GitBranch,
   KeyRound,
+  LoaderCircle,
   LogOut,
   MessageSquare,
   Monitor,
@@ -21,10 +22,17 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { type BillingData, BillingPanel } from "@/components/billing/BillingPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
+import {
+  type CodexDeviceAuthFlow,
+  disconnectWorkspaceCodexAuth,
+  pollWorkspaceCodexDeviceAuth,
+  startWorkspaceCodexDeviceAuth,
+} from "@/lib/codex-auth/actions";
+import type { WorkspaceCodexAuthSettings } from "@/lib/codex-auth/data";
 import {
   removeBetterStackMcpConnection,
   removeBraintrustMcpConnection,
@@ -63,6 +71,7 @@ type Props = {
   workspace: {
     name: string;
     createdAt: string;
+    canManageSettings: boolean;
     sync: {
       hasRepo: boolean;
       lastSyncedAt: string | null;
@@ -109,6 +118,7 @@ type Props = {
       updatedAt: string | null;
     };
   };
+  codexAuth: WorkspaceCodexAuthSettings;
   toolPolicies: WorkspaceToolPolicyOverrides;
 };
 
@@ -152,6 +162,26 @@ function ReadOnly({ value }: { value: string }) {
     <div className="rounded-md border border-border bg-surface/60 px-2.5 py-1.5 text-[13px] text-ink/85">
       {value}
     </div>
+  );
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function sameCodexDeviceAuthFlow(current: CodexDeviceAuthFlow | null, next: CodexDeviceAuthFlow) {
+  return (
+    current?.id === next.id &&
+    current.status === next.status &&
+    current.userCode === next.userCode &&
+    current.verificationUri === next.verificationUri &&
+    current.statusReason === next.statusReason &&
+    current.expiresAt === next.expiresAt
   );
 }
 
@@ -248,6 +278,221 @@ function WorkspaceState({ sync }: { sync: Props["workspace"]["sync"] }) {
                 ? `Last synced ${sync.lastSyncedAt}`
                 : "Not synced yet"
               : "Git storage is being set up"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CodexAuthSection({
+  codexAuth,
+  canManage,
+}: {
+  codexAuth: WorkspaceCodexAuthSettings;
+  canManage: boolean;
+}) {
+  const router = useRouter();
+  const [flow, setFlow] = useState<CodexDeviceAuthFlow | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isStartingFlow, setIsStartingFlow] = useState(false);
+  const [isSubmitting, startSubmitTransition] = useTransition();
+  const isConnected = codexAuth.status === "connected";
+  const needsReauth = codexAuth.status === "needs_reauth";
+  const isTerminalFlow =
+    flow?.status === "completed" || flow?.status === "failed" || flow?.status === "expired";
+  const isActiveFlow = Boolean(flow && !isTerminalFlow);
+  const shouldPoll = Boolean(flow && !isTerminalFlow);
+  const flowId = flow?.id ?? null;
+  const showSetupPanel = isStartingFlow || Boolean(flow && flow.status !== "completed");
+  const connectDisabled = !canManage || isSubmitting || isStartingFlow || isActiveFlow;
+
+  useEffect(() => {
+    if (!shouldPoll || !flowId) return;
+    let cancelled = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const result = await pollWorkspaceCodexDeviceAuth(flowId);
+        if (cancelled) return;
+        if (!result.ok) {
+          setError(result.error);
+          setIsStartingFlow(false);
+          return;
+        }
+        setFlow((current) =>
+          sameCodexDeviceAuthFlow(current, result.flow) ? current : result.flow,
+        );
+        setIsStartingFlow(false);
+        if (result.flow.status === "completed") {
+          router.refresh();
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [flowId, router, shouldPoll]);
+
+  function onConnect() {
+    setError(null);
+    setFlow(null);
+    setIsStartingFlow(true);
+    startSubmitTransition(async () => {
+      const result = await startWorkspaceCodexDeviceAuth();
+      if (!result.ok) {
+        setIsStartingFlow(false);
+        setError(result.error);
+        return;
+      }
+      setIsStartingFlow(false);
+      setFlow(result.flow);
+    });
+  }
+
+  function onDisconnect() {
+    setError(null);
+    setIsStartingFlow(false);
+    startSubmitTransition(async () => {
+      const result = await disconnectWorkspaceCodexAuth();
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setFlow(null);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+          <KeyRound size={15} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+              Codex subscription auth
+            </div>
+            <span
+              className={`inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-medium ${
+                isConnected
+                  ? "border-success/25 bg-success/10 text-success"
+                  : needsReauth
+                    ? "border-warning/25 bg-warning/10 text-warning"
+                    : "border-border bg-surface text-ink-muted"
+              }`}
+            >
+              {isConnected ? "Connected" : needsReauth ? "Needs reauth" : "Not connected"}
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+            This workspace shares one Codex account for Codex engine runs. Model usage is handled by
+            the connected Codex subscription; workspace credits still cover sandbox compute.
+          </p>
+          {codexAuth.connectedByEmail && (
+            <div className="mt-2 text-[11.5px] text-ink-subtle">
+              Connected by {codexAuth.connectedByEmail}
+              {codexAuth.lastValidatedAt
+                ? ` · validated ${formatDateTime(codexAuth.lastValidatedAt)}`
+                : ""}
+            </div>
+          )}
+          {codexAuth.statusReason && (
+            <div className="mt-2 text-[12px] text-warning">{codexAuth.statusReason}</div>
+          )}
+
+          {showSetupPanel && (
+            <div className="mt-4 rounded-md border border-border bg-canvas p-3">
+              <div className="text-[12px] font-medium text-ink">
+                {isStartingFlow
+                  ? "Starting Codex sign-in"
+                  : flow?.status === "failed"
+                    ? "Codex connection failed"
+                    : flow?.status === "expired"
+                      ? "Codex connection expired"
+                      : flow?.verificationUri && flow.userCode
+                        ? "Finish signing in to Codex"
+                        : "Preparing Codex sign-in"}
+              </div>
+              {flow?.verificationUri && flow.userCode ? (
+                <div className="mt-2 flex flex-col gap-2">
+                  <a
+                    href={flow.verificationUri}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted"
+                  >
+                    <ExternalLink size={13} strokeWidth={1.9} />
+                    Open Codex sign-in
+                  </a>
+                  <div className="w-fit rounded-md border border-border bg-surface px-3 py-2 font-mono text-[18px] font-semibold tracking-[0.08em] text-ink">
+                    {flow.userCode}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-ink-muted">
+                  <LoaderCircle
+                    size={13}
+                    strokeWidth={1.8}
+                    className="mt-0.5 shrink-0 animate-spin"
+                  />
+                  <span>
+                    {isStartingFlow
+                      ? "Creating a short-lived auth sandbox and starting Codex login."
+                      : "Waiting for Codex to produce a device code. This can take a minute on a cold sandbox."}
+                  </span>
+                </div>
+              )}
+              {flow?.statusReason && (
+                <div className="mt-2 text-[12px] text-ink-muted">{flow.statusReason}</div>
+              )}
+            </div>
+          )}
+
+          {error && <div className="mt-3 text-[12px] text-danger">{error}</div>}
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onConnect}
+              disabled={connectDisabled}
+              className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {isStartingFlow || isActiveFlow ? (
+                <LoaderCircle size={13} strokeWidth={1.9} className="animate-spin" />
+              ) : (
+                <KeyRound size={13} strokeWidth={1.9} />
+              )}
+              {isStartingFlow || isActiveFlow
+                ? "Signing in…"
+                : isConnected
+                  ? "Reconnect Codex"
+                  : "Connect Codex"}
+            </button>
+            {codexAuth.status && (
+              <button
+                type="button"
+                onClick={onDisconnect}
+                disabled={!canManage || isSubmitting}
+                className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Disconnect
+              </button>
+            )}
+            {!canManage && (
+              <span className="text-[12px] text-ink-subtle">
+                Only workspace admins can manage Codex authentication.
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -1421,7 +1666,14 @@ function WorkspaceNameForm({ initial }: { initial: string }) {
   );
 }
 
-export default function SettingsView({ profile, workspace, billing, mcp, toolPolicies }: Props) {
+export default function SettingsView({
+  profile,
+  workspace,
+  billing,
+  mcp,
+  codexAuth,
+  toolPolicies,
+}: Props) {
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] px-8 pb-24 pt-10">
@@ -1474,6 +1726,13 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
             description="How this workspace is stored and versioned."
           >
             <WorkspaceState sync={workspace.sync} />
+          </Section>
+
+          <Section
+            title="Codex"
+            description="Use a workspace Codex subscription for Codex engine sessions."
+          >
+            <CodexAuthSection codexAuth={codexAuth} canManage={workspace.canManageSettings} />
           </Section>
 
           <Section

@@ -28,6 +28,11 @@ function runnerToken() {
 
 export async function callRunner(path: string, context: RunnerContext = {}) {
   try {
+    logger.debug("Runner request started", {
+      runner_path: path,
+      ...context,
+      event: "opencompany.runner_request_started",
+    });
     const response = await fetch(`${runnerInternalBaseUrl()}${path}`, {
       method: "POST",
       headers: {
@@ -45,6 +50,54 @@ export async function callRunner(path: string, context: RunnerContext = {}) {
       ...context,
       event: "opencompany.runner_request_succeeded",
     });
+  } catch (error) {
+    captureException(error, {
+      runner_path: path,
+      ...context,
+      event: context.event ?? "opencompany.runner_request_failed",
+    });
+    logger.warn("Runner request failed", {
+      event: context.event ?? "opencompany.runner_request_failed",
+      runner_path: path,
+      ...context,
+      error,
+    });
+    throw error;
+  }
+}
+
+export async function callRunnerJson<TResponse>(
+  path: string,
+  input: { body?: Record<string, unknown>; context?: RunnerContext } = {},
+): Promise<TResponse> {
+  const context = input.context ?? {};
+  try {
+    logger.debug("Runner request started", {
+      runner_path: path,
+      has_body: Boolean(input.body),
+      ...context,
+      event: "opencompany.runner_request_started",
+    });
+    const response = await fetch(`${runnerInternalBaseUrl()}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${runnerToken()}`,
+        ...(input.body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(input.body ? { body: JSON.stringify(input.body) } : {}),
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`Runner request failed with ${response.status}: ${details}`);
+    }
+    logger.debug("Runner request succeeded", {
+      runner_path: path,
+      runner_status: response.status,
+      ...context,
+      event: "opencompany.runner_request_succeeded",
+    });
+    return (await response.json()) as TResponse;
   } catch (error) {
     captureException(error, {
       runner_path: path,

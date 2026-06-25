@@ -262,7 +262,7 @@ Required environment variables:
 - `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Activates the LLM broker — sandboxed CLIs call models via `/broker/*` with short-lived per-delegation tokens instead of raw provider keys. Unset locally.)
 - `RUNNER_LLM_BROKER_ENABLED` (optional, defaults to `true`; no-deploy kill switch back to direct key injection)
 - `OPENAI_CODEX_API_KEY` (optional; server-side upstream credential for the broker's `openai` provider and local-dev `codex_coder` fallback)
-- `RUNNER_CODEX_MODEL` (optional, defaults to `gpt-5.2-codex`)
+- `RUNNER_CODEX_MODEL` (optional, defaults to `gpt-5.5`)
 - `RUNNER_CODEX_TIMEOUT_MS` (optional, defaults to `1200000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:

@@ -68,6 +68,7 @@ export type AgentToolId =
   | "google_calendar"
   | "google_drive";
 export type AgentModelId =
+  | "openai/gpt-5.5"
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
   | "openai/gpt-5.4-nano"
@@ -105,6 +106,8 @@ export type AgentModelId =
   | "zai/glm-5-turbo"
   | "zai/glm-5v-turbo"
   | "openrouter/fusion";
+
+export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type AgentHostedToolConfig = {
   id:

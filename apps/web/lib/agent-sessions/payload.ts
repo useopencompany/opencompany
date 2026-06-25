@@ -1,4 +1,5 @@
-import type { AgentEngine } from "@opencompany/agent-runtime/types";
+import { isCodexReasoningEffort } from "@opencompany/agent-runtime";
+import type { AgentEngine, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   type RuntimeEvent,
@@ -42,6 +43,9 @@ export type AgentSessionPayload = {
   engine: AgentEngine;
   modelProvider: string;
   modelName: string;
+  codexReasoningEffort: CodexReasoningEffort;
+  codexPlanModeEnabled: boolean;
+  codexPlanModeReasoningEffort: CodexReasoningEffort;
   parentSessionId: string | null;
   parentMessageId: string | null;
   parentToolCallId: string | null;
@@ -378,6 +382,11 @@ function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
     engine: readOptionalSessionEngine(record, "engine") ?? "opencompany",
     modelProvider: readStringField(record, "modelProvider"),
     modelName: readStringField(record, "modelName"),
+    codexReasoningEffort:
+      readOptionalCodexReasoningEffort(record, "codexReasoningEffort") ?? "medium",
+    codexPlanModeEnabled: readOptionalBooleanField(record, "codexPlanModeEnabled") ?? false,
+    codexPlanModeReasoningEffort:
+      readOptionalCodexReasoningEffort(record, "codexPlanModeReasoningEffort") ?? "high",
     parentSessionId: readNullableStringField(record, "parentSessionId"),
     parentMessageId: readNullableStringField(record, "parentMessageId"),
     parentToolCallId: readNullableStringField(record, "parentToolCallId"),
@@ -595,6 +604,16 @@ function readOptionalSessionEngine(
   const value = record[field];
   if (value === undefined) return undefined;
   if (value === "opencompany" || value === "codex") return value;
+  throw new Error(`Invalid ${field}.`);
+}
+
+function readOptionalCodexReasoningEffort(
+  record: Record<string, unknown>,
+  field: string,
+): CodexReasoningEffort | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && isCodexReasoningEffort(value)) return value;
   throw new Error(`Invalid ${field}.`);
 }
 

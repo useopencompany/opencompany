@@ -2,14 +2,22 @@
 
 import {
   ATTACHMENT_TEXT_MAX_BYTES,
+  CODEX_AGENT_MODEL_IDS,
+  CODEX_DEFAULT_MODEL_ID,
+  CODEX_REASONING_EFFORTS,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
+  isCodexModelId,
   listAddableBuiltinSkills,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
   permissionLabelFor,
   type ResolvedSkillMetadata,
 } from "@opencompany/agent-runtime";
-import type { AgentConfig, AgentModelId } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentModelId,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -69,7 +77,15 @@ import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopB
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
@@ -82,6 +98,7 @@ import {
   continueInterruptedSession,
   markSessionSeen,
   resolveToolApproval,
+  setAgentSessionCodexSettings,
   setAgentSessionModel,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
@@ -212,6 +229,10 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+
+function codexReasoningLabel(effort: CodexReasoningEffort) {
+  return effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1);
+}
 
 // Wraps an oversized composer paste in a File so it rides the normal attachment pipeline.
 // Numbered against the pending attachments so two pastes in one message don't show as
@@ -513,9 +534,24 @@ function SessionViewContentBody({
   // than the send path's `isPending`.
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [, startModelTransition] = useTransition();
+  const [codexReasoningOverride, setCodexReasoningOverride] = useState<CodexReasoningEffort | null>(
+    null,
+  );
+  const [, startCodexSettingsTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsEnabled = session.engine !== "codex";
+  const codexReasoningEffort = codexReasoningOverride ?? session.codexReasoningEffort;
+  const codexModelValue = isCodexModelId(modelOverride ?? session.modelName)
+    ? (modelOverride ?? session.modelName)
+    : CODEX_DEFAULT_MODEL_ID;
+
+  useEffect(() => {
+    // Session identity changes must clear transient composer controls.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setModelOverride(null);
+    setCodexReasoningOverride(null);
+  }, [session.id]);
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
   // home composers). The drop overlay, validation/capability gate and upload lifecycle all come
   // from here. Attaching is always available: text/code files need no model capability (they are
@@ -536,6 +572,8 @@ function SessionViewContentBody({
   });
   useEffect(() => {
     if (attachmentsEnabled) return;
+    // Attachment controls are hidden for Codex sessions.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAttachMenuOpen(false);
     setAttachments((current) => {
       current.forEach((attachment) => {
@@ -1619,6 +1657,19 @@ function SessionViewContentBody({
     });
   };
 
+  const handleCodexReasoningChange = (reasoningEffort: CodexReasoningEffort) => {
+    const previous = codexReasoningOverride;
+    setCodexReasoningOverride(reasoningEffort);
+    setFormError(null);
+    startCodexSettingsTransition(async () => {
+      const result = await setAgentSessionCodexSettings(session.id, { reasoningEffort });
+      if (!result.ok) {
+        setCodexReasoningOverride(previous);
+        setFormError(result.error);
+      }
+    });
+  };
+
   const handleContinueInterrupted = () => {
     if (!sessionCanContinue || isPending) return;
     const content = "Continue";
@@ -1944,10 +1995,59 @@ function SessionViewContentBody({
                       </div>
                     ) : null}
                     <ModelPicker
-                      value={modelOverride ?? session.modelName}
-                      fallbackModelId={DEFAULT_MODEL_ID}
+                      value={
+                        session.engine === "codex"
+                          ? codexModelValue
+                          : (modelOverride ?? session.modelName)
+                      }
+                      fallbackModelId={
+                        session.engine === "codex" ? CODEX_DEFAULT_MODEL_ID : DEFAULT_MODEL_ID
+                      }
+                      {...(session.engine === "codex" ? { modelIds: CODEX_AGENT_MODEL_IDS } : {})}
                       onChange={handleModelChange}
                     />
+                    {session.engine === "codex" ? (
+                      <>
+                        <Select
+                          value={codexReasoningEffort}
+                          onValueChange={(value) =>
+                            handleCodexReasoningChange(value as CodexReasoningEffort)
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label="Codex reasoning effort"
+                            className="h-6 w-auto border-transparent bg-transparent px-1.5 py-0 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-surface-subtle/70 focus:ring-1 focus:ring-ink/20"
+                          >
+                            <Brain size={12} strokeWidth={1.9} className="mr-1.5 shrink-0" />
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent align="start">
+                            {CODEX_REASONING_EFFORTS.map((effort) => (
+                              <SelectItem key={effort} value={effort}>
+                                Reasoning {codexReasoningLabel(effort)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <TooltipProvider delayDuration={150}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                aria-disabled="true"
+                                className="flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-subtle opacity-60"
+                              >
+                                Plan
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[260px]">
+                              Native plan mode is not available through the current Codex exec
+                              runner path yet.
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </>
+                    ) : null}
                   </>
                 }
                 action={(() => {

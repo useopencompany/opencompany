@@ -1,8 +1,11 @@
 import {
+  codexCliModelNameForModelId,
+  isCodexReasoningEffort,
   newAgentSessionMessageId,
   normalizeAgentConfig,
   shellQuote,
 } from "@opencompany/agent-runtime";
+import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import {
   agentSessionMessageAttachments,
@@ -16,13 +19,17 @@ import { setActiveRun } from "./active-runs";
 import { loadConnectedGitHubInstallation } from "./amp-tool";
 import {
   buildCodexCommand,
-  buildCodexConfig,
+  buildCodexConfigForAuth,
   buildCodexHome,
   buildCodexWorkRoot,
+  type CodexCliAuth,
+  codexApiKeyFallbackEnabled,
   codexHostedToolUsage,
   codexRuntimeEventsFromJsonEvent,
   createCodexStreamAccumulator,
   ensureCodexInstalled,
+  loadWorkspaceCodexCliAuth,
+  persistRefreshedWorkspaceCodexAuth,
 } from "./codex-tool";
 import {
   buildGitHubCommandEnv,
@@ -95,16 +102,19 @@ type CodexUserMessage = {
   modelMessage: unknown;
 };
 
-type CodexAuth = {
-  baseUrl: string;
-  apiKeyEnvVar: string;
-  apiKeyValue: string;
-  brokered: boolean;
-};
 type CodexGitHubAuth = Awaited<ReturnType<typeof loadGitHubAuth>>;
 type CodexCliSummary = ReturnType<ReturnType<typeof createCodexStreamAccumulator>["summary"]> & {
   brokered: boolean;
+  subscriptionBacked: boolean;
 };
+
+function codexCliModelForSession(modelName: string, fallbackModel: string) {
+  return codexCliModelNameForModelId(modelName) ?? fallbackModel;
+}
+
+function codexReasoningEffortForSession(value: string): CodexReasoningEffort {
+  return isCodexReasoningEffort(value) ? value : "medium";
+}
 
 export async function runCodexTurn(input: {
   sessionId: string;
@@ -163,7 +173,8 @@ async function runCodexTurnWithContext(
     userId = row.session.userId;
     agentId = row.agent.id;
     modelProvider = "openai";
-    modelName = input.env.codexModel;
+    const codexModel = codexCliModelForSession(row.session.modelName, input.env.codexModel);
+    modelName = row.session.modelName;
 
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
@@ -231,7 +242,7 @@ async function runCodexTurnWithContext(
         leaseId: ctx.leaseId,
         leaseOwner: ctx.leaseOwner,
         modelProvider: "openai",
-        modelName: input.env.codexModel,
+        modelName: row.session.modelName,
       }),
     );
     if (!lease) {
@@ -310,7 +321,11 @@ async function runCodexTurnWithContext(
       sandbox,
       row,
       task,
-      model: input.env.codexModel,
+      model: codexModel,
+      reasoningEffort: codexReasoningEffortForSession(row.session.codexReasoningEffort),
+      planModeReasoningEffort: row.session.codexPlanModeEnabled
+        ? codexReasoningEffortForSession(row.session.codexPlanModeReasoningEffort)
+        : null,
       existingEngineSessionId: row.session.engineSessionId,
       assistantMessageId,
       checkAbort,
@@ -331,9 +346,10 @@ async function runCodexTurnWithContext(
     }
 
     const usage = codexHostedToolUsage({
-      model: input.env.codexModel,
+      model: codexModel,
       summary,
       brokered: summary.brokered,
+      subscriptionBacked: summary.subscriptionBacked,
     });
     if (usage) {
       await observeRunStep(ctx, "record_codex_usage", () =>
@@ -527,16 +543,20 @@ async function runCodexCli(input: {
   row: Awaited<ReturnType<typeof loadSession>>;
   task: string;
   model: string;
+  reasoningEffort: CodexReasoningEffort;
+  planModeReasoningEffort: CodexReasoningEffort | null;
   existingEngineSessionId: string | null;
   assistantMessageId: string;
   checkAbort: ReturnType<typeof createLeaseAbortCheck>;
   env: RunnerEnv;
   githubAuth: CodexGitHubAuth;
 }): Promise<CodexCliSummary> {
-  const runWithAuth = async (auth: CodexAuth) => {
+  const runWithAuth = async (auth: CodexCliAuth) => {
     const layout = sandboxLayout(input.row.session.workdir, input.row.agent.isDefault);
+    const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
     const redact = createKnownSecretRedactor([
-      auth.apiKeyValue,
+      auth.kind === "api" ? auth.apiKeyValue : null,
+      serializedAuthJson,
       input.env.openaiCodexApiKey,
       input.githubAuth.githubToken,
       input.githubAuth.githubAuthHeader,
@@ -545,6 +565,8 @@ async function runCodexCli(input: {
       workRoot: layout.workRoot,
       task: input.task,
       model: input.model,
+      reasoningEffort: input.reasoningEffort,
+      planModeReasoningEffort: input.planModeReasoningEffort,
       existingEngineSessionId: input.existingEngineSessionId,
       auth,
       githubAuth: input.githubAuth,
@@ -556,6 +578,9 @@ async function runCodexCli(input: {
       { timeoutMs: 30_000 },
     );
     await input.sandbox.files.write(`${commandPlan.codexHome}/config.toml`, commandPlan.config);
+    if (serializedAuthJson) {
+      await input.sandbox.files.write(`${commandPlan.codexHome}/auth.json`, serializedAuthJson);
+    }
 
     const stream = createCodexStreamAccumulator();
     let timedOut = false;
@@ -615,8 +640,21 @@ async function runCodexCli(input: {
       stderr: redact(String(result.stderr ?? "")),
       timedOut,
     });
-    return { ...summary, brokered: auth.brokered };
+    await persistRefreshedWorkspaceCodexAuth({
+      sandbox: input.sandbox,
+      codexHome: commandPlan.codexHome,
+      workspaceId: input.row.workspace.id,
+      auth,
+    });
+    return { ...summary, brokered: auth.brokered, subscriptionBacked: auth.kind === "chatgpt" };
   };
+
+  const workspaceCodexAuth = await loadWorkspaceCodexCliAuth(input.row.workspace.id);
+  if (workspaceCodexAuth) return runWithAuth(workspaceCodexAuth);
+
+  if (!codexApiKeyFallbackEnabled()) {
+    throw new Error("Connect Codex in company settings before running Codex sessions.");
+  }
 
   if (brokerActive(input.env) && input.env.publicUrl) {
     return withBrokerDelegation(
@@ -631,6 +669,7 @@ async function runCodexCli(input: {
       },
       (minted) =>
         runWithAuth({
+          kind: "api",
           baseUrl: brokerBaseUrl(input.env.publicUrl as string, "openai"),
           apiKeyEnvVar: BROKER_TOKEN_ENV_VAR,
           apiKeyValue: minted.token,
@@ -643,6 +682,7 @@ async function runCodexCli(input: {
     throw new Error("OPENAI_CODEX_API_KEY is required to run Codex sessions.");
   }
   return runWithAuth({
+    kind: "api",
     baseUrl: CODEX_DIRECT_BASE_URL,
     apiKeyEnvVar: CODEX_DIRECT_API_KEY_ENV_VAR,
     apiKeyValue: input.env.openaiCodexApiKey,
@@ -654,15 +694,17 @@ export function buildCodexSessionCommandPlan(input: {
   workRoot: string;
   task: string;
   model: string;
+  reasoningEffort?: CodexReasoningEffort | null;
+  planModeReasoningEffort?: CodexReasoningEffort | null;
   existingEngineSessionId: string | null;
-  auth: CodexAuth;
+  auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
 }) {
   const codexWorkRoot = buildCodexWorkRoot(input.workRoot);
   const codexHome = buildCodexHome(codexWorkRoot);
   const codexEnv = {
     CODEX_HOME: codexHome,
-    [input.auth.apiKeyEnvVar]: input.auth.apiKeyValue,
+    ...(input.auth.kind === "api" ? { [input.auth.apiKeyEnvVar]: input.auth.apiKeyValue } : {}),
     ...(input.githubAuth.githubToken && input.githubAuth.githubAuthHeader
       ? buildGitHubCommandEnv({
           githubAuthHeader: input.githubAuth.githubAuthHeader,
@@ -679,6 +721,8 @@ export function buildCodexSessionCommandPlan(input: {
       workRoot: codexWorkRoot,
       model: input.model,
       sessionId: input.existingEngineSessionId,
+      reasoningEffort: input.reasoningEffort ?? null,
+      planModeReasoningEffort: input.planModeReasoningEffort ?? null,
     }),
   ].join(" && ");
 
@@ -687,10 +731,7 @@ export function buildCodexSessionCommandPlan(input: {
     codexHome,
     codexEnv,
     command,
-    config: buildCodexConfig({
-      baseUrl: input.auth.baseUrl,
-      apiKeyEnvVar: input.auth.apiKeyEnvVar,
-    }),
+    config: buildCodexConfigForAuth(input.auth),
   };
 }
 

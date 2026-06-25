@@ -1,6 +1,7 @@
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
+import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
 import type { RunnerEnv } from "./env";
 import { enqueueRunnerJob } from "./jobs";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
@@ -77,6 +78,60 @@ export function createServer(
     });
     wakeWorker();
     reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/codex-auth/device/start", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const body = request.body as { workspaceId?: string; requestedByUserId?: string } | undefined;
+    const workspaceId = body?.workspaceId?.trim();
+    const requestedByUserId = body?.requestedByUserId?.trim();
+    if (!workspaceId || !requestedByUserId) {
+      reply.status(400).send({ error: "workspaceId and requestedByUserId are required." });
+      return;
+    }
+    logger.info("Codex device auth start route received", {
+      event: "opencompany.runner_codex_auth_start_route_received",
+      workspace_id: workspaceId,
+      requested_by_user_id: requestedByUserId,
+    });
+    const flow = await startCodexDeviceAuthFlow({ workspaceId, requestedByUserId, env });
+    logger.info("Codex device auth start route completed", {
+      event: "opencompany.runner_codex_auth_start_route_completed",
+      workspace_id: workspaceId,
+      flow_id: flow.id,
+      flow_status: flow.status,
+    });
+    reply.send({ ok: true, flow });
+  });
+
+  app.post("/internal/codex-auth/device/:flowId/poll", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { flowId } = request.params as { flowId: string };
+    const body = request.body as { workspaceId?: string } | undefined;
+    const workspaceId = body?.workspaceId?.trim();
+    if (!workspaceId) {
+      reply.status(400).send({ error: "workspaceId is required." });
+      return;
+    }
+    logger.debug("Codex device auth poll route received", {
+      event: "opencompany.runner_codex_auth_poll_route_received",
+      workspace_id: workspaceId,
+      flow_id: flowId,
+    });
+    const flow = await pollCodexDeviceAuthFlow({ workspaceId, flowId, env });
+    if (!flow) {
+      reply.status(404).send({ error: "Codex device auth flow was not found." });
+      return;
+    }
+    logger.debug("Codex device auth poll route completed", {
+      event: "opencompany.runner_codex_auth_poll_route_completed",
+      workspace_id: workspaceId,
+      flow_id: flow.id,
+      flow_status: flow.status,
+      has_user_code: Boolean(flow.userCode),
+      has_verification_uri: Boolean(flow.verificationUri),
+    });
+    reply.send({ ok: true, flow });
   });
 
   app.post("/internal/sessions/:id/messages/:messageId/run", async (request, reply) => {

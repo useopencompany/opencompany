@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  CODEX_AGENT_MODEL_IDS,
+  CODEX_DEFAULT_MODEL_ID,
+  isCodexModelId,
+} from "@opencompany/agent-runtime";
 import type { AgentEngine, AgentModelId } from "@opencompany/agent-runtime/types";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQueryClient } from "@tanstack/react-query";
@@ -62,13 +67,22 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents.at(0);
+  const selectedAgentIsCodex = selectedAgent?.engine === "codex";
+  const defaultModelForSelectedAgent =
+    selectedAgentIsCodex && selectedAgent
+      ? isCodexModelId(selectedAgent.defaultModel)
+        ? selectedAgent.defaultModel
+        : CODEX_DEFAULT_MODEL_ID
+      : selectedAgent?.defaultModel;
   // The model used for the new session: an explicit pick for THIS agent wins, otherwise the
   // selected agent's saved default. Picking a model here never changes the agent's default.
+  const scopedModelOverride =
+    modelOverride?.agentId === selectedAgentId ? modelOverride.modelId : null;
   const selectedModel =
-    (modelOverride?.agentId === selectedAgentId ? modelOverride.modelId : null) ??
-    selectedAgent?.defaultModel ??
-    "";
-  const attachmentsEnabled = selectedAgent?.engine !== "codex";
+    selectedAgentIsCodex && scopedModelOverride && !isCodexModelId(scopedModelOverride)
+      ? CODEX_DEFAULT_MODEL_ID
+      : (scopedModelOverride ?? defaultModelForSelectedAgent ?? "");
+  const attachmentsEnabled = !selectedAgentIsCodex;
   // Image/file attachments via the shared composer hook. No session exists yet — uploads land in
   // a sessionless "pending/" path and the pointers ride into createAgentSessionFromPrompt.
   const {
@@ -247,7 +261,8 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             {selectedModel ? (
               <ModelPicker
                 value={selectedModel}
-                fallbackModelId={DEFAULT_MODEL_ID}
+                fallbackModelId={selectedAgentIsCodex ? CODEX_DEFAULT_MODEL_ID : DEFAULT_MODEL_ID}
+                {...(selectedAgentIsCodex ? { modelIds: CODEX_AGENT_MODEL_IDS } : {})}
                 onChange={(modelId) => setModelOverride({ agentId: selectedAgentId, modelId })}
               />
             ) : null}

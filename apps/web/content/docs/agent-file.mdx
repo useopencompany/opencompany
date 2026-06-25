@@ -102,7 +102,7 @@ Which session engine runs new sessions for this agent.
 engine: opencompany
 ```
 
-Use `opencompany` for the native OpenCompany runner. Use `codex` to start sessions backed by the Codex CLI runner. Existing files without this field keep working as `opencompany`. Codex sessions keep `model:` for compatibility, but the runner uses `RUNNER_CODEX_MODEL`; Codex sessions are text-only in v1.
+Use `opencompany` for the native OpenCompany runner. Use `codex` to start sessions backed by the Codex CLI runner. Existing files without this field keep working as `opencompany`. Codex sessions use Codex-compatible session models and per-session reasoning settings; `RUNNER_CODEX_MODEL` remains the legacy/fallback CLI model. Codex sessions are text-only in v1.
 
 ### `tools`
 

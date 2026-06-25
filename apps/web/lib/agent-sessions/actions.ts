@@ -3,7 +3,10 @@
 import {
   type AgentSessionQuestionAnswer,
   ATTACHMENT_MAX_PER_MESSAGE,
+  CODEX_DEFAULT_MODEL_ID,
   getAgentModelDefinition,
+  isCodexModelId,
+  isCodexReasoningEffort,
   modelSupportsAttachments,
   newAgentSessionId,
   newAgentSessionMessageAttachmentId,
@@ -11,6 +14,7 @@ import {
   normalizeAgentConfig,
   validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
+import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -73,6 +77,22 @@ function billingRedirectForSurface(
 ) {
   const query = reason === "weekly_limit_reached" ? "?billing=limit" : "?billing=insufficient";
   return surface === "personal" ? `${personalPaths.settings}${query}` : `/company/settings${query}`;
+}
+
+function resolveSessionModelName(input: {
+  engine: "opencompany" | "codex";
+  requestedModelId?: string;
+  agentModelId: string;
+}) {
+  if (input.engine === "codex") {
+    if (input.requestedModelId && isCodexModelId(input.requestedModelId)) {
+      return input.requestedModelId;
+    }
+    return isCodexModelId(input.agentModelId) ? input.agentModelId : CODEX_DEFAULT_MODEL_ID;
+  }
+  return input.requestedModelId && getAgentModelDefinition(input.requestedModelId)
+    ? input.requestedModelId
+    : input.agentModelId;
 }
 
 export async function createAgentSession(idOrPath: string, options: SessionStartOptions = {}) {
@@ -163,10 +183,12 @@ export async function createAgentSessionFromPrompt(
     return { ok: false, error: "Agent not found." } as const;
   }
 
-  // A valid catalog model picked in the composer overrides the agent's default for this
-  // session only; an unknown/stale id is ignored in favor of the agent default.
-  const modelName = modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
   const engine = normalizeAgentConfig(agent.config).engine;
+  const modelName = resolveSessionModelName({
+    engine,
+    agentModelId: agent.config.model.name,
+    ...(modelId ? { requestedModelId: modelId } : {}),
+  });
 
   if (engine === "codex" && attachments.length > 0) {
     return { ok: false, error: "Codex sessions do not support attachments yet." } as const;
@@ -656,10 +678,30 @@ export async function setAgentSessionModel(sessionId: string, modelId: string) {
   }
 
   const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id, engine: agentSessions.engine })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+  if (session.engine === "codex" && !isCodexModelId(modelId)) {
+    return { ok: false, error: "Codex sessions can only use Codex models." } as const;
+  }
+
   const updated = await db
     .update(agentSessions)
     .set({
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: session.engine === "codex" ? "openai" : "vercel-ai-gateway",
       modelName: modelId,
       updatedAt: new Date(),
     })
@@ -671,6 +713,72 @@ export async function setAgentSessionModel(sessionId: string, modelId: string) {
         isNull(agentSessions.archivedAt),
       ),
     )
+    .returning({ id: agentSessions.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  return { ok: true } as const;
+}
+
+export async function setAgentSessionCodexSettings(
+  sessionId: string,
+  settings: {
+    reasoningEffort?: string;
+    planModeEnabled?: boolean;
+    planModeReasoningEffort?: string;
+  },
+) {
+  const { user, workspace } = await currentWorkspace();
+  const reasoningEffort = settings.reasoningEffort;
+  const planModeReasoningEffort = settings.planModeReasoningEffort;
+  if (reasoningEffort !== undefined && !isCodexReasoningEffort(reasoningEffort)) {
+    return { ok: false, error: "Invalid Codex reasoning effort." } as const;
+  }
+  if (planModeReasoningEffort !== undefined && !isCodexReasoningEffort(planModeReasoningEffort)) {
+    return { ok: false, error: "Invalid Codex plan reasoning effort." } as const;
+  }
+  if (settings.planModeEnabled === true) {
+    return { ok: false, error: "Codex plan mode is not available in this runner yet." } as const;
+  }
+
+  const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id, engine: agentSessions.engine })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+  if (session.engine !== "codex") {
+    return { ok: false, error: "Codex settings only apply to Codex sessions." } as const;
+  }
+
+  const updated = await db
+    .update(agentSessions)
+    .set({
+      ...(reasoningEffort !== undefined
+        ? { codexReasoningEffort: reasoningEffort as CodexReasoningEffort }
+        : {}),
+      ...(typeof settings.planModeEnabled === "boolean"
+        ? { codexPlanModeEnabled: settings.planModeEnabled }
+        : {}),
+      ...(planModeReasoningEffort !== undefined
+        ? { codexPlanModeReasoningEffort: planModeReasoningEffort as CodexReasoningEffort }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSessions.id, session.id))
     .returning({ id: agentSessions.id });
 
   if (updated.length === 0) {
@@ -1307,10 +1415,15 @@ async function insertAgentSession(input: {
 }) {
   const db = getDb();
   const sessionId = newAgentSessionId();
-  const modelName = input.modelName ?? input.agent.config.model.name;
   const engine = normalizeAgentConfig(input.agent.config).engine;
+  const modelName = resolveSessionModelName({
+    engine,
+    agentModelId: input.agent.config.model.name,
+    ...(input.modelName ? { requestedModelId: input.modelName } : {}),
+  });
   const status = engine === "codex" ? "ready" : "created";
   const statusMessage = engine === "codex" ? "Session ready" : "Session created";
+  const modelProvider = engine === "codex" ? "openai" : input.agent.config.model.provider;
 
   // Return the canonical session row and status-event row so callers can synthesize the
   // session detail payload in-memory (see buildCreatedSessionDetail) instead of issuing a
@@ -1326,7 +1439,7 @@ async function insertAgentSession(input: {
         title: input.title,
         status,
         engine,
-        modelProvider: input.agent.config.model.provider,
+        modelProvider,
         modelName,
       })
       .returning(),
@@ -1369,6 +1482,12 @@ async function insertAgentSessionWithUserMessage(input: {
   const messageId = newAgentSessionMessageId();
   const now = new Date();
   const engine = normalizeAgentConfig(input.agent.config).engine;
+  const modelName = resolveSessionModelName({
+    engine,
+    requestedModelId: input.modelName,
+    agentModelId: input.agent.config.model.name,
+  });
+  const modelProvider = engine === "codex" ? "openai" : input.agent.config.model.provider;
   const payload = { messageId, role: "user", content: input.content, status: "completed" };
   const attachmentRows = buildAttachmentRows({
     messageId,
@@ -1388,8 +1507,8 @@ async function insertAgentSessionWithUserMessage(input: {
       agentId: input.agent.id,
       title: input.title,
       engine,
-      modelProvider: input.agent.config.model.provider,
-      modelName: input.modelName,
+      modelProvider,
+      modelName,
     })
     .returning();
   const statusEventInsert = db

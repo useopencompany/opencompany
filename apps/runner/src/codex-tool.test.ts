@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCodexCommand,
   buildCodexConfig,
+  buildCodexConfigForAuth,
   buildCodexHome,
   buildCodexWorkRoot,
   codexHostedToolUsage,
@@ -90,7 +91,7 @@ describe("buildCodexCommand", () => {
     const command = buildCodexCommand({
       task: `edit "README.md"; echo $CODEX_API_KEY`,
       workRoot: "/tmp/work root",
-      model: "gpt-5.2-codex",
+      model: "gpt-5.5",
     });
 
     expect(command).toContain("codex exec --json");
@@ -99,7 +100,7 @@ describe("buildCodexCommand", () => {
     expect(command).toContain("--skip-git-repo-check");
     expect(command).not.toContain("--ask-for-approval");
     expect(command).not.toContain("resume");
-    expect(command).toContain("-m 'gpt-5.2-codex'");
+    expect(command).toContain("-m 'gpt-5.5'");
     expect(command).toContain(`'edit "README.md"; echo $CODEX_API_KEY'`);
     expect(command).not.toContain("OPENAI_CODEX_API_KEY");
   });
@@ -108,7 +109,7 @@ describe("buildCodexCommand", () => {
     const command = buildCodexCommand({
       task: "follow up",
       workRoot: "/home/user/workspace/work/codex",
-      model: "gpt-5.2-codex",
+      model: "gpt-5.5",
       sessionId: "codex-session-1",
     });
 
@@ -116,7 +117,21 @@ describe("buildCodexCommand", () => {
     expect(command).toContain("--cd '/home/user/workspace/work/codex'");
     expect(command).toContain("--sandbox workspace-write");
     expect(command).toContain("--skip-git-repo-check");
-    expect(command).toContain("resume -m 'gpt-5.2-codex' 'codex-session-1' 'follow up'");
+    expect(command).toContain("resume -m 'gpt-5.5' 'codex-session-1' 'follow up'");
+  });
+
+  it("passes reasoning config overrides", () => {
+    const command = buildCodexCommand({
+      task: "plan and implement",
+      workRoot: "/tmp/work root",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: "xhigh",
+    });
+
+    expect(command).toContain("-m 'gpt-5.5'");
+    expect(command).toContain("-c 'model_reasoning_effort=high'");
+    expect(command).toContain("-c 'plan_mode_reasoning_effort=xhigh'");
   });
 });
 
@@ -148,6 +163,21 @@ describe("buildCodexConfig", () => {
     expect(config).toContain('base_url = "https://runner.example.com/broker/openai/v1"');
     expect(config).toContain('env_key = "OPENCOMPANY_LLM_BROKER_TOKEN"');
     expect(config).toContain('wire_api = "responses"');
+  });
+
+  it("configures Codex to use file-backed ChatGPT auth for subscription-backed runs", () => {
+    const config = buildCodexConfigForAuth({
+      kind: "chatgpt",
+      authJson: { OPENAI_REFRESH_TOKEN: "secret" },
+      brokered: false,
+    });
+
+    expect(config).toContain('cli_auth_credentials_store = "file"');
+    expect(config).toContain('forced_login_method = "chatgpt"');
+    expect(config).toContain("[sandbox_workspace_write]");
+    expect(config).toContain("network_access = true");
+    expect(config).not.toContain("model_provider");
+    expect(config).not.toContain("env_key");
   });
 });
 
@@ -467,7 +497,7 @@ describe("codexRuntimeEventsFromJsonEvent", () => {
 describe("codexHostedToolUsage", () => {
   it("prices Codex token usage with platform model pricing", () => {
     const usage = codexHostedToolUsage({
-      model: "gpt-5.2-codex",
+      model: "gpt-5.5",
       summary: {
         usage: {
           input_tokens: 1000,
@@ -482,8 +512,8 @@ describe("codexHostedToolUsage", () => {
       operation: "session",
       costSource: "platform_model_pricing",
       rawUsage: {
-        model: "gpt-5.2-codex",
-        billing_model: "openai/gpt-5.2-codex",
+        model: "gpt-5.5",
+        billing_model: "openai/gpt-5.5",
       },
     });
     expect(usage?.costUsdMicros).toBeGreaterThan(0);
@@ -511,6 +541,33 @@ describe("codexHostedToolUsage", () => {
         model: "gpt-5.2-codex",
         billing_model: "openai/gpt-5.2-codex",
         cost_source: "broker_metered",
+        display_only: true,
+      },
+    });
+  });
+
+  it("records subscription-backed Codex token usage as display-only at zero cost", () => {
+    const usage = codexHostedToolUsage({
+      model: "gpt-5.2-codex",
+      subscriptionBacked: true,
+      summary: {
+        usage: {
+          input_tokens: 1000,
+          cache_read_input_tokens: 100,
+          output_tokens: 500,
+        },
+      },
+    });
+
+    expect(usage).toMatchObject({
+      provider: "codex",
+      operation: "session",
+      costUsdMicros: 0,
+      costSource: "subscription",
+      rawUsage: {
+        model: "gpt-5.2-codex",
+        billing_model: "openai/gpt-5.2-codex",
+        cost_source: "subscription",
         display_only: true,
       },
     });

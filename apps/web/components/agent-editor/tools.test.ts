@@ -30,6 +30,7 @@ describe("agent editor mention tools", () => {
 
   test("exposes the curated common Vercel AI Gateway language models", () => {
     expect(AGENT_MODELS.map((model) => model.id)).toEqual([
+      "openai/gpt-5.5",
       "openai/gpt-5.4-mini",
       "openai/gpt-5.4-nano",
       "openai/gpt-5.4",

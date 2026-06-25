@@ -73,6 +73,8 @@ export function useComposerAttachments(opts: {
     enabledRef.current = enabled;
     if (!enabled) {
       dragCounterRef.current = 0;
+      // Disabled attachment surfaces should immediately clear stale drag UI.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsDragActive(false);
     }
   }, [enabled]);
