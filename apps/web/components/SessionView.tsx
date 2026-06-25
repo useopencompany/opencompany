@@ -87,7 +87,6 @@ import {
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
@@ -582,6 +581,7 @@ function SessionViewContentBody({
   const [codexReasoningOverride, setCodexReasoningOverride] = useState<CodexReasoningEffort | null>(
     null,
   );
+  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
   const [, startCodexSettingsTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -596,6 +596,7 @@ function SessionViewContentBody({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setModelOverride(null);
     setCodexReasoningOverride(null);
+    setCodexPlanModeEnabled(false);
   }, [session.id]);
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
   // home composers). The drop overlay, validation/capability gate and upload lifecycle all come
@@ -1685,12 +1686,22 @@ function SessionViewContentBody({
       // A message sent while a run is active steers it (delivered at the next model-step
       // boundary, in-flight work preserved); idle sends just start a turn. There's no mode
       // picker — "steer" is the single default behavior, the server ignores it when idle.
-      const result = await submitAgentSessionMessage(
-        session.id,
-        content,
-        toSubmitAttachments(submitReady),
-        "steer",
-      );
+      const submitOptions =
+        session.engine === "codex" && codexPlanModeEnabled ? { codexPlanModeEnabled: true } : null;
+      const result = submitOptions
+        ? await submitAgentSessionMessage(
+            session.id,
+            content,
+            toSubmitAttachments(submitReady),
+            "steer",
+            submitOptions,
+          )
+        : await submitAgentSessionMessage(
+            session.id,
+            content,
+            toSubmitAttachments(submitReady),
+            "steer",
+          );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
         // Sent successfully — clear the tray. The sent attachments' object-URL previews are now
@@ -1702,6 +1713,7 @@ function SessionViewContentBody({
           if (a.previewUrl && !carried.has(a.id)) URL.revokeObjectURL(a.previewUrl);
         });
         setAttachments([]);
+        setCodexPlanModeEnabled(false);
         setOptimisticUserMessages((current) =>
           current.map((message) =>
             message.optimisticId === optimisticId
@@ -2100,23 +2112,19 @@ function SessionViewContentBody({
                           <ReasoningBars effort={codexReasoningEffort} size={12} />
                           {codexReasoningLabel(codexReasoningEffort)}
                         </button>
-                        <TooltipProvider delayDuration={150}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                aria-disabled="true"
-                                className="flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-subtle opacity-60"
-                              >
-                                Plan
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-[260px]">
-                              Native plan mode is not available through the current Codex exec
-                              runner path yet.
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
+                        <button
+                          type="button"
+                          aria-pressed={codexPlanModeEnabled}
+                          title="Plan mode for the next message"
+                          onClick={() => setCodexPlanModeEnabled((enabled) => !enabled)}
+                          className={
+                            codexPlanModeEnabled
+                              ? "flex h-6 items-center gap-1.5 rounded-md bg-ink px-1.5 text-[11.5px] font-medium text-surface transition-colors hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                              : "flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted transition-colors hover:bg-surface-subtle/70 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                          }
+                        >
+                          Plan
+                        </button>
                       </>
                     ) : null}
                   </>

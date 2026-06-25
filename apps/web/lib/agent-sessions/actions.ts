@@ -522,6 +522,7 @@ export async function submitAgentSessionMessage(
   content: string,
   attachments: SubmitAttachmentInput[] = [],
   sendMode: SendMode = "steer",
+  options: { codexPlanModeEnabled?: boolean } = {},
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
@@ -610,6 +611,13 @@ export async function submitAgentSessionMessage(
     sendMode: effectiveSendMode,
   });
   const messageId = message.id;
+
+  if (session.engine === "codex" && options.codexPlanModeEnabled === true) {
+    await db
+      .update(agentSessions)
+      .set({ codexPlanModeEnabled: true, updatedAt: new Date() })
+      .where(eq(agentSessions.id, sessionId));
+  }
 
   // Interrupt mode: the user aborted the in-flight turn to run this message now. Request the
   // abort synchronously (off the time-to-first-token path it would otherwise share) so the
@@ -726,21 +734,12 @@ export async function setAgentSessionCodexSettings(
   sessionId: string,
   settings: {
     reasoningEffort?: string;
-    planModeEnabled?: boolean;
-    planModeReasoningEffort?: string;
   },
 ) {
   const { user, workspace } = await currentWorkspace();
   const reasoningEffort = settings.reasoningEffort;
-  const planModeReasoningEffort = settings.planModeReasoningEffort;
   if (reasoningEffort !== undefined && !isCodexReasoningEffort(reasoningEffort)) {
     return { ok: false, error: "Invalid Codex reasoning effort." } as const;
-  }
-  if (planModeReasoningEffort !== undefined && !isCodexReasoningEffort(planModeReasoningEffort)) {
-    return { ok: false, error: "Invalid Codex plan reasoning effort." } as const;
-  }
-  if (settings.planModeEnabled === true) {
-    return { ok: false, error: "Codex plan mode is not available in this runner yet." } as const;
   }
 
   const db = getDb();
@@ -769,12 +768,6 @@ export async function setAgentSessionCodexSettings(
     .set({
       ...(reasoningEffort !== undefined
         ? { codexReasoningEffort: reasoningEffort as CodexReasoningEffort }
-        : {}),
-      ...(typeof settings.planModeEnabled === "boolean"
-        ? { codexPlanModeEnabled: settings.planModeEnabled }
-        : {}),
-      ...(planModeReasoningEffort !== undefined
-        ? { codexPlanModeReasoningEffort: planModeReasoningEffort as CodexReasoningEffort }
         : {}),
       updatedAt: new Date(),
     })
