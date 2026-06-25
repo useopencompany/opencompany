@@ -37,6 +37,7 @@ import { appendRuntimeEvent } from "./events";
 import { settleBrokerTokensForSession } from "./llm-broker-tokens";
 import {
   armSandboxIdleTimeout,
+  connectSandbox,
   createOrConnectSandbox,
   killSandbox,
   prepareWorkspace,
@@ -117,10 +118,12 @@ export async function ensureSandbox(
           sandbox: readySandbox,
           workdir: row.session.workdir,
           personal,
+          createCodexRoot: agentConfig.engine === "codex",
           configureGitCredentialHelper: needsAuthenticatedGit(agentConfig),
           agentFile: serializeAgentFile({
             title: agentConfig.title,
             body: agentConfig.instructions,
+            engine: agentConfig.engine,
             model: agentConfig.model.name,
             tools: agentConfig.tools,
             brain: agentConfig.brain,
@@ -251,6 +254,101 @@ export async function ensureSandbox(
     if (sandbox) {
       await parkSandboxWhenIdle(sandbox, env);
     }
+    throw error;
+  }
+}
+
+export async function acquireCodexSandboxForTurn(
+  row: LoadedSession,
+  env: RunnerEnv,
+  options?: { braintrustSpan?: BraintrustSpan | undefined },
+) {
+  const requestedSandboxId = row.session.e2bSandboxId;
+  if (!requestedSandboxId) {
+    return ensureSandbox(row, env, options);
+  }
+
+  const agentConfig = normalizeAgentConfig(row.agent.config);
+  const template = resolveSandboxTemplate(agentConfig, env);
+  const readyStartedAt = performance.now();
+  const e2bRequests: SandboxLatencyObservation[] = [];
+  try {
+    const sandbox = await connectSandbox({
+      sandboxId: requestedSandboxId,
+      onLatency: (observation) => {
+        e2bRequests.push(observation);
+        captureE2BSandboxLatency({
+          row,
+          template,
+          existingSandbox: true,
+          phase: "e2b_request",
+          ...observation,
+        });
+      },
+    });
+
+    if (!sandbox) {
+      return ensureSandbox(
+        { ...row, session: { ...row.session, e2bSandboxId: null } },
+        env,
+        options,
+      );
+    }
+
+    const totalMs = elapsedMs(readyStartedAt);
+    captureE2BSandboxLatency({
+      row,
+      template,
+      existingSandbox: true,
+      phase: "sandbox_ready",
+      operation: "connect",
+      outcome: "success",
+      latencyMs: totalMs,
+      sandboxId: sandbox.sandboxId,
+      requestedSandboxId,
+    });
+    logSandboxHydrationTiming(options?.braintrustSpan, {
+      outcome: "success",
+      existingSandbox: true,
+      template: template ?? "default",
+      timings: { totalMs },
+      e2bRequests,
+      sandboxId: sandbox.sandboxId,
+      requestedSandboxId,
+    });
+    return sandbox;
+  } catch (error) {
+    const name = errorName(error);
+    const totalMs = elapsedMs(readyStartedAt);
+    captureE2BSandboxLatency({
+      row,
+      template,
+      existingSandbox: true,
+      phase: "sandbox_ready",
+      operation: "connect",
+      outcome: "error",
+      latencyMs: totalMs,
+      requestedSandboxId,
+      ...(name ? { errorName: name } : {}),
+    });
+    logSandboxHydrationTiming(options?.braintrustSpan, {
+      outcome: "error",
+      existingSandbox: true,
+      template: template ?? "default",
+      timings: { totalMs },
+      e2bRequests,
+      requestedSandboxId,
+      ...(name ? { errorName: name } : {}),
+    });
+    captureException(error, {
+      event: "opencompany.runner_sandbox_failed",
+      workspace_id: row.workspace.id,
+      user_id: row.session.userId,
+      agent_id: row.agent.id,
+      session_id: row.session.id,
+      sandbox_id: requestedSandboxId,
+      existing_sandbox: true,
+    });
     throw error;
   }
 }
@@ -391,11 +489,10 @@ function errorName(error: unknown) {
   return error instanceof Error ? error.name : undefined;
 }
 
-// The richer sandbox template (with git, gh, and the coding-agent CLIs installed)
-// is used whenever the agent has GitHub access (an attached repository or the live
-// `@github` all-repositories scope) or a coding-agent tool enabled; plain chat agents
-// get the lighter default template.
+// Codex engine sessions run on the Codex template family. Other coding/GitHub-capable sessions use
+// the richer AMP template; plain chat agents get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
+  if (agentConfig.engine === "codex") return env.codexE2bTemplate ?? "codex";
   return needsAuthenticatedGit(agentConfig) ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
 
@@ -408,10 +505,12 @@ function needsAuthenticatedGit(agentConfig: AgentConfig) {
   );
 }
 
-// Per-template resource overrides used to price sandbox compute. Both current templates
-// run on E2B's base allocation; add an entry here if a template is ever provisioned with
-// a custom vCPU/RAM size so billing tracks the real allocation.
-const SANDBOX_TEMPLATE_RESOURCES: Record<string, SandboxResourceConfig> = {};
+// Per-template resource overrides used to price sandbox compute. E2B resource sizing is a
+// template-build property, so this must match the provisioned template allocation.
+const CODEX_SANDBOX_RESOURCES = { vcpu: 8, ramMiB: 8192 } satisfies SandboxResourceConfig;
+const SANDBOX_TEMPLATE_RESOURCES: Record<string, SandboxResourceConfig> = {
+  codex: CODEX_SANDBOX_RESOURCES,
+};
 
 export type SandboxBillingInfo = {
   template: string | null;
@@ -425,6 +524,13 @@ export type SandboxBillingInfo = {
 export function resolveSandboxBilling(row: LoadedSession, env: RunnerEnv): SandboxBillingInfo {
   const agentConfig = normalizeAgentConfig(row.agent.config);
   const template = resolveSandboxTemplate(agentConfig, env) ?? null;
+  if (agentConfig.engine === "codex") {
+    return {
+      template,
+      vcpu: CODEX_SANDBOX_RESOURCES.vcpu,
+      ramMib: CODEX_SANDBOX_RESOURCES.ramMiB,
+    };
+  }
   const resources =
     (template ? SANDBOX_TEMPLATE_RESOURCES[template] : undefined) ?? DEFAULT_SANDBOX_RESOURCES;
   return { template, vcpu: resources.vcpu, ramMib: resources.ramMiB };

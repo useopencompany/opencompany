@@ -1,3 +1,4 @@
+import { normalizeAgentConfig } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
@@ -20,11 +21,15 @@ export default async function Home() {
     .where(and(eq(agents.workspaceId, context.workspace.id), isNull(agents.userId)))
     .orderBy(desc(agents.updatedAt));
 
-  const agentOptions = rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    defaultModel: row.config.model.name,
-  }));
+  const agentOptions = rows.map((row) => {
+    const config = normalizeAgentConfig(row.config);
+    return {
+      id: row.id,
+      name: row.name,
+      defaultModel: config.model.name,
+      engine: config.engine,
+    };
+  });
 
   return (
     <MainPanel

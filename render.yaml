@@ -72,6 +72,8 @@ services:
         sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE
         sync: false
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
+        sync: false
       - key: RUNNER_E2B_IDLE_TIMEOUT_MS
         sync: false
       - key: RUNNER_INSTANCE_ID

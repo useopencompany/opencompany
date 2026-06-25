@@ -227,11 +227,13 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
+| `OPENCOMPANY_CODEX_E2B_TEMPLATE` | No | Optional Codex-specific E2B template; defaults to `codex`. Build `apps/runner/e2b/codex` as `opencompany-codex-toolbox` and set this in runner envs to roll onto the custom toolbox image. |
 | `RUNNER_LLM_BROKER_PUBLIC_URL` | No | Public base URL of the runner for the LLM broker (`/broker/*`). Defaults to Render's `RENDER_EXTERNAL_URL`; unset (local dev) disables the broker and falls back to direct provider-key injection into the sandbox. Distinct from the web-side `RUNNER_PUBLIC_URL`, which points at localhost in local dev. |
 | `RUNNER_LLM_BROKER_ENABLED` | No | Kill switch for the LLM broker, defaults to `true`. Set `false` to revert sandboxed CLIs to direct key injection without a deploy. |
-| `OPENAI_CODEX_API_KEY` | Codex only | Platform OpenAI key used server-side as the LLM broker's upstream credential for the `openai` provider (`codex_coder`). Never enters the sandbox on the brokered path; local-dev fallback maps it to `CODEX_API_KEY` for the Codex CLI. Use a budget-capped OpenAI project key. |
-| `RUNNER_CODEX_MODEL` | No | Codex CLI model for `codex_coder`, defaults to `gpt-5.2-codex`. Not exposed as a tool argument in v1. |
-| `RUNNER_CODEX_TIMEOUT_MS` | No | Wall-clock ceiling for a single `codex_coder` delegation, defaults to `1200000` (20 min). Timeouts surface partial diffs and skip PR creation. |
+| `RUNNER_CODEX_API_KEY_FALLBACK_ENABLED` | No | Explicit kill switch for the legacy Codex API-key path when no workspace Codex account is connected. Defaults to disabled in production and enabled outside production. Set `false` locally to force device-auth testing. |
+| `OPENAI_CODEX_API_KEY` | Codex fallback only | Platform OpenAI key used by the legacy Codex fallback path. Brokered fallback runs use it server-side as the LLM broker's upstream credential for the `openai` provider (`codex_coder`); local-dev fallback maps it to `CODEX_API_KEY` for the Codex CLI. Production/company runs should use the workspace Codex account connected in company settings instead. |
+| `RUNNER_CODEX_MODEL` | No | Fallback Codex CLI model for `codex_coder`, defaults to `gpt-5.5`. Active Codex sessions normally use their persisted session model. |
+| `RUNNER_CODEX_TIMEOUT_MS` | No | Wall-clock ceiling for a single Codex engine turn or `codex_coder` delegation, defaults to `3600000` (1 hour). Timeouts surface partial output and skip PR creation. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP and Google (Gmail/Calendar/Drive) credentials. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Used by the runner to refresh Gmail/Calendar/Drive access tokens against Google's token endpoint. Must match Vercel. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |

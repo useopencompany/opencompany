@@ -9,6 +9,7 @@ import type {
   AgentCodingToolConfig,
   AgentConfig,
   AgentConfigTool,
+  AgentEngine,
   AgentExternalSkillReference,
   AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
@@ -68,6 +69,7 @@ const TOOL_BY_LABEL = new Map(
 );
 const MODEL_BY_ID = new Map(SUPPORTED_AGENT_MODELS.map((model) => [model.id, model]));
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+const DEFAULT_ENGINE: AgentEngine = "opencompany";
 
 export function normalizeAgentBody(body: string) {
   return body.replace(/\r\n/g, "\n").replace(/\s+$/g, "");
@@ -157,6 +159,7 @@ export function collectBuiltinSkillMentions(body: string): AgentBuiltinSkillRefe
 export function deriveAgentConfigFromBody(input: {
   title: string;
   body: string;
+  engine?: AgentEngine;
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
   neonDatabases?: AgentConfigDerivationNeonDatabase[];
@@ -185,6 +188,7 @@ export function deriveAgentConfigFromBody(input: {
       schemaVersion: "agent.v1",
       title: normalizeTitle(input.title),
       instructions: body,
+      engine: normalizeEngine(input.engine),
       model: {
         provider: "vercel-ai-gateway",
         name: model.id,
@@ -208,6 +212,10 @@ export function deriveAgentConfigFromBody(input: {
         : [],
     },
   };
+}
+
+function normalizeEngine(value: AgentEngine | undefined): AgentEngine {
+  return value === "codex" ? "codex" : DEFAULT_ENGINE;
 }
 
 export function toConfigTool(

@@ -1,8 +1,10 @@
 import type {
   AgentConfig,
+  AgentEngine,
   AgentSessionQuestionAnswer,
   AgentSessionQuestionPrompt,
   AgentSkillFile,
+  CodexReasoningEffort,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
@@ -44,6 +46,15 @@ export type WorkspaceIntegrationCredentialKind =
 export type WorkspaceMcpServerStatus = "configured" | "missing_credential" | "disabled" | "error";
 
 export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
+
+export type WorkspaceCodexCredentialStatus = "connected" | "needs_reauth";
+
+export type WorkspaceCodexDeviceAuthFlowStatus =
+  | "pending"
+  | "code_ready"
+  | "completed"
+  | "failed"
+  | "expired";
 
 // Canonical encrypted-payload shape lives in @opencompany/crypto; aliased here so the
 // jsonb column annotations and existing importers keep their familiar name.
@@ -101,6 +112,11 @@ export const users = pgTable(
     // reach /company. Off for everyone until they opt in from personal Settings. Kept on `users`
     // (a tiny boolean) so the auth hot path loads it for free, mirroring `proMode`.
     companySurfaceEnabled: boolean("company_surface_enabled").notNull().default(false),
+    // Per-user feature flag for the Codex runtime. When true the agent editor shows the engine
+    // selector so an agent can be switched from the default OpenCompany runtime to Codex; off for
+    // everyone until they opt in from Settings → Feature flags. Kept on `users` (a tiny boolean)
+    // so the auth hot path loads it for free, mirroring `proMode`/`companySurfaceEnabled`.
+    codexEngineEnabled: boolean("codex_engine_enabled").notNull().default(false),
     // IANA timezone used by user-owned scheduled routines. Individual personal routines derive
     // from this setting so users manage their local time in one place.
     timezone: text("timezone").notNull().default("UTC"),
@@ -203,7 +219,7 @@ export const agents = pgTable(
       .$type<AgentConfig>()
       .notNull()
       .default(
-        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"agents":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
+        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","engine":"opencompany","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"agents":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
       ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -444,12 +460,23 @@ export const agentSessions = pgTable(
       .references(() => agents.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled session"),
     status: text("status").notNull().default("created"),
+    engine: text("engine").$type<AgentEngine>().notNull().default("opencompany"),
+    engineSessionId: text("engine_session_id"),
     source: text("source")
       .$type<"user" | "agent" | "memory" | "whatsapp">()
       .notNull()
       .default("user"),
     modelProvider: text("model_provider").notNull().default("vercel-ai-gateway"),
     modelName: text("model_name").notNull().default("openai/gpt-5.4-mini"),
+    codexReasoningEffort: text("codex_reasoning_effort")
+      .$type<CodexReasoningEffort>()
+      .notNull()
+      .default("high"),
+    codexPlanModeEnabled: boolean("codex_plan_mode_enabled").notNull().default(false),
+    codexPlanModeReasoningEffort: text("codex_plan_mode_reasoning_effort")
+      .$type<CodexReasoningEffort>()
+      .notNull()
+      .default("high"),
     parentSessionId: text("parent_session_id"),
     parentMessageId: text("parent_message_id"),
     parentToolCallId: text("parent_tool_call_id"),
@@ -487,6 +514,7 @@ export const agentSessions = pgTable(
     ),
     sourceIdx: index("agent_sessions_source_idx").on(table.source),
     statusIdx: index("agent_sessions_status_idx").on(table.status),
+    engineIdx: index("agent_sessions_engine_idx").on(table.engine),
     visibleWorkspaceUserUpdatedIdx: index("agent_sessions_visible_workspace_user_updated_idx").on(
       table.workspaceId,
       table.userId,
@@ -504,6 +532,18 @@ export const agentSessions = pgTable(
     sourceCheck: check(
       "agent_sessions_source_check",
       sql`${table.source} IN ('user', 'agent', 'memory', 'whatsapp')`,
+    ),
+    engineCheck: check(
+      "agent_sessions_engine_check",
+      sql`${table.engine} IN ('opencompany', 'codex')`,
+    ),
+    codexReasoningEffortCheck: check(
+      "agent_sessions_codex_reasoning_effort_check",
+      sql`${table.codexReasoningEffort} IN ('low', 'medium', 'high', 'xhigh')`,
+    ),
+    codexPlanModeReasoningEffortCheck: check(
+      "agent_sessions_codex_plan_mode_reasoning_effort_check",
+      sql`${table.codexPlanModeReasoningEffort} IN ('low', 'medium', 'high', 'xhigh')`,
     ),
   }),
 );
@@ -933,7 +973,7 @@ export const agentSessionRunJobs = pgTable(
     ),
     kindCheck: check(
       "agent_session_run_jobs_kind_check",
-      sql`${table.kind} IN ('start', 'message', 'title', 'after_session', 'resume_approval', 'resume_question')`,
+      sql`${table.kind} IN ('start', 'message', 'codex_turn', 'title', 'after_session', 'resume_approval', 'resume_question')`,
     ),
     statusCheck: check(
       "agent_session_run_jobs_status_check",
@@ -1652,6 +1692,70 @@ export const workspaceMcpCredentials = pgTable(
       columns: [table.serverId, table.workspaceId],
       foreignColumns: [workspaceMcpServers.id, workspaceMcpServers.workspaceId],
     }).onDelete("cascade"),
+  }),
+);
+
+export const workspaceCodexCredentials = pgTable(
+  "workspace_codex_credentials",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    encryptedAuthJson: jsonb("encrypted_auth_json")
+      .$type<WorkspaceIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    status: text("status").$type<WorkspaceCodexCredentialStatus>().notNull().default("connected"),
+    statusReason: text("status_reason"),
+    connectedByUserId: text("connected_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("workspace_codex_credentials_status_idx").on(table.status),
+    connectedByUserIdx: index("workspace_codex_credentials_connected_by_user_idx").on(
+      table.connectedByUserId,
+    ),
+    statusCheck: check(
+      "workspace_codex_credentials_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth')`,
+    ),
+  }),
+);
+
+export const workspaceCodexDeviceAuthFlows = pgTable(
+  "workspace_codex_device_auth_flows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    requestedByUserId: text("requested_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    userCode: text("user_code"),
+    verificationUri: text("verification_uri"),
+    status: text("status").$type<WorkspaceCodexDeviceAuthFlowStatus>().notNull().default("pending"),
+    statusReason: text("status_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceStatusIdx: index("workspace_codex_device_auth_flows_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    expiresAtIdx: index("workspace_codex_device_auth_flows_expires_at_idx").on(table.expiresAt),
+    statusCheck: check(
+      "workspace_codex_device_auth_flows_status_check",
+      sql`${table.status} IN ('pending', 'code_ready', 'completed', 'failed', 'expired')`,
+    ),
   }),
 );
 

@@ -97,6 +97,7 @@ const binding = {
 
 const config: AgentConfig = {
   schemaVersion: "agent.v1",
+  engine: "opencompany",
   title: "Leo",
   instructions: "Use @opencompany/web for code changes.",
   model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },

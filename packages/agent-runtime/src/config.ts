@@ -28,11 +28,14 @@ import {
 import type {
   AgentConfig,
   AgentConfigTool,
+  AgentEngine,
   AgentGitHubRepositoryConfig,
   AgentMcpToolConfig,
   AgentNeonDatabaseConfig,
   AgentToolId,
 } from "./types";
+
+const DEFAULT_AGENT_ENGINE: AgentEngine = "opencompany";
 
 type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & {
   integrations?: {
@@ -347,6 +350,7 @@ export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
 
   return {
     ...config,
+    engine: persisted.engine === "codex" ? "codex" : DEFAULT_AGENT_ENGINE,
     tools: Array.isArray(persisted.tools) ? persisted.tools : [],
     brain: Array.isArray(persisted.brain) ? persisted.brain : [],
     agents: Array.isArray(persisted.agents) ? persisted.agents : [],

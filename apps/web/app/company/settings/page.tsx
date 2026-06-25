@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
 import { loadBillingOverview } from "@/lib/billing/service";
+import { loadWorkspaceCodexAuthSettings } from "@/lib/codex-auth/data";
 import { loadWorkspaceSyncStatus } from "@/lib/workspace-state/status";
 
 function initialsFor(name: string, email: string) {
@@ -29,9 +30,9 @@ function formatDate(date: Date) {
 }
 
 export default async function SettingsPage() {
-  const { authUser, user, workspace } = await currentWorkspace();
+  const { authUser, user, workspace, role } = await currentWorkspace();
   const db = getDb();
-  const [syncStatus, [avatar], billing] = await Promise.all([
+  const [syncStatus, [avatar], billing, codexAuth] = await Promise.all([
     loadWorkspaceSyncStatus(db, workspace.id),
     db
       .select({ updatedAt: userAvatars.updatedAt })
@@ -39,6 +40,7 @@ export default async function SettingsPage() {
       .where(eq(userAvatars.userId, user.id))
       .limit(1),
     loadBillingOverview(workspace.id),
+    loadWorkspaceCodexAuthSettings(workspace.id),
   ]);
   const customAvatarUrl = avatar
     ? `/api/avatar/${user.id}?v=${new Date(avatar.updatedAt).getTime()}`
@@ -60,6 +62,7 @@ export default async function SettingsPage() {
       workspace={{
         name: workspace.name,
         createdAt: formatDate(new Date(workspace.createdAt)),
+        canManageSettings: role === "admin",
         sync: {
           hasRepo: syncStatus.hasRepo,
           lastSyncedAt: syncStatus.lastSyncedAt
@@ -69,6 +72,7 @@ export default async function SettingsPage() {
           failedCount: syncStatus.failedCount,
         },
       }}
+      codexAuth={codexAuth}
       billing={{
         balanceUsdMicros: billing.balanceUsdMicros,
         spendLast7UsdMicros: billing.spendLast7UsdMicros,

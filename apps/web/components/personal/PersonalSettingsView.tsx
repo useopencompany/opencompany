@@ -11,6 +11,7 @@ import { useToast } from "@/components/ToastProvider";
 import { Toggle } from "@/components/ui/toggle";
 import { resetPersonalAgent } from "@/lib/personal/actions";
 import {
+  setCodexEngineEnabled as setCodexEngineEnabledAction,
   setCompanySurfaceEnabled as setCompanySurfaceEnabledAction,
   setProMode as setProModeAction,
   setUserTimezone as setUserTimezoneAction,
@@ -27,6 +28,8 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     setProMode,
     companySurfaceEnabled,
     setCompanySurfaceEnabled,
+    codexEngineEnabled,
+    setCodexEngineEnabled,
     userTimezone,
     userTimezoneSource,
     setUserTimezone,
@@ -79,6 +82,19 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     });
   }
 
+  function onToggleCodexEngine(next: boolean) {
+    // Flip optimistically so the toggle responds immediately; the company agent editor reads the
+    // persisted value on its next server render (the action revalidates that layout).
+    setCodexEngineEnabled(next);
+    startTransition(async () => {
+      const result = await setCodexEngineEnabledAction(next);
+      if (!result.ok) {
+        setCodexEngineEnabled(!next);
+        showError(result.error, "Could not update the Codex runtime flag");
+      }
+    });
+  }
+
   function onSaveTimezone(next: string, source: "browser" | "manual") {
     const previous = userTimezone;
     const previousSource = userTimezoneSource;
@@ -106,43 +122,36 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
       </header>
 
       <Section
-        title="Pro mode"
-        description="Unlock advanced surfaces, including the read-only agent Memory inspector in the sidebar."
+        title="Feature flags"
+        description="Turn experimental features and optional surfaces on or off."
       >
-        <div className="flex items-center gap-3">
-          <Toggle
-            pressed={proMode}
-            disabled={isPending}
-            aria-label={`${proMode ? "Disable" : "Enable"} Pro mode`}
-            onPressedChange={onToggleProMode}
-          >
-            {proMode ? "On" : "Off"}
-          </Toggle>
-          <span className="text-[12.5px] text-ink-muted">
-            {proMode ? "Advanced surfaces are visible." : "Advanced surfaces are hidden."}
-          </span>
-        </div>
-      </Section>
-
-      <Section
-        title="Company workspace"
-        description="Bring back the legacy company workspace surface, switchable from the sidebar."
-      >
-        <div className="flex items-center gap-3">
-          <Toggle
-            pressed={companySurfaceEnabled}
-            disabled={isPending}
-            aria-label={`${companySurfaceEnabled ? "Disable" : "Enable"} company workspace access`}
-            onPressedChange={onToggleCompanySurface}
-          >
-            {companySurfaceEnabled ? "On" : "Off"}
-          </Toggle>
-          <span className="text-[12.5px] text-ink-muted">
-            {companySurfaceEnabled
-              ? "The company workspace is available from the sidebar."
-              : "The company workspace is hidden."}
-          </span>
-        </div>
+        <FlagRow
+          label="Pro mode"
+          description="Unlock advanced surfaces, including the read-only agent Memory inspector in the sidebar."
+          pressed={proMode}
+          disabled={isPending}
+          onPressedChange={onToggleProMode}
+          onText="Advanced surfaces are visible."
+          offText="Advanced surfaces are hidden."
+        />
+        <FlagRow
+          label="Company workspace"
+          description="Bring back the legacy company workspace surface, switchable from the sidebar."
+          pressed={companySurfaceEnabled}
+          disabled={isPending}
+          onPressedChange={onToggleCompanySurface}
+          onText="The company workspace is available from the sidebar."
+          offText="The company workspace is hidden."
+        />
+        <FlagRow
+          label="Codex runtime"
+          description="Show the engine selector on agents so they can run on the Codex runtime instead of OpenCompany."
+          pressed={codexEngineEnabled}
+          disabled={isPending}
+          onPressedChange={onToggleCodexEngine}
+          onText="The engine selector is shown on agents."
+          offText="Agents stay on the OpenCompany runtime."
+        />
       </Section>
 
       <Section title="Appearance" description="Choose how the interface looks.">
@@ -234,6 +243,44 @@ function Section({
         <div className="flex flex-col gap-4">{children}</div>
       </div>
     </section>
+  );
+}
+
+// A single feature-flag row inside the "Feature flags" section: a labelled On/Off toggle with a
+// short description plus a state line that reflects what the flag currently does.
+function FlagRow({
+  label,
+  description,
+  pressed,
+  disabled,
+  onPressedChange,
+  onText,
+  offText,
+}: {
+  label: string;
+  description: string;
+  pressed: boolean;
+  disabled: boolean;
+  onPressedChange: (next: boolean) => void;
+  onText: string;
+  offText: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <div className="text-[12.5px] font-medium text-ink">{label}</div>
+        <p className="mt-0.5 text-[12px] leading-5 text-ink-muted">{description}</p>
+        <p className="mt-0.5 text-[12px] text-ink-subtle">{pressed ? onText : offText}</p>
+      </div>
+      <Toggle
+        pressed={pressed}
+        disabled={disabled}
+        aria-label={`${pressed ? "Disable" : "Enable"} ${label}`}
+        onPressedChange={onPressedChange}
+      >
+        {pressed ? "On" : "Off"}
+      </Toggle>
+    </div>
   );
 }
 

@@ -3,13 +3,18 @@
 import {
   type AgentSessionQuestionAnswer,
   ATTACHMENT_MAX_PER_MESSAGE,
+  CODEX_DEFAULT_MODEL_ID,
   getAgentModelDefinition,
+  isCodexModelId,
+  isCodexReasoningEffort,
   modelSupportsAttachments,
   newAgentSessionId,
   newAgentSessionMessageAttachmentId,
   newAgentSessionMessageId,
+  normalizeAgentConfig,
   validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
+import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -74,6 +79,22 @@ function billingRedirectForSurface(
   return surface === "personal" ? `${personalPaths.settings}${query}` : `/company/settings${query}`;
 }
 
+function resolveSessionModelName(input: {
+  engine: "opencompany" | "codex";
+  requestedModelId?: string;
+  agentModelId: string;
+}) {
+  if (input.engine === "codex") {
+    if (input.requestedModelId && isCodexModelId(input.requestedModelId)) {
+      return input.requestedModelId;
+    }
+    return isCodexModelId(input.agentModelId) ? input.agentModelId : CODEX_DEFAULT_MODEL_ID;
+  }
+  return input.requestedModelId && getAgentModelDefinition(input.requestedModelId)
+    ? input.requestedModelId
+    : input.agentModelId;
+}
+
 export async function createAgentSession(idOrPath: string, options: SessionStartOptions = {}) {
   const { user, workspace } = await currentWorkspace();
   const allowance = await ensureWorkspaceRunAllowance({
@@ -101,12 +122,15 @@ export async function createAgentSession(idOrPath: string, options: SessionStart
     workspaceId: workspace.id,
   });
   const sessionId = session.id;
+  const engine = session.engine;
 
   // Analytics is a network flush (PostHog) that must not sit on the critical path, so it
   // runs concurrently with the session-start dispatch inside `after()`.
   after(() =>
     Promise.all([
-      dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id }),
+      ...(engine === "opencompany"
+        ? [dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id })]
+        : []),
       captureServerEvent("session_started", user.id, {
         user_id: user.id,
         workspace_id: workspace.id,
@@ -114,6 +138,7 @@ export async function createAgentSession(idOrPath: string, options: SessionStart
         session_id: sessionId,
         model_provider: agent.config.model.provider,
         model_name: agent.config.model.name,
+        engine,
         source: "agent",
       }),
     ]),
@@ -158,9 +183,16 @@ export async function createAgentSessionFromPrompt(
     return { ok: false, error: "Agent not found." } as const;
   }
 
-  // A valid catalog model picked in the composer overrides the agent's default for this
-  // session only; an unknown/stale id is ignored in favor of the agent default.
-  const modelName = modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
+  const engine = normalizeAgentConfig(agent.config).engine;
+  const modelName = resolveSessionModelName({
+    engine,
+    agentModelId: agent.config.model.name,
+    ...(modelId ? { requestedModelId: modelId } : {}),
+  });
+
+  if (engine === "codex" && attachments.length > 0) {
+    return { ok: false, error: "Codex sessions do not support attachments yet." } as const;
+  }
 
   // Re-validate attachments server-side against this session's model + the caller's workspace.
   const attachmentCheck = validateSubmitAttachments(attachments, modelName, workspace.id);
@@ -185,14 +217,22 @@ export async function createAgentSessionFromPrompt(
   });
   const sessionId = session.id;
   const messageId = message.id;
+  const sessionEngine = session.engine;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
   // and therefore the runner dispatch. Run dispatch and analytics concurrently in
   // `after()` so neither sits on the time-to-first-token path.
   after(() =>
     Promise.all([
-      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
-      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      triggerAgentMessageRun({
+        sessionId,
+        messageId,
+        workspaceId: workspace.id,
+        engine: sessionEngine,
+      }),
+      ...(sessionEngine === "opencompany"
+        ? [dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id })]
+        : []),
       captureServerEvent("session_started", user.id, {
         user_id: user.id,
         workspace_id: workspace.id,
@@ -200,6 +240,7 @@ export async function createAgentSessionFromPrompt(
         session_id: sessionId,
         model_provider: agent.config.model.provider,
         model_name: modelName,
+        engine: sessionEngine,
         source: "prompt",
       }),
       captureServerEvent("session_message_sent", user.id, {
@@ -210,6 +251,7 @@ export async function createAgentSessionFromPrompt(
         message_id: messageId,
         model_provider: agent.config.model.provider,
         model_name: modelName,
+        engine: sessionEngine,
         is_initial_message: true,
         message_length: trimmed.length,
       }),
@@ -356,6 +398,7 @@ export async function createPersonalOnboardingSession(
     workspaceId: workspace.id,
   });
   const sessionId = session.id;
+  const sessionEngine = session.engine;
 
   // Visible content = the task verbatim. Model-only content appends the background context and the
   // onboarding pointer; it never renders in the transcript (modelMessage), so the user just sees
@@ -370,8 +413,15 @@ export async function createPersonalOnboardingSession(
 
   after(() =>
     Promise.all([
-      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
-      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      triggerAgentMessageRun({
+        sessionId,
+        messageId,
+        workspaceId: workspace.id,
+        engine: sessionEngine,
+      }),
+      ...(sessionEngine === "opencompany"
+        ? [dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id })]
+        : []),
       captureServerEvent("session_started", user.id, {
         user_id: user.id,
         workspace_id: workspace.id,
@@ -379,6 +429,7 @@ export async function createPersonalOnboardingSession(
         session_id: sessionId,
         model_provider: agent.config.model.provider,
         model_name: agent.config.model.name,
+        engine: sessionEngine,
         source: "onboarding",
       }),
     ]),
@@ -471,6 +522,7 @@ export async function submitAgentSessionMessage(
   content: string,
   attachments: SubmitAttachmentInput[] = [],
   sendMode: SendMode = "steer",
+  options: { codexPlanModeEnabled?: boolean } = {},
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
@@ -489,6 +541,7 @@ export async function submitAgentSessionMessage(
         agentId: agentSessions.agentId,
         modelProvider: agentSessions.modelProvider,
         modelName: agentSessions.modelName,
+        engine: agentSessions.engine,
         status: agentSessions.status,
       })
       .from(agentSessions)
@@ -510,6 +563,9 @@ export async function submitAgentSessionMessage(
   const session = sessionRows[0];
   if (!session) {
     return { ok: false, error: "Session not found." } as const;
+  }
+  if (session.engine === "codex" && attachments.length > 0) {
+    return { ok: false, error: "Codex sessions do not support attachments yet." } as const;
   }
 
   // Re-validate attachments server-side: the client checks are advisory only. Enforced against
@@ -556,6 +612,13 @@ export async function submitAgentSessionMessage(
   });
   const messageId = message.id;
 
+  if (session.engine === "codex" && options.codexPlanModeEnabled === true) {
+    await db
+      .update(agentSessions)
+      .set({ codexPlanModeEnabled: true, updatedAt: new Date() })
+      .where(eq(agentSessions.id, sessionId));
+  }
+
   // Interrupt mode: the user aborted the in-flight turn to run this message now. Request the
   // abort synchronously (off the time-to-first-token path it would otherwise share) so the
   // runner stops at its next step/tool boundary as soon as possible; its abort-path
@@ -584,8 +647,15 @@ export async function submitAgentSessionMessage(
       ...(interruptRunning
         ? [dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id })]
         : []),
-      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
-      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      triggerAgentMessageRun({
+        sessionId,
+        messageId,
+        workspaceId: workspace.id,
+        engine: session.engine,
+      }),
+      ...(session.engine === "opencompany"
+        ? [dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id })]
+        : []),
       captureServerEvent("session_message_sent", user.id, {
         user_id: user.id,
         workspace_id: workspace.id,
@@ -594,6 +664,7 @@ export async function submitAgentSessionMessage(
         message_id: messageId,
         model_provider: session.modelProvider,
         model_name: session.modelName,
+        engine: session.engine,
         is_initial_message: false,
         message_length: trimmed.length,
       }),
@@ -615,10 +686,30 @@ export async function setAgentSessionModel(sessionId: string, modelId: string) {
   }
 
   const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id, engine: agentSessions.engine })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+  if (session.engine === "codex" && !isCodexModelId(modelId)) {
+    return { ok: false, error: "Codex sessions can only use Codex models." } as const;
+  }
+
   const updated = await db
     .update(agentSessions)
     .set({
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: session.engine === "codex" ? "openai" : "vercel-ai-gateway",
       modelName: modelId,
       updatedAt: new Date(),
     })
@@ -630,6 +721,57 @@ export async function setAgentSessionModel(sessionId: string, modelId: string) {
         isNull(agentSessions.archivedAt),
       ),
     )
+    .returning({ id: agentSessions.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  return { ok: true } as const;
+}
+
+export async function setAgentSessionCodexSettings(
+  sessionId: string,
+  settings: {
+    reasoningEffort?: string;
+  },
+) {
+  const { user, workspace } = await currentWorkspace();
+  const reasoningEffort = settings.reasoningEffort;
+  if (reasoningEffort !== undefined && !isCodexReasoningEffort(reasoningEffort)) {
+    return { ok: false, error: "Invalid Codex reasoning effort." } as const;
+  }
+
+  const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id, engine: agentSessions.engine })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+  if (session.engine !== "codex") {
+    return { ok: false, error: "Codex settings only apply to Codex sessions." } as const;
+  }
+
+  const updated = await db
+    .update(agentSessions)
+    .set({
+      ...(reasoningEffort !== undefined
+        ? { codexReasoningEffort: reasoningEffort as CodexReasoningEffort }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSessions.id, session.id))
     .returning({ id: agentSessions.id });
 
   if (updated.length === 0) {
@@ -653,6 +795,7 @@ export async function continueInterruptedSession(sessionId: string) {
         lastError: agentSessions.lastError,
         modelProvider: agentSessions.modelProvider,
         modelName: agentSessions.modelName,
+        engine: agentSessions.engine,
       })
       .from(agentSessions)
       .where(
@@ -705,8 +848,15 @@ export async function continueInterruptedSession(sessionId: string) {
 
   after(() =>
     Promise.all([
-      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
-      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      triggerAgentMessageRun({
+        sessionId,
+        messageId,
+        workspaceId: workspace.id,
+        engine: session.engine,
+      }),
+      ...(session.engine === "opencompany"
+        ? [dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id })]
+        : []),
       captureServerEvent("session_message_sent", user.id, {
         user_id: user.id,
         workspace_id: workspace.id,
@@ -715,6 +865,7 @@ export async function continueInterruptedSession(sessionId: string) {
         message_id: messageId,
         model_provider: session.modelProvider,
         model_name: session.modelName,
+        engine: session.engine,
         is_initial_message: false,
         message_length: "Continue".length,
       }),
@@ -1257,7 +1408,15 @@ async function insertAgentSession(input: {
 }) {
   const db = getDb();
   const sessionId = newAgentSessionId();
-  const modelName = input.modelName ?? input.agent.config.model.name;
+  const engine = normalizeAgentConfig(input.agent.config).engine;
+  const modelName = resolveSessionModelName({
+    engine,
+    agentModelId: input.agent.config.model.name,
+    ...(input.modelName ? { requestedModelId: input.modelName } : {}),
+  });
+  const status = engine === "codex" ? "ready" : "created";
+  const statusMessage = engine === "codex" ? "Session ready" : "Session created";
+  const modelProvider = engine === "codex" ? "openai" : input.agent.config.model.provider;
 
   // Return the canonical session row and status-event row so callers can synthesize the
   // session detail payload in-memory (see buildCreatedSessionDetail) instead of issuing a
@@ -1271,7 +1430,9 @@ async function insertAgentSession(input: {
         userId: input.userId,
         agentId: input.agent.id,
         title: input.title,
-        modelProvider: input.agent.config.model.provider,
+        status,
+        engine,
+        modelProvider,
         modelName,
       })
       .returning(),
@@ -1280,7 +1441,7 @@ async function insertAgentSession(input: {
       .values({
         sessionId,
         type: "session.status",
-        payload: { status: "created", message: "Session created" },
+        payload: { status, message: statusMessage },
       })
       .returning({
         id: agentSessionEvents.id,
@@ -1313,6 +1474,13 @@ async function insertAgentSessionWithUserMessage(input: {
   const sessionId = newAgentSessionId();
   const messageId = newAgentSessionMessageId();
   const now = new Date();
+  const engine = normalizeAgentConfig(input.agent.config).engine;
+  const modelName = resolveSessionModelName({
+    engine,
+    requestedModelId: input.modelName,
+    agentModelId: input.agent.config.model.name,
+  });
+  const modelProvider = engine === "codex" ? "openai" : input.agent.config.model.provider;
   const payload = { messageId, role: "user", content: input.content, status: "completed" };
   const attachmentRows = buildAttachmentRows({
     messageId,
@@ -1331,8 +1499,9 @@ async function insertAgentSessionWithUserMessage(input: {
       userId: input.userId,
       agentId: input.agent.id,
       title: input.title,
-      modelProvider: input.agent.config.model.provider,
-      modelName: input.modelName,
+      engine,
+      modelProvider,
+      modelName,
     })
     .returning();
   const statusEventInsert = db

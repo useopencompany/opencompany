@@ -19,6 +19,7 @@ import {
   createAgentSessionFromPrompt,
   createPersonalOnboardingSession,
   resolveToolApproval,
+  setAgentSessionCodexSettings,
   setSessionStar,
   submitAgentSessionMessage,
 } from "./actions";
@@ -125,13 +126,24 @@ const triggerAgentApprovalResumeMock = vi.mocked(triggerAgentApprovalResume);
 const triggerAgentMessageRunMock = vi.mocked(triggerAgentMessageRun);
 const captureServerEventMock = vi.mocked(captureServerEvent);
 
-function fakeAgent() {
+function fakeAgent(overrides: Record<string, unknown> = {}) {
   return {
     id: "agt_123",
     name: "Leo",
     path: "agents/leo/leo.agent",
     workspaceId: "wks_123",
-    config: { model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" } },
+    config: {
+      schemaVersion: "agent.v1",
+      engine: "opencompany",
+      title: "Leo",
+      instructions: "Help the user.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    },
+    ...overrides,
   };
 }
 
@@ -146,6 +158,7 @@ function fakeSessionRow(overrides: Record<string, unknown> = {}) {
     title: "Ship it",
     status: "created",
     source: "user",
+    engine: "opencompany",
     modelProvider: "vercel-ai-gateway",
     modelName: "openai/gpt-5.4-mini",
     parentSessionId: null,
@@ -209,9 +222,11 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   // onboarding path writes the session first, then the visible first message in a second batch.
   let twoQueryBatchCount = 0;
   const batch = vi.fn(async (queries: unknown[]) => {
+    const engine = agent?.config.engine === "codex" ? "codex" : "opencompany";
+    const status = engine === "codex" ? "ready" : "created";
     if (queries.length === 4) {
       return [
-        [fakeSessionRow()],
+        [fakeSessionRow({ engine, status })],
         [statusEventRow],
         [fakeMessageRow()],
         [{ id: 2, createdAt: CREATED_AT }],
@@ -220,7 +235,7 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
 
     twoQueryBatchCount += 1;
     return twoQueryBatchCount === 1
-      ? [[fakeSessionRow()], [statusEventRow]]
+      ? [[fakeSessionRow({ engine, status })], [statusEventRow]]
       : [[fakeMessageRow()], [{ id: 2, createdAt: CREATED_AT }]];
   });
   return { select, insert, update, batch } as never;
@@ -289,6 +304,7 @@ describe("createAgentSession", () => {
       agentPath: "agents/leo/leo.agent",
       status: "created",
       source: "user",
+      engine: "opencompany",
       modelProvider: "vercel-ai-gateway",
       modelName: "openai/gpt-5.4-mini",
       createdAt: CREATED_AT.toISOString(),
@@ -302,6 +318,7 @@ describe("createAgentSession", () => {
       title: "Ship it",
       status: "created",
       source: "user",
+      engine: "opencompany",
       modelName: "openai/gpt-5.4-mini",
       lastError: null,
       createdAt: CREATED_AT.toISOString(),
@@ -320,6 +337,40 @@ describe("createAgentSession", () => {
       session_id: "ses_123",
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
+      engine: "opencompany",
+      source: "agent",
+    });
+  });
+
+  it("creates empty Codex sessions ready for messaging without native sandbox startup", async () => {
+    getDbMock.mockReturnValue(
+      dbWithAgent(
+        fakeAgent({
+          config: {
+            ...fakeAgent().config,
+            engine: "codex",
+          },
+        }),
+      ),
+    );
+
+    const result = await createAgentSession("agt_123");
+
+    if (!result.ok) throw new Error("expected ok result");
+    expect(result.detail.session).toMatchObject({
+      id: "ses_123",
+      engine: "codex",
+      status: "ready",
+    });
+    expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).toHaveBeenCalledWith("session_started", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      agent_id: "agt_123",
+      session_id: "ses_123",
+      model_provider: "vercel-ai-gateway",
+      model_name: "openai/gpt-5.4-mini",
+      engine: "codex",
       source: "agent",
     });
   });
@@ -376,6 +427,7 @@ describe("createPersonalOnboardingSession", () => {
       sessionId: "ses_123",
       messageId: "msg_123",
       workspaceId: "wks_123",
+      engine: "opencompany",
     });
   });
 });
@@ -460,6 +512,7 @@ describe("createAgentSessionFromPrompt", () => {
       sessionId: "ses_123",
       messageId: "msg_123",
       workspaceId: "wks_123",
+      engine: "opencompany",
     });
     expect(dispatchAgentAfterSessionCheckMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
@@ -473,6 +526,7 @@ describe("createAgentSessionFromPrompt", () => {
       session_id: "ses_123",
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
+      engine: "opencompany",
       source: "prompt",
     });
     expect(captureServerEventMock).toHaveBeenCalledWith("session_message_sent", "usr_123", {
@@ -483,8 +537,46 @@ describe("createAgentSessionFromPrompt", () => {
       message_id: "msg_123",
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
+      engine: "opencompany",
       is_initial_message: true,
       message_length: "Ship it".length,
+    });
+  });
+
+  it("routes Codex initial messages to the Codex turn runner and skips after-session checks", async () => {
+    getDbMock.mockReturnValue(
+      dbWithAgent(
+        fakeAgent({
+          config: {
+            ...fakeAgent().config,
+            engine: "codex",
+          },
+        }),
+      ),
+    );
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Ship it with Codex");
+
+    if (!result.ok) throw new Error("expected ok result");
+    expect(result.detail.session).toMatchObject({ id: "ses_123", engine: "codex" });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      workspaceId: "wks_123",
+      engine: "codex",
+    });
+    expect(dispatchAgentAfterSessionCheckMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).toHaveBeenCalledWith("session_message_sent", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      agent_id: "agt_123",
+      session_id: "ses_123",
+      message_id: "msg_123",
+      model_provider: "vercel-ai-gateway",
+      model_name: "openai/gpt-5.4-mini",
+      engine: "codex",
+      is_initial_message: true,
+      message_length: "Ship it with Codex".length,
     });
   });
 
@@ -569,6 +661,32 @@ describe("createAgentSessionFromPrompt", () => {
     ]);
 
     expect(result.ok).toBe(false);
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects attachments for Codex initial messages", async () => {
+    getDbMock.mockReturnValue(
+      dbWithAgent(
+        fakeAgent({
+          config: {
+            ...fakeAgent().config,
+            engine: "codex",
+          },
+        }),
+      ),
+    );
+
+    const result = await createAgentSessionFromPrompt("agt_123", "hi", undefined, [
+      {
+        blobPathname: "workspace/wks_123/pending/att1-x.png",
+        blobUrl: "https://blob.example/x.png",
+        mediaType: "image/png",
+        filename: "x.png",
+        sizeBytes: 1024,
+      },
+    ]);
+
+    expect(result).toEqual({ ok: false, error: "Codex sessions do not support attachments yet." });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 });
@@ -658,6 +776,8 @@ describe("submitAgentSessionMessage", () => {
         agentId: "agt_123",
         modelProvider: "vercel-ai-gateway",
         modelName: "openai/gpt-5.4-mini",
+        engine: "opencompany",
+        status: "completed",
       },
     ]);
     const where = vi.fn(() => ({ limit }));
@@ -686,6 +806,7 @@ describe("submitAgentSessionMessage", () => {
       sessionId: "ses_123",
       messageId: "msg_456",
       workspaceId: "wks_123",
+      engine: "opencompany",
     });
     expect(dispatchAgentAfterSessionCheckMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
@@ -699,10 +820,145 @@ describe("submitAgentSessionMessage", () => {
       session_id: "ses_123",
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
+      engine: "opencompany",
       message_id: "msg_456",
       is_initial_message: false,
       message_length: "Follow up".length,
     });
+  });
+
+  it("routes Codex follow-up messages to the Codex turn runner and skips after-session checks", async () => {
+    const limit = vi.fn().mockResolvedValue([
+      {
+        id: "ses_123",
+        agentId: "agt_123",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+        engine: "codex",
+        status: "completed",
+      },
+    ]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn(() => ({ returning }));
+    const insert = vi.fn(() => ({ values }));
+    const batch = vi
+      .fn()
+      .mockResolvedValue([
+        [{ id: "msg_456" }],
+        [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
+      ]);
+    const updateSet = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+    const update = vi.fn(() => ({
+      set: updateSet,
+    }));
+    getDbMock.mockReturnValue({ select, insert, batch, update } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", " Follow up ");
+
+    expect(result).toEqual({ ok: true, messageId: "msg_456" });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_456",
+      workspaceId: "wks_123",
+      engine: "codex",
+    });
+    expect(dispatchAgentAfterSessionCheckMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).toHaveBeenCalledWith("session_message_sent", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      agent_id: "agt_123",
+      session_id: "ses_123",
+      model_provider: "vercel-ai-gateway",
+      model_name: "openai/gpt-5.4-mini",
+      engine: "codex",
+      message_id: "msg_456",
+      is_initial_message: false,
+      message_length: "Follow up".length,
+    });
+    expect(updateSet).not.toHaveBeenCalledWith(
+      expect.objectContaining({ codexPlanModeEnabled: true }),
+    );
+  });
+
+  it("sets one-shot Codex plan mode for a requested follow-up message", async () => {
+    const limit = vi.fn().mockResolvedValue([
+      {
+        id: "ses_123",
+        agentId: "agt_123",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+        engine: "codex",
+        status: "completed",
+      },
+    ]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn(() => ({ returning }));
+    const insert = vi.fn(() => ({ values }));
+    const batch = vi
+      .fn()
+      .mockResolvedValue([
+        [{ id: "msg_456" }],
+        [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
+      ]);
+    const updateSet = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+    const update = vi.fn(() => ({
+      set: updateSet,
+    }));
+    getDbMock.mockReturnValue({ select, insert, batch, update } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", " Follow up ", [], "steer", {
+      codexPlanModeEnabled: true,
+    });
+
+    expect(result).toEqual({ ok: true, messageId: "msg_456" });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codexPlanModeEnabled: true,
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_456",
+      workspaceId: "wks_123",
+      engine: "codex",
+    });
+  });
+
+  it("rejects attachments for Codex follow-up messages", async () => {
+    const limit = vi.fn().mockResolvedValue([
+      {
+        id: "ses_123",
+        agentId: "agt_123",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+        engine: "codex",
+        status: "completed",
+      },
+    ]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    getDbMock.mockReturnValue({ select } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", "Look", [
+      {
+        blobPathname: "workspace/wks_123/pending/att1-x.png",
+        blobUrl: "https://blob.example/x.png",
+        mediaType: "image/png",
+        filename: "x.png",
+        sizeBytes: 1024,
+      },
+    ]);
+
+    expect(result).toEqual({ ok: false, error: "Codex sessions do not support attachments yet." });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 
   it("reports missing credits before session existence", async () => {
@@ -734,6 +990,39 @@ describe("submitAgentSessionMessage", () => {
 
     expect(result).toEqual({ ok: false, error: "Session not found." });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("setAgentSessionCodexSettings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  it("persists reasoning effort without enabling persistent plan mode", async () => {
+    const limit = vi.fn().mockResolvedValue([{ id: "ses_123", engine: "codex" }]);
+    const selectWhere = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where: selectWhere }));
+    const select = vi.fn(() => ({ from }));
+    const returning = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
+    const updateWhere = vi.fn(() => ({ returning }));
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set: updateSet }));
+    getDbMock.mockReturnValue({ select, update } as never);
+
+    const result = await setAgentSessionCodexSettings("ses_123", {
+      reasoningEffort: "high",
+      planModeEnabled: true,
+    } as never);
+
+    expect(result).toEqual({ ok: true });
+    expect(updateSet).toHaveBeenCalledWith({
+      codexReasoningEffort: "high",
+      updatedAt: expect.any(Date),
+    });
   });
 });
 
@@ -773,6 +1062,7 @@ describe("continueInterruptedSession", () => {
     lastError: null,
     modelProvider: "vercel-ai-gateway",
     modelName: "openai/gpt-5.4-mini",
+    engine: "opencompany",
   };
 
   it("rejects inaccessible or archived sessions through the session lookup", async () => {
@@ -844,6 +1134,7 @@ describe("continueInterruptedSession", () => {
       sessionId: "ses_123",
       messageId: "msg_continue",
       workspaceId: "wks_123",
+      engine: "opencompany",
     });
     expect(dispatchAgentAfterSessionCheckMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
@@ -876,6 +1167,7 @@ describe("continueInterruptedSession", () => {
       sessionId: "ses_123",
       messageId: "msg_continue",
       workspaceId: "wks_123",
+      engine: "opencompany",
     });
   });
 

@@ -2,14 +2,22 @@
 
 import {
   ATTACHMENT_TEXT_MAX_BYTES,
+  CODEX_AGENT_MODEL_IDS,
+  CODEX_DEFAULT_MODEL_ID,
+  CODEX_REASONING_EFFORTS,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
+  isCodexModelId,
   listAddableBuiltinSkills,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
   permissionLabelFor,
   type ResolvedSkillMetadata,
 } from "@opencompany/agent-runtime";
-import type { AgentConfig, AgentModelId } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentModelId,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,10 +32,12 @@ import {
   CircleStop,
   Copy,
   ExternalLink,
+  FileText,
   LoaderCircle,
   MessageCircleQuestion,
   Play,
   Plus,
+  Search,
   ShieldAlert,
   TerminalSquare,
   Upload,
@@ -69,6 +79,11 @@ import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentCon
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
+import {
+  type ToolCallDisplay,
+  type ToolCallDisplayDetailModel,
+  toolCallDisplay,
+} from "@/components/session/toolCallDisplay";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -84,6 +99,7 @@ import {
   continueInterruptedSession,
   markSessionSeen,
   resolveToolApproval,
+  setAgentSessionCodexSettings,
   setAgentSessionModel,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
@@ -107,6 +123,7 @@ import {
   mergeLiveSessionAggregates,
   mergeMessages,
   type RuntimeBrainFileReference,
+  type RuntimeEngineActivity,
   type RuntimeEvent,
   type RuntimeQuestionItem,
   type RuntimeToolCall,
@@ -213,6 +230,53 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+
+function codexReasoningLabel(effort: CodexReasoningEffort) {
+  return effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
+// Advances to the next reasoning effort, wrapping xhigh → low, so the toolbar pill
+// cycles through every level on repeated clicks instead of opening a dropdown.
+function nextCodexReasoningEffort(current: CodexReasoningEffort): CodexReasoningEffort {
+  const idx = CODEX_REASONING_EFFORTS.indexOf(current);
+  return CODEX_REASONING_EFFORTS[(idx + 1) % CODEX_REASONING_EFFORTS.length] ?? current;
+}
+
+// Four ascending bars; the first N (N = the level's 1-based rank, low=1 … xhigh=4)
+// render at full strength and the rest fade out, so the icon reads as a signal meter.
+function ReasoningBars({ effort, size = 12 }: { effort: CodexReasoningEffort; size?: number }) {
+  const active = CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
+  // x is evenly spaced; each bar is bottom-aligned at y=14 with an ascending height.
+  const bars = [
+    { x: 1, height: 4.5 },
+    { x: 5, height: 7 },
+    { x: 9, height: 9.5 },
+    { x: 13, height: 12 },
+  ];
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      {bars.map((bar, i) => (
+        <rect
+          key={bar.x}
+          x={bar.x}
+          y={14 - bar.height}
+          width={2}
+          height={bar.height}
+          rx={1}
+          fill="currentColor"
+          opacity={i < active ? 1 : 0.28}
+        />
+      ))}
+    </svg>
+  );
+}
 
 // Wraps an oversized composer paste in a File so it rides the normal attachment pipeline.
 // Numbered against the pending attachments so two pastes in one message don't show as
@@ -527,8 +591,26 @@ function SessionViewContentBody({
   // than the send path's `isPending`.
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [, startModelTransition] = useTransition();
+  const [codexReasoningOverride, setCodexReasoningOverride] = useState<CodexReasoningEffort | null>(
+    null,
+  );
+  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
+  const [, startCodexSettingsTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsEnabled = session.engine !== "codex";
+  const codexReasoningEffort = codexReasoningOverride ?? session.codexReasoningEffort;
+  const codexModelValue = isCodexModelId(modelOverride ?? session.modelName)
+    ? (modelOverride ?? session.modelName)
+    : CODEX_DEFAULT_MODEL_ID;
+
+  useEffect(() => {
+    // Session identity changes must clear transient composer controls.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setModelOverride(null);
+    setCodexReasoningOverride(null);
+    setCodexPlanModeEnabled(false);
+  }, [session.id]);
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
   // home composers). The drop overlay, validation/capability gate and upload lifecycle all come
   // from here. Attaching is always available: text/code files need no model capability (they are
@@ -545,7 +627,20 @@ function SessionViewContentBody({
     workspaceId,
     modelName: session.modelName,
     uploadScope: { kind: "session", sessionId: session.id },
+    enabled: attachmentsEnabled,
   });
+  useEffect(() => {
+    if (attachmentsEnabled) return;
+    // Attachment controls are hidden for Codex sessions.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAttachMenuOpen(false);
+    setAttachments((current) => {
+      current.forEach((attachment) => {
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      });
+      return [];
+    });
+  }, [attachmentsEnabled, setAttachments]);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -1082,6 +1177,10 @@ function SessionViewContentBody({
               }
               reasoningActive={isReasoningInProgress(message, runtime.events)}
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
+              collapseWorkBeforeFinalAnswer={codexWorkCompletedForMessage(
+                message.id,
+                runtime.events,
+              )}
             />
           ) : (
             <div className="flex flex-col gap-2">
@@ -1567,7 +1666,8 @@ function SessionViewContentBody({
     const sentMidRun = hasRunningAssistantMessage || showWaitingForAssistant;
     const content = input.trim();
     const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
-    if (!content && ready.length === 0) return;
+    const submitReady = attachmentsEnabled ? ready : [];
+    if (!content && submitReady.length === 0) return;
     setFormError(null);
     const optimisticId = newOptimisticMessageId();
     const submittedAtMs = Date.now();
@@ -1588,9 +1688,9 @@ function SessionViewContentBody({
       // Carry the sent attachments so the bubble shows them immediately. Images use their local
       // object-URL preview (the served /api/attachments row doesn't exist yet); the revoke is
       // deferred until the durable server message replaces this optimistic one (see effect below).
-      ...(ready.length > 0
+      ...(submitReady.length > 0
         ? {
-            attachments: ready.map((a) => ({
+            attachments: submitReady.map((a) => ({
               id: a.id,
               kind: a.kind,
               mediaType: a.mediaType,
@@ -1610,23 +1710,34 @@ function SessionViewContentBody({
       // A message sent while a run is active steers it (delivered at the next model-step
       // boundary, in-flight work preserved); idle sends just start a turn. There's no mode
       // picker — "steer" is the single default behavior, the server ignores it when idle.
-      const result = await submitAgentSessionMessage(
-        session.id,
-        content,
-        toSubmitAttachments(ready),
-        "steer",
-      );
+      const submitOptions =
+        session.engine === "codex" && codexPlanModeEnabled ? { codexPlanModeEnabled: true } : null;
+      const result = submitOptions
+        ? await submitAgentSessionMessage(
+            session.id,
+            content,
+            toSubmitAttachments(submitReady),
+            "steer",
+            submitOptions,
+          )
+        : await submitAgentSessionMessage(
+            session.id,
+            content,
+            toSubmitAttachments(submitReady),
+            "steer",
+          );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
         // Sent successfully — clear the tray. The sent attachments' object-URL previews are now
         // owned by the optimistic message (revoked when its durable server message arrives), so
         // only revoke previews that were NOT carried over (defensive — the send gate means all
         // tray attachments are `ready`, so this set is normally empty).
-        const carried = new Set(ready.map((a) => a.id));
+        const carried = new Set(submitReady.map((a) => a.id));
         attachments.forEach((a) => {
           if (a.previewUrl && !carried.has(a.id)) URL.revokeObjectURL(a.previewUrl);
         });
         setAttachments([]);
+        setCodexPlanModeEnabled(false);
         setOptimisticUserMessages((current) =>
           current.map((message) =>
             message.optimisticId === optimisticId
@@ -1655,6 +1766,19 @@ function SessionViewContentBody({
       const result = await setAgentSessionModel(session.id, modelId);
       if (!result.ok) {
         setModelOverride(previous);
+        setFormError(result.error);
+      }
+    });
+  };
+
+  const handleCodexReasoningChange = (reasoningEffort: CodexReasoningEffort) => {
+    const previous = codexReasoningOverride;
+    setCodexReasoningOverride(reasoningEffort);
+    setFormError(null);
+    startCodexSettingsTransition(async () => {
+      const result = await setAgentSessionCodexSettings(session.id, { reasoningEffort });
+      if (!result.ok) {
+        setCodexReasoningOverride(previous);
         setFormError(result.error);
       }
     });
@@ -1791,9 +1915,9 @@ function SessionViewContentBody({
           // Drop-overlay hover handlers come from the shared hook. The window-level drop handler
           // (inside the hook) does the actual preventDefault + accept, so a drop anywhere in the
           // app attaches and the browser never opens the file; these only drive the overlay.
-          {...dragHandlers}
+          {...(attachmentsEnabled ? dragHandlers : {})}
         >
-          {isDragActive ? <ComposerDropOverlay /> : null}
+          {attachmentsEnabled && isDragActive ? <ComposerDropOverlay /> : null}
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
@@ -1864,7 +1988,9 @@ function SessionViewContentBody({
         ) : (
           <div className="bg-canvas px-6 py-4">
             <div className="mx-auto max-w-[960px]">
-              <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+              {attachmentsEnabled ? (
+                <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+              ) : null}
               <Composer
                 variant="compact"
                 error={formError}
@@ -1959,7 +2085,8 @@ function SessionViewContentBody({
                     onPaste={(event) => {
                       // Files in the clipboard (e.g. a screenshot) are taken as attachments by the
                       // shared hook, which also stops the browser pasting them into the textarea.
-                      if (handlePasteFiles(event)) return;
+                      if (attachmentsEnabled && handlePasteFiles(event)) return;
+                      if (!attachmentsEnabled) return;
                       // Oversized plain-text pastes become a .txt attachment instead of dumping
                       // a wall of text into the composer. Beyond the attachment size cap the
                       // paste falls through untouched — losing the user's text to a rejection
@@ -1987,51 +2114,91 @@ function SessionViewContentBody({
                 }
                 leftControls={
                   <>
-                    <div ref={attachMenuRef} className="relative">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
-                        className="hidden"
-                        onChange={(event) => {
-                          acceptFiles(Array.from(event.target.files ?? []));
-                          event.target.value = "";
-                          setAttachMenuOpen(false);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setAttachMenuOpen((prev) => !prev)}
-                        aria-label="Attach file"
-                        aria-expanded={attachMenuOpen}
-                        aria-haspopup="menu"
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
-                      >
-                        <Plus size={15} strokeWidth={1.75} />
-                      </button>
-                      {attachMenuOpen ? (
-                        <div
-                          role="menu"
-                          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                    {attachmentsEnabled ? (
+                      <div ref={attachMenuRef} className="relative">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          accept={ATTACHMENT_FILE_INPUT_ACCEPT}
+                          className="hidden"
+                          onChange={(event) => {
+                            acceptFiles(Array.from(event.target.files ?? []));
+                            event.target.value = "";
+                            setAttachMenuOpen(false);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setAttachMenuOpen((prev) => !prev)}
+                          aria-label="Attach file"
+                          aria-expanded={attachMenuOpen}
+                          aria-haspopup="menu"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
                         >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                          <Plus size={15} strokeWidth={1.75} />
+                        </button>
+                        {attachMenuOpen ? (
+                          <div
+                            role="menu"
+                            className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
                           >
-                            <Upload size={13} strokeWidth={1.75} />
-                            Upload file
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                            >
+                              <Upload size={13} strokeWidth={1.75} />
+                              Upload file
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <ModelPicker
-                      value={modelOverride ?? session.modelName}
-                      fallbackModelId={DEFAULT_MODEL_ID}
+                      value={
+                        session.engine === "codex"
+                          ? codexModelValue
+                          : (modelOverride ?? session.modelName)
+                      }
+                      fallbackModelId={
+                        session.engine === "codex" ? CODEX_DEFAULT_MODEL_ID : DEFAULT_MODEL_ID
+                      }
+                      {...(session.engine === "codex" ? { modelIds: CODEX_AGENT_MODEL_IDS } : {})}
                       onChange={handleModelChange}
                     />
+                    {session.engine === "codex" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCodexReasoningChange(
+                              nextCodexReasoningEffort(codexReasoningEffort),
+                            )
+                          }
+                          aria-label={`Codex reasoning effort: ${codexReasoningLabel(codexReasoningEffort)} (click to cycle)`}
+                          title="Reasoning effort — click to cycle"
+                          className="flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted transition-colors hover:bg-surface-subtle/70 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                        >
+                          <ReasoningBars effort={codexReasoningEffort} size={12} />
+                          {codexReasoningLabel(codexReasoningEffort)}
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={codexPlanModeEnabled}
+                          title="Plan mode for the next message"
+                          onClick={() => setCodexPlanModeEnabled((enabled) => !enabled)}
+                          className={
+                            codexPlanModeEnabled
+                              ? "flex h-6 items-center gap-1.5 rounded-md bg-ink px-1.5 text-[11.5px] font-medium text-surface transition-colors hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                              : "flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted transition-colors hover:bg-surface-subtle/70 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                          }
+                        >
+                          Plan
+                        </button>
+                      </>
+                    ) : null}
                   </>
                 }
                 action={(() => {
@@ -2044,10 +2211,10 @@ function SessionViewContentBody({
                     canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
                   const sendDisabled =
                     isPending ||
-                    attachments.some((a) => a.status !== "ready") ||
+                    (attachmentsEnabled && attachments.some((a) => a.status !== "ready")) ||
                     (!parseSlashCommand(input, allSlashCommands) &&
                       !input.trim() &&
-                      attachments.length === 0);
+                      (!attachmentsEnabled || attachments.length === 0));
                   return (
                     <div className="flex items-center gap-1.5">
                       <button
@@ -2303,7 +2470,7 @@ function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean
 // intentionally excluded so what you paste matches the final assistant answer.
 function extractAssistantText(parts: AssistantTurnPart[]): string {
   return parts
-    .map((part) => (part.type === "text" ? part.text : ""))
+    .map((part) => (part.type === "text" && part.tone !== "work" ? part.text : ""))
     .filter((chunk) => chunk.length > 0)
     .join("\n\n");
 }
@@ -2470,6 +2637,7 @@ export function AssistantMessageContent({
   stoppedError = null,
   reasoningActive = false,
   activeStartedAt,
+  collapseWorkBeforeFinalAnswer = false,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
@@ -2479,6 +2647,7 @@ export function AssistantMessageContent({
   stoppedError?: string | null;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
+  collapseWorkBeforeFinalAnswer?: boolean;
 }) {
   const hasParts = parts.length > 0;
   const isRunning = message.status === "running" && sessionCanGenerate;
@@ -2536,13 +2705,14 @@ export function AssistantMessageContent({
     | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
     | { kind: "process"; parts: AssistantTurnPart[]; key: string };
 
-  const deliverableStart = isCompleted
+  const canCollapseWork = isCompleted || collapseWorkBeforeFinalAnswer;
+  const deliverableStart = canCollapseWork
     ? deliverableStartIndex(normalizedParts)
     : normalizedParts.length;
   // While paused at a tool gate or running a resumed tool, keep the steps expanded inline
   // rather than folding the completed message into a "N steps" summary that would hide it.
   const collapseWork =
-    isCompleted &&
+    canCollapseWork &&
     !awaitingApproval &&
     !hasRunningTool &&
     !hasQuestionPart &&
@@ -2575,12 +2745,19 @@ export function AssistantMessageContent({
         if (group.kind === "part") {
           const part = group.part;
           if (part.type === "text") {
-            return (
+            const markdown = (
               <AssistantMarkdown
-                key={group.key}
                 content={part.text}
                 streaming={group.key === streamingTextGroupKey}
               />
+            );
+            return (
+              <div
+                key={group.key}
+                className={part.tone === "work" ? "text-[13px] leading-6 text-ink-muted" : ""}
+              >
+                {markdown}
+              </div>
             );
           }
           if (part.type === "reasoning") {
@@ -2591,6 +2768,9 @@ export function AssistantMessageContent({
                 durationSeconds={part.durationSeconds}
               />
             );
+          }
+          if (part.type === "engine-activity") {
+            return <EngineActivityCard key={group.key} activity={part.activity} />;
           }
           return null;
         }
@@ -2643,6 +2823,19 @@ export function AssistantMessageContent({
       {hasParts && isStopped ? <AssistantStoppedNotice errorMessage={stoppedError} /> : null}
     </div>
   );
+}
+
+function codexWorkCompletedForMessage(messageId: string, events: RuntimeEvent[]) {
+  let completed = false;
+  for (const event of events) {
+    if (event.type !== "engine.activity") continue;
+    if (event.messageId !== messageId && readString(event.payload.messageId) !== messageId) {
+      continue;
+    }
+    if (readString(event.payload.engine) !== "codex") continue;
+    completed = readString(event.payload.status) === "completed";
+  }
+  return completed;
 }
 
 function activeStartForAssistantMessage(
@@ -2730,7 +2923,14 @@ function CompletedStepGroup({
             part.type === "tool-call" ? (
               <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
             ) : part.type === "text" ? (
-              <AssistantMarkdown key={`text:${index}`} content={part.text} />
+              <div
+                key={`text:${index}`}
+                className={part.tone === "work" ? "text-[13px] leading-6 text-ink-muted" : ""}
+              >
+                <AssistantMarkdown content={part.text} />
+              </div>
+            ) : part.type === "engine-activity" ? (
+              <EngineActivityCard key={`engine:${index}`} activity={part.activity} />
             ) : null,
           )}
         </div>
@@ -2834,6 +3034,38 @@ function ReasoningCard({
   );
 }
 
+function EngineActivityCard({ activity }: { activity: RuntimeEngineActivity }) {
+  const running = activity.status === "running";
+  const failed = activity.status === "failed";
+  const statusLabel = failed ? "failed" : running ? "running" : "completed";
+  return (
+    <div className="text-[11.5px] leading-5 text-ink-muted">
+      <div className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-px">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+          {running ? (
+            <LoaderCircle size={11} strokeWidth={2} className="animate-spin text-warning" />
+          ) : failed ? (
+            <AlertCircle size={11} strokeWidth={1.9} className="text-danger" />
+          ) : (
+            <TerminalSquare size={11} strokeWidth={1.75} />
+          )}
+        </span>
+        <span className="shrink-0 font-medium text-ink/65">{activity.label}</span>
+        <span
+          className={`shrink-0 text-[10.5px] ${
+            failed ? "text-danger" : running ? "text-warning" : "text-ink-subtle"
+          }`}
+        >
+          {statusLabel}
+        </span>
+        <span className="min-w-0 truncate text-ink-subtle" title={activity.activity}>
+          {activity.activity}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ToolCallCard({
   toolCall,
   sessionIsInterrupted = false,
@@ -2893,9 +3125,10 @@ function ToolCallCardDefault({
   const awaitingApproval = toolCall.approval?.status === "required" && optimisticDecision === null;
   const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
   const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
-  // Badge the tool with the brand glyph of the service it touches (Linear, Gmail, …);
-  // null for internal/generic tools, which keep the wrench.
-  const serviceIcon = toolServiceIcon(toolCall.name);
+  const display = toolCallDisplay(toolCall);
+  // Badge external service tools (Linear, Gmail, etc.) while preserving specialized
+  // icons for shell/read/file/memory calls from toolCallDisplay.
+  const serviceIcon = display.icon === "tool" ? toolServiceIcon(toolCall.name) : null;
 
   const submitDecision = (decision: "approved" | "denied") => {
     if (!approvalContext) return;
@@ -2928,17 +3161,16 @@ function ToolCallCardDefault({
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-            {toolCall.name === AFTER_SESSION_TOOL_NAME ? (
-              <Brain size={11} strokeWidth={1.75} />
-            ) : serviceIcon ? (
+            {serviceIcon ? (
               createElement(serviceIcon, { size: 11 })
             ) : (
-              <Wrench size={11} strokeWidth={1.75} />
+              <ToolCallDisplayIcon icon={display.icon} />
             )}
           </span>
-          <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
-            {toolCall.label || formatToolName(toolCall.name)}
+          <span className="min-w-0 truncate font-medium text-ink/65" title={display.title}>
+            {display.label}
           </span>
+          {display.detail ? <ToolCallDisplayDetail detail={display.detail} /> : null}
           {toolCall.brainFile || toolCall.brainPath ? (
             <span
               title={`Updated ${brainFileTitle(
@@ -3041,6 +3273,32 @@ function ToolCallCardDefault({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ToolCallDisplayIcon({ icon }: { icon: ToolCallDisplay["icon"] }) {
+  if (icon === "brain") return <Brain size={11} strokeWidth={1.75} />;
+  if (icon === "file") return <FileText size={11} strokeWidth={1.75} />;
+  if (icon === "search") return <Search size={11} strokeWidth={1.75} />;
+  if (icon === "terminal") return <TerminalSquare size={11} strokeWidth={1.75} />;
+  return <Wrench size={11} strokeWidth={1.75} />;
+}
+
+function ToolCallDisplayDetail({ detail }: { detail: ToolCallDisplayDetailModel }) {
+  const className =
+    detail.kind === "command"
+      ? "inline-flex min-w-0 max-w-[min(420px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+      : detail.kind === "file"
+        ? "inline-flex min-w-0 max-w-[min(260px,calc(100vw-180px))] items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-px text-[10.5px] leading-4 text-ink/60"
+        : "inline-flex shrink-0 items-center text-[10.5px] leading-4 text-ink-subtle";
+
+  return (
+    <span title={detail.title ?? detail.label} className={className}>
+      {detail.kind === "file" ? (
+        <FileText size={10} strokeWidth={1.8} className="shrink-0" />
+      ) : null}
+      <span className="min-w-0 truncate">{detail.label}</span>
+    </span>
   );
 }
 
@@ -3715,12 +3973,6 @@ function SubagentProgressView({
       </div>
     </div>
   );
-}
-
-function formatToolName(name: string) {
-  const normalized = name.replace(/[_-]+/g, " ").trim();
-  if (!normalized) return "Tool call";
-  return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
 }
 
 function SessionInspector({

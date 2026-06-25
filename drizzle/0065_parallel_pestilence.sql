@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "codex_engine_enabled" boolean DEFAULT false NOT NULL;

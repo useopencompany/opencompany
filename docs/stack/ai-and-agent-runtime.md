@@ -81,6 +81,7 @@ agent sessions.
 - `apps/runner/src/agent-loop.ts`.
 - `apps/runner/src/env.ts`.
 - `E2B_API_KEY`, `OPENCOMPANY_E2B_TEMPLATE`, `OPENCOMPANY_AMP_E2B_TEMPLATE`,
+  `OPENCOMPANY_CODEX_E2B_TEMPLATE`,
   `RUNNER_E2B_IDLE_TIMEOUT_MS` in `.env.example`.
 - `docs/runner.md`.
 
@@ -292,18 +293,29 @@ per tool call via the optional `model` argument (validated against `AGENT_MODEL_
 defaulting to a fixed platform model when omitted. The memory CLI's model-backed retrieval routes
 through the same broker (`MEMORY_GATEWAY_BASE_URL` + token in place of the raw key).
 
-Codex runs headless as `codex exec --json --sandbox workspace-write --ask-for-approval never`
-inside the same coding sandbox template. The runner writes an isolated
-`${CODEX_HOME}/config.toml` with a custom `opencompany` provider using the Responses API. When the
-LLM broker is active, that provider points at `/broker/openai/v1` and Codex receives only
-`OPENCOMPANY_LLM_BROKER_TOKEN`; the server-side `OPENAI_CODEX_API_KEY` is attached by the broker
-and broker settlement is the billable record. Without the broker (local dev, or the
-`RUNNER_LLM_BROKER_ENABLED=false` kill switch), the same config points at OpenAI directly and the
-single CLI process receives `CODEX_API_KEY`. The model is selected by `RUNNER_CODEX_MODEL`, defaults
-to `gpt-5.2-codex`, and is intentionally not exposed as a tool argument until CLI/model
-compatibility is tested. When brokered Codex emits token usage in JSONL output, the row is recorded
-display-only at cost 0; otherwise unbrokered usage is priced with platform OpenAI model pricing.
-Missing JSONL usage is noted in artifact metadata with `usageMissing: true`.
+Codex engine sessions run headless inside the template selected by
+`OPENCOMPANY_CODEX_E2B_TEMPLATE`, defaulting to E2B's `codex` template. Codex engine turns route
+through a persistent `codex app-server --listen ws://127.0.0.1:...` daemon in the same E2B sandbox,
+with a short-lived per-turn Bun JSONL bridge to the app-server websocket. `codex_coder` remains on
+`codex exec`.
+Codex templates are expected to be
+provisioned with 8 vCPU and 8192 MB RAM; the runner records Codex sandbox usage against that
+allocation for billing and observability. The repo-owned `apps/runner/e2b/codex` template builds
+`opencompany-codex-toolbox`, extending E2B's `codex` template with `rg`, `fd`, `jq`, `curl`, `git`,
+`gh`, Bun, Node/npm, the pinned Codex CLI, Playwright, and Playwright-managed Chromium.
+Production/company runs use the workspace Codex account connected in company
+settings: the runner writes an isolated `${CODEX_HOME}/config.toml` with file-backed ChatGPT auth,
+injects the encrypted workspace `auth.json` cache into that home, and rotates the encrypted cache
+after successful runs because the CLI may refresh tokens. Codex token usage from this
+subscription-backed path is recorded display-only at cost 0; OpenCompany credits still cover the E2B
+sandbox compute.
+
+The legacy OpenAI API-key path is kept only as an explicit fallback (`RUNNER_CODEX_API_KEY_FALLBACK_ENABLED`).
+When that fallback and the LLM broker are active, Codex receives only `OPENCOMPANY_LLM_BROKER_TOKEN`
+and the server-side `OPENAI_CODEX_API_KEY` is attached by the broker. Without the broker, the Codex
+process receives `CODEX_API_KEY`. Active Codex sessions persist their selected Codex model on
+`agent_sessions` and pass it to app-server; `RUNNER_CODEX_MODEL` defaults to `gpt-5.5` as the
+fallback for `codex_coder`.
 
 > Foundational note: opencode also speaks the Agent Client Protocol (`opencode acp`, JSON-RPC over
 > stdio). A future iteration can run harnesses through an in-runner ACP client to surface their
@@ -311,11 +323,11 @@ Missing JSONL usage is noted in artifact metadata with `usageMissing: true`.
 > additional harnesses (Claude Code, Gemini) the same way. The current opencode and Codex
 > integrations intentionally use the simpler one-shot CLI paths that mirror AMP.
 
-These harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
-`opencode` and `codex` CLIs are made available defensively: their tool files check for the binary
-and install on demand if missing, so the tools work on the current template without a rebuild. The
-durable option is to bake both CLIs into `OPENCOMPANY_AMP_E2B_TEMPLATE` and keep the on-demand
-install path as a fallback.
+These harnesses run in coding sandbox templates (`OPENCOMPANY_AMP_E2B_TEMPLATE` for AMP/opencode
+and `OPENCOMPANY_CODEX_E2B_TEMPLATE` for Codex). The `opencode` and `codex` CLIs are made
+available defensively: their tool files check for the binary and install on demand if missing, so the
+tools work on older templates without a rebuild. The durable option is to bake the CLI into the
+coding template and keep the on-demand install path as a fallback.
 
 MCP tools are enabled by workspace setup plus agent configuration:
 

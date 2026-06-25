@@ -138,6 +138,7 @@ function buildFixedPersonalAgentSource(config: AgentConfig, body: string) {
   return serializeAgentFile({
     title: FIXED_PERSONAL_AGENT_NAME,
     body,
+    engine: config.engine,
     model: config.model.name,
     tools: config.tools,
     brain: config.brain,

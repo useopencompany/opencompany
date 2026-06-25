@@ -1,0 +1,990 @@
+import { createHash } from "node:crypto";
+import { shellQuote } from "@opencompany/agent-runtime";
+import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import { createLogger } from "@opencompany/observability";
+import { buildCodexConfigForAuth, type CodexCliAuth } from "./codex-tool";
+import { buildGitHubCommandEnv, truncateText } from "./coding-agent-shared";
+import type { SandboxHandle } from "./sandbox";
+
+const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
+const CODEX_APP_SERVER_ENDPOINT = "ws://127.0.0.1:47345";
+const CODEX_APP_SERVER_STATE = "app-server-state.json";
+const CODEX_APP_SERVER_PROXY = "app-server-proxy.mjs";
+const CODEX_APP_SERVER_DAEMON_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const CODEX_APP_SERVER_REQUEST_TIMEOUT_MS = 30_000;
+const CODEX_APP_SERVER_NOTIFICATION_FLUSH_MS = 100;
+const CODEX_APP_SERVER_NOTIFICATION_FLUSH_CHARS = 64;
+const CODEX_APP_SERVER_CLIENT_NAME = "opencompany_runner";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "codex-app-server" });
+
+type CodexGitHubAuth = {
+  githubToken: string | null;
+  githubAuthHeader: string | null;
+};
+
+type CodexUsage = {
+  input_tokens: number;
+  cache_read_input_tokens?: number;
+  output_tokens: number;
+};
+
+export type CodexAppServerSummary = {
+  sessionId: string | null;
+  status: "success" | "error" | "timeout" | "unknown";
+  result: string;
+  error: string | null;
+  usage: CodexUsage | null;
+};
+
+type AppServerState = {
+  pid: number;
+  socketPath: string;
+  fingerprint: string;
+};
+
+type JsonRpcResponse = {
+  id: number;
+  result?: unknown;
+  error?: { code?: number; message?: string };
+};
+
+type JsonRpcNotification = {
+  method: string;
+  params?: Record<string, unknown>;
+};
+
+export function buildCodexAppServerCommandPlan(input: {
+  codexWorkRoot: string;
+  codexHome: string;
+  auth: CodexCliAuth;
+  githubAuth: CodexGitHubAuth;
+}) {
+  const socketPath = CODEX_APP_SERVER_ENDPOINT;
+  const statePath = `${input.codexHome}/${CODEX_APP_SERVER_STATE}`;
+  const proxyPath = `${input.codexHome}/${CODEX_APP_SERVER_PROXY}`;
+  const config = buildCodexConfigForAuth(input.auth);
+  const codexEnv = {
+    CODEX_HOME: input.codexHome,
+    ...(input.auth.kind === "api" ? { [input.auth.apiKeyEnvVar]: input.auth.apiKeyValue } : {}),
+    ...(input.githubAuth.githubToken && input.githubAuth.githubAuthHeader
+      ? buildGitHubCommandEnv({
+          githubAuthHeader: input.githubAuth.githubAuthHeader,
+          githubToken: input.githubAuth.githubToken,
+          toolCallId: "codex-session",
+        })
+      : {}),
+  };
+  const daemonCommand = [
+    `cd ${shellQuote(input.codexWorkRoot)}`,
+    `export PATH=${CODEX_BIN_PATH}:"$PATH"`,
+    `codex app-server --listen ${shellQuote(socketPath)}`,
+  ].join(" && ");
+  const proxyCommand = [
+    `cd ${shellQuote(input.codexWorkRoot)}`,
+    `export PATH=${CODEX_BIN_PATH}:"$PATH"`,
+    `bun ${shellQuote(proxyPath)} ${shellQuote(socketPath)}`,
+  ].join(" && ");
+
+  return {
+    codexWorkRoot: input.codexWorkRoot,
+    codexHome: input.codexHome,
+    socketPath,
+    statePath,
+    proxyPath,
+    codexEnv,
+    config,
+    daemonCommand,
+    proxyCommand,
+    fingerprint: appServerFingerprint({ config, auth: input.auth, githubAuth: input.githubAuth }),
+    forceRestart: input.auth.brokered,
+  };
+}
+
+export async function runCodexAppServerTurn(input: {
+  sandbox: SandboxHandle;
+  codexWorkRoot: string;
+  codexHome: string;
+  task: string;
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
+  planModeReasoningEffort: CodexReasoningEffort | null;
+  existingEngineSessionId: string | null;
+  auth: CodexCliAuth;
+  githubAuth: CodexGitHubAuth;
+  timeoutMs: number;
+  checkAbort: () => Promise<void>;
+  onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+  onActivity: (activity: string) => Promise<void>;
+}) {
+  const plan = buildCodexAppServerCommandPlan({
+    codexWorkRoot: input.codexWorkRoot,
+    codexHome: input.codexHome,
+    auth: input.auth,
+    githubAuth: input.githubAuth,
+  });
+
+  await ensureCodexAppServerDaemon({ sandbox: input.sandbox, plan });
+  try {
+    return await runTurnThroughProxy({ ...input, plan });
+  } catch (error) {
+    if (!isInitializeFailure(error)) throw error;
+    await stopCodexAppServerDaemon(input.sandbox, plan);
+    await ensureCodexAppServerDaemon({
+      sandbox: input.sandbox,
+      plan: { ...plan, forceRestart: true },
+    });
+    return await runTurnThroughProxy({ ...input, plan });
+  }
+}
+
+async function ensureCodexAppServerDaemon(input: {
+  sandbox: SandboxHandle;
+  plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
+}) {
+  await input.sandbox.files.write(`${input.plan.codexHome}/config.toml`, input.plan.config);
+  await input.sandbox.files.write(input.plan.proxyPath, codexAppServerProxyScript());
+  const current = await readAppServerState(input.sandbox, input.plan.statePath);
+  const reusable =
+    !input.plan.forceRestart &&
+    current?.fingerprint === input.plan.fingerprint &&
+    current.socketPath === input.plan.socketPath &&
+    (await appServerProcessReady(input.sandbox, current));
+  if (reusable) {
+    logger.info("Reusing Codex app-server daemon", {
+      event: "opencompany.codex_app_server_daemon_reused",
+      pid: current.pid,
+    });
+    return;
+  }
+
+  logger.info("Starting Codex app-server daemon", {
+    event: "opencompany.codex_app_server_daemon_starting",
+    force_restart: input.plan.forceRestart,
+    had_state: Boolean(current),
+  });
+  await stopCodexAppServerDaemon(input.sandbox, input.plan, current?.pid ?? null);
+  const handle = await input.sandbox.commands.run(input.plan.daemonCommand, {
+    background: true,
+    envs: input.plan.codexEnv,
+    timeoutMs: CODEX_APP_SERVER_DAEMON_TIMEOUT_MS,
+  });
+  const pid = commandHandlePid(handle);
+  if (pid == null) throw new Error("Codex app-server did not return a process id.");
+  await waitForEndpoint(input.sandbox, input.plan.socketPath);
+  await input.sandbox.files.write(
+    input.plan.statePath,
+    JSON.stringify({
+      pid,
+      socketPath: input.plan.socketPath,
+      fingerprint: input.plan.fingerprint,
+    } satisfies AppServerState),
+  );
+  logger.info("Started Codex app-server daemon", {
+    event: "opencompany.codex_app_server_daemon_started",
+    pid,
+  });
+}
+
+async function stopCodexAppServerDaemon(
+  sandbox: SandboxHandle,
+  plan: ReturnType<typeof buildCodexAppServerCommandPlan>,
+  pid?: number | null,
+) {
+  const state = pid == null ? await readAppServerState(sandbox, plan.statePath) : null;
+  const targetPid = pid ?? state?.pid ?? null;
+  if (targetPid != null) {
+    await sandbox.commands.kill(targetPid).catch(() => false);
+  }
+  await killSocketAppServerProcesses(sandbox, plan.socketPath);
+  await sandbox.commands
+    .run(`rm -f ${shellQuote(plan.socketPath)} ${shellQuote(plan.statePath)}`, {
+      timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS,
+    })
+    .catch(() => undefined);
+}
+
+async function killSocketAppServerProcesses(sandbox: SandboxHandle, socketPath: string) {
+  await sandbox.commands
+    .run(
+      [
+        `pkill -f -- ${shellQuote(`app-server.*${socketPath}`)} 2>/dev/null || true`,
+        `pkill -f -- ${shellQuote("app-server --listen unix://")} 2>/dev/null || true`,
+      ].join("\n"),
+      {
+        timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS,
+      },
+    )
+    .catch(() => undefined);
+}
+
+async function runTurnThroughProxy(input: {
+  sandbox: SandboxHandle;
+  task: string;
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
+  planModeReasoningEffort: CodexReasoningEffort | null;
+  existingEngineSessionId: string | null;
+  timeoutMs: number;
+  checkAbort: () => Promise<void>;
+  onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+  onActivity: (activity: string) => Promise<void>;
+  plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
+}): Promise<CodexAppServerSummary> {
+  const accumulator = createCodexAppServerAccumulator();
+  const notificationBatcher = createCodexAppServerNotificationBatcher({
+    onFlush: async ({ events, activity }) => {
+      if (events.length > 0) await input.onRuntimeEvents(events);
+      if (activity) await input.onActivity(activity);
+    },
+  });
+  const client = new AppServerProxyClient({
+    sandbox: input.sandbox,
+    command: input.plan.proxyCommand,
+    envs: input.plan.codexEnv,
+    timeoutMs: input.timeoutMs,
+    onNotification: (notification) => {
+      const activity = accumulator.push(notification);
+      notificationBatcher.push(notification, activity);
+    },
+  });
+
+  await client.start();
+  let turnId: string | null = null;
+  try {
+    await client.request("initialize", {
+      clientInfo: {
+        name: CODEX_APP_SERVER_CLIENT_NAME,
+        title: "OpenCompany Runner",
+        version: "0.1.0",
+      },
+      capabilities: { experimentalApi: true },
+    });
+    await client.notify("initialized", {});
+
+    const threadId = await startOrResumeThread({ client, input });
+    const turn = await client.request("turn/start", {
+      threadId,
+      input: [{ type: "text", text: input.task, text_elements: [] }],
+      cwd: input.plan.codexWorkRoot,
+      model: input.model,
+      effort: input.reasoningEffort,
+      approvalPolicy: "never",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: [input.plan.codexWorkRoot],
+        networkAccess: true,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    });
+    turnId = stringFromPath(turn, ["turn", "id"]);
+    const completion = await waitForTurnCompletion({
+      promise: accumulator.completed,
+      checkAbort: async () => {
+        client.throwIfFailed();
+        await input.checkAbort();
+      },
+      timeoutMs: input.timeoutMs,
+      interrupt: () =>
+        turnId
+          ? client.request("turn/interrupt", { threadId, turnId }).then(
+              () => undefined,
+              () => undefined,
+            )
+          : Promise.resolve(),
+    });
+    await notificationBatcher.flush();
+    const summary = accumulator.summary();
+    if (completion === "timeout") {
+      return {
+        ...summary,
+        status: "timeout",
+        error: "Codex timed out before finishing. The partial output is shown below.",
+      };
+    }
+    return summary;
+  } finally {
+    await notificationBatcher.settleIgnoringError();
+    await client.stop();
+  }
+}
+
+async function startOrResumeThread(input: {
+  client: AppServerProxyClient;
+  input: {
+    existingEngineSessionId: string | null;
+    model: string;
+    reasoningEffort: CodexReasoningEffort;
+    planModeReasoningEffort: CodexReasoningEffort | null;
+    plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
+  };
+}) {
+  if (input.input.existingEngineSessionId) {
+    const resumed = await input.client.request("thread/resume", {
+      threadId: input.input.existingEngineSessionId,
+      model: input.input.model,
+      cwd: input.input.plan.codexWorkRoot,
+      sandbox: "workspace-write",
+      approvalPolicy: "never",
+      config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
+    });
+    return stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId;
+  }
+
+  const started = await input.client.request("thread/start", {
+    model: input.input.model,
+    cwd: input.input.plan.codexWorkRoot,
+    sandbox: "workspace-write",
+    approvalPolicy: "never",
+    config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
+  });
+  const threadId = stringFromPath(started, ["thread", "id"]);
+  if (!threadId) throw new Error("Codex app-server did not return a thread id.");
+  return threadId;
+}
+
+function createCodexAppServerNotificationBatcher(input: {
+  onFlush: (batch: { events: Record<string, unknown>[]; activity: string | null }) => Promise<void>;
+}) {
+  let events: JsonRpcNotification[] = [];
+  let activities: string[] = [];
+  let pendingDeltaChars = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let flushChain = Promise.resolve();
+  let flushError: unknown = null;
+
+  const flushCurrent = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (events.length === 0 && activities.length === 0) return flushChain;
+
+    const batchEvents = coalesceCodexAppServerNotifications(events);
+    const batchActivity = activities.length > 0 ? activities.join("\n") : null;
+    events = [];
+    activities = [];
+    pendingDeltaChars = 0;
+
+    flushChain = flushChain.then(async () => {
+      try {
+        await input.onFlush({ events: batchEvents, activity: batchActivity });
+      } catch (error) {
+        flushError ??= error;
+      }
+    });
+    return flushChain;
+  };
+
+  return {
+    push(notification: JsonRpcNotification, activity: string | null) {
+      events.push(notification);
+      if (activity?.trim()) activities.push(activity.trim());
+
+      const delta = coalescibleDelta(notification);
+      if (!delta) {
+        void flushCurrent();
+        return;
+      }
+
+      pendingDeltaChars += delta.delta.length;
+      if (pendingDeltaChars >= CODEX_APP_SERVER_NOTIFICATION_FLUSH_CHARS) {
+        void flushCurrent();
+        return;
+      }
+
+      if (!timer) {
+        timer = setTimeout(() => {
+          void flushCurrent();
+        }, CODEX_APP_SERVER_NOTIFICATION_FLUSH_MS);
+      }
+    },
+    async flush() {
+      await flushCurrent();
+      if (flushError) throw flushError;
+    },
+    async settleIgnoringError() {
+      await flushCurrent().catch(() => undefined);
+    },
+  };
+}
+
+export function coalesceCodexAppServerNotifications(
+  notifications: JsonRpcNotification[],
+): Record<string, unknown>[] {
+  const output: JsonRpcNotification[] = [];
+  let pending: JsonRpcNotification | null = null;
+  let pendingKey: string | null = null;
+
+  const flushPending = () => {
+    if (pending) output.push(pending);
+    pending = null;
+    pendingKey = null;
+  };
+
+  for (const notification of notifications) {
+    const delta = coalescibleDelta(notification);
+    if (!delta) {
+      flushPending();
+      output.push(notification);
+      continue;
+    }
+
+    if (pending && pendingKey === delta.key) {
+      const pendingNotification: JsonRpcNotification = pending;
+      const params: Record<string, unknown> = isRecord(pendingNotification.params)
+        ? pendingNotification.params
+        : {};
+      pending = {
+        ...pendingNotification,
+        params: {
+          ...params,
+          delta: `${rawString(params.delta) ?? ""}${delta.delta}`,
+        },
+      };
+      continue;
+    }
+
+    flushPending();
+    pending = {
+      ...notification,
+      params: {
+        ...(notification.params ?? {}),
+        delta: delta.delta,
+      },
+    };
+    pendingKey = delta.key;
+  }
+
+  flushPending();
+  return output;
+}
+
+function coalescibleDelta(notification: JsonRpcNotification) {
+  const params = notification.params;
+  const delta = rawString(params?.delta);
+  if (delta == null || !COALESCIBLE_DELTA_METHODS.has(notification.method)) return null;
+
+  return {
+    delta,
+    key: JSON.stringify([
+      notification.method,
+      firstString(params?.threadId),
+      firstString(params?.turnId),
+      firstString(params?.itemId),
+      firstString(params?.stream),
+      firstString(params?.command),
+    ]),
+  };
+}
+
+const COALESCIBLE_DELTA_METHODS = new Set([
+  "item/agentMessage/delta",
+  "item/plan/delta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/textDelta",
+  "item/commandExecution/outputDelta",
+]);
+
+function reasoningConfig(
+  reasoningEffort: CodexReasoningEffort,
+  planModeReasoningEffort: CodexReasoningEffort | null,
+) {
+  return {
+    model_reasoning_effort: reasoningEffort,
+    ...(planModeReasoningEffort ? { plan_mode_reasoning_effort: planModeReasoningEffort } : {}),
+  };
+}
+
+class AppServerProxyClient {
+  private buffer = "";
+  private nextId = 1;
+  private handle: unknown = null;
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      timeout: ReturnType<typeof setTimeout>;
+    }
+  >();
+  private lastStderr: string | null = null;
+  private failure: Error | null = null;
+
+  constructor(
+    private readonly input: {
+      sandbox: SandboxHandle;
+      command: string;
+      envs: Record<string, string>;
+      timeoutMs: number;
+      onNotification: (notification: JsonRpcNotification) => void;
+    },
+  ) {}
+
+  async start() {
+    logger.info("Starting Codex app-server proxy", {
+      event: "opencompany.codex_app_server_proxy_starting",
+    });
+    this.handle = await this.input.sandbox.commands.run(this.input.command, {
+      background: true,
+      stdin: true,
+      envs: this.input.envs,
+      timeoutMs: this.input.timeoutMs,
+      onStdout: (data: string) => {
+        void this.onStdout(data).catch((error) => this.fail(error));
+      },
+      onStderr: async (data: string) => {
+        if (data.trim()) this.lastStderr = truncateText(data.trim(), 500);
+      },
+    });
+    logger.info("Started Codex app-server proxy", {
+      event: "opencompany.codex_app_server_proxy_started",
+      pid: commandHandlePid(this.handle),
+    });
+  }
+
+  async stop() {
+    const pid = commandHandlePid(this.handle);
+    if (pid != null) await this.input.sandbox.commands.kill(pid).catch(() => false);
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("Codex app-server proxy stopped before responding."));
+    }
+    this.pending.clear();
+  }
+
+  request(method: string, params: unknown) {
+    const id = this.nextId++;
+    logger.info("Sending Codex app-server request", {
+      event: "opencompany.codex_app_server_request_started",
+      method,
+      request_id: id,
+    });
+    const response = new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        const suffix = this.lastStderr ? ` Last stderr: ${this.lastStderr}` : "";
+        logger.warn("Codex app-server request timed out", {
+          event: "opencompany.codex_app_server_request_timeout",
+          method,
+          request_id: id,
+          has_stderr: Boolean(this.lastStderr),
+        });
+        reject(new Error(`Codex app-server request "${method}" timed out.${suffix}`));
+      }, CODEX_APP_SERVER_REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timeout });
+    });
+    void this.send({ method, id, params }).catch((error) => {
+      const pending = this.pending.get(id);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      this.pending.delete(id);
+    });
+    return response;
+  }
+
+  async notify(method: string, params: unknown) {
+    await this.send({ method, params });
+  }
+
+  throwIfFailed() {
+    if (this.failure) throw this.failure;
+  }
+
+  private async send(message: unknown) {
+    this.throwIfFailed();
+    const pid = commandHandlePid(this.handle);
+    if (pid == null) throw new Error("Codex app-server proxy is not running.");
+    const data = `${JSON.stringify(message)}\n`;
+    const handle = this.handle as { sendStdin?: (data: string) => Promise<void> };
+    if (typeof handle.sendStdin === "function") {
+      await handle.sendStdin(data);
+      return;
+    }
+    await this.input.sandbox.commands.sendStdin(pid, data);
+  }
+
+  private async onStdout(data: string) {
+    this.buffer += data;
+    const lines = this.buffer.split("\n");
+    this.buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      await this.consumeLine(line);
+    }
+  }
+
+  private async consumeLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let message: unknown;
+    try {
+      message = JSON.parse(trimmed);
+    } catch {
+      return;
+    }
+    if (!isRecord(message)) return;
+    if (typeof message.id === "number") {
+      this.resolveResponse(message as JsonRpcResponse);
+      return;
+    }
+    if (typeof message.method === "string") {
+      this.input.onNotification(message as JsonRpcNotification);
+    }
+  }
+
+  private resolveResponse(response: JsonRpcResponse) {
+    const pending = this.pending.get(response.id);
+    if (!pending) return;
+    this.pending.delete(response.id);
+    clearTimeout(pending.timeout);
+    if (response.error) {
+      logger.warn("Codex app-server request failed", {
+        event: "opencompany.codex_app_server_request_failed",
+        request_id: response.id,
+        code: response.error.code,
+        message: response.error.message,
+      });
+      pending.reject(
+        new CodexAppServerRpcError(response.error.message ?? "Codex app-server error"),
+      );
+      return;
+    }
+    logger.info("Codex app-server request completed", {
+      event: "opencompany.codex_app_server_request_completed",
+      request_id: response.id,
+    });
+    pending.resolve(response.result ?? {});
+  }
+
+  private fail(error: unknown) {
+    this.failure = error instanceof Error ? error : new Error(String(error));
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(this.failure);
+    }
+    this.pending.clear();
+  }
+}
+
+class CodexAppServerRpcError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexAppServerRpcError";
+  }
+}
+
+export function createCodexAppServerAccumulator() {
+  let sessionId: string | null = null;
+  let latestAgentMessageText = "";
+  const agentMessageTextByItemId = new Map<string, string>();
+  let finalAgentText = "";
+  let error: string | null = null;
+  let usage: CodexUsage | null = null;
+  let completedResolve: (() => void) | null = null;
+  const completed = new Promise<void>((resolve) => {
+    completedResolve = resolve;
+  });
+  let status: CodexAppServerSummary["status"] = "unknown";
+
+  return {
+    completed,
+    push(notification: JsonRpcNotification) {
+      const params = notification.params;
+      const foundThreadId = firstString(params?.threadId, stringFromPath(params, ["thread", "id"]));
+      if (foundThreadId && !sessionId) sessionId = foundThreadId;
+
+      if (notification.method === "item/agentMessage/delta") {
+        const delta = rawString(params?.delta);
+        if (delta) {
+          const itemId = firstString(params?.itemId) ?? "__default_agent_message";
+          const next = `${agentMessageTextByItemId.get(itemId) ?? ""}${delta}`;
+          agentMessageTextByItemId.set(itemId, next);
+          latestAgentMessageText = next;
+        }
+        return delta?.trim() ? compactActivity(`Codex: ${delta}`) : null;
+      }
+
+      if (notification.method === "item/completed") {
+        const item = isRecord(params?.item) ? params.item : null;
+        if (item?.type === "agentMessage") {
+          finalAgentText = firstString(item.text) ?? finalAgentText;
+        }
+        if (item?.type === "commandExecution") {
+          return compactActivity(`Codex: ${firstString(item.command) ?? "command completed"}`);
+        }
+      }
+
+      if (notification.method === "item/started") {
+        const item = isRecord(params?.item) ? params.item : null;
+        if (item?.type === "commandExecution") {
+          return compactActivity(`Codex: ${firstString(item.command) ?? "running command"}`);
+        }
+      }
+
+      if (notification.method === "thread/tokenUsage/updated") {
+        usage = usageFromNotification(params);
+      }
+
+      if (notification.method === "turn/completed") {
+        const turn = isRecord(params?.turn) ? params.turn : null;
+        const turnStatus = firstString(turn?.status);
+        status =
+          turnStatus === "completed"
+            ? "success"
+            : turnStatus === "failed" || turnStatus === "interrupted"
+              ? "error"
+              : "unknown";
+        error =
+          turnStatus === "interrupted"
+            ? "Codex was interrupted before finishing."
+            : (firstString(stringFromPath(turn, ["error", "message"])) ?? error);
+        completedResolve?.();
+        return status === "success" ? "Codex completed" : null;
+      }
+
+      if (notification.method === "error") {
+        error = firstString(params?.message) ?? error;
+      }
+
+      return null;
+    },
+    summary(): CodexAppServerSummary {
+      const result = (finalAgentText || latestAgentMessageText).trim();
+      return {
+        sessionId,
+        status: error && status === "unknown" ? "error" : status,
+        result,
+        error,
+        usage,
+      };
+    },
+  };
+}
+
+async function waitForTurnCompletion(input: {
+  promise: Promise<void>;
+  checkAbort: () => Promise<void>;
+  timeoutMs: number;
+  interrupt: () => Promise<void>;
+}) {
+  const deadline = Date.now() + input.timeoutMs;
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      await input.interrupt();
+      return "timeout" as const;
+    }
+    const completed = await Promise.race([
+      input.promise.then(() => true),
+      sleep(Math.min(1_000, remainingMs)).then(() => false),
+    ]);
+    if (completed) return "completed" as const;
+    try {
+      await input.checkAbort();
+    } catch (error) {
+      await input.interrupt();
+      throw error;
+    }
+  }
+}
+
+async function appServerProcessReady(sandbox: SandboxHandle, state: AppServerState) {
+  const result = await sandbox.commands
+    .run(`kill -0 ${state.pid} && ${websocketProbeCommand(state.socketPath)}`, {
+      timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS,
+    })
+    .catch(() => null);
+  return Boolean(result);
+}
+
+async function waitForEndpoint(sandbox: SandboxHandle, endpoint: string) {
+  await sandbox.commands.run(
+    `for i in $(seq 1 100); do ${websocketProbeCommand(endpoint)} && exit 0; sleep 0.1; done; exit 1`,
+    { timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS },
+  );
+}
+
+function websocketProbeCommand(endpoint: string) {
+  const script = `
+const endpoint = ${JSON.stringify(endpoint)};
+const ws = new WebSocket(endpoint);
+const timer = setTimeout(() => process.exit(1), 500);
+ws.onopen = () => {
+  clearTimeout(timer);
+  ws.close();
+  process.exit(0);
+};
+ws.onerror = () => {
+  clearTimeout(timer);
+  process.exit(1);
+};
+`;
+  return `bun -e ${shellQuote(script)}`;
+}
+
+function codexAppServerProxyScript() {
+  return `const endpoint = process.argv[2];
+if (!endpoint) {
+  console.error("missing app-server endpoint");
+  process.exit(1);
+}
+
+const ws = new WebSocket(endpoint);
+let inputClosed = false;
+
+await new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error("timed out connecting to app-server")), 30_000);
+  ws.onopen = () => {
+    clearTimeout(timer);
+    resolve(undefined);
+  };
+  ws.onerror = () => {
+    clearTimeout(timer);
+    reject(new Error("failed to connect to app-server"));
+  };
+});
+
+ws.onmessage = (event) => {
+  process.stdout.write(String(event.data) + "\\n");
+};
+ws.onclose = () => {
+  if (!inputClosed) process.exit(0);
+};
+ws.onerror = () => {
+  console.error("app-server websocket error");
+  process.exit(1);
+};
+
+const decoder = new TextDecoder();
+let buffer = "";
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += decoder.decode(chunk, { stream: true });
+  const lines = buffer.split("\\n");
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed) ws.send(trimmed);
+  }
+}
+inputClosed = true;
+const trailing = buffer.trim();
+if (trailing) ws.send(trailing);
+`;
+}
+
+async function readAppServerState(sandbox: SandboxHandle, path: string) {
+  try {
+    const content = await sandbox.files.read(path);
+    const parsed = JSON.parse(
+      typeof content === "string" ? content : new TextDecoder().decode(content),
+    );
+    if (!isRecord(parsed)) return null;
+    const pid = typeof parsed.pid === "number" ? parsed.pid : null;
+    const socketPath = typeof parsed.socketPath === "string" ? parsed.socketPath : null;
+    const fingerprint = typeof parsed.fingerprint === "string" ? parsed.fingerprint : null;
+    return pid != null && socketPath && fingerprint ? { pid, socketPath, fingerprint } : null;
+  } catch {
+    return null;
+  }
+}
+
+function appServerFingerprint(input: {
+  config: string;
+  auth: CodexCliAuth;
+  githubAuth: CodexGitHubAuth;
+}) {
+  return hashJson({
+    config: input.config,
+    auth:
+      input.auth.kind === "api"
+        ? {
+            kind: "api",
+            baseUrl: input.auth.baseUrl,
+            apiKeyEnvVar: input.auth.apiKeyEnvVar,
+            apiKeyHash: hash(input.auth.apiKeyValue),
+            brokered: input.auth.brokered,
+          }
+        : {
+            kind: "chatgpt",
+            authHash: hashJson(input.auth.authJson),
+          },
+    githubTokenHash: input.githubAuth.githubToken ? hash(input.githubAuth.githubToken) : null,
+    githubAuthHeaderHash: input.githubAuth.githubAuthHeader
+      ? hash(input.githubAuth.githubAuthHeader)
+      : null,
+  });
+}
+
+function usageFromNotification(params: Record<string, unknown> | undefined): CodexUsage | null {
+  const last =
+    isRecord(params?.tokenUsage) && isRecord(params.tokenUsage.last)
+      ? params.tokenUsage.last
+      : null;
+  if (!last) return null;
+  const inputTokens = numberFrom(last.inputTokens);
+  const outputTokens = numberFrom(last.outputTokens);
+  if (inputTokens == null || outputTokens == null) return null;
+  const cachedInputTokens = numberFrom(last.cachedInputTokens);
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    ...(cachedInputTokens ? { cache_read_input_tokens: cachedInputTokens } : {}),
+  };
+}
+
+function isInitializeFailure(error: unknown) {
+  return (
+    error instanceof CodexAppServerRpcError || /app-server|proxy|initialize/i.test(String(error))
+  );
+}
+
+function commandHandlePid(handle: unknown) {
+  return isRecord(handle) && typeof handle.pid === "number" ? handle.pid : null;
+}
+
+function stringFromPath(value: unknown, path: string[]): string | null {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!isRecord(current)) return null;
+    current = current[key];
+  }
+  return firstString(current);
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+function rawString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberFrom(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function compactActivity(value: string) {
+  return `${truncateText(value.replace(/\s+/g, " ").trim(), 500)}\n`;
+}
+
+function hashJson(value: unknown) {
+  return hash(JSON.stringify(value));
+}
+
+function hash(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
