@@ -32,6 +32,8 @@ Useful commands:
 
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
 
+Local dev logs: `bun run dev` and `bun run dev:stream` write Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source web --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.
+
 ## Product Context
 
 OpenCompany is a platform for running company-owned AI agents.
