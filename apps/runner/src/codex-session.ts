@@ -90,15 +90,10 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "codex-ses
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
 // CODEX_HOME for session runs lives OUTSIDE the work root the model operates in (Codex is
-// launched with `--cd ${codexWorkRoot}`). For subscription-backed runs the workspace ChatGPT
-// auth.json is written here; keeping it out of the agent's working tree stops it surfacing in the
-// diffs, file listings, or commits the model produces. Codex's own process still reads/writes
-// CODEX_HOME freely — it is not subject to the `workspace-write` sandbox policy — exactly as the
-// device-auth flow does. Defense-in-depth, not a full seal: `workspace-write` does not sandbox
-// reads, so an out-of-tree absolute path is harder to discover but not unreachable. The sandbox is
-// per session, so a single fixed path cannot collide, and it persists across turns so
-// `codex exec resume` can still read the session's rollout files.
-const CODEX_SESSION_HOME = "/home/user/.opencompany/codex-session";
+// launched with `--cd ${codexWorkRoot}`). It must still be user-writable because Codex refreshes
+// file-backed ChatGPT credentials during runs, so it intentionally does not live under the
+// root-owned OpenCompany metadata directory at `/home/user/.opencompany`.
+const CODEX_SESSION_HOME = "/home/user/.opencompany-codex/session";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";
 const CODEX_DIRECT_API_KEY_ENV_VAR = "CODEX_API_KEY";
 const BROKER_TOKEN_ENV_VAR = "OPENCOMPANY_LLM_BROKER_TOKEN";
@@ -583,10 +578,15 @@ async function runCodexCli(input: {
       githubAuth: input.githubAuth,
     });
 
-    await ensureCodexInstalled(input.sandbox);
-    await input.sandbox.commands.run(
-      `mkdir -p ${shellQuote(commandPlan.codexWorkRoot)} ${shellQuote(commandPlan.codexHome)}`,
-      { timeoutMs: 30_000 },
+    await runCodexCommandStage("CLI setup", redact, () => ensureCodexInstalled(input.sandbox));
+    await runCodexCommandStage("workspace setup", redact, () =>
+      input.sandbox.commands.run(
+        [
+          `mkdir -p ${shellQuote(commandPlan.codexWorkRoot)} ${shellQuote(commandPlan.codexHome)}`,
+          `chmod 700 ${shellQuote(commandPlan.codexHome)}`,
+        ].join(" && "),
+        { timeoutMs: 30_000 },
+      ),
     );
     await input.sandbox.files.write(`${commandPlan.codexHome}/config.toml`, commandPlan.config);
     if (serializedAuthJson) {
@@ -699,6 +699,35 @@ async function runCodexCli(input: {
     apiKeyValue: input.env.openaiCodexApiKey,
     brokered: false,
   });
+}
+
+async function runCodexCommandStage<T>(
+  stage: string,
+  redact: (value: string) => string,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    const exitResult = commandExitResult(error);
+    if (!exitResult) throw error;
+    throw new Error(formatCodexCommandStageFailure(stage, exitResult, redact), { cause: error });
+  }
+}
+
+function formatCodexCommandStageFailure(
+  stage: string,
+  result: { exitCode: number; stdout: string; stderr: string },
+  redact: (value: string) => string,
+) {
+  const details = [
+    result.stderr.trim() ? `stderr: ${redact(result.stderr.trim())}` : null,
+    result.stdout.trim() ? `stdout: ${redact(result.stdout.trim())}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const suffix = details ? `\n${truncateText(details, 2_000)}` : "";
+  return `Codex ${stage} failed with exit code ${result.exitCode}.${suffix}`;
 }
 
 export function buildCodexSessionCommandPlan(input: {

@@ -755,17 +755,58 @@ export function commandExitResult(error: unknown) {
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   if (record.name !== "CommandExitError") return null;
-  const result =
-    record.result && typeof record.result === "object"
-      ? (record.result as Record<string, unknown>)
-      : record;
-  if (typeof result.exitCode !== "number") return null;
+  const result = readRecordProperty(record, "result");
+  const candidates = result ? [result, record] : [record];
+  const exitCode =
+    candidates.map((candidate) => readNumberProperty(candidate, "exitCode")).find(isNumber) ??
+    candidates.map((candidate) => readNumberProperty(candidate, "exit_code")).find(isNumber);
+  if (exitCode == null) return null;
 
   return {
-    stdout: typeof result.stdout === "string" ? result.stdout : "",
-    stderr: typeof result.stderr === "string" ? result.stderr : "",
-    exitCode: result.exitCode,
+    stdout:
+      candidates.map((candidate) => readStringProperty(candidate, "stdout")).find(isString) ?? "",
+    stderr:
+      candidates.map((candidate) => readStringProperty(candidate, "stderr")).find(isString) ?? "",
+    exitCode,
   };
+}
+
+function readRecordProperty(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  try {
+    const value = record[key];
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readNumberProperty(record: Record<string, unknown>, key: string): number | null {
+  try {
+    const value = record[key];
+    return typeof value === "number" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStringProperty(record: Record<string, unknown>, key: string): string | null {
+  try {
+    const value = record[key];
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function isNumber(value: number | null): value is number {
+  return typeof value === "number";
+}
+
+function isString(value: string | null): value is string {
+  return typeof value === "string";
 }
 
 // E2B raises a `TimeoutError` when a command exceeds its `timeoutMs` (the process is killed

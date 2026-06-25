@@ -117,7 +117,11 @@ Important details:
   `work/` for that tool run.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
-  the full serialized `.agent` source and Brain manifest.
+  the full serialized `.agent` source and Brain manifest. This directory is root-owned and not
+  used for tool runtime state.
+- Codex engine runtime state lives outside the model work tree under the user-writable private
+  `/home/user/.opencompany-codex/session` directory, including the session `CODEX_HOME` files and
+  file-backed Codex auth cache.
 
 V1 tools:
 

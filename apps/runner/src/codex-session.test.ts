@@ -8,6 +8,7 @@ const auth = {
   apiKeyValue: "codex_secret_123",
   brokered: false,
 };
+const codexSessionHome = "/home/user/.opencompany-codex/session";
 
 describe("buildCodexSessionCommandPlan", () => {
   it("runs Codex in the session work area without pre-cloning a repository", () => {
@@ -23,10 +24,11 @@ describe("buildCodexSessionCommandPlan", () => {
     expect(plan.codexWorkRoot).toBe("/home/user/workspace/work/codex");
     // CODEX_HOME lives outside the `--cd` work root so the workspace ChatGPT auth.json never sits
     // in the tree the model operates on.
-    expect(plan.codexHome).toBe("/home/user/.opencompany/codex-session");
+    expect(plan.codexHome).toBe(codexSessionHome);
     expect(plan.codexHome.startsWith(`${plan.codexWorkRoot}/`)).toBe(false);
+    expect(plan.codexHome.startsWith("/home/user/.opencompany/")).toBe(false);
     expect(plan.codexEnv).toMatchObject({
-      CODEX_HOME: "/home/user/.opencompany/codex-session",
+      CODEX_HOME: codexSessionHome,
       CODEX_API_KEY: "codex_secret_123",
     });
     expect(plan.command).toContain("cd '/home/user/workspace/work/codex'");
@@ -108,8 +110,11 @@ describe("buildCodexSessionCommandPlan", () => {
     });
 
     expect(plan.codexEnv).toEqual({
-      CODEX_HOME: "/home/user/.opencompany/codex-session",
+      CODEX_HOME: codexSessionHome,
     });
+    expect(plan.codexHome).toBe(codexSessionHome);
+    expect(plan.codexHome.startsWith(`${plan.codexWorkRoot}/`)).toBe(false);
+    expect(plan.codexHome.startsWith("/home/user/.opencompany/")).toBe(false);
     expect(plan.config).toContain('cli_auth_credentials_store = "file"');
     expect(plan.config).toContain('forced_login_method = "chatgpt"');
     expect(plan.config).not.toContain("model_provider");

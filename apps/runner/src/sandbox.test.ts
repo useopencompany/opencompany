@@ -1583,6 +1583,27 @@ describe("commandExitResult", () => {
       stderr: "err",
     });
   });
+
+  it("normalizes CommandExitError objects that expose command output through getters", () => {
+    const error = Object.create({
+      get exitCode() {
+        return 1;
+      },
+      get stdout() {
+        return "getter out";
+      },
+      get stderr() {
+        return "getter err";
+      },
+    }) as { name: string };
+    error.name = "CommandExitError";
+
+    expect(commandExitResult(error)).toEqual({
+      exitCode: 1,
+      stdout: "getter out",
+      stderr: "getter err",
+    });
+  });
 });
 
 async function createTempWorkdir() {
