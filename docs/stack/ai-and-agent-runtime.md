@@ -293,12 +293,14 @@ defaulting to a fixed platform model when omitted. The memory CLI's model-backed
 through the same broker (`MEMORY_GATEWAY_BASE_URL` + token in place of the raw key).
 
 Codex runs headless as `codex exec --json --sandbox workspace-write --ask-for-approval never`
-inside the same coding sandbox template. Production/company runs use the workspace Codex account
-connected in company settings: the runner writes an isolated `${CODEX_HOME}/config.toml` with
-file-backed ChatGPT auth, injects the encrypted workspace `auth.json` cache into that home, and
-rotates the encrypted cache after successful runs because the CLI may refresh tokens. Codex token
-usage from this subscription-backed path is recorded display-only at cost 0; OpenCompany credits
-still cover the E2B sandbox compute.
+inside the E2B `codex` template. That template is expected to be provisioned with 8 vCPU and
+8192 MB RAM; the runner records Codex sandbox usage against that allocation for billing and
+observability. Production/company runs use the workspace Codex account connected in company
+settings: the runner writes an isolated `${CODEX_HOME}/config.toml` with file-backed ChatGPT auth,
+injects the encrypted workspace `auth.json` cache into that home, and rotates the encrypted cache
+after successful runs because the CLI may refresh tokens. Codex token usage from this
+subscription-backed path is recorded display-only at cost 0; OpenCompany credits still cover the E2B
+sandbox compute.
 
 The legacy OpenAI API-key path is kept only as an explicit fallback (`RUNNER_CODEX_API_KEY_FALLBACK_ENABLED`).
 When that fallback and the LLM broker are active, Codex receives only `OPENCOMPANY_LLM_BROKER_TOKEN`
@@ -314,11 +316,11 @@ for legacy rows and `codex_coder`. Missing JSONL usage is noted in artifact meta
 > additional harnesses (Claude Code, Gemini) the same way. The current opencode and Codex
 > integrations intentionally use the simpler one-shot CLI paths that mirror AMP.
 
-These harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
-`opencode` and `codex` CLIs are made available defensively: their tool files check for the binary
-and install on demand if missing, so the tools work on the current template without a rebuild. The
-durable option is to bake both CLIs into `OPENCOMPANY_AMP_E2B_TEMPLATE` and keep the on-demand
-install path as a fallback.
+These harnesses run in coding sandbox templates (`OPENCOMPANY_AMP_E2B_TEMPLATE` for AMP/opencode
+and E2B's `codex` template for Codex). The `opencode` and `codex` CLIs are made available
+defensively: their tool files check for the binary and install on demand if missing, so the tools
+work on the current template without a rebuild. The durable option for AMP/opencode is to bake the
+CLI into `OPENCOMPANY_AMP_E2B_TEMPLATE` and keep the on-demand install path as a fallback.
 
 MCP tools are enabled by workspace setup plus agent configuration:
 

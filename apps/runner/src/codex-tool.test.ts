@@ -281,6 +281,67 @@ describe("createCodexStreamAccumulator", () => {
     });
   });
 
+  it("extracts app-server style thread ids and agent message deltas", () => {
+    const stream = createCodexStreamAccumulator();
+    const stdout =
+      [
+        JSON.stringify({
+          method: "thread/started",
+          params: { thread: { id: "019efdef-acf7-70d3-90d1-c67d06f4f12f" } },
+        }),
+        JSON.stringify({
+          method: "item/agentMessage/delta",
+          params: { itemId: "item_0", delta: "I am checking the command output." },
+        }),
+      ].join("\n") + "\n";
+
+    const activity = stream.push(stdout);
+    stream.finish();
+
+    expect(activity).toContain("Codex: I am checking the command output.");
+    expect(stream.summary({ exitCode: 0, stdout, stderr: "" })).toMatchObject({
+      sessionId: "019efdef-acf7-70d3-90d1-c67d06f4f12f",
+      result: "I am checking the command output.",
+    });
+  });
+
+  it("does not mistake Codex item ids for resumable session ids", () => {
+    const stream = createCodexStreamAccumulator();
+    const stdout =
+      [
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "item_0",
+            type: "command_execution",
+            command: "pwd",
+          },
+        }),
+        JSON.stringify({
+          type: "thread.started",
+          thread_id: "019efdef-acf7-70d3-90d1-c67d06f4f12f",
+        }),
+      ].join("\n") + "\n";
+
+    stream.push(stdout);
+    stream.finish();
+
+    expect(stream.summary({ exitCode: 0, stdout, stderr: "" }).sessionId).toBe(
+      "019efdef-acf7-70d3-90d1-c67d06f4f12f",
+    );
+  });
+
+  it("keeps supporting legacy session start events that only expose a top-level id", () => {
+    const stream = createCodexStreamAccumulator();
+
+    stream.push(`${JSON.stringify({ type: "session.started", id: "codex-session-legacy" })}\n`);
+    stream.finish();
+
+    expect(stream.summary({ exitCode: 0, stdout: "", stderr: "" }).sessionId).toBe(
+      "codex-session-legacy",
+    );
+  });
+
   it("uses the latest cumulative token totals instead of summing repeated usage events", () => {
     const stream = createCodexStreamAccumulator();
 
@@ -364,6 +425,99 @@ describe("createCodexStreamAccumulator", () => {
 });
 
 describe("codexRuntimeEventsFromJsonEvent", () => {
+  it("maps Codex agent message JSONL to live assistant text", () => {
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          type: "item.completed",
+          item: {
+            id: "item_text",
+            type: "agent_message",
+            text: "The command builder emits the expected shape.",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "message.delta",
+        payload: {
+          messageId: "msg_assistant",
+          delta: "The command builder emits the expected shape.",
+        },
+      },
+    ]);
+  });
+
+  it("maps app-server Codex text, reasoning, and command output deltas", () => {
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          method: "item/agentMessage/delta",
+          params: {
+            itemId: "item_text",
+            delta: "I am checking the installed CLI.",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "message.delta",
+        payload: {
+          messageId: "msg_assistant",
+          delta: "I am checking the installed CLI.",
+        },
+      },
+    ]);
+
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          method: "item/reasoning/summaryTextDelta",
+          params: {
+            itemId: "item_reasoning",
+            delta: "Need to inspect the event stream mapper.",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "message.reasoning_delta",
+        payload: {
+          messageId: "msg_assistant",
+          delta: "Need to inspect the event stream mapper.",
+        },
+      },
+    ]);
+
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          method: "item/commandExecution/outputDelta",
+          params: {
+            itemId: "item_cmd",
+            command: "/bin/bash -lc 'rg --files'",
+            stream: "stderr",
+            delta: "No files found\n",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "command.output",
+        payload: {
+          command: "/bin/bash -lc 'rg --files'",
+          toolCallId: "codex:item_cmd",
+          stream: "stderr",
+          delta: "No files found\n",
+        },
+      },
+    ]);
+  });
+
   it("maps Codex command execution JSONL to shell tool events", () => {
     expect(
       codexRuntimeEventsFromJsonEvent(
@@ -420,6 +574,71 @@ describe("codexRuntimeEventsFromJsonEvent", () => {
             command: "git clone https://github.com/octocat/Hello-World.git hello-world",
             exitCode: 0,
             output: "Cloning into 'hello-world'...",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("maps app-server Codex command execution events to shell tool events", () => {
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          method: "item/started",
+          params: {
+            item: {
+              id: "item_0",
+              type: "commandExecution",
+              command: "/bin/bash -lc 'git status --short --branch'",
+              status: "inProgress",
+            },
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "tool.started",
+        payload: {
+          messageId: "msg_assistant",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          input: {
+            command: "/bin/bash -lc 'git status --short --branch'",
+          },
+        },
+      },
+    ]);
+
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          method: "item/completed",
+          params: {
+            item: {
+              id: "item_0",
+              type: "commandExecution",
+              command: "/bin/bash -lc 'git status --short --branch'",
+              aggregatedOutput: "## main\n",
+              exitCode: 0,
+              status: "completed",
+            },
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "tool.completed",
+        payload: {
+          messageId: "msg_assistant",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          outputPreview: "## main",
+          output: {
+            command: "/bin/bash -lc 'git status --short --branch'",
+            exitCode: 0,
+            output: "## main",
           },
         },
       },

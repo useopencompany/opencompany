@@ -60,6 +60,7 @@ import {
   completeSpawnedAfterSessionRunForChild,
   ensureSandbox,
   optionalUserContext,
+  resolveSandboxBilling,
   summarizeAfterSessionNote,
 } from "./session-lifecycle";
 
@@ -378,10 +379,19 @@ describe("acquireCodexSandboxForTurn", () => {
 
     const row = loadedSessionRow({ e2bSandboxId: null, engine: "codex" });
 
-    await expect(acquireCodexSandboxForTurn(row as never, env())).resolves.toBe(sandbox);
+    await expect(
+      acquireCodexSandboxForTurn(row as never, env({ ampE2bTemplate: "custom-amp-template" })),
+    ).resolves.toBe(sandbox);
 
     expect(e2bMocks.connect).not.toHaveBeenCalled();
     expect(e2bMocks.create).toHaveBeenCalledTimes(1);
+    expect(e2bMocks.create).toHaveBeenCalledWith(
+      "codex",
+      expect.objectContaining({
+        timeoutMs: 30_000,
+        lifecycle: { onTimeout: "pause", autoResume: true },
+      }),
+    );
     expect(sandbox.commands.run).toHaveBeenCalled();
     expect(materializeMocks.materializeAgentBundleForSession).toHaveBeenCalled();
     expect(materializeMocks.materializeSkillsForSession).toHaveBeenCalled();
@@ -418,6 +428,36 @@ describe("acquireCodexSandboxForTurn", () => {
   });
 });
 
+describe("resolveSandboxBilling", () => {
+  it("uses the Codex template and 8 vCPU / 8 GiB allocation for Codex sessions", () => {
+    const row = loadedSessionRow({ e2bSandboxId: null, engine: "codex" });
+
+    expect(
+      resolveSandboxBilling(row as never, env({ ampE2bTemplate: "custom-amp-template" })),
+    ).toEqual({
+      template: "codex",
+      vcpu: 8,
+      ramMib: 8192,
+    });
+  });
+
+  it("keeps non-Codex coding agents on the AMP template and base allocation", () => {
+    const row = loadedSessionRow({
+      e2bSandboxId: null,
+      engine: "opencompany",
+      tools: [{ id: "opencode", type: "builtin" }],
+    });
+
+    expect(
+      resolveSandboxBilling(row as never, env({ ampE2bTemplate: "custom-amp-template" })),
+    ).toEqual({
+      template: "custom-amp-template",
+      vcpu: 2,
+      ramMib: 512,
+    });
+  });
+});
+
 function hydratedSandbox(sandboxId: string) {
   return {
     sandboxId,
@@ -434,6 +474,7 @@ function hydratedSandbox(sandboxId: string) {
 function loadedSessionRow(input: {
   e2bSandboxId: string | null;
   engine?: "opencompany" | "codex";
+  tools?: ReturnType<typeof agentConfig>["tools"];
 }) {
   const engine = input.engine ?? "codex";
   return {
@@ -447,6 +488,13 @@ function loadedSessionRow(input: {
       engine,
     },
     workspace: { id: "workspace_123" },
-    agent: { id: "agent_123", isDefault: false, config: agentConfig({ engine }) },
+    agent: {
+      id: "agent_123",
+      isDefault: false,
+      config: agentConfig({
+        engine,
+        ...(input.tools ? { tools: input.tools } : {}),
+      }),
+    },
   };
 }

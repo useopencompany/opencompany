@@ -792,24 +792,19 @@ export function createCodexStreamAccumulator() {
   function ingestEvent(event: unknown): string | null {
     if (!isRecord(event)) return null;
     parsedEvents.push(event);
-    const foundSessionId = firstDeepString(event, [
-      "session_id",
-      "sessionId",
-      "thread_id",
-      "threadId",
-      "conversation_id",
-      "conversationId",
-      "id",
-    ]);
+    const foundSessionId = codexSessionIdFromEvent(event);
     if (foundSessionId && !sessionId) sessionId = foundSessionId;
 
-    const type = firstString(event.type, isRecord(event.msg) ? event.msg.type : undefined) ?? "";
+    const type = normalizeCodexEventType(codexEventType(event));
     const text = firstDeepString(event, ["delta", "text", "content", "message"]);
     let activity: string | null = null;
     if (text && isAssistantTextEvent(type, event)) {
       resultText += text;
       activity = compactActivity(`Codex: ${text}`);
-    } else if (/tool|exec|command|patch|file/i.test(type)) {
+    } else if (
+      type !== "item.commandexecution.outputdelta" &&
+      /tool|exec|command|patch|file/i.test(type)
+    ) {
       const label = firstDeepString(event, ["name", "command", "path", "title"]);
       activity = compactActivity(`Codex: ${label ?? type}`);
     }
@@ -929,19 +924,66 @@ export function codexRuntimeEventsFromJsonEvent(
   messageId: string,
 ): AgentRuntimeEvent[] {
   if (!isRecord(event)) return [];
-  const msg = isRecord(event.msg) ? event.msg : null;
-  const type = firstString(event.type, msg?.type);
-  if (type !== "item.started" && type !== "item.completed") return [];
+  const eventType = codexEventType(event);
+  const normalizedType = normalizeCodexEventType(eventType);
+  const params = codexEventParams(event);
 
-  const item = isRecord(event.item) ? event.item : isRecord(msg?.item) ? msg.item : null;
-  if (!item || firstString(item.type) !== "command_execution") return [];
+  if (normalizedType === "assistant_message_delta") {
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    return delta ? [{ type: "message.delta", payload: { messageId, delta } }] : [];
+  }
+
+  if (normalizedType === "item.agentmessage.delta" || normalizedType === "item.plan.delta") {
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    return delta ? [{ type: "message.delta", payload: { messageId, delta } }] : [];
+  }
+
+  if (
+    normalizedType === "item.reasoning.summarytextdelta" ||
+    normalizedType === "item.reasoning.textdelta"
+  ) {
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    return delta ? [{ type: "message.reasoning_delta", payload: { messageId, delta } }] : [];
+  }
+
+  if (normalizedType === "item.commandexecution.outputdelta") {
+    const toolCallId = codexToolCallIdFromEvent(event);
+    const delta = firstNonEmptyRawString(event.delta, params?.delta);
+    if (!toolCallId || !delta) return [];
+    return [
+      {
+        type: "command.output",
+        payload: {
+          command: codexCommandString(params?.command ?? event.command) ?? toolCallId,
+          toolCallId,
+          stream: firstString(params?.stream, event.stream) === "stderr" ? "stderr" : "stdout",
+          delta,
+        },
+      },
+    ];
+  }
+
+  if (normalizedType !== "item.started" && normalizedType !== "item.completed") return [];
+
+  const item = codexItemFromEvent(event);
+  const itemType = normalizeCodexItemType(firstString(item?.type));
+  if (
+    normalizedType === "item.completed" &&
+    itemType === "agentmessage" &&
+    !isSlashCodexEvent(event)
+  ) {
+    const text = firstNonEmptyRawString(item?.text, item?.content);
+    return text ? [{ type: "message.delta", payload: { messageId, delta: text } }] : [];
+  }
+
+  if (!item || itemType !== "commandexecution") return [];
 
   const itemId = firstString(item.id);
-  const command = firstString(item.command);
+  const command = codexCommandString(item.command);
   if (!itemId || !command) return [];
 
   const toolCallId = `codex:${itemId}`;
-  if (type === "item.started") {
+  if (normalizedType === "item.started") {
     return [
       {
         type: "tool.started",
@@ -955,9 +997,9 @@ export function codexRuntimeEventsFromJsonEvent(
     ];
   }
 
-  const exitCode = numberFrom(item.exit_code);
+  const exitCode = numberFrom(item.exit_code ?? item.exitCode);
   const status = firstString(item.status);
-  const outputPreview = firstString(item.aggregated_output) ?? "";
+  const outputPreview = firstString(item.aggregated_output, item.aggregatedOutput) ?? "";
   if (status === "failed" || (exitCode != null && exitCode !== 0)) {
     const message =
       exitCode == null ? "Codex command failed." : `Codex command exited with code ${exitCode}.`;
@@ -1077,9 +1119,9 @@ function codexBillingModel(model: string): AgentModelId {
 
 function isAssistantTextEvent(type: string, event: Record<string, unknown>) {
   if (/assistant|agent|message|text|delta|response/i.test(type)) return true;
-  const item = isRecord(event.item) ? event.item : null;
-  const itemType = firstString(item?.type);
-  if (itemType && /assistant|agent.*message|message/i.test(itemType)) return true;
+  const item = codexItemFromEvent(event);
+  const itemType = normalizeCodexItemType(firstString(item?.type));
+  if (itemType && /assistant|agentmessage|message/i.test(itemType)) return true;
   const role = firstDeepString(event, ["role"]);
   return role === "assistant";
 }
@@ -1087,6 +1129,105 @@ function isAssistantTextEvent(type: string, event: Record<string, unknown>) {
 function firstString(...values: unknown[]): string | null {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function firstNonEmptyRawString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+function codexEventType(event: Record<string, unknown>): string {
+  const msg = isRecord(event.msg) ? event.msg : null;
+  return firstString(event.type, event.method, msg?.type, msg?.method) ?? "";
+}
+
+function normalizeCodexEventType(type: string) {
+  return type.replace(/\//g, ".").toLowerCase();
+}
+
+function isSlashCodexEvent(event: Record<string, unknown>) {
+  const msg = isRecord(event.msg) ? event.msg : null;
+  const type = firstString(event.type, event.method, msg?.type, msg?.method);
+  return Boolean(type?.includes("/"));
+}
+
+function codexEventParams(event: Record<string, unknown>): Record<string, unknown> | null {
+  if (isRecord(event.params)) return event.params;
+  const msg = isRecord(event.msg) ? event.msg : null;
+  if (isRecord(msg?.params)) return msg.params;
+  return null;
+}
+
+function codexItemFromEvent(event: Record<string, unknown>): Record<string, unknown> | null {
+  if (isRecord(event.item)) return event.item;
+  const msg = isRecord(event.msg) ? event.msg : null;
+  if (isRecord(msg?.item)) return msg.item;
+  const params = codexEventParams(event);
+  if (isRecord(params?.item)) return params.item;
+  return null;
+}
+
+function codexToolCallIdFromEvent(event: Record<string, unknown>): string | null {
+  const params = codexEventParams(event);
+  const item = codexItemFromEvent(event);
+  const itemId = firstString(event.itemId, params?.itemId, item?.id);
+  return itemId ? `codex:${itemId}` : null;
+}
+
+function normalizeCodexItemType(type: string | null) {
+  return (type ?? "").replace(/_/g, "").toLowerCase();
+}
+
+function codexCommandString(value: unknown): string | null {
+  const command = firstString(value);
+  if (command) return command;
+  if (Array.isArray(value) && value.every((part) => typeof part === "string")) {
+    return value.join(" ").trim() || null;
+  }
+  return null;
+}
+
+function codexSessionIdFromEvent(event: Record<string, unknown>): string | null {
+  const params = codexEventParams(event);
+  const direct = firstString(
+    event.session_id,
+    event.sessionId,
+    event.thread_id,
+    event.threadId,
+    event.conversation_id,
+    event.conversationId,
+    params?.session_id,
+    params?.sessionId,
+    params?.thread_id,
+    params?.threadId,
+    params?.conversation_id,
+    params?.conversationId,
+  );
+  if (direct) return direct;
+
+  const msg = isRecord(event.msg) ? event.msg : null;
+  const msgId = msg
+    ? firstString(
+        msg.session_id,
+        msg.sessionId,
+        msg.thread_id,
+        msg.threadId,
+        msg.conversation_id,
+        msg.conversationId,
+      )
+    : null;
+  if (msgId) return msgId;
+
+  const type = normalizeCodexEventType(codexEventType(event));
+  if (/^(session|thread|conversation)\.started$/i.test(type)) {
+    const thread = isRecord(params?.thread) ? params.thread : null;
+    const session = isRecord(params?.session) ? params.session : null;
+    const conversation = isRecord(params?.conversation) ? params.conversation : null;
+    return firstString(event.id, msg?.id, thread?.id, session?.id, conversation?.id);
   }
   return null;
 }

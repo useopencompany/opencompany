@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexSessionCommandPlan } from "./codex-session";
+import { buildCodexSessionCommandPlan, resumableCodexSessionId } from "./codex-session";
 
 const auth = {
   kind: "api" as const,
@@ -111,5 +111,20 @@ describe("buildCodexSessionCommandPlan", () => {
     expect(plan.config).toContain('forced_login_method = "chatgpt"');
     expect(plan.config).not.toContain("model_provider");
     expect(plan.config).not.toContain("env_key");
+  });
+});
+
+describe("resumableCodexSessionId", () => {
+  it("keeps a Codex session id from failed turns so retry messages can resume context", () => {
+    expect(
+      resumableCodexSessionId({
+        sessionId: "019efe9c-a0a5-7f81-98a4-6fab601b4a76",
+        status: "error",
+      }),
+    ).toBe("019efe9c-a0a5-7f81-98a4-6fab601b4a76");
+  });
+
+  it("does not persist a missing Codex session id", () => {
+    expect(resumableCodexSessionId({ sessionId: null, status: "error" })).toBeNull();
   });
 });

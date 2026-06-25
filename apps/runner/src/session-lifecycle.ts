@@ -488,14 +488,11 @@ function errorName(error: unknown) {
   return error instanceof Error ? error.name : undefined;
 }
 
-// The richer sandbox template (with git, gh, and the coding-agent CLIs installed)
-// is used whenever the agent has GitHub access (an attached repository or the live
-// `@github` all-repositories scope) or a coding-agent tool enabled; plain chat agents
-// get the lighter default template.
+// Codex engine sessions run on E2B's Codex template. Other coding/GitHub-capable sessions use the
+// richer AMP template; plain chat agents get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
-  return agentConfig.engine === "codex" || needsAuthenticatedGit(agentConfig)
-    ? (env.ampE2bTemplate ?? "amp")
-    : env.e2bTemplate;
+  if (agentConfig.engine === "codex") return "codex";
+  return needsAuthenticatedGit(agentConfig) ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
 
 function needsAuthenticatedGit(agentConfig: AgentConfig) {
@@ -507,10 +504,11 @@ function needsAuthenticatedGit(agentConfig: AgentConfig) {
   );
 }
 
-// Per-template resource overrides used to price sandbox compute. Both current templates
-// run on E2B's base allocation; add an entry here if a template is ever provisioned with
-// a custom vCPU/RAM size so billing tracks the real allocation.
-const SANDBOX_TEMPLATE_RESOURCES: Record<string, SandboxResourceConfig> = {};
+// Per-template resource overrides used to price sandbox compute. E2B resource sizing is a
+// template-build property, so this must match the provisioned template allocation.
+const SANDBOX_TEMPLATE_RESOURCES: Record<string, SandboxResourceConfig> = {
+  codex: { vcpu: 8, ramMiB: 8192 },
+};
 
 export type SandboxBillingInfo = {
   template: string | null;

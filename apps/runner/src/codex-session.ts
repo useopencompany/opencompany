@@ -893,8 +893,7 @@ function codexAssistantContent(input: {
   return result ? `${result}\n\nCodex error: ${error}` : `Codex error: ${error}`;
 }
 
-function resumableCodexSessionId(input: Pick<CodexCliSummary, "sessionId" | "status">) {
-  if (input.status !== "success" && input.status !== "timeout") return null;
+export function resumableCodexSessionId(input: Pick<CodexCliSummary, "sessionId" | "status">) {
   return input.sessionId;
 }
 
