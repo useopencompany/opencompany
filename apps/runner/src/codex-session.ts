@@ -29,6 +29,7 @@ import {
 } from "./codex-tool";
 import { createKnownSecretRedactor, gitAuthHeader, truncateText } from "./coding-agent-shared";
 import { getDb } from "./db";
+import { completeDelegatedChildRunForParent } from "./delegation";
 import { brokerActive, brokerBaseUrl, type RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubWorkInstallationToken } from "./github";
@@ -148,10 +149,15 @@ async function runCodexTurnWithContext(
   let outcome = "unknown";
   let assistantMessageCreated = false;
   let assistantMessageCompleted = false;
+  // A delegated (source="agent") codex child: at run end it rolls usage up to the parent and wakes
+  // a parent parked awaiting it. Fired from finally so every exit path (success/fail/abort) covers
+  // it once the session status is durably terminal.
+  let delegatedChildRun = false;
 
   try {
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     const agentConfig = normalizeAgentConfig(row.agent.config);
+    delegatedChildRun = row.session.source === "agent";
     workspaceId = row.workspace.id;
     userId = row.session.userId;
     agentId = row.agent.id;
@@ -529,6 +535,11 @@ async function runCodexTurnWithContext(
       modelName,
       sandbox,
     });
+    if (delegatedChildRun) {
+      await completeDelegatedChildRunForParent({ childSessionId: input.sessionId }).catch(() => {
+        // Best-effort: the backstop sweep re-wakes the parent if this parent-notify is lost.
+      });
+    }
   }
 }
 

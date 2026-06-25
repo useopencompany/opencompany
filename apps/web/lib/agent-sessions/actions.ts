@@ -603,7 +603,8 @@ export async function submitAgentSessionMessage(
   const midWork =
     session.status === "running" ||
     session.status === "awaiting_approval" ||
-    session.status === "awaiting_input";
+    session.status === "awaiting_input" ||
+    session.status === "awaiting_delegation";
   const effectiveSendMode = midWork ? sendMode : null;
   const { message } = await insertUserMessage(sessionId, trimmed, {
     workspaceId: workspace.id,

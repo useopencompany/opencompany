@@ -170,6 +170,7 @@ function SessionHistoryItem({
           />
         ) : session.status === "awaiting_approval" ||
           session.status === "awaiting_input" ||
+          session.status === "awaiting_delegation" ||
           session.status === "interrupted" ? (
           <SessionStatusDot status={session.status} pulse />
         ) : null}

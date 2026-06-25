@@ -10,9 +10,10 @@ import { flushBraintrust } from "@opencompany/observability/braintrust";
 import * as Sentry from "@sentry/bun";
 import { listActiveRuns } from "./active-runs";
 import { assertRunnerDbConfig, closeDb } from "./db";
+import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./delegation";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
-import { startRunnerJobWorker } from "./jobs";
+import { setRunnerJobWakeup, startRunnerJobWorker } from "./jobs";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { assertPreviewIdentity } from "./preview-guard";
 import { createServer } from "./server";
@@ -53,6 +54,22 @@ const jobWorker = startRunnerJobWorker(env, {
         });
         return 0;
       }),
+      // Delegation safety nets: re-wake any parent parked awaiting children that have all finished
+      // (lost-wake backstop), and abort children orphaned by a dead parent.
+      sweepDelegationBackstop().catch((error) => {
+        logger.warn("Delegation backstop sweep failed", {
+          event: "opencompany.delegation_backstop_sweep_failed",
+          error,
+        });
+        return 0;
+      }),
+      sweepDeadParentDelegatedChildren().catch((error) => {
+        logger.warn("Dead-parent delegated child sweep failed", {
+          event: "opencompany.delegation_dead_parent_sweep_failed",
+          error,
+        });
+        return 0;
+      }),
     ]);
     if (settledBrokerTokens > 0) {
       logger.info("Settled leftover LLM broker tokens", {
@@ -63,6 +80,9 @@ const jobWorker = startRunnerJobWorker(env, {
     return interrupted;
   },
 });
+// Let any in-process enqueue (delegation spawn, child-finish parent-wake) nudge the worker
+// immediately instead of waiting out the poll interval — the same wake the HTTP server uses.
+setRunnerJobWakeup(jobWorker.notify);
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

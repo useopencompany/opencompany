@@ -226,6 +226,7 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
   "archived",
   "awaiting_approval",
   "awaiting_input",
+  "awaiting_delegation",
 ]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
@@ -1005,6 +1006,9 @@ function SessionViewContentBody({
   // Paused specifically for an ask_user_question: the composer is hidden and the question card is
   // the only input surface (the card's X cancels back to the composer).
   const sessionIsAwaitingInput = runtime.currentStatus === "awaiting_input";
+  // Parked waiting on delegated children: no human card (it auto-resumes when they finish), but the
+  // user can still cancel the parked parent.
+  const sessionIsAwaitingDelegation = runtime.currentStatus === "awaiting_delegation";
   const sessionIsInterrupted = runtime.currentStatus === "interrupted";
   const sessionHasResumableStepLimitFailure = isToolStepLimitResumable({
     status: runtime.currentStatus,
@@ -1020,7 +1024,7 @@ function SessionViewContentBody({
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
   // Abort stays available while paused so the user can cancel a parked run without
   // having to approve or deny the pending tool call first.
-  const canAbort = sessionCanGenerate || sessionIsPaused;
+  const canAbort = sessionCanGenerate || sessionIsPaused || sessionIsAwaitingDelegation;
 
   const renderMessage = (message: SessionMessage, opts?: { footerInFlow?: boolean }) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
@@ -4359,6 +4363,7 @@ function statusLabel(status: string) {
   if (status === "ready") return "Ready";
   if (status === "running") return "Running";
   if (status === "awaiting_approval" || status === "awaiting_input") return "Paused";
+  if (status === "awaiting_delegation") return "Awaiting agents";
   if (status === "interrupted") return "Interrupted";
   if (status === "completed") return "Done";
   if (status === "aborting") return "Aborting";

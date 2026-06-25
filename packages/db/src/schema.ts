@@ -480,6 +480,11 @@ export const agentSessions = pgTable(
     parentSessionId: text("parent_session_id"),
     parentMessageId: text("parent_message_id"),
     parentToolCallId: text("parent_tool_call_id"),
+    // Delegation nesting depth: 0 for a user/scheduled/memory session, parent.delegationDepth + 1
+    // for a delegated (source="agent") child. Denormalized at child-create so a detached child
+    // run (its own job, no in-process caller) can enforce MAX_AGENT_DELEGATION_DEPTH without
+    // walking the parent chain on every spawn.
+    delegationDepth: integer("delegation_depth").notNull().default(0),
     e2bSandboxId: text("e2b_sandbox_id"),
     workdir: text("workdir").notNull().default("/home/user/workspace"),
     runLeaseId: text("run_lease_id"),
@@ -946,9 +951,10 @@ export const agentSessionRunJobs = pgTable(
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
     // No FK to agent_session_messages: this column is overloaded by job kind. message/
-    // title/after_session jobs store a message id, `resume_approval` jobs store the
-    // tool_call_id (its idempotency key is resume_approval:{sessionId}:{toolCallId}), and
-    // `start` jobs leave it null. Cleanup still cascades via the session_id FK.
+    // title/after_session jobs store a message id, `resume_approval`/`resume_question`/
+    // `resume_delegation` jobs store the tool_call_id (e.g. resume_delegation's idempotency
+    // key is resume_delegation:{parentSessionId}:{parentToolCallId}), and `start` jobs leave
+    // it null. Cleanup still cascades via the session_id FK.
     messageId: text("message_id"),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("pending"),
@@ -973,7 +979,7 @@ export const agentSessionRunJobs = pgTable(
     ),
     kindCheck: check(
       "agent_session_run_jobs_kind_check",
-      sql`${table.kind} IN ('start', 'message', 'codex_turn', 'title', 'after_session', 'resume_approval', 'resume_question')`,
+      sql`${table.kind} IN ('start', 'message', 'codex_turn', 'title', 'after_session', 'resume_approval', 'resume_question', 'resume_delegation')`,
     ),
     statusCheck: check(
       "agent_session_run_jobs_status_check",
