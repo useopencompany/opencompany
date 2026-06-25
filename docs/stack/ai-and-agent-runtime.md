@@ -294,11 +294,10 @@ defaulting to a fixed platform model when omitted. The memory CLI's model-backed
 through the same broker (`MEMORY_GATEWAY_BASE_URL` + token in place of the raw key).
 
 Codex engine sessions run headless inside the template selected by
-`OPENCOMPANY_CODEX_E2B_TEMPLATE`, defaulting to E2B's `codex` template. By default the runner
-spawns one `codex exec --json --sandbox workspace-write` process per turn. When
-`RUNNER_CODEX_APP_SERVER_ENABLED=true`, Codex engine turns instead route through a persistent
-`codex app-server --listen ws://127.0.0.1:...` daemon in the same E2B sandbox, with a short-lived
-per-turn Bun JSONL bridge to the app-server websocket. `codex_coder` remains on `codex exec`.
+`OPENCOMPANY_CODEX_E2B_TEMPLATE`, defaulting to E2B's `codex` template. Codex engine turns route
+through a persistent `codex app-server --listen ws://127.0.0.1:...` daemon in the same E2B sandbox,
+with a short-lived per-turn Bun JSONL bridge to the app-server websocket. `codex_coder` remains on
+`codex exec`.
 Codex templates are expected to be
 provisioned with 8 vCPU and 8192 MB RAM; the runner records Codex sandbox usage against that
 allocation for billing and observability. The repo-owned `apps/runner/e2b/codex` template builds
@@ -313,11 +312,10 @@ sandbox compute.
 
 The legacy OpenAI API-key path is kept only as an explicit fallback (`RUNNER_CODEX_API_KEY_FALLBACK_ENABLED`).
 When that fallback and the LLM broker are active, Codex receives only `OPENCOMPANY_LLM_BROKER_TOKEN`
-and the server-side `OPENAI_CODEX_API_KEY` is attached by the broker. Without the broker, the single
-CLI process receives `CODEX_API_KEY`. Active Codex sessions persist their selected Codex model on
-`agent_sessions` and pass it to the CLI; `RUNNER_CODEX_MODEL` defaults to `gpt-5.5` as the fallback
-for legacy rows and `codex_coder`. Missing JSONL usage is noted in artifact metadata with
-`usageMissing: true`.
+and the server-side `OPENAI_CODEX_API_KEY` is attached by the broker. Without the broker, the Codex
+process receives `CODEX_API_KEY`. Active Codex sessions persist their selected Codex model on
+`agent_sessions` and pass it to app-server; `RUNNER_CODEX_MODEL` defaults to `gpt-5.5` as the
+fallback for `codex_coder`.
 
 > Foundational note: opencode also speaks the Agent Client Protocol (`opencode acp`, JSON-RPC over
 > stdio). A future iteration can run harnesses through an in-runner ACP client to surface their

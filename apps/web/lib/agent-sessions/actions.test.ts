@@ -19,6 +19,7 @@ import {
   createAgentSessionFromPrompt,
   createPersonalOnboardingSession,
   resolveToolApproval,
+  setAgentSessionCodexSettings,
   setSessionStar,
   submitAgentSessionMessage,
 } from "./actions";
@@ -849,8 +850,9 @@ describe("submitAgentSessionMessage", () => {
         [{ id: "msg_456" }],
         [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
       ]);
+    const updateSet = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
     const update = vi.fn(() => ({
-      set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
+      set: updateSet,
     }));
     getDbMock.mockReturnValue({ select, insert, batch, update } as never);
 
@@ -875,6 +877,57 @@ describe("submitAgentSessionMessage", () => {
       message_id: "msg_456",
       is_initial_message: false,
       message_length: "Follow up".length,
+    });
+    expect(updateSet).not.toHaveBeenCalledWith(
+      expect.objectContaining({ codexPlanModeEnabled: true }),
+    );
+  });
+
+  it("sets one-shot Codex plan mode for a requested follow-up message", async () => {
+    const limit = vi.fn().mockResolvedValue([
+      {
+        id: "ses_123",
+        agentId: "agt_123",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+        engine: "codex",
+        status: "completed",
+      },
+    ]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn(() => ({ returning }));
+    const insert = vi.fn(() => ({ values }));
+    const batch = vi
+      .fn()
+      .mockResolvedValue([
+        [{ id: "msg_456" }],
+        [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
+      ]);
+    const updateSet = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+    const update = vi.fn(() => ({
+      set: updateSet,
+    }));
+    getDbMock.mockReturnValue({ select, insert, batch, update } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", " Follow up ", [], "steer", {
+      codexPlanModeEnabled: true,
+    });
+
+    expect(result).toEqual({ ok: true, messageId: "msg_456" });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codexPlanModeEnabled: true,
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_456",
+      workspaceId: "wks_123",
+      engine: "codex",
     });
   });
 
@@ -937,6 +990,39 @@ describe("submitAgentSessionMessage", () => {
 
     expect(result).toEqual({ ok: false, error: "Session not found." });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("setAgentSessionCodexSettings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  it("persists reasoning effort without enabling persistent plan mode", async () => {
+    const limit = vi.fn().mockResolvedValue([{ id: "ses_123", engine: "codex" }]);
+    const selectWhere = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where: selectWhere }));
+    const select = vi.fn(() => ({ from }));
+    const returning = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
+    const updateWhere = vi.fn(() => ({ returning }));
+    const updateSet = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set: updateSet }));
+    getDbMock.mockReturnValue({ select, update } as never);
+
+    const result = await setAgentSessionCodexSettings("ses_123", {
+      reasoningEffort: "high",
+      planModeEnabled: true,
+    } as never);
+
+    expect(result).toEqual({ ok: true });
+    expect(updateSet).toHaveBeenCalledWith({
+      codexReasoningEffort: "high",
+      updatedAt: expect.any(Date),
+    });
   });
 });
 

@@ -125,6 +125,7 @@ const actionMocks = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
   createAgentSessionFromPrompt: vi.fn(),
   resolveToolApproval: vi.fn(),
+  setAgentSessionCodexSettings: vi.fn(),
   submitAgentSessionMessage: vi.fn(),
   submitAgentSessionQuestionResponse: vi.fn(),
 }));
@@ -137,6 +138,7 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
   createAgentSessionFromPrompt: actionMocks.createAgentSessionFromPrompt,
   markSessionSeen: vi.fn(),
   resolveToolApproval: actionMocks.resolveToolApproval,
+  setAgentSessionCodexSettings: actionMocks.setAgentSessionCodexSettings,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
   submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,
 }));
@@ -168,6 +170,7 @@ afterEach(() => {
   actionMocks.createAgentSession.mockReset();
   actionMocks.createAgentSessionFromPrompt.mockReset();
   actionMocks.resolveToolApproval.mockReset();
+  actionMocks.setAgentSessionCodexSettings.mockReset();
   actionMocks.submitAgentSessionQuestionResponse.mockReset();
   actionMocks.submitAgentSessionMessage.mockReset();
   payloadMocks.seedSessionQueries.mockReset();
@@ -1430,6 +1433,58 @@ describe("SessionViewContent — optimistic send", () => {
       resolveSubmit({ ok: true, messageId: "msg_real" });
       await submitPromise;
     });
+  });
+
+  it("submits Codex messages without plan mode by default", async () => {
+    const user = userEvent.setup();
+    vi.mocked(submitAgentSessionMessage).mockResolvedValue({
+      ok: true,
+      messageId: "msg_real",
+    } as Awaited<ReturnType<typeof submitAgentSessionMessage>>);
+
+    renderSessionViewContent(
+      makeDetail({ session: makeSession({ engine: "codex", status: "ready" }) }),
+    );
+
+    const composer = screen.getByPlaceholderText("Ask this agent to do something");
+    await user.type(composer, "Inspect the repo");
+    await user.keyboard("{Enter}");
+
+    expect(submitAgentSessionMessage).toHaveBeenCalledWith(
+      "sess_001",
+      "Inspect the repo",
+      [],
+      "steer",
+    );
+  });
+
+  it("submits Codex plan mode once and resets it after success", async () => {
+    const user = userEvent.setup();
+    vi.mocked(submitAgentSessionMessage).mockResolvedValue({
+      ok: true,
+      messageId: "msg_real",
+    } as Awaited<ReturnType<typeof submitAgentSessionMessage>>);
+
+    renderSessionViewContent(
+      makeDetail({ session: makeSession({ engine: "codex", status: "ready" }) }),
+    );
+
+    const planButton = screen.getByRole("button", { name: "Plan" });
+    await user.click(planButton);
+    expect(planButton).toHaveAttribute("aria-pressed", "true");
+
+    const composer = screen.getByPlaceholderText("Ask this agent to do something");
+    await user.type(composer, "Plan the change");
+    await user.keyboard("{Enter}");
+
+    expect(submitAgentSessionMessage).toHaveBeenCalledWith(
+      "sess_001",
+      "Plan the change",
+      [],
+      "steer",
+      { codexPlanModeEnabled: true },
+    );
+    await waitFor(() => expect(planButton).toHaveAttribute("aria-pressed", "false"));
   });
 });
 
