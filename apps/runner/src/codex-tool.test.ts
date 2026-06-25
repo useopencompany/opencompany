@@ -474,6 +474,27 @@ describe("codexRuntimeEventsFromJsonEvent", () => {
     expect(
       codexRuntimeEventsFromJsonEvent(
         {
+          method: "item/agentMessage/delta",
+          params: {
+            itemId: "item_text",
+            delta: " ",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "message.delta",
+        payload: {
+          messageId: "msg_assistant",
+          delta: " ",
+        },
+      },
+    ]);
+
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
           method: "item/reasoning/summaryTextDelta",
           params: {
             itemId: "item_reasoning",

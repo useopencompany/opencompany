@@ -1150,7 +1150,7 @@ function firstString(...values: unknown[]): string | null {
 
 function firstNonEmptyRawString(...values: unknown[]): string | null {
   for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "string" && value.length > 0) return value;
   }
   return null;
 }

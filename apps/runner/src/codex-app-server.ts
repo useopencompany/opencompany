@@ -12,6 +12,8 @@ const CODEX_APP_SERVER_STATE = "app-server-state.json";
 const CODEX_APP_SERVER_PROXY = "app-server-proxy.mjs";
 const CODEX_APP_SERVER_DAEMON_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const CODEX_APP_SERVER_REQUEST_TIMEOUT_MS = 30_000;
+const CODEX_APP_SERVER_NOTIFICATION_FLUSH_MS = 100;
+const CODEX_APP_SERVER_NOTIFICATION_FLUSH_CHARS = 64;
 const CODEX_APP_SERVER_CLIENT_NAME = "opencompany_runner";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "codex-app-server" });
@@ -230,17 +232,12 @@ async function runTurnThroughProxy(input: {
   plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
 }): Promise<CodexAppServerSummary> {
   const accumulator = createCodexAppServerAccumulator();
-  let notificationFlush = Promise.resolve();
-  let notificationError: unknown = null;
-  const enqueueNotificationSideEffects = (work: () => Promise<void>) => {
-    notificationFlush = notificationFlush.then(async () => {
-      try {
-        await work();
-      } catch (error) {
-        notificationError ??= error;
-      }
-    });
-  };
+  const notificationBatcher = createCodexAppServerNotificationBatcher({
+    onFlush: async ({ events, activity }) => {
+      if (events.length > 0) await input.onRuntimeEvents(events);
+      if (activity) await input.onActivity(activity);
+    },
+  });
   const client = new AppServerProxyClient({
     sandbox: input.sandbox,
     command: input.plan.proxyCommand,
@@ -248,10 +245,7 @@ async function runTurnThroughProxy(input: {
     timeoutMs: input.timeoutMs,
     onNotification: (notification) => {
       const activity = accumulator.push(notification);
-      enqueueNotificationSideEffects(async () => {
-        await input.onRuntimeEvents([notification]);
-        if (activity) await input.onActivity(activity);
-      });
+      notificationBatcher.push(notification, activity);
     },
   });
 
@@ -300,8 +294,7 @@ async function runTurnThroughProxy(input: {
             )
           : Promise.resolve(),
     });
-    await notificationFlush;
-    if (notificationError) throw notificationError;
+    await notificationBatcher.flush();
     const summary = accumulator.summary();
     if (completion === "timeout") {
       return {
@@ -312,7 +305,7 @@ async function runTurnThroughProxy(input: {
     }
     return summary;
   } finally {
-    await notificationFlush.catch(() => undefined);
+    await notificationBatcher.settleIgnoringError();
     await client.stop();
   }
 }
@@ -335,7 +328,6 @@ async function startOrResumeThread(input: {
       sandbox: "workspace-write",
       approvalPolicy: "never",
       config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
-      persistExtendedHistory: false,
     });
     return stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId;
   }
@@ -346,13 +338,154 @@ async function startOrResumeThread(input: {
     sandbox: "workspace-write",
     approvalPolicy: "never",
     config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
-    experimentalRawEvents: false,
-    persistExtendedHistory: false,
   });
   const threadId = stringFromPath(started, ["thread", "id"]);
   if (!threadId) throw new Error("Codex app-server did not return a thread id.");
   return threadId;
 }
+
+function createCodexAppServerNotificationBatcher(input: {
+  onFlush: (batch: { events: Record<string, unknown>[]; activity: string | null }) => Promise<void>;
+}) {
+  let events: JsonRpcNotification[] = [];
+  let activities: string[] = [];
+  let pendingDeltaChars = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let flushChain = Promise.resolve();
+  let flushError: unknown = null;
+
+  const flushCurrent = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (events.length === 0 && activities.length === 0) return flushChain;
+
+    const batchEvents = coalesceCodexAppServerNotifications(events);
+    const batchActivity = activities.length > 0 ? activities.join("\n") : null;
+    events = [];
+    activities = [];
+    pendingDeltaChars = 0;
+
+    flushChain = flushChain.then(async () => {
+      try {
+        await input.onFlush({ events: batchEvents, activity: batchActivity });
+      } catch (error) {
+        flushError ??= error;
+      }
+    });
+    return flushChain;
+  };
+
+  return {
+    push(notification: JsonRpcNotification, activity: string | null) {
+      events.push(notification);
+      if (activity?.trim()) activities.push(activity.trim());
+
+      const delta = coalescibleDelta(notification);
+      if (!delta) {
+        void flushCurrent();
+        return;
+      }
+
+      pendingDeltaChars += delta.delta.length;
+      if (pendingDeltaChars >= CODEX_APP_SERVER_NOTIFICATION_FLUSH_CHARS) {
+        void flushCurrent();
+        return;
+      }
+
+      if (!timer) {
+        timer = setTimeout(() => {
+          void flushCurrent();
+        }, CODEX_APP_SERVER_NOTIFICATION_FLUSH_MS);
+      }
+    },
+    async flush() {
+      await flushCurrent();
+      if (flushError) throw flushError;
+    },
+    async settleIgnoringError() {
+      await flushCurrent().catch(() => undefined);
+    },
+  };
+}
+
+export function coalesceCodexAppServerNotifications(
+  notifications: JsonRpcNotification[],
+): Record<string, unknown>[] {
+  const output: JsonRpcNotification[] = [];
+  let pending: JsonRpcNotification | null = null;
+  let pendingKey: string | null = null;
+
+  const flushPending = () => {
+    if (pending) output.push(pending);
+    pending = null;
+    pendingKey = null;
+  };
+
+  for (const notification of notifications) {
+    const delta = coalescibleDelta(notification);
+    if (!delta) {
+      flushPending();
+      output.push(notification);
+      continue;
+    }
+
+    if (pending && pendingKey === delta.key) {
+      const pendingNotification: JsonRpcNotification = pending;
+      const params: Record<string, unknown> = isRecord(pendingNotification.params)
+        ? pendingNotification.params
+        : {};
+      pending = {
+        ...pendingNotification,
+        params: {
+          ...params,
+          delta: `${rawString(params.delta) ?? ""}${delta.delta}`,
+        },
+      };
+      continue;
+    }
+
+    flushPending();
+    pending = {
+      ...notification,
+      params: {
+        ...(notification.params ?? {}),
+        delta: delta.delta,
+      },
+    };
+    pendingKey = delta.key;
+  }
+
+  flushPending();
+  return output;
+}
+
+function coalescibleDelta(notification: JsonRpcNotification) {
+  const params = notification.params;
+  const delta = rawString(params?.delta);
+  if (delta == null || !COALESCIBLE_DELTA_METHODS.has(notification.method)) return null;
+
+  return {
+    delta,
+    key: JSON.stringify([
+      notification.method,
+      firstString(params?.threadId),
+      firstString(params?.turnId),
+      firstString(params?.itemId),
+      firstString(params?.stream),
+      firstString(params?.command),
+    ]),
+  };
+}
+
+const COALESCIBLE_DELTA_METHODS = new Set([
+  "item/agentMessage/delta",
+  "item/plan/delta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/textDelta",
+  "item/commandExecution/outputDelta",
+]);
 
 function reasoningConfig(
   reasoningEffort: CodexReasoningEffort,
@@ -563,9 +696,9 @@ export function createCodexAppServerAccumulator() {
       if (foundThreadId && !sessionId) sessionId = foundThreadId;
 
       if (notification.method === "item/agentMessage/delta") {
-        const delta = firstString(params?.delta);
+        const delta = rawString(params?.delta);
         if (delta) deltaText += delta;
-        return delta ? compactActivity(`Codex: ${delta}`) : null;
+        return delta?.trim() ? compactActivity(`Codex: ${delta}`) : null;
       }
 
       if (notification.method === "item/completed") {
@@ -820,6 +953,10 @@ function firstString(...values: unknown[]) {
     if (typeof value === "string" && value.trim()) return value;
   }
   return null;
+}
+
+function rawString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function numberFrom(value: unknown) {

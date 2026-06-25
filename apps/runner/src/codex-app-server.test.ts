@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCodexAppServerCommandPlan,
+  coalesceCodexAppServerNotifications,
   createCodexAppServerAccumulator,
   runCodexAppServerTurn,
 } from "./codex-app-server";
@@ -100,6 +101,30 @@ describe("createCodexAppServerAccumulator", () => {
     });
   });
 
+  it("preserves whitespace-only text deltas", async () => {
+    const accumulator = createCodexAppServerAccumulator();
+
+    accumulator.push({
+      method: "item/agentMessage/delta",
+      params: { delta: "Hello" },
+    });
+    accumulator.push({
+      method: "item/agentMessage/delta",
+      params: { delta: " " },
+    });
+    accumulator.push({
+      method: "item/agentMessage/delta",
+      params: { delta: "world" },
+    });
+    accumulator.push({
+      method: "turn/completed",
+      params: { threadId: "thread_123", turn: { status: "completed" } },
+    });
+    await accumulator.completed;
+
+    expect(accumulator.summary().result).toBe("Hello world");
+  });
+
   it("maps interrupted turns to an error summary", async () => {
     const accumulator = createCodexAppServerAccumulator();
 
@@ -114,6 +139,56 @@ describe("createCodexAppServerAccumulator", () => {
       status: "error",
       error: "Codex was interrupted before finishing.",
     });
+  });
+});
+
+describe("coalesceCodexAppServerNotifications", () => {
+  it("coalesces adjacent deltas for the same stream and preserves lifecycle order", () => {
+    expect(
+      coalesceCodexAppServerNotifications([
+        {
+          method: "item/agentMessage/delta",
+          params: { threadId: "thread_1", itemId: "item_1", delta: "Hello" },
+        },
+        {
+          method: "item/agentMessage/delta",
+          params: { threadId: "thread_1", itemId: "item_1", delta: " " },
+        },
+        {
+          method: "item/agentMessage/delta",
+          params: { threadId: "thread_1", itemId: "item_1", delta: "world" },
+        },
+        {
+          method: "item/commandExecution/outputDelta",
+          params: { itemId: "cmd_1", stream: "stdout", delta: "one" },
+        },
+        {
+          method: "item/commandExecution/outputDelta",
+          params: { itemId: "cmd_1", stream: "stderr", delta: "two" },
+        },
+        {
+          method: "turn/completed",
+          params: { threadId: "thread_1", turn: { status: "completed" } },
+        },
+      ]),
+    ).toEqual([
+      {
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread_1", itemId: "item_1", delta: "Hello world" },
+      },
+      {
+        method: "item/commandExecution/outputDelta",
+        params: { itemId: "cmd_1", stream: "stdout", delta: "one" },
+      },
+      {
+        method: "item/commandExecution/outputDelta",
+        params: { itemId: "cmd_1", stream: "stderr", delta: "two" },
+      },
+      {
+        method: "turn/completed",
+        params: { threadId: "thread_1", turn: { status: "completed" } },
+      },
+    ]);
   });
 });
 
