@@ -28,7 +28,7 @@ export function createMcpOAuthStartRoute(
       skipOnboarding: true,
     });
     const url = new URL(request.url);
-    const returnTo = url.searchParams.get("returnTo") ?? "/company/settings";
+    const returnTo = url.searchParams.get("returnTo") ?? "/company/integrations";
 
     try {
       const server = await upsertServer(
@@ -98,7 +98,7 @@ export function createMcpOAuthCallbackRoute(
         has_state: Boolean(stateValue),
       });
       return NextResponse.redirect(
-        new URL(`/company/settings?mcp=${provider.key}&setup=error&reason=invalid_state`, url),
+        new URL(`/company/integrations?mcp=${provider.key}&setup=error&reason=invalid_state`, url),
       );
     }
 

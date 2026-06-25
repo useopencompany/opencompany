@@ -78,6 +78,15 @@ describe("Sidebar status menu item", () => {
     expect(workspaceLink).toHaveAttribute("aria-current", "page");
   });
 
+  it("links to company integrations from the primary nav", () => {
+    renderSidebar();
+
+    expect(screen.getByRole("link", { name: "Integrations" })).toHaveAttribute(
+      "href",
+      "/company/integrations",
+    );
+  });
+
   it("links to the Better Stack status page from the account menu", async () => {
     mockStatusPageFetch("operational");
     const user = userEvent.setup();

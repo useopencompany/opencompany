@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpOAuthState, sanitizeReturnTo, verifyMcpOAuthState } from "@/lib/mcp/oauth-state";
 
-const input = { workspaceId: "wks_1", userId: "usr_1", returnTo: "/settings/integrations" };
+const input = { workspaceId: "wks_1", userId: "usr_1", returnTo: "/company/integrations" };
 
 beforeEach(() => {
   vi.stubEnv("MCP_OAUTH_STATE_SECRET", "test-state-secret");
@@ -50,8 +50,8 @@ describe("MCP OAuth state", () => {
   });
 
   it("falls back to a safe return path for off-site redirects", () => {
-    expect(sanitizeReturnTo("//evil.example")).toBe("/company/settings");
-    expect(sanitizeReturnTo("https://evil.example")).toBe("/company/settings");
+    expect(sanitizeReturnTo("//evil.example")).toBe("/company/integrations");
+    expect(sanitizeReturnTo("https://evil.example")).toBe("/company/integrations");
     expect(sanitizeReturnTo("/agents")).toBe("/agents");
   });
 });

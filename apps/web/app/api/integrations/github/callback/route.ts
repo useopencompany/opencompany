@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       has_state: Boolean(stateValue),
     });
     return NextResponse.redirect(
-      new URL("/company/settings/integrations?integration=github&setup=error", url),
+      new URL("/company/integrations?integration=github&setup=error", url),
     );
   }
 

@@ -164,15 +164,15 @@ describe("agent editor mention tools", () => {
     // Not-connected provider stays selectable but is flagged + linkable.
     expect(slack).toBeDefined();
     expect(slack?.needsSetup).toBe(true);
-    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fcompany%2Fsettings");
+    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fcompany%2Fintegrations");
     expect(betterstack).toBeDefined();
     expect(betterstack?.needsSetup).toBe(true);
     expect(betterstack?.connectUrl).toBe(
-      "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fsettings",
+      "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fintegrations",
     );
     expect(notion).toBeDefined();
     expect(notion?.needsSetup).toBe(true);
-    expect(notion?.connectUrl).toBe("/api/mcp/notion/start?returnTo=%2Fcompany%2Fsettings");
+    expect(notion?.connectUrl).toBe("/api/mcp/notion/start?returnTo=%2Fcompany%2Fintegrations");
   });
 
   test("offers the addable built-in first-principles skill in the mention menu", () => {

@@ -34,9 +34,7 @@ export async function GET(request: Request) {
       event: "opencompany.google_oauth_broker_callback_failed",
       reason: "invalid_state",
     });
-    return NextResponse.redirect(
-      new URL("/company/settings/integrations?setup=error", getAppUrl()),
-    );
+    return NextResponse.redirect(new URL("/company/integrations?setup=error", getAppUrl()));
   }
 
   const config = GOOGLE_PROVIDER_CONFIG[state.provider];

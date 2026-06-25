@@ -126,6 +126,41 @@ export function SessionPageSkeleton() {
   );
 }
 
+export function BrainPageSkeleton() {
+  return (
+    <main className="relative flex h-full flex-1 overflow-hidden">
+      <aside className="hidden w-[260px] shrink-0 border-r border-border bg-sidebar/60 px-3 py-4 md:block">
+        <Block className="h-7 w-full" />
+        <div className="mt-5 space-y-2">
+          {[0, 1, 2, 3, 4, 5].map((row) => (
+            <Block key={row} className={`h-6 ${row % 3 === 0 ? "w-11/12" : "w-4/5"}`} />
+          ))}
+        </div>
+      </aside>
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <div
+          className="mx-auto w-full max-w-[820px] px-6 pb-24 pt-8"
+          role="status"
+          aria-label="Loading files"
+        >
+          <Block className="h-6 w-52" />
+          <Block className="mt-3 h-3 w-72" />
+          <div className="mt-8 space-y-3">
+            <Block className="h-4 w-full" />
+            <Block className="h-4 w-11/12" />
+            <Block className="h-4 w-2/3" />
+          </div>
+          <div className="mt-10 space-y-3">
+            {[0, 1, 2, 3].map((row) => (
+              <Block key={row} className="h-9 w-full" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export function SettingsPageSkeleton() {
   return (
     <PageShell maxWidth="max-w-[860px]">

@@ -230,7 +230,7 @@ export async function runCreateLinearIssueTool(input: {
   } catch (error) {
     return recoverable(
       "linear_not_connected",
-      `This workspace's Linear isn't connected (or the connection failed): ${errMessage(error)}. Ask the user to connect Linear in Settings → Integrations, then try again.`,
+      `This workspace's Linear isn't connected (or the connection failed): ${errMessage(error)}. Ask the user to connect Linear in the Integrations tab, then try again.`,
     );
   }
 

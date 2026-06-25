@@ -96,7 +96,7 @@ describe("Google OAuth helpers", () => {
       provider: "gmail",
       workspaceId: "wks_123",
       userId: "usr_123",
-      returnTo: "/settings/integrations",
+      returnTo: "/company/integrations",
       oauthRedirectUri: "https://oauth.opencompany.cloud/api/google/callback",
       targetOrigin: "https://pr-42.preview.opencompany.cloud/settings?tab=integrations",
     });
@@ -113,7 +113,7 @@ describe("Google OAuth helpers", () => {
       provider: "gmail",
       workspaceId: "wks_123",
       userId: "usr_123",
-      returnTo: "/settings/integrations",
+      returnTo: "/company/integrations",
       targetOrigin: "not a url",
     });
 

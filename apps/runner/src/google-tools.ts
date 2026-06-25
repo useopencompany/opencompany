@@ -141,7 +141,7 @@ async function resolveAccount(
   const active = rows.filter((row) => row.status !== "disconnected");
   if (active.length === 0) {
     throw new Error(
-      `No ${displayName(provider)} account is connected for this workspace. Connect one in Settings → Integrations.`,
+      `No ${displayName(provider)} account is connected for this workspace. Connect one in the Integrations tab.`,
     );
   }
 
@@ -198,7 +198,7 @@ async function getAccessToken(
 
   if (!row) {
     throw new Error(
-      `${displayName(account.provider)} credentials are missing. Reconnect the account in Settings → Integrations.`,
+      `${displayName(account.provider)} credentials are missing. Reconnect the account in the Integrations tab.`,
     );
   }
 
@@ -216,7 +216,7 @@ async function getAccessToken(
   if (!tokens.refresh_token) {
     await markNeedsReauth(context, account, "Stored Google credentials have no refresh token.");
     throw new Error(
-      `${displayName(account.provider)} needs to be reconnected (no refresh token). Reconnect it in Settings → Integrations.`,
+      `${displayName(account.provider)} needs to be reconnected (no refresh token). Reconnect it in the Integrations tab.`,
     );
   }
   return refreshAccessToken(context, account, tokens, options.signal);
@@ -252,7 +252,7 @@ async function refreshAccessToken(
     if (response.status === 400 && detail.includes("invalid_grant")) {
       await markNeedsReauth(context, account, "Google refused the refresh token (invalid_grant).");
       throw new Error(
-        `${displayName(account.provider)} access was revoked. Reconnect it in Settings → Integrations.`,
+        `${displayName(account.provider)} access was revoked. Reconnect it in the Integrations tab.`,
       );
     }
     throw new Error(`Google token refresh failed with ${response.status}: ${detail}`);
@@ -1187,7 +1187,7 @@ function assertCalendarAllowed(
 ) {
   if (calendarId === "primary" || selected.has(calendarId)) return;
   throw new Error(
-    `Calendar "${calendarId}" is not enabled for agents on ${account.accountEmail ?? "this account"}. Enable it in Settings → Integrations.`,
+    `Calendar "${calendarId}" is not enabled for agents on ${account.accountEmail ?? "this account"}. Enable it in the Integrations tab.`,
   );
 }
 
