@@ -3181,4 +3181,174 @@ describe("buildAssistantTurnParts ordering is delivery-order independent", () =>
     // The live view must match the snapshot — no visible reorder on the swap.
     expect(toolIds(liveParts)).toEqual(toolIds(finalParts));
   });
+
+  it("renders Codex engine activity from durable events during live and replay states", () => {
+    const events: RuntimeEvent[] = [
+      event(1, "engine.activity", {
+        messageId: "msg_a",
+        engine: "codex",
+        label: "Codex",
+        status: "running",
+        activity: "Codex is planning changes",
+      }),
+      event(2, "engine.activity", {
+        messageId: "msg_a",
+        engine: "codex",
+        label: "Codex",
+        status: "completed",
+        activity: "Codex completed",
+      }),
+    ];
+
+    const liveParts = buildAssistantTurnParts(
+      { id: "msg_a", role: "assistant", content: "", status: "running" },
+      events,
+    );
+    expect(liveParts).toEqual([
+      {
+        type: "engine-activity",
+        activity: {
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        },
+      },
+    ]);
+
+    const replayParts = buildAssistantTurnParts(
+      {
+        id: "msg_a",
+        role: "assistant",
+        content: "Done.",
+        status: "completed",
+        modelMessage: { role: "assistant", content: [{ type: "text", text: "Done." }] },
+      },
+      events,
+    );
+
+    expect(replayParts[0]).toMatchObject({
+      type: "engine-activity",
+      activity: { engine: "codex", status: "completed", activity: "Codex completed" },
+    });
+    expect(replayParts[1]).toEqual({ type: "text", text: "Done." });
+  });
+
+  it("renders Codex command tool calls before the final replay message", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_a",
+        role: "assistant",
+        content: "Updated hello-world/README.",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "Updated hello-world/README." }],
+        },
+      },
+      [
+        event(1, "engine.activity", {
+          messageId: "msg_a",
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        }),
+        event(2, "tool.started", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          input: { command: "git clone https://github.com/octocat/Hello-World.git hello-world" },
+        }),
+        event(3, "tool.completed", {
+          messageId: "msg_a",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          outputPreview: "Cloning into 'hello-world'...",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "engine-activity",
+        activity: {
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        },
+      },
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "codex:item_0",
+          name: "shell",
+          label: "Running git clone https://github.com/octocat/Hello-World.git hello-world",
+          status: "completed",
+          inputPreview:
+            '{\n  "command": "git clone https://github.com/octocat/Hello-World.git hello-world"\n}',
+          activityPreview: "",
+          outputPreview: "Cloning into 'hello-world'...",
+          startedEventId: 2,
+          completedEventId: 3,
+        },
+      },
+      { type: "text", text: "Updated hello-world/README." },
+    ]);
+  });
+
+  it("renders persisted Codex JSONL fallback content as assistant text", () => {
+    const content =
+      [
+        JSON.stringify({
+          type: "thread.started",
+          thread_id: "019efdef-acf7-70d3-90d1-c67d06f4f12f",
+        }),
+        JSON.stringify({ type: "turn.started" }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "item_0",
+            type: "agent_message",
+            text: "Got it. What should I test or work on?",
+          },
+        }),
+        JSON.stringify({
+          type: "turn.completed",
+          usage: {
+            input_tokens: 13531,
+            cached_input_tokens: 12160,
+            output_tokens: 36,
+            reasoning_output_tokens: 0,
+          },
+        }),
+      ].join("\n") + "\n";
+
+    const parts = buildAssistantTurnParts(
+      { id: "msg_a", role: "assistant", content, status: "completed", modelMessage: null },
+      [
+        event(1, "engine.activity", {
+          messageId: "msg_a",
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "engine-activity",
+        activity: {
+          engine: "codex",
+          label: "Codex",
+          status: "completed",
+          activity: "Codex completed",
+        },
+      },
+      { type: "text", text: "Got it. What should I test or work on?" },
+    ]);
+  });
 });

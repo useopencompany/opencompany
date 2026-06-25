@@ -1,5 +1,6 @@
 import type {
   AgentConfig,
+  AgentEngine,
   AgentSessionQuestionAnswer,
   AgentSessionQuestionPrompt,
   AgentSkillFile,
@@ -203,7 +204,7 @@ export const agents = pgTable(
       .$type<AgentConfig>()
       .notNull()
       .default(
-        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"agents":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
+        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","engine":"opencompany","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"agents":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
       ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -444,6 +445,8 @@ export const agentSessions = pgTable(
       .references(() => agents.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled session"),
     status: text("status").notNull().default("created"),
+    engine: text("engine").$type<AgentEngine>().notNull().default("opencompany"),
+    engineSessionId: text("engine_session_id"),
     source: text("source")
       .$type<"user" | "agent" | "memory" | "whatsapp">()
       .notNull()
@@ -487,6 +490,7 @@ export const agentSessions = pgTable(
     ),
     sourceIdx: index("agent_sessions_source_idx").on(table.source),
     statusIdx: index("agent_sessions_status_idx").on(table.status),
+    engineIdx: index("agent_sessions_engine_idx").on(table.engine),
     visibleWorkspaceUserUpdatedIdx: index("agent_sessions_visible_workspace_user_updated_idx").on(
       table.workspaceId,
       table.userId,
@@ -504,6 +508,10 @@ export const agentSessions = pgTable(
     sourceCheck: check(
       "agent_sessions_source_check",
       sql`${table.source} IN ('user', 'agent', 'memory', 'whatsapp')`,
+    ),
+    engineCheck: check(
+      "agent_sessions_engine_check",
+      sql`${table.engine} IN ('opencompany', 'codex')`,
     ),
   }),
 );
@@ -933,7 +941,7 @@ export const agentSessionRunJobs = pgTable(
     ),
     kindCheck: check(
       "agent_session_run_jobs_kind_check",
-      sql`${table.kind} IN ('start', 'message', 'title', 'after_session', 'resume_approval', 'resume_question')`,
+      sql`${table.kind} IN ('start', 'message', 'codex_turn', 'title', 'after_session', 'resume_approval', 'resume_question')`,
     ),
     statusCheck: check(
       "agent_session_run_jobs_status_check",

@@ -265,10 +265,13 @@ export type AgentScheduleTriggerConfig = {
 
 export type AgentTriggerConfig = AgentGitHubPullRequestTriggerConfig | AgentScheduleTriggerConfig;
 
+export type AgentEngine = "opencompany" | "codex";
+
 export type AgentConfig = {
   schemaVersion: "agent.v1";
   title: string;
   instructions: string;
+  engine: AgentEngine;
   model: {
     provider: "vercel-ai-gateway";
     name: AgentModelId;

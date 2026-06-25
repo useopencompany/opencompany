@@ -350,6 +350,7 @@ function serializeAgentSource(agent: typeof agents.$inferSelect): string {
   return serializeAgentFile({
     title: agent.name,
     body: agent.body,
+    engine: config.engine,
     model: config.model.name,
     tools: config.tools,
     brain: config.brain,

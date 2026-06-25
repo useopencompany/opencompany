@@ -89,6 +89,7 @@ async function derivePersonalAgentSave(
   const derived = deriveAgentConfigFromBody({
     title: FIXED_PERSONAL_AGENT_NAME,
     body,
+    engine: currentConfig.engine,
     model: model ?? currentConfig.model.name,
     repositories: derivationRepositories,
     skills,
@@ -99,6 +100,7 @@ async function derivePersonalAgentSave(
   const source = serializeAgentFile({
     title: FIXED_PERSONAL_AGENT_NAME,
     body: derived.body,
+    engine: derived.config.engine,
     model: derived.config.model.name,
     tools: derived.config.tools,
     brain: derived.config.brain,
@@ -221,6 +223,7 @@ export async function updatePersonalAgentSchedules(
   const source = serializeAgentFile({
     title: FIXED_PERSONAL_AGENT_NAME,
     body: agent.body,
+    engine: nextConfig.engine,
     model: nextConfig.model.name,
     tools: nextConfig.tools,
     brain: nextConfig.brain,

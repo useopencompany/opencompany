@@ -594,6 +594,7 @@ export function agentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 export function baseAgentConfig(): AgentConfig {
   return {
     schemaVersion: "agent.v1" as const,
+    engine: "opencompany",
     title: "Test agent",
     instructions: "Test.",
     model: {

@@ -1,3 +1,4 @@
+import type { AgentEngine } from "@opencompany/agent-runtime/types";
 import { inngest } from "@/lib/inngest/client";
 
 export const AGENT_SESSION_STARTED_EVENT = "agent.session_started";
@@ -18,6 +19,7 @@ export function dispatchAgentMessageSubmitted(input: {
   sessionId: string;
   messageId: string;
   workspaceId: string;
+  engine?: AgentEngine;
 }) {
   return inngest.send({
     name: AGENT_MESSAGE_SUBMITTED_EVENT,

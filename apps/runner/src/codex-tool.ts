@@ -1,4 +1,4 @@
-import { type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
+import { type AgentConfig, type AgentRuntimeEvent, shellQuote } from "@opencompany/agent-runtime";
 import type { AgentGitHubRepositoryConfig, AgentModelId } from "@opencompany/agent-runtime/types";
 import { calculateModelUsageCost, type HostedToolCostSource } from "@opencompany/billing";
 import { agentSessionArtifacts } from "@opencompany/db/schema";
@@ -68,7 +68,7 @@ type CodexTarget =
 
 type MaterializedCodexTarget = Exclude<CodexTarget, { kind: "workspace" }>;
 
-async function ensureCodexInstalled(sandbox: SandboxHandle) {
+export async function ensureCodexInstalled(sandbox: SandboxHandle) {
   const check = await sandbox.commands.run(
     `command -v codex || test -x "$HOME/.codex/bin/codex" && echo found || true`,
     { timeoutMs: 30_000 },
@@ -481,6 +481,7 @@ export function buildCodexCommand(input: {
     shellQuote(input.workRoot),
     "--sandbox",
     "workspace-write",
+    "--skip-git-repo-check",
   ];
   const sessionId = input.sessionId?.trim();
   if (sessionId) {
@@ -522,6 +523,9 @@ export function buildCodexConfig(input: { baseUrl: string; apiKeyEnvVar: string 
   return [
     `model_provider = ${tomlString(CODEX_PROVIDER_ID)}`,
     `model_verbosity = "medium"`,
+    "",
+    "[sandbox_workspace_write]",
+    "network_access = true",
     "",
     `[model_providers.${CODEX_PROVIDER_ID}]`,
     `name = ${tomlString(CODEX_PROVIDER_NAME)}`,
@@ -632,6 +636,7 @@ export function createCodexStreamAccumulator() {
   let sessionId: string | null = null;
   let resultText = "";
   let error: string | null = null;
+  let parsedEvents: Record<string, unknown>[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let cacheReadTokens = 0;
@@ -640,6 +645,7 @@ export function createCodexStreamAccumulator() {
 
   function ingestEvent(event: unknown): string | null {
     if (!isRecord(event)) return null;
+    parsedEvents.push(event);
     const foundSessionId = firstDeepString(event, [
       "session_id",
       "sessionId",
@@ -730,6 +736,11 @@ export function createCodexStreamAccumulator() {
       if (buffer.trim()) consumeLine(buffer);
       buffer = "";
     },
+    drainEvents() {
+      const events = parsedEvents;
+      parsedEvents = [];
+      return events;
+    },
     summary(input: {
       exitCode: number | null;
       stdout: string;
@@ -765,6 +776,84 @@ export function createCodexStreamAccumulator() {
       };
     },
   };
+}
+
+export function codexRuntimeEventsFromJsonEvent(
+  event: unknown,
+  messageId: string,
+): AgentRuntimeEvent[] {
+  if (!isRecord(event)) return [];
+  const msg = isRecord(event.msg) ? event.msg : null;
+  const type = firstString(event.type, msg?.type);
+  if (type !== "item.started" && type !== "item.completed") return [];
+
+  const item = isRecord(event.item) ? event.item : isRecord(msg?.item) ? msg.item : null;
+  if (!item || firstString(item.type) !== "command_execution") return [];
+
+  const itemId = firstString(item.id);
+  const command = firstString(item.command);
+  if (!itemId || !command) return [];
+
+  const toolCallId = `codex:${itemId}`;
+  if (type === "item.started") {
+    return [
+      {
+        type: "tool.started",
+        payload: {
+          messageId,
+          toolCallId,
+          name: "shell",
+          input: { command },
+        },
+      },
+    ];
+  }
+
+  const exitCode = numberFrom(item.exit_code);
+  const status = firstString(item.status);
+  const outputPreview = firstString(item.aggregated_output) ?? "";
+  if (status === "failed" || (exitCode != null && exitCode !== 0)) {
+    const message =
+      exitCode == null ? "Codex command failed." : `Codex command exited with code ${exitCode}.`;
+    return [
+      {
+        type: "tool.failed",
+        payload: {
+          messageId,
+          toolCallId,
+          name: "shell",
+          ...(outputPreview ? { outputPreview } : {}),
+          output: {
+            command,
+            exitCode,
+            output: outputPreview,
+          },
+          error: {
+            message,
+            code: "codex_command_failed",
+            recoverable: true,
+          },
+        },
+      },
+    ];
+  }
+
+  return [
+    {
+      type: "tool.completed",
+      payload: {
+        messageId,
+        toolCallId,
+        name: "shell",
+        ...(outputPreview ? { outputPreview } : {}),
+        output: {
+          command,
+          exitCode,
+          output: outputPreview,
+        },
+      },
+    },
+  ];
 }
 
 export function codexHostedToolUsage(input: {
@@ -826,6 +915,9 @@ function codexBillingModel(model: string): AgentModelId {
 
 function isAssistantTextEvent(type: string, event: Record<string, unknown>) {
   if (/assistant|agent|message|text|delta|response/i.test(type)) return true;
+  const item = isRecord(event.item) ? event.item : null;
+  const itemType = firstString(item?.type);
+  if (itemType && /assistant|agent.*message|message/i.test(itemType)) return true;
   const role = firstDeepString(event, ["role"]);
   return role === "assistant";
 }

@@ -37,8 +37,9 @@ export function useComposerAttachments(opts: {
    *  switching the model on the home composer takes effect without re-creating callbacks. */
   modelName: string;
   uploadScope: AttachmentUploadScope;
+  enabled?: boolean;
 }) {
-  const { workspaceId, modelName, uploadScope } = opts;
+  const { workspaceId, modelName, uploadScope, enabled = true } = opts;
   const { showToast } = useToast();
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -67,6 +68,14 @@ export function useComposerAttachments(opts: {
   useEffect(() => {
     capabilityRef.current = modelSupportsAttachments(modelName);
   }, [modelName]);
+  const enabledRef = useRef(enabled);
+  useEffect(() => {
+    enabledRef.current = enabled;
+    if (!enabled) {
+      dragCounterRef.current = 0;
+      setIsDragActive(false);
+    }
+  }, [enabled]);
   const uploadScopeRef = useRef(uploadScope);
   useEffect(() => {
     uploadScopeRef.current = uploadScope;
@@ -74,6 +83,7 @@ export function useComposerAttachments(opts: {
 
   const acceptFiles = useCallback(
     (files: File[]) => {
+      if (!enabledRef.current) return;
       setAttachments((prev) => {
         const next = [...prev];
         for (const file of files) {
@@ -208,6 +218,7 @@ export function useComposerAttachments(opts: {
       event.preventDefault();
       dragCounterRef.current = 0;
       setIsDragActive(false);
+      if (!enabledRef.current) return;
       const files = Array.from(event.dataTransfer.files);
       if (files.length > 0) acceptFiles(files);
     };
@@ -225,6 +236,7 @@ export function useComposerAttachments(opts: {
   const handlePasteFiles = useCallback(
     (event: ReactClipboardEvent): boolean => {
       const items = event.clipboardData?.items;
+      if (!enabledRef.current) return false;
       if (!items) return false;
       const files: File[] = [];
       for (const item of Array.from(items)) {
@@ -246,16 +258,19 @@ export function useComposerAttachments(opts: {
   const dragHandlers = useMemo(
     () => ({
       onDragEnter: (event: ReactDragEvent) => {
+        if (!enabledRef.current) return;
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
         dragCounterRef.current += 1;
         setIsDragActive(true);
       },
       onDragOver: (event: ReactDragEvent) => {
+        if (!enabledRef.current) return;
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
       },
       onDragLeave: (event: ReactDragEvent) => {
+        if (!enabledRef.current) return;
         event.preventDefault();
         dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
         if (dragCounterRef.current === 0) setIsDragActive(false);

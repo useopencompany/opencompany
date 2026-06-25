@@ -1,6 +1,6 @@
 # The `.agent` file format
 
-An agent is a single text file. Everything the platform knows about an agent — its name, instructions, the model that runs it, and the tools it can call — lives in that file. The web editor, the GitHub sync, and the runtime all read the same format.
+An agent is a single text file. Everything the platform knows about an agent — its name, instructions, session engine, model, and tools — lives in that file. The web editor, the GitHub sync, and the runtime all read the same format.
 
 This is the spec.
 
@@ -9,6 +9,7 @@ This is the spec.
 ```yaml
 ---
 title: "Fundraising copilot"
+engine: opencompany
 model: openai/gpt-5.4
 tools:
   - exa
@@ -47,7 +48,7 @@ Some frontmatter fields are **derived from body mentions** rather than authored 
 
 Removing `@exa` removes the tool. Tool and context mentions stay in sync with what the runtime is configured to use.
 
-Model selection is per-agent config in `model:`. Body mentions do not change the model.
+Engine and model selection are per-agent config in `engine:` and `model:`. Body mentions do not change either field.
 
 ### Tiptap content is not the contract
 
@@ -61,9 +62,20 @@ On save, the server derives mention-backed frontmatter/config from the body text
 
 Human-readable name. Serialized as a YAML double-quoted string. Trimmed. Empty values become `"Untitled agent"`.
 
+### `engine` — string, optional
+
+Which session engine runs new sessions for the agent:
+
+| Value | Behavior |
+| ----- | -------- |
+| `opencompany` | Default. Uses OpenCompany's native runner loop, model routing, tools, sandbox lifecycle, attachments, and after-session hooks. |
+| `codex` | Uses the Codex CLI runner path for turns. The agent still keeps `model:` for compatibility, but Codex sessions use the runner's `RUNNER_CODEX_MODEL` instead. Codex sessions are text-only in v1. |
+
+Missing `engine:` defaults to `opencompany` so existing agent files keep working. Generated files serialize the field explicitly.
+
 ### `model` — string, required
 
-The model the agent runs on. Must be one of:
+The model the OpenCompany engine runs on. Must be one of:
 
 | ID                                         | Notes                                                           |
 | ------------------------------------------ | --------------------------------------------------------------- |
@@ -419,6 +431,8 @@ The parser is intentionally lenient. A hand-edited `.agent` file should never re
 | Rule                             | Behavior on violation                          |
 | -------------------------------- | ---------------------------------------------- |
 | Title empty                      | Becomes `"Untitled agent"`                     |
+| Missing `engine:`                | Defaults to `opencompany`                     |
+| Unknown engine in `engine:`      | Defaults to `opencompany` while leniently parsing; strict validation rejects it |
 | Unknown model in `model:`        | Falls back to `openai/gpt-5.4-mini`            |
 | Unknown tool in `tools:`         | Dropped                                        |
 | Missing frontmatter              | Whole file treated as body, defaults applied  |
@@ -432,6 +446,7 @@ The parser is intentionally lenient. A hand-edited `.agent` file should never re
 ```yaml
 ---
 title: "Notes"
+engine: opencompany
 model: openai/gpt-5.4-mini
 tools: []
 ---
@@ -444,6 +459,7 @@ Summarize whatever I paste below.
 ```yaml
 ---
 title: "Investor research"
+engine: opencompany
 model: openai/gpt-5.4
 tools:
   - exa
@@ -459,6 +475,7 @@ Author with only the body. The serializer fills in the frontmatter from the ment
 ```yaml
 ---
 title: "Research"
+engine: opencompany
 model: openai/gpt-5.4-mini
 tools:
   - exa
@@ -467,7 +484,7 @@ tools:
 Find investors with @exa and write a concise brief.
 ```
 
-You never touched `tools:`. It reflects what the body actually references. The model remains explicit per-agent config.
+You never touched `tools:`. It reflects what the body actually references. The engine and model remain explicit per-agent config.
 
 ## Compiled config
 
@@ -476,6 +493,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
 ```ts
 {
   schemaVersion: "agent.v1",
+  engine: "opencompany",
   title: "Investor research",
   instructions: "Find recent fund announcements with @exa...",
   model: {

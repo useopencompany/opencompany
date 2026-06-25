@@ -681,6 +681,7 @@ function makeSession(
     title: "Test Session",
     status: "running",
     source: "user",
+    engine: "opencompany",
     modelProvider: "anthropic",
     modelName: "claude-3-5-sonnet",
     parentSessionId: null,
@@ -771,6 +772,7 @@ function makePersonalAgentContext(
 ): PersonalAgentContextValue {
   const config: PersonalAgentContextValue["config"] = {
     schemaVersion: "agent.v1",
+    engine: "opencompany",
     title: "Personal Agent",
     instructions: "Help me.",
     model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },

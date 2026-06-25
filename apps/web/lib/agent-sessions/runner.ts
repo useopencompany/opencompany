@@ -4,6 +4,7 @@ type RunnerContext = {
   workspace_id?: string;
   session_id?: string;
   message_id?: string;
+  engine?: "opencompany" | "codex";
   event?: string;
 };
 

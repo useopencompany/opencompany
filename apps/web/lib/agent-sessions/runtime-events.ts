@@ -318,6 +318,13 @@ export type RuntimeBrainFileReference = {
   path: string;
 };
 
+export type RuntimeEngineActivity = {
+  engine: "codex";
+  label: string;
+  status: "running" | "completed" | "failed";
+  activity: string;
+};
+
 export type AssistantTurnPart =
   | { type: "text"; text: string }
   | {
@@ -325,6 +332,7 @@ export type AssistantTurnPart =
       text: string | undefined;
       durationSeconds?: number | undefined;
     }
+  | { type: "engine-activity"; activity: RuntimeEngineActivity }
   | { type: "tool-call"; toolCall: RuntimeToolCall };
 
 export function applyRuntimeEventToState(
@@ -755,6 +763,7 @@ export function buildAssistantTurnParts(
     readReasoningContent(events, message.id) || readModelReasoning(modelParts);
   const liveReasoning = readReasoningDeltas(events, message.id);
   const reasoningText = reasoningSummary || reasoningContent || liveReasoning || undefined;
+  const engineActivity = latestEngineActivityForMessage(events, message.id);
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const hasReasoningEvidence =
@@ -776,6 +785,10 @@ export function buildAssistantTurnParts(
 
   if (modelParts) {
     const turnParts: AssistantTurnPart[] = [...reasoningParts];
+    if (engineActivity) turnParts.push({ type: "engine-activity", activity: engineActivity });
+    if (engineActivity?.engine === "codex") {
+      turnParts.push(...buildEventAssistantTurnParts(events, message.id, toolCallsById));
+    }
 
     for (const part of modelParts) {
       if (part.type === "text") {
@@ -829,12 +842,18 @@ export function buildAssistantTurnParts(
   }
 
   const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById);
-  if (eventParts.length > 0) return normalizeAssistantTurnParts([...reasoningParts, ...eventParts]);
-  if (reasoningParts.length > 0 && message.content) {
-    return [...reasoningParts, { type: "text", text: message.content }];
+  const engineParts: AssistantTurnPart[] = engineActivity
+    ? [{ type: "engine-activity", activity: engineActivity }]
+    : [];
+  const contentText = assistantDisplayContent(message.content);
+  if (eventParts.length > 0)
+    return normalizeAssistantTurnParts([...reasoningParts, ...engineParts, ...eventParts]);
+  if ((reasoningParts.length > 0 || engineParts.length > 0) && contentText) {
+    return [...reasoningParts, ...engineParts, { type: "text", text: contentText }];
   }
-  if (reasoningParts.length > 0) return reasoningParts;
-  return message.content ? [{ type: "text", text: message.content }] : [];
+  if (reasoningParts.length > 0 || engineParts.length > 0)
+    return [...reasoningParts, ...engineParts];
+  return contentText ? [{ type: "text", text: contentText }] : [];
 }
 
 // Assistant text streams in across model steps, which produces two artifacts: a chunk
@@ -1354,6 +1373,70 @@ function buildEventAssistantTurnParts(
 
   flushText();
   return parts;
+}
+
+function latestEngineActivityForMessage(
+  events: RuntimeEvent[],
+  messageId: string,
+): RuntimeEngineActivity | null {
+  let latest: RuntimeEngineActivity | null = null;
+  for (const event of events) {
+    if (event.type !== "engine.activity" || !eventBelongsToMessage(event, messageId)) continue;
+    const engine = readString(event.payload.engine);
+    if (engine !== "codex") continue;
+    const status = readEngineActivityStatus(event.payload.status);
+    latest = {
+      engine,
+      label: readString(event.payload.label) || "Codex",
+      status,
+      activity: readString(event.payload.activity) || defaultEngineActivity(status),
+    };
+  }
+  return latest;
+}
+
+function readEngineActivityStatus(value: unknown): RuntimeEngineActivity["status"] {
+  return value === "completed" || value === "failed" ? value : "running";
+}
+
+function defaultEngineActivity(status: RuntimeEngineActivity["status"]) {
+  if (status === "completed") return "Codex completed";
+  if (status === "failed") return "Codex failed";
+  return "Codex is working";
+}
+
+function assistantDisplayContent(content: string) {
+  return codexJsonlAssistantText(content) ?? content;
+}
+
+function codexJsonlAssistantText(content: string): string | null {
+  if (!content.includes('"type"') || !content.includes("turn.")) return null;
+  let sawCodexJsonl = false;
+  const textParts: string[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const event = JSON.parse(trimmed) as unknown;
+      if (!isRecord(event)) continue;
+      const type = readString(event.type);
+      if (/^(thread|turn|item)\./.test(type)) sawCodexJsonl = true;
+      const item = isRecord(event.item) ? event.item : null;
+      const itemType = readString(item?.type);
+      const itemText = readString(item?.text);
+      if (type === "item.completed" && itemType === "agent_message" && itemText) {
+        textParts.push(itemText);
+      }
+      const delta = readString(event.delta);
+      if (/assistant|agent|message|text|delta|response/i.test(type) && delta) {
+        textParts.push(delta);
+      }
+    } catch {
+      return null;
+    }
+  }
+  if (!sawCodexJsonl || textParts.length === 0) return null;
+  return textParts.join("").trim() || null;
 }
 
 function latestSessionErrorAfter(events: RuntimeEvent[], messageId: string) {

@@ -96,6 +96,23 @@ export function createServer(
     reply.status(202).send({ ok: true });
   });
 
+  app.post("/internal/sessions/:id/messages/:messageId/codex-turn", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { id, messageId } = request.params as { id: string; messageId: string };
+    logger.info("Runner Codex turn accepted", {
+      event: "opencompany.runner_codex_turn_accepted",
+      session_id: id,
+      message_id: messageId,
+    });
+    await enqueueRunnerJob({
+      kind: "codex_turn",
+      sessionId: id,
+      messageId,
+    });
+    wakeWorker();
+    reply.status(202).send({ ok: true });
+  });
+
   app.post("/internal/sessions/:id/approvals/:toolCallId/resume", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const { id, toolCallId } = request.params as { id: string; toolCallId: string };

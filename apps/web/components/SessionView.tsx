@@ -105,6 +105,7 @@ import {
   mergeLiveSessionAggregates,
   mergeMessages,
   type RuntimeBrainFileReference,
+  type RuntimeEngineActivity,
   type RuntimeEvent,
   type RuntimeQuestionItem,
   type RuntimeToolCall,
@@ -514,6 +515,7 @@ function SessionViewContentBody({
   const [, startModelTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsEnabled = session.engine !== "codex";
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
   // home composers). The drop overlay, validation/capability gate and upload lifecycle all come
   // from here. Attaching is always available: text/code files need no model capability (they are
@@ -530,7 +532,18 @@ function SessionViewContentBody({
     workspaceId,
     modelName: session.modelName,
     uploadScope: { kind: "session", sessionId: session.id },
+    enabled: attachmentsEnabled,
   });
+  useEffect(() => {
+    if (attachmentsEnabled) return;
+    setAttachMenuOpen(false);
+    setAttachments((current) => {
+      current.forEach((attachment) => {
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      });
+      return [];
+    });
+  }, [attachmentsEnabled, setAttachments]);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -1512,7 +1525,8 @@ function SessionViewContentBody({
     const sentMidRun = hasRunningAssistantMessage || showWaitingForAssistant;
     const content = input.trim();
     const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
-    if (!content && ready.length === 0) return;
+    const submitReady = attachmentsEnabled ? ready : [];
+    if (!content && submitReady.length === 0) return;
     setFormError(null);
     const optimisticId = newOptimisticMessageId();
     const submittedAtMs = Date.now();
@@ -1533,9 +1547,9 @@ function SessionViewContentBody({
       // Carry the sent attachments so the bubble shows them immediately. Images use their local
       // object-URL preview (the served /api/attachments row doesn't exist yet); the revoke is
       // deferred until the durable server message replaces this optimistic one (see effect below).
-      ...(ready.length > 0
+      ...(submitReady.length > 0
         ? {
-            attachments: ready.map((a) => ({
+            attachments: submitReady.map((a) => ({
               id: a.id,
               kind: a.kind,
               mediaType: a.mediaType,
@@ -1558,7 +1572,7 @@ function SessionViewContentBody({
       const result = await submitAgentSessionMessage(
         session.id,
         content,
-        toSubmitAttachments(ready),
+        toSubmitAttachments(submitReady),
         "steer",
       );
       if (result.ok) {
@@ -1567,7 +1581,7 @@ function SessionViewContentBody({
         // owned by the optimistic message (revoked when its durable server message arrives), so
         // only revoke previews that were NOT carried over (defensive — the send gate means all
         // tray attachments are `ready`, so this set is normally empty).
-        const carried = new Set(ready.map((a) => a.id));
+        const carried = new Set(submitReady.map((a) => a.id));
         attachments.forEach((a) => {
           if (a.previewUrl && !carried.has(a.id)) URL.revokeObjectURL(a.previewUrl);
         });
@@ -1688,9 +1702,9 @@ function SessionViewContentBody({
           // Drop-overlay hover handlers come from the shared hook. The window-level drop handler
           // (inside the hook) does the actual preventDefault + accept, so a drop anywhere in the
           // app attaches and the browser never opens the file; these only drive the overlay.
-          {...dragHandlers}
+          {...(attachmentsEnabled ? dragHandlers : {})}
         >
-          {isDragActive ? <ComposerDropOverlay /> : null}
+          {attachmentsEnabled && isDragActive ? <ComposerDropOverlay /> : null}
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
@@ -1761,7 +1775,9 @@ function SessionViewContentBody({
         ) : (
           <div className="bg-canvas px-6 py-4">
             <div className="mx-auto max-w-[960px]">
-              <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+              {attachmentsEnabled ? (
+                <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+              ) : null}
               <Composer
                 variant="compact"
                 error={formError}
@@ -1856,7 +1872,8 @@ function SessionViewContentBody({
                     onPaste={(event) => {
                       // Files in the clipboard (e.g. a screenshot) are taken as attachments by the
                       // shared hook, which also stops the browser pasting them into the textarea.
-                      if (handlePasteFiles(event)) return;
+                      if (attachmentsEnabled && handlePasteFiles(event)) return;
+                      if (!attachmentsEnabled) return;
                       // Oversized plain-text pastes become a .txt attachment instead of dumping
                       // a wall of text into the composer. Beyond the attachment size cap the
                       // paste falls through untouched — losing the user's text to a rejection
@@ -1884,46 +1901,48 @@ function SessionViewContentBody({
                 }
                 leftControls={
                   <>
-                    <div ref={attachMenuRef} className="relative">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
-                        className="hidden"
-                        onChange={(event) => {
-                          acceptFiles(Array.from(event.target.files ?? []));
-                          event.target.value = "";
-                          setAttachMenuOpen(false);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setAttachMenuOpen((prev) => !prev)}
-                        aria-label="Attach file"
-                        aria-expanded={attachMenuOpen}
-                        aria-haspopup="menu"
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
-                      >
-                        <Plus size={15} strokeWidth={1.75} />
-                      </button>
-                      {attachMenuOpen ? (
-                        <div
-                          role="menu"
-                          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                    {attachmentsEnabled ? (
+                      <div ref={attachMenuRef} className="relative">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          accept={ATTACHMENT_FILE_INPUT_ACCEPT}
+                          className="hidden"
+                          onChange={(event) => {
+                            acceptFiles(Array.from(event.target.files ?? []));
+                            event.target.value = "";
+                            setAttachMenuOpen(false);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setAttachMenuOpen((prev) => !prev)}
+                          aria-label="Attach file"
+                          aria-expanded={attachMenuOpen}
+                          aria-haspopup="menu"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
                         >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                          <Plus size={15} strokeWidth={1.75} />
+                        </button>
+                        {attachMenuOpen ? (
+                          <div
+                            role="menu"
+                            className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
                           >
-                            <Upload size={13} strokeWidth={1.75} />
-                            Upload file
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                            >
+                              <Upload size={13} strokeWidth={1.75} />
+                              Upload file
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <ModelPicker
                       value={modelOverride ?? session.modelName}
                       fallbackModelId={DEFAULT_MODEL_ID}
@@ -1941,10 +1960,10 @@ function SessionViewContentBody({
                     canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
                   const sendDisabled =
                     isPending ||
-                    attachments.some((a) => a.status !== "ready") ||
+                    (attachmentsEnabled && attachments.some((a) => a.status !== "ready")) ||
                     (!parseSlashCommand(input, allSlashCommands) &&
                       !input.trim() &&
-                      attachments.length === 0);
+                      (!attachmentsEnabled || attachments.length === 0));
                   return (
                     <div className="flex items-center gap-1.5">
                       <button
@@ -2489,6 +2508,9 @@ export function AssistantMessageContent({
               />
             );
           }
+          if (part.type === "engine-activity") {
+            return <EngineActivityCard key={group.key} activity={part.activity} />;
+          }
           return null;
         }
 
@@ -2628,6 +2650,8 @@ function CompletedStepGroup({
               <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
             ) : part.type === "text" ? (
               <AssistantMarkdown key={`text:${index}`} content={part.text} />
+            ) : part.type === "engine-activity" ? (
+              <EngineActivityCard key={`engine:${index}`} activity={part.activity} />
             ) : null,
           )}
         </div>
@@ -2727,6 +2751,38 @@ function ReasoningCard({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function EngineActivityCard({ activity }: { activity: RuntimeEngineActivity }) {
+  const running = activity.status === "running";
+  const failed = activity.status === "failed";
+  const statusLabel = failed ? "failed" : running ? "running" : "completed";
+  return (
+    <div className="text-[11.5px] leading-5 text-ink-muted">
+      <div className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-px">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+          {running ? (
+            <LoaderCircle size={11} strokeWidth={2} className="animate-spin text-warning" />
+          ) : failed ? (
+            <AlertCircle size={11} strokeWidth={1.9} className="text-danger" />
+          ) : (
+            <TerminalSquare size={11} strokeWidth={1.75} />
+          )}
+        </span>
+        <span className="shrink-0 font-medium text-ink/65">{activity.label}</span>
+        <span
+          className={`shrink-0 text-[10.5px] ${
+            failed ? "text-danger" : running ? "text-warning" : "text-ink-subtle"
+          }`}
+        >
+          {statusLabel}
+        </span>
+        <span className="min-w-0 truncate text-ink-subtle" title={activity.activity}>
+          {activity.activity}
+        </span>
+      </div>
     </div>
   );
 }

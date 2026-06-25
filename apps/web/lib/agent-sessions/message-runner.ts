@@ -1,3 +1,4 @@
+import type { AgentEngine } from "@opencompany/agent-runtime/types";
 import { createLogger } from "@opencompany/observability";
 import {
   dispatchAgentApprovalResume,
@@ -10,6 +11,7 @@ type TriggerAgentMessageRunInput = {
   sessionId: string;
   messageId: string;
   workspaceId: string;
+  engine?: AgentEngine;
 };
 
 type TriggerAgentApprovalResumeInput = {
@@ -21,6 +23,16 @@ type TriggerAgentApprovalResumeInput = {
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 export async function triggerAgentMessageRun(input: TriggerAgentMessageRunInput) {
+  const engine = input.engine ?? "opencompany";
+  const runnerPath =
+    engine === "codex"
+      ? `/internal/sessions/${input.sessionId}/messages/${input.messageId}/codex-turn`
+      : `/internal/sessions/${input.sessionId}/messages/${input.messageId}/run`;
+  const failureEvent =
+    engine === "codex"
+      ? "opencompany.direct_run_codex_turn_failed"
+      : "opencompany.direct_run_message_failed";
+
   if (!canCallRunnerDirectly()) {
     logger.info("Falling back to Inngest runner dispatch", {
       event: "opencompany.runner_request_fallback",
@@ -29,16 +41,17 @@ export async function triggerAgentMessageRun(input: TriggerAgentMessageRunInput)
       session_id: input.sessionId,
       message_id: input.messageId,
     });
-    await dispatchAgentMessageSubmitted(input);
+    await dispatchAgentMessageSubmitted({ ...input, engine });
     return;
   }
 
   try {
-    await callRunner(`/internal/sessions/${input.sessionId}/messages/${input.messageId}/run`, {
-      event: "opencompany.direct_run_message_failed",
+    await callRunner(runnerPath, {
+      event: failureEvent,
       workspace_id: input.workspaceId,
       session_id: input.sessionId,
       message_id: input.messageId,
+      engine,
     });
   } catch (error) {
     logger.warn("Falling back to Inngest runner dispatch", {
@@ -49,7 +62,7 @@ export async function triggerAgentMessageRun(input: TriggerAgentMessageRunInput)
       message_id: input.messageId,
       error,
     });
-    await dispatchAgentMessageSubmitted(input);
+    await dispatchAgentMessageSubmitted({ ...input, engine });
     return;
   }
 

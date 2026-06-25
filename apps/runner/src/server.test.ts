@@ -121,6 +121,25 @@ describe("internal message run endpoint", () => {
       messageId: "msg_123",
     });
   });
+
+  it("persists a Codex turn job before accepting authenticated Codex message requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/messages/msg_123/codex-turn",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(enqueueRunnerJob).toHaveBeenCalledWith({
+      kind: "codex_turn",
+      sessionId: "ses_123",
+      messageId: "msg_123",
+    });
+  });
 });
 
 describe("internal session title endpoint", () => {

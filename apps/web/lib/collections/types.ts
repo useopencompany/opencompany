@@ -1,4 +1,4 @@
-import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentEngine, TiptapDoc } from "@opencompany/agent-runtime/types";
 import type { InboxItemArtifact } from "@opencompany/db/schema";
 
 /**
@@ -39,6 +39,7 @@ export type AgentSessionRow = {
   agent_id: string;
   title: string;
   status: string;
+  engine: AgentEngine;
   source: "user" | "agent" | "memory" | "whatsapp";
   model_provider: string;
   model_name: string;

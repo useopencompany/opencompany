@@ -121,6 +121,7 @@ export async function ensureSandbox(
           agentFile: serializeAgentFile({
             title: agentConfig.title,
             body: agentConfig.instructions,
+            engine: agentConfig.engine,
             model: agentConfig.model.name,
             tools: agentConfig.tools,
             brain: agentConfig.brain,
@@ -396,7 +397,9 @@ function errorName(error: unknown) {
 // `@github` all-repositories scope) or a coding-agent tool enabled; plain chat agents
 // get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
-  return needsAuthenticatedGit(agentConfig) ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
+  return agentConfig.engine === "codex" || needsAuthenticatedGit(agentConfig)
+    ? (env.ampE2bTemplate ?? "amp")
+    : env.e2bTemplate;
 }
 
 function needsAuthenticatedGit(agentConfig: AgentConfig) {

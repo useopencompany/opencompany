@@ -10,6 +10,7 @@ import {
   buildCodexWorkRoot,
   codexHostedToolUsage,
   codexIntentToAddCommand,
+  codexRuntimeEventsFromJsonEvent,
   createCodexStreamAccumulator,
   resolveCodexTarget,
 } from "./codex-tool";
@@ -95,6 +96,7 @@ describe("buildCodexCommand", () => {
     expect(command).toContain("codex exec --json");
     expect(command).toContain("--cd '/tmp/work root'");
     expect(command).toContain("--sandbox workspace-write");
+    expect(command).toContain("--skip-git-repo-check");
     expect(command).not.toContain("--ask-for-approval");
     expect(command).not.toContain("resume");
     expect(command).toContain("-m 'gpt-5.2-codex'");
@@ -113,6 +115,7 @@ describe("buildCodexCommand", () => {
     expect(command).toContain("codex exec --json");
     expect(command).toContain("--cd '/home/user/workspace/work/codex'");
     expect(command).toContain("--sandbox workspace-write");
+    expect(command).toContain("--skip-git-repo-check");
     expect(command).toContain("resume -m 'gpt-5.2-codex' 'codex-session-1' 'follow up'");
   });
 });
@@ -138,6 +141,8 @@ describe("buildCodexConfig", () => {
 
     expect(config).toContain('model_provider = "opencompany"');
     expect(config).toContain('model_verbosity = "medium"');
+    expect(config).toContain("[sandbox_workspace_write]");
+    expect(config).toContain("network_access = true");
     expect(config).toContain("[model_providers.opencompany]");
     expect(config).toContain('name = "OpenCompany"');
     expect(config).toContain('base_url = "https://runner.example.com/broker/openai/v1"');
@@ -202,6 +207,50 @@ describe("createCodexStreamAccumulator", () => {
     });
   });
 
+  it("extracts final agent_message text from current Codex item.completed JSONL", () => {
+    const stream = createCodexStreamAccumulator();
+    const stdout =
+      [
+        JSON.stringify({
+          type: "thread.started",
+          thread_id: "019efdef-acf7-70d3-90d1-c67d06f4f12f",
+        }),
+        JSON.stringify({ type: "turn.started" }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "item_0",
+            type: "agent_message",
+            text: "Got it. What should I test or work on?",
+          },
+        }),
+        JSON.stringify({
+          type: "turn.completed",
+          usage: {
+            input_tokens: 13531,
+            cached_input_tokens: 12160,
+            output_tokens: 36,
+            reasoning_output_tokens: 0,
+          },
+        }),
+      ].join("\n") + "\n";
+
+    const activity = stream.push(stdout);
+    stream.finish();
+
+    expect(activity).toContain("Codex: Got it. What should I test or work on?");
+    expect(stream.summary({ exitCode: 0, stdout, stderr: "" })).toMatchObject({
+      sessionId: "019efdef-acf7-70d3-90d1-c67d06f4f12f",
+      status: "success",
+      result: "Got it. What should I test or work on?",
+      usage: {
+        input_tokens: 13531,
+        cache_read_input_tokens: 12160,
+        output_tokens: 36,
+      },
+    });
+  });
+
   it("uses the latest cumulative token totals instead of summing repeated usage events", () => {
     const stream = createCodexStreamAccumulator();
 
@@ -253,6 +302,165 @@ describe("createCodexStreamAccumulator", () => {
       error: "Codex timed out before finishing. The partial diff is shown below.",
       usage: null,
     });
+  });
+
+  it("drains parsed JSONL events after finish consumes a trailing partial line", () => {
+    const stream = createCodexStreamAccumulator();
+    stream.push(
+      JSON.stringify({
+        type: "item.started",
+        item: {
+          id: "item_0",
+          type: "command_execution",
+          command: "git status",
+        },
+      }),
+    );
+
+    expect(stream.drainEvents()).toEqual([]);
+    stream.finish();
+
+    expect(stream.drainEvents()).toEqual([
+      {
+        type: "item.started",
+        item: {
+          id: "item_0",
+          type: "command_execution",
+          command: "git status",
+        },
+      },
+    ]);
+  });
+});
+
+describe("codexRuntimeEventsFromJsonEvent", () => {
+  it("maps Codex command execution JSONL to shell tool events", () => {
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          type: "item.started",
+          item: {
+            id: "item_0",
+            type: "command_execution",
+            command: "git clone https://github.com/octocat/Hello-World.git hello-world",
+            aggregated_output: "",
+            status: "in_progress",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "tool.started",
+        payload: {
+          messageId: "msg_assistant",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          input: {
+            command: "git clone https://github.com/octocat/Hello-World.git hello-world",
+          },
+        },
+      },
+    ]);
+
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          type: "item.completed",
+          item: {
+            id: "item_0",
+            type: "command_execution",
+            command: "git clone https://github.com/octocat/Hello-World.git hello-world",
+            aggregated_output: "Cloning into 'hello-world'...\n",
+            exit_code: 0,
+            status: "completed",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "tool.completed",
+        payload: {
+          messageId: "msg_assistant",
+          toolCallId: "codex:item_0",
+          name: "shell",
+          outputPreview: "Cloning into 'hello-world'...",
+          output: {
+            command: "git clone https://github.com/octocat/Hello-World.git hello-world",
+            exitCode: 0,
+            output: "Cloning into 'hello-world'...",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("maps failed Codex command execution JSONL to failed shell tool events", () => {
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          type: "item.completed",
+          item: {
+            id: "item_1",
+            type: "command_execution",
+            command: "git status",
+            aggregated_output: "fatal: not a git repository\n",
+            exit_code: 128,
+            status: "failed",
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "tool.failed",
+        payload: {
+          messageId: "msg_assistant",
+          toolCallId: "codex:item_1",
+          name: "shell",
+          outputPreview: "fatal: not a git repository",
+          output: {
+            command: "git status",
+            exitCode: 128,
+            output: "fatal: not a git repository",
+          },
+          error: {
+            message: "Codex command exited with code 128.",
+            code: "codex_command_failed",
+            recoverable: true,
+          },
+        },
+      },
+    ]);
+  });
+
+  it("maps wrapped Codex JSONL message envelopes to shell tool events", () => {
+    expect(
+      codexRuntimeEventsFromJsonEvent(
+        {
+          msg: {
+            type: "item.started",
+            item: {
+              id: "item_2",
+              type: "command_execution",
+              command: "pwd",
+            },
+          },
+        },
+        "msg_assistant",
+      ),
+    ).toEqual([
+      {
+        type: "tool.started",
+        payload: {
+          messageId: "msg_assistant",
+          toolCallId: "codex:item_2",
+          name: "shell",
+          input: { command: "pwd" },
+        },
+      },
+    ]);
   });
 });
 

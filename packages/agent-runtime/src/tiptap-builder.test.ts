@@ -107,6 +107,7 @@ describe("buildAgentTiptapDoc", () => {
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     schemaVersion: "agent.v1",
+    engine: "opencompany",
     title: "Test",
     instructions: "",
     model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
