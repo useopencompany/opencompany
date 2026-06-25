@@ -350,7 +350,7 @@ function isGoogleIntegrationStatePayload(value: unknown): value is GoogleIntegra
 }
 
 function sanitizeReturnTo(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//")) return "/company/settings/integrations";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/company/integrations";
   return value;
 }
 

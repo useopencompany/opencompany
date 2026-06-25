@@ -116,6 +116,5 @@ export async function setGoogleCalendarSelection(input: {
 
 function revalidateIntegrationPaths() {
   revalidatePath("/company/agents");
-  revalidatePath("/company/settings");
-  revalidatePath("/company/settings/integrations");
+  revalidatePath("/company/integrations");
 }

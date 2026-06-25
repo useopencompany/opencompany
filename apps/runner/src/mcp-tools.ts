@@ -972,7 +972,7 @@ function buildNotConnectedStubTool(input: {
     description:
       `${input.provider.displayName} is enabled for this agent but not connected. ` +
       `Calling this performs no action — instead tell the user to connect ` +
-      `${input.provider.displayName} in Settings → Integrations.`,
+      `${input.provider.displayName} in the Integrations tab.`,
     inputSchema: jsonSchema({ type: "object", properties: {} } as never),
     onInputAvailable: async () => {
       await input.checkAbort();

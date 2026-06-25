@@ -17,7 +17,7 @@ function state(targetOrigin?: string) {
     provider: "gmail",
     workspaceId: "wks_123",
     userId: "usr_123",
-    returnTo: "/settings/integrations",
+    returnTo: "/company/integrations",
     ...(targetOrigin ? { targetOrigin } : {}),
   });
 }
@@ -72,7 +72,7 @@ describe("Google OAuth broker callback", () => {
 
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.origin).toBe("https://app.opencompany.cloud");
-    expect(location.pathname).toBe("/settings/integrations");
+    expect(location.pathname).toBe("/company/integrations");
     expect(location.searchParams.get("integration")).toBe("gmail");
     expect(location.searchParams.get("setup")).toBe("error");
   });
