@@ -69,6 +69,9 @@ export * from "./brand-icons";
 // Project-owned icons (model providers, social, brand) — same currentColor +
 // LucideIcon contract, so they compose with Central icons and the same utilities.
 export * from "./provider-icons";
+// Brand logos for connectable services (Linear, Slack, Gmail, …) — used to badge
+// agent tool calls with the service they touch. Same currentColor + LucideIcon contract.
+export * from "./service-icons";
 // Shared icon types (`IconProps` / `LucideProps` / `LucideIcon`).
 export type { IconProps, LucideIcon, LucideProps } from "./types";
 export {

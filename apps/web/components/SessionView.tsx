@@ -38,6 +38,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
+  createElement,
   Fragment,
   useContext,
   useEffect,
@@ -61,6 +62,7 @@ import {
   type PendingAttachment,
   toSubmitAttachments,
 } from "@/components/composer-attachments";
+import { toolServiceIcon } from "@/components/icons/tool-service-icon";
 import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
 import { type RightPanelHandle, useMobileInspector } from "@/components/MobileInspectorContext";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
@@ -2790,6 +2792,9 @@ function ToolCallCardDefault({
   const awaitingApproval = toolCall.approval?.status === "required" && optimisticDecision === null;
   const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
   const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
+  // Badge the tool with the brand glyph of the service it touches (Linear, Gmail, …);
+  // null for internal/generic tools, which keep the wrench.
+  const serviceIcon = toolServiceIcon(toolCall.name);
 
   const submitDecision = (decision: "approved" | "denied") => {
     if (!approvalContext) return;
@@ -2824,6 +2829,8 @@ function ToolCallCardDefault({
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
             {toolCall.name === AFTER_SESSION_TOOL_NAME ? (
               <Brain size={11} strokeWidth={1.75} />
+            ) : serviceIcon ? (
+              createElement(serviceIcon, { size: 11 })
             ) : (
               <Wrench size={11} strokeWidth={1.75} />
             )}
