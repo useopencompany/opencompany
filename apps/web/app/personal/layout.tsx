@@ -10,6 +10,7 @@ import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
 import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
 import { agentGitHubRepositories, buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { currentWorkspace } from "@/lib/auth";
+import { isCodexEngineEnabled } from "@/lib/flags/codexEngine";
 import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
 import { loadGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
@@ -103,7 +104,11 @@ export default async function PersonalLayout({ children }: { children: React.Rea
       }}
     >
       <QueryProvider>
-        <WorkspaceProvider workspaceId={workspace.id} userId={user.id}>
+        <WorkspaceProvider
+          workspaceId={workspace.id}
+          userId={user.id}
+          codexEngineEnabled={isCodexEngineEnabled(user)}
+        >
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
@@ -128,6 +133,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                   toolPolicies={toolPolicies}
                   proMode={user.proMode}
                   companySurfaceEnabled={user.companySurfaceEnabled}
+                  codexEngineEnabled={user.codexEngineEnabled}
                 >
                   {children}
                 </PersonalShell>

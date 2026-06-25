@@ -121,6 +121,31 @@ export async function setCompanySurfaceEnabled(next: boolean) {
   return { ok: true as const };
 }
 
+// Per-user "Codex runtime" feature flag, set from Settings → Feature flags. Persisted on
+// `users.codexEngineEnabled` so both surfaces pick it up on next load: the /personal layout (which
+// flips it optimistically via PersonalAgentContext for the Settings toggle) and the /company agent
+// editor (which reads it from WorkspaceContext to show/hide the engine selector). Revalidate both
+// layouts so the agent editor's engine selector appears/disappears after the flag changes.
+export async function setCodexEngineEnabled(next: boolean) {
+  const context = await currentWorkspace({ optional: true });
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  try {
+    await getDb()
+      .update(users)
+      .set({ codexEngineEnabled: next, updatedAt: new Date() })
+      .where(eq(users.id, context.user.id));
+  } catch {
+    return { ok: false as const, error: "Could not update the Codex runtime flag. Please try again." };
+  }
+
+  revalidatePath("/personal", "layout");
+  revalidatePath("/company", "layout");
+  return { ok: true as const };
+}
+
 export async function setUserTimezone(
   input: string | { timezone: string; source?: Exclude<UserTimezoneSource, "unset"> },
 ) {

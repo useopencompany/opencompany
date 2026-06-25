@@ -37,6 +37,7 @@ import { appendRuntimeEvent } from "./events";
 import { settleBrokerTokensForSession } from "./llm-broker-tokens";
 import {
   armSandboxIdleTimeout,
+  connectSandbox,
   createOrConnectSandbox,
   killSandbox,
   prepareWorkspace,
@@ -252,6 +253,101 @@ export async function ensureSandbox(
     if (sandbox) {
       await parkSandboxWhenIdle(sandbox, env);
     }
+    throw error;
+  }
+}
+
+export async function acquireCodexSandboxForTurn(
+  row: LoadedSession,
+  env: RunnerEnv,
+  options?: { braintrustSpan?: BraintrustSpan | undefined },
+) {
+  const requestedSandboxId = row.session.e2bSandboxId;
+  if (!requestedSandboxId) {
+    return ensureSandbox(row, env, options);
+  }
+
+  const agentConfig = normalizeAgentConfig(row.agent.config);
+  const template = resolveSandboxTemplate(agentConfig, env);
+  const readyStartedAt = performance.now();
+  const e2bRequests: SandboxLatencyObservation[] = [];
+  try {
+    const sandbox = await connectSandbox({
+      sandboxId: requestedSandboxId,
+      onLatency: (observation) => {
+        e2bRequests.push(observation);
+        captureE2BSandboxLatency({
+          row,
+          template,
+          existingSandbox: true,
+          phase: "e2b_request",
+          ...observation,
+        });
+      },
+    });
+
+    if (!sandbox) {
+      return ensureSandbox(
+        { ...row, session: { ...row.session, e2bSandboxId: null } },
+        env,
+        options,
+      );
+    }
+
+    const totalMs = elapsedMs(readyStartedAt);
+    captureE2BSandboxLatency({
+      row,
+      template,
+      existingSandbox: true,
+      phase: "sandbox_ready",
+      operation: "connect",
+      outcome: "success",
+      latencyMs: totalMs,
+      sandboxId: sandbox.sandboxId,
+      requestedSandboxId,
+    });
+    logSandboxHydrationTiming(options?.braintrustSpan, {
+      outcome: "success",
+      existingSandbox: true,
+      template: template ?? "default",
+      timings: { totalMs },
+      e2bRequests,
+      sandboxId: sandbox.sandboxId,
+      requestedSandboxId,
+    });
+    return sandbox;
+  } catch (error) {
+    const name = errorName(error);
+    const totalMs = elapsedMs(readyStartedAt);
+    captureE2BSandboxLatency({
+      row,
+      template,
+      existingSandbox: true,
+      phase: "sandbox_ready",
+      operation: "connect",
+      outcome: "error",
+      latencyMs: totalMs,
+      requestedSandboxId,
+      ...(name ? { errorName: name } : {}),
+    });
+    logSandboxHydrationTiming(options?.braintrustSpan, {
+      outcome: "error",
+      existingSandbox: true,
+      template: template ?? "default",
+      timings: { totalMs },
+      e2bRequests,
+      requestedSandboxId,
+      ...(name ? { errorName: name } : {}),
+    });
+    captureException(error, {
+      event: "opencompany.runner_sandbox_failed",
+      workspace_id: row.workspace.id,
+      user_id: row.session.userId,
+      agent_id: row.agent.id,
+      session_id: row.session.id,
+      sandbox_id: requestedSandboxId,
+      existing_sandbox: true,
+    });
     throw error;
   }
 }

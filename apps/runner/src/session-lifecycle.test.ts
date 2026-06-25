@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentConfig, env } from "./agent-loop-test-support";
 
 const e2bMocks = vi.hoisted(() => ({
+  connect: vi.fn(),
   create: vi.fn(),
 }));
 
@@ -55,6 +56,7 @@ vi.mock("./durable-streams", () => ({
 
 import { agentSessionEvents } from "@opencompany/db/schema";
 import {
+  acquireCodexSandboxForTurn,
   completeSpawnedAfterSessionRunForChild,
   ensureSandbox,
   optionalUserContext,
@@ -317,3 +319,134 @@ describe("ensureSandbox analytics", () => {
     );
   });
 });
+
+describe("acquireCodexSandboxForTurn", () => {
+  it("connects to an existing sandbox without rematerializing the filesystem", async () => {
+    const sandbox = {
+      sandboxId: "sbx_existing",
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    e2bMocks.connect.mockResolvedValue(sandbox);
+
+    const row = loadedSessionRow({ e2bSandboxId: "sbx_existing", engine: "codex" });
+
+    await expect(acquireCodexSandboxForTurn(row as never, env())).resolves.toBe(sandbox);
+
+    expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_existing", {
+      timeoutMs: 3_600_000,
+      requestTimeoutMs: 30_000,
+    });
+    expect(e2bMocks.create).not.toHaveBeenCalled();
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+    expect(materializeMocks.materializeBrainForSession).not.toHaveBeenCalled();
+    expect(materializeMocks.materializeAgentBundleForSession).not.toHaveBeenCalled();
+    expect(materializeMocks.materializeSkillsForSession).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
+      "e2b_sandbox_latency",
+      "user_123",
+      expect.objectContaining({
+        phase: "e2b_request",
+        operation: "connect",
+        outcome: "success",
+        existing_sandbox: true,
+        sandbox_id: "sbx_existing",
+        requested_sandbox_id: "sbx_existing",
+      }),
+    );
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
+      "e2b_sandbox_latency",
+      "user_123",
+      expect.objectContaining({
+        phase: "sandbox_ready",
+        operation: "connect",
+        outcome: "success",
+        existing_sandbox: true,
+        sandbox_id: "sbx_existing",
+        requested_sandbox_id: "sbx_existing",
+      }),
+    );
+  });
+
+  it("fully hydrates when the session has no sandbox id", async () => {
+    const sandbox = hydratedSandbox("sbx_new");
+    e2bMocks.create.mockResolvedValue(sandbox);
+
+    const row = loadedSessionRow({ e2bSandboxId: null, engine: "codex" });
+
+    await expect(acquireCodexSandboxForTurn(row as never, env())).resolves.toBe(sandbox);
+
+    expect(e2bMocks.connect).not.toHaveBeenCalled();
+    expect(e2bMocks.create).toHaveBeenCalledTimes(1);
+    expect(sandbox.commands.run).toHaveBeenCalled();
+    expect(materializeMocks.materializeAgentBundleForSession).toHaveBeenCalled();
+    expect(materializeMocks.materializeSkillsForSession).toHaveBeenCalled();
+  });
+
+  it("falls back to full hydration for stale sandbox ids without a second connect attempt", async () => {
+    const sandbox = hydratedSandbox("sbx_replacement");
+    e2bMocks.connect.mockRejectedValue(new Error("sandbox not found"));
+    e2bMocks.create.mockResolvedValue(sandbox);
+
+    const row = loadedSessionRow({ e2bSandboxId: "sbx_stale", engine: "codex" });
+
+    await expect(acquireCodexSandboxForTurn(row as never, env())).resolves.toBe(sandbox);
+
+    expect(e2bMocks.connect).toHaveBeenCalledTimes(1);
+    expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_stale", {
+      timeoutMs: 3_600_000,
+      requestTimeoutMs: 30_000,
+    });
+    expect(e2bMocks.create).toHaveBeenCalledTimes(1);
+    expect(materializeMocks.materializeAgentBundleForSession).toHaveBeenCalled();
+    expect(materializeMocks.materializeSkillsForSession).toHaveBeenCalled();
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
+      "e2b_sandbox_latency",
+      "user_123",
+      expect.objectContaining({
+        phase: "e2b_request",
+        operation: "connect",
+        outcome: "not_found",
+        existing_sandbox: true,
+        requested_sandbox_id: "sbx_stale",
+      }),
+    );
+  });
+});
+
+function hydratedSandbox(sandboxId: string) {
+  return {
+    sandboxId,
+    setTimeout: vi.fn().mockResolvedValue(undefined),
+    commands: {
+      run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+    },
+    files: {
+      write: vi.fn().mockResolvedValue(undefined),
+    },
+  };
+}
+
+function loadedSessionRow(input: {
+  e2bSandboxId: string | null;
+  engine?: "opencompany" | "codex";
+}) {
+  const engine = input.engine ?? "codex";
+  return {
+    session: {
+      id: "session_123",
+      userId: "user_123",
+      workspaceId: "workspace_123",
+      agentId: "agent_123",
+      e2bSandboxId: input.e2bSandboxId,
+      workdir: "/home/user/workspace",
+      engine,
+    },
+    workspace: { id: "workspace_123" },
+    agent: { id: "agent_123", isDefault: false, config: agentConfig({ engine }) },
+  };
+}

@@ -77,7 +77,7 @@ import {
   sandboxLayout,
 } from "./sandbox";
 import {
-  ensureSandbox,
+  acquireCodexSandboxForTurn,
   isSessionArchived,
   loadAssistantResponseForMessage,
   loadSession,
@@ -289,7 +289,9 @@ async function runCodexTurnWithContext(
       activity: "Codex is starting",
     });
 
-    sandbox = await observeRunStep(ctx, "ensure_sandbox", () => ensureSandbox(row, input.env));
+    sandbox = await observeRunStep(ctx, "acquire_codex_sandbox", () =>
+      acquireCodexSandboxForTurn(row, input.env),
+    );
     await checkAbort();
     const updatedSandbox = await observeRunStep(ctx, "update_sandbox_for_lease", () =>
       updateSandboxForLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, sandbox!.sandboxId),

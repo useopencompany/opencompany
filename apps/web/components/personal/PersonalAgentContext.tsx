@@ -64,6 +64,12 @@ export type PersonalAgentContextValue = {
   companySurfaceEnabled: boolean;
   setCompanySurfaceEnabled: (next: boolean) => void;
 
+  // Per-user "Codex runtime" feature flag. Seeded from the DB at layout load; the setter flips it
+  // optimistically so the Settings toggle reflects immediately (the company agent editor reads the
+  // persisted value from WorkspaceContext on its next server render).
+  codexEngineEnabled: boolean;
+  setCodexEngineEnabled: (next: boolean) => void;
+
   setUserTimezone: (next: string) => void;
   setUserTimezoneSource: (next: UserTimezoneSource) => void;
 

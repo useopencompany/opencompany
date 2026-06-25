@@ -13,6 +13,7 @@ import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadSidebarSessionsForWorkspace } from "@/lib/agent-sessions/data";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { currentWorkspace } from "@/lib/auth";
+import { isCodexEngineEnabled } from "@/lib/flags/codexEngine";
 
 const SIDEBAR_COLLAPSED_COOKIE = "opencompany-sidebar-collapsed";
 
@@ -62,7 +63,11 @@ export default async function AppShell({ children }: { children: React.ReactNode
       }}
     >
       <QueryProvider>
-        <WorkspaceProvider workspaceId={workspace.id} userId={user.id}>
+        <WorkspaceProvider
+          workspaceId={workspace.id}
+          userId={user.id}
+          codexEngineEnabled={isCodexEngineEnabled(user)}
+        >
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />

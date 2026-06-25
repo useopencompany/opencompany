@@ -102,44 +102,55 @@ export async function createOrConnectSandbox(input: {
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   if (input.sandboxId) {
-    const startedAt = performance.now();
-    try {
-      const sandbox = await Sandbox.connect(input.sandboxId, {
-        timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
-        requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
-      });
+    const sandbox = await connectSandbox({
+      sandboxId: input.sandboxId,
+      ...(input.onLatency ? { onLatency: input.onLatency } : {}),
+    });
+    if (sandbox) return sandbox;
+  }
+
+  return createSandbox(input);
+}
+
+export async function connectSandbox(input: {
+  sandboxId: string;
+  onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
+}) {
+  const startedAt = performance.now();
+  try {
+    const sandbox = await Sandbox.connect(input.sandboxId, {
+      timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    emitSandboxLatency(input.onLatency, {
+      operation: "connect",
+      outcome: "success",
+      latencyMs: elapsedMs(startedAt),
+      sandboxId: sandbox.sandboxId,
+      requestedSandboxId: input.sandboxId,
+    });
+    return sandbox;
+  } catch (error) {
+    const name = errorName(error);
+    if (!isSandboxNotFound(error)) {
       emitSandboxLatency(input.onLatency, {
         operation: "connect",
-        outcome: "success",
-        latencyMs: elapsedMs(startedAt),
-        sandboxId: sandbox.sandboxId,
-        requestedSandboxId: input.sandboxId,
-      });
-      return sandbox;
-    } catch (error) {
-      if (!isSandboxNotFound(error)) {
-        const name = errorName(error);
-        emitSandboxLatency(input.onLatency, {
-          operation: "connect",
-          outcome: "error",
-          latencyMs: elapsedMs(startedAt),
-          requestedSandboxId: input.sandboxId,
-          ...(name ? { errorName: name } : {}),
-        });
-        throw error;
-      }
-      const name = errorName(error);
-      emitSandboxLatency(input.onLatency, {
-        operation: "connect",
-        outcome: "not_found",
+        outcome: "error",
         latencyMs: elapsedMs(startedAt),
         requestedSandboxId: input.sandboxId,
         ...(name ? { errorName: name } : {}),
       });
+      throw error;
     }
+    emitSandboxLatency(input.onLatency, {
+      operation: "connect",
+      outcome: "not_found",
+      latencyMs: elapsedMs(startedAt),
+      requestedSandboxId: input.sandboxId,
+      ...(name ? { errorName: name } : {}),
+    });
+    return null;
   }
-
-  return createSandbox(input);
 }
 
 async function createSandbox(input: {

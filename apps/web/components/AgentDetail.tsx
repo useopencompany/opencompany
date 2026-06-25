@@ -25,6 +25,7 @@ import {
   CircleAlert,
   Clock3,
   Cloud,
+  Cpu,
   FileCode2,
   FileText,
   Folder,
@@ -134,7 +135,7 @@ function updateAgentQueries(
 }
 
 export default function AgentDetail({ initialAgent, idOrPath }: Props) {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, codexEngineEnabled } = useWorkspaceContext();
   const { data: agent } = useQuery({
     queryKey: agentQueryKeys.detail(workspaceId, idOrPath),
     queryFn: () => fetchAgent(idOrPath),
@@ -155,17 +156,26 @@ export default function AgentDetail({ initialAgent, idOrPath }: Props) {
     return <AgentDetailSkeleton />;
   }
 
-  return <AgentDetailContent agent={agent} idOrPath={idOrPath} workspaceId={workspaceId} />;
+  return (
+    <AgentDetailContent
+      agent={agent}
+      idOrPath={idOrPath}
+      workspaceId={workspaceId}
+      codexEngineEnabled={codexEngineEnabled}
+    />
+  );
 }
 
 function AgentDetailContent({
   agent,
   idOrPath,
   workspaceId,
+  codexEngineEnabled,
 }: {
   agent: AgentDetailPayload;
   idOrPath: string;
   workspaceId: string;
+  codexEngineEnabled: boolean;
 }) {
   const queryClient = useQueryClient();
   const { agents: agentsCollection } = useCollections();
@@ -520,7 +530,12 @@ function AgentDetailContent({
                 schedule();
               }}
             />
-            <EngineSelect value={selectedEngine} onChange={updateEngine} />
+            {/* The engine selector is gated behind the per-user "Codex runtime" feature flag
+                (Settings → Feature flags). Hidden by default so agents stay on the OpenCompany
+                runtime; the saved engine value is preserved either way. */}
+            {codexEngineEnabled ? (
+              <EngineSelect value={selectedEngine} onChange={updateEngine} />
+            ) : null}
           </div>
 
           <div className="mt-6">
@@ -1461,8 +1476,9 @@ function EngineSelect({
     <Select value={value} onValueChange={(next) => onChange(readAgentEngine(next))}>
       <SelectTrigger
         aria-label="Engine"
-        className="h-8 w-auto border-border bg-surface px-2 text-[12px] text-ink/85 shadow-none hover:bg-surface-muted focus:ring-1 focus:ring-ink/20"
+        className="h-6 w-auto justify-start gap-1.5 border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none transition-colors hover:bg-surface-subtle/70 focus:ring-0 focus-visible:bg-surface-subtle/70 data-[state=open]:bg-surface-subtle/70"
       >
+        <Cpu size={12} strokeWidth={1.9} className="shrink-0" />
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="start">
