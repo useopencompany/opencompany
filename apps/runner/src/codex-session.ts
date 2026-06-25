@@ -20,7 +20,6 @@ import { loadConnectedGitHubInstallation } from "./amp-tool";
 import {
   buildCodexCommand,
   buildCodexConfigForAuth,
-  buildCodexHome,
   buildCodexWorkRoot,
   type CodexCliAuth,
   codexApiKeyFallbackEnabled,
@@ -90,6 +89,16 @@ import { recordToolUsage } from "./usage-recorder";
 const logger = createLogger({ service: "opencompany-runner", runtime: "codex-session" });
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
+// CODEX_HOME for session runs lives OUTSIDE the work root the model operates in (Codex is
+// launched with `--cd ${codexWorkRoot}`). For subscription-backed runs the workspace ChatGPT
+// auth.json is written here; keeping it out of the agent's working tree stops it surfacing in the
+// diffs, file listings, or commits the model produces. Codex's own process still reads/writes
+// CODEX_HOME freely — it is not subject to the `workspace-write` sandbox policy — exactly as the
+// device-auth flow does. Defense-in-depth, not a full seal: `workspace-write` does not sandbox
+// reads, so an out-of-tree absolute path is harder to discover but not unreachable. The sandbox is
+// per session, so a single fixed path cannot collide, and it persists across turns so
+// `codex exec resume` can still read the session's rollout files.
+const CODEX_SESSION_HOME = "/home/user/.opencompany/codex-session";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";
 const CODEX_DIRECT_API_KEY_ENV_VAR = "CODEX_API_KEY";
 const BROKER_TOKEN_ENV_VAR = "OPENCOMPANY_LLM_BROKER_TOKEN";
@@ -703,7 +712,7 @@ export function buildCodexSessionCommandPlan(input: {
   githubAuth: CodexGitHubAuth;
 }) {
   const codexWorkRoot = buildCodexWorkRoot(input.workRoot);
-  const codexHome = buildCodexHome(codexWorkRoot);
+  const codexHome = CODEX_SESSION_HOME;
   const codexEnv = {
     CODEX_HOME: codexHome,
     ...(input.auth.kind === "api" ? { [input.auth.apiKeyEnvVar]: input.auth.apiKeyValue } : {}),
@@ -893,7 +902,10 @@ function codexAssistantContent(input: {
   return result ? `${result}\n\nCodex error: ${error}` : `Codex error: ${error}`;
 }
 
-export function resumableCodexSessionId(input: Pick<CodexCliSummary, "sessionId" | "status">) {
+// The engine session id is persisted whenever Codex produced one, regardless of turn status: a
+// failed or timed-out turn still leaves a resumable Codex thread (partial rollout), so the user's
+// next message continues the same context instead of starting cold.
+export function resumableCodexSessionId(input: Pick<CodexCliSummary, "sessionId">) {
   return input.sessionId;
 }
 

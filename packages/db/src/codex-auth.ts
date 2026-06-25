@@ -8,7 +8,8 @@ import {
   UnsupportedKeyVersionError,
 } from "@opencompany/crypto";
 import { eq } from "drizzle-orm";
-import type { getDb } from "./client";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type * as schema from "./schema";
 import {
   type WorkspaceCodexCredentialStatus,
   type WorkspaceIntegrationCredentialEncryptedPayload,
@@ -17,12 +18,14 @@ import {
 
 const ENCRYPTION_KEY_VERSION = 1;
 
-type CodexAuthDb = {
-  delete: (...args: Parameters<ReturnType<typeof getDb>["delete"]>) => any;
-  insert: (...args: Parameters<ReturnType<typeof getDb>["insert"]>) => any;
-  select: (...args: Parameters<ReturnType<typeof getDb>["select"]>) => any;
-  update: (...args: Parameters<ReturnType<typeof getDb>["update"]>) => any;
-};
+// Driver-agnostic db handle: callers pass the web app's `neon-http` client or the runner's pooled
+// `node-postgres` client, so this types against drizzle's `PgDatabase` base rather than either
+// concrete driver (matches recall.ts / sync-outbox.ts). The `Pick` keeps the surface to the query
+// builders these helpers actually use, with full builder typing instead of the previous `=> any`.
+type CodexAuthDb = Pick<
+  PgDatabase<PgQueryResultHKT, typeof schema>,
+  "delete" | "insert" | "select" | "update"
+>;
 
 export type WorkspaceCodexAuthJson = Record<string, unknown>;
 

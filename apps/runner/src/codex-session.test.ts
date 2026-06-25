@@ -21,9 +21,12 @@ describe("buildCodexSessionCommandPlan", () => {
     });
 
     expect(plan.codexWorkRoot).toBe("/home/user/workspace/work/codex");
-    expect(plan.codexHome).toBe("/home/user/workspace/work/codex/.codex");
+    // CODEX_HOME lives outside the `--cd` work root so the workspace ChatGPT auth.json never sits
+    // in the tree the model operates on.
+    expect(plan.codexHome).toBe("/home/user/.opencompany/codex-session");
+    expect(plan.codexHome.startsWith(`${plan.codexWorkRoot}/`)).toBe(false);
     expect(plan.codexEnv).toMatchObject({
-      CODEX_HOME: "/home/user/workspace/work/codex/.codex",
+      CODEX_HOME: "/home/user/.opencompany/codex-session",
       CODEX_API_KEY: "codex_secret_123",
     });
     expect(plan.command).toContain("cd '/home/user/workspace/work/codex'");
@@ -105,7 +108,7 @@ describe("buildCodexSessionCommandPlan", () => {
     });
 
     expect(plan.codexEnv).toEqual({
-      CODEX_HOME: "/home/user/workspace/work/codex/.codex",
+      CODEX_HOME: "/home/user/.opencompany/codex-session",
     });
     expect(plan.config).toContain('cli_auth_credentials_store = "file"');
     expect(plan.config).toContain('forced_login_method = "chatgpt"');
@@ -119,12 +122,11 @@ describe("resumableCodexSessionId", () => {
     expect(
       resumableCodexSessionId({
         sessionId: "019efe9c-a0a5-7f81-98a4-6fab601b4a76",
-        status: "error",
       }),
     ).toBe("019efe9c-a0a5-7f81-98a4-6fab601b4a76");
   });
 
   it("does not persist a missing Codex session id", () => {
-    expect(resumableCodexSessionId({ sessionId: null, status: "error" })).toBeNull();
+    expect(resumableCodexSessionId({ sessionId: null })).toBeNull();
   });
 });

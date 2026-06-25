@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { loadEncryptionKey } from "@opencompany/crypto";
 
+const DEFAULT_CODEX_TIMEOUT_MS = 60 * 60 * 1000;
+
 export type RunnerEnv = {
   databaseUrl: string;
   internalToken: string;
@@ -39,10 +41,10 @@ export type RunnerEnv = {
   // Wall-clock ceiling for a single opencode_coder delegation. Large monorepo tasks routinely
   // exceed the old hard 10 minutes; tunable per environment. On timeout the run no longer throws
   // away its work — the partial diff + resumable opencode session id are surfaced (opencode-tool.ts).
-  // The job lease TTL (jobs.ts) must comfortably exceed this so a long run is not re-claimed.
+  // The job lease heartbeats while the command runs, so its TTL does not need to match this ceiling.
   opencodeTimeoutMs: number;
-  // Wall-clock ceiling for a single codex_coder delegation. Mirrors opencode timeout
-  // behavior: timeouts surface a partial diff but never publish a pull request.
+  // Wall-clock ceiling for a single Codex engine turn or codex_coder delegation. Mirrors
+  // opencode timeout behavior: timeouts surface partial output but never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
   // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
@@ -86,7 +88,7 @@ export function loadEnv(): RunnerEnv {
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
-    codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", 1_200_000),
+    codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.5",
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),

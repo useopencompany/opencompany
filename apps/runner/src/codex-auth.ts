@@ -45,10 +45,11 @@ export async function startCodexDeviceAuthFlow(input: {
   const sandbox = await Sandbox.create(input.env.ampE2bTemplate ?? "amp", {
     envs: {},
     timeoutMs: CODEX_AUTH_SANDBOX_TIMEOUT_MS,
-    lifecycle: {
-      onTimeout: "pause",
-      autoResume: true,
-    },
+    // Single-use, short-lived auth sandbox: let it self-terminate at its timeout (E2B's default
+    // `kill`) rather than pause+resume. An abandoned flow — the user closes the tab and never polls
+    // again — then gets reaped by E2B instead of lingering indefinitely as a paused sandbox. Active
+    // polling keeps it alive: each `Sandbox.connect` below extends the timeout.
+    lifecycle: { onTimeout: "kill" },
   });
   logger.info("Codex auth sandbox created", {
     event: "opencompany.runner_codex_auth_sandbox_created",

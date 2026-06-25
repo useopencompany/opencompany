@@ -445,7 +445,16 @@ describe("resolveSandboxBilling", () => {
     const row = loadedSessionRow({
       e2bSandboxId: null,
       engine: "opencompany",
-      tools: [{ id: "opencode", type: "builtin" }],
+      tools: [
+        {
+          id: "opencode",
+          type: "coding_agent",
+          provider: "opencode",
+          label: "opencode",
+          description: "Delegate coding work to opencode inside an E2B sandbox.",
+          prCapable: true,
+        },
+      ],
     });
 
     expect(
