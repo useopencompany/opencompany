@@ -114,6 +114,7 @@ import {
   buildUnansweredQuestionToolOutput,
   loadSessionQuestion,
 } from "./session-questions";
+import { describeRunnerError } from "./stream-helpers";
 import { createRunSubagentHandler } from "./subagent";
 import { loadToolApproval } from "./tool-approvals";
 import {
@@ -725,7 +726,7 @@ async function runMessageWithContext(
       return { nextSteerMessageId: interrupt?.id };
     }
 
-    const message = error instanceof Error ? error.message : "Unknown runner error";
+    const message = describeRunnerError(error);
     logBraintrustCurrentSpan({
       error: braintrustError(error),
       metadata: {
@@ -1965,7 +1966,7 @@ async function resumeApprovalWithContext(
       }
       return;
     }
-    const message = error instanceof Error ? error.message : "Unknown runner error";
+    const message = describeRunnerError(error);
     logBraintrustCurrentSpan({
       error: braintrustError(error),
       metadata: { outcome: "failed", tool_call_id: input.toolCallId },
@@ -2439,7 +2440,7 @@ async function resumeQuestionResponseWithContext(
       }
       return;
     }
-    const message = error instanceof Error ? error.message : "Unknown runner error";
+    const message = describeRunnerError(error);
     logBraintrustCurrentSpan({
       error: braintrustError(error),
       metadata: { outcome: "failed", tool_call_id: input.toolCallId },

@@ -2,6 +2,7 @@ import type { TextStreamPart, ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 import {
   buildRecoverableToolStreamOutput,
+  describeRunnerError,
   isRecoverableToolStreamError,
   normalizeReasoningSummary,
   readReasoningTextDelta,
@@ -16,6 +17,84 @@ function toolErrorPart(toolName: string, error: unknown): TextStreamPart<ToolSet
     error,
   } as never;
 }
+
+// ---------------------------------------------------------------------------
+// describeRunnerError
+// ---------------------------------------------------------------------------
+// A Vercel AI Gateway 400 used to be persisted as the bare status text "Bad Request",
+// which made attachment/context-overflow failures undiagnosable in prod (see the Leo
+// kimi-k2.5 session that failed with lastError: "Bad Request"). These tests pin the
+// behaviour that we now fold the gateway's real reason (status code + responseBody) into
+// the message, while leaving ordinary runner errors untouched.
+// ---------------------------------------------------------------------------
+
+// Mimic an AI SDK v6 APICallError without importing the class (the runner duck-types it).
+function makeApiCallError(opts: {
+  message: string;
+  statusCode?: number;
+  responseBody?: string;
+  data?: unknown;
+}): Error {
+  const error = new Error(opts.message);
+  error.name = "AI_APICallError";
+  Object.assign(error, {
+    statusCode: opts.statusCode,
+    responseBody: opts.responseBody,
+    data: opts.data,
+  });
+  return error;
+}
+
+describe("describeRunnerError", () => {
+  it("folds the gateway status code and OpenAI-style reason into a 'Bad Request'", () => {
+    const error = makeApiCallError({
+      message: "Bad Request",
+      statusCode: 400,
+      responseBody: JSON.stringify({
+        error: { message: "context length 312000 exceeds 262144", code: "context_length_exceeded" },
+      }),
+    });
+    expect(describeRunnerError(error)).toBe(
+      "Bad Request (HTTP 400): context length 312000 exceeds 262144",
+    );
+  });
+
+  it("reads the reason from a parsed `data` envelope when responseBody is absent", () => {
+    const error = makeApiCallError({
+      message: "Bad Request",
+      statusCode: 400,
+      data: { error: { message: "invalid image part" } },
+    });
+    expect(describeRunnerError(error)).toBe("Bad Request (HTTP 400): invalid image part");
+  });
+
+  it("falls back to truncated raw text when responseBody is not JSON", () => {
+    const error = makeApiCallError({
+      message: "Bad Request",
+      statusCode: 400,
+      responseBody: "nope",
+    });
+    expect(describeRunnerError(error)).toBe("Bad Request (HTTP 400): nope");
+  });
+
+  it("omits a redundant detail equal to the base message", () => {
+    const error = makeApiCallError({
+      message: "Bad Request",
+      statusCode: 400,
+      responseBody: JSON.stringify({ error: { message: "Bad Request" } }),
+    });
+    expect(describeRunnerError(error)).toBe("Bad Request (HTTP 400)");
+  });
+
+  it("passes ordinary runner errors through unchanged", () => {
+    expect(describeRunnerError(new Error("Run aborted."))).toBe("Run aborted.");
+  });
+
+  it("handles non-Error throws", () => {
+    expect(describeRunnerError("boom")).toBe("boom");
+    expect(describeRunnerError(undefined)).toBe("Unknown runner error");
+  });
+});
 
 describe("reasoning stream helpers", () => {
   it("reads reasoning parts without treating them as assistant text", () => {

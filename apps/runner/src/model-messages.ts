@@ -112,7 +112,12 @@ export function buildModelMessages(
     }
 
     if (isToolModelMessage(modelMessage)) continue;
-    if (modelMessage) messages.push(modelMessage);
+    // Skip empty user/assistant turns. A dropped image-only paste leaves an empty user message,
+    // and a failed turn leaves an empty assistant row (modelMessage=null → legacy "" content);
+    // either one is persisted and then replayed on every later turn, and the gateway rejects an
+    // empty message with a 400. Filtering here breaks that cascade and lets an already-poisoned
+    // session recover. Messages carrying tool-calls are handled by the branch above.
+    if (modelMessage && !isEmptyReplayMessage(modelMessage)) messages.push(modelMessage);
   }
 
   return messages;
@@ -128,6 +133,23 @@ function largeTextAttachmentReference(att: ReplayAttachment, bytes: Buffer): str
     `The full content is at ${attachmentSandboxPath(att.blobPathname)} in your workspace — read it with your file tools. If you have no file tools, only the preview below is available; say so rather than guessing at the rest.`,
     `Preview (first ${preview.length} characters):\n\n${preview}`,
   ].join("\n");
+}
+
+// A user/assistant message conveys nothing to the model when its content is empty, whitespace-only
+// text, or an array whose every part is empty text/reasoning. Such a message is invalid to send and
+// is the root of the empty-message 400 cascade, so it is dropped from the replayed history.
+function isEmptyReplayMessage(message: ModelMessage): boolean {
+  const content = message.content;
+  if (typeof content === "string") return content.trim().length === 0;
+  if (Array.isArray(content)) {
+    return content.every((part) => {
+      const type = (part as { type?: unknown }).type;
+      if (type !== "text" && type !== "reasoning") return false;
+      const text = (part as { text?: unknown }).text;
+      return typeof text !== "string" || text.trim().length === 0;
+    });
+  }
+  return false;
 }
 
 export function buildAssistantModelMessage(input: {
