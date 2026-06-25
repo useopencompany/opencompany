@@ -548,6 +548,18 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     ratings: { capability: 2, speed: 2, cost: 2 },
   },
   {
+    id: "zai/glm-5.2",
+    type: "model",
+    contextWindowTokens: 256_000,
+    label: "GLM 5.2",
+    description: "Latest GLM model with improved reasoning and coding capabilities.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
+    ratings: { capability: 2, speed: 2, cost: 2 },
+  },
+  {
     id: "zai/glm-5-turbo",
     type: "model",
     contextWindowTokens: 256_000,
