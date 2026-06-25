@@ -305,6 +305,70 @@ describe("createCodexStreamAccumulator", () => {
     });
   });
 
+  it("uses the latest Codex agent message item as the final result", () => {
+    const stream = createCodexStreamAccumulator();
+    const stdout =
+      [
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "item_progress",
+            type: "agent_message",
+            text: "I am checking the repository.",
+          },
+        }),
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "item_command",
+            type: "command_execution",
+            command: "pwd",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "item_final",
+            type: "agent_message",
+            text: "Done.",
+          },
+        }),
+      ].join("\n") + "\n";
+
+    stream.push(stdout);
+    stream.finish();
+
+    expect(stream.summary({ exitCode: 0, stdout, stderr: "" }).result).toBe("Done.");
+  });
+
+  it("keeps only the latest Codex agent-message delta item as the final result", () => {
+    const stream = createCodexStreamAccumulator();
+    const stdout =
+      [
+        JSON.stringify({
+          method: "item/agentMessage/delta",
+          params: { itemId: "item_progress", delta: "I am checking " },
+        }),
+        JSON.stringify({
+          method: "item/agentMessage/delta",
+          params: { itemId: "item_progress", delta: "the repository." },
+        }),
+        JSON.stringify({
+          method: "item/agentMessage/delta",
+          params: { itemId: "item_final", delta: "Done" },
+        }),
+        JSON.stringify({
+          method: "item/agentMessage/delta",
+          params: { itemId: "item_final", delta: "." },
+        }),
+      ].join("\n") + "\n";
+
+    stream.push(stdout);
+    stream.finish();
+
+    expect(stream.summary({ exitCode: 0, stdout, stderr: "" }).result).toBe("Done.");
+  });
+
   it("does not mistake Codex item ids for resumable session ids", () => {
     const stream = createCodexStreamAccumulator();
     const stdout =
