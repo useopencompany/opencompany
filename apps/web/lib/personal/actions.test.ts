@@ -148,7 +148,8 @@ function personalAgent(configPatch: Partial<AgentConfig> = {}) {
 function dbWithPersonalAgent(agent: ReturnType<typeof personalAgent>) {
   const updates: Array<{ body: string; config: AgentConfig }> = [];
   const limit = vi.fn(async () => [agent]);
-  const whereSelect = vi.fn(() => ({ limit }));
+  const orderBy = vi.fn(async () => []);
+  const whereSelect = vi.fn(() => ({ limit, orderBy }));
   const from = vi.fn(() => ({ where: whereSelect }));
   const select = vi.fn(() => ({ from }));
   const whereUpdate = vi.fn();
