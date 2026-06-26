@@ -3,6 +3,7 @@ import {
   agents,
   brainFiles,
   workspaceRepositories,
+  workspaceSkills,
   workspaceSyncJobs,
   workspaces,
 } from "@opencompany/db/schema";
@@ -40,6 +41,7 @@ function createDb(rows: {
   brainFiles?: unknown[];
   agentFiles?: unknown[];
   agents?: unknown[];
+  workspaceSkills?: unknown[];
 }) {
   const batched: unknown[][] = [];
   const deleted: unknown[] = [];
@@ -51,6 +53,7 @@ function createDb(rows: {
     if (table === brainFiles) return rows.brainFiles ?? [];
     if (table === agentFiles) return rows.agentFiles ?? [];
     if (table === agents) return rows.agents ?? [];
+    if (table === workspaceSkills) return rows.workspaceSkills ?? [];
     return [];
   };
 
@@ -169,6 +172,57 @@ describe("projectWorkspaceToGitHub", () => {
     expect(arg.upserts).toEqual([{ path: "brain/a.md", content: "A" }]);
     expect(arg.deletes).toEqual([]);
     expect(result).toEqual({ status: "synced", commitSha: "commit_1", upserts: 1, deletes: 0 });
+  });
+
+  it("commits a workspace skill file and marks it synced", async () => {
+    const { db, updated } = createDb({
+      jobs: [
+        {
+          id: 12,
+          workspaceId: "wsp_1",
+          repoPath: "skills/brand-voice/SKILL.md",
+          sourceKind: "skill",
+          sourceRef: "brand-voice",
+          operation: "upsert",
+          desiredHash: "h_skill",
+          previousPath: null,
+          attempts: 0,
+        },
+      ],
+      workspaces: [WORKSPACE],
+      workspaceSkills: [
+        {
+          skillId: "brand-voice",
+          content: "---\nname: Brand Voice\ndescription: Use the company voice.\n---\nBody.",
+          contentHash: "h_skill",
+          githubSyncedHash: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db as never);
+    commitMock.mockResolvedValue({
+      commitSha: "commit_skill",
+      blobShaByPath: new Map([["skills/brand-voice/SKILL.md", "blob_skill"]]),
+    });
+
+    const result = await projectWorkspaceToGitHub({ workspaceId: "wsp_1" });
+
+    const arg = commitMock.mock.calls[0]![0];
+    expect(arg.upserts).toEqual([
+      {
+        path: "skills/brand-voice/SKILL.md",
+        content: "---\nname: Brand Voice\ndescription: Use the company voice.\n---\nBody.",
+      },
+    ]);
+    expect(result).toEqual({
+      status: "synced",
+      commitSha: "commit_skill",
+      upserts: 1,
+      deletes: 0,
+    });
+    const skillUpdate = updated.find((update) => update.table === workspaceSkills);
+    expect(skillUpdate?.values.githubSyncStatus).toBe("synced");
+    expect(skillUpdate?.values.githubSyncedHash).toBe("h_skill");
   });
 
   it("skips the commit when the file already matches its committed hash (no-op)", async () => {

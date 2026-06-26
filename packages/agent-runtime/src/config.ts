@@ -338,7 +338,12 @@ function buildSkillsIndexSection(skills: ResolvedSkillMetadata[]): string | null
       if (skill.origin === "builtin") {
         return `- ${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`;
       }
-      const label = skill.origin === "personal" ? "Personal skill" : "External skill";
+      const label =
+        skill.origin === "personal"
+          ? "Personal skill"
+          : skill.origin === "workspace"
+            ? "Workspace skill"
+            : "External skill";
       return `- ${label} (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`;
     }),
   ];

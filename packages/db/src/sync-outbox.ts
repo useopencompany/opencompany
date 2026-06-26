@@ -15,7 +15,7 @@ import { workspaceSyncJobs } from "./schema";
 // directly. Coalescing is keyed on (workspaceId, repoPath) so rapid successive
 // edits to the same path collapse into a single pending job.
 
-export type WorkspaceSyncSourceKind = "brain" | "agent" | "agent_file";
+export type WorkspaceSyncSourceKind = "brain" | "agent" | "agent_file" | "skill";
 export type WorkspaceSyncOperation = "upsert" | "delete";
 
 export type EnqueueWorkspaceSyncInput = {

@@ -1,6 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { computeSkillFolderIntegrity, isKnownAgentSkillId, isValidSkillMountId } from "./skills";
-import type { AgentSkillFile, AgentSkillSource } from "./types";
+import type { AgentRemoteSkillSource, AgentSkillFile } from "./types";
 
 // Limits applied to every resolve / re-resolve. Skills are small text bundles; anything
 // larger is almost certainly not a skill (or is hostile) and is rejected.
@@ -21,7 +21,7 @@ export class SkillResolverError extends Error {
 }
 
 export type ParsedSkillUrl = {
-  sourceType: AgentSkillSource["type"];
+  sourceType: AgentRemoteSkillSource["type"];
   owner: string;
   repo: string;
   // Canonical https repository url (always github.com, even for skills.sh sources).
@@ -69,7 +69,7 @@ export type ResolvedSkill = {
   name: string;
   description: string;
   command?: string;
-  source: AgentSkillSource;
+  source: AgentRemoteSkillSource;
   resolvedCommit: string;
   integrity: string;
   files: AgentSkillFile[];
@@ -83,7 +83,7 @@ export type ResolveSkillResult =
   | {
       status: "ambiguous";
       candidates: SkillCandidate[];
-      source: Pick<AgentSkillSource, "type" | "url" | "ref">;
+      source: Pick<AgentRemoteSkillSource, "type" | "url" | "ref">;
       resolvedCommit: string;
     };
 

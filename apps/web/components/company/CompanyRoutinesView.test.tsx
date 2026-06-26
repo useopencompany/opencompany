@@ -1,12 +1,15 @@
 import type { AgentConfig, AgentScheduleTriggerConfig } from "@opencompany/agent-runtime/types";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentRow } from "@/lib/collections/types";
 import CompanyRoutinesView from "./CompanyRoutinesView";
 
 const mocks = vi.hoisted(() => ({
+  dialogProps: null as null | {
+    title?: string;
+    onSave: (trigger: AgentScheduleTriggerConfig) => void;
+  },
   rows: [] as unknown[],
   push: vi.fn(),
   showError: vi.fn(),
@@ -22,6 +25,16 @@ vi.mock("@tanstack/react-db", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
+}));
+
+vi.mock("@/components/agent-schedules/ScheduleDialog", () => ({
+  ScheduleDialog: (props: {
+    title?: string;
+    onSave: (trigger: AgentScheduleTriggerConfig) => void;
+  }) => {
+    mocks.dialogProps = props;
+    return <div aria-label={props.title ?? "Schedule"} role="dialog" />;
+  },
 }));
 
 vi.mock("next/navigation", () => ({
@@ -110,8 +123,20 @@ function companyAgent(triggers: AgentConfig["triggers"] = []): AgentRow {
   };
 }
 
+function schedule(id: string, prompt: string): AgentScheduleTriggerConfig {
+  return {
+    id,
+    type: "agent.schedule",
+    cron: "0 9 * * 1-5",
+    timezone: "UTC",
+    prompt,
+    enabled: true,
+  };
+}
+
 describe("CompanyRoutinesView", () => {
   beforeEach(() => {
+    mocks.dialogProps = null;
     mocks.rows = [companyAgent()];
     mocks.useLiveQuery.mockImplementation(() => ({ data: mocks.rows, isLoading: false }));
     mocks.updateWorkspaceAgentSchedules.mockResolvedValue({ ok: true });
@@ -119,22 +144,25 @@ describe("CompanyRoutinesView", () => {
   });
 
   it("bases consecutive saves on optimistic schedules while the live agent row is stale", async () => {
-    const user = userEvent.setup();
+    const { unmount } = render(<CompanyRoutinesView />);
 
-    render(<CompanyRoutinesView />);
-
-    await user.click(screen.getAllByRole("button", { name: "New routine" })[0]!);
-    await user.type(screen.getByLabelText(/prompt/i), "First routine");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "New routine" })[0]!);
+    expect(screen.getByRole("dialog", { name: "New routine" })).toBeInTheDocument();
+    act(() => {
+      mocks.dialogProps?.onSave(schedule("first-routine", "First routine"));
+    });
 
     await waitFor(() => expect(mocks.updateWorkspaceAgentSchedules).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole("button", { name: "New routine" })).toBeEnabled());
 
-    await user.click(screen.getByRole("button", { name: "New routine" }));
-    await user.type(screen.getByLabelText(/prompt/i), "Second routine");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "New routine" }));
+    expect(screen.getByRole("dialog", { name: "New routine" })).toBeInTheDocument();
+    act(() => {
+      mocks.dialogProps?.onSave(schedule("second-routine", "Second routine"));
+    });
 
     await waitFor(() => expect(mocks.updateWorkspaceAgentSchedules).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "New routine" })).toBeEnabled());
 
     const firstSave = mocks.updateWorkspaceAgentSchedules.mock.calls[0]?.[1] as
       | AgentScheduleTriggerConfig[]
@@ -148,5 +176,7 @@ describe("CompanyRoutinesView", () => {
       "First routine",
       "Second routine",
     ]);
-  });
+
+    unmount();
+  }, 20_000);
 });

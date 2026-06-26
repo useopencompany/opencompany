@@ -5,6 +5,7 @@ import {
   agents,
   brainFiles,
   workspaceRepositories,
+  workspaceSkills,
   workspaceSyncJobs,
   workspaces,
 } from "@opencompany/db/schema";
@@ -203,14 +204,16 @@ async function planJobs(
   const brainPaths = new Set<string>();
   const agentFilePaths = new Set<string>();
   const agentIds = new Set<string>();
+  const skillIds = new Set<string>();
   for (const job of jobs) {
     if (job.operation === "delete") continue;
     if (job.sourceKind === "brain") brainPaths.add(brainLogicalPath(job.repoPath));
     else if (job.sourceKind === "agent_file") agentFilePaths.add(job.repoPath);
     else if (job.sourceKind === "agent" && job.sourceRef) agentIds.add(job.sourceRef);
+    else if (job.sourceKind === "skill" && job.sourceRef) skillIds.add(job.sourceRef);
   }
 
-  const [brainRows, agentFileRows, agentRows] = await Promise.all([
+  const [brainRows, agentFileRows, agentRows, skillRows] = await Promise.all([
     brainPaths.size
       ? db
           .select()
@@ -236,13 +239,25 @@ async function planJobs(
           .from(agents)
           .where(and(eq(agents.workspaceId, workspaceId), inArray(agents.id, [...agentIds])))
       : Promise.resolve([]),
+    skillIds.size
+      ? db
+          .select()
+          .from(workspaceSkills)
+          .where(
+            and(
+              eq(workspaceSkills.workspaceId, workspaceId),
+              inArray(workspaceSkills.skillId, [...skillIds]),
+            ),
+          )
+      : Promise.resolve([]),
   ]);
 
   const brainByPath = new Map(brainRows.map((row) => [row.path, row]));
   const agentFileByPath = new Map(agentFileRows.map((row) => [row.path, row]));
   const agentById = new Map(agentRows.map((row) => [row.id, row]));
+  const skillById = new Map(skillRows.map((row) => [row.skillId, row]));
 
-  return jobs.map((job) => planJob(job, { brainByPath, agentFileByPath, agentById }));
+  return jobs.map((job) => planJob(job, { brainByPath, agentFileByPath, agentById, skillById }));
 }
 
 function planJob(
@@ -251,6 +266,7 @@ function planJob(
     brainByPath: Map<string, typeof brainFiles.$inferSelect>;
     agentFileByPath: Map<string, typeof agentFiles.$inferSelect>;
     agentById: Map<string, typeof agents.$inferSelect>;
+    skillById: Map<string, typeof workspaceSkills.$inferSelect>;
   },
 ): PlannedJob {
   const renamePath =
@@ -297,6 +313,7 @@ function resolveDesiredContent(
     brainByPath: Map<string, typeof brainFiles.$inferSelect>;
     agentFileByPath: Map<string, typeof agentFiles.$inferSelect>;
     agentById: Map<string, typeof agents.$inferSelect>;
+    skillById: Map<string, typeof workspaceSkills.$inferSelect>;
   },
 ): {
   content: string;
@@ -337,6 +354,17 @@ function resolveDesiredContent(
       committedHash: hashAgentSource(source),
       syncedHash: row.githubSyncedHash,
       currentPath: row.path,
+    };
+  }
+  if (job.sourceKind === "skill") {
+    if (!job.sourceRef) return null;
+    const row = lookups.skillById.get(job.sourceRef);
+    if (!row) return null;
+    return {
+      content: row.content,
+      committedHash: row.contentHash,
+      syncedHash: row.githubSyncedHash,
+      currentPath: null,
     };
   }
   return null;
@@ -456,6 +484,18 @@ function markSourceSynced(
         ),
       );
   }
+  if (job.sourceKind === "skill") {
+    return db
+      .update(workspaceSkills)
+      .set(synced)
+      .where(
+        and(
+          eq(workspaceSkills.workspaceId, job.workspaceId),
+          eq(workspaceSkills.skillId, job.sourceRef ?? ""),
+          eq(workspaceSkills.contentHash, committedHash),
+        ),
+      );
+  }
   // agent
   return db
     .update(agents)
@@ -524,6 +564,18 @@ function markSourceFailed(
           eq(agentFiles.workspaceId, job.workspaceId),
           eq(agentFiles.path, job.repoPath),
           eq(agentFiles.contentHash, committedHash),
+        ),
+      );
+  }
+  if (job.sourceKind === "skill") {
+    return db
+      .update(workspaceSkills)
+      .set(failed)
+      .where(
+        and(
+          eq(workspaceSkills.workspaceId, job.workspaceId),
+          eq(workspaceSkills.skillId, job.sourceRef ?? ""),
+          eq(workspaceSkills.contentHash, committedHash),
         ),
       );
   }

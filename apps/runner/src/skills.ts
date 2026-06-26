@@ -1,22 +1,26 @@
 import {
   type AgentConfig,
+  type AgentExternalSkillReference,
   type AgentSkillFile,
+  type AgentWorkspaceSkillSource,
   agentBundleDir,
-  isExternalSkillReference,
+  isRemoteSkillReference,
+  isWorkspaceSkillReference,
   MEMORY_CLI_FILE,
   MEMORY_SKILL_ID,
   resolveEnabledBuiltinSkillFiles,
   scanPersonalSkills,
   shellQuote,
 } from "@opencompany/agent-runtime";
-import { agentFiles, agents } from "@opencompany/db/schema";
+import { agentFiles, agents, workspaceSkills } from "@opencompany/db/schema";
 import { getMemoryCliSource } from "@opencompany/memory/cli-bundle";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import { type SandboxHandle, sandboxLayout, writeSandboxTextFiles } from "./sandbox";
 import { loadExternalSkillFiles } from "./skill-snapshots";
 
 const SANDBOX_ROOT_USER = "root";
+type WorkspaceSkillReference = AgentExternalSkillReference & { source: AgentWorkspaceSkillSource };
 
 // Materialize the session's enabled skills into a read-only ./skills root. Each skill becomes
 // skills/<id>/<file> (e.g. skills/agent-self-edit/SKILL.md). Files are root-owned and
@@ -35,9 +39,15 @@ export async function materializeSkillsForSession(input: {
 }) {
   const layout = sandboxLayout(input.workdir);
   const builtins = resolveEnabledBuiltinSkillFiles(input.config);
-  const externalRefs = (input.config.skills ?? []).filter(isExternalSkillReference);
+  const externalRefs = (input.config.skills ?? []).filter(isRemoteSkillReference);
+  const workspaceRefs = (input.config.skills ?? []).filter(isWorkspaceSkillReference);
   const externals = await loadExternalSkillFiles(input.workspaceId, externalRefs);
-  const skills: Array<{ id: string; files: AgentSkillFile[] }> = [...builtins, ...externals];
+  const workspaceAuthored = await loadWorkspaceSkillsForMount(input.workspaceId, workspaceRefs);
+  const skills: Array<{ id: string; files: AgentSkillFile[] }> = [
+    ...builtins,
+    ...externals,
+    ...workspaceAuthored,
+  ];
   // Personal skills (agent/skills/<id>/) mount identically to built-ins/externals, but their ids
   // must not shadow one, so reserve the ids already in play before scanning the bundle.
   const reservedIds = new Set(skills.map((skill) => skill.id));
@@ -81,6 +91,30 @@ export async function materializeSkillsForSession(input: {
     ].join(" && "),
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   );
+}
+
+async function loadWorkspaceSkillsForMount(
+  workspaceId: string,
+  refs: WorkspaceSkillReference[],
+): Promise<Array<{ id: string; files: AgentSkillFile[] }>> {
+  if (refs.length === 0) return [];
+  const ids = [...new Set(refs.map((ref) => ref.id))];
+  const db = getDb();
+  const rows = await db
+    .select({
+      skillId: workspaceSkills.skillId,
+      content: workspaceSkills.content,
+    })
+    .from(workspaceSkills)
+    .where(
+      and(eq(workspaceSkills.workspaceId, workspaceId), inArray(workspaceSkills.skillId, ids)),
+    );
+  const byId = new Map(rows.map((row) => [row.skillId, row.content]));
+  return refs.flatMap((ref) => {
+    const content = byId.get(ref.id);
+    if (!content) return [];
+    return [{ id: ref.id, files: [{ path: "SKILL.md", content }] }];
+  });
 }
 
 // Load the agent's personal skills from its bundle (agent_files) so they can be copied into the

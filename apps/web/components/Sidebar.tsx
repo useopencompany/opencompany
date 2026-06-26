@@ -4,6 +4,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  Blocks,
   Bot,
   Brain,
   // CircleEqual,
@@ -515,6 +516,12 @@ function SidebarContent({
               icon={Bot}
               label="Agents"
               active={isActive("/company/agents")}
+            />
+            <NavItem
+              href="/company/skills"
+              icon={Blocks}
+              label="Skills"
+              active={isActive("/company/skills")}
             />
             <NavItem
               href="/company/routines"
