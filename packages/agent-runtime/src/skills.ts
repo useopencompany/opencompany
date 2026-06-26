@@ -217,6 +217,12 @@ from a GitHub/skills.sh URL are managed by a human in the editor and are preserv
 - \`@skill/move-to-opencompany\` — import an external knowledge base (a GitHub repo or folders)
   into the Brain safely, with a preview and a receipt (imported N, lost 0). Add it when the user
   is migrating notes, docs, or a wiki into OpenCompany.
+- \`@skill/cto-pr-review\` — review pull requests and diffs as a blocking senior technical
+  reviewer. Add it for agents responsible for code review, merge readiness, architecture, or
+  release risk.
+- \`@skill/implementer\` — implement software changes with a strong SWE loop: read context,
+  define the real contract, test first when practical, make a narrow change, verify, and review
+  the diff. Add it for agents that regularly write code.
 
 Add a skill only when it genuinely fits how you work — an unused skill is just noise in your
 definition.
@@ -1144,6 +1150,153 @@ End with an honest, structured tally:
 }
 const MOVE_TO_OPENCOMPANY_SKILL_MD = buildMoveToOpenCompanySkillMd();
 
+export const CTO_PR_REVIEW_SKILL_ID = "cto-pr-review";
+
+function buildCtoPrReviewSkillMd(): string {
+  return `---
+name: cto-pr-review
+description: Review pull requests and diffs as a blocking CTO-level technical reviewer. Use when evaluating code for merge readiness, correctness, architecture, security, migrations, tests, and product risk.
+---
+
+# CTO PR review
+
+Review code as the person accountable for what ships. Your job is to decide whether the change
+is safe to merge, not to make the author feel good. Be fair, concrete, and technically rigorous.
+
+## When to use this
+
+- The user asks for a PR review, diff review, code review, merge check, or release-readiness pass.
+- You are reviewing work from another agent before continuing.
+- A change touches shared behavior, security boundaries, billing, auth, data persistence,
+  migrations, env/config, external APIs, or user-facing flows.
+
+Do not use this for broad brainstorming or implementation. If asked to fix the issues you find,
+finish the review first, then switch to the appropriate implementation workflow.
+
+## Review procedure
+
+1. Establish the review target: base/head commits, branch diff, PR, patch, or files changed.
+2. Read the stated requirements and identify the real contract being changed.
+3. Inspect the changed code and the surrounding code it depends on. Do not judge from the diff
+   alone when behavior depends on nearby helpers, schemas, routes, or tests.
+4. Check the high-risk surfaces:
+   - correctness and edge cases
+   - security, authorization, secret handling, and untrusted input
+   - data loss, migrations, env vars, and backwards compatibility
+   - product behavior, UX states, and API contracts
+   - test coverage and whether tests prove the changed behavior
+   - maintainability, ownership boundaries, and consistency with local patterns
+5. Verify when practical with tests, typecheck, build, or a focused command. If you cannot verify,
+   name the gap.
+6. Produce findings first, ordered by severity. Do not lead with praise or a summary.
+
+## Severity
+
+- **Critical** - Must fix before merge. Security issue, data loss, broken core flow, invalid
+  migration, auth bypass, or behavior that can corrupt user/company state.
+- **Important** - Should fix before merge. Incorrect edge case, missing validation, contract
+  mismatch, incomplete test coverage for risky behavior, or maintainability issue likely to cause
+  real defects.
+- **Minor** - Optional cleanup. Small readability, naming, or local consistency issues that do not
+  affect correctness.
+
+Style-only feedback belongs in Minor unless it hides a real correctness or maintenance problem.
+
+## Output format
+
+Start with findings. Use this shape:
+
+\`\`\`
+Findings
+- Critical: path/to/file.ts:123 - Description of the bug, why it matters, and the concrete fix.
+- Important: path/to/file.ts:45 - Description...
+
+Open questions
+- Anything that blocks a confident review.
+
+Verification
+- Commands or checks run, or "Not run" with the reason.
+
+Merge assessment
+- Blocked, risky, or ready.
+\`\`\`
+
+If there are no findings, say so plainly and still report verification and residual risk. Do not
+invent issues. Do not rubber-stamp unverified behavior as safe.
+`;
+}
+
+const CTO_PR_REVIEW_SKILL_MD = buildCtoPrReviewSkillMd();
+
+export const IMPLEMENTER_SKILL_ID = "implementer";
+
+function buildImplementerSkillMd(): string {
+  return `---
+name: implementer
+description: Implement software changes like a strong SWE: read context first, use TDD when practical, keep the diff narrow, match local patterns, verify behavior, and review your own work before finishing.
+---
+
+# Implementer
+
+Implement the requested software change with senior-engineer discipline. The goal is a correct,
+reviewable diff that fits the codebase and is proven by the lightest meaningful verification.
+
+## Work loop
+
+1. Read the relevant code, tests, docs, and local conventions before editing.
+2. State the real contract being changed: inputs, outputs, persisted data, UI behavior, or runtime
+   side effects.
+3. Choose the narrowest implementation that satisfies that contract. Prefer existing helpers,
+   patterns, components, and test styles.
+4. For behavior changes, use TDD when practical:
+   - Write or update one focused test first.
+   - Run it and verify it fails for the expected reason.
+   - Implement the minimal code needed to pass.
+   - Run it again and verify it passes.
+   - Refactor only while keeping the test green.
+5. For changes where TDD is not practical, name why and use the smallest verification that proves
+   the behavior.
+6. Update docs, env examples, migrations, or generated artifacts only when the changed contract
+   requires it.
+7. Review your own diff before finishing.
+
+## Engineering rules
+
+- Keep scope tight. Do not bundle unrelated cleanup or broad refactors.
+- Treat external input as hostile and validate at boundaries.
+- Do not silently swallow errors. Surface them, handle them, or make invalid state impossible.
+- Do not add new dependencies, feature flags, retries, or abstractions unless the current task
+  clearly needs them.
+- Preserve user changes in the worktree. Work with existing edits; do not revert unrelated files.
+- For UI work, include loading, empty, error, and slow states when the flow needs them.
+
+## Self-review checklist
+
+Before declaring the work done, check:
+
+- Does the diff match the requested behavior and no more?
+- Are tests meaningful, and did at least one relevant failing test fail before implementation when
+  TDD was practical?
+- Did the right verification commands run cleanly?
+- Could this break auth, billing, persistence, migrations, env/config, external APIs, or user
+  data?
+- Are docs and examples still honest?
+- Is the final answer explicit about what changed, what was verified, and what remains unverified?
+
+## Final report
+
+Keep the close-out short:
+
+- What changed.
+- Verification run.
+- Anything not verified and why.
+
+Do not claim a check passed unless you ran it. Do not leave the user with a vague "should work."
+`;
+}
+
+const IMPLEMENTER_SKILL_MD = buildImplementerSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -1230,6 +1383,24 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
     defaultEnabled: false,
     addable: true,
     files: [{ path: "SKILL.md", content: MOVE_TO_OPENCOMPANY_SKILL_MD }],
+  },
+  {
+    id: CTO_PR_REVIEW_SKILL_ID,
+    name: "CTO PR review",
+    description:
+      "Review pull requests and diffs as a blocking CTO-level technical reviewer — findings first by severity across correctness, architecture, security, migrations, tests, and product risk.",
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: CTO_PR_REVIEW_SKILL_MD }],
+  },
+  {
+    id: IMPLEMENTER_SKILL_ID,
+    name: "Implementer",
+    description:
+      "Implement software changes like a strong SWE — read context first, test behavior when practical, keep the diff narrow, match local patterns, verify, and review your own work.",
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: IMPLEMENTER_SKILL_MD }],
   },
 ];
 

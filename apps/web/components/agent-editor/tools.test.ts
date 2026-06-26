@@ -1,4 +1,4 @@
-import { Atom, Blocks, Brain, Feather, Sparkles } from "lucide-react";
+import { Atom, Blocks, Brain, Code2, Feather, ListTodo, Sparkles } from "lucide-react";
 import { describe, expect, test } from "vitest";
 import {
   AGENT_MODELS,
@@ -204,10 +204,40 @@ describe("agent editor mention tools", () => {
     );
   });
 
+  test("offers the addable built-in CTO PR review skill in the mention menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skill",
+          mentionId: "skill/cto-pr-review",
+          label: "skill/cto-pr-review",
+          displayLabel: "CTO PR review",
+        }),
+      ]),
+    );
+  });
+
+  test("offers the addable built-in implementer skill in the mention menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skill",
+          mentionId: "skill/implementer",
+          label: "skill/implementer",
+          displayLabel: "Implementer",
+        }),
+      ]),
+    );
+  });
+
   test("gives built-in skills distinct icons and external skills a neutral fallback", () => {
     expect(skillIconFor("first-principles")).toBe(Atom);
     expect(skillIconFor("humanizer")).toBe(Feather);
     expect(skillIconFor("memory")).toBe(Brain);
+    expect(skillIconFor("cto-pr-review")).toBe(ListTodo);
+    expect(skillIconFor("implementer")).toBe(Code2);
     // Unknown / external skill ids fall back to a neutral glyph rather than the
     // old shared Sparkles placeholder.
     expect(skillIconFor("some-external-github-skill")).toBe(Blocks);
