@@ -15,6 +15,10 @@ on:
         description: "Run web and runner health checks after deploy"
         type: boolean
         default: true
+      deploy_connector:
+        description: "Deploy the Connector Vercel project after the web/runner release"
+        type: boolean
+        default: false
 
 concurrency:
   group: production-release
@@ -156,29 +160,6 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: bun run db:migrate
 
-      - name: Pull Vercel connector project config
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        run: |
-          rm -rf .vercel .vercel-connector-prebuilt
-          VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" \
-            bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-
-      - name: Check Vercel connector env
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        env:
-          OPENCOMPANY_LOAD_VERCEL_ENV: "1"
-        run: bun run release:preflight -- --connector
-
-      - name: Build connector
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        env:
-          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-        run: |
-          VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" \
-            bunx vercel build --prod --token="$VERCEL_TOKEN"
-          mv .vercel .vercel-connector-prebuilt
-
       - name: Pull Vercel project config
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: |
@@ -214,7 +195,7 @@ jobs:
 
       - name: Skip stale deploy
         if: ${{ github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'false' }}
-        run: echo "This automatic release was superseded after build, so web, connector, and runner deploys were skipped."
+        run: echo "This automatic release was superseded after build, so web and runner deploys were skipped."
 
       - name: Trigger runner deploy
         id: trigger-runner
@@ -235,22 +216,6 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed web to $url"
 
-      - name: Deploy connector
-        id: deploy-connector
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
-        run: |
-          rm -rf .vercel
-          mv .vercel-connector-prebuilt .vercel
-          output="$(VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
-          echo "$output"
-          url="$(printf "%s\n" "$output" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
-          if [ -z "$url" ]; then
-            echo "Could not find connector deployment URL in Vercel output."
-            exit 1
-          fi
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "Deployed connector to $url"
-
       - name: Cancel runner deploy after app deploy failure
         if: ${{ failure() && steps.trigger-runner.outputs.deploy_id != '' }}
         run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
@@ -264,6 +229,7 @@ jobs:
         env:
           EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
           SMOKE_RUNNER: ${{ github.event_name == 'workflow_run' || inputs.deploy_runner }}
+          SMOKE_CONNECTOR: "false"
           SMOKE_WEB_ATTEMPTS: "12"
           SMOKE_CONNECTOR_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
@@ -320,3 +286,89 @@ jobs:
             }
 
             await github.rest.repos.createDeploymentStatus(status);
+
+  connector:
+    name: Deploy Connector production
+    needs: release
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_connector }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 25
+    environment: production
+    env:
+      INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
+      INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Require main branch
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "Connector production releases must run from main. Current ref: $GITHUB_REF"
+          exit 1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Fetch release secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /release
+
+      - name: Check Connector release automation env
+        run: bun run release:preflight -- --connector-release
+
+      - name: Pull Vercel Connector project config
+        run: |
+          rm -rf .vercel
+          VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" \
+            bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Check Vercel Connector env
+        env:
+          OPENCOMPANY_LOAD_VERCEL_ENV: "1"
+        run: bun run release:preflight -- --connector
+
+      - name: Build Connector
+        env:
+          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+        run: |
+          VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" \
+            bunx vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy Connector
+        id: deploy-connector
+        run: |
+          output="$(VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
+          echo "$output"
+          url="$(printf "%s\n" "$output" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
+          if [ -z "$url" ]; then
+            echo "Could not find connector deployment URL in Vercel output."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed connector to $url"
+
+      - name: Smoke check Connector
+        env:
+          EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
+          SMOKE_WEB: "false"
+          SMOKE_RUNNER: "false"
+          SMOKE_CONNECTOR: "true"
+          SMOKE_CONNECTOR_ATTEMPTS: "12"
+          SMOKE_DELAY_MS: "10000"
+        run: bun run release:smoke

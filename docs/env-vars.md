@@ -295,11 +295,11 @@ Infisical `prod` + `/release` secrets:
 | `VERCEL_TOKEN` | Vercel CLI deploy token. |
 | `VERCEL_ORG_ID` | Vercel team/org id. |
 | `VERCEL_PROJECT_ID` | Vercel web project id. |
-| `VERCEL_CONNECTOR_PROJECT_ID` | Vercel Connector project id. |
+| `VERCEL_CONNECTOR_PROJECT_ID` | Vercel Connector project id. Required only for manual production dispatches with `deploy_connector: true`. |
 | `RENDER_SERVICE_ID` | Render service id for `opencompany-runner`. |
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
-| `PRODUCTION_CONNECTOR_URL` | Canonical production Connector URL for smoke checks. |
+| `PRODUCTION_CONNECTOR_URL` | Canonical production Connector URL for smoke checks. Required only when Connector smoke is enabled. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 | `CHANGELOG_BLOB_READ_WRITE_TOKEN` | Public `opencompany-changelog` Blob store token. Authoring-time credential for uploading changelog screen recordings (see [changelog-media.md](./changelog-media.md)); not read by CI or any runtime. |
 
@@ -320,7 +320,7 @@ Release-only script vars:
 | `RENDER_DEPLOY_TIMEOUT_MS` | No | Maximum time to wait for the Render deploy API before smoke checks. Defaults to `900000`. |
 | `RENDER_DEPLOY_POLL_MS` | No | Delay between Render deploy status polls. Defaults to `10000`. |
 | `SMOKE_WEB` | No | Set to `false`, `0`, or `no` to skip web health checks. Defaults to enabled. |
-| `SMOKE_CONNECTOR` | No | Set to `false`, `0`, or `no` to skip Connector health checks. Defaults to enabled. |
+| `SMOKE_CONNECTOR` | No | Set to `false`, `0`, or `no` to skip Connector health checks. The script defaults to enabled; the normal production workflow sets it to `false`, and the manual Connector job sets it to `true`. |
 | `SMOKE_RUNNER` | No | Set to `false`, `0`, or `no` to skip runner health checks. Defaults to enabled. |
 | `SMOKE_ATTEMPTS` | No | Default health retry count. Defaults to `30`. |
 | `SMOKE_WEB_ATTEMPTS` | No | Web health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
@@ -462,10 +462,11 @@ Check local web and runner env coverage:
 bun run release:preflight
 ```
 
-Check only release automation env:
+Check release automation env:
 
 ```bash
 bun run infisical:release:preflight
+bun run release:preflight -- --connector-release
 ```
 
 Run deployed health checks:

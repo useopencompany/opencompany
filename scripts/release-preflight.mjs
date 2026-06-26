@@ -98,13 +98,16 @@ const groups = {
       "VERCEL_TOKEN",
       "VERCEL_ORG_ID",
       "VERCEL_PROJECT_ID",
-      "VERCEL_CONNECTOR_PROJECT_ID",
       "RENDER_SERVICE_ID",
       "RENDER_API_KEY",
       "PRODUCTION_WEB_URL",
-      "PRODUCTION_CONNECTOR_URL",
       "RUNNER_PUBLIC_URL",
     ],
+    optional: [],
+  },
+  "connector-release": {
+    label: "GitHub Actions Connector release automation",
+    required: ["VERCEL_TOKEN", "VERCEL_CONNECTOR_PROJECT_ID", "PRODUCTION_CONNECTOR_URL"],
     optional: [],
   },
 };

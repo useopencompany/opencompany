@@ -80,8 +80,10 @@ Connector deploys as its own Vercel project from the monorepo:
 - Automatic Vercel Git deploys: disabled
 
 Production env comes from Infisical `prod` + `/connector` and is synced to the
-Connector Vercel project. The production release workflow deploys Connector
-after production migrations and alongside the existing web/runner release.
+Connector Vercel project. The production release workflow deploys Connector only
+when a manual workflow dispatch sets `deploy_connector: true`. Automatic
+web/runner releases skip Connector build, deploy, and smoke checks so Connector
+cannot block existing production releases.
 
 Required production env:
 

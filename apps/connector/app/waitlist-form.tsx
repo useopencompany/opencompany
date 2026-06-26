@@ -16,7 +16,7 @@ export function WaitlistForm() {
         <span aria-hidden className="text-muted-foreground">
           ›{" "}
         </span>
-        You're on the list. We'll be in touch.
+        You&apos;re on the list. We&apos;ll be in touch.
       </p>
     );
   }

@@ -5,7 +5,7 @@ import { Checkbox } from "@opencompany/ui/components/checkbox";
 import { Input } from "@opencompany/ui/components/input";
 import { CheckCircle2, LinearIcon, Link, Lock } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useState } from "react";
 import { describeConnectorLinearStatus } from "@/lib/mcp/status";
 import {
   CONNECTOR_LINEAR_PERMISSION_LABELS,
@@ -17,7 +17,7 @@ import { finishConnectorSetupAction, saveConnectorOrganizationAction } from "@/l
 import type { ConnectorSetupState, SerializedConnectorOrganization } from "@/lib/setup/data";
 import {
   initialFinishSetupActionState,
-  type OrganizationActionState,
+  initialOrganizationActionState,
   type setupStatusMessage,
 } from "@/lib/setup/state";
 import { slugifyConnectorOrganizationName } from "@/lib/slug";
@@ -46,26 +46,21 @@ export function SetupFlow({ initialState, notice }: SetupFlowProps) {
     initialState.permissions,
   );
 
-  const initialOrganizationState: OrganizationActionState = useMemo(
-    () => ({ error: null, organization }),
-    [organization],
-  );
   const [organizationState, organizationAction, organizationPending] = useActionState(
     saveConnectorOrganizationAction,
-    initialOrganizationState,
+    initialOrganizationActionState,
   );
   const [finishState, finishAction, finishPending] = useActionState(
     finishConnectorSetupAction,
     initialFinishSetupActionState,
   );
 
-  useEffect(() => {
-    if (!organizationState.organization) return;
+  if (organizationState.organization && organizationState.organization !== organization) {
     setOrganization(organizationState.organization);
     setName(organizationState.organization.name);
     setSlug(organizationState.organization.slug);
     setStep(2);
-  }, [organizationState.organization]);
+  }
 
   function updatePermission(scope: ConnectorLinearPermissionScope, checked: boolean) {
     setPermissions((current) => ({ ...current, [scope]: checked }));

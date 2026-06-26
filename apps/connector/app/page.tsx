@@ -70,7 +70,7 @@ export default async function HomePage() {
         </pre>
 
         <h1 className="mt-10 text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-          One place for your team's integrations, MCPs, and skills.
+          One place for your team&apos;s integrations, MCPs, and skills.
         </h1>
 
         <p className="mt-5 max-w-xl text-xs leading-6 text-foreground/55 sm:text-sm">
@@ -98,7 +98,7 @@ export default async function HomePage() {
         <p className="mt-4 max-w-xl text-sm leading-7 text-foreground/55 sm:text-base">
           You paste an API token into a group chat so the team can use AI. Someone leaves, and now{" "}
           <span className="text-foreground">
-            you're rotating keys for everyone — with no idea who has access to what.
+            you&apos;re rotating keys for everyone — with no idea who has access to what.
           </span>{" "}
           Connector is how that ends.
         </p>

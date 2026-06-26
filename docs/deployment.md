@@ -24,13 +24,11 @@ Production releases are intentionally guarded:
 
 1. Run CI on `main`.
 2. Run Drizzle migrations against production Neon.
-3. Build the Vercel Connector and web apps for the exact commit.
+3. Build the Vercel web app for the exact commit.
 4. Re-check that the release is still current.
-5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web and Connector apps while
-   Render builds.
+5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web app while Render builds.
 6. Wait for the Render runner deploy for the exact commit.
-7. Smoke check the canonical production web `/api/healthz`, Connector `/api/healthz`, and runner
-   `/healthz`.
+7. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
 
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
 `CI` workflow succeeds for a push to `main`, and it can still be manually triggered from GitHub
@@ -46,16 +44,23 @@ failed Vercel deploy best-effort cancels the in-flight Render deploy, but cancel
 rollback guarantee; if Render has already gone live, treat the failed workflow as requiring operator
 follow-up.
 
+Connector is intentionally outside the automatic release path. Manual workflow dispatches can deploy
+Connector after the web/runner release by setting `deploy_connector: true`; that starts a separate
+`connector` job with `needs: release`, validates the Connector release env, builds and deploys the
+Connector Vercel project, then runs a Connector-only smoke check.
+
 The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so a newer push to the
 same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
 bursts from spending Actions minutes on commits that can no longer release.
 
-The web and Connector smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_CONNECTOR_URL` from
-Infisical `prod` + `/release`, not the raw Vercel deployment URLs, so Vercel deployment protection
-can remain enabled on generated preview-style URLs. In production the canonical web URL is
+The web smoke check uses `PRODUCTION_WEB_URL` from Infisical `prod` + `/release`, not the raw Vercel
+deployment URL, so Vercel deployment protection can remain enabled on generated preview-style URLs.
+Normal production releases set `SMOKE_CONNECTOR=false`. Manual Connector deployments use
+`PRODUCTION_CONNECTOR_URL` from the same Infisical path and set `SMOKE_WEB=false`,
+`SMOKE_RUNNER=false`, and `SMOKE_CONNECTOR=true`. In production the canonical web URL is
 `https://my.opencompany.cloud`, and the canonical Connector URL is `https://runconnector.com`. The
 Better Stack status page should monitor the same web `/api/healthz`, Connector `/api/healthz`, and
-runner `/healthz` endpoints as the release smoke check, so keep those health endpoints stable when
+runner `/healthz` endpoints as the release smoke checks, so keep those health endpoints stable when
 changing deployment or monitoring behavior.
 
 Release attribution is not managed as an Infisical secret. Vercel and Render expose commit metadata
@@ -152,10 +157,10 @@ Set these in Infisical `prod` + `/connector` and sync them into the Connector Ve
 - `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY`
 - optional observability env vars
 
-The release workflow reads `VERCEL_CONNECTOR_PROJECT_ID` from Infisical `prod` + `/release`, builds
-the Connector Vercel project before deploying anything, then deploys its prebuilt output after the
-web app. This keeps Connector on the same release SHA as web and runner while preserving the
-migration-first release contract.
+The release workflow reads `VERCEL_CONNECTOR_PROJECT_ID` from Infisical `prod` + `/release` only for
+manual workflow dispatches with `deploy_connector: true`. The Connector job runs after the
+web/runner release, builds the Connector Vercel project, deploys its prebuilt output, and smoke
+checks only Connector. Automatic web/runner releases do not build, deploy, or smoke Connector.
 
 ### Render
 
@@ -270,6 +275,12 @@ The release workflow checks these with:
 bun run release:preflight -- --release
 ```
 
+Manual Connector deployments also check Connector-specific release automation vars with:
+
+```bash
+bun run release:preflight -- --connector-release
+```
+
 ## Local/operator commands
 
 Check local env coverage:
@@ -278,11 +289,12 @@ Check local env coverage:
 bun run release:preflight
 ```
 
-Check only web or runner env coverage:
+Check targeted env coverage:
 
 ```bash
 bun run release:preflight -- --web
 bun run release:preflight -- --connector
+bun run release:preflight -- --connector-release
 bun run release:preflight -- --runner
 ```
 
