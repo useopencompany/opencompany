@@ -114,8 +114,10 @@ export type SessionAggregateSnapshot = {
  * because it carries live deltas/status. The exception is a completed assistant
  * overlay that lacks the snapshot's canonical final payload (`modelMessage`/content),
  * which can happen when transient deltas or an older completion event were missed.
- * Messages new since the snapshot are appended in stream order (they are
- * chronologically newer). Keyed by message id.
+ * Messages new since the snapshot are appended in stream order, then the merged
+ * transcript is stably ordered by `createdAt` when both messages expose one. This
+ * keeps mixed snapshot/overlay states in the same chronological order as the
+ * Postgres snapshot while preserving legacy rows without timestamps.
  */
 export function mergeMessages(
   snapshot: SessionMessage[],
@@ -132,7 +134,7 @@ export function mergeMessages(
   for (const message of overlay) {
     if (!seen.has(message.id)) merged.push(message);
   }
-  return merged;
+  return sortMessagesByCreatedAt(merged);
 }
 
 function mergeSharedMessage(snapshot: SessionMessage, overlay: SessionMessage): SessionMessage {
@@ -162,29 +164,98 @@ function shouldRestoreCompletedAssistantSnapshot(
 /**
  * Union-merge snapshot events with the live overlay. Durable events (numeric id)
  * are deduped by id with the overlay copy preferred; transient events (id `null`,
- * token/reasoning deltas) exist only on the overlay and are appended in stream
- * order. The snapshot prefix stays ordered; overlay-only events (newer durable +
- * transient) follow, preserving chronology.
+ * token/reasoning/tool-output deltas) exist only on the overlay and must stay at
+ * their original stream positions. If we append all transients after the snapshot
+ * prefix, the live assistant turn can render text/tool rows in a different order
+ * until the final `modelMessage` snapshot arrives.
  */
 export function mergeEvents(snapshot: RuntimeEvent[], overlay: RuntimeEvent[]): RuntimeEvent[] {
   const overlayById = new Map<number, RuntimeEvent>();
   for (const event of overlay) {
     if (event.id !== null) overlayById.set(event.id, event);
   }
-  const merged: RuntimeEvent[] = [];
-  const seenIds = new Set<number>();
+  const snapshotById = new Map<number, RuntimeEvent>();
   for (const event of snapshot) {
-    if (event.id !== null) {
-      merged.push(overlayById.get(event.id) ?? event);
-      seenIds.add(event.id);
-    } else {
-      merged.push(event);
+    if (event.id !== null) snapshotById.set(event.id, event);
+  }
+
+  if (overlay.length === 0) return snapshot;
+
+  const durableIds = Array.from(new Set([...snapshotById.keys(), ...overlayById.keys()])).sort(
+    (left, right) => left - right,
+  );
+  let durableCursor = 0;
+  const seenIds = new Set<number>();
+
+  const merged: RuntimeEvent[] = [];
+  let hasSeenDurableOverlayEvent = false;
+  let pendingTransientEvents: RuntimeEvent[] = [];
+  const pushDurable = (id: number) => {
+    if (seenIds.has(id)) return;
+    const event = overlayById.get(id) ?? snapshotById.get(id);
+    if (!event) return;
+    merged.push(event);
+    seenIds.add(id);
+  };
+  const pushSnapshotDurablesBefore = (id: number) => {
+    while (durableCursor < durableIds.length) {
+      const nextId = durableIds[durableCursor];
+      if (nextId === undefined || nextId >= id) break;
+      durableCursor += 1;
+      pushDurable(nextId);
+    }
+  };
+
+  for (const event of overlay) {
+    if (event.id === null) {
+      pendingTransientEvents.push(event);
+      continue;
+    }
+
+    pushSnapshotDurablesBefore(event.id);
+    merged.push(...pendingTransientEvents);
+    pendingTransientEvents = [];
+    while (durableIds[durableCursor] === event.id) durableCursor += 1;
+    pushDurable(event.id);
+    hasSeenDurableOverlayEvent = true;
+  }
+
+  if (!hasSeenDurableOverlayEvent) {
+    while (durableCursor < durableIds.length) {
+      const id = durableIds[durableCursor];
+      durableCursor += 1;
+      if (id !== undefined) pushDurable(id);
     }
   }
-  for (const event of overlay) {
-    if (event.id === null || !seenIds.has(event.id)) merged.push(event);
+
+  merged.push(...pendingTransientEvents);
+
+  while (durableCursor < durableIds.length) {
+    const id = durableIds[durableCursor];
+    durableCursor += 1;
+    if (id !== undefined) pushDurable(id);
   }
+
   return merged;
+}
+
+function sortMessagesByCreatedAt(messages: SessionMessage[]): SessionMessage[] {
+  return messages
+    .map((message, index) => ({ message, index, createdAtMs: messageCreatedAtMs(message) }))
+    .sort((left, right) => {
+      if (left.createdAtMs !== null && right.createdAtMs !== null) {
+        const delta = left.createdAtMs - right.createdAtMs;
+        if (delta !== 0) return delta;
+      }
+      return left.index - right.index;
+    })
+    .map((entry) => entry.message);
+}
+
+function messageCreatedAtMs(message: SessionMessage): number | null {
+  if (!message.createdAt) return null;
+  const timestamp = Date.parse(message.createdAt);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 export function mergeLiveSessionAggregates(
