@@ -85,6 +85,7 @@ Set these in Vercel Production.
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Production callback URL. Must match WorkOS dashboard. |
 | `WORKOS_REDIRECT_URI` | No | Server-only fallback. Usually leave unset. |
+| `CONNECTOR_WORKOS_REDIRECT_URI` | Connector only | Connector AuthKit callback URL, e.g. `https://runconnector.com/auth/callback`. Falls back to `NEXT_PUBLIC_WORKOS_REDIRECT_URI`, then `WORKOS_REDIRECT_URI`, then local port 3002. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
 | `GITHUB_APP_ID` | Yes | GitHub App id. |
 | `GITHUB_APP_INSTALLATION_ID` | Yes | Managed workspace-state GitHub App installation id. Do not use this as the user-facing work integration installation. |
@@ -363,6 +364,7 @@ orchestrator and are not stored anywhere long-term.
 | `INNGEST_SERVE_ORIGIN` | web | `https://pr-<n>.<domain>`, ensuring Inngest calls the deterministic preview custom domain rather than a protected Vercel deployment URL. |
 | `NEXT_PUBLIC_APP_URL` | web (build-time + runtime) | `https://pr-<n>.<domain>`. Used in signed OAuth state so the stable Google broker can forward back to the right preview. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | web (build-time) | `https://pr-<n>.<domain>/auth/callback`. |
+| `CONNECTOR_WORKOS_REDIRECT_URI` | connector (build-time + runtime) | Connector callback URL when deploying connector separately from web, e.g. `https://runconnector.com/auth/callback`. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | web | Optional pass-through from the provision environment. Set to `https://oauth.opencompany.cloud/api/google/callback` to use the stable Google OAuth broker for previews. |
 | `PREVIEW_ALLOW_UNVERIFIED_ENDPOINT` | runner | Emergency escape hatch for the boot gate. Leave unset. |
 

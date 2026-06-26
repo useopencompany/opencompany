@@ -19,6 +19,7 @@ const PERSONAL_ENV_MODE = argv.includes("--personal-env");
 const SHARED_DATABASE_MODE =
   argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
 const PERSONAL_ENV_PATH = ".env.override.local";
+const CONNECTOR_ENV_PATH = "apps/connector/.env.local";
 const PERSONAL_ENV_TEMPLATE = `# Personal local overrides.
 # This file is gitignored and has higher precedence than .env.local.
 # Use it for developer-owned resources that should survive \`bun run env:pull\`.
@@ -151,6 +152,7 @@ const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
 const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
+const LOCAL_CONNECTOR_WORKOS_REDIRECT_URI = "http://localhost:3002/auth/callback";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
@@ -287,8 +289,15 @@ function isPlaceholder(value) {
 
 function inspectState() {
   const env = readEffectiveLocalEnv();
+  const connectorEnv = parseEnv(CONNECTOR_ENV_PATH);
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
+  const connectorWorkosMissing = [
+    "WORKOS_CLIENT_ID",
+    "WORKOS_API_KEY",
+    "WORKOS_COOKIE_PASSWORD",
+    "CONNECTOR_WORKOS_REDIRECT_URI",
+  ].filter((key) => isPlaceholder(connectorEnv[key]));
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -297,6 +306,8 @@ function inspectState() {
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
+    connectorWorkos: connectorWorkosMissing.length === 0 ? "ready" : "placeholder",
+    connectorWorkosMissingKeys: connectorWorkosMissing,
     runner: runnerMissing.length === 0 ? "ready" : "placeholder",
     runnerMissingKeys: runnerMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
@@ -444,6 +455,37 @@ async function ensureLocalDevDefaults() {
   ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
 }
 
+async function ensureConnectorEnv() {
+  step("Connector local env");
+
+  const env = readEffectiveLocalEnv();
+  const missing = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"].filter((key) =>
+    isPlaceholder(env[key]),
+  );
+
+  if (missing.length > 0) {
+    warn(`Skipping Connector env sync until WorkOS is configured: ${missing.join(", ")}`);
+    return;
+  }
+
+  const connectorEnv = parseEnv(CONNECTOR_ENV_PATH);
+  const connectorRedirectUri = !isPlaceholder(connectorEnv.CONNECTOR_WORKOS_REDIRECT_URI)
+    ? connectorEnv.CONNECTOR_WORKOS_REDIRECT_URI
+    : !isPlaceholder(env.CONNECTOR_WORKOS_REDIRECT_URI)
+      ? env.CONNECTOR_WORKOS_REDIRECT_URI
+      : LOCAL_CONNECTOR_WORKOS_REDIRECT_URI;
+
+  writeEnvValues(CONNECTOR_ENV_PATH, {
+    WORKOS_CLIENT_ID: env.WORKOS_CLIENT_ID,
+    WORKOS_API_KEY: env.WORKOS_API_KEY,
+    WORKOS_COOKIE_PASSWORD: env.WORKOS_COOKIE_PASSWORD,
+    CONNECTOR_WORKOS_REDIRECT_URI: connectorRedirectUri,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: connectorRedirectUri,
+  });
+
+  ok(`${CONNECTOR_ENV_PATH} has Connector WorkOS env`);
+}
+
 async function ensurePersonalEnvFile() {
   step("Personal env override file");
   if (existsSync(PERSONAL_ENV_PATH)) {
@@ -498,6 +540,7 @@ function pullSharedDevEnvFromInfisical({
     }
   }
   pulled.NEXT_PUBLIC_WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
+  pulled.CONNECTOR_WORKOS_REDIRECT_URI = LOCAL_CONNECTOR_WORKOS_REDIRECT_URI;
   if (!isPlaceholder(pulled.WORKOS_REDIRECT_URI)) {
     pulled.WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
   }
@@ -823,6 +866,7 @@ async function main() {
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
     await ensureLocalDevDefaults();
+    await ensureConnectorEnv();
     ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
@@ -840,6 +884,14 @@ async function main() {
     const nextSteps = [];
     if (state.envFile === "missing") {
       nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
+    }
+    if (state.connectorWorkos === "placeholder") {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `write Connector WorkOS env into ${CONNECTOR_ENV_PATH} (${state.connectorWorkosMissingKeys.join(
+          ", ",
+        )})`,
+      });
     }
     if (
       state.workos === "placeholder" ||
@@ -925,6 +977,7 @@ async function main() {
   await ensureEnvFile(state);
   await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
+  await ensureConnectorEnv();
   await ensureLocalRunnerEnv(inspectState());
   if (SHARED_DATABASE_MODE) {
     await ensureSharedDatabaseUrl(inspectState());

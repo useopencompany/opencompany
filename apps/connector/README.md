@@ -19,8 +19,28 @@ repo:
 Most product code should stay inside `apps/connector`. Promote code to a shared
 package only when another app has a real reuse case.
 
-This app intentionally does not wire in OpenCompany auth, database access,
-Inngest, observability, analytics, or other production app infrastructure yet.
+This app uses WorkOS AuthKit for sign-up/sign-in, but intentionally does not wire
+in OpenCompany database access, Inngest, observability, analytics, or other
+production app infrastructure yet.
+
+## Auth
+
+Connector uses the shared WorkOS AuthKit client secrets plus its own redirect URI:
+
+```bash
+WORKOS_CLIENT_ID="client_..."
+WORKOS_API_KEY="sk_test_..."
+WORKOS_COOKIE_PASSWORD="replace-with-at-least-32-characters"
+CONNECTOR_WORKOS_REDIRECT_URI="http://localhost:3002/auth/callback"
+```
+
+`bun run setup` writes those values into `apps/connector/.env.local` so direct
+Connector dev runs have the env files Next expects.
+
+When `CONNECTOR_WORKOS_REDIRECT_URI` is unset, Connector falls back to
+`NEXT_PUBLIC_WORKOS_REDIRECT_URI`, then `WORKOS_REDIRECT_URI`, then the local
+`http://localhost:3002/auth/callback` default. The WorkOS dashboard callback URL
+must match the value used by the app.
 
 ## Develop
 

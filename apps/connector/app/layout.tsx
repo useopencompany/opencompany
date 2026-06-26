@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type * as React from "react";
+import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,7 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
-        {children}
+        <AuthKitProvider>{children}</AuthKitProvider>
       </body>
     </html>
   );
