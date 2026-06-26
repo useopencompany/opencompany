@@ -11,7 +11,7 @@ import {
   agentSessions,
   agents,
 } from "@opencompany/db/schema";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { emitDelegatedUsageRollup } from "./delegation-usage";
 import { appendRuntimeEvent } from "./events";
@@ -804,13 +804,15 @@ async function loadDelegatedAgent(workspaceId: string, path: string) {
       id: agents.id,
       name: agents.name,
       path: agents.path,
+      userId: agents.userId,
       config: agents.config,
     })
     .from(agents)
-    .where(and(eq(agents.workspaceId, workspaceId), eq(agents.path, path)))
+    .where(and(eq(agents.workspaceId, workspaceId), eq(agents.path, path), isNull(agents.userId)))
     .limit(1);
 
-  return agent ? { ...agent, config: normalizeAgentConfig(agent.config) } : null;
+  if (!agent || agent.userId) return null;
+  return { ...agent, config: normalizeAgentConfig(agent.config) };
 }
 
 async function loadDelegatedChildSession(input: {
