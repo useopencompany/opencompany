@@ -613,16 +613,10 @@ describe("createAgentSessionFromPrompt", () => {
     ]);
     getDbMock.mockReturnValue({ select, insert, batch } as never);
 
-    const result = await createAgentSessionFromPrompt(
-      "agt_123",
-      "Plan it",
-      undefined,
-      [],
-      {
-        codexReasoningEffort: "xhigh",
-        codexPlanModeEnabled: true,
-      },
-    );
+    const result = await createAgentSessionFromPrompt("agt_123", "Plan it", undefined, [], {
+      codexReasoningEffort: "xhigh",
+      codexPlanModeEnabled: true,
+    });
 
     expect(result.ok).toBe(true);
     expect(valuesCalls[0]).toEqual(
@@ -672,12 +666,14 @@ describe("createAgentSessionFromPrompt", () => {
     const where = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where }));
     const select = vi.fn(() => ({ from }));
-    const batch = vi.fn().mockResolvedValueOnce([
-      [fakeSessionRow()],
-      [statusEventRow],
-      [fakeMessageRow()],
-      [{ id: 2, createdAt: CREATED_AT }],
-    ]);
+    const batch = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [fakeSessionRow()],
+        [statusEventRow],
+        [fakeMessageRow()],
+        [{ id: 2, createdAt: CREATED_AT }],
+      ]);
     getDbMock.mockReturnValue({ select, insert, batch } as never);
 
     const result = await createAgentSessionFromPrompt("agt_123", "Ship it", undefined, [], {

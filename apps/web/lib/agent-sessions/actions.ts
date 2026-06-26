@@ -224,9 +224,7 @@ export async function createAgentSessionFromPrompt(
     modelName,
     content: trimmed,
     attachments,
-    ...(engine === "codex" && codexReasoningEffort !== undefined
-      ? { codexReasoningEffort }
-      : {}),
+    ...(engine === "codex" && codexReasoningEffort !== undefined ? { codexReasoningEffort } : {}),
     ...(engine === "codex" && options.codexPlanModeEnabled === true
       ? { codexPlanModeEnabled: true }
       : {}),

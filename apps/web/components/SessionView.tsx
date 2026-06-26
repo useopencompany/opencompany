@@ -76,8 +76,8 @@ import { MARKDOWN_COMPONENTS } from "@/components/Markdown";
 import { type RightPanelHandle, useMobileInspector } from "@/components/MobileInspectorContext";
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
-import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
 import { CodexComposerControls } from "@/components/session/CodexComposerControls";
+import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import {
   type ToolCallDisplay,
