@@ -30,6 +30,7 @@ import { abortActiveRun } from "./active-runs";
 import { materializeAgentBundleForSession } from "./agent-bundle";
 import { materializeLargeTextAttachmentsForSession } from "./attachment-materialize";
 import { materializeBrainForSession } from "./brain";
+import { materializeCodexAttachmentsForSession } from "./codex-attachment-materialize";
 import { getDb } from "./db";
 import { closeSessionStream } from "./durable-streams";
 import { brokerActive, type RunnerEnv } from "./env";
@@ -57,6 +58,7 @@ type SandboxHydrationTiming = {
   materializeAgentBundleMs?: number;
   materializeSkillsMs?: number;
   materializeAttachmentsMs?: number;
+  materializeCodexAttachmentsMs?: number;
 };
 
 export async function ensureSandbox(
@@ -193,6 +195,22 @@ export async function ensureSandbox(
         ),
       ),
     );
+    // Codex persists local attachment paths in the conversation history. Full hydration is where
+    // stale/replaced sandboxes regain every prior attachment path before the thread resumes.
+    if (agentConfig.engine === "codex") {
+      materializationTasks.push(
+        traceBraintrustStep("sandbox_materialize_codex_attachments", () =>
+          recordSandboxHydrationStage(timings, "materializeCodexAttachmentsMs", () =>
+            materializeCodexAttachmentsForSession({
+              sandbox: readySandbox,
+              sessionId: row.session.id,
+              workdir: row.session.workdir,
+              blobToken: env.blobReadWriteToken,
+            }),
+          ),
+        ),
+      );
+    }
     await waitForMaterializationTasks(materializationTasks);
     const totalMs = elapsedMs(readyStartedAt);
     captureE2BSandboxLatency({
@@ -473,6 +491,11 @@ function sandboxHydrationMetrics(
     metrics,
     "sandbox_hydration_materialize_attachments_ms",
     timings.materializeAttachmentsMs,
+  );
+  addMetric(
+    metrics,
+    "sandbox_hydration_materialize_codex_attachments_ms",
+    timings.materializeCodexAttachmentsMs,
   );
   for (const request of e2bRequests) {
     addMetric(metrics, `sandbox_e2b_${request.operation}_ms`, request.latencyMs);

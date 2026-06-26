@@ -1,5 +1,4 @@
 import {
-  attachmentSandboxFilename,
   codexCliModelNameForModelId,
   isCodexReasoningEffort,
   newAgentSessionMessageId,
@@ -8,18 +7,17 @@ import {
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
-import {
-  agentSessionMessageAttachments,
-  agentSessionMessages,
-  agentSessions,
-} from "@opencompany/db/schema";
+import { agentSessionMessages, agentSessions } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import { and, eq, isNull } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { loadConnectedGitHubInstallation } from "./amp-tool";
-import { downloadBlobBytes } from "./attachment-hydration";
 import { type CodexAppServerSummary, runCodexAppServerTurn } from "./codex-app-server";
+import {
+  type CodexAttachment,
+  materializeCodexAttachmentsForSession,
+} from "./codex-attachment-materialize";
 import {
   type CodexCliAuth,
   codexApiKeyFallbackEnabled,
@@ -57,13 +55,7 @@ import {
 } from "./run-context";
 import { RunAbortError, RunLeaseBusyError, RunLeaseLostError } from "./run-control";
 import { MessageTurnFailedError } from "./runner-errors";
-import {
-  commandExitResult,
-  killSandbox,
-  type SandboxHandle,
-  sandboxLayout,
-  writeSandboxTextFiles,
-} from "./sandbox";
+import { commandExitResult, killSandbox, type SandboxHandle, sandboxLayout } from "./sandbox";
 import {
   acquireCodexSandboxForTurn,
   isSessionArchived,
@@ -92,13 +84,6 @@ type CodexUserMessage = {
   id: string;
   content: string;
   modelMessage: unknown;
-};
-
-type CodexAttachment = {
-  filename: string;
-  kind: string;
-  mediaType: string;
-  path: string;
 };
 
 type CodexGitHubAuth = Awaited<ReturnType<typeof loadGitHubAuth>>;
@@ -323,7 +308,7 @@ async function runCodexTurnWithContext(
       loadGitHubAuth(row.workspace.id),
     );
     const attachments = await observeRunStep(ctx, "materialize_codex_attachments", () =>
-      materializeCodexAttachments({
+      materializeCodexAttachmentsForSession({
         sandbox: sandbox!,
         sessionId: input.sessionId,
         messageId: input.messageId,
@@ -735,67 +720,6 @@ async function loadCodexUserMessage(
     )
     .limit(1);
   return message ?? null;
-}
-
-async function materializeCodexAttachments(input: {
-  sandbox: SandboxHandle;
-  sessionId: string;
-  messageId: string;
-  workdir: string;
-  blobToken: string | undefined;
-}): Promise<CodexAttachment[]> {
-  const rows = await getDb()
-    .select({
-      blobPathname: agentSessionMessageAttachments.blobPathname,
-      blobUrl: agentSessionMessageAttachments.blobUrl,
-      filename: agentSessionMessageAttachments.filename,
-      kind: agentSessionMessageAttachments.kind,
-      mediaType: agentSessionMessageAttachments.mediaType,
-    })
-    .from(agentSessionMessageAttachments)
-    .where(
-      and(
-        eq(agentSessionMessageAttachments.sessionId, input.sessionId),
-        eq(agentSessionMessageAttachments.messageId, input.messageId),
-      ),
-    );
-  if (rows.length === 0) return [];
-
-  const layout = sandboxLayout(input.workdir);
-  const dir = `${layout.codexRoot}/work/attachments`;
-  await input.sandbox.commands.run(
-    `mkdir -p ${shellQuote(dir)} && printf '*\\n' > ${shellQuote(`${dir}/.gitignore`)}`,
-    { timeoutMs: 30_000 },
-  );
-  const listing = await input.sandbox.commands.run(`ls -1 ${shellQuote(dir)}`, {
-    timeoutMs: 30_000,
-  });
-  const existing = new Set(listing.stdout.split("\n").filter(Boolean));
-
-  const materialized: CodexAttachment[] = [];
-  for (const row of rows) {
-    const sandboxFilename = attachmentSandboxFilename(row.blobPathname);
-    const absolutePath = `${dir}/${sandboxFilename}`;
-    const relativePath = `work/attachments/${sandboxFilename}`;
-
-    if (!existing.has(sandboxFilename)) {
-      const bytes = await downloadBlobBytes(row.blobUrl, input.blobToken);
-      await writeSandboxTextFiles({
-        sandbox: input.sandbox,
-        files: [{ path: absolutePath, content: bytes }],
-      });
-      existing.add(sandboxFilename);
-    }
-
-    materialized.push({
-      filename: row.filename,
-      kind: row.kind,
-      mediaType: row.mediaType,
-      path: relativePath,
-    });
-  }
-
-  return materialized;
 }
 
 async function loadGitHubAuth(workspaceId: string) {

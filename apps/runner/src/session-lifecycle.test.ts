@@ -13,6 +13,7 @@ const analyticsMocks = vi.hoisted(() => ({
 const materializeMocks = vi.hoisted(() => ({
   materializeAgentBundleForSession: vi.fn(),
   materializeBrainForSession: vi.fn(),
+  materializeCodexAttachmentsForSession: vi.fn(),
   materializeSkillsForSession: vi.fn(),
 }));
 
@@ -39,6 +40,10 @@ vi.mock("./agent-bundle", () => ({
 
 vi.mock("./brain", () => ({
   materializeBrainForSession: materializeMocks.materializeBrainForSession,
+}));
+
+vi.mock("./codex-attachment-materialize", () => ({
+  materializeCodexAttachmentsForSession: materializeMocks.materializeCodexAttachmentsForSession,
 }));
 
 vi.mock("./skills", () => ({
@@ -69,6 +74,7 @@ beforeEach(() => {
   analyticsMocks.captureServerEvent.mockResolvedValue(undefined);
   materializeMocks.materializeAgentBundleForSession.mockResolvedValue(undefined);
   materializeMocks.materializeBrainForSession.mockResolvedValue(undefined);
+  materializeMocks.materializeCodexAttachmentsForSession.mockResolvedValue(undefined);
   materializeMocks.materializeSkillsForSession.mockResolvedValue(undefined);
   durableStreamMocks.publishToDurableStream.mockResolvedValue(undefined);
 });
@@ -346,6 +352,7 @@ describe("acquireCodexSandboxForTurn", () => {
     expect(sandbox.commands.run).not.toHaveBeenCalled();
     expect(materializeMocks.materializeBrainForSession).not.toHaveBeenCalled();
     expect(materializeMocks.materializeAgentBundleForSession).not.toHaveBeenCalled();
+    expect(materializeMocks.materializeCodexAttachmentsForSession).not.toHaveBeenCalled();
     expect(materializeMocks.materializeSkillsForSession).not.toHaveBeenCalled();
     expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "e2b_sandbox_latency",
@@ -394,6 +401,12 @@ describe("acquireCodexSandboxForTurn", () => {
     );
     expect(sandbox.commands.run).toHaveBeenCalled();
     expect(materializeMocks.materializeAgentBundleForSession).toHaveBeenCalled();
+    expect(materializeMocks.materializeCodexAttachmentsForSession).toHaveBeenCalledWith({
+      sandbox,
+      sessionId: "session_123",
+      workdir: "/home/user/workspace",
+      blobToken: undefined,
+    });
     expect(materializeMocks.materializeSkillsForSession).toHaveBeenCalled();
   });
 
@@ -438,6 +451,12 @@ describe("acquireCodexSandboxForTurn", () => {
     });
     expect(e2bMocks.create).toHaveBeenCalledTimes(1);
     expect(materializeMocks.materializeAgentBundleForSession).toHaveBeenCalled();
+    expect(materializeMocks.materializeCodexAttachmentsForSession).toHaveBeenCalledWith({
+      sandbox,
+      sessionId: "session_123",
+      workdir: "/home/user/workspace",
+      blobToken: undefined,
+    });
     expect(materializeMocks.materializeSkillsForSession).toHaveBeenCalled();
     expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "e2b_sandbox_latency",

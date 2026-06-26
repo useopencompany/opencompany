@@ -780,17 +780,35 @@ describe("createAgentSessionFromPrompt", () => {
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 
-  it("rejects attachments for Codex initial messages", async () => {
-    getDbMock.mockReturnValue(
-      dbWithAgent(
-        fakeAgent({
-          config: {
-            ...fakeAgent().config,
-            engine: "codex",
-          },
-        }),
-      ),
-    );
+  it("persists attachments for Codex initial messages", async () => {
+    const valuesCalls: unknown[] = [];
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn((rows) => {
+      valuesCalls.push(rows);
+      return { returning };
+    });
+    const insert = vi.fn(() => ({ values }));
+    const limit = vi.fn().mockResolvedValue([
+      fakeAgent({
+        config: {
+          ...fakeAgent().config,
+          engine: "codex",
+        },
+      }),
+    ]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const batch = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [fakeSessionRow({ engine: "codex", status: "ready" })],
+        [statusEventRow],
+        [fakeMessageRow()],
+        [{ id: 2, createdAt: CREATED_AT }],
+        [],
+      ]);
+    getDbMock.mockReturnValue({ select, insert, batch } as never);
 
     const result = await createAgentSessionFromPrompt("agt_123", "hi", undefined, [
       {
@@ -802,8 +820,24 @@ describe("createAgentSessionFromPrompt", () => {
       },
     ]);
 
-    expect(result).toEqual({ ok: false, error: "Codex sessions do not support attachments yet." });
-    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(valuesCalls).toContainEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          blobPathname: "workspace/wks_123/pending/att1-x.png",
+          blobUrl: "https://blob.example/x.png",
+          kind: "image",
+          sessionId: "ses_123",
+          messageId: "msg_123",
+        }),
+      ]),
+    );
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      workspaceId: "wks_123",
+      engine: "codex",
+    });
   });
 });
 
@@ -1047,7 +1081,7 @@ describe("submitAgentSessionMessage", () => {
     });
   });
 
-  it("rejects attachments for Codex follow-up messages", async () => {
+  it("persists attachments for Codex follow-up messages", async () => {
     const limit = vi.fn().mockResolvedValue([
       {
         id: "ses_123",
@@ -1061,7 +1095,24 @@ describe("submitAgentSessionMessage", () => {
     const where = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where }));
     const select = vi.fn(() => ({ from }));
-    getDbMock.mockReturnValue({ select } as never);
+    const valuesCalls: unknown[] = [];
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn((rows) => {
+      valuesCalls.push(rows);
+      return { returning };
+    });
+    const insert = vi.fn(() => ({ values }));
+    const batch = vi
+      .fn()
+      .mockResolvedValue([
+        [{ id: "msg_456" }],
+        [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
+        [],
+      ]);
+    const update = vi.fn(() => ({
+      set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
+    }));
+    getDbMock.mockReturnValue({ select, insert, batch, update } as never);
 
     const result = await submitAgentSessionMessage("ses_123", "Look", [
       {
@@ -1073,8 +1124,25 @@ describe("submitAgentSessionMessage", () => {
       },
     ]);
 
-    expect(result).toEqual({ ok: false, error: "Codex sessions do not support attachments yet." });
-    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, messageId: "msg_456" });
+    expect(valuesCalls).toContainEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          blobPathname: "workspace/wks_123/pending/att1-x.png",
+          blobUrl: "https://blob.example/x.png",
+          kind: "image",
+          sessionId: "ses_123",
+          messageId: "msg_456",
+        }),
+      ]),
+    );
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_456",
+      workspaceId: "wks_123",
+      engine: "codex",
+    });
+    expect(dispatchAgentAfterSessionCheckMock).not.toHaveBeenCalled();
   });
 
   it("reports missing credits before session existence", async () => {
