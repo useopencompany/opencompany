@@ -12,6 +12,7 @@ import type { PersonalIntegrationDetails } from "@/lib/personal/integration-deta
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 import type { UserTimezoneSource } from "@/lib/timezones";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
+import type { WorkspacePickerItem } from "@/lib/workspaces/actions";
 
 // The immutable identity of the personal agent the surface is rendering. Mutable surfaces
 // (config, behavior body) live as context state below, not here.
@@ -36,6 +37,8 @@ export type PersonalAgentContextValue = {
   userTimezone: string;
   userTimezoneSource: UserTimezoneSource;
   workspaceName: string;
+  workspaceId: string;
+  workspaces: WorkspacePickerItem[];
   initialSessions: SidebarSessionPayload[];
   personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;

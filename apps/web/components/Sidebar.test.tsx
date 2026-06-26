@@ -7,10 +7,17 @@ import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import Sidebar from "./Sidebar";
 
+const workspaceActionMocks = vi.hoisted(() => ({
+  createWorkspace: vi.fn(),
+  switchWorkspace: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
   useRouter: () => ({
     prefetch: vi.fn(),
+    push: vi.fn(),
+    refresh: vi.fn(),
     replace: vi.fn(),
   }),
 }));
@@ -37,6 +44,11 @@ vi.mock("@/lib/feedback/actions", () => ({
   submitFeedback: vi.fn(),
 }));
 
+vi.mock("@/lib/workspaces/actions", () => ({
+  createWorkspace: workspaceActionMocks.createWorkspace,
+  switchWorkspace: workspaceActionMocks.switchWorkspace,
+}));
+
 // The sidebar reads its sessions from TanStack DB live queries and writes
 // through the workspace collections. Stub both so this status-menu test renders
 // without mounting CollectionsProvider (which pulls the server-action import
@@ -60,6 +72,10 @@ const statusPageUrl = "https://myopencompany.betteruptime.com";
 describe("Sidebar status menu item", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    workspaceActionMocks.createWorkspace.mockReset();
+    workspaceActionMocks.switchWorkspace.mockReset();
+    workspaceActionMocks.createWorkspace.mockResolvedValue({ ok: true, workspaceId: "wks_new" });
+    workspaceActionMocks.switchWorkspace.mockResolvedValue({ ok: true, workspaceId: "wks_2" });
   });
 
   it("keeps personal and workspace spaces available from the space switcher", async () => {
@@ -72,10 +88,38 @@ describe("Sidebar status menu item", () => {
       "href",
       "/personal",
     );
-    const workspaceLink = screen.getByRole("link", { name: "OpenCompany" });
-    expect(workspaceLink).toHaveAttribute("href", "/");
-    expect(workspaceLink).toHaveAttribute("title", "OpenCompany");
-    expect(workspaceLink).toHaveAttribute("aria-current", "page");
+    const currentWorkspace = screen.getByRole("button", { name: "OpenCompany" });
+    expect(currentWorkspace).toHaveAttribute("title", "OpenCompany");
+    expect(currentWorkspace).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Research Labs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create company..." })).toBeInTheDocument();
+  });
+
+  it("switches to another workspace from the space switcher", async () => {
+    const user = userEvent.setup();
+
+    renderSidebar();
+    await user.click(screen.getByRole("button", { name: "Switch space" }));
+    await user.click(screen.getByRole("button", { name: "Research Labs" }));
+
+    expect(workspaceActionMocks.switchWorkspace).toHaveBeenCalledWith("wks_2");
+  });
+
+  it("shows workspace creation errors inline", async () => {
+    workspaceActionMocks.createWorkspace.mockResolvedValue({
+      ok: false,
+      error: "Workspace could not be created.",
+    });
+    const user = userEvent.setup();
+
+    renderSidebar();
+    await user.click(screen.getByRole("button", { name: "Switch space" }));
+    await user.click(screen.getByRole("button", { name: "Create company..." }));
+    await user.type(screen.getByRole("textbox", { name: "Company name" }), "New Company");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(workspaceActionMocks.createWorkspace).toHaveBeenCalledWith("New Company");
+    expect(await screen.findByText("Workspace could not be created.")).toBeInTheDocument();
   });
 
   it("links to company integrations from the primary nav", () => {
@@ -138,7 +182,12 @@ function renderSidebar() {
           <Sidebar
             userName="Ada Lovelace"
             userEmail="ada@example.com"
+            activeWorkspaceId="wks_test"
             workspaceName="OpenCompany"
+            workspaces={[
+              { id: "wks_test", name: "OpenCompany", workosOrganizationId: "org_test" },
+              { id: "wks_2", name: "Research Labs", workosOrganizationId: "org_2" },
+            ]}
             initialCollapsed={false}
             initialSessions={[]}
           />

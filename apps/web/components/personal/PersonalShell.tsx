@@ -35,6 +35,7 @@ import { useDrawerGesture } from "@/lib/useDrawerGesture";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { setUserTimezone as setUserTimezoneAction } from "@/lib/users/actions";
 import { cn } from "@/lib/utils";
+import type { WorkspacePickerItem } from "@/lib/workspaces/actions";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
 const sidebarCollapsedSubscribers = new Set<() => void>();
@@ -78,7 +79,9 @@ export type PersonalShellProps = {
   userEmail: string;
   userTimezone: string;
   userTimezoneSource: UserTimezoneSource;
+  workspaceId: string;
   workspaceName: string;
+  workspaces: WorkspacePickerItem[];
   initialSessions: SidebarSessionPayload[];
   contextFiles: AgentBundleFilePayload[];
   personalSkills: ResolvedSkillMetadata[];
@@ -104,7 +107,9 @@ export default function PersonalShell({
   userEmail,
   userTimezone: initialUserTimezone,
   userTimezoneSource: initialUserTimezoneSource,
+  workspaceId,
   workspaceName,
+  workspaces,
   initialSessions,
   contextFiles,
   personalSkills,
@@ -277,7 +282,9 @@ export default function PersonalShell({
       userEmail,
       userTimezone,
       userTimezoneSource,
+      workspaceId,
       workspaceName,
+      workspaces,
       initialSessions,
       personalSkills,
       githubIntegrationStatus,
@@ -319,6 +326,8 @@ export default function PersonalShell({
       codexEngineEnabled,
       userTimezone,
       userTimezoneSource,
+      workspaceId,
+      workspaces,
       githubRequested,
       files,
       personalSkills,

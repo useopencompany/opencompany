@@ -20,6 +20,7 @@ import type { PersonalIntegrationConnections } from "@/lib/personal/integrations
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 import { normalizeUserTimezoneSource } from "@/lib/timezones";
 import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
+import { listUserWorkspaces } from "@/lib/workspaces/actions";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it does
 // not inherit AppShell/Sidebar — but it still needs the same provider stack (minus the workspace
@@ -50,6 +51,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     mcpSettings,
     toolPolicies,
     githubIntegrationRepositories,
+    workspaceList,
   ] = await Promise.all([
     loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
     loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
@@ -59,6 +61,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
     loadWorkspaceToolPolicyOverrides(workspace.id),
     loadGitHubIntegrationRepositoriesForWorkspace(workspace.id),
+    listUserWorkspaces(),
   ]);
 
   // The workspace GitHub integration's repository catalog (only usable repos), so the Behavior
@@ -122,7 +125,9 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                   userEmail={authUser.email}
                   userTimezone={user.timezone}
                   userTimezoneSource={normalizeUserTimezoneSource(user.timezoneSource)}
+                  workspaceId={workspace.id}
                   workspaceName={workspace.name}
+                  workspaces={workspaceList}
                   initialSessions={sessions}
                   contextFiles={contextFiles}
                   personalSkills={personalSkills}

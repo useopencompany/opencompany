@@ -14,19 +14,24 @@ import { loadSidebarSessionsForWorkspace } from "@/lib/agent-sessions/data";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { currentWorkspace } from "@/lib/auth";
 import { isCodexEngineEnabled } from "@/lib/flags/codexEngine";
+import { listUserWorkspaces, type WorkspacePickerItem } from "@/lib/workspaces/actions";
 
 const SIDEBAR_COLLAPSED_COOKIE = "opencompany-sidebar-collapsed";
 
 async function SidebarWithSessions({
   userName,
   userEmail,
+  activeWorkspaceId,
   workspaceName,
+  workspaces,
   initialCollapsed,
   sessionsPromise,
 }: {
   userName: string;
   userEmail: string;
+  activeWorkspaceId: string;
   workspaceName: string;
+  workspaces: WorkspacePickerItem[];
   initialCollapsed: boolean;
   sessionsPromise: Promise<SidebarSessionPayload[]>;
 }) {
@@ -36,7 +41,9 @@ async function SidebarWithSessions({
     <Sidebar
       userName={userName}
       userEmail={userEmail}
+      activeWorkspaceId={activeWorkspaceId}
       workspaceName={workspaceName}
+      workspaces={workspaces}
       initialCollapsed={initialCollapsed}
       initialSessions={sessions}
     />
@@ -51,6 +58,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
   const sessionsPromise = loadSidebarSessionsForWorkspace(user.id, workspace.id);
   const initialSidebarCollapsed = sidebarCollapsedCookie?.value === "true";
+  const workspaceList = await listUserWorkspaces();
 
   return (
     <AnalyticsProvider
@@ -84,7 +92,9 @@ export default async function AppShell({ children }: { children: React.ReactNode
                           <Sidebar
                             userName={userName}
                             userEmail={authUser.email}
+                            activeWorkspaceId={workspace.id}
                             workspaceName={workspace.name}
+                            workspaces={workspaceList}
                             initialCollapsed={initialSidebarCollapsed}
                             initialSessions={[]}
                             sessionsLoading
@@ -94,7 +104,9 @@ export default async function AppShell({ children }: { children: React.ReactNode
                         <SidebarWithSessions
                           userName={userName}
                           userEmail={authUser.email}
+                          activeWorkspaceId={workspace.id}
                           workspaceName={workspace.name}
+                          workspaces={workspaceList}
                           initialCollapsed={initialSidebarCollapsed}
                           sessionsPromise={sessionsPromise}
                         />
