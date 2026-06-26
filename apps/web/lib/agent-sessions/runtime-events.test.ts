@@ -20,8 +20,8 @@ import {
   type SessionRuntimeState,
 } from "./runtime-events";
 
-function message(id: string, role: string, content: string): SessionMessage {
-  return { id, role, content, status: "completed" };
+function message(id: string, role: string, content: string, createdAt?: string): SessionMessage {
+  return { id, role, content, status: "completed", ...(createdAt ? { createdAt } : {}) };
 }
 
 describe("mergeMessages", () => {
@@ -48,6 +48,21 @@ describe("mergeMessages", () => {
     const merged = mergeMessages(snapshot, overlay);
 
     expect(merged.map((m) => m.id)).toEqual(["msg_user", "msg_asst", "msg_user2"]);
+  });
+
+  it("keeps mixed snapshot and stream messages in createdAt order", () => {
+    const snapshot = [
+      message("msg_user_1", "user", "First", "2026-06-26T10:00:00.000Z"),
+      message("msg_user_2", "user", "Second", "2026-06-26T10:00:20.000Z"),
+    ];
+    const overlay = [
+      message("msg_user_1", "user", "First", "2026-06-26T10:00:00.000Z"),
+      message("msg_asst_1", "assistant", "Reply", "2026-06-26T10:00:10.000Z"),
+    ];
+
+    const merged = mergeMessages(snapshot, overlay);
+
+    expect(merged.map((m) => m.id)).toEqual(["msg_user_1", "msg_asst_1", "msg_user_2"]);
   });
 
   it("restores a completed assistant's canonical snapshot payload when the overlay missed it", () => {
@@ -110,6 +125,71 @@ describe("mergeEvents", () => {
     const merged = mergeEvents(snapshot, overlay);
 
     expect(merged.map((e) => e.id)).toEqual([1, null, 2]);
+  });
+
+  it("keeps transient stream events before their following snapshot durable event", () => {
+    const messageCreated = event(1, "message.created", {
+      messageId: "msg_asst",
+      role: "assistant",
+      status: "running",
+    });
+    const toolStarted = event(3, "tool.started", {
+      messageId: "msg_asst",
+      toolCallId: "call_list",
+      name: "list_files",
+      input: { path: "." },
+    });
+    const snapshot = [messageCreated, toolStarted];
+    const overlay = [
+      messageCreated,
+      event(null, "message.delta", { messageId: "msg_asst", delta: "Before tool." }),
+      toolStarted,
+    ];
+
+    const merged = mergeEvents(snapshot, overlay);
+    const parts = buildAssistantTurnParts(
+      { id: "msg_asst", role: "assistant", content: "", status: "running" },
+      merged,
+    );
+
+    expect(merged.map((e) => e.id)).toEqual([1, null, 3]);
+    expect(parts.map((part) => (part.type === "text" ? part.text : part.type))).toEqual([
+      "Before tool.",
+      "tool-call",
+    ]);
+  });
+
+  it("keeps lower snapshot durables before leading transient stream events", () => {
+    const earlierToolStarted = event(1, "tool.started", {
+      messageId: "msg_asst",
+      toolCallId: "call_list",
+      name: "list_files",
+      input: { path: "." },
+    });
+    const laterToolStarted = event(3, "tool.started", {
+      messageId: "msg_asst",
+      toolCallId: "call_read",
+      name: "read_file",
+      input: { path: "README.md" },
+    });
+    const snapshot = [earlierToolStarted, laterToolStarted];
+    const overlay = [
+      event(null, "message.delta", { messageId: "msg_asst", delta: "After first tool." }),
+      laterToolStarted,
+    ];
+
+    const merged = mergeEvents(snapshot, overlay);
+    const parts = buildAssistantTurnParts(
+      { id: "msg_asst", role: "assistant", content: "", status: "running" },
+      merged,
+    );
+
+    expect(merged.map((e) => e.id)).toEqual([1, null, 3]);
+    expect(parts.map((part) => (part.type === "text" ? part.text : part.type))).toEqual([
+      "tool-call",
+      "After first tool.",
+      "tool-call",
+    ]);
   });
 
   it("keeps snapshot durable events not present on the stream", () => {
