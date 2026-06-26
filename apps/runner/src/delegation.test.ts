@@ -175,6 +175,33 @@ describe("delegate_to_agent async spawn", () => {
     expect(jobMocks.enqueueRunnerJob).not.toHaveBeenCalled();
   });
 
+  it("refuses to spawn a private personal agent even if it appears in configured references", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createSpawnDb({
+        agent: {
+          id: "agt_personal",
+          name: "Personal",
+          path: "agents/research/research.agent",
+          userId: "usr_other",
+          config: agentConfig({ engine: "opencompany" }),
+        },
+      }),
+    );
+
+    const result = await handler()({
+      agent: "research",
+      prompt: "Investigate X",
+      toolCallId: "call_private",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: "failed",
+      error: "Agent agents/research/research.agent was not found in this workspace.",
+    });
+    expect(jobMocks.enqueueRunnerJob).not.toHaveBeenCalled();
+  });
+
   it("resumes an existing child on the child's own engine", async () => {
     const db = createSpawnDb({
       agent: null,
