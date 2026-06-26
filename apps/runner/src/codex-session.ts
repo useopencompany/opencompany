@@ -65,6 +65,7 @@ import {
   resolveSandboxBilling,
   setStatus,
 } from "./session-lifecycle";
+import { materializeCodexSkillsForSession } from "./skills";
 import { recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "codex-session" });
@@ -323,6 +324,7 @@ async function runCodexTurnWithContext(
       ctx,
       sandbox,
       row,
+      agentConfig,
       task,
       model: codexModel,
       reasoningEffort: codexReasoningEffortForSession(row.session.codexReasoningEffort),
@@ -547,6 +549,7 @@ async function runCodexAppServerSession(input: {
   ctx: ReturnType<typeof createRunContext>;
   sandbox: SandboxHandle;
   row: Awaited<ReturnType<typeof loadSession>>;
+  agentConfig: Pick<ReturnType<typeof normalizeAgentConfig>, "skills">;
   task: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
@@ -583,11 +586,20 @@ async function runCodexAppServerSession(input: {
     if (serializedAuthJson) {
       await input.sandbox.files.write(`${codexHome}/auth.json`, serializedAuthJson);
     }
+    const codexSkills = await runCodexCommandStage("skill setup", redact, () =>
+      materializeCodexSkillsForSession({
+        sandbox: input.sandbox,
+        workdir: input.row.session.workdir,
+        workspaceId: input.row.workspace.id,
+        config: input.agentConfig,
+      }),
+    );
 
     const summary = await runCodexAppServerTurn({
       sandbox: input.sandbox,
       codexWorkRoot,
       codexHome,
+      skillFingerprint: codexSkills.fingerprint,
       task: input.task,
       model: input.model,
       reasoningEffort: input.reasoningEffort,

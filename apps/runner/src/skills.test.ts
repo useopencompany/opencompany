@@ -38,7 +38,7 @@ const dbMock = vi.hoisted(() => {
 });
 vi.mock("./db", () => ({ getDb: dbMock.getDb }));
 
-import { materializeSkillsForSession } from "./skills";
+import { materializeCodexSkillsForSession, materializeSkillsForSession } from "./skills";
 
 function personalSkillMd(name: string, description: string) {
   return `---\nname: ${name}\ndescription: ${description}\n---\nBody.`;
@@ -261,5 +261,161 @@ describe("materializeSkillsForSession", () => {
     );
     expect(memoryWrite).toBeDefined();
     expect(String(memoryWrite?.data ?? "")).not.toContain("malicious override");
+  });
+});
+
+describe("materializeCodexSkillsForSession", () => {
+  beforeEach(() => {
+    loadExternalSkillFiles.mockReset();
+    loadExternalSkillFiles.mockResolvedValue([]);
+    dbMock.state.agentRows = [];
+    dbMock.state.fileRows = [];
+    dbMock.state.workspaceSkillRows = [];
+    dbMock.state.selection = null;
+  });
+
+  function fakeSandbox() {
+    return {
+      commands: { run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }) },
+      files: { write: vi.fn().mockResolvedValue(undefined) },
+    };
+  }
+
+  function writtenSkillFiles(sandbox: ReturnType<typeof fakeSandbox>) {
+    expect(sandbox.files.write).toHaveBeenCalledTimes(1);
+    expect(sandbox.files.write).toHaveBeenCalledWith(expect.any(Array), { user: "root" });
+    return sandbox.files.write.mock.calls[0]?.[0] as Array<{ path: string; data: string }>;
+  }
+
+  it("materializes workspace-authored skills where Codex scans repository skills", async () => {
+    const sandbox = fakeSandbox();
+    const workspaceSkill = {
+      id: "brand-voice",
+      name: "Brand Voice",
+      description: "Use the company voice.",
+      source: {
+        type: "workspace" as const,
+        path: "skills/brand-voice",
+      },
+    };
+    dbMock.state.workspaceSkillRows = [
+      {
+        skillId: "brand-voice",
+        content: "---\nname: Brand Voice\ndescription: Use the company voice.\n---\nBody.",
+      },
+    ];
+
+    const result = await materializeCodexSkillsForSession({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      workspaceId: "ws_1",
+      config: { skills: [workspaceSkill] },
+    });
+
+    expect(result.count).toBe(1);
+    expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(loadExternalSkillFiles).toHaveBeenCalledWith("ws_1", []);
+    expect(writtenSkillFiles(sandbox)).toEqual([
+      {
+        path: "/home/user/workspace/codex/.agents/skills/brand-voice/SKILL.md",
+        data: expect.stringContaining("Brand Voice"),
+      },
+    ]);
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills");
+    expect(commands.some((command) => command.includes("chmod 444"))).toBe(true);
+  });
+
+  it("materializes external skills with supporting files for Codex", async () => {
+    const sandbox = fakeSandbox();
+    loadExternalSkillFiles.mockResolvedValue([
+      {
+        id: "improve-codebase-architecture",
+        files: [
+          { path: "SKILL.md", content: "skill body" },
+          { path: "LANGUAGE.md", content: "secondary" },
+        ],
+      },
+    ]);
+
+    const result = await materializeCodexSkillsForSession({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      workspaceId: "ws_1",
+      config: { skills: [externalSkill] },
+    });
+
+    expect(result.count).toBe(1);
+    expect(loadExternalSkillFiles).toHaveBeenCalledWith("ws_1", [externalSkill]);
+    expect(writtenSkillFiles(sandbox)).toEqual(
+      expect.arrayContaining([
+        {
+          path: "/home/user/workspace/codex/.agents/skills/improve-codebase-architecture/SKILL.md",
+          data: "skill body",
+        },
+        {
+          path: "/home/user/workspace/codex/.agents/skills/improve-codebase-architecture/LANGUAGE.md",
+          data: "secondary",
+        },
+      ]),
+    );
+  });
+
+  it("does not expose default OpenCompany built-ins to native Codex sessions", async () => {
+    const sandbox = fakeSandbox();
+
+    const result = await materializeCodexSkillsForSession({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      workspaceId: "ws_1",
+      config: { skills: [] },
+    });
+
+    expect(result.count).toBe(0);
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands[0]).toContain("rm -rf");
+    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills");
+    expect(commands).toHaveLength(2);
+  });
+
+  it("returns a different fingerprint when materialized skill contents change", async () => {
+    const sandbox = fakeSandbox();
+    const workspaceSkill = {
+      id: "brand-voice",
+      name: "Brand Voice",
+      description: "Use the company voice.",
+      source: {
+        type: "workspace" as const,
+        path: "skills/brand-voice",
+      },
+    };
+    dbMock.state.workspaceSkillRows = [
+      {
+        skillId: "brand-voice",
+        content: "---\nname: Brand Voice\ndescription: Use the company voice.\n---\nBody.",
+      },
+    ];
+
+    const first = await materializeCodexSkillsForSession({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      workspaceId: "ws_1",
+      config: { skills: [workspaceSkill] },
+    });
+    dbMock.state.workspaceSkillRows = [
+      {
+        skillId: "brand-voice",
+        content: "---\nname: Brand Voice\ndescription: Use the company voice.\n---\nUpdated body.",
+      },
+    ];
+    const second = await materializeCodexSkillsForSession({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      workspaceId: "ws_1",
+      config: { skills: [workspaceSkill] },
+    });
+
+    expect(first.fingerprint).not.toBe(second.fingerprint);
   });
 });

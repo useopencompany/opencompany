@@ -277,6 +277,10 @@ Mentioning `@skill/<id>` in the body enables the skill for that agent; removing 
 removes it from the saved config. Workspace skills are mounted read-only under
 `./skills/<id>/` at session start.
 
+For Codex-engine sessions, the runner also mirrors selected workspace/external skills into the
+Codex work root at `.agents/skills/<id>/` so native Codex skill discovery can see them.
+OpenCompany runtime-only default skills remain in the OpenCompany `./skills` mount.
+
 The first built-in skill, `agent-self-edit`, teaches the agent to evolve its own `.agent`
 definition. With it enabled, the runtime exposes an internal `update_agent_file` tool: the
 agent submits a complete new body and can optionally provide a new model and the complete
