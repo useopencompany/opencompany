@@ -225,6 +225,12 @@ Current addable built-in skills include:
 - `humanizer` — editing guidance for making generated prose sound human.
 - `y-combinator-knowledge` — YC-style startup sparring: office-hours framing, user obsession,
   MVP and growth pressure, fundraising discipline, and links to canonical YC/PG teachings.
+- `move-to-opencompany` — import an external knowledge base (a GitHub repo or folders/files)
+  into the Brain safely, with a preview and a receipt.
+- `cto-pr-review` — blocking senior technical review for PRs and diffs, with findings ordered by
+  severity across correctness, architecture, security, migrations, tests, and product risk.
+- `implementer` — disciplined software implementation: read context, test behavior when practical,
+  keep the diff narrow, match local patterns, verify, and self-review before finishing.
 
 **External skills** are brought in from a public GitHub repository (or a skills.sh page,
 resolved through its backing GitHub repo). They serialize as an object carrying provenance
