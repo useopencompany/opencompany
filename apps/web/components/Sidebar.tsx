@@ -7,6 +7,7 @@ import {
   Bot,
   Brain,
   // CircleEqual,
+  Clock3,
   // Download,
   Inbox,
   ListFilter,
@@ -514,6 +515,12 @@ function SidebarContent({
               icon={Bot}
               label="Agents"
               active={isActive("/company/agents")}
+            />
+            <NavItem
+              href="/company/routines"
+              icon={Clock3}
+              label="Routines"
+              active={isActive("/company/routines")}
             />
             <NavItem
               href={BRAIN_BASE_PATH}
