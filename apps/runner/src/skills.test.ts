@@ -277,14 +277,25 @@ describe("materializeCodexSkillsForSession", () => {
   function fakeSandbox() {
     return {
       commands: { run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }) },
-      files: { write: vi.fn().mockResolvedValue(undefined) },
+      files: {
+        read: vi.fn().mockRejectedValue(new Error("missing")),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
     };
   }
 
   function writtenSkillFiles(sandbox: ReturnType<typeof fakeSandbox>) {
     expect(sandbox.files.write).toHaveBeenCalledTimes(1);
     expect(sandbox.files.write).toHaveBeenCalledWith(expect.any(Array), { user: "root" });
-    return sandbox.files.write.mock.calls[0]?.[0] as Array<{ path: string; data: string }>;
+    return (sandbox.files.write.mock.calls[0]?.[0] as Array<{ path: string; data: string }>).filter(
+      ({ path }) => !path.endsWith("/.opencompany-managed-skills.json"),
+    );
+  }
+
+  function writtenManifest(sandbox: ReturnType<typeof fakeSandbox>) {
+    expect(sandbox.files.write).toHaveBeenCalledTimes(1);
+    const writes = sandbox.files.write.mock.calls[0]?.[0] as Array<{ path: string; data: string }>;
+    return writes.find(({ path }) => path.endsWith("/.opencompany-managed-skills.json"));
   }
 
   it("materializes workspace-authored skills where Codex scans repository skills", async () => {
@@ -321,8 +332,15 @@ describe("materializeCodexSkillsForSession", () => {
         data: expect.stringContaining("Brand Voice"),
       },
     ]);
+    expect(writtenManifest(sandbox)).toEqual({
+      path: "/home/user/workspace/codex/.agents/skills/.opencompany-managed-skills.json",
+      data: JSON.stringify({ version: 1, skillIds: ["brand-voice"] }, null, 2),
+    });
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands[0]).toContain("mkdir -p");
     expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills");
+    expect(commands[1]).toContain("rm -rf");
+    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/brand-voice");
     expect(commands.some((command) => command.includes("chmod 444"))).toBe(true);
   });
 
@@ -372,11 +390,53 @@ describe("materializeCodexSkillsForSession", () => {
     });
 
     expect(result.count).toBe(0);
-    expect(sandbox.files.write).not.toHaveBeenCalled();
+    expect(writtenSkillFiles(sandbox)).toEqual([]);
+    expect(writtenManifest(sandbox)).toEqual({
+      path: "/home/user/workspace/codex/.agents/skills/.opencompany-managed-skills.json",
+      data: JSON.stringify({ version: 1, skillIds: [] }, null, 2),
+    });
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
-    expect(commands[0]).toContain("rm -rf");
+    expect(commands[0]).toContain("mkdir -p");
     expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills");
-    expect(commands).toHaveLength(2);
+    expect(commands.some((command) => command.includes("rm -rf"))).toBe(false);
+    expect(commands).toHaveLength(3);
+  });
+
+  it("reconciles only OpenCompany-managed Codex skill ids from the manifest", async () => {
+    const sandbox = fakeSandbox();
+    sandbox.files.read.mockResolvedValue(
+      JSON.stringify({ version: 1, skillIds: ["old-managed", "brand-voice"] }),
+    );
+    const workspaceSkill = {
+      id: "brand-voice",
+      name: "Brand Voice",
+      description: "Use the company voice.",
+      source: {
+        type: "workspace" as const,
+        path: "skills/brand-voice",
+      },
+    };
+    dbMock.state.workspaceSkillRows = [
+      {
+        skillId: "brand-voice",
+        content: "---\nname: Brand Voice\ndescription: Use the company voice.\n---\nBody.",
+      },
+    ];
+
+    await materializeCodexSkillsForSession({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      workspaceId: "ws_1",
+      config: { skills: [workspaceSkill] },
+    });
+
+    const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/old-managed");
+    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/brand-voice");
+    expect(commands[1]).not.toContain(
+      "/home/user/workspace/codex/.agents/skills/native-user-skill",
+    );
+    expect(commands[1]).not.toContain("rm -rf '/home/user/workspace/codex/.agents/skills' &&");
   });
 
   it("returns a different fingerprint when materialized skill contents change", async () => {

@@ -279,7 +279,9 @@ removes it from the saved config. Workspace skills are mounted read-only under
 
 For Codex-engine sessions, the runner also mirrors selected workspace/external skills into the
 Codex work root at `.agents/skills/<id>/` so native Codex skill discovery can see them.
-OpenCompany runtime-only default skills remain in the OpenCompany `./skills` mount.
+The mirror is tracked with `.agents/skills/.opencompany-managed-skills.json` and reconciles
+only those managed ids, preserving repo-authored or user-created native Codex skills in the same
+directory. OpenCompany runtime-only default skills remain in the OpenCompany `./skills` mount.
 
 The first built-in skill, `agent-self-edit`, teaches the agent to evolve its own `.agent`
 definition. With it enabled, the runtime exposes an internal `update_agent_file` tool: the

@@ -23,6 +23,8 @@ import { type SandboxHandle, sandboxLayout, writeSandboxTextFiles } from "./sand
 import { loadExternalSkillFiles } from "./skill-snapshots";
 
 const SANDBOX_ROOT_USER = "root";
+const SANDBOX_USER = "user";
+const CODEX_MANAGED_SKILLS_MANIFEST = ".opencompany-managed-skills.json";
 type WorkspaceSkillReference = AgentExternalSkillReference & { source: AgentWorkspaceSkillSource };
 type MountedSkill = { id: string; files: AgentSkillFile[] };
 
@@ -80,17 +82,22 @@ export async function materializeCodexSkillsForSession(input: {
 }): Promise<{ fingerprint: string; count: number }> {
   const layout = sandboxLayout(input.workdir);
   const root = `${layout.codexRoot}/.agents/skills`;
+  const manifestPath = `${root}/${CODEX_MANAGED_SKILLS_MANIFEST}`;
   const skills = await loadCodexSkillsForMount(input.workspaceId, input.config);
+  for (const skill of skills) assertSafeSkillId(skill.id);
   const skillFiles = skills.flatMap((skill) =>
     skill.files.map((file) => ({
       path: `${root}/${skill.id}/${file.path}`,
       content: file.content,
     })),
   );
+  const currentSkillIds = [...new Set(skills.map((skill) => skill.id))];
 
-  await resetAndWriteSkillTree({
+  await reconcileCodexManagedSkillTree({
     sandbox: input.sandbox,
     root,
+    manifestPath,
+    skillIds: currentSkillIds,
     files: skillFiles,
   });
 
@@ -98,6 +105,86 @@ export async function materializeCodexSkillsForSession(input: {
     fingerprint: skillTreeFingerprint(skills),
     count: skills.length,
   };
+}
+
+async function reconcileCodexManagedSkillTree(input: {
+  sandbox: SandboxHandle;
+  root: string;
+  manifestPath: string;
+  skillIds: string[];
+  files: Array<{ path: string; content: string }>;
+}) {
+  const previousSkillIds = await readCodexManagedSkillIds(input.sandbox, input.manifestPath);
+  const resetSkillIds = [...new Set([...previousSkillIds, ...input.skillIds])];
+  const resetCommands = [
+    `chown ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(input.root)}`,
+    `chmod 755 ${shellQuote(input.root)}`,
+    ...resetSkillIds.map((id) => `rm -rf ${shellQuote(`${input.root}/${id}`)}`),
+  ];
+
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(input.root)}`, { timeoutMs: 30_000 });
+  await input.sandbox.commands.run(resetCommands.join(" && "), {
+    user: SANDBOX_ROOT_USER,
+    timeoutMs: 30_000,
+  });
+
+  await writeSandboxTextFiles({
+    sandbox: input.sandbox,
+    files: [
+      ...input.files,
+      {
+        path: input.manifestPath,
+        content: JSON.stringify({ version: 1, skillIds: input.skillIds }, null, 2),
+      },
+    ],
+    user: SANDBOX_ROOT_USER,
+  });
+
+  const managedPaths = input.skillIds.map((id) => shellQuote(`${input.root}/${id}`));
+  const lockCommands = [
+    `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.manifestPath)}`,
+    `chmod 444 ${shellQuote(input.manifestPath)}`,
+    ...(managedPaths.length > 0
+      ? [
+          `chown -R ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${managedPaths.join(" ")}`,
+          `find ${managedPaths.join(" ")} -type d -exec chmod 555 {} +`,
+          `find ${managedPaths.join(" ")} -type f -exec chmod 444 {} +`,
+        ]
+      : []),
+  ];
+  await input.sandbox.commands.run(lockCommands.join(" && "), {
+    user: SANDBOX_ROOT_USER,
+    timeoutMs: 30_000,
+  });
+}
+
+async function readCodexManagedSkillIds(sandbox: SandboxHandle, manifestPath: string) {
+  let content: string;
+  try {
+    content = String(await sandbox.files.read(manifestPath));
+  } catch {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(content) as { version?: unknown; skillIds?: unknown };
+    if (parsed.version !== 1 || !Array.isArray(parsed.skillIds)) return [];
+    return parsed.skillIds.filter((id): id is string => {
+      if (typeof id !== "string") return false;
+      return isSafeSkillId(id);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function assertSafeSkillId(id: string) {
+  if (isSafeSkillId(id)) return;
+  throw new Error(`Cannot materialize Codex skill with unsafe id: ${id}`);
+}
+
+function isSafeSkillId(id: string) {
+  return id.length > 0 && id !== "." && id !== ".." && !id.includes("/") && !id.includes("\0");
 }
 
 async function loadOpenCompanySkillsForMount(input: {
