@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import {
+  AGENT_SKILL_DEFINITION_BY_ID,
   type AgentConfig,
   type AgentExternalSkillReference,
   type AgentSkillFile,
   type AgentWorkspaceSkillSource,
   agentBundleDir,
+  isExternalSkillReference,
   isRemoteSkillReference,
   isWorkspaceSkillReference,
   MEMORY_CLI_FILE,
@@ -20,7 +23,10 @@ import { type SandboxHandle, sandboxLayout, writeSandboxTextFiles } from "./sand
 import { loadExternalSkillFiles } from "./skill-snapshots";
 
 const SANDBOX_ROOT_USER = "root";
+const SANDBOX_USER = "user";
+const CODEX_MANAGED_SKILLS_MANIFEST = ".opencompany-managed-skills.json";
 type WorkspaceSkillReference = AgentExternalSkillReference & { source: AgentWorkspaceSkillSource };
+type MountedSkill = { id: string; files: AgentSkillFile[] };
 
 // Materialize the session's enabled skills into a read-only ./skills root. Each skill becomes
 // skills/<id>/<file> (e.g. skills/agent-self-edit/SKILL.md). Files are root-owned and
@@ -38,16 +44,7 @@ export async function materializeSkillsForSession(input: {
   config: Pick<AgentConfig, "skills">;
 }) {
   const layout = sandboxLayout(input.workdir);
-  const builtins = resolveEnabledBuiltinSkillFiles(input.config);
-  const externalRefs = (input.config.skills ?? []).filter(isRemoteSkillReference);
-  const workspaceRefs = (input.config.skills ?? []).filter(isWorkspaceSkillReference);
-  const externals = await loadExternalSkillFiles(input.workspaceId, externalRefs);
-  const workspaceAuthored = await loadWorkspaceSkillsForMount(input.workspaceId, workspaceRefs);
-  const skills: Array<{ id: string; files: AgentSkillFile[] }> = [
-    ...builtins,
-    ...externals,
-    ...workspaceAuthored,
-  ];
+  const skills = await loadOpenCompanySkillsForMount(input);
   // Personal skills (agent/skills/<id>/) mount identically to built-ins/externals, but their ids
   // must not shadow one, so reserve the ids already in play before scanning the bundle.
   const reservedIds = new Set(skills.map((skill) => skill.id));
@@ -70,27 +67,157 @@ export async function materializeSkillsForSession(input: {
     });
   }
 
-  await input.sandbox.commands.run(
-    `rm -rf ${shellQuote(layout.skillsRoot)} && mkdir -p ${shellQuote(layout.skillsRoot)}`,
-    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  await resetAndWriteSkillTree({
+    sandbox: input.sandbox,
+    root: layout.skillsRoot,
+    files: skillFiles,
+  });
+}
+
+export async function materializeCodexSkillsForSession(input: {
+  sandbox: SandboxHandle;
+  workdir: string;
+  workspaceId: string;
+  config: Pick<AgentConfig, "skills">;
+}): Promise<{ fingerprint: string; count: number }> {
+  const layout = sandboxLayout(input.workdir);
+  const root = `${layout.codexRoot}/.agents/skills`;
+  const manifestPath = `${root}/${CODEX_MANAGED_SKILLS_MANIFEST}`;
+  const skills = await loadCodexSkillsForMount(input.workspaceId, input.config);
+  for (const skill of skills) assertSafeSkillId(skill.id);
+  const skillFiles = skills.flatMap((skill) =>
+    skill.files.map((file) => ({
+      path: `${root}/${skill.id}/${file.path}`,
+      content: file.content,
+    })),
   );
+  const currentSkillIds = [...new Set(skills.map((skill) => skill.id))];
+
+  await reconcileCodexManagedSkillTree({
+    sandbox: input.sandbox,
+    root,
+    manifestPath,
+    skillIds: currentSkillIds,
+    files: skillFiles,
+  });
+
+  return {
+    fingerprint: skillTreeFingerprint(skills),
+    count: skills.length,
+  };
+}
+
+async function reconcileCodexManagedSkillTree(input: {
+  sandbox: SandboxHandle;
+  root: string;
+  manifestPath: string;
+  skillIds: string[];
+  files: Array<{ path: string; content: string }>;
+}) {
+  const previousSkillIds = await readCodexManagedSkillIds(input.sandbox, input.manifestPath);
+  const resetSkillIds = [...new Set([...previousSkillIds, ...input.skillIds])];
+  const resetCommands = [
+    `chown ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(input.root)}`,
+    `chmod 755 ${shellQuote(input.root)}`,
+    ...resetSkillIds.map((id) => `rm -rf ${shellQuote(`${input.root}/${id}`)}`),
+  ];
+
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(input.root)}`, { timeoutMs: 30_000 });
+  await input.sandbox.commands.run(resetCommands.join(" && "), {
+    user: SANDBOX_ROOT_USER,
+    timeoutMs: 30_000,
+  });
 
   await writeSandboxTextFiles({
     sandbox: input.sandbox,
-    files: skillFiles,
+    files: [
+      ...input.files,
+      {
+        path: input.manifestPath,
+        content: JSON.stringify({ version: 1, skillIds: input.skillIds }, null, 2),
+      },
+    ],
     user: SANDBOX_ROOT_USER,
   });
 
-  // Lock the tree down: root-owned, directories traversable+readable (555), files read-only
-  // (444). The agent runs as `user` and can read via the world bits but cannot write.
-  await input.sandbox.commands.run(
-    [
-      `chown -R ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(layout.skillsRoot)}`,
-      `find ${shellQuote(layout.skillsRoot)} -type d -exec chmod 555 {} +`,
-      `find ${shellQuote(layout.skillsRoot)} -type f -exec chmod 444 {} +`,
-    ].join(" && "),
-    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
-  );
+  const managedPaths = input.skillIds.map((id) => shellQuote(`${input.root}/${id}`));
+  const lockCommands = [
+    `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.manifestPath)}`,
+    `chmod 444 ${shellQuote(input.manifestPath)}`,
+    ...(managedPaths.length > 0
+      ? [
+          `chown -R ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${managedPaths.join(" ")}`,
+          `find ${managedPaths.join(" ")} -type d -exec chmod 555 {} +`,
+          `find ${managedPaths.join(" ")} -type f -exec chmod 444 {} +`,
+        ]
+      : []),
+  ];
+  await input.sandbox.commands.run(lockCommands.join(" && "), {
+    user: SANDBOX_ROOT_USER,
+    timeoutMs: 30_000,
+  });
+}
+
+async function readCodexManagedSkillIds(sandbox: SandboxHandle, manifestPath: string) {
+  let content: string;
+  try {
+    content = String(await sandbox.files.read(manifestPath));
+  } catch {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(content) as { version?: unknown; skillIds?: unknown };
+    if (parsed.version !== 1 || !Array.isArray(parsed.skillIds)) return [];
+    return parsed.skillIds.filter((id): id is string => {
+      if (typeof id !== "string") return false;
+      return isSafeSkillId(id);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function assertSafeSkillId(id: string) {
+  if (isSafeSkillId(id)) return;
+  throw new Error(`Cannot materialize Codex skill with unsafe id: ${id}`);
+}
+
+function isSafeSkillId(id: string) {
+  return id.length > 0 && id !== "." && id !== ".." && !id.includes("/") && !id.includes("\0");
+}
+
+async function loadOpenCompanySkillsForMount(input: {
+  workspaceId: string;
+  config: Pick<AgentConfig, "skills">;
+}): Promise<MountedSkill[]> {
+  const builtins = resolveEnabledBuiltinSkillFiles(input.config);
+  const externalRefs = (input.config.skills ?? []).filter(isRemoteSkillReference);
+  const workspaceRefs = (input.config.skills ?? []).filter(isWorkspaceSkillReference);
+  const externals = await loadExternalSkillFiles(input.workspaceId, externalRefs);
+  const workspaceAuthored = await loadWorkspaceSkillsForMount(input.workspaceId, workspaceRefs);
+  return [...builtins, ...externals, ...workspaceAuthored];
+}
+
+async function loadCodexSkillsForMount(
+  workspaceId: string,
+  config: Pick<AgentConfig, "skills">,
+): Promise<MountedSkill[]> {
+  const remoteRefs = (config.skills ?? []).filter(isRemoteSkillReference);
+  const workspaceRefs = (config.skills ?? []).filter(isWorkspaceSkillReference);
+  const codexCompatibleBuiltins = (config.skills ?? []).flatMap((reference) => {
+    if (isExternalSkillReference(reference)) return [];
+    const definition = AGENT_SKILL_DEFINITION_BY_ID.get(reference.id);
+    // Default OpenCompany built-ins include tool-specific instructions (`read_skill`,
+    // `update_agent_file`, memory CLI) that do not exist in native Codex sessions. Only bridge
+    // explicitly selected addable built-ins, plus remote/workspace skills below.
+    return definition?.addable ? [definition] : [];
+  });
+  const [externals, workspaceAuthored] = await Promise.all([
+    loadExternalSkillFiles(workspaceId, remoteRefs),
+    loadWorkspaceSkillsForMount(workspaceId, workspaceRefs),
+  ]);
+  return [...codexCompatibleBuiltins, ...externals, ...workspaceAuthored];
 }
 
 async function loadWorkspaceSkillsForMount(
@@ -139,4 +266,51 @@ async function loadPersonalSkillsForMount(
     .where(and(eq(agentFiles.workspaceId, workspaceId), eq(agentFiles.agentId, agentId)));
   const { skills } = scanPersonalSkills({ bundleFiles: rows, bundleDir, reservedIds });
   return skills.map((skill) => ({ id: skill.metadata.id, files: skill.files }));
+}
+
+async function resetAndWriteSkillTree(input: {
+  sandbox: SandboxHandle;
+  root: string;
+  files: Array<{ path: string; content: string }>;
+}) {
+  await input.sandbox.commands.run(
+    `rm -rf ${shellQuote(input.root)} && mkdir -p ${shellQuote(input.root)}`,
+    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  );
+
+  await writeSandboxTextFiles({
+    sandbox: input.sandbox,
+    files: input.files,
+    user: SANDBOX_ROOT_USER,
+  });
+
+  // Lock the tree down: root-owned, directories traversable+readable (555), files read-only
+  // (444). The agent runs as `user` and can read via the world bits but cannot write.
+  await input.sandbox.commands.run(
+    [
+      `chown -R ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.root)}`,
+      `find ${shellQuote(input.root)} -type d -exec chmod 555 {} +`,
+      `find ${shellQuote(input.root)} -type f -exec chmod 444 {} +`,
+    ].join(" && "),
+    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  );
+}
+
+function skillTreeFingerprint(skills: MountedSkill[]) {
+  const hash = createHash("sha256");
+  for (const skill of [...skills].sort((left, right) => left.id.localeCompare(right.id))) {
+    hash.update("skill\0");
+    hash.update(skill.id);
+    hash.update("\0");
+    for (const file of [...skill.files].sort((left, right) =>
+      left.path.localeCompare(right.path),
+    )) {
+      hash.update("file\0");
+      hash.update(file.path);
+      hash.update("\0");
+      hash.update(file.content);
+      hash.update("\0");
+    }
+  }
+  return hash.digest("hex");
 }

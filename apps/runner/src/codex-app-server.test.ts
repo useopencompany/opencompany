@@ -21,6 +21,7 @@ describe("buildCodexAppServerCommandPlan", () => {
     const plan = buildCodexAppServerCommandPlan({
       codexWorkRoot,
       codexHome,
+      skillFingerprint: "skills_a",
       auth: apiAuth,
       githubAuth: {
         githubToken: "github_token_123",
@@ -51,11 +52,31 @@ describe("buildCodexAppServerCommandPlan", () => {
     const plan = buildCodexAppServerCommandPlan({
       codexWorkRoot,
       codexHome,
+      skillFingerprint: "skills_a",
       auth: { ...apiAuth, brokered: true },
       githubAuth: { githubToken: null, githubAuthHeader: null },
     });
 
     expect(plan.forceRestart).toBe(true);
+  });
+
+  it("includes the materialized skills fingerprint in daemon reuse decisions", () => {
+    const first = buildCodexAppServerCommandPlan({
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+    });
+    const second = buildCodexAppServerCommandPlan({
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_b",
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+    });
+
+    expect(first.fingerprint).not.toBe(second.fingerprint);
   });
 });
 
@@ -229,6 +250,7 @@ describe("runCodexAppServerTurn", () => {
       sandbox: sandbox as never,
       codexWorkRoot,
       codexHome,
+      skillFingerprint: "skills_a",
       task: "implement the request",
       model: "gpt-5.5",
       reasoningEffort: "high",
@@ -281,6 +303,7 @@ describe("runCodexAppServerTurn", () => {
       sandbox: sandbox as never,
       codexWorkRoot,
       codexHome,
+      skillFingerprint: "skills_a",
       task: "continue",
       model: "gpt-5.5",
       reasoningEffort: "medium",
@@ -324,6 +347,7 @@ describe("runCodexAppServerTurn", () => {
       sandbox: sandbox as never,
       codexWorkRoot,
       codexHome,
+      skillFingerprint: "skills_a",
       task: "continue",
       model: "gpt-5.5",
       reasoningEffort: "medium",
