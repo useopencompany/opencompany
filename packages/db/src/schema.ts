@@ -18,6 +18,7 @@ import {
   index,
   integer,
   jsonb,
+  pgSchema,
   pgTable,
   serial,
   text,
@@ -48,6 +49,14 @@ export type WorkspaceMcpServerStatus = "configured" | "missing_credential" | "di
 export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
 
 export type WorkspaceCodexCredentialStatus = "connected" | "needs_reauth";
+
+export type ConnectorOrganizationRole = "owner" | "member";
+
+export type ConnectorMcpServerStatus = "configured" | "missing_credential" | "disabled" | "error";
+
+export type ConnectorMcpCredentialKind = "oauth" | (string & {});
+
+export type ConnectorPermissionScope = "linear.issues.read" | "linear.issues.write";
 
 export type WorkspaceCodexDeviceAuthFlowStatus =
   | "pending"
@@ -87,6 +96,182 @@ const tsvector = customType<{ data: string }>({
     return "tsvector";
   },
 });
+
+export const connectorSchema = pgSchema("connector");
+
+export const connectorUsers = connectorSchema.table(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    workosUserId: text("workos_user_id").notNull(),
+    email: text("email").notNull(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    avatarUrl: text("avatar_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workosUserIdIdx: uniqueIndex("connector_users_workos_user_id_idx").on(table.workosUserId),
+  }),
+);
+
+export const connectorOrganizations = connectorSchema.table(
+  "organizations",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => connectorUsers.id, { onDelete: "restrict" }),
+    setupCompletedAt: timestamp("setup_completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    slugIdx: uniqueIndex("connector_organizations_slug_idx").on(table.slug),
+  }),
+);
+
+export const connectorOrganizationMemberships = connectorSchema.table(
+  "organization_memberships",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => connectorOrganizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => connectorUsers.id, { onDelete: "cascade" }),
+    role: text("role").$type<ConnectorOrganizationRole>().notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    membershipIdx: uniqueIndex("connector_organization_memberships_org_user_idx").on(
+      table.organizationId,
+      table.userId,
+    ),
+    roleCheck: check(
+      "connector_organization_memberships_role_check",
+      sql`${table.role} IN ('owner', 'member')`,
+    ),
+  }),
+);
+
+export const connectorMcpServers = connectorSchema.table(
+  "mcp_servers",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => connectorOrganizations.id, { onDelete: "cascade" }),
+    serverKey: text("server_key").notNull(),
+    displayName: text("display_name").notNull(),
+    endpointUrl: text("endpoint_url").notNull(),
+    status: text("status")
+      .$type<ConnectorMcpServerStatus>()
+      .notNull()
+      .default("missing_credential"),
+    statusReason: text("status_reason"),
+    connectedByUserId: text("connected_by_user_id").references(() => connectorUsers.id, {
+      onDelete: "set null",
+    }),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    organizationKeyIdx: uniqueIndex("connector_mcp_servers_org_key_idx").on(
+      table.organizationId,
+      table.serverKey,
+    ),
+    organizationStatusIdx: index("connector_mcp_servers_org_status_idx").on(
+      table.organizationId,
+      table.status,
+    ),
+    serverOrganizationIdx: uniqueIndex("connector_mcp_servers_id_org_idx").on(
+      table.id,
+      table.organizationId,
+    ),
+    statusCheck: check(
+      "connector_mcp_servers_status_check",
+      sql`${table.status} IN ('configured', 'missing_credential', 'disabled', 'error')`,
+    ),
+  }),
+);
+
+export const connectorMcpCredentials = connectorSchema.table(
+  "mcp_credentials",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => connectorOrganizations.id, { onDelete: "cascade" }),
+    serverId: text("server_id").notNull(),
+    kind: text("kind").$type<ConnectorMcpCredentialKind>().notNull(),
+    encryptedPayload: jsonb("encrypted_payload")
+      .$type<WorkspaceIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    organizationIdx: index("connector_mcp_credentials_org_idx").on(table.organizationId),
+    serverIdx: index("connector_mcp_credentials_server_idx").on(table.serverId),
+    serverKindIdx: uniqueIndex("connector_mcp_credentials_server_kind_idx").on(
+      table.serverId,
+      table.kind,
+    ),
+    serverOrganizationFk: foreignKey({
+      name: "connector_mcp_credentials_server_org_fk",
+      columns: [table.serverId, table.organizationId],
+      foreignColumns: [connectorMcpServers.id, connectorMcpServers.organizationId],
+    }).onDelete("cascade"),
+  }),
+);
+
+export const connectorPermissionGrants = connectorSchema.table(
+  "permission_grants",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => connectorOrganizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    scope: text("scope").$type<ConnectorPermissionScope>().notNull(),
+    granted: boolean("granted").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    organizationProviderScopeIdx: uniqueIndex(
+      "connector_permission_grants_org_provider_scope_idx",
+    ).on(table.organizationId, table.provider, table.scope),
+    scopeCheck: check(
+      "connector_permission_grants_scope_check",
+      sql`${table.scope} IN ('linear.issues.read', 'linear.issues.write')`,
+    ),
+  }),
+);
+
+export const connectorWaitlistSignups = connectorSchema.table(
+  "waitlist_signups",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    emailIdx: uniqueIndex("connector_waitlist_signups_email_idx").on(table.email),
+  }),
+);
 
 export const users = pgTable(
   "users",
@@ -2100,6 +2285,73 @@ export const workspaceSlackChannels = pgTable(
       "workspace_slack_channels_status_check",
       sql`${table.status} IN ('pending', 'active', 'failed')`,
     ),
+  }),
+);
+
+export const connectorUsersRelations = relations(connectorUsers, ({ many }) => ({
+  createdOrganizations: many(connectorOrganizations),
+  memberships: many(connectorOrganizationMemberships),
+  connectedMcpServers: many(connectorMcpServers),
+}));
+
+export const connectorOrganizationsRelations = relations(
+  connectorOrganizations,
+  ({ one, many }) => ({
+    createdBy: one(connectorUsers, {
+      fields: [connectorOrganizations.createdByUserId],
+      references: [connectorUsers.id],
+    }),
+    memberships: many(connectorOrganizationMemberships),
+    mcpServers: many(connectorMcpServers),
+    mcpCredentials: many(connectorMcpCredentials),
+    permissionGrants: many(connectorPermissionGrants),
+  }),
+);
+
+export const connectorOrganizationMembershipsRelations = relations(
+  connectorOrganizationMemberships,
+  ({ one }) => ({
+    organization: one(connectorOrganizations, {
+      fields: [connectorOrganizationMemberships.organizationId],
+      references: [connectorOrganizations.id],
+    }),
+    user: one(connectorUsers, {
+      fields: [connectorOrganizationMemberships.userId],
+      references: [connectorUsers.id],
+    }),
+  }),
+);
+
+export const connectorMcpServersRelations = relations(connectorMcpServers, ({ one, many }) => ({
+  organization: one(connectorOrganizations, {
+    fields: [connectorMcpServers.organizationId],
+    references: [connectorOrganizations.id],
+  }),
+  connectedByUser: one(connectorUsers, {
+    fields: [connectorMcpServers.connectedByUserId],
+    references: [connectorUsers.id],
+  }),
+  credentials: many(connectorMcpCredentials),
+}));
+
+export const connectorMcpCredentialsRelations = relations(connectorMcpCredentials, ({ one }) => ({
+  organization: one(connectorOrganizations, {
+    fields: [connectorMcpCredentials.organizationId],
+    references: [connectorOrganizations.id],
+  }),
+  server: one(connectorMcpServers, {
+    fields: [connectorMcpCredentials.serverId, connectorMcpCredentials.organizationId],
+    references: [connectorMcpServers.id, connectorMcpServers.organizationId],
+  }),
+}));
+
+export const connectorPermissionGrantsRelations = relations(
+  connectorPermissionGrants,
+  ({ one }) => ({
+    organization: one(connectorOrganizations, {
+      fields: [connectorPermissionGrants.organizationId],
+      references: [connectorOrganizations.id],
+    }),
   }),
 );
 

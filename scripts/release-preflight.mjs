@@ -4,6 +4,7 @@
 // Purpose: validates required release, web, runner, and smoke-check environment variables.
 
 import "./load-env.mjs";
+import { Buffer } from "node:buffer";
 
 const groups = {
   web: {
@@ -75,6 +76,21 @@ const groups = {
       "OBSERVABILITY_TIMING",
     ],
   },
+  connector: {
+    label: "Vercel connector app",
+    required: [
+      "DATABASE_URL",
+      "WORKOS_CLIENT_ID",
+      "WORKOS_API_KEY",
+      "WORKOS_COOKIE_PASSWORD",
+      "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+      "CONNECTOR_WORKOS_REDIRECT_URI",
+      "CONNECTOR_APP_URL",
+      "CONNECTOR_MCP_OAUTH_STATE_SECRET",
+      "CONNECTOR_CREDENTIAL_ENCRYPTION_KEY",
+    ],
+    optional: ["BETTER_STACK_ERRORS_DSN", "OBSERVABILITY_ENV", "OBSERVABILITY_LOG_LEVEL"],
+  },
   release: {
     label: "GitHub Actions release automation",
     required: [
@@ -87,6 +103,11 @@ const groups = {
       "PRODUCTION_WEB_URL",
       "RUNNER_PUBLIC_URL",
     ],
+    optional: [],
+  },
+  "connector-release": {
+    label: "GitHub Actions Connector release automation",
+    required: ["VERCEL_TOKEN", "VERCEL_CONNECTOR_PROJECT_ID", "PRODUCTION_CONNECTOR_URL"],
     optional: [],
   },
 };
@@ -136,6 +157,40 @@ if (redirectUri && !redirectUri.startsWith("https://") && !redirectUri.includes(
   console.log("\nNEXT_PUBLIC_WORKOS_REDIRECT_URI should be https:// outside local development.");
 }
 
+const connectorRedirectUri = process.env.CONNECTOR_WORKOS_REDIRECT_URI;
+if (
+  connectorRedirectUri &&
+  !connectorRedirectUri.startsWith("https://") &&
+  !connectorRedirectUri.includes("localhost")
+) {
+  failed = true;
+  console.log("\nCONNECTOR_WORKOS_REDIRECT_URI should be https:// outside local development.");
+}
+
+const connectorAppUrl = process.env.CONNECTOR_APP_URL;
+if (
+  connectorAppUrl &&
+  !connectorAppUrl.startsWith("https://") &&
+  !connectorAppUrl.includes("localhost")
+) {
+  failed = true;
+  console.log("\nCONNECTOR_APP_URL should be https:// outside local development.");
+}
+
+const connectorStateSecret = process.env.CONNECTOR_MCP_OAUTH_STATE_SECRET;
+if (!isUnset(connectorStateSecret) && connectorStateSecret.length < 32) {
+  failed = true;
+  console.log("\nCONNECTOR_MCP_OAUTH_STATE_SECRET must be at least 32 characters.");
+}
+
+if (!isUnset(process.env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY)) {
+  const connectorCredentialKey = decodeBase64(process.env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY);
+  if (connectorCredentialKey?.byteLength !== 32) {
+    failed = true;
+    console.log("\nCONNECTOR_CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key.");
+  }
+}
+
 if (failed) {
   console.log("\nRelease preflight failed.");
   process.exit(1);
@@ -167,4 +222,12 @@ function isPlaceholder(value) {
     normalized.endsWith("_placeholder") ||
     normalized === "postgresql://..."
   );
+}
+
+function decodeBase64(value) {
+  try {
+    return Buffer.from(value, "base64");
+  } catch {
+    return null;
+  }
 }
