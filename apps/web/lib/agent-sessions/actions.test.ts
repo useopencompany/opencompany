@@ -580,6 +580,122 @@ describe("createAgentSessionFromPrompt", () => {
     });
   });
 
+  it("persists initial Codex reasoning and plan mode on the new session", async () => {
+    const valuesCalls: unknown[] = [];
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn((rows) => {
+      valuesCalls.push(rows);
+      return { returning };
+    });
+    const insert = vi.fn(() => ({ values }));
+    const codexAgent = fakeAgent({
+      config: {
+        ...fakeAgent().config,
+        engine: "codex",
+      },
+    });
+    const limit = vi.fn().mockResolvedValue([codexAgent]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const batch = vi.fn().mockResolvedValueOnce([
+      [
+        fakeSessionRow({
+          engine: "codex",
+          status: "ready",
+          codexReasoningEffort: "xhigh",
+          codexPlanModeEnabled: true,
+        }),
+      ],
+      [statusEventRow],
+      [fakeMessageRow()],
+      [{ id: 2, createdAt: CREATED_AT }],
+    ]);
+    getDbMock.mockReturnValue({ select, insert, batch } as never);
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Plan it", undefined, [], {
+      codexReasoningEffort: "xhigh",
+      codexPlanModeEnabled: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(valuesCalls[0]).toEqual(
+      expect.objectContaining({
+        engine: "codex",
+        codexReasoningEffort: "xhigh",
+        codexPlanModeEnabled: true,
+      }),
+    );
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      workspaceId: "wks_123",
+      engine: "codex",
+    });
+  });
+
+  it("rejects invalid initial Codex reasoning before starting the runner", async () => {
+    getDbMock.mockReturnValue(
+      dbWithAgent(
+        fakeAgent({
+          config: {
+            ...fakeAgent().config,
+            engine: "codex",
+          },
+        }),
+      ),
+    );
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Plan it", undefined, [], {
+      codexReasoningEffort: "maximum",
+    } as never);
+
+    expect(result).toEqual({ ok: false, error: "Invalid Codex reasoning effort." });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores Codex-only initial options for OpenCompany sessions", async () => {
+    const valuesCalls: unknown[] = [];
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn((rows) => {
+      valuesCalls.push(rows);
+      return { returning };
+    });
+    const insert = vi.fn(() => ({ values }));
+    const limit = vi.fn().mockResolvedValue([fakeAgent()]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const batch = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [fakeSessionRow()],
+        [statusEventRow],
+        [fakeMessageRow()],
+        [{ id: 2, createdAt: CREATED_AT }],
+      ]);
+    getDbMock.mockReturnValue({ select, insert, batch } as never);
+
+    const result = await createAgentSessionFromPrompt("agt_123", "Ship it", undefined, [], {
+      codexReasoningEffort: "xhigh",
+      codexPlanModeEnabled: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(valuesCalls[0]).not.toEqual(
+      expect.objectContaining({
+        codexReasoningEffort: expect.any(String),
+        codexPlanModeEnabled: expect.any(Boolean),
+      }),
+    );
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      workspaceId: "wks_123",
+      engine: "opencompany",
+    });
+  });
+
   it("persists a valid image attachment on the first message", async () => {
     // Capture the rows handed to `.values(...)`: the prompt path builds every insert op (incl.
     // the attachment rows) and passes them into db.batch, so the attachment payload shows up as
