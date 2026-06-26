@@ -16,7 +16,6 @@
     "dev:logs": "node scripts/dev-logs.mjs",
     "dev:web": "turbo dev --ui=tui --filter=@opencompany/web",
     "dev:ds": "turbo dev --ui=tui --filter=@opencompany/design-system",
-    "dev:connector": "turbo dev --ui=tui --filter=@opencompany/connector",
     "dev:runner": "turbo dev --ui=stream --filter=@opencompany/runner",
     "dev:kill-port": "node scripts/kill-port.mjs",
     "dev:kill-3000": "node scripts/kill-port.mjs 3000",

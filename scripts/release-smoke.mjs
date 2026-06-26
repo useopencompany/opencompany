@@ -1,24 +1,19 @@
 #!/usr/bin/env node
 
 // Called by: .github/workflows/release-production.yml and root `bun run release:smoke`.
-// Purpose: polls production web, connector, and runner health checks after deployment.
+// Purpose: polls production web and runner health checks after deployment.
 
 import { execFileSync } from "node:child_process";
 
 const webUrl = normalizeBaseUrl(process.env.WEB_URL || process.env.PRODUCTION_WEB_URL);
 const webVercelDeployment = normalizeBaseUrl(process.env.SMOKE_WEB_VERCEL_DEPLOYMENT);
-const connectorUrl = normalizeBaseUrl(
-  process.env.CONNECTOR_URL || process.env.PRODUCTION_CONNECTOR_URL,
-);
 const runnerUrl = normalizeBaseUrl(process.env.RUNNER_PUBLIC_URL);
 const expectedRelease = process.env.EXPECTED_RELEASE;
 const attempts = Number(process.env.SMOKE_ATTEMPTS ?? "30");
 const webAttempts = Number(process.env.SMOKE_WEB_ATTEMPTS ?? attempts);
-const connectorAttempts = Number(process.env.SMOKE_CONNECTOR_ATTEMPTS ?? attempts);
 const runnerAttempts = Number(process.env.SMOKE_RUNNER_ATTEMPTS ?? attempts);
 const delayMs = Number(process.env.SMOKE_DELAY_MS ?? "10000");
 const checkWeb = booleanEnv("SMOKE_WEB", true);
-const checkConnector = booleanEnv("SMOKE_CONNECTOR", true);
 const checkRunner = booleanEnv("SMOKE_RUNNER", true);
 
 if (checkWeb && !webUrl && !webVercelDeployment) {
@@ -31,21 +26,10 @@ if (checkRunner && !runnerUrl) {
   process.exit(1);
 }
 
-if (checkConnector && !connectorUrl) {
-  console.error("CONNECTOR_URL or PRODUCTION_CONNECTOR_URL is required.");
-  process.exit(1);
-}
-
 const checks = [];
 
 if (checkWeb) {
   checks.push(checkUntilReady("web", webHealthTarget(), webAttempts, delayMs));
-}
-
-if (checkConnector) {
-  checks.push(
-    checkUntilReady("connector", `${connectorUrl}/api/healthz`, connectorAttempts, delayMs),
-  );
 }
 
 if (checkRunner) {

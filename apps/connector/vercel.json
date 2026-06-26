@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "if [ -f ../../bun.lock ]; then cd ../..; fi; bun install --frozen-lockfile",
-  "buildCommand": "if [ -f ../../turbo.json ]; then cd ../..; fi; bun run build --filter=@opencompany/connector",
-  "regions": ["fra1"],
-  "git": {
-    "deploymentEnabled": false
-  }
-}
