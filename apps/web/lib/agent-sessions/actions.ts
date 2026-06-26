@@ -200,10 +200,6 @@ export async function createAgentSessionFromPrompt(
     return { ok: false, error: "Invalid Codex reasoning effort." } as const;
   }
 
-  if (engine === "codex" && attachments.length > 0) {
-    return { ok: false, error: "Codex sessions do not support attachments yet." } as const;
-  }
-
   // Re-validate attachments server-side against this session's model + the caller's workspace.
   const attachmentCheck = validateSubmitAttachments(attachments, modelName, workspace.id);
   if (!attachmentCheck.ok) {
@@ -578,10 +574,6 @@ export async function submitAgentSessionMessage(
   if (!session) {
     return { ok: false, error: "Session not found." } as const;
   }
-  if (session.engine === "codex" && attachments.length > 0) {
-    return { ok: false, error: "Codex sessions do not support attachments yet." } as const;
-  }
-
   // Re-validate attachments server-side: the client checks are advisory only. Enforced against
   // the session's actual model and the caller's workspace (same gate as the new-session path).
   const attachmentCheck = validateSubmitAttachments(attachments, session.modelName, workspace.id);

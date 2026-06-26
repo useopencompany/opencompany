@@ -539,7 +539,6 @@ function SessionViewContentBody({
   const [, startCodexSettingsTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentsEnabled = session.engine !== "codex";
   const codexReasoningEffort = codexReasoningOverride ?? session.codexReasoningEffort;
   const codexModelValue = isCodexModelId(modelOverride ?? session.modelName)
     ? (modelOverride ?? session.modelName)
@@ -554,8 +553,8 @@ function SessionViewContentBody({
   }, [session.id]);
   // Drag/drop, paste and file-pick attachment handling lives in a shared hook (also used by the
   // home composers). The drop overlay, validation/capability gate and upload lifecycle all come
-  // from here. Attaching is always available: text/code files need no model capability (they are
-  // inlined as text); the per-file image/PDF gate happens inside the hook.
+  // from here. Text/code files need no model capability; the per-file image/PDF gate happens
+  // inside the hook.
   const {
     attachments,
     setAttachments,
@@ -566,22 +565,10 @@ function SessionViewContentBody({
     dragHandlers,
   } = useComposerAttachments({
     workspaceId,
-    modelName: session.modelName,
+    modelName: modelOverride ?? session.modelName,
     uploadScope: { kind: "session", sessionId: session.id },
-    enabled: attachmentsEnabled,
+    enabled: true,
   });
-  useEffect(() => {
-    if (attachmentsEnabled) return;
-    // Attachment controls are hidden for Codex sessions.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAttachMenuOpen(false);
-    setAttachments((current) => {
-      current.forEach((attachment) => {
-        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-      });
-      return [];
-    });
-  }, [attachmentsEnabled, setAttachments]);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -1599,7 +1586,7 @@ function SessionViewContentBody({
     const sentMidRun = hasRunningAssistantMessage || showWaitingForAssistant;
     const content = input.trim();
     const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
-    const submitReady = attachmentsEnabled ? ready : [];
+    const submitReady = ready;
     if (!content && submitReady.length === 0) return;
     setFormError(null);
     const optimisticId = newOptimisticMessageId();
@@ -1800,9 +1787,9 @@ function SessionViewContentBody({
           // Drop-overlay hover handlers come from the shared hook. The window-level drop handler
           // (inside the hook) does the actual preventDefault + accept, so a drop anywhere in the
           // app attaches and the browser never opens the file; these only drive the overlay.
-          {...(attachmentsEnabled ? dragHandlers : {})}
+          {...dragHandlers}
         >
-          {attachmentsEnabled && isDragActive ? <ComposerDropOverlay /> : null}
+          {isDragActive ? <ComposerDropOverlay /> : null}
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
@@ -1873,9 +1860,7 @@ function SessionViewContentBody({
         ) : (
           <div className="bg-canvas px-6 py-4">
             <div className="mx-auto max-w-[960px]">
-              {attachmentsEnabled ? (
-                <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
-              ) : null}
+              <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
               <Composer
                 variant="compact"
                 error={formError}
@@ -1970,8 +1955,7 @@ function SessionViewContentBody({
                     onPaste={(event) => {
                       // Files in the clipboard (e.g. a screenshot) are taken as attachments by the
                       // shared hook, which also stops the browser pasting them into the textarea.
-                      if (attachmentsEnabled && handlePasteFiles(event)) return;
-                      if (!attachmentsEnabled) return;
+                      if (handlePasteFiles(event)) return;
                       // Oversized plain-text pastes become a .txt attachment instead of dumping
                       // a wall of text into the composer. Beyond the attachment size cap the
                       // paste falls through untouched — losing the user's text to a rejection
@@ -1999,48 +1983,46 @@ function SessionViewContentBody({
                 }
                 leftControls={
                   <>
-                    {attachmentsEnabled ? (
-                      <div ref={attachMenuRef} className="relative">
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          accept={ATTACHMENT_FILE_INPUT_ACCEPT}
-                          className="hidden"
-                          onChange={(event) => {
-                            acceptFiles(Array.from(event.target.files ?? []));
-                            event.target.value = "";
-                            setAttachMenuOpen(false);
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setAttachMenuOpen((prev) => !prev)}
-                          aria-label="Attach file"
-                          aria-expanded={attachMenuOpen}
-                          aria-haspopup="menu"
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
+                    <div ref={attachMenuRef} className="relative">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
+                        className="hidden"
+                        onChange={(event) => {
+                          acceptFiles(Array.from(event.target.files ?? []));
+                          event.target.value = "";
+                          setAttachMenuOpen(false);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAttachMenuOpen((prev) => !prev)}
+                        aria-label="Attach file"
+                        aria-expanded={attachMenuOpen}
+                        aria-haspopup="menu"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
+                      >
+                        <Plus size={15} strokeWidth={1.75} />
+                      </button>
+                      {attachMenuOpen ? (
+                        <div
+                          role="menu"
+                          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
                         >
-                          <Plus size={15} strokeWidth={1.75} />
-                        </button>
-                        {attachMenuOpen ? (
-                          <div
-                            role="menu"
-                            className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
                           >
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => fileInputRef.current?.click()}
-                              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
-                            >
-                              <Upload size={13} strokeWidth={1.75} />
-                              Upload file
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
+                            <Upload size={13} strokeWidth={1.75} />
+                            Upload file
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                     <ModelPicker
                       value={
                         session.engine === "codex"
@@ -2073,10 +2055,10 @@ function SessionViewContentBody({
                     canAbort && (hasRunningAssistantMessage || showWaitingForAssistant);
                   const sendDisabled =
                     isPending ||
-                    (attachmentsEnabled && attachments.some((a) => a.status !== "ready")) ||
+                    attachments.some((a) => a.status !== "ready") ||
                     (!parseSlashCommand(input, allSlashCommands) &&
                       !input.trim() &&
-                      (!attachmentsEnabled || attachments.length === 0));
+                      attachments.length === 0);
                   return (
                     <div className="flex items-center gap-1.5">
                       <button

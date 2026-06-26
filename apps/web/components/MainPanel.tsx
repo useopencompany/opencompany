@@ -104,7 +104,6 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     selectedAgentIsCodex && codexPlanMode?.agentId === selectedAgentId
       ? codexPlanMode.enabled
       : false;
-  const attachmentsEnabled = !selectedAgentIsCodex;
   // Image/file attachments via the shared composer hook. No session exists yet — uploads land in
   // a sessionless "pending/" path and the pointers ride into createAgentSessionFromPrompt.
   const {
@@ -120,28 +119,19 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     workspaceId,
     modelName: selectedModel,
     uploadScope: { kind: "pending" },
-    enabled: attachmentsEnabled,
+    enabled: true,
   });
   const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
   const hasUploadError = attachments.some((a) => a.status === "error");
   // Submit needs text OR a ready attachment, and is blocked while any upload is in flight or
   // errored (so an image is never silently dropped, and a broken upload can't be sent).
   const canSubmit = Boolean(
-    (input.trim() || (attachmentsEnabled && ready.length > 0)) &&
+    (input.trim() || ready.length > 0) &&
       selectedAgentId &&
       !isPending &&
-      (!attachmentsEnabled || (!isUploading && !hasUploadError)),
+      !isUploading &&
+      !hasUploadError,
   );
-
-  useEffect(() => {
-    if (attachmentsEnabled) return;
-    setAttachments((current) => {
-      current.forEach((attachment) => {
-        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-      });
-      return [];
-    });
-  }, [attachmentsEnabled, setAttachments]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -156,12 +146,8 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
   const submit = () => {
     const content = input.trim();
-    const submitReady = attachmentsEnabled ? ready : [];
-    if (
-      (!content && submitReady.length === 0) ||
-      isPending ||
-      (attachmentsEnabled && (isUploading || hasUploadError))
-    )
+    const submitReady = ready;
+    if ((!content && submitReady.length === 0) || isPending || isUploading || hasUploadError)
       return;
     if (!selectedAgentId) {
       setError("Create an agent first before starting a session.");
@@ -213,25 +199,21 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         submit();
       }}
       className="relative"
-      {...(attachmentsEnabled ? dragHandlers : {})}
+      {...dragHandlers}
     >
-      {attachmentsEnabled && isDragActive ? <ComposerDropOverlay className="rounded-2xl" /> : null}
-      {attachmentsEnabled ? (
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={ATTACHMENT_FILE_INPUT_ACCEPT}
-          className="hidden"
-          onChange={(event) => {
-            acceptFiles(Array.from(event.target.files ?? []));
-            event.target.value = "";
-          }}
-        />
-      ) : null}
-      {attachmentsEnabled ? (
-        <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
-      ) : null}
+      {isDragActive ? <ComposerDropOverlay className="rounded-2xl" /> : null}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={ATTACHMENT_FILE_INPUT_ACCEPT}
+        className="hidden"
+        onChange={(event) => {
+          acceptFiles(Array.from(event.target.files ?? []));
+          event.target.value = "";
+        }}
+      />
+      <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
       <Composer
         variant="expanded"
         error={error}
@@ -249,7 +231,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             onPaste={(event) => {
               // Files in the clipboard (e.g. a screenshot) attach via the shared hook, which also
               // stops the browser pasting them into the textarea. Text pastes fall through.
-              if (attachmentsEnabled) handlePasteFiles(event);
+              handlePasteFiles(event);
             }}
             rows={1}
             placeholder="Ask Open Company to build, fix bugs, explore"
@@ -259,16 +241,14 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         }
         leftControls={
           <>
-            {attachmentsEnabled ? (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                aria-label="Attach file"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
-              >
-                <Plus size={15} strokeWidth={1.75} />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach file"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+            >
+              <Plus size={15} strokeWidth={1.75} />
+            </button>
             <Select
               disabled={agents.length === 0}
               value={selectedAgentId}

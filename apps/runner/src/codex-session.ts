@@ -1,4 +1,5 @@
 import {
+  attachmentSandboxFilename,
   codexCliModelNameForModelId,
   isCodexReasoningEffort,
   newAgentSessionMessageId,
@@ -17,6 +18,7 @@ import { flushBraintrust, traceBraintrust } from "@opencompany/observability/bra
 import { and, eq, isNull } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { loadConnectedGitHubInstallation } from "./amp-tool";
+import { downloadBlobBytes } from "./attachment-hydration";
 import { type CodexAppServerSummary, runCodexAppServerTurn } from "./codex-app-server";
 import {
   type CodexCliAuth,
@@ -55,7 +57,13 @@ import {
 } from "./run-context";
 import { RunAbortError, RunLeaseBusyError, RunLeaseLostError } from "./run-control";
 import { MessageTurnFailedError } from "./runner-errors";
-import { commandExitResult, killSandbox, type SandboxHandle, sandboxLayout } from "./sandbox";
+import {
+  commandExitResult,
+  killSandbox,
+  type SandboxHandle,
+  sandboxLayout,
+  writeSandboxTextFiles,
+} from "./sandbox";
 import {
   acquireCodexSandboxForTurn,
   isSessionArchived,
@@ -84,6 +92,13 @@ type CodexUserMessage = {
   id: string;
   content: string;
   modelMessage: unknown;
+};
+
+type CodexAttachment = {
+  filename: string;
+  kind: string;
+  mediaType: string;
+  path: string;
 };
 
 type CodexGitHubAuth = Awaited<ReturnType<typeof loadGitHubAuth>>;
@@ -204,13 +219,6 @@ async function runCodexTurnWithContext(
       return;
     }
 
-    const attachmentCount = await observeRunStep(ctx, "count_message_attachments", () =>
-      countMessageAttachments(input.sessionId, input.messageId),
-    );
-    if (attachmentCount > 0) {
-      throw new Error("Codex sessions do not support attachments yet.");
-    }
-
     const existingAssistantResponse = await observeRunStep(
       ctx,
       "load_existing_assistant_response",
@@ -314,10 +322,20 @@ async function runCodexTurnWithContext(
     const githubAuth = await observeRunStep(ctx, "load_github_auth", () =>
       loadGitHubAuth(row.workspace.id),
     );
+    const attachments = await observeRunStep(ctx, "materialize_codex_attachments", () =>
+      materializeCodexAttachments({
+        sandbox: sandbox!,
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        workdir: row.session.workdir,
+        blobToken: input.env.blobReadWriteToken,
+      }),
+    );
     const task = buildCodexTask({
       agentInstructions: agentConfig.instructions,
       userMessage: codexUserMessage,
       hasGitHubAuth: Boolean(githubAuth.githubToken),
+      attachments,
     });
     const summary = await runCodexAppServerSession({
       ctx,
@@ -719,18 +737,65 @@ async function loadCodexUserMessage(
   return message ?? null;
 }
 
-async function countMessageAttachments(sessionId: string, messageId: string) {
+async function materializeCodexAttachments(input: {
+  sandbox: SandboxHandle;
+  sessionId: string;
+  messageId: string;
+  workdir: string;
+  blobToken: string | undefined;
+}): Promise<CodexAttachment[]> {
   const rows = await getDb()
-    .select({ id: agentSessionMessageAttachments.id })
+    .select({
+      blobPathname: agentSessionMessageAttachments.blobPathname,
+      blobUrl: agentSessionMessageAttachments.blobUrl,
+      filename: agentSessionMessageAttachments.filename,
+      kind: agentSessionMessageAttachments.kind,
+      mediaType: agentSessionMessageAttachments.mediaType,
+    })
     .from(agentSessionMessageAttachments)
     .where(
       and(
-        eq(agentSessionMessageAttachments.sessionId, sessionId),
-        eq(agentSessionMessageAttachments.messageId, messageId),
+        eq(agentSessionMessageAttachments.sessionId, input.sessionId),
+        eq(agentSessionMessageAttachments.messageId, input.messageId),
       ),
-    )
-    .limit(1);
-  return rows.length;
+    );
+  if (rows.length === 0) return [];
+
+  const layout = sandboxLayout(input.workdir);
+  const dir = `${layout.codexRoot}/work/attachments`;
+  await input.sandbox.commands.run(
+    `mkdir -p ${shellQuote(dir)} && printf '*\\n' > ${shellQuote(`${dir}/.gitignore`)}`,
+    { timeoutMs: 30_000 },
+  );
+  const listing = await input.sandbox.commands.run(`ls -1 ${shellQuote(dir)}`, {
+    timeoutMs: 30_000,
+  });
+  const existing = new Set(listing.stdout.split("\n").filter(Boolean));
+
+  const materialized: CodexAttachment[] = [];
+  for (const row of rows) {
+    const sandboxFilename = attachmentSandboxFilename(row.blobPathname);
+    const absolutePath = `${dir}/${sandboxFilename}`;
+    const relativePath = `work/attachments/${sandboxFilename}`;
+
+    if (!existing.has(sandboxFilename)) {
+      const bytes = await downloadBlobBytes(row.blobUrl, input.blobToken);
+      await writeSandboxTextFiles({
+        sandbox: input.sandbox,
+        files: [{ path: absolutePath, content: bytes }],
+      });
+      existing.add(sandboxFilename);
+    }
+
+    materialized.push({
+      filename: row.filename,
+      kind: row.kind,
+      mediaType: row.mediaType,
+      path: relativePath,
+    });
+  }
+
+  return materialized;
 }
 
 async function loadGitHubAuth(workspaceId: string) {
@@ -843,9 +908,22 @@ function buildCodexTask(input: {
   agentInstructions: string;
   userMessage: CodexUserMessage;
   hasGitHubAuth: boolean;
+  attachments?: CodexAttachment[];
 }) {
   const userPrompt =
     modelMessageContent(input.userMessage.modelMessage) ?? input.userMessage.content;
+  const attachmentLines =
+    input.attachments && input.attachments.length > 0
+      ? [
+          "",
+          "Attached files:",
+          ...input.attachments.map(
+            (attachment, index) =>
+              `${index + 1}. ${attachment.filename} (${attachment.kind}, ${attachment.mediaType}) at ${attachment.path}`,
+          ),
+          "Use these local file paths when the request depends on the attached content.",
+        ]
+      : [];
   return [
     "You are running inside an OpenCompany Codex-backed session.",
     "Start in an empty work area. Do not assume any repository has already been cloned.",
@@ -860,6 +938,7 @@ function buildCodexTask(input: {
     "",
     "User request:",
     userPrompt.trim() || input.userMessage.content.trim(),
+    ...attachmentLines,
   ].join("\n");
 }
 
