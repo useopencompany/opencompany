@@ -159,6 +159,39 @@ describe("mergeEvents", () => {
     ]);
   });
 
+  it("keeps lower snapshot durables before leading transient stream events", () => {
+    const earlierToolStarted = event(1, "tool.started", {
+      messageId: "msg_asst",
+      toolCallId: "call_list",
+      name: "list_files",
+      input: { path: "." },
+    });
+    const laterToolStarted = event(3, "tool.started", {
+      messageId: "msg_asst",
+      toolCallId: "call_read",
+      name: "read_file",
+      input: { path: "README.md" },
+    });
+    const snapshot = [earlierToolStarted, laterToolStarted];
+    const overlay = [
+      event(null, "message.delta", { messageId: "msg_asst", delta: "After first tool." }),
+      laterToolStarted,
+    ];
+
+    const merged = mergeEvents(snapshot, overlay);
+    const parts = buildAssistantTurnParts(
+      { id: "msg_asst", role: "assistant", content: "", status: "running" },
+      merged,
+    );
+
+    expect(merged.map((e) => e.id)).toEqual([1, null, 3]);
+    expect(parts.map((part) => (part.type === "text" ? part.text : part.type))).toEqual([
+      "tool-call",
+      "After first tool.",
+      "tool-call",
+    ]);
+  });
+
   it("keeps snapshot durable events not present on the stream", () => {
     const snapshot = [
       event(1, "message.created", { messageId: "m" }),

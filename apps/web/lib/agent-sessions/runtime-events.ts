@@ -188,6 +188,8 @@ export function mergeEvents(snapshot: RuntimeEvent[], overlay: RuntimeEvent[]): 
   const seenIds = new Set<number>();
 
   const merged: RuntimeEvent[] = [];
+  let hasSeenDurableOverlayEvent = false;
+  let pendingTransientEvents: RuntimeEvent[] = [];
   const pushDurable = (id: number) => {
     if (seenIds.has(id)) return;
     const event = overlayById.get(id) ?? snapshotById.get(id);
@@ -206,14 +208,27 @@ export function mergeEvents(snapshot: RuntimeEvent[], overlay: RuntimeEvent[]): 
 
   for (const event of overlay) {
     if (event.id === null) {
-      merged.push(event);
+      pendingTransientEvents.push(event);
       continue;
     }
 
     pushSnapshotDurablesBefore(event.id);
+    merged.push(...pendingTransientEvents);
+    pendingTransientEvents = [];
     while (durableIds[durableCursor] === event.id) durableCursor += 1;
     pushDurable(event.id);
+    hasSeenDurableOverlayEvent = true;
   }
+
+  if (!hasSeenDurableOverlayEvent) {
+    while (durableCursor < durableIds.length) {
+      const id = durableIds[durableCursor];
+      durableCursor += 1;
+      if (id !== undefined) pushDurable(id);
+    }
+  }
+
+  merged.push(...pendingTransientEvents);
 
   while (durableCursor < durableIds.length) {
     const id = durableIds[durableCursor];
