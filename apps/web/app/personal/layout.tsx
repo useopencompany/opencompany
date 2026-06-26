@@ -23,6 +23,7 @@ import type { PersonalIntegrationConnections } from "@/lib/personal/integrations
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 import { normalizeUserTimezoneSource } from "@/lib/timezones";
 import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
+import { listUserWorkspaces } from "@/lib/workspaces/actions";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it does
 // not inherit AppShell/Sidebar — but it still needs the same provider stack (minus the workspace
@@ -53,6 +54,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     mcpSettings,
     toolPolicies,
     githubIntegrationRepositories,
+    workspaceList,
     workspaceAgents,
   ] = await Promise.all([
     loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
@@ -63,6 +65,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
     loadWorkspaceToolPolicyOverrides(workspace.id),
     loadGitHubIntegrationRepositoriesForWorkspace(workspace.id),
+    listUserWorkspaces(),
     loadAgentReferencesForWorkspace(workspace.id),
   ]);
 
@@ -108,7 +111,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
         lastName: authUser.lastName,
       }}
     >
-      <QueryProvider>
+      <QueryProvider key={workspace.id}>
         <WorkspaceProvider
           workspaceId={workspace.id}
           userId={user.id}
@@ -127,7 +130,9 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                   userEmail={authUser.email}
                   userTimezone={user.timezone}
                   userTimezoneSource={normalizeUserTimezoneSource(user.timezoneSource)}
+                  workspaceId={workspace.id}
                   workspaceName={workspace.name}
+                  workspaces={workspaceList}
                   initialSessions={sessions}
                   contextFiles={contextFiles}
                   personalSkills={personalSkills}
