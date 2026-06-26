@@ -328,6 +328,7 @@ jobs:
           # already verify the web deployment; keep smoke focused on the per-PR runner
           # until a team-scoped Vercel curl token or bypass token is configured.
           SMOKE_WEB: "false"
+          SMOKE_CONNECTOR: "false"
           RUNNER_PUBLIC_URL: ${{ steps.provision.outputs.runner_url }}
           EXPECTED_RELEASE: ${{ env.PR_SHA }}
           SMOKE_WEB_ATTEMPTS: "18"
