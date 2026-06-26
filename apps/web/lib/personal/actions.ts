@@ -27,7 +27,7 @@ import type {
 } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agentFiles, agents, inboxItems } from "@opencompany/db/schema";
+import { agentFiles, agents, inboxItems, workspaceSkills } from "@opencompany/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import {
   type AgentBundleFilePayload,
@@ -43,6 +43,7 @@ import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { MAX_BRAIN_FILE_BYTES } from "@/lib/brain/paths";
 import { listWorkspaceSkillSnapshots, toExternalSkillReference } from "@/lib/skills/snapshots";
+import { toWorkspaceSkillReference } from "@/lib/skills/workspace";
 
 type UpdateBehaviorResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
 type UpdateSchedulesResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
@@ -78,9 +79,18 @@ async function derivePersonalAgentSave(
       .filter(isExternalSkillReference)
       .map((skill) => [skill.id, skill] as const),
   );
-  const workspaceSkillReferences = (await listWorkspaceSkillSnapshots(workspaceId)).map(
-    toExternalSkillReference,
-  );
+  const [skillSnapshots, authoredSkills] = await Promise.all([
+    listWorkspaceSkillSnapshots(workspaceId),
+    getDb()
+      .select()
+      .from(workspaceSkills)
+      .where(eq(workspaceSkills.workspaceId, workspaceId))
+      .orderBy(asc(workspaceSkills.name), asc(workspaceSkills.skillId)),
+  ]);
+  const workspaceSkillReferences = [
+    ...skillSnapshots.map(toExternalSkillReference),
+    ...authoredSkills.map(toWorkspaceSkillReference),
+  ];
   for (const skill of workspaceSkillReferences) {
     skillsById.set(skill.id, skill);
   }
@@ -508,9 +518,17 @@ export async function addPersonalAgentSkill(
 
   const addableBuiltinIds = new Set(listAddableBuiltinSkills().map((skill) => skill.id));
   const { workspace } = await currentWorkspace();
-  const workspaceSkillIds = new Set(
-    (await listWorkspaceSkillSnapshots(workspace.id)).map((snapshot) => snapshot.skillId),
-  );
+  const [skillSnapshots, authoredSkills] = await Promise.all([
+    listWorkspaceSkillSnapshots(workspace.id),
+    getDb()
+      .select({ skillId: workspaceSkills.skillId })
+      .from(workspaceSkills)
+      .where(eq(workspaceSkills.workspaceId, workspace.id)),
+  ]);
+  const workspaceSkillIds = new Set([
+    ...skillSnapshots.map((snapshot) => snapshot.skillId),
+    ...authoredSkills.map((skill) => skill.skillId),
+  ]);
 
   if (!addableBuiltinIds.has(normalized) && !workspaceSkillIds.has(normalized)) {
     return { ok: false, error: "Unknown skill." };

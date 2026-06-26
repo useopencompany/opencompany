@@ -168,12 +168,17 @@ export type AgentSkillCatalogEntry = {
   description: string;
   /** Slash-command slug from SKILL.md frontmatter, if the skill declares one. */
   command?: string;
-  source?: {
-    type: "github" | "skills.sh";
-    url: string;
-    ref: string;
-    path: string;
-  };
+  source?:
+    | {
+        type: "github" | "skills.sh";
+        url: string;
+        ref: string;
+        path: string;
+      }
+    | {
+        type: "workspace";
+        path: string;
+      };
 };
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {

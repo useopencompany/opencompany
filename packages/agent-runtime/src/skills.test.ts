@@ -40,6 +40,21 @@ function externalSkill(
   };
 }
 
+function workspaceSkill(
+  overrides: Partial<AgentExternalSkillReference> = {},
+): AgentExternalSkillReference {
+  return {
+    id: "brand-voice",
+    name: "Brand Voice",
+    description: "Use the company voice.",
+    source: {
+      type: "workspace",
+      path: "skills/brand-voice",
+    },
+    ...overrides,
+  };
+}
+
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     schemaVersion: "agent.v1",
@@ -330,6 +345,20 @@ describe("external skills", () => {
     ).toBeNull();
   });
 
+  test("normalizeExternalSkillReference keeps workspace skill references", () => {
+    const skill = workspaceSkill();
+    expect(normalizeExternalSkillReference(skill)).toEqual(skill);
+  });
+
+  test("normalizeExternalSkillReference rejects workspace skill references with mismatched paths", () => {
+    expect(
+      normalizeExternalSkillReference({
+        ...workspaceSkill(),
+        source: { type: "workspace", path: "skills/other" },
+      }),
+    ).toBeNull();
+  });
+
   test("normalizeAgentSkills keeps external objects alongside built-in ids", () => {
     const skill = externalSkill();
     expect(normalizeAgentSkills([AGENT_SELF_EDIT_SKILL_ID, skill, "made-up"])).toEqual([
@@ -360,13 +389,35 @@ describe("external skills", () => {
     ).toEqual(source);
   });
 
+  test("workspace skills round-trip through serialize/parse as objects", () => {
+    const skill = workspaceSkill();
+    const source = serializeAgentFile({ title: "Agent", body: "Help out.", skills: [skill] });
+    expect(source).toContain("type: workspace");
+    expect(source).toContain("path: skills/brand-voice");
+    expect(source).not.toContain("url:");
+    const parsed = parseAgentFile(source);
+    expect(parsed.config.skills).toEqual([skill]);
+  });
+
   test("resolveEnabledSkillMetadata lists built-ins plus external skills", () => {
     const skill = externalSkill();
     const metadata = resolveEnabledSkillMetadata(baseConfig({ skills: [skill] }));
     expect(metadata.find((m) => m.id === AGENT_SELF_EDIT_SKILL_ID)?.origin).toBe("builtin");
     const external = metadata.find((m) => m.id === skill.id);
     expect(external?.origin).toBe("external");
-    expect(external?.source?.url).toBe(skill.source.url);
+    expect(external?.source?.type).toBe("github");
+    if (external?.source?.type !== "github" || skill.source.type !== "github") {
+      throw new Error("expected GitHub skill sources");
+    }
+    expect(external.source.url).toBe(skill.source.url);
+  });
+
+  test("resolveEnabledSkillMetadata marks workspace skills separately", () => {
+    const skill = workspaceSkill();
+    const metadata = resolveEnabledSkillMetadata(baseConfig({ skills: [skill] }));
+    const resolved = metadata.find((m) => m.id === skill.id);
+    expect(resolved?.origin).toBe("workspace");
+    expect(resolved?.source?.type).toBe("workspace");
   });
 
   test("resolveEnabledBuiltinSkillFiles excludes external skills (no files in code)", () => {

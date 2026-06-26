@@ -1,4 +1,4 @@
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { normalizeSkillCommand, validateSkillFiles } from "./skill-resolver";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import {
@@ -7,6 +7,7 @@ import {
   type AgentSkillFile,
   type AgentSkillReference,
   type AgentSkillSource,
+  type AgentWorkspaceSkillSource,
   isExternalSkillReference,
 } from "./types";
 
@@ -1257,7 +1258,7 @@ export type ResolvedSkillMetadata = {
   name: string;
   description: string;
   command?: string;
-  origin: "builtin" | "external" | "personal";
+  origin: "builtin" | "external" | "personal" | "workspace";
   source?: AgentSkillSource;
   provenance?: "agent" | "user";
 };
@@ -1278,11 +1279,12 @@ export function resolveEnabledSkillMetadata(
   for (const reference of config.skills ?? []) {
     if (seen.has(reference.id)) continue;
     if (isExternalSkillReference(reference)) {
+      const origin = reference.source.type === "workspace" ? "workspace" : "external";
       out.push({
         id: reference.id,
         name: reference.name,
         description: reference.description,
-        origin: "external",
+        origin,
         source: reference.source,
       });
       seen.add(reference.id);
@@ -1350,6 +1352,29 @@ function isAllowedSkillSourceUrl(url: string): boolean {
   return ALLOWED_SKILL_SOURCE_HOSTS.has(parsed.hostname.toLowerCase());
 }
 
+export function workspaceSkillSourcePath(id: string): AgentWorkspaceSkillSource["path"] {
+  return `skills/${id}`;
+}
+
+export function serializeSkillMarkdown(input: {
+  name: string;
+  description: string;
+  body: string;
+}): string {
+  const name = input.name.trim();
+  const description = input.description.trim();
+  const body = input.body.replace(/\r\n/g, "\n").replace(/\s+$/g, "");
+  const frontmatter = stringifyYaml(
+    {
+      name,
+      description,
+    },
+    { lineWidth: 0 },
+  ).trimEnd();
+
+  return ["---", frontmatter, "---", "", body].join("\n");
+}
+
 // Validate the *shape* of an external skill reference (no DB, no network). Returns a
 // normalized reference or null. A malformed external object is dropped entirely so it can
 // never half-mount. Integrity-vs-content checks happen at resolve/materialize time.
@@ -1367,6 +1392,17 @@ export function normalizeExternalSkillReference(
 
   const sourceRecord = source as Record<string, unknown>;
   const type = sourceRecord.type;
+  if (type === "workspace") {
+    const path = typeof sourceRecord.path === "string" ? sourceRecord.path.trim() : "";
+    if (path !== workspaceSkillSourcePath(id)) return null;
+    return {
+      id,
+      name,
+      description,
+      source: { type, path },
+    };
+  }
+
   if (type !== "github" && type !== "skills.sh") return null;
   const url = typeof sourceRecord.url === "string" ? sourceRecord.url.trim() : "";
   if (!isAllowedSkillSourceUrl(url)) return null;

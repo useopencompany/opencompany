@@ -21,6 +21,7 @@ import {
   brainFiles,
   workspaceIntegrationResources,
   workspaceIntegrations,
+  workspaceSkills,
   workspaceSyncJobs,
 } from "@opencompany/db/schema";
 import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
@@ -65,6 +66,7 @@ import {
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import { listWorkspaceSkillSnapshots, toExternalSkillReference } from "@/lib/skills/snapshots";
+import { toWorkspaceSkillReference } from "@/lib/skills/workspace";
 import {
   ensureWorkspaceRepository,
   listWorkspaceAgentFiles,
@@ -259,11 +261,20 @@ export async function updateAgent(
     if (!row.path || row.path === agent.path) return [];
     return [{ path: row.path, name: row.name }];
   });
-  const workspaceSkillReferences = (
-    await timeAsync(trace, "db.selectSkillSnapshots", () =>
+  const [skillSnapshots, authoredSkills] = await timeAsync(trace, "db.selectSkillCatalog", () =>
+    Promise.all([
       listWorkspaceSkillSnapshots(workspace.id),
-    )
-  ).map(toExternalSkillReference);
+      db
+        .select()
+        .from(workspaceSkills)
+        .where(eq(workspaceSkills.workspaceId, workspace.id))
+        .orderBy(asc(workspaceSkills.name), asc(workspaceSkills.skillId)),
+    ]),
+  );
+  const workspaceSkillReferences = [
+    ...skillSnapshots.map(toExternalSkillReference),
+    ...authoredSkills.map(toWorkspaceSkillReference),
+  ];
   const savedRepositories = currentConfig.integrations.github.repositories;
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubRepositories,
