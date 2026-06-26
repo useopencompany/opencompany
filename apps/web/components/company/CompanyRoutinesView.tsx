@@ -24,6 +24,7 @@ import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import type { AgentRow } from "@/lib/collections/types";
 
 type RoutineItem = { agent: AgentRow; routine: AgentScheduleTriggerConfig };
+type OptimisticSchedulesByAgentId = Record<string, AgentScheduleTriggerConfig[]>;
 
 type DialogState =
   | { mode: "create"; agentId: string }
@@ -162,6 +163,25 @@ function RoutinesSkeleton() {
   );
 }
 
+function scheduleListsEqual(
+  left: readonly AgentScheduleTriggerConfig[],
+  right: readonly AgentScheduleTriggerConfig[],
+) {
+  if (left.length !== right.length) return false;
+  return left.every((schedule, index) => {
+    const other = right[index];
+    return (
+      other &&
+      schedule.id === other.id &&
+      schedule.type === other.type &&
+      schedule.cron === other.cron &&
+      schedule.timezone === other.timezone &&
+      schedule.prompt === other.prompt &&
+      schedule.enabled === other.enabled
+    );
+  });
+}
+
 function CompanyRoutinesLive() {
   const { workspaceId } = useWorkspaceContext();
   const { agents: agentsCollection } = useCollections();
@@ -171,6 +191,8 @@ function CompanyRoutinesLive() {
   const router = useRouter();
 
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [optimisticSchedules, setOptimisticSchedules] = useState<OptimisticSchedulesByAgentId>({});
+  const [savingAgentIds, setSavingAgentIds] = useState<Set<string>>(() => new Set());
   const [runningRoutineId, setRunningRoutineId] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [isPending, startTransition] = useTransition();
@@ -193,6 +215,18 @@ function CompanyRoutinesLive() {
     () => new Map(companyAgents.map((agent) => [agent.id, agent])),
     [companyAgents],
   );
+  const schedulesByAgentId = useMemo(() => {
+    const schedules = new Map<string, AgentScheduleTriggerConfig[]>();
+    for (const agent of companyAgents) {
+      const liveSchedules = scheduleTriggers(agent.config.triggers);
+      const optimistic = optimisticSchedules[agent.id];
+      schedules.set(
+        agent.id,
+        optimistic && !scheduleListsEqual(optimistic, liveSchedules) ? optimistic : liveSchedules,
+      );
+    }
+    return schedules;
+  }, [companyAgents, optimisticSchedules]);
   const agentOptions = useMemo(
     () => companyAgents.map((agent) => ({ id: agent.id, name: agent.name })),
     [companyAgents],
@@ -200,16 +234,94 @@ function CompanyRoutinesLive() {
   const routineItems = useMemo<RoutineItem[]>(
     () =>
       companyAgents.flatMap((agent) =>
-        scheduleTriggers(agent.config.triggers).map((routine) => ({ agent, routine })),
+        (schedulesByAgentId.get(agent.id) ?? []).map((routine) => ({ agent, routine })),
       ),
-    [companyAgents],
+    [companyAgents, schedulesByAgentId],
   );
 
+  useEffect(() => {
+    const agentIdsToClear = Object.keys(optimisticSchedules).filter((agentId) => {
+      const agent = agentsById.get(agentId);
+      return (
+        !agent ||
+        scheduleListsEqual(
+          optimisticSchedules[agentId] ?? [],
+          scheduleTriggers(agent.config.triggers),
+        )
+      );
+    });
+
+    if (agentIdsToClear.length === 0) return;
+
+    const timeout = window.setTimeout(() => {
+      setOptimisticSchedules((previous) => {
+        let changed = false;
+        const next = { ...previous };
+
+        for (const agentId of agentIdsToClear) {
+          const agent = agentsById.get(agentId);
+          if (
+            !agent ||
+            scheduleListsEqual(previous[agentId] ?? [], scheduleTriggers(agent.config.triggers))
+          ) {
+            delete next[agentId];
+            changed = true;
+          }
+        }
+
+        return changed ? next : previous;
+      });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [agentsById, optimisticSchedules]);
+
+  function setAgentSaving(agentId: string, saving: boolean) {
+    setSavingAgentIds((previous) => {
+      const next = new Set(previous);
+      if (saving) next.add(agentId);
+      else next.delete(agentId);
+      return next;
+    });
+  }
+
   function persistAgentRoutines(agentId: string, next: AgentScheduleTriggerConfig[]) {
+    const previous = schedulesByAgentId.get(agentId) ?? [];
+    const hadPreviousOptimistic = Object.prototype.hasOwnProperty.call(
+      optimisticSchedules,
+      agentId,
+    );
+    setOptimisticSchedules((current) => ({ ...current, [agentId]: next }));
+    setAgentSaving(agentId, true);
+
+    function rollbackOptimisticSchedules() {
+      setOptimisticSchedules((current) => {
+        const reverted = { ...current };
+        if (hadPreviousOptimistic) reverted[agentId] = previous;
+        else delete reverted[agentId];
+        return reverted;
+      });
+    }
+
     startTransition(async () => {
-      const result = await updateWorkspaceAgentSchedules(agentId, next);
-      if (!result.ok) showError(result.error, "Could not save routine");
-      // The agents Electric collection streams the updated row back, refreshing the list.
+      try {
+        const result = await updateWorkspaceAgentSchedules(agentId, next);
+        if (!result.ok) {
+          rollbackOptimisticSchedules();
+          showError(result.error, "Could not save routine");
+        }
+        // Keep the optimistic schedules until Electric streams the matching row back.
+      } catch (error) {
+        rollbackOptimisticSchedules();
+        showError(
+          error instanceof Error ? error.message : "Could not save routine.",
+          "Could not save routine",
+        );
+      } finally {
+        setAgentSaving(agentId, false);
+      }
     });
   }
 
@@ -217,7 +329,7 @@ function CompanyRoutinesLive() {
     if (!dialog) return;
     const agent = agentsById.get(dialog.agentId);
     if (agent) {
-      const next = upsertScheduleTrigger(scheduleTriggers(agent.config.triggers), trigger);
+      const next = upsertScheduleTrigger(schedulesByAgentId.get(dialog.agentId) ?? [], trigger);
       persistAgentRoutines(dialog.agentId, next);
     }
     setDialog(null);
@@ -226,7 +338,7 @@ function CompanyRoutinesLive() {
   function toggleRoutine(agentId: string, routine: AgentScheduleTriggerConfig) {
     const agent = agentsById.get(agentId);
     if (!agent) return;
-    const next = scheduleTriggers(agent.config.triggers).map((item) =>
+    const next = (schedulesByAgentId.get(agentId) ?? []).map((item) =>
       item.id === routine.id ? { ...item, enabled: !item.enabled } : item,
     );
     persistAgentRoutines(agentId, next);
@@ -235,7 +347,7 @@ function CompanyRoutinesLive() {
   function deleteRoutine(agentId: string, routineId: string) {
     const agent = agentsById.get(agentId);
     if (!agent) return;
-    const next = scheduleTriggers(agent.config.triggers).filter((item) => item.id !== routineId);
+    const next = (schedulesByAgentId.get(agentId) ?? []).filter((item) => item.id !== routineId);
     persistAgentRoutines(agentId, next);
   }
 
@@ -267,9 +379,10 @@ function CompanyRoutinesLive() {
   if (isLoading) return <RoutinesSkeleton />;
 
   const hasAgents = companyAgents.length > 0;
+  const hasSavingAgent = savingAgentIds.size > 0;
   const dialogAgent = dialog ? agentsById.get(dialog.agentId) : null;
   const dialogExistingIds = dialogAgent
-    ? scheduleTriggers(dialogAgent.config.triggers).map((trigger) => trigger.id)
+    ? (schedulesByAgentId.get(dialogAgent.id) ?? []).map((trigger) => trigger.id)
     : [];
 
   function openCreate() {
@@ -290,7 +403,7 @@ function CompanyRoutinesLive() {
         <button
           type="button"
           onClick={openCreate}
-          disabled={!hasAgents}
+          disabled={!hasAgents || hasSavingAgent}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12.5px] font-medium text-ink/85 transition-colors duration-150 hover:bg-surface-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Plus size={12.5} strokeWidth={1.9} />
@@ -304,7 +417,7 @@ function CompanyRoutinesLive() {
             key={`${item.agent.id}:${item.routine.id}`}
             item={item}
             now={now}
-            isPending={isPending}
+            isPending={isPending || savingAgentIds.has(item.agent.id)}
             isRunning={runningRoutineId === `${item.agent.id}:${item.routine.id}`}
             onEdit={() =>
               setDialog({ mode: "edit", agentId: item.agent.id, schedule: item.routine })
@@ -332,7 +445,8 @@ function CompanyRoutinesLive() {
                 <button
                   type="button"
                   onClick={openCreate}
-                  className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                  disabled={hasSavingAgent}
+                  className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Plus size={13} strokeWidth={1.9} />
                   New routine
