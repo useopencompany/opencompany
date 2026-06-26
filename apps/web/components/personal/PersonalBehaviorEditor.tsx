@@ -40,7 +40,7 @@ export function PersonalBehaviorEditor({
   onDraftChange: (body: string, content: TiptapDoc) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
-  const { agent, githubRepositories } = usePersonalAgent();
+  const { agent, githubRepositories, workspaceAgents } = usePersonalAgent();
   const { showError } = useToast();
   const { data: workspaceSkills } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
@@ -68,8 +68,8 @@ export function PersonalBehaviorEditor({
   // @-mention any repo the connection can reach — not only repos already saved on the config.
   const mentionItems = useMemo(() => {
     const skills = mergeSkillCatalog(config.skills ?? [], workspaceSkills ?? []);
-    return buildAgentMentionItems(githubRepositories, [], { skills });
-  }, [githubRepositories, config.skills, workspaceSkills]);
+    return buildAgentMentionItems(githubRepositories, [], { agents: workspaceAgents, skills });
+  }, [githubRepositories, workspaceAgents, config.skills, workspaceSkills]);
 
   // The actual persist. `interactive` debounced saves drive the local save indicator; the
   // final flush on unmount runs fire-and-forget (this component is gone, so it must not touch

@@ -33,7 +33,10 @@ import {
   normalizeAgentBundleRelativePath,
   serializeAgentBundleFiles,
 } from "@/lib/agents/bundle-files";
-import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
+import {
+  loadAgentReferencesForWorkspace,
+  loadGitHubIntegrationRepositoriesForWorkspace,
+} from "@/lib/agents/data";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
@@ -46,11 +49,11 @@ type UpdateBehaviorResult = { ok: true; config: AgentConfig } | { ok: false; err
 type UpdateSchedulesResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
 
 // The personal agent's `.agent` body is the single source of truth: @-mentioned tools, skills,
-// repositories, and integrations are re-derived from it on every save. This re-runs that canonical
-// derivation for a given body — resolving the workspace's repositories and external skills so their
-// mentions bind — and returns the parsed title/body/config plus the serialized source (for hashing).
-// Both the Behavior editor and the manual "Add integration" path go through here so neither can
-// diverge from what the body actually says.
+// repositories, integrations, and company agents are re-derived from it on every save. This re-runs
+// that canonical derivation for a given body — resolving the workspace's repositories, external
+// skills, and workspace-wide agents so their mentions bind — and returns the parsed title/body/config
+// plus the serialized source (for hashing). Both the Behavior editor and the manual "Add
+// integration" path go through here so neither can diverge from what the body actually says.
 async function derivePersonalAgentSave(
   agent: { name: string; config: AgentConfig },
   workspaceId: string,
@@ -83,6 +86,7 @@ async function derivePersonalAgentSave(
     skillsById.set(skill.id, skill);
   }
   const skills = [...skillsById.values()];
+  const workspaceAgents = await loadAgentReferencesForWorkspace(workspaceId);
 
   const derived = deriveAgentConfigFromBody({
     title: FIXED_PERSONAL_AGENT_NAME,
@@ -90,6 +94,7 @@ async function derivePersonalAgentSave(
     engine: currentConfig.engine,
     model: model ?? currentConfig.model.name,
     repositories: derivationRepositories,
+    agents: workspaceAgents,
     skills,
     preferredRepositories: savedRepositories.filter((repository) => repository.binding),
     triggers: currentConfig.triggers,
