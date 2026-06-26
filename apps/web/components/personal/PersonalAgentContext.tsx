@@ -1,7 +1,12 @@
 "use client";
 
 import type { ResolvedSkillMetadata } from "@opencompany/agent-runtime";
-import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentReference,
+  AgentToolId,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import { createContext, useContext } from "react";
 import type { PersonalGitHubIntegrationStatus } from "@/components/personal/PersonalCapabilityPanel";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
@@ -42,6 +47,8 @@ export type PersonalAgentContextValue = {
   // The workspace GitHub integration's usable repository catalog (loaded once at layout
   // mount), so the Behavior editor can offer concrete @owner/repo mention items.
   githubRepositories: GitHubIntegrationRepositoryPayload[];
+  // Workspace-wide/company agents mentionable from the personal Behavior editor.
+  workspaceAgents: AgentReference[];
   // Workspace-level connection state per integration, used to render Connected/Connect badges.
   integrationConnections: PersonalIntegrationConnections;
   // Per-integration accounts/resources/permissions detail for the expandable Integrations rows.

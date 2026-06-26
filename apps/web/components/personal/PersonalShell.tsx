@@ -1,7 +1,12 @@
 "use client";
 
 import { agentBundleDir, type ResolvedSkillMetadata } from "@opencompany/agent-runtime";
-import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentReference,
+  AgentToolId,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import { PanelLeft } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -86,6 +91,8 @@ export type PersonalShellProps = {
   // The workspace GitHub integration's usable repository catalog, so the Behavior editor can
   // offer concrete @owner/repo mentions (not just the generic @github pill).
   githubRepositories: GitHubIntegrationRepositoryPayload[];
+  // Workspace-wide/company agents mentionable from the personal Behavior editor.
+  workspaceAgents: AgentReference[];
   integrationConnections: PersonalIntegrationConnections;
   integrationDetails: PersonalIntegrationDetails;
   toolPolicies: WorkspaceToolPolicyOverrides;
@@ -110,6 +117,7 @@ export default function PersonalShell({
   personalSkills,
   githubIntegrationStatus,
   githubRepositories,
+  workspaceAgents,
   integrationConnections,
   integrationDetails,
   toolPolicies,
@@ -282,6 +290,7 @@ export default function PersonalShell({
       personalSkills,
       githubIntegrationStatus,
       githubRepositories,
+      workspaceAgents,
       integrationConnections,
       integrationDetails,
       toolPolicies,
@@ -324,6 +333,7 @@ export default function PersonalShell({
       personalSkills,
       githubIntegrationStatus,
       githubRepositories,
+      workspaceAgents,
       integrationConnections,
       integrationDetails,
       toolPolicies,
