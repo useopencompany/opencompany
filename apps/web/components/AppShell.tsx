@@ -70,7 +70,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
         lastName: authUser.lastName,
       }}
     >
-      <QueryProvider>
+      <QueryProvider key={workspace.id}>
         <WorkspaceProvider
           workspaceId={workspace.id}
           userId={user.id}

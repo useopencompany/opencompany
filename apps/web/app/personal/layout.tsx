@@ -106,7 +106,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
         lastName: authUser.lastName,
       }}
     >
-      <QueryProvider>
+      <QueryProvider key={workspace.id}>
         <WorkspaceProvider
           workspaceId={workspace.id}
           userId={user.id}
