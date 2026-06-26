@@ -10,10 +10,8 @@ import {
   extractMentionIds,
   FIXED_PERSONAL_AGENT_NAME,
   isExternalSkillReference,
-  isSupportedScheduleCron,
   listAddableBuiltinSkills,
   normalizeAgentConfig,
-  normalizeScheduleTimezone,
   parseAgentFile,
   SUPPORTED_AGENT_TOOLS,
   serializeAgentFile,
@@ -21,7 +19,6 @@ import {
 import type {
   AgentConfig,
   AgentModelId,
-  AgentScheduleTriggerConfig,
   AgentToolId,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
@@ -39,6 +36,7 @@ import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data
 import { hashAgentSource } from "@/lib/agents/hash";
 import { buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
+import { parseScheduleTriggers } from "@/lib/agent-schedules/parse";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { MAX_BRAIN_FILE_BYTES } from "@/lib/brain/paths";
@@ -209,7 +207,7 @@ export async function updatePersonalAgentSchedules(
     return { ok: false, error: "Personal agent not found." };
   }
 
-  const parsed = parsePersonalScheduleTriggers(schedules, user.timezone);
+  const parsed = parseScheduleTriggers(schedules, { timezone: user.timezone });
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
   const currentConfig = normalizeAgentConfig(agent.config);
@@ -251,49 +249,6 @@ export async function updatePersonalAgentSchedules(
   });
 
   return { ok: true, config: nextConfig };
-}
-
-function parsePersonalScheduleTriggers(
-  schedules: readonly unknown[],
-  userTimezone: string,
-): { ok: true; value: AgentScheduleTriggerConfig[] } | { ok: false; error: string } {
-  if (!Array.isArray(schedules)) {
-    return { ok: false, error: "Routines must be a list." };
-  }
-
-  const timezone = normalizeScheduleTimezone(userTimezone);
-  const ids = new Set<string>();
-  const triggers: AgentScheduleTriggerConfig[] = [];
-
-  for (const [index, item] of schedules.entries()) {
-    const label = `Routine ${index + 1}`;
-    if (!item || typeof item !== "object") {
-      return { ok: false, error: `${label} is invalid.` };
-    }
-    const record = item as Record<string, unknown>;
-    const id = typeof record.id === "string" ? record.id.trim() : "";
-    const cron = typeof record.cron === "string" ? record.cron.trim() : "";
-    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
-
-    if (!id) return { ok: false, error: `${label} needs an id.` };
-    if (ids.has(id)) return { ok: false, error: `Duplicate routine id "${id}".` };
-    if (!cron || !isSupportedScheduleCron(cron)) {
-      return { ok: false, error: `${label} has an unsupported schedule.` };
-    }
-    if (!prompt) return { ok: false, error: `${label} needs a prompt.` };
-
-    ids.add(id);
-    triggers.push({
-      id,
-      type: AGENT_SCHEDULE_TRIGGER_TYPE,
-      cron,
-      timezone,
-      prompt,
-      enabled: record.enabled === true,
-    });
-  }
-
-  return { ok: true, value: triggers };
 }
 
 type ResetPersonalAgentResult = { ok: true } | { ok: false; error: string };

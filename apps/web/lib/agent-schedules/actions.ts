@@ -1,12 +1,14 @@
 "use server";
 
-import { normalizeAgentConfig } from "@opencompany/agent-runtime";
+import { AGENT_SCHEDULE_TRIGGER_TYPE, normalizeAgentConfig } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
 import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
+import { updateAgent } from "@/lib/agents/actions";
 import { currentWorkspace } from "@/lib/auth";
+import { parseScheduleTriggers } from "./parse";
 import { runScheduledAgent } from "./runner";
 
 export async function runAgentScheduleNow(agentId: string, triggerId: string) {
@@ -59,4 +61,56 @@ export async function runAgentScheduleNow(agentId: string, triggerId: string) {
   }
 
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
+}
+
+/**
+ * Replace the schedule (routine) triggers on a workspace agent, used by the company Routines tab.
+ *
+ * This is the workspace counterpart to `updatePersonalAgentSchedules`: it scopes to a company
+ * agent (`workspace_id` + `user_id IS NULL`), validates the incoming triggers, and merges them
+ * with the agent's existing non-schedule triggers (GitHub PR triggers, etc.) so those survive.
+ * The actual write is delegated to `updateAgent`, which owns versioning, normalization, and the
+ * GitHub sync that workspace agents (unlike local-only personal agents) require — so routines
+ * stay consistent with edits made in the agent editor.
+ */
+export async function updateWorkspaceAgentSchedules(
+  agentId: string,
+  schedules: readonly unknown[],
+) {
+  const { workspace } = await currentWorkspace();
+  const db = getDb();
+
+  const [agent] = await db
+    .select({ id: agents.id, config: agents.config })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.id, agentId),
+        eq(agents.workspaceId, workspace.id),
+        isNull(agents.userId),
+      ),
+    )
+    .limit(1);
+
+  if (!agent) {
+    return { ok: false, error: "Agent not found." } as const;
+  }
+
+  const parsed = parseScheduleTriggers(schedules);
+  if (!parsed.ok) return { ok: false, error: parsed.error } as const;
+
+  const currentConfig = normalizeAgentConfig(agent.config);
+  const mergedTriggers = [
+    ...parsed.value,
+    ...currentConfig.triggers.filter((trigger) => trigger.type !== AGENT_SCHEDULE_TRIGGER_TYPE),
+  ];
+
+  // Delegate the actual write to `updateAgent` (the canonical workspace-agent path) so versioning,
+  // config normalization, and GitHub sync stay consistent with edits made in the agent editor.
+  const result = await updateAgent(agentId, { config: { triggers: mergedTriggers } });
+  if (!result?.agent) {
+    return { ok: false, error: "Could not save routine." } as const;
+  }
+
+  return { ok: true } as const;
 }
