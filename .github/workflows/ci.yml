@@ -24,10 +24,6 @@ jobs:
       WORKOS_API_KEY: sk_test_ci_placeholder
       WORKOS_COOKIE_PASSWORD: replace-with-at-least-32-characters
       NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3000/auth/callback
-      CONNECTOR_APP_URL: http://localhost:3002
-      CONNECTOR_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
-      CONNECTOR_MCP_OAUTH_STATE_SECRET: replace-with-a-long-random-secret
-      CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: cmVwbGFjZS13aXRoLWJhc2U2NC0zMi1ieXRlLWtleSE=
     steps:
       - name: Checkout
         uses: actions/checkout@v5

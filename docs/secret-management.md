@@ -24,7 +24,6 @@ Use secret paths by deployment surface:
 | Path | Used by | Purpose |
 |---|---|---|
 | `/web` | Vercel web, local web | Next.js app, WorkOS, Inngest, GitHub App, analytics, feedback, runner client config. |
-| `/connector` | Vercel connector, local connector | Standalone Connector app, WorkOS AuthKit callback, Linear MCP OAuth state, Connector credential encryption. |
 | `/runner` | Render runner, local runner | Fastify runner, E2B, AI Gateway, runner auth, GitHub App Brain sync. |
 | `/release` | GitHub Actions release workflow | Production migration/deploy orchestration. |
 
@@ -65,8 +64,8 @@ bun run setup:personal
 Then set `NEON_PROJECT_ID` in `.env.override.local`. That file is gitignored, survives
 `bun run env:pull`, and takes precedence over `.env.local`.
 
-When `.infisical.json` exists, setup pulls shared dev values from Infisical `dev` + `/web`,
-`/connector`, and `/runner`. There is no Vercel env-pull fallback.
+When `.infisical.json` exists, setup pulls shared dev values from Infisical `dev` + `/web` and
+`/runner`. There is no Vercel env-pull fallback.
 
 Then run development from `.env.local`:
 
@@ -94,9 +93,9 @@ Export local env files when tools need a real `.env.local`:
 bun run infisical:export
 ```
 
-The export command pulls `dev` secrets from `/web`, `/connector`, and `/runner` into `.env.local`,
-while preserving existing `DATABASE_URL`, `NEON_BRANCH`, and `INNGEST_DEV`. Those are local runtime
-values managed by `bun run setup` and the dev scripts.
+The export command pulls `dev` secrets from `/web` and `/runner` into `.env.local`, while preserving
+existing `DATABASE_URL`, `NEON_BRANCH`, and `INNGEST_DEV`. Those are local runtime values managed by
+`bun run setup` and the dev scripts.
 
 ## Initial Secret Upload
 
@@ -126,14 +125,6 @@ For Infisical `dev`, `/web` should include:
   credential encryption key)
 - runner connection vars
 - optional Linear, analytics, and observability vars
-
-For Infisical `dev`, `/connector` should include:
-
-- WorkOS vars: `WORKOS_CLIENT_ID`, `WORKOS_API_KEY`, and `WORKOS_COOKIE_PASSWORD`
-- `CONNECTOR_APP_URL` and `CONNECTOR_WORKOS_REDIRECT_URI`; local setup rewrites these to
-  `http://localhost:3002` values
-- `CONNECTOR_MCP_OAUTH_STATE_SECRET`
-- `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY`
 
 For Infisical `dev`, `/runner` should include:
 
@@ -168,12 +159,6 @@ Repeat for:
 
 - `dev` + `/web` -> Vercel Development
 - `staging` + `/web` -> Vercel Preview
-
-Create a second Vercel secret sync for Connector:
-
-- `prod` + `/connector` -> Connector Vercel project, Production
-- `dev` + `/connector` -> Connector Vercel project, Development
-- `staging` + `/connector` -> Connector Vercel project, Preview, if preview deploys are enabled
 
 ## Render Sync
 
@@ -214,12 +199,10 @@ Put these keys in Infisical `prod` + `/release`:
 | `PRODUCTION_DATABASE_URL` | Production Neon URL for migrations. |
 | `VERCEL_TOKEN` | Vercel deploy token. |
 | `VERCEL_ORG_ID` | Vercel org/team id. |
-| `VERCEL_PROJECT_ID` | Vercel web project id. |
-| `VERCEL_CONNECTOR_PROJECT_ID` | Vercel project id for the Connector app. |
+| `VERCEL_PROJECT_ID` | Vercel project id. |
 | `RENDER_SERVICE_ID` | Render service id for the runner. |
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
-| `PRODUCTION_CONNECTOR_URL` | Canonical production Connector URL for smoke checks. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 
 The workflow maps `PRODUCTION_DATABASE_URL` to `DATABASE_URL` before running Drizzle migrations.
