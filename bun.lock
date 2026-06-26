@@ -27,6 +27,27 @@
         "vitest": "^4.1.7",
       },
     },
+    "apps/connector": {
+      "name": "@opencompany/connector",
+      "version": "0.2.0",
+      "dependencies": {
+        "@opencompany/ui": "workspace:*",
+        "next": "16.2.6",
+        "react": "19.2.6",
+        "react-dom": "19.2.6",
+      },
+      "devDependencies": {
+        "@tailwindcss/postcss": "^4.3.0",
+        "@types/node": "^25.9.1",
+        "@types/react": "19.2.15",
+        "@types/react-dom": "19.2.3",
+        "eslint": "9.39.4",
+        "eslint-config-next": "16.2.6",
+        "postcss": "8.5.15",
+        "tailwindcss": "^4.3.0",
+        "typescript": "^6.0.3",
+      },
+    },
     "apps/design-system": {
       "name": "@opencompany/design-system",
       "version": "0.2.0",
@@ -702,6 +723,8 @@
     "@opencompany/analytics": ["@opencompany/analytics@workspace:packages/analytics"],
 
     "@opencompany/billing": ["@opencompany/billing@workspace:packages/billing"],
+
+    "@opencompany/connector": ["@opencompany/connector@workspace:apps/connector"],
 
     "@opencompany/crypto": ["@opencompany/crypto@workspace:packages/crypto"],
 
