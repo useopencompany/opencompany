@@ -69,6 +69,8 @@ type SessionStartSurface = "company" | "personal";
 
 type SessionStartOptions = {
   surface?: SessionStartSurface;
+  codexReasoningEffort?: CodexReasoningEffort;
+  codexPlanModeEnabled?: boolean;
 };
 
 function billingRedirectForSurface(
@@ -189,6 +191,14 @@ export async function createAgentSessionFromPrompt(
     agentModelId: agent.config.model.name,
     ...(modelId ? { requestedModelId: modelId } : {}),
   });
+  const codexReasoningEffort = options.codexReasoningEffort;
+  if (
+    engine === "codex" &&
+    codexReasoningEffort !== undefined &&
+    !isCodexReasoningEffort(codexReasoningEffort)
+  ) {
+    return { ok: false, error: "Invalid Codex reasoning effort." } as const;
+  }
 
   if (engine === "codex" && attachments.length > 0) {
     return { ok: false, error: "Codex sessions do not support attachments yet." } as const;
@@ -214,6 +224,12 @@ export async function createAgentSessionFromPrompt(
     modelName,
     content: trimmed,
     attachments,
+    ...(engine === "codex" && codexReasoningEffort !== undefined
+      ? { codexReasoningEffort }
+      : {}),
+    ...(engine === "codex" && options.codexPlanModeEnabled === true
+      ? { codexPlanModeEnabled: true }
+      : {}),
   });
   const sessionId = session.id;
   const messageId = message.id;
@@ -1470,6 +1486,8 @@ async function insertAgentSessionWithUserMessage(input: {
   modelName: string;
   content: string;
   attachments?: SubmitAttachmentInput[];
+  codexReasoningEffort?: CodexReasoningEffort;
+  codexPlanModeEnabled?: boolean;
 }) {
   const db = getDb();
   const sessionId = newAgentSessionId();
@@ -1503,6 +1521,12 @@ async function insertAgentSessionWithUserMessage(input: {
       engine,
       modelProvider,
       modelName,
+      ...(engine === "codex" && input.codexReasoningEffort !== undefined
+        ? { codexReasoningEffort: input.codexReasoningEffort }
+        : {}),
+      ...(engine === "codex" && input.codexPlanModeEnabled === true
+        ? { codexPlanModeEnabled: true }
+        : {}),
     })
     .returning();
   const statusEventInsert = db

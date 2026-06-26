@@ -5,7 +5,11 @@ import {
   CODEX_DEFAULT_MODEL_ID,
   isCodexModelId,
 } from "@opencompany/agent-runtime";
-import type { AgentEngine, AgentModelId } from "@opencompany/agent-runtime/types";
+import type {
+  AgentEngine,
+  AgentModelId,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle, Plus } from "lucide-react";
@@ -21,6 +25,7 @@ import {
   ComposerDropOverlay,
   toSubmitAttachments,
 } from "@/components/composer-attachments";
+import { CodexComposerControls } from "@/components/session/CodexComposerControls";
 import { useToast } from "@/components/ToastProvider";
 import {
   Select,
@@ -38,6 +43,7 @@ import { agentRowToListItem, sortAgentsByUpdatedDesc } from "@/lib/collections/s
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = "high";
 
 type AgentOption = {
   id: string;
@@ -61,6 +67,14 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const [modelOverride, setModelOverride] = useState<{ agentId: string; modelId: string } | null>(
     null,
   );
+  const [codexReasoningOverride, setCodexReasoningOverride] = useState<{
+    agentId: string;
+    reasoningEffort: CodexReasoningEffort;
+  } | null>(null);
+  const [codexPlanMode, setCodexPlanMode] = useState<{
+    agentId: string;
+    enabled: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -82,6 +96,14 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     selectedAgentIsCodex && scopedModelOverride && !isCodexModelId(scopedModelOverride)
       ? CODEX_DEFAULT_MODEL_ID
       : (scopedModelOverride ?? defaultModelForSelectedAgent ?? "");
+  const codexReasoningEffort =
+    codexReasoningOverride?.agentId === selectedAgentId
+      ? codexReasoningOverride.reasoningEffort
+      : DEFAULT_CODEX_REASONING_EFFORT;
+  const codexPlanModeEnabled =
+    selectedAgentIsCodex && codexPlanMode?.agentId === selectedAgentId
+      ? codexPlanMode.enabled
+      : false;
   const attachmentsEnabled = !selectedAgentIsCodex;
   // Image/file attachments via the shared composer hook. No session exists yet — uploads land in
   // a sessionless "pending/" path and the pointers ride into createAgentSessionFromPrompt.
@@ -148,11 +170,18 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
     setError(null);
     startTransition(async () => {
+      const sessionOptions = selectedAgentIsCodex
+        ? {
+            codexReasoningEffort,
+            ...(codexPlanModeEnabled ? { codexPlanModeEnabled: true } : {}),
+          }
+        : undefined;
       const result = await createAgentSessionFromPrompt(
         selectedAgentId,
         content,
         selectedModel || undefined,
         toSubmitAttachments(submitReady),
+        sessionOptions,
       );
       if (!result.ok) {
         if ("redirectTo" in result) {
@@ -171,6 +200,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
       // /api/attachments), so the local blob previews aren't needed there: revoke + clear the tray.
       attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
       setAttachments([]);
+      setCodexPlanMode(null);
       seedSessionQueries(queryClient, workspaceId, result.detail);
       router.push(`/company/session/${result.session.id}`);
     });
@@ -242,7 +272,10 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             <Select
               disabled={agents.length === 0}
               value={selectedAgentId}
-              onValueChange={setSelectedAgentIdOverride}
+              onValueChange={(agentId) => {
+                setSelectedAgentIdOverride(agentId);
+                setCodexPlanMode(null);
+              }}
             >
               <SelectTrigger
                 aria-label="Agent"
@@ -264,6 +297,18 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
                 fallbackModelId={selectedAgentIsCodex ? CODEX_DEFAULT_MODEL_ID : DEFAULT_MODEL_ID}
                 {...(selectedAgentIsCodex ? { modelIds: CODEX_AGENT_MODEL_IDS } : {})}
                 onChange={(modelId) => setModelOverride({ agentId: selectedAgentId, modelId })}
+              />
+            ) : null}
+            {selectedAgentIsCodex ? (
+              <CodexComposerControls
+                reasoningEffort={codexReasoningEffort}
+                planModeEnabled={codexPlanModeEnabled}
+                onReasoningEffortChange={(reasoningEffort) =>
+                  setCodexReasoningOverride({ agentId: selectedAgentId, reasoningEffort })
+                }
+                onPlanModeEnabledChange={(enabled) =>
+                  setCodexPlanMode(enabled ? { agentId: selectedAgentId, enabled } : null)
+                }
               />
             ) : null}
           </>

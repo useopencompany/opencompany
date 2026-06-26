@@ -4,7 +4,6 @@ import {
   ATTACHMENT_TEXT_MAX_BYTES,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
-  CODEX_REASONING_EFFORTS,
   COMPOSER_PASTE_ATTACHMENT_MIN_CHARS,
   isCodexModelId,
   listAddableBuiltinSkills,
@@ -78,6 +77,7 @@ import { type RightPanelHandle, useMobileInspector } from "@/components/MobileIn
 import { useOptionalPersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { formatUsdMicros, SessionTopBar } from "@/components/session/SessionTopBar";
+import { CodexComposerControls } from "@/components/session/CodexComposerControls";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import {
   type ToolCallDisplay,
@@ -231,53 +231,6 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
-
-function codexReasoningLabel(effort: CodexReasoningEffort) {
-  return effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1);
-}
-
-// Advances to the next reasoning effort, wrapping xhigh → low, so the toolbar pill
-// cycles through every level on repeated clicks instead of opening a dropdown.
-function nextCodexReasoningEffort(current: CodexReasoningEffort): CodexReasoningEffort {
-  const idx = CODEX_REASONING_EFFORTS.indexOf(current);
-  return CODEX_REASONING_EFFORTS[(idx + 1) % CODEX_REASONING_EFFORTS.length] ?? current;
-}
-
-// Four ascending bars; the first N (N = the level's 1-based rank, low=1 … xhigh=4)
-// render at full strength and the rest fade out, so the icon reads as a signal meter.
-function ReasoningBars({ effort, size = 12 }: { effort: CodexReasoningEffort; size?: number }) {
-  const active = CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
-  // x is evenly spaced; each bar is bottom-aligned at y=14 with an ascending height.
-  const bars = [
-    { x: 1, height: 4.5 },
-    { x: 5, height: 7 },
-    { x: 9, height: 9.5 },
-    { x: 13, height: 12 },
-  ];
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      className="shrink-0"
-      aria-hidden="true"
-    >
-      {bars.map((bar, i) => (
-        <rect
-          key={bar.x}
-          x={bar.x}
-          y={14 - bar.height}
-          width={2}
-          height={bar.height}
-          rx={1}
-          fill="currentColor"
-          opacity={i < active ? 1 : 0.28}
-        />
-      ))}
-    </svg>
-  );
-}
 
 // Wraps an oversized composer paste in a File so it rides the normal attachment pipeline.
 // Numbered against the pending attachments so two pastes in one message don't show as
@@ -2101,35 +2054,12 @@ function SessionViewContentBody({
                       onChange={handleModelChange}
                     />
                     {session.engine === "codex" ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCodexReasoningChange(
-                              nextCodexReasoningEffort(codexReasoningEffort),
-                            )
-                          }
-                          aria-label={`Codex reasoning effort: ${codexReasoningLabel(codexReasoningEffort)} (click to cycle)`}
-                          title="Reasoning effort — click to cycle"
-                          className="flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted transition-colors hover:bg-surface-subtle/70 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-                        >
-                          <ReasoningBars effort={codexReasoningEffort} size={12} />
-                          {codexReasoningLabel(codexReasoningEffort)}
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={codexPlanModeEnabled}
-                          title="Plan mode for the next message"
-                          onClick={() => setCodexPlanModeEnabled((enabled) => !enabled)}
-                          className={
-                            codexPlanModeEnabled
-                              ? "flex h-6 items-center gap-1.5 rounded-md bg-ink px-1.5 text-[11.5px] font-medium text-surface transition-colors hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-                              : "flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted transition-colors hover:bg-surface-subtle/70 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-                          }
-                        >
-                          Plan
-                        </button>
-                      </>
+                      <CodexComposerControls
+                        reasoningEffort={codexReasoningEffort}
+                        planModeEnabled={codexPlanModeEnabled}
+                        onReasoningEffortChange={handleCodexReasoningChange}
+                        onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                      />
                     ) : null}
                   </>
                 }
