@@ -1,5 +1,0 @@
-/*
- * Connector uses the shared OpenCompany UI tokens and Tailwind setup for now.
- * Product-specific styles should stay local to this app until they earn reuse.
- */
-@import "@opencompany/ui/globals.css";

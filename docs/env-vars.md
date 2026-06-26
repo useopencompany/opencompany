@@ -49,9 +49,6 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GOOGLE_OAUTH_CALLBACK_URL` | Vercel web envs | Optional stable Google callback broker, e.g. `https://oauth.opencompany.cloud/api/google/callback`. When set, Google authorization and token exchange both use this exact redirect URI. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign Google integration OAuth state. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
-| `CONNECTOR_APP_URL` | Connector envs | Connector app origin used for WorkOS and MCP OAuth callback URL construction, e.g. `https://runconnector.com`. |
-| `CONNECTOR_MCP_OAUTH_STATE_SECRET` | Connector envs | 32+ character secret used only to sign Connector MCP OAuth setup state. Separate from OpenCompany web MCP state. |
-| `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY` | Connector envs | Base64-encoded 32-byte key used only to encrypt Connector-owned MCP credentials stored in the `connector` Postgres schema. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
@@ -208,25 +205,6 @@ own Inngest retries run first), gives up on failures older than 7 days, and drai
 - **Sandbox:** don't test against the real customer-facing Slack in a way that spams colleagues —
   use a Pro-trial workspace and set `SLACK_SUPPORT_MEMBER_IDS` to just yourself.
 
-## Vercel Connector
-
-Set these in the Connector Vercel project. Infisical source path: `prod` + `/connector`.
-
-| Var | Required | Purpose |
-|---|---:|---|
-| `DATABASE_URL` | Yes | Hosted Neon pooled connection string. Connector-owned tables live in the `connector` Postgres schema. |
-| `WORKOS_CLIENT_ID` | Yes | WorkOS AuthKit client id. Can match the main web app when both use the same WorkOS environment. |
-| `WORKOS_API_KEY` | Yes | WorkOS server API key. |
-| `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. |
-| `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Connector production callback URL, normally `https://runconnector.com/auth/callback`. |
-| `CONNECTOR_WORKOS_REDIRECT_URI` | Yes | Server-side Connector AuthKit callback URL. Keep equal to `NEXT_PUBLIC_WORKOS_REDIRECT_URI` in hosted envs. |
-| `CONNECTOR_APP_URL` | Yes | Connector origin used to build MCP OAuth callback URLs, normally `https://runconnector.com`. |
-| `CONNECTOR_MCP_OAUTH_STATE_SECRET` | Yes | Dedicated secret used to sign Connector Linear MCP OAuth setup state. Generate a separate 32+ character value with `openssl rand -base64 32`. |
-| `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY` | Yes | Base64-encoded 32-byte key used to encrypt Connector MCP OAuth credentials. Generate with `openssl rand -base64 32`. |
-| `BETTER_STACK_ERRORS_DSN` | No | Optional Connector server error reporting DSN. |
-| `OBSERVABILITY_ENV` | No | Optional Connector observability environment. |
-| `OBSERVABILITY_LOG_LEVEL` | No | Optional Connector log level. |
-
 ## Render Runner
 
 Set these in the Render `opencompany-runner` service.
@@ -294,12 +272,10 @@ Infisical `prod` + `/release` secrets:
 | `PRODUCTION_DATABASE_URL` | Production Neon URL used by release migrations. |
 | `VERCEL_TOKEN` | Vercel CLI deploy token. |
 | `VERCEL_ORG_ID` | Vercel team/org id. |
-| `VERCEL_PROJECT_ID` | Vercel web project id. |
-| `VERCEL_CONNECTOR_PROJECT_ID` | Vercel Connector project id. Required only for manual production dispatches with `deploy_connector: true`. |
+| `VERCEL_PROJECT_ID` | Vercel project id. |
 | `RENDER_SERVICE_ID` | Render service id for `opencompany-runner`. |
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
-| `PRODUCTION_CONNECTOR_URL` | Canonical production Connector URL for smoke checks. Required only when Connector smoke is enabled. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 | `CHANGELOG_BLOB_READ_WRITE_TOKEN` | Public `opencompany-changelog` Blob store token. Authoring-time credential for uploading changelog screen recordings (see [changelog-media.md](./changelog-media.md)); not read by CI or any runtime. |
 
@@ -320,11 +296,9 @@ Release-only script vars:
 | `RENDER_DEPLOY_TIMEOUT_MS` | No | Maximum time to wait for the Render deploy API before smoke checks. Defaults to `900000`. |
 | `RENDER_DEPLOY_POLL_MS` | No | Delay between Render deploy status polls. Defaults to `10000`. |
 | `SMOKE_WEB` | No | Set to `false`, `0`, or `no` to skip web health checks. Defaults to enabled. |
-| `SMOKE_CONNECTOR` | No | Set to `false`, `0`, or `no` to skip Connector health checks. The script defaults to enabled; the normal production workflow sets it to `false`, and the manual Connector job sets it to `true`. |
 | `SMOKE_RUNNER` | No | Set to `false`, `0`, or `no` to skip runner health checks. Defaults to enabled. |
 | `SMOKE_ATTEMPTS` | No | Default health retry count. Defaults to `30`. |
 | `SMOKE_WEB_ATTEMPTS` | No | Web health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
-| `SMOKE_CONNECTOR_ATTEMPTS` | No | Connector health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
 | `SMOKE_RUNNER_ATTEMPTS` | No | Runner health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
 | `SMOKE_DELAY_MS` | No | Delay between retries. Defaults to `10000`. |
 
@@ -389,9 +363,6 @@ orchestrator and are not stored anywhere long-term.
 | `INNGEST_SERVE_ORIGIN` | web | `https://pr-<n>.<domain>`, ensuring Inngest calls the deterministic preview custom domain rather than a protected Vercel deployment URL. |
 | `NEXT_PUBLIC_APP_URL` | web (build-time + runtime) | `https://pr-<n>.<domain>`. Used in signed OAuth state so the stable Google broker can forward back to the right preview. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | web (build-time) | `https://pr-<n>.<domain>/auth/callback`. |
-| `CONNECTOR_WORKOS_REDIRECT_URI` | connector (build-time + runtime) | Connector callback URL when deploying connector separately from web, e.g. `https://runconnector.com/auth/callback`. |
-| `CONNECTOR_APP_URL` | connector (build-time + runtime) | Connector origin used for Linear MCP OAuth callback construction. |
-| `CONNECTOR_MCP_OAUTH_STATE_SECRET` / `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY` | connector runtime | Connector-only MCP OAuth state signing and credential encryption secrets. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | web | Optional pass-through from the provision environment. Set to `https://oauth.opencompany.cloud/api/google/callback` to use the stable Google OAuth broker for previews. |
 | `PREVIEW_ALLOW_UNVERIFIED_ENDPOINT` | runner | Emergency escape hatch for the boot gate. Leave unset. |
 
@@ -462,18 +433,16 @@ Check local web and runner env coverage:
 bun run release:preflight
 ```
 
-Check release automation env:
+Check only release automation env:
 
 ```bash
 bun run infisical:release:preflight
-bun run release:preflight -- --connector-release
 ```
 
 Run deployed health checks:
 
 ```bash
 PRODUCTION_WEB_URL=https://app.example.com \
-PRODUCTION_CONNECTOR_URL=https://runconnector.com \
 RUNNER_PUBLIC_URL=https://opencompany-runner.onrender.com \
 bun run release:smoke
 ```
