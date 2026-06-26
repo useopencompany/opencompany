@@ -1472,7 +1472,8 @@ function buildRows(
       icon: skillIconFor(skill.id),
       label: isExternalSkillReference(skill) ? skill.name || skill.id : skill.id,
       description: isExternalSkillReference(skill)
-        ? skill.description || skill.source.url
+        ? skill.description ||
+          (skill.source.type === "workspace" ? skill.source.path : skill.source.url)
         : `Built-in skill · ${skill.id}`,
     }));
     // Personal skills are authored by the agent itself (or the user) under agent/skills/<id>/ and

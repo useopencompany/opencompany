@@ -10,14 +10,29 @@ const dbMock = vi.hoisted(() => {
   const state = {
     agentRows: [] as Array<{ path: string | null }>,
     fileRows: [] as Array<{ path: string; content: string }>,
+    workspaceSkillRows: [] as Array<{ skillId: string; content: string }>,
+    selection: null as Record<string, unknown> | null,
   };
   const chain: Record<string, unknown> = {
-    select: () => chain,
+    select: (selection: Record<string, unknown>) => {
+      state.selection = selection;
+      return chain;
+    },
     from: () => chain,
     where: () => chain,
     limit: () => Promise.resolve(state.agentRows),
-    then: (resolve: (rows: Array<{ path: string; content: string }>) => unknown) =>
-      resolve(state.fileRows),
+    then: (
+      resolve: (
+        rows:
+          | Array<{ path: string; content: string }>
+          | Array<{ skillId: string; content: string }>,
+      ) => unknown,
+    ) => {
+      if (state.selection && "skillId" in state.selection) {
+        return resolve(state.workspaceSkillRows);
+      }
+      return resolve(state.fileRows);
+    },
   };
   return { state, getDb: vi.fn(() => chain) };
 });
@@ -47,6 +62,8 @@ describe("materializeSkillsForSession", () => {
     loadExternalSkillFiles.mockResolvedValue([]);
     dbMock.state.agentRows = [];
     dbMock.state.fileRows = [];
+    dbMock.state.workspaceSkillRows = [];
+    dbMock.state.selection = null;
   });
 
   function fakeSandbox() {
@@ -141,6 +158,43 @@ describe("materializeSkillsForSession", () => {
         {
           path: "/home/user/workspace/skills/improve-codebase-architecture/LANGUAGE.md",
           data: "secondary",
+        },
+      ]),
+    );
+  });
+
+  it("materializes workspace-authored skills without refreshing them as externals", async () => {
+    const sandbox = fakeSandbox();
+    const workspaceSkill = {
+      id: "brand-voice",
+      name: "Brand Voice",
+      description: "Use the company voice.",
+      source: {
+        type: "workspace" as const,
+        path: "skills/brand-voice",
+      },
+    };
+    dbMock.state.workspaceSkillRows = [
+      {
+        skillId: "brand-voice",
+        content: "---\nname: Brand Voice\ndescription: Use the company voice.\n---\nBody.",
+      },
+    ];
+
+    await materializeSkillsForSession({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      workspaceId: "ws_1",
+      agentId: "agent_1",
+      config: { skills: [workspaceSkill] },
+    });
+
+    expect(loadExternalSkillFiles).toHaveBeenCalledWith("ws_1", []);
+    expect(writtenSkillFiles(sandbox)).toEqual(
+      expect.arrayContaining([
+        {
+          path: "/home/user/workspace/skills/brand-voice/SKILL.md",
+          data: expect.stringContaining("Brand Voice"),
         },
       ]),
     );

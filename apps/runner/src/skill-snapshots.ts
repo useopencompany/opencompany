@@ -1,5 +1,6 @@
 import {
   type AgentExternalSkillReference,
+  type AgentRemoteSkillSource,
   type AgentSkillFile,
   createGitHubSkillFetcher,
   parseSkillUrl,
@@ -18,6 +19,7 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "server" }
 const SNAPSHOT_FRESHNESS_MS = 5 * 60 * 1000;
 
 export type MaterializableSkill = { id: string; files: AgentSkillFile[] };
+type RemoteSkillReference = AgentExternalSkillReference & { source: AgentRemoteSkillSource };
 
 function newSkillSnapshotId() {
   return `skl_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
@@ -29,7 +31,7 @@ function newSkillSnapshotId() {
 // snapshot is skipped (warned) so it never blocks session start.
 export async function loadExternalSkillFiles(
   workspaceId: string,
-  refs: AgentExternalSkillReference[],
+  refs: RemoteSkillReference[],
 ): Promise<MaterializableSkill[]> {
   const out: MaterializableSkill[] = [];
   for (const ref of refs) {
@@ -41,7 +43,7 @@ export async function loadExternalSkillFiles(
 
 async function loadExternalSkill(
   workspaceId: string,
-  ref: AgentExternalSkillReference,
+  ref: RemoteSkillReference,
 ): Promise<MaterializableSkill | null> {
   const db = getDb();
   const [row] = await db
@@ -108,7 +110,7 @@ async function loadExternalSkill(
 
 async function upsertSnapshot(
   workspaceId: string,
-  ref: AgentExternalSkillReference,
+  ref: RemoteSkillReference,
   resolved: ResolvedSkill,
 ) {
   const db = getDb();

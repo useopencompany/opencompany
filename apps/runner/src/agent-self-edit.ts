@@ -2,23 +2,27 @@ import { createHash } from "node:crypto";
 import {
   AGENT_SCHEDULE_TRIGGER_TYPE,
   type AgentConfig,
+  type AgentExternalSkillReference,
   type AgentModelId,
   type AgentScheduleTriggerConfig,
   buildAgentTiptapDoc,
   buildConfigMentionResolver,
   collectBuiltinSkillMentions,
+  extractMentionIds,
   FIXED_PERSONAL_AGENT_NAME,
   getAgentModelDefinition,
-  isExternalSkillReference,
+  isKnownAgentSkillId,
+  isRemoteSkillReference,
   isSupportedScheduleCron,
   normalizeAgentConfig,
   normalizeScheduleTimezone,
   serializeAgentFile,
   validateAgentFileSource,
+  workspaceSkillSourcePath,
 } from "@opencompany/agent-runtime";
-import { agentSessions, agents } from "@opencompany/db/schema";
+import { agentSessions, agents, workspaceSkills } from "@opencompany/db/schema";
 import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
 
@@ -90,12 +94,12 @@ export async function applyAgentSelfUpdate(input: {
   // The body is the source of truth: tools and brain follow its @mentions. The title changes only
   // when an explicit `title` is passed (otherwise the current name is kept); path, delegated
   // agents, and repositories are preserved — they cannot be changed through self-edit in this
-  // version. Built-in skills DO follow the body's `@skill/<id>` mentions (add by mentioning,
-  // remove by dropping the mention); external skills are preserved as-is, since they need
-  // workspace resolution the agent can't perform here. The model changes only via the explicit
-  // `model` argument; otherwise the current model is kept. Schedule triggers are replaced
-  // wholesale when `triggers` is provided (omitted = keep current); GitHub PR triggers are always
-  // preserved, since they reference repositories the agent cannot manage here.
+  // version. Built-in and workspace-authored skills follow the body's `@skill/<id>` mentions
+  // (add by mentioning, remove by dropping the mention); remote GitHub/skills.sh skills are
+  // preserved as-is because adding/removing those remains editor-managed. The model changes only
+  // via the explicit `model` argument; otherwise the current model is kept. Schedule triggers are
+  // replaced wholesale when `triggers` is provided (omitted = keep current); GitHub PR triggers are
+  // always preserved, since they reference repositories the agent cannot manage here.
   const preservedNonScheduleTriggers = current.triggers.filter(
     (trigger) => trigger.type !== AGENT_SCHEDULE_TRIGGER_TYPE,
   );
@@ -104,8 +108,17 @@ export async function applyAgentSelfUpdate(input: {
       ? current.triggers
       : [...scheduleTriggers, ...preservedNonScheduleTriggers];
 
-  const preservedExternalSkills = (current.skills ?? []).filter(isExternalSkillReference);
-  const nextSkills = [...collectBuiltinSkillMentions(body), ...preservedExternalSkills];
+  const preservedRemoteSkills = (current.skills ?? []).filter(isRemoteSkillReference);
+  const workspaceSkillMentions = await resolveWorkspaceSkillMentions({
+    db,
+    workspaceId: row.workspaceId,
+    body,
+  });
+  const nextSkills = [
+    ...collectBuiltinSkillMentions(body),
+    ...preservedRemoteSkills,
+    ...workspaceSkillMentions,
+  ];
 
   const source = serializeAgentFile({
     title: row.isDefault ? FIXED_PERSONAL_AGENT_NAME : (title ?? row.name),
@@ -207,6 +220,59 @@ export async function applyAgentSelfUpdate(input: {
     ...(summary ? { summary } : {}),
     appliesTo: `Saved (version ${nextVersion}). This is live from your next turn in this same session — your next reply (or the user's next message) uses the updated tools, instructions, skills, model, and schedules. No new session needed; only the reply you're finishing now keeps the previous configuration.`,
   };
+}
+
+async function resolveWorkspaceSkillMentions(input: {
+  db: ReturnType<typeof getDb>;
+  workspaceId: string;
+  body: string;
+}): Promise<AgentExternalSkillReference[]> {
+  const ids = collectMentionedWorkspaceSkillIds(input.body);
+  if (ids.length === 0) return [];
+
+  const rows = await input.db
+    .select({
+      skillId: workspaceSkills.skillId,
+      name: workspaceSkills.name,
+      description: workspaceSkills.description,
+    })
+    .from(workspaceSkills)
+    .where(
+      and(
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+        inArray(workspaceSkills.skillId, ids),
+      ),
+    );
+  const byId = new Map(rows.map((row) => [row.skillId, row]));
+
+  return ids.flatMap((id) => {
+    const skill = byId.get(id);
+    if (!skill) return [];
+    return [
+      {
+        id: skill.skillId,
+        name: skill.name,
+        description: skill.description,
+        source: {
+          type: "workspace" as const,
+          path: workspaceSkillSourcePath(skill.skillId),
+        },
+      },
+    ];
+  });
+}
+
+function collectMentionedWorkspaceSkillIds(body: string): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const rawId of extractMentionIds(body)) {
+    if (!rawId.toLowerCase().startsWith("skill/")) continue;
+    const id = rawId.slice("skill/".length).toLowerCase();
+    if (!id || isKnownAgentSkillId(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
 }
 
 function parseArgs(

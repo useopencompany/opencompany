@@ -2,13 +2,14 @@
 
 import { Loader2, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { AgentSkillCatalogEntry } from "@/components/agent-editor/tools";
 import { saveSkill } from "@/lib/skills/actions";
 
 export type AddedSkill = {
   id: string;
   name: string;
   description: string;
-  source: PreviewSkill["source"];
+  source: NonNullable<AgentSkillCatalogEntry["source"]>;
 };
 
 type Candidate = { path: string; name: string; description: string };

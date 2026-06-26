@@ -280,6 +280,38 @@ export const workspaceSkillSnapshots = pgTable(
   }),
 );
 
+export const workspaceSkills = pgTable(
+  "workspace_skills",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    skillId: text("skill_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    body: text("body").notNull().default(""),
+    content: text("content").notNull(),
+    contentHash: text("content_hash").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    githubBlobSha: text("github_blob_sha"),
+    githubCommitSha: text("github_commit_sha"),
+    githubSyncedHash: text("github_synced_hash"),
+    githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
+    githubSyncStatus: text("github_sync_status").notNull().default("pending"),
+    githubSyncError: text("github_sync_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("workspace_skills_workspace_idx").on(table.workspaceId),
+    workspaceSkillIdIdx: uniqueIndex("workspace_skills_workspace_skill_id_idx").on(
+      table.workspaceId,
+      table.skillId,
+    ),
+  }),
+);
+
 export const brainFiles = pgTable(
   "brain_files",
   {
@@ -400,6 +432,7 @@ export const brainFileVersions = pgTable(
 //   - "brain"      -> brainFiles row keyed by (workspaceId, logical brain path)
 //   - "agent_file" -> agentFiles row keyed by (workspaceId, repoPath)
 //   - "agent"      -> agents row keyed by sourceRef (agentId); re-serialized
+//   - "skill"      -> workspaceSkills row keyed by sourceRef (skillId)
 // `repoPath` is always the full repo-relative path (e.g. "brain/spec.md",
 // "agents/leo.agent", "agents/leo/user.md").
 export const workspaceSyncJobs = pgTable(
@@ -432,7 +465,7 @@ export const workspaceSyncJobs = pgTable(
     nextRunAtIdx: index("workspace_sync_jobs_next_run_at_idx").on(table.nextRunAt),
     sourceKindCheck: check(
       "workspace_sync_jobs_source_kind_check",
-      sql`${table.sourceKind} IN ('brain', 'agent_file', 'agent')`,
+      sql`${table.sourceKind} IN ('brain', 'agent_file', 'agent', 'skill')`,
     ),
     operationCheck: check(
       "workspace_sync_jobs_operation_check",
@@ -2090,6 +2123,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   agents: many(agents),
   brainFiles: many(brainFiles),
   agentFiles: many(agentFiles),
+  workspaceSkills: many(workspaceSkills),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
   creditBalance: one(workspaceCreditBalances, {
@@ -2139,6 +2173,13 @@ export const agentFilesRelations = relations(agentFiles, ({ one }) => ({
   agent: one(agents, {
     fields: [agentFiles.agentId],
     references: [agents.id],
+  }),
+}));
+
+export const workspaceSkillsRelations = relations(workspaceSkills, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceSkills.workspaceId],
+    references: [workspaces.id],
   }),
 }));
 
@@ -2473,6 +2514,7 @@ export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
 export type AgentScheduleRun = typeof agentScheduleRuns.$inferSelect;
 export type BrainFile = typeof brainFiles.$inferSelect;
 export type AgentFile = typeof agentFiles.$inferSelect;
+export type WorkspaceSkill = typeof workspaceSkills.$inferSelect;
 export type WorkspaceSyncJob = typeof workspaceSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type SessionStar = typeof sessionStars.$inferSelect;

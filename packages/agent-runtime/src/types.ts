@@ -161,7 +161,7 @@ export type AgentSkillFile = {
   content: string;
 };
 
-export type AgentSkillSource = {
+export type AgentRemoteSkillSource = {
   // `github`: a public GitHub repository. `skills.sh`: a skills.sh page, resolved through
   // its backing GitHub repository. Both ultimately fetch from GitHub in V1.
   type: "github" | "skills.sh";
@@ -172,6 +172,15 @@ export type AgentSkillSource = {
   // Skill directory within the repository, "" = repository root.
   path: string;
 };
+
+export type AgentWorkspaceSkillSource = {
+  // A company-owned skill authored inside OpenCompany and synced into the workspace repo.
+  type: "workspace";
+  // Repo path to the skill directory, e.g. skills/brand-voice.
+  path: string;
+};
+
+export type AgentSkillSource = AgentRemoteSkillSource | AgentWorkspaceSkillSource;
 
 // A built-in skill shipped in code (serialized as a bare string id in YAML).
 export type AgentBuiltinSkillReference = {
@@ -198,6 +207,21 @@ export function isExternalSkillReference(
     !!(reference as AgentExternalSkillReference).source &&
     typeof (reference as AgentExternalSkillReference).source === "object"
   );
+}
+
+export function isRemoteSkillReference(
+  reference: AgentSkillReference,
+): reference is AgentExternalSkillReference & { source: AgentRemoteSkillSource } {
+  return (
+    isExternalSkillReference(reference) &&
+    (reference.source.type === "github" || reference.source.type === "skills.sh")
+  );
+}
+
+export function isWorkspaceSkillReference(
+  reference: AgentSkillReference,
+): reference is AgentExternalSkillReference & { source: AgentWorkspaceSkillSource } {
+  return isExternalSkillReference(reference) && reference.source.type === "workspace";
 }
 
 export type AgentAfterSessionConfig = {

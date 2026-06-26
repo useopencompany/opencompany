@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Bot, Clock3, Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ScheduleDialog } from "@/components/agent-schedules/ScheduleDialog";
 import { showOutOfCreditsToast } from "@/components/billing/out-of-credits-toast";
 import { useCollections } from "@/components/CollectionsProvider";
@@ -195,7 +195,6 @@ function CompanyRoutinesLive() {
   const [savingAgentIds, setSavingAgentIds] = useState<Set<string>>(() => new Set());
   const [runningRoutineId, setRunningRoutineId] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
-  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 60_000);
@@ -305,7 +304,7 @@ function CompanyRoutinesLive() {
       });
     }
 
-    startTransition(async () => {
+    void (async () => {
       try {
         const result = await updateWorkspaceAgentSchedules(agentId, next);
         if (!result.ok) {
@@ -322,7 +321,7 @@ function CompanyRoutinesLive() {
       } finally {
         setAgentSaving(agentId, false);
       }
-    });
+    })();
   }
 
   function handleSave(trigger: AgentScheduleTriggerConfig) {
@@ -352,7 +351,7 @@ function CompanyRoutinesLive() {
   }
 
   function runRoutineNow(agentId: string, routineId: string) {
-    startTransition(async () => {
+    void (async () => {
       setRunningRoutineId(`${agentId}:${routineId}`);
       try {
         const result = await runAgentScheduleNow(agentId, routineId);
@@ -373,7 +372,7 @@ function CompanyRoutinesLive() {
       } finally {
         setRunningRoutineId(null);
       }
-    });
+    })();
   }
 
   if (isLoading) return <RoutinesSkeleton />;
@@ -417,7 +416,10 @@ function CompanyRoutinesLive() {
             key={`${item.agent.id}:${item.routine.id}`}
             item={item}
             now={now}
-            isPending={isPending || savingAgentIds.has(item.agent.id)}
+            isPending={
+              savingAgentIds.has(item.agent.id) ||
+              runningRoutineId === `${item.agent.id}:${item.routine.id}`
+            }
             isRunning={runningRoutineId === `${item.agent.id}:${item.routine.id}`}
             onEdit={() =>
               setDialog({ mode: "edit", agentId: item.agent.id, schedule: item.routine })

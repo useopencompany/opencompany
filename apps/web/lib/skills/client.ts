@@ -32,6 +32,13 @@ function parseSkillSource(value: unknown): AgentSkillCatalogEntry["source"] | nu
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as Record<string, unknown>;
   const type = source.type;
+  if (type === "workspace") {
+    if (typeof source.path !== "string") return null;
+    return {
+      type,
+      path: source.path,
+    };
+  }
   if (type !== "github" && type !== "skills.sh") return null;
   if (
     typeof source.url !== "string" ||
