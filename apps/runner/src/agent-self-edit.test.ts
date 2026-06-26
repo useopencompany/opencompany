@@ -34,13 +34,21 @@ function agentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   };
 }
 
-function createDb(opts: { row?: unknown; updateReturning?: unknown[] }) {
+function createDb(opts: {
+  row?: unknown;
+  updateReturning?: unknown[];
+  workspaceSkillRows?: Array<{ skillId: string; name: string; description: string }>;
+}) {
   const calls = { update: [] as unknown[], insert: [] as unknown[] };
-  const selectBuilder = {
-    from: () => selectBuilder,
-    innerJoin: () => selectBuilder,
-    where: () => selectBuilder,
+  const agentSelectBuilder = {
+    from: () => agentSelectBuilder,
+    innerJoin: () => agentSelectBuilder,
+    where: () => agentSelectBuilder,
     limit: async () => (opts.row ? [opts.row] : []),
+  };
+  const workspaceSkillSelectBuilder = {
+    from: () => workspaceSkillSelectBuilder,
+    where: async () => opts.workspaceSkillRows ?? [],
   };
   const updateBuilder = {
     set: (value: unknown) => {
@@ -60,7 +68,6 @@ function createDb(opts: { row?: unknown; updateReturning?: unknown[] }) {
   return {
     calls,
     db: {
-      select: () => selectBuilder,
       update: () => updateBuilder,
       insert: () => insertBuilder,
       transaction: async (callback: (tx: unknown) => unknown) =>
@@ -68,6 +75,10 @@ function createDb(opts: { row?: unknown; updateReturning?: unknown[] }) {
           update: () => updateBuilder,
           insert: () => insertBuilder,
         }),
+      select: vi
+        .fn()
+        .mockReturnValueOnce(agentSelectBuilder)
+        .mockReturnValue(workspaceSkillSelectBuilder),
     },
   };
 }
@@ -236,6 +247,79 @@ describe("applyAgentSelfUpdate", () => {
         model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
       }),
     });
+  });
+
+  it("drops workspace skills when their body mention is removed while preserving remote skills", async () => {
+    const existing: AgentConfig = agentConfig({
+      skills: [
+        {
+          id: "brand-voice",
+          name: "Brand Voice",
+          description: "Use the company voice.",
+          source: { type: "workspace", path: "skills/brand-voice" },
+        },
+        {
+          id: "remote-research",
+          name: "Remote Research",
+          description: "Research helper.",
+          source: {
+            type: "github",
+            url: "https://github.com/useopencompany/skills",
+            ref: "main",
+            path: "remote-research",
+          },
+        },
+      ],
+    });
+    const { db, calls } = createDb({ row: { ...baseRow, config: existing } });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Keep helping." }));
+
+    expect(result.ok).toBe(true);
+    const config = (calls.update[0] as { config: AgentConfig }).config;
+    expect(config.skills).toEqual([
+      {
+        id: "remote-research",
+        name: "Remote Research",
+        description: "Research helper.",
+        source: {
+          type: "github",
+          url: "https://github.com/useopencompany/skills",
+          ref: "main",
+          path: "remote-research",
+        },
+      },
+    ]);
+  });
+
+  it("adds a workspace skill when the body mentions it", async () => {
+    const { db, calls } = createDb({
+      row: baseRow,
+      workspaceSkillRows: [
+        {
+          skillId: "brand-voice",
+          name: "Brand Voice",
+          description: "Use the company voice.",
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(
+      input({ body: "Keep helping. Use @skill/brand-voice for product copy." }),
+    );
+
+    expect(result.ok).toBe(true);
+    const config = (calls.update[0] as { config: AgentConfig }).config;
+    expect(config.skills).toEqual([
+      {
+        id: "brand-voice",
+        name: "Brand Voice",
+        description: "Use the company voice.",
+        source: { type: "workspace", path: "skills/brand-voice" },
+      },
+    ]);
   });
 
   it("rejects an empty body without writing", async () => {

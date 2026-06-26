@@ -652,6 +652,7 @@ function PersonalSidebarView({
     userName,
     userEmail,
     workspaceName,
+    workspaces,
     config,
     personalSkills,
     githubRequested,
@@ -769,14 +770,14 @@ function PersonalSidebarView({
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
-          {/* Personal-first users only see the company tab after opting in from Settings. */}
-          {companySurfaceEnabled && (
-            <SpaceSwitcher
-              activeSpace="personal"
-              workspaceName={workspaceName}
-              className="min-w-0 flex-1 px-0 pb-0"
-            />
-          )}
+          <SpaceSwitcher
+            activeSpace="personal"
+            activeWorkspaceId={workspaceId}
+            workspaceName={workspaceName}
+            workspaces={workspaces}
+            hideWorkspace={!companySurfaceEnabled}
+            className="min-w-0 flex-1 px-0 pb-0"
+          />
         </div>
 
         {/* Primary nav */}

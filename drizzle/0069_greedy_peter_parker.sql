@@ -75,7 +75,6 @@ CREATE TABLE "connector"."waitlist_signups" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX "connector_mcp_servers_id_org_idx" ON "connector"."mcp_servers" USING btree ("id","organization_id");--> statement-breakpoint
 ALTER TABLE "connector"."mcp_credentials" ADD CONSTRAINT "mcp_credentials_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "connector"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "connector"."mcp_credentials" ADD CONSTRAINT "connector_mcp_credentials_server_org_fk" FOREIGN KEY ("server_id","organization_id") REFERENCES "connector"."mcp_servers"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "connector"."mcp_servers" ADD CONSTRAINT "mcp_servers_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "connector"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -89,6 +88,7 @@ CREATE INDEX "connector_mcp_credentials_server_idx" ON "connector"."mcp_credenti
 CREATE UNIQUE INDEX "connector_mcp_credentials_server_kind_idx" ON "connector"."mcp_credentials" USING btree ("server_id","kind");--> statement-breakpoint
 CREATE UNIQUE INDEX "connector_mcp_servers_org_key_idx" ON "connector"."mcp_servers" USING btree ("organization_id","server_key");--> statement-breakpoint
 CREATE INDEX "connector_mcp_servers_org_status_idx" ON "connector"."mcp_servers" USING btree ("organization_id","status");--> statement-breakpoint
+CREATE UNIQUE INDEX "connector_mcp_servers_id_org_idx" ON "connector"."mcp_servers" USING btree ("id","organization_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "connector_organization_memberships_org_user_idx" ON "connector"."organization_memberships" USING btree ("organization_id","user_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "connector_organizations_slug_idx" ON "connector"."organizations" USING btree ("slug");--> statement-breakpoint
 CREATE UNIQUE INDEX "connector_permission_grants_org_provider_scope_idx" ON "connector"."permission_grants" USING btree ("organization_id","provider","scope");--> statement-breakpoint

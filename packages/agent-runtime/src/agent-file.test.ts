@@ -850,4 +850,25 @@ describe("validateAgentFileSource", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.parsed.config.skills).toEqual([skill]);
   });
+
+  test("round-trips a workspace skill through the self-edit guard", () => {
+    const skill = {
+      id: "brand-voice",
+      name: "Brand Voice",
+      description: "Use the company voice.",
+      source: {
+        type: "workspace" as const,
+        path: "skills/brand-voice",
+      },
+    };
+    const source = serializeAgentFile({
+      title: "Agent",
+      body: "Use @skill/brand-voice.",
+      model: "openai/gpt-5.4",
+      skills: [skill],
+    });
+    const result = validateAgentFileSource(source);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.parsed.config.skills).toEqual([skill]);
+  });
 });
