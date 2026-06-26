@@ -26,6 +26,7 @@ import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentFiles, agents, inboxItems } from "@opencompany/db/schema";
 import { and, asc, eq } from "drizzle-orm";
+import { parseScheduleTriggers } from "@/lib/agent-schedules/parse";
 import {
   type AgentBundleFilePayload,
   isAgentBundleTextFile,
@@ -36,7 +37,6 @@ import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data
 import { hashAgentSource } from "@/lib/agents/hash";
 import { buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
-import { parseScheduleTriggers } from "@/lib/agent-schedules/parse";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { MAX_BRAIN_FILE_BYTES } from "@/lib/brain/paths";

@@ -83,13 +83,7 @@ export async function updateWorkspaceAgentSchedules(
   const [agent] = await db
     .select({ id: agents.id, config: agents.config })
     .from(agents)
-    .where(
-      and(
-        eq(agents.id, agentId),
-        eq(agents.workspaceId, workspace.id),
-        isNull(agents.userId),
-      ),
-    )
+    .where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspace.id), isNull(agents.userId)))
     .limit(1);
 
   if (!agent) {

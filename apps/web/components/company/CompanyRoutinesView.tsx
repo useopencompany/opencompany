@@ -152,7 +152,10 @@ function RoutinesSkeleton() {
       <div className="h-[18px] w-32 animate-pulse rounded bg-surface-muted" />
       <div className="mt-6 space-y-3">
         {[0, 1, 2].map((index) => (
-          <div key={index} className="h-24 animate-pulse rounded-lg border border-border bg-surface/40" />
+          <div
+            key={index}
+            className="h-24 animate-pulse rounded-lg border border-border bg-surface/40"
+          />
         ))}
       </div>
     </RoutinesShell>
