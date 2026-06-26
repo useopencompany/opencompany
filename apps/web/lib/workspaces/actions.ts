@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import { users, workspaceMemberships, workspaces } from "@opencompany/db/schema";
+import { captureException } from "@opencompany/observability";
 import { and, asc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
@@ -14,6 +15,7 @@ import { getWorkOSClient } from "@/lib/workos";
 
 const WORKSPACE_NAME_MAX_LENGTH = 80;
 const ADMIN_ROLE = "admin";
+const CREATE_WORKSPACE_ERROR_MESSAGE = "Could not create workspace. Please try again.";
 
 export type WorkspacePickerItem = {
   id: string;
@@ -32,6 +34,20 @@ function validateWorkspaceName(name: string) {
     return { ok: false as const, error: "Name is too long (max 80 chars)." };
   }
   return { ok: true as const, name: trimmed };
+}
+
+async function cleanupCreatedOrganization(
+  workos: ReturnType<typeof getWorkOSClient>,
+  organizationId: string,
+) {
+  try {
+    await workos.organizations.deleteOrganization(organizationId);
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.workspace_create_workos_cleanup_failed",
+      workos_organization_id: organizationId,
+    });
+  }
 }
 
 export async function listUserWorkspaces(): Promise<WorkspacePickerItem[]> {
@@ -60,46 +76,57 @@ export async function createWorkspace(name: string) {
     return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
   }
 
-  const db = getDb();
   const now = new Date();
+  const workspaceId = newWorkspaceId();
+  let workos: ReturnType<typeof getWorkOSClient> | undefined;
+  let workosOrganizationId: string | undefined;
+  let localWorkspacePersisted = false;
 
   try {
-    const organization = await getWorkOSClient().organizations.createOrganization({
-      name: validation.name,
-    });
+    const db = getDb();
+    workos = getWorkOSClient();
+    const organization = await workos.organizations.createOrganization(
+      {
+        name: validation.name,
+      },
+      { idempotencyKey: workspaceId },
+    );
+    workosOrganizationId = organization.id;
 
-    await getWorkOSClient().userManagement.createOrganizationMembership({
+    await workos.userManagement.createOrganizationMembership({
       organizationId: organization.id,
       userId: context.authUser.id,
       roleSlug: ADMIN_ROLE,
     });
 
-    const [workspace] = await db
-      .insert(workspaces)
-      .values({
-        id: newWorkspaceId(),
-        workosOrganizationId: organization.id,
-        name: organization.name || validation.name,
-        createdByUserId: context.user.id,
+    const [workspaceRows] = await db.batch([
+      db
+        .insert(workspaces)
+        .values({
+          id: workspaceId,
+          workosOrganizationId: organization.id,
+          name: organization.name || validation.name,
+          createdByUserId: context.user.id,
+          updatedAt: now,
+        })
+        .returning(),
+      db.insert(workspaceMemberships).values({
+        workspaceId,
+        userId: context.user.id,
+        role: ADMIN_ROLE,
         updatedAt: now,
-      })
-      .returning();
+      }),
+      db
+        .update(users)
+        .set({ companySurfaceEnabled: true, updatedAt: now })
+        .where(eq(users.id, context.user.id)),
+    ]);
+    const [workspace] = workspaceRows;
 
     if (!workspace) {
-      return { ok: false as const, error: "Unable to create workspace." };
+      throw new Error("Workspace insert did not return a row.");
     }
-
-    await db.insert(workspaceMemberships).values({
-      workspaceId: workspace.id,
-      userId: context.user.id,
-      role: ADMIN_ROLE,
-      updatedAt: now,
-    });
-
-    await db
-      .update(users)
-      .set({ companySurfaceEnabled: true, updatedAt: now })
-      .where(eq(users.id, context.user.id));
+    localWorkspacePersisted = true;
 
     await refreshIntoWorkspaceOrganization(workspace);
 
@@ -109,10 +136,18 @@ export async function createWorkspace(name: string) {
 
     return { ok: true as const, workspaceId: workspace.id };
   } catch (error) {
-    return {
-      ok: false as const,
-      error: error instanceof Error ? error.message : "Could not create workspace.",
-    };
+    captureException(error, {
+      event: "opencompany.workspace_create_failed",
+      user_id: context.user.id,
+      workos_organization_id: workosOrganizationId,
+      local_workspace_persisted: localWorkspacePersisted,
+    });
+
+    if (workos && workosOrganizationId && !localWorkspacePersisted) {
+      await cleanupCreatedOrganization(workos, workosOrganizationId);
+    }
+
+    return { ok: false as const, error: CREATE_WORKSPACE_ERROR_MESSAGE };
   }
 }
 

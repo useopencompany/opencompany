@@ -1,4 +1,5 @@
 import { getDb } from "@opencompany/db/client";
+import { captureException } from "@opencompany/observability";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentWorkspace, refreshIntoWorkspaceOrganization } from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos";
@@ -6,6 +7,10 @@ import { createWorkspace, switchWorkspace, updateWorkspaceName } from "./actions
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -26,6 +31,7 @@ const getDbMock = vi.mocked(getDb);
 const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const refreshIntoWorkspaceOrganizationMock = vi.mocked(refreshIntoWorkspaceOrganization);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
+const captureExceptionMock = vi.mocked(captureException);
 
 describe("updateWorkspaceName", () => {
   beforeEach(() => {
@@ -33,6 +39,7 @@ describe("updateWorkspaceName", () => {
     getWorkOSClientMock.mockReturnValue({
       organizations: {
         createOrganization: vi.fn().mockResolvedValue({ id: "org_new", name: "New Company" }),
+        deleteOrganization: vi.fn().mockResolvedValue(undefined),
         updateOrganization: vi.fn().mockResolvedValue({ id: "org_123" }),
       },
       userManagement: {
@@ -97,6 +104,7 @@ describe("createWorkspace", () => {
     getWorkOSClientMock.mockReturnValue({
       organizations: {
         createOrganization: vi.fn().mockResolvedValue({ id: "org_new", name: "New Company" }),
+        deleteOrganization: vi.fn().mockResolvedValue(undefined),
         updateOrganization: vi.fn(),
       },
       userManagement: {
@@ -150,24 +158,29 @@ describe("createWorkspace", () => {
       name: "New Company",
       createdByUserId: "usr_123",
     };
-    const returning = vi.fn().mockResolvedValue([createdWorkspace]);
+    const workspaceInsertQuery = { query: "workspace-insert" };
+    const membershipInsertQuery = { query: "membership-insert" };
+    const userUpdateQuery = { query: "user-update" };
+    const batch = vi.fn().mockResolvedValue([[createdWorkspace], undefined, undefined]);
+    const returning = vi.fn(() => workspaceInsertQuery);
     const workspaceValues = vi.fn(() => ({ returning }));
-    const membershipValues = vi.fn().mockResolvedValue(undefined);
+    const membershipValues = vi.fn(() => membershipInsertQuery);
     const insert = vi
       .fn()
       .mockReturnValueOnce({ values: workspaceValues })
       .mockReturnValueOnce({ values: membershipValues });
-    const where = vi.fn().mockResolvedValue(undefined);
+    const where = vi.fn(() => userUpdateQuery);
     const set = vi.fn(() => ({ where }));
     const update = vi.fn(() => ({ set }));
-    getDbMock.mockReturnValue({ insert, update } as never);
+    getDbMock.mockReturnValue({ insert, update, batch } as never);
 
     const result = await createWorkspace("  New Company  ");
 
     expect(result).toEqual({ ok: true, workspaceId: "wks_new" });
-    expect(getWorkOSClientMock().organizations.createOrganization).toHaveBeenCalledWith({
-      name: "New Company",
-    });
+    expect(getWorkOSClientMock().organizations.createOrganization).toHaveBeenCalledWith(
+      { name: "New Company" },
+      { idempotencyKey: expect.stringMatching(/^wks_/) },
+    );
     expect(getWorkOSClientMock().userManagement.createOrganizationMembership).toHaveBeenCalledWith({
       organizationId: "org_new",
       userId: "user_123",
@@ -178,11 +191,12 @@ describe("createWorkspace", () => {
         workosOrganizationId: "org_new",
         name: "New Company",
         createdByUserId: "usr_123",
+        id: expect.stringMatching(/^wks_/),
       }),
     );
     expect(membershipValues).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspaceId: "wks_new",
+        workspaceId: expect.stringMatching(/^wks_/),
         userId: "usr_123",
         role: "admin",
       }),
@@ -191,7 +205,83 @@ describe("createWorkspace", () => {
       companySurfaceEnabled: true,
       updatedAt: expect.any(Date),
     });
+    expect(batch).toHaveBeenCalledWith([
+      workspaceInsertQuery,
+      membershipInsertQuery,
+      userUpdateQuery,
+    ]);
     expect(refreshIntoWorkspaceOrganizationMock).toHaveBeenCalledWith(createdWorkspace);
+  });
+
+  it("cleans up the WorkOS organization and returns stable copy when local persistence fails", async () => {
+    const persistenceError = new Error("workspace_memberships_workspace_user_idx violation");
+    const workspaceInsertQuery = { query: "workspace-insert" };
+    const membershipInsertQuery = { query: "membership-insert" };
+    const userUpdateQuery = { query: "user-update" };
+    const batch = vi.fn().mockRejectedValue(persistenceError);
+    const returning = vi.fn(() => workspaceInsertQuery);
+    const workspaceValues = vi.fn(() => ({ returning }));
+    const membershipValues = vi.fn(() => membershipInsertQuery);
+    const insert = vi
+      .fn()
+      .mockReturnValueOnce({ values: workspaceValues })
+      .mockReturnValueOnce({ values: membershipValues });
+    const where = vi.fn(() => userUpdateQuery);
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    getDbMock.mockReturnValue({ insert, update, batch } as never);
+
+    const result = await createWorkspace("New Company");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Could not create workspace. Please try again.",
+    });
+    expect(getWorkOSClientMock().organizations.deleteOrganization).toHaveBeenCalledWith("org_new");
+    expect(captureExceptionMock).toHaveBeenCalledWith(
+      persistenceError,
+      expect.objectContaining({
+        event: "opencompany.workspace_create_failed",
+        user_id: "usr_123",
+        workos_organization_id: "org_new",
+        local_workspace_persisted: false,
+      }),
+    );
+    expect(refreshIntoWorkspaceOrganizationMock).not.toHaveBeenCalled();
+  });
+
+  it("captures cleanup failures without exposing internal errors to the browser", async () => {
+    const persistenceError = new Error("database connection failed");
+    const cleanupError = new Error("workos cleanup failed");
+    vi.mocked(getWorkOSClientMock().organizations.deleteOrganization).mockRejectedValue(
+      cleanupError,
+    );
+    const batch = vi.fn().mockRejectedValue(persistenceError);
+    const returning = vi.fn(() => ({ query: "workspace-insert" }));
+    const workspaceValues = vi.fn(() => ({ returning }));
+    const membershipValues = vi.fn(() => ({ query: "membership-insert" }));
+    const insert = vi
+      .fn()
+      .mockReturnValueOnce({ values: workspaceValues })
+      .mockReturnValueOnce({ values: membershipValues });
+    const where = vi.fn(() => ({ query: "user-update" }));
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    getDbMock.mockReturnValue({ insert, update, batch } as never);
+
+    const result = await createWorkspace("New Company");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Could not create workspace. Please try again.",
+    });
+    expect(captureExceptionMock).toHaveBeenCalledWith(
+      cleanupError,
+      expect.objectContaining({
+        event: "opencompany.workspace_create_workos_cleanup_failed",
+        workos_organization_id: "org_new",
+      }),
+    );
   });
 });
 
