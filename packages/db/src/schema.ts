@@ -56,6 +56,21 @@ export type WorkspaceCodexDeviceAuthFlowStatus =
   | "failed"
   | "expired";
 
+export type WorkspaceMembershipRole = "admin" | "member";
+
+export type AgentSessionMessageRole = "user" | "assistant" | "tool";
+
+export type AgentSessionMessageStatus =
+  | "created"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type AgentSessionMessageSendMode = "steer" | "queue" | "interrupt";
+
+export type AgentSessionArtifactKind = "amp_run" | "opencode_run" | "codex_run";
+
 // Canonical encrypted-payload shape lives in @opencompany/crypto; aliased here so the
 // jsonb column annotations and existing importers keep their familiar name.
 export type WorkspaceIntegrationCredentialEncryptedPayload = EncryptedPayload;
@@ -174,7 +189,7 @@ export const workspaceMemberships = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    role: text("role").notNull().default("member"),
+    role: text("role").$type<WorkspaceMembershipRole>().notNull().default("member"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -183,6 +198,7 @@ export const workspaceMemberships = pgTable(
       table.workspaceId,
       table.userId,
     ),
+    roleCheck: check("workspace_memberships_role_check", sql`${table.role} IN ('admin', 'member')`),
   }),
 );
 
@@ -671,8 +687,8 @@ export const agentSessionMessages = pgTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
-    role: text("role").notNull(),
-    status: text("status").notNull().default("created"),
+    role: text("role").$type<AgentSessionMessageRole>().notNull(),
+    status: text("status").$type<AgentSessionMessageStatus>().notNull().default("created"),
     content: text("content").notNull().default(""),
     internal: boolean("internal").notNull().default(false),
     // How a user message was dispatched while a run was already in flight (the composer's
@@ -681,7 +697,7 @@ export const agentSessionMessages = pgTable(
     // turn (discarding in-flight work) and runs immediately. NULL on idle/first sends and all
     // legacy rows — the runner treats NULL as "steer" so historical behavior is preserved.
     // See docs/agent-turn-vocabulary.md and apps/runner/src/session-lifecycle.ts.
-    sendMode: text("send_mode"),
+    sendMode: text("send_mode").$type<AgentSessionMessageSendMode>(),
     modelMessage: jsonb("model_message").$type<Record<string, unknown>>(),
     toolName: text("tool_name"),
     toolCallId: text("tool_call_id"),
@@ -697,6 +713,18 @@ export const agentSessionMessages = pgTable(
     ),
     responseToMessageIdx: uniqueIndex("agent_session_messages_response_to_message_idx").on(
       table.responseToMessageId,
+    ),
+    roleCheck: check(
+      "agent_session_messages_role_check",
+      sql`${table.role} IN ('user', 'assistant', 'tool')`,
+    ),
+    statusCheck: check(
+      "agent_session_messages_status_check",
+      sql`${table.status} IN ('created', 'running', 'completed', 'failed', 'cancelled')`,
+    ),
+    sendModeCheck: check(
+      "agent_session_messages_send_mode_check",
+      sql`${table.sendMode} IS NULL OR ${table.sendMode} IN ('steer', 'queue', 'interrupt')`,
     ),
   }),
 );
@@ -1913,7 +1941,7 @@ export const agentSessionArtifacts = pgTable(
     }),
     toolCallId: text("tool_call_id").notNull(),
     toolName: text("tool_name").notNull(),
-    kind: text("kind").notNull(),
+    kind: text("kind").$type<AgentSessionArtifactKind>().notNull(),
     title: text("title"),
     url: text("url"),
     externalId: text("external_id"),
@@ -1927,6 +1955,10 @@ export const agentSessionArtifacts = pgTable(
   (table) => ({
     sessionIdx: index("agent_session_artifacts_session_idx").on(table.sessionId),
     toolCallIdx: index("agent_session_artifacts_tool_call_idx").on(table.toolCallId),
+    kindCheck: check(
+      "agent_session_artifacts_kind_check",
+      sql`${table.kind} IN ('amp_run', 'opencode_run', 'codex_run')`,
+    ),
   }),
 );
 

@@ -1,0 +1,5 @@
+ALTER TABLE "agent_session_artifacts" ADD CONSTRAINT "agent_session_artifacts_kind_check" CHECK ("agent_session_artifacts"."kind" IN ('amp_run', 'opencode_run', 'codex_run')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "agent_session_messages" ADD CONSTRAINT "agent_session_messages_role_check" CHECK ("agent_session_messages"."role" IN ('user', 'assistant', 'tool')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "agent_session_messages" ADD CONSTRAINT "agent_session_messages_status_check" CHECK ("agent_session_messages"."status" IN ('created', 'running', 'completed', 'failed', 'cancelled')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "agent_session_messages" ADD CONSTRAINT "agent_session_messages_send_mode_check" CHECK ("agent_session_messages"."send_mode" IS NULL OR "agent_session_messages"."send_mode" IN ('steer', 'queue', 'interrupt')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "workspace_memberships" ADD CONSTRAINT "workspace_memberships_role_check" CHECK ("workspace_memberships"."role" IN ('admin', 'member')) NOT VALID;

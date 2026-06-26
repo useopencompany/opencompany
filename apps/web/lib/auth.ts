@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
+import type { WorkspaceMembershipRole } from "@opencompany/db/schema";
 import {
   onboardingResponses,
   users,
@@ -27,7 +28,7 @@ type OnboardingUser = Pick<AppUser, "id" | "email">;
 
 const ADMIN_ROLE = "admin";
 const MEMBER_ROLE = "member";
-type WorkspaceRole = typeof ADMIN_ROLE | typeof MEMBER_ROLE;
+type WorkspaceRole = WorkspaceMembershipRole;
 
 export type CurrentWorkspaceContext = {
   authUser: WorkOSUser;
@@ -135,7 +136,11 @@ async function syncUser(authUser: WorkOSUser) {
   return { user, isNewUser };
 }
 
-async function syncLocalMembership(input: { workspaceId: string; userId: string; role: string }) {
+async function syncLocalMembership(input: {
+  workspaceId: string;
+  userId: string;
+  role: WorkspaceMembershipRole;
+}) {
   const db = getDb();
   const now = new Date();
 

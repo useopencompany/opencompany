@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { AgentSessionMessageRole } from "./schema";
 import * as schema from "./schema";
 import { agentSessionMessageChunks, agentSessionMessages, agentSessions } from "./schema";
 
@@ -14,7 +15,7 @@ import { agentSessionMessageChunks, agentSessionMessages, agentSessions } from "
 // sync-outbox.ts.
 
 // Only user/assistant text is recallable; tool output and internal/system messages are excluded.
-const RECALL_ROLES = ["user", "assistant"];
+const RECALL_ROLES: AgentSessionMessageRole[] = ["user", "assistant"];
 
 // Oversized messages are sliced so one giant assistant message does not become a multi-KB "blob"
 // that degrades ts_rank and trigram similarity. ~2000 chars ≈ a few hundred words.
