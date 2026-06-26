@@ -8,9 +8,11 @@ Render for the long-lived agent runner.
 - Infisical stores and syncs runtime/release secrets.
 - Vercel hosts `apps/web`, serves the Next.js UI, WorkOS callback routes, server actions, and the
   Inngest endpoint at `/api/inngest`.
+- A separate Vercel project hosts `apps/connector` on `runconnector.com` for the standalone
+  Connector app and Linear MCP OAuth setup.
 - Render hosts `apps/runner`, the Bun/Fastify service that owns live agent runs, E2B sandboxes,
   model/tool streams, abort state, and Durable Stream transcript appends.
-- Neon Postgres is shared by web, Inngest functions, and the runner.
+- Neon Postgres is shared by web, Connector, Inngest functions, and the runner.
 - Inngest coordinates background functions, but it does not host live token streams.
 
 Keep this split for V1. Vercel Queues/Workflow/Fluid Compute are useful later, but the current
@@ -22,11 +24,13 @@ Production releases are intentionally guarded:
 
 1. Run CI on `main`.
 2. Run Drizzle migrations against production Neon.
-3. Build the Vercel web app for the exact commit.
+3. Build the Vercel Connector and web apps for the exact commit.
 4. Re-check that the release is still current.
-5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web app while Render builds.
+5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web and Connector apps while
+   Render builds.
 6. Wait for the Render runner deploy for the exact commit.
-7. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
+7. Smoke check the canonical production web `/api/healthz`, Connector `/api/healthz`, and runner
+   `/healthz`.
 
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
 `CI` workflow succeeds for a push to `main`, and it can still be manually triggered from GitHub
@@ -46,11 +50,13 @@ The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so
 same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
 bursts from spending Actions minutes on commits that can no longer release.
 
-The web smoke check uses `PRODUCTION_WEB_URL` from Infisical `prod` + `/release`, not the raw Vercel
-deployment URL, so Vercel deployment protection can remain enabled on generated preview-style URLs.
-In production this canonical web URL is `https://my.opencompany.cloud`. The Better Stack status page
-monitors the same web `/api/healthz` and runner `/healthz` endpoints as the release smoke check, so
-keep those health endpoints stable when changing deployment or monitoring behavior.
+The web and Connector smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_CONNECTOR_URL` from
+Infisical `prod` + `/release`, not the raw Vercel deployment URLs, so Vercel deployment protection
+can remain enabled on generated preview-style URLs. In production the canonical web URL is
+`https://my.opencompany.cloud`, and the canonical Connector URL is `https://runconnector.com`. The
+Better Stack status page should monitor the same web `/api/healthz`, Connector `/api/healthz`, and
+runner `/healthz` endpoints as the release smoke check, so keep those health endpoints stable when
+changing deployment or monitoring behavior.
 
 Release attribution is not managed as an Infisical secret. Vercel and Render expose commit metadata
 to the server runtimes, and the production workflow injects `RELEASE_SHA` as
@@ -116,6 +122,40 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 Forward production web logs to the Better Stack source `opencompany-web-production` using the
 Vercel Better Stack integration or a Vercel Log Drain. Keep the source token in Vercel/Infisical,
 not in git.
+
+### Vercel Connector
+
+Create/import a second Vercel project from this repo for `apps/connector`.
+
+- Root directory: `apps/connector`
+- Install command: `if [ -f ../../bun.lock ]; then cd ../..; fi; bun install --frozen-lockfile`
+- Build command: `if [ -f ../../turbo.json ]; then cd ../..; fi; bun run build --filter=@opencompany/connector`
+- Production branch: `main`
+- Enable "Automatically expose System Environment Variables".
+- Enable "Include source files outside of the Root Directory" so workspace packages can be built.
+- Enable Skew Protection.
+- Automatic Git deploys are disabled in `apps/connector/vercel.json` with
+  `git.deploymentEnabled: false`.
+- Add `runconnector.com` as the production domain, plus `www.runconnector.com` redirecting to the
+  apex unless product chooses `www` as canonical.
+
+Set these in Infisical `prod` + `/connector` and sync them into the Connector Vercel project:
+
+- `DATABASE_URL`
+- `WORKOS_CLIENT_ID`
+- `WORKOS_API_KEY`
+- `WORKOS_COOKIE_PASSWORD`
+- `NEXT_PUBLIC_WORKOS_REDIRECT_URI`
+- `CONNECTOR_WORKOS_REDIRECT_URI`
+- `CONNECTOR_APP_URL`
+- `CONNECTOR_MCP_OAUTH_STATE_SECRET`
+- `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY`
+- optional observability env vars
+
+The release workflow reads `VERCEL_CONNECTOR_PROJECT_ID` from Infisical `prod` + `/release`, builds
+the Connector Vercel project before deploying anything, then deploys its prebuilt output after the
+web app. This keeps Connector on the same release SHA as web and runner while preserving the
+migration-first release contract.
 
 ### Render
 
@@ -192,6 +232,8 @@ Create or switch to the production WorkOS environment.
 
 - Add the production redirect URI:
   `https://<production-web-domain>/auth/callback`
+- Add the Connector production redirect URI:
+  `https://runconnector.com/auth/callback`
 - Set `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the same value in Vercel.
 - Generate a 32+ character `WORKOS_COOKIE_PASSWORD`.
 
@@ -240,6 +282,7 @@ Check only web or runner env coverage:
 
 ```bash
 bun run release:preflight -- --web
+bun run release:preflight -- --connector
 bun run release:preflight -- --runner
 ```
 
@@ -247,6 +290,7 @@ Run smoke checks against deployed services:
 
 ```bash
 PRODUCTION_WEB_URL=https://my.opencompany.cloud \
+PRODUCTION_CONNECTOR_URL=https://runconnector.com \
 RUNNER_PUBLIC_URL=https://opencompany-runner.onrender.com \
 bun run release:smoke
 ```
@@ -254,10 +298,10 @@ bun run release:smoke
 ## First release checklist
 
 - CI is green on `main`.
-- Infisical `prod` + `/web`, `/runner`, and `/release` are populated.
+- Infisical `prod` + `/web`, `/connector`, `/runner`, and `/release` are populated.
 - Infisical syncs to Vercel and Render are enabled.
 - GitHub Actions production vars for Infisical OIDC are set.
-- WorkOS production callback works.
+- WorkOS production web and Connector callbacks work.
 - Inngest production app can sync functions from `/api/inngest`.
 - Neon backups/PITR are enabled.
 - Render API deploy works for the runner service.

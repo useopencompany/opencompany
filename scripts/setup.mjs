@@ -1,5 +1,6 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { argv, exit, versions } from "node:process";
 import {
@@ -63,6 +64,21 @@ const GITHUB_WORK_INTEGRATION_ENV_KEYS = [
   "GITHUB_INTEGRATION_STATE_SECRET",
 ];
 const INTEGRATION_CREDENTIAL_ENV_KEYS = ["INTEGRATION_CREDENTIAL_ENCRYPTION_KEY"];
+const CONNECTOR_REQUIRED_ENV_KEYS = [
+  "WORKOS_CLIENT_ID",
+  "WORKOS_API_KEY",
+  "WORKOS_COOKIE_PASSWORD",
+  "CONNECTOR_WORKOS_REDIRECT_URI",
+  "CONNECTOR_APP_URL",
+  "CONNECTOR_MCP_OAUTH_STATE_SECRET",
+  "CONNECTOR_CREDENTIAL_ENCRYPTION_KEY",
+];
+const CONNECTOR_SHARED_DEV_ENV_KEYS = [
+  "CONNECTOR_WORKOS_REDIRECT_URI",
+  "CONNECTOR_APP_URL",
+  "CONNECTOR_MCP_OAUTH_STATE_SECRET",
+  "CONNECTOR_CREDENTIAL_ENCRYPTION_KEY",
+];
 const GOOGLE_INTEGRATION_ENV_KEYS = [
   "GOOGLE_OAUTH_CLIENT_ID",
   "GOOGLE_OAUTH_CLIENT_SECRET",
@@ -135,6 +151,7 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "OPENCOMPANY_NGROK_REQUIRED",
   "OPENCOMPANY_NGROK_URL",
   "NGROK_AUTHTOKEN",
+  ...CONNECTOR_SHARED_DEV_ENV_KEYS,
   ...STRIPE_ENV_KEYS,
   ...STRIPE_OPTIONAL_ENV_KEYS,
   ...LINEAR_ENV_KEYS,
@@ -150,8 +167,9 @@ const SHARED_DEV_ENV_KEYS = [
 ];
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
-const INFISICAL_DEV_PATHS = ["/web", "/runner"];
+const INFISICAL_DEV_PATHS = ["/web", "/runner", "/connector"];
 const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
+const LOCAL_CONNECTOR_APP_URL = "http://localhost:3002";
 const LOCAL_CONNECTOR_WORKOS_REDIRECT_URI = "http://localhost:3002/auth/callback";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
@@ -277,6 +295,10 @@ function writeEnvValues(path, values) {
   );
 }
 
+function generateLocalSecret() {
+  return randomBytes(32).toString("base64");
+}
+
 function isPlaceholder(value) {
   if (!value) return true;
   return (
@@ -292,12 +314,9 @@ function inspectState() {
   const connectorEnv = parseEnv(CONNECTOR_ENV_PATH);
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
-  const connectorWorkosMissing = [
-    "WORKOS_CLIENT_ID",
-    "WORKOS_API_KEY",
-    "WORKOS_COOKIE_PASSWORD",
-    "CONNECTOR_WORKOS_REDIRECT_URI",
-  ].filter((key) => isPlaceholder(connectorEnv[key]));
+  const connectorMissing = CONNECTOR_REQUIRED_ENV_KEYS.filter((key) =>
+    isPlaceholder(connectorEnv[key]),
+  );
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -306,8 +325,8 @@ function inspectState() {
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
-    connectorWorkos: connectorWorkosMissing.length === 0 ? "ready" : "placeholder",
-    connectorWorkosMissingKeys: connectorWorkosMissing,
+    connectorWorkos: connectorMissing.length === 0 ? "ready" : "placeholder",
+    connectorWorkosMissingKeys: connectorMissing,
     runner: runnerMissing.length === 0 ? "ready" : "placeholder",
     runnerMissingKeys: runnerMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
@@ -474,6 +493,21 @@ async function ensureConnectorEnv() {
     : !isPlaceholder(env.CONNECTOR_WORKOS_REDIRECT_URI)
       ? env.CONNECTOR_WORKOS_REDIRECT_URI
       : LOCAL_CONNECTOR_WORKOS_REDIRECT_URI;
+  const connectorAppUrl = !isPlaceholder(connectorEnv.CONNECTOR_APP_URL)
+    ? connectorEnv.CONNECTOR_APP_URL
+    : !isPlaceholder(env.CONNECTOR_APP_URL)
+      ? env.CONNECTOR_APP_URL
+      : LOCAL_CONNECTOR_APP_URL;
+  const connectorMcpStateSecret = !isPlaceholder(connectorEnv.CONNECTOR_MCP_OAUTH_STATE_SECRET)
+    ? connectorEnv.CONNECTOR_MCP_OAUTH_STATE_SECRET
+    : !isPlaceholder(env.CONNECTOR_MCP_OAUTH_STATE_SECRET)
+      ? env.CONNECTOR_MCP_OAUTH_STATE_SECRET
+      : generateLocalSecret();
+  const connectorCredentialKey = !isPlaceholder(connectorEnv.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY)
+    ? connectorEnv.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY
+    : !isPlaceholder(env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY)
+      ? env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY
+      : generateLocalSecret();
 
   writeEnvValues(CONNECTOR_ENV_PATH, {
     WORKOS_CLIENT_ID: env.WORKOS_CLIENT_ID,
@@ -481,9 +515,12 @@ async function ensureConnectorEnv() {
     WORKOS_COOKIE_PASSWORD: env.WORKOS_COOKIE_PASSWORD,
     CONNECTOR_WORKOS_REDIRECT_URI: connectorRedirectUri,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: connectorRedirectUri,
+    CONNECTOR_APP_URL: connectorAppUrl,
+    CONNECTOR_MCP_OAUTH_STATE_SECRET: connectorMcpStateSecret,
+    CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: connectorCredentialKey,
   });
 
-  ok(`${CONNECTOR_ENV_PATH} has Connector WorkOS env`);
+  ok(`${CONNECTOR_ENV_PATH} has Connector env`);
 }
 
 async function ensurePersonalEnvFile() {
@@ -540,6 +577,7 @@ function pullSharedDevEnvFromInfisical({
     }
   }
   pulled.NEXT_PUBLIC_WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
+  pulled.CONNECTOR_APP_URL = LOCAL_CONNECTOR_APP_URL;
   pulled.CONNECTOR_WORKOS_REDIRECT_URI = LOCAL_CONNECTOR_WORKOS_REDIRECT_URI;
   if (!isPlaceholder(pulled.WORKOS_REDIRECT_URI)) {
     pulled.WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
@@ -580,7 +618,7 @@ function pullSharedDevEnv(options = {}) {
   if (existsSync(".infisical.json")) {
     throw new Error(
       "Infisical is linked but shared dev env could not be pulled. " +
-        "Run `infisical login` and check the dev /web and /runner folders.",
+        "Run `infisical login` and check the dev /web, /runner, and /connector folders.",
     );
   }
 

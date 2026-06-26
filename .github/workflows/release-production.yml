@@ -156,9 +156,34 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: bun run db:migrate
 
+      - name: Pull Vercel connector project config
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        run: |
+          rm -rf .vercel .vercel-connector-prebuilt
+          VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" \
+            bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Check Vercel connector env
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        env:
+          OPENCOMPANY_LOAD_VERCEL_ENV: "1"
+        run: bun run release:preflight -- --connector
+
+      - name: Build connector
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        env:
+          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+        run: |
+          VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" \
+            bunx vercel build --prod --token="$VERCEL_TOKEN"
+          mv .vercel .vercel-connector-prebuilt
+
       - name: Pull Vercel project config
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: |
+          rm -rf .vercel
+          bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Check Vercel web env
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
@@ -189,7 +214,7 @@ jobs:
 
       - name: Skip stale deploy
         if: ${{ github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'false' }}
-        run: echo "This automatic release was superseded after build, so web and runner deploys were skipped."
+        run: echo "This automatic release was superseded after build, so web, connector, and runner deploys were skipped."
 
       - name: Trigger runner deploy
         id: trigger-runner
@@ -210,7 +235,23 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed web to $url"
 
-      - name: Cancel runner deploy after web failure
+      - name: Deploy connector
+        id: deploy-connector
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        run: |
+          rm -rf .vercel
+          mv .vercel-connector-prebuilt .vercel
+          output="$(VERCEL_PROJECT_ID="$VERCEL_CONNECTOR_PROJECT_ID" bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
+          echo "$output"
+          url="$(printf "%s\n" "$output" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
+          if [ -z "$url" ]; then
+            echo "Could not find connector deployment URL in Vercel output."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed connector to $url"
+
+      - name: Cancel runner deploy after app deploy failure
         if: ${{ failure() && steps.trigger-runner.outputs.deploy_id != '' }}
         run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
 
@@ -224,6 +265,7 @@ jobs:
           EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
           SMOKE_RUNNER: ${{ github.event_name == 'workflow_run' || inputs.deploy_runner }}
           SMOKE_WEB_ATTEMPTS: "12"
+          SMOKE_CONNECTOR_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke

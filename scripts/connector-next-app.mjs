@@ -13,6 +13,7 @@ const args = argv.slice(2);
 const env = { ...process.env };
 
 env.CONNECTOR_WORKOS_REDIRECT_URI ??= "http://localhost:3002/auth/callback";
+env.CONNECTOR_APP_URL ??= "http://localhost:3002";
 
 if (args[0] === "dev") {
   env.PORT ??= "3002";

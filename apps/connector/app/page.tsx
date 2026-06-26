@@ -1,7 +1,6 @@
-import { buttonVariants } from "@opencompany/ui/components/button";
-import { cn } from "@opencompany/ui/lib/utils";
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { redirect } from "next/navigation";
+import { redirectToConnectorHomeForAuthUser } from "@/lib/auth";
+import { WaitlistForm } from "./waitlist-form";
 
 const logo = String.raw`
   ____                            _
@@ -56,7 +55,7 @@ export default async function HomePage() {
   const { user } = await withAuth();
 
   if (user) {
-    redirect("/setup");
+    await redirectToConnectorHomeForAuthUser(user);
   }
 
   return (
@@ -74,38 +73,34 @@ export default async function HomePage() {
           One place for your team's integrations, MCPs, and skills.
         </h1>
 
-        <p className="mt-5 max-w-xl text-xs leading-6 text-muted-foreground sm:text-sm">
-          Stop sharing API tokens in Slack threads. Connect everything once, decide who gets what,
-          and give your whole team a single MCP to plug into. You stay in control. They stay
-          productive.
+        <p className="mt-5 max-w-xl text-xs leading-6 text-foreground/55 sm:text-sm">
+          Stop sharing API tokens in Slack threads.{" "}
+          <span className="text-foreground">Connect everything once, decide who gets what,</span>{" "}
+          and give your team a single MCP to plug into.
         </p>
 
-        <div className="mt-10 flex flex-wrap items-center gap-6">
-          <a
-            href="/auth/sign-up"
-            className={cn(buttonVariants({ size: "lg" }), "rounded-none font-mono")}
-          >
-            Get started
-          </a>
+        <div className="mt-10 flex flex-col gap-5">
+          <WaitlistForm />
           <a
             href="/auth/sign-in"
             className="inline-flex items-center gap-2 text-sm font-medium text-foreground transition-colors hover:text-muted-foreground"
           >
-            Sign in <span aria-hidden>→</span>
+            Already have an account? Sign in <span aria-hidden>→</span>
           </a>
         </div>
       </section>
 
       <section
         id="how-it-works"
-        className="mx-auto w-full max-w-3xl scroll-mt-16 border-t border-border px-6 py-20 sm:px-8"
+        className="mx-auto w-full max-w-3xl scroll-mt-16 border-t border-border px-6 pb-20 pt-12 sm:px-8"
       >
         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">The problem</p>
-        <p className="mt-4 max-w-xl text-sm leading-7 text-foreground sm:text-base">
-          Your team wants to use AI with Slack, GitHub, and Linear. So you paste an API token in a
-          group chat. Three months later a contractor leaves, and now you're rotating keys for 12
-          people — and you don't even know who has access to what. This is how it starts. Connector
-          is how it ends.
+        <p className="mt-4 max-w-xl text-sm leading-7 text-foreground/55 sm:text-base">
+          You paste an API token into a group chat so the team can use AI. Someone leaves, and now{" "}
+          <span className="text-foreground">
+            you're rotating keys for everyone — with no idea who has access to what.
+          </span>{" "}
+          Connector is how that ends.
         </p>
 
         <div className="mt-16 grid gap-px border border-border bg-border sm:grid-cols-3">
@@ -132,14 +127,11 @@ export default async function HomePage() {
           ))}
         </dl>
 
-        <div className="mt-16 flex flex-wrap items-center gap-6 border-t border-border pt-12">
-          <a
-            href="/auth/sign-up"
-            className={cn(buttonVariants({ size: "lg" }), "rounded-none font-mono")}
-          >
-            Get started
-          </a>
-          <span className="text-sm text-muted-foreground">One key. One click. Just works.</span>
+        <div className="mt-16 flex flex-col gap-4 border-t border-border pt-12">
+          <span className="text-sm text-muted-foreground">
+            Join the waitlist. One key. One click. Just works.
+          </span>
+          <WaitlistForm />
         </div>
       </section>
     </main>
