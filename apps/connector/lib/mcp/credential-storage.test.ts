@@ -68,7 +68,7 @@ describe("connector MCP credential storage", () => {
       payload: { tokens: { access_token: "lin_secret", token_type: "Bearer" } },
       db,
     });
-    vi.unstubAllEnvs();
+    vi.stubEnv("CONNECTOR_CREDENTIAL_ENCRYPTION_KEY", "");
 
     await expect(loadConnectorMcpCredential({ ...credentialContext, db })).rejects.toThrow(
       "CONNECTOR_CREDENTIAL_ENCRYPTION_KEY is required.",

@@ -50,7 +50,7 @@ describe("connector MCP OAuth state", () => {
   });
 
   it("requires the connector state secret env", () => {
-    vi.unstubAllEnvs();
+    vi.stubEnv("CONNECTOR_MCP_OAUTH_STATE_SECRET", "");
 
     expect(() => createConnectorMcpOAuthState(input)).toThrow(
       "CONNECTOR_MCP_OAUTH_STATE_SECRET is required for Connector MCP OAuth.",
