@@ -7,7 +7,10 @@ import QueryProvider from "@/components/QueryProvider";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
-import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
+import {
+  loadAgentReferencesForWorkspace,
+  loadGitHubIntegrationRepositoriesForWorkspace,
+} from "@/lib/agents/data";
 import { agentGitHubRepositories, buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { currentWorkspace } from "@/lib/auth";
 import { isCodexEngineEnabled } from "@/lib/flags/codexEngine";
@@ -52,6 +55,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     toolPolicies,
     githubIntegrationRepositories,
     workspaceList,
+    workspaceAgents,
   ] = await Promise.all([
     loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
     loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
@@ -62,6 +66,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     loadWorkspaceToolPolicyOverrides(workspace.id),
     loadGitHubIntegrationRepositoriesForWorkspace(workspace.id),
     listUserWorkspaces(),
+    loadAgentReferencesForWorkspace(workspace.id),
   ]);
 
   // The workspace GitHub integration's repository catalog (only usable repos), so the Behavior
@@ -133,6 +138,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                   personalSkills={personalSkills}
                   githubIntegrationStatus={workspaceIntegrations.github.status}
                   githubRepositories={githubRepositories}
+                  workspaceAgents={workspaceAgents}
                   integrationConnections={integrationConnections}
                   integrationDetails={integrationDetails}
                   toolPolicies={toolPolicies}

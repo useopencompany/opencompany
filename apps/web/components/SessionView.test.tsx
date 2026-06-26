@@ -919,6 +919,7 @@ function makePersonalAgentContext(
     personalSkills: [],
     githubIntegrationStatus: "not_connected",
     githubRepositories: [],
+    workspaceAgents: [],
     integrationConnections: {
       github: false,
       gmail: false,
