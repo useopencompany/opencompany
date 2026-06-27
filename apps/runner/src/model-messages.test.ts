@@ -361,7 +361,8 @@ describe("buildModelMessages", () => {
       ]),
     ).toEqual([
       { role: "user", content: "List files." },
-      { role: "assistant", content: "" },
+      // The empty assistant row left by the failed turn is also dropped (empty-message replay
+      // guard) — replaying it is what poisons later turns into repeated gateway 400s.
       { role: "user", content: "Continue." },
     ]);
   });
@@ -614,5 +615,96 @@ describe("buildAssistantModelMessage", () => {
         { type: "text", text: "Done" },
       ],
     });
+  });
+});
+
+describe("buildModelMessages — empty-message replay guard", () => {
+  // Regression for the Leo kimi-k2.5 session (ses_042d0e478d8649fcbd24): an image-only paste was
+  // dropped (attachments unsupported), leaving an EMPTY user message that was persisted and then
+  // replayed on every later turn. The Vercel AI Gateway rejects an empty message, so once that row
+  // entered history every subsequent turn failed with "Bad Request" — including a later "Hallo".
+  // The guard drops empty user/assistant messages at replay time, which both prevents the cascade
+  // and recovers already-poisoned sessions (the empty row is simply not sent).
+
+  it("drops an empty user message from the replayed history", () => {
+    const messages = buildModelMessages([
+      {
+        id: "u1",
+        role: "user",
+        content: "Pricing?",
+        modelMessage: { role: "user", content: "Pricing?" },
+      },
+      // Image-only paste → image ignored → empty message still persisted (export turn 259).
+      { id: "u2", role: "user", content: "", modelMessage: { role: "user", content: "" } },
+      {
+        id: "u3",
+        role: "user",
+        content: "Hallo",
+        modelMessage: { role: "user", content: "Hallo" },
+      },
+    ]);
+
+    expect(messages).toEqual([
+      { role: "user", content: "Pricing?" },
+      { role: "user", content: "Hallo" },
+    ]);
+  });
+
+  it("drops a whitespace-only user message", () => {
+    const messages = buildModelMessages([
+      {
+        id: "u1",
+        role: "user",
+        content: "   \n  ",
+        modelMessage: { role: "user", content: "   \n  " },
+      },
+      {
+        id: "u2",
+        role: "user",
+        content: "Real question",
+        modelMessage: { role: "user", content: "Real question" },
+      },
+    ]);
+    expect(messages).toEqual([{ role: "user", content: "Real question" }]);
+  });
+
+  it("drops an empty assistant row left behind by a failed turn (legacy fallback)", () => {
+    // A failed turn never persists a completion: the assistant row stays with modelMessage=null
+    // and empty content, so legacyModelMessage materializes { role: 'assistant', content: '' }.
+    const messages = buildModelMessages([
+      { id: "u1", role: "user", content: "Hi", modelMessage: { role: "user", content: "Hi" } },
+      { id: "a1", role: "assistant", content: "", modelMessage: null },
+      {
+        id: "u2",
+        role: "user",
+        content: "Still there?",
+        modelMessage: { role: "user", content: "Still there?" },
+      },
+    ]);
+    expect(messages).toEqual([
+      { role: "user", content: "Hi" },
+      { role: "user", content: "Still there?" },
+    ]);
+  });
+
+  it("keeps non-empty messages untouched", () => {
+    const messages = buildModelMessages([
+      {
+        id: "u1",
+        role: "user",
+        content: "Question",
+        modelMessage: { role: "user", content: "Question" },
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Answer",
+        modelMessage: { role: "assistant", content: "Answer" },
+      },
+    ]);
+    expect(messages).toEqual([
+      { role: "user", content: "Question" },
+      { role: "assistant", content: "Answer" },
+    ]);
   });
 });

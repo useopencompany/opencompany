@@ -128,3 +128,77 @@ function readRawReasoningContent(value: unknown): string {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+// Upper bound on how much provider detail we fold into the session's lastError. Generous enough
+// to carry a real reason ("context length 312000 exceeds 262144") but short enough that a giant
+// echoed request body can't bloat the row or the UI notice.
+const PROVIDER_ERROR_DETAIL_MAX = 600;
+
+// Turn whatever the model turn threw into the single human-readable string we persist as the
+// session's lastError (and report to Sentry / the session.error event). AI SDK gateway/provider
+// failures arrive as an APICallError whose `.message` is just the bare HTTP status text — e.g.
+// "Bad Request" — while the actionable reason (context overflow, unsupported input, rate limit)
+// sits unread in `.statusCode` + `.responseBody`/`.data`. Surfacing only "Bad Request" makes
+// these undiagnosable in prod, so we pull the real reason out here.
+export function describeRunnerError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return typeof error === "string" && error.trim() ? error.trim() : "Unknown runner error";
+  }
+  return describeApiCallError(error) ?? (error.message.trim() || "Unknown runner error");
+}
+
+function describeApiCallError(error: Error): string | null {
+  const record = error as unknown as Record<string, unknown>;
+  const statusCode = typeof record.statusCode === "number" ? record.statusCode : undefined;
+  // Duck-type rather than `instanceof APICallError`: the gateway error can be re-wrapped before it
+  // reaches us, and the SDK error type has moved packages across versions. A numeric statusCode or
+  // a responseBody string is a reliable tell regardless of how it was constructed.
+  const looksLikeApiError =
+    error.name === "AI_APICallError" ||
+    error.name === "APICallError" ||
+    statusCode !== undefined ||
+    typeof record.responseBody === "string";
+  if (!looksLikeApiError) return null;
+
+  const reason = extractProviderReason(record.responseBody, record.data);
+  const base = error.message.trim() || "Provider request failed";
+  const status = statusCode !== undefined ? ` (HTTP ${statusCode})` : "";
+  const detail = reason && reason !== base ? `: ${reason}` : "";
+  return `${base}${status}${detail}`;
+}
+
+function extractProviderReason(responseBody: unknown, data: unknown): string | null {
+  const fromData = readErrorMessageField(data);
+  if (fromData) return truncateDetail(fromData);
+  if (typeof responseBody === "string" && responseBody.trim()) {
+    const trimmed = responseBody.trim();
+    try {
+      const fromBody = readErrorMessageField(JSON.parse(trimmed));
+      if (fromBody) return truncateDetail(fromBody);
+    } catch {
+      // responseBody isn't JSON — fall through to the raw (truncated) text.
+    }
+    return truncateDetail(trimmed);
+  }
+  return null;
+}
+
+// Best-effort pull of a message out of a provider error payload. Covers both the OpenAI-style
+// `{ error: { message } }` envelope the Vercel AI Gateway forwards and a bare `{ error: "..." }`
+// or top-level `{ message }`.
+function readErrorMessageField(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  const err = value.error;
+  if (typeof err === "string" && err.trim()) return err.trim();
+  if (isRecord(err) && typeof err.message === "string" && err.message.trim()) {
+    return err.message.trim();
+  }
+  if (typeof value.message === "string" && value.message.trim()) return value.message.trim();
+  return null;
+}
+
+function truncateDetail(value: string): string {
+  return value.length > PROVIDER_ERROR_DETAIL_MAX
+    ? `${value.slice(0, PROVIDER_ERROR_DETAIL_MAX)}…`
+    : value;
+}
