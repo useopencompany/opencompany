@@ -26,6 +26,10 @@ export function ScheduleDialog({
   defaultTimezone,
   showTimezone = true,
   title,
+  agentOptions,
+  selectedAgentId,
+  onSelectAgent,
+  agentPickerDisabled = false,
   onClose,
   onSave,
   onRemove,
@@ -35,6 +39,13 @@ export function ScheduleDialog({
   defaultTimezone?: string;
   showTimezone?: boolean;
   title?: string;
+  // When provided, render an agent picker at the top of the form (company Routines tab, where a
+  // routine can target any workspace agent). Personal/agent-editor callers omit these — the agent
+  // is already implied by context.
+  agentOptions?: { id: string; name: string }[];
+  selectedAgentId?: string;
+  onSelectAgent?: (agentId: string) => void;
+  agentPickerDisabled?: boolean;
   onClose: () => void;
   onSave: (trigger: AgentScheduleTriggerConfig) => void;
   onRemove?: () => void;
@@ -96,6 +107,24 @@ export function ScheduleDialog({
         </div>
 
         <div className="mt-4 space-y-3">
+          {agentOptions && agentOptions.length > 0 ? (
+            <label className="block">
+              <span className="text-[11px] font-medium uppercase text-ink-subtle">Agent</span>
+              <select
+                value={selectedAgentId}
+                onChange={(event) => onSelectAgent?.(event.target.value)}
+                disabled={agentPickerDisabled}
+                className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:ring-1 focus:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {agentOptions.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
           <label className="block">
             <span className="text-[11px] font-medium uppercase text-ink-subtle">Frequency</span>
             <select

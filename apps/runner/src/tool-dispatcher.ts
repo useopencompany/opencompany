@@ -147,6 +147,13 @@ type DelegateToAgent = (input: {
   agent?: string;
   sessionId?: string;
   prompt: string;
+  wait?: boolean;
+  toolCallId: string;
+}) => Promise<unknown>;
+
+type AwaitAgents = (input: {
+  sessionIds?: string[];
+  mode?: string;
   toolCallId: string;
 }) => Promise<unknown>;
 
@@ -199,6 +206,7 @@ export function createToolSet(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  awaitAgents?: AwaitAgents | undefined;
   runSubagent?: RunSubagent | undefined;
   // Receives each call's ToolCallTimings once measured (per-turn rollup + slow-call analytics).
   onToolTimings?: ((record: ToolTimingRecord) => void) | undefined;
@@ -270,6 +278,7 @@ export function createToolSet(input: {
           observabilityContext: input.observabilityContext,
           toolBudget: input.toolBudget,
           delegateToAgent: input.delegateToAgent,
+          awaitAgents: input.awaitAgents,
           runSubagent: input.runSubagent,
         });
       },
@@ -340,6 +349,7 @@ export function createToolSet(input: {
         observabilityContext: input.observabilityContext,
         toolBudget: input.toolBudget,
         delegateToAgent: input.delegateToAgent,
+        awaitAgents: input.awaitAgents,
         runSubagent: input.runSubagent,
       });
     },
@@ -399,6 +409,7 @@ export async function dispatchBuiltinUseTool(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  awaitAgents?: AwaitAgents | undefined;
   runSubagent?: RunSubagent | undefined;
 }) {
   const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
@@ -492,6 +503,7 @@ export async function dispatchBuiltinUseTool(input: {
     observabilityContext: input.observabilityContext,
     toolBudget: input.toolBudget,
     delegateToAgent: input.delegateToAgent,
+    awaitAgents: input.awaitAgents,
     runSubagent: input.runSubagent,
   });
 }
@@ -630,6 +642,7 @@ type ExecuteRuntimeToolInput = {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  awaitAgents?: AwaitAgents | undefined;
   runSubagent?: RunSubagent | undefined;
 };
 
@@ -806,6 +819,16 @@ async function executeRuntimeToolInner(
             );
           }
           return input.runSubagent({ ...args, toolCallId: input.toolCallId });
+        }
+        if (input.definition.name === "await_agents") {
+          if (!input.awaitAgents) {
+            throw new RecoverableToolError(
+              "Awaiting delegated agents is not available in this run.",
+              "await_agents_unavailable",
+            );
+          }
+          const awaitArgs = readAwaitAgentsArgs(input.args);
+          return input.awaitAgents({ ...awaitArgs, toolCallId: input.toolCallId });
         }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
@@ -1753,10 +1776,30 @@ function readDelegateToAgentArgs(args: unknown) {
     );
   }
 
+  const wait = record.wait === true;
+
   return {
     ...(agent ? { agent } : {}),
     ...(sessionId ? { sessionId } : {}),
     prompt,
+    ...(wait ? { wait: true } : {}),
+  };
+}
+
+function readAwaitAgentsArgs(args: unknown) {
+  const record = isRecord(args) ? args : {};
+  const sessionIds = Array.isArray(record.sessionIds)
+    ? record.sessionIds
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter((id): id is string => Boolean(id))
+    : undefined;
+  const mode =
+    record.mode === "all" || record.mode === "any" || record.mode === "poll"
+      ? record.mode
+      : undefined;
+  return {
+    ...(sessionIds && sessionIds.length > 0 ? { sessionIds } : {}),
+    ...(mode ? { mode } : {}),
   };
 }
 

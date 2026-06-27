@@ -3,8 +3,10 @@ import {
   AFTER_SESSION_TAG,
   AGENT_SELF_EDIT_SKILL_ID,
   agentMentionIdForPath,
+  CTO_PR_REVIEW_SKILL_ID,
   FIRST_PRINCIPLES_SKILL_ID,
   HUMANIZER_SKILL_ID,
+  IMPLEMENTER_SKILL_ID,
   listAddableBuiltinSkills,
   MEMORY_SKILL_ID,
   ONBOARDING_SKILL_ID,
@@ -168,12 +170,17 @@ export type AgentSkillCatalogEntry = {
   description: string;
   /** Slash-command slug from SKILL.md frontmatter, if the skill declares one. */
   command?: string;
-  source?: {
-    type: "github" | "skills.sh";
-    url: string;
-    ref: string;
-    path: string;
-  };
+  source?:
+    | {
+        type: "github" | "skills.sh";
+        url: string;
+        ref: string;
+        path: string;
+      }
+    | {
+        type: "workspace";
+        path: string;
+      };
 };
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
@@ -354,6 +361,8 @@ const SKILL_ICONS: Record<string, LucideIcon> = {
   [FIRST_PRINCIPLES_SKILL_ID]: Atom,
   [HUMANIZER_SKILL_ID]: Feather,
   [Y_COMBINATOR_KNOWLEDGE_SKILL_ID]: Rocket,
+  [CTO_PR_REVIEW_SKILL_ID]: ListTodo,
+  [IMPLEMENTER_SKILL_ID]: Code2,
   [MEMORY_SKILL_ID]: Brain,
   [SKILL_CREATOR_SKILL_ID]: Hammer,
   [AGENT_SELF_EDIT_SKILL_ID]: SlidersHorizontal,

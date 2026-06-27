@@ -57,6 +57,7 @@ type JsonRpcNotification = {
 export function buildCodexAppServerCommandPlan(input: {
   codexWorkRoot: string;
   codexHome: string;
+  skillFingerprint: string;
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
 }) {
@@ -96,7 +97,12 @@ export function buildCodexAppServerCommandPlan(input: {
     config,
     daemonCommand,
     proxyCommand,
-    fingerprint: appServerFingerprint({ config, auth: input.auth, githubAuth: input.githubAuth }),
+    fingerprint: appServerFingerprint({
+      config,
+      skillFingerprint: input.skillFingerprint,
+      auth: input.auth,
+      githubAuth: input.githubAuth,
+    }),
     forceRestart: input.auth.brokered,
   };
 }
@@ -105,6 +111,7 @@ export async function runCodexAppServerTurn(input: {
   sandbox: SandboxHandle;
   codexWorkRoot: string;
   codexHome: string;
+  skillFingerprint: string;
   task: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
@@ -120,6 +127,7 @@ export async function runCodexAppServerTurn(input: {
   const plan = buildCodexAppServerCommandPlan({
     codexWorkRoot: input.codexWorkRoot,
     codexHome: input.codexHome,
+    skillFingerprint: input.skillFingerprint,
     auth: input.auth,
     githubAuth: input.githubAuth,
   });
@@ -893,11 +901,13 @@ async function readAppServerState(sandbox: SandboxHandle, path: string) {
 
 function appServerFingerprint(input: {
   config: string;
+  skillFingerprint: string;
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
 }) {
   return hashJson({
     config: input.config,
+    skillFingerprint: input.skillFingerprint,
     auth:
       input.auth.kind === "api"
         ? {

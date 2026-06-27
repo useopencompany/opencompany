@@ -1,0 +1,3 @@
+ALTER TABLE "agent_session_run_jobs" DROP CONSTRAINT "agent_session_run_jobs_kind_check";--> statement-breakpoint
+ALTER TABLE "agent_sessions" ADD COLUMN "delegation_depth" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "agent_session_run_jobs" ADD CONSTRAINT "agent_session_run_jobs_kind_check" CHECK ("agent_session_run_jobs"."kind" IN ('start', 'message', 'codex_turn', 'title', 'after_session', 'resume_approval', 'resume_question', 'resume_delegation'));

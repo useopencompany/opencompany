@@ -29,6 +29,7 @@ import {
 } from "./codex-tool";
 import { createKnownSecretRedactor, gitAuthHeader, truncateText } from "./coding-agent-shared";
 import { getDb } from "./db";
+import { completeDelegatedChildRunForParent } from "./delegation";
 import { brokerActive, brokerBaseUrl, type RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubWorkInstallationToken } from "./github";
@@ -64,6 +65,7 @@ import {
   resolveSandboxBilling,
   setStatus,
 } from "./session-lifecycle";
+import { materializeCodexSkillsForSession } from "./skills";
 import { recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "codex-session" });
@@ -148,10 +150,15 @@ async function runCodexTurnWithContext(
   let outcome = "unknown";
   let assistantMessageCreated = false;
   let assistantMessageCompleted = false;
+  // A delegated (source="agent") codex child: at run end it rolls usage up to the parent and wakes
+  // a parent parked awaiting it. Fired from finally so every exit path (success/fail/abort) covers
+  // it once the session status is durably terminal.
+  let delegatedChildRun = false;
 
   try {
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     const agentConfig = normalizeAgentConfig(row.agent.config);
+    delegatedChildRun = row.session.source === "agent";
     workspaceId = row.workspace.id;
     userId = row.session.userId;
     agentId = row.agent.id;
@@ -317,6 +324,7 @@ async function runCodexTurnWithContext(
       ctx,
       sandbox,
       row,
+      agentConfig,
       task,
       model: codexModel,
       reasoningEffort: codexReasoningEffortForSession(row.session.codexReasoningEffort),
@@ -529,6 +537,11 @@ async function runCodexTurnWithContext(
       modelName,
       sandbox,
     });
+    if (delegatedChildRun) {
+      await completeDelegatedChildRunForParent({ childSessionId: input.sessionId }).catch(() => {
+        // Best-effort: the backstop sweep re-wakes the parent if this parent-notify is lost.
+      });
+    }
   }
 }
 
@@ -536,6 +549,7 @@ async function runCodexAppServerSession(input: {
   ctx: ReturnType<typeof createRunContext>;
   sandbox: SandboxHandle;
   row: Awaited<ReturnType<typeof loadSession>>;
+  agentConfig: Pick<ReturnType<typeof normalizeAgentConfig>, "skills">;
   task: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
@@ -572,11 +586,20 @@ async function runCodexAppServerSession(input: {
     if (serializedAuthJson) {
       await input.sandbox.files.write(`${codexHome}/auth.json`, serializedAuthJson);
     }
+    const codexSkills = await runCodexCommandStage("skill setup", redact, () =>
+      materializeCodexSkillsForSession({
+        sandbox: input.sandbox,
+        workdir: input.row.session.workdir,
+        workspaceId: input.row.workspace.id,
+        config: input.agentConfig,
+      }),
+    );
 
     const summary = await runCodexAppServerTurn({
       sandbox: input.sandbox,
       codexWorkRoot,
       codexHome,
+      skillFingerprint: codexSkills.fingerprint,
       task: input.task,
       model: input.model,
       reasoningEffort: input.reasoningEffort,

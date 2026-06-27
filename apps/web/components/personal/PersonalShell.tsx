@@ -1,7 +1,12 @@
 "use client";
 
 import { agentBundleDir, type ResolvedSkillMetadata } from "@opencompany/agent-runtime";
-import type { AgentConfig, AgentToolId, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentReference,
+  AgentToolId,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import { PanelLeft } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -35,6 +40,7 @@ import { useDrawerGesture } from "@/lib/useDrawerGesture";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { setUserTimezone as setUserTimezoneAction } from "@/lib/users/actions";
 import { cn } from "@/lib/utils";
+import type { WorkspacePickerItem } from "@/lib/workspaces/actions";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
 const sidebarCollapsedSubscribers = new Set<() => void>();
@@ -78,7 +84,9 @@ export type PersonalShellProps = {
   userEmail: string;
   userTimezone: string;
   userTimezoneSource: UserTimezoneSource;
+  workspaceId: string;
   workspaceName: string;
+  workspaces: WorkspacePickerItem[];
   initialSessions: SidebarSessionPayload[];
   contextFiles: AgentBundleFilePayload[];
   personalSkills: ResolvedSkillMetadata[];
@@ -86,6 +94,8 @@ export type PersonalShellProps = {
   // The workspace GitHub integration's usable repository catalog, so the Behavior editor can
   // offer concrete @owner/repo mentions (not just the generic @github pill).
   githubRepositories: GitHubIntegrationRepositoryPayload[];
+  // Workspace-wide/company agents mentionable from the personal Behavior editor.
+  workspaceAgents: AgentReference[];
   integrationConnections: PersonalIntegrationConnections;
   integrationDetails: PersonalIntegrationDetails;
   toolPolicies: WorkspaceToolPolicyOverrides;
@@ -104,12 +114,15 @@ export default function PersonalShell({
   userEmail,
   userTimezone: initialUserTimezone,
   userTimezoneSource: initialUserTimezoneSource,
+  workspaceId,
   workspaceName,
+  workspaces,
   initialSessions,
   contextFiles,
   personalSkills,
   githubIntegrationStatus,
   githubRepositories,
+  workspaceAgents,
   integrationConnections,
   integrationDetails,
   toolPolicies,
@@ -277,11 +290,14 @@ export default function PersonalShell({
       userEmail,
       userTimezone,
       userTimezoneSource,
+      workspaceId,
       workspaceName,
+      workspaces,
       initialSessions,
       personalSkills,
       githubIntegrationStatus,
       githubRepositories,
+      workspaceAgents,
       integrationConnections,
       integrationDetails,
       toolPolicies,
@@ -319,11 +335,14 @@ export default function PersonalShell({
       codexEngineEnabled,
       userTimezone,
       userTimezoneSource,
+      workspaceId,
+      workspaces,
       githubRequested,
       files,
       personalSkills,
       githubIntegrationStatus,
       githubRepositories,
+      workspaceAgents,
       integrationConnections,
       integrationDetails,
       toolPolicies,

@@ -1,6 +1,6 @@
 "use client";
 
-import { scheduleNextRunAt, scheduleSummary } from "@opencompany/agent-runtime";
+import { scheduleSummary } from "@opencompany/agent-runtime";
 import type { AgentConfig, AgentScheduleTriggerConfig } from "@opencompany/agent-runtime/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock3, Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
@@ -12,16 +12,14 @@ import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
+import {
+  nextRunLabel,
+  scheduleTriggers,
+  upsertScheduleTrigger,
+} from "@/lib/agent-schedules/format";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { updatePersonalAgentSchedules } from "@/lib/personal/actions";
 import { personalPaths } from "@/lib/personal/paths";
-
-function scheduleTriggers(triggers: readonly unknown[]): AgentScheduleTriggerConfig[] {
-  return triggers.filter((trigger): trigger is AgentScheduleTriggerConfig => {
-    if (!trigger || typeof trigger !== "object" || !("type" in trigger)) return false;
-    return trigger.type === "agent.schedule";
-  });
-}
 
 function RoutineStatusPill({ enabled }: { enabled: boolean }) {
   return (
@@ -310,64 +308,4 @@ function withSchedules(config: AgentConfig, schedules: AgentScheduleTriggerConfi
       ...config.triggers.filter((trigger) => trigger.type !== "agent.schedule"),
     ],
   };
-}
-
-function upsertScheduleTrigger(
-  triggers: AgentScheduleTriggerConfig[],
-  next: AgentScheduleTriggerConfig,
-) {
-  const index = triggers.findIndex((trigger) => trigger.id === next.id);
-  if (index === -1) return [...triggers, next];
-  return triggers.map((trigger, triggerIndex) => (triggerIndex === index ? next : trigger));
-}
-
-function nextRunLabel(routine: AgentScheduleTriggerConfig, now: Date) {
-  if (!routine.enabled) return "Paused";
-  const nextRunAt = scheduleNextRunAt(routine, now);
-  if (!nextRunAt) return "No upcoming run";
-  return `Next run ${relativeNextRun(nextRunAt, now)} · ${localNextRunTime(
-    nextRunAt,
-    routine.timezone,
-    now,
-  )}`;
-}
-
-function relativeNextRun(nextRunAt: Date, now: Date) {
-  const minutes = Math.max(1, Math.ceil((nextRunAt.getTime() - now.getTime()) / 60_000));
-  if (minutes < 60) return `in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 36) return `in about ${hours} ${hours === 1 ? "hour" : "hours"}`;
-  const days = Math.round(minutes / (24 * 60));
-  return `in ${days} ${days === 1 ? "day" : "days"}`;
-}
-
-function localNextRunTime(nextRunAt: Date, timezone: string, now: Date) {
-  const time = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(nextRunAt);
-  const nextKey = localDateKey(nextRunAt, timezone);
-  const todayKey = localDateKey(now, timezone);
-  const tomorrowKey = localDateKey(new Date(now.getTime() + 24 * 60 * 60_000), timezone);
-
-  if (nextKey === todayKey) return `today at ${time}`;
-  if (nextKey === tomorrowKey) return `tomorrow at ${time}`;
-
-  const day = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    weekday: "long",
-  }).format(nextRunAt);
-  return `${day} at ${time}`;
-}
-
-function localDateKey(date: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const values = new Map(parts.map((part) => [part.type, part.value]));
-  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
 }

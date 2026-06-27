@@ -89,16 +89,17 @@ export async function loadGitHubIntegrationRepositoriesForWorkspace(
   }));
 }
 
-async function loadAgentReferencesForWorkspace(workspaceId: string) {
+export async function loadAgentReferencesForWorkspace(workspaceId: string) {
   const db = getDb();
   const rows = await db
-    .select({ path: agents.path, name: agents.name })
+    .select({ path: agents.path, name: agents.name, userId: agents.userId })
     .from(agents)
     // Workspace-wide agents only; private/personal agents (userId set) are excluded.
     .where(and(eq(agents.workspaceId, workspaceId), isNull(agents.userId)))
     .orderBy(asc(agents.name));
 
   return rows.flatMap((row) => {
+    if (row.userId) return [];
     if (!row.path) return [];
     return [{ path: row.path, name: row.name }];
   });

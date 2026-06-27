@@ -4,9 +4,11 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  Blocks,
   Bot,
   Brain,
   // CircleEqual,
+  Clock3,
   // Download,
   Inbox,
   ListFilter,
@@ -31,6 +33,7 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { BRAIN_BASE_PATH } from "@/lib/brain/paths";
 import { deriveSidebarSessions } from "@/lib/collections/selectors";
+import type { WorkspacePickerItem } from "@/lib/workspaces/actions";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -170,6 +173,7 @@ function SessionHistoryItem({
           />
         ) : session.status === "awaiting_approval" ||
           session.status === "awaiting_input" ||
+          session.status === "awaiting_delegation" ||
           session.status === "interrupted" ? (
           <SessionStatusDot status={session.status} pulse />
         ) : null}
@@ -283,7 +287,9 @@ function SessionHistorySkeleton() {
 type SidebarChromeProps = {
   userName: string;
   userEmail: string;
+  activeWorkspaceId: string;
   workspaceName: string;
+  workspaces: WorkspacePickerItem[];
   initialCollapsed: boolean;
 };
 
@@ -295,7 +301,9 @@ const noopArchive = () => {};
 export default function Sidebar({
   userName,
   userEmail,
+  activeWorkspaceId,
   workspaceName,
+  workspaces,
   initialCollapsed,
   initialSessions,
   sessionsLoading = false,
@@ -304,7 +312,14 @@ export default function Sidebar({
   sessionsLoading?: boolean;
 }) {
   const hydrated = useHydrated();
-  const chrome = { userName, userEmail, workspaceName, initialCollapsed };
+  const chrome = {
+    userName,
+    userEmail,
+    activeWorkspaceId,
+    workspaceName,
+    workspaces,
+    initialCollapsed,
+  };
 
   // SSR + first client render (and the Suspense loading fallback) render from the
   // server-provided list with no live query, so the hydrated markup matches the
@@ -415,7 +430,9 @@ function SidebarLive({
 function SidebarContent({
   userName,
   userEmail,
+  activeWorkspaceId,
   workspaceName,
+  workspaces,
   initialCollapsed,
   sessions,
   showSessionsLoading,
@@ -484,8 +501,9 @@ function SidebarContent({
             </button>
             <SpaceSwitcher
               activeSpace="workspace"
+              activeWorkspaceId={activeWorkspaceId}
               workspaceName={workspaceName}
-              workspaceHref={pathname}
+              workspaces={workspaces}
               className="min-w-0 flex-1 px-0 pb-0"
             />
           </div>
@@ -498,6 +516,18 @@ function SidebarContent({
               icon={Bot}
               label="Agents"
               active={isActive("/company/agents")}
+            />
+            <NavItem
+              href="/company/skills"
+              icon={Blocks}
+              label="Skills"
+              active={isActive("/company/skills")}
+            />
+            <NavItem
+              href="/company/routines"
+              icon={Clock3}
+              label="Routines"
+              active={isActive("/company/routines")}
             />
             <NavItem
               href={BRAIN_BASE_PATH}

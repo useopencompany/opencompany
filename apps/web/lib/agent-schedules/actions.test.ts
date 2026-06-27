@@ -2,8 +2,9 @@ import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
+import { updateAgent } from "@/lib/agents/actions";
 import { currentWorkspace } from "@/lib/auth";
-import { runAgentScheduleNow } from "./actions";
+import { runAgentScheduleNow, updateWorkspaceAgentSchedules } from "./actions";
 import { runScheduledAgent } from "./runner";
 
 vi.mock("@opencompany/db/client", () => ({
@@ -18,6 +19,10 @@ vi.mock("@/lib/agent-sessions/data", () => ({
   loadAgentSessionDetailForWorkspace: vi.fn(),
 }));
 
+vi.mock("@/lib/agents/actions", () => ({
+  updateAgent: vi.fn(),
+}));
+
 vi.mock("./runner", () => ({
   runScheduledAgent: vi.fn(),
 }));
@@ -26,6 +31,7 @@ const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const getDbMock = vi.mocked(getDb);
 const runScheduledAgentMock = vi.mocked(runScheduledAgent);
 const loadAgentSessionDetailForWorkspaceMock = vi.mocked(loadAgentSessionDetailForWorkspace);
+const updateAgentMock = vi.mocked(updateAgent);
 
 describe("runAgentScheduleNow", () => {
   beforeEach(() => {
@@ -88,6 +94,95 @@ describe("runAgentScheduleNow", () => {
   });
 });
 
+describe("updateWorkspaceAgentSchedules", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+    updateAgentMock.mockResolvedValue({ agent: { id: "agt_123" } } as never);
+  });
+
+  it("rejects personal/user-scoped agents by requiring a company agent row", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(null) as never);
+
+    const result = await updateWorkspaceAgentSchedules("agt_personal", [validSchedule()]);
+
+    expect(result).toEqual({ ok: false, error: "Agent not found." });
+    expect(updateAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects agents outside the current workspace", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(null) as never);
+
+    const result = await updateWorkspaceAgentSchedules("agt_other_workspace", [validSchedule()]);
+
+    expect(result).toEqual({ ok: false, error: "Agent not found." });
+    expect(updateAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves non-schedule triggers and delegates the merged config through updateAgent", async () => {
+    const pullRequestTrigger = {
+      id: "repo-pr",
+      type: "github.pull_request" as const,
+      repository: "repo_123",
+      events: ["opened" as const],
+      branches: ["main"],
+      enabled: true,
+    };
+    getDbMock.mockReturnValue(
+      dbWithAgent(
+        fakeAgent({
+          triggers: [
+            {
+              id: "old-brief",
+              type: "agent.schedule",
+              cron: "0 8 * * *",
+              timezone: "UTC",
+              prompt: "Old brief.",
+              enabled: true,
+            },
+            pullRequestTrigger,
+          ],
+        }),
+      ) as never,
+    );
+
+    const result = await updateWorkspaceAgentSchedules("agt_123", [
+      validSchedule({ prompt: "New brief." }),
+    ]);
+
+    expect(result).toEqual({ ok: true });
+    expect(updateAgentMock).toHaveBeenCalledWith("agt_123", {
+      config: {
+        triggers: [
+          {
+            id: "weekday-brief",
+            type: "agent.schedule",
+            cron: "0 9 * * 1-5",
+            timezone: "America/New_York",
+            prompt: "New brief.",
+            enabled: true,
+          },
+          pullRequestTrigger,
+        ],
+      },
+    });
+  });
+
+  it("returns schedule validation errors without writing", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()) as never);
+
+    const result = await updateWorkspaceAgentSchedules("agt_123", [
+      validSchedule({ cron: "13 7 3 2 5" }),
+    ]);
+
+    expect(result).toEqual({ ok: false, error: "Routine 1 has an unsupported schedule." });
+    expect(updateAgentMock).not.toHaveBeenCalled();
+  });
+});
+
 function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   const limit = vi.fn().mockResolvedValue(agent ? [agent] : []);
   const where = vi.fn(() => ({ limit }));
@@ -96,7 +191,7 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   return { select };
 }
 
-function fakeAgent() {
+function fakeAgent(input?: { triggers?: unknown[] }) {
   return {
     id: "agt_123",
     workspaceId: "wks_123",
@@ -110,7 +205,7 @@ function fakeAgent() {
       brain: [],
       agents: [],
       integrations: { github: { repositories: [] } },
-      triggers: [
+      triggers: input?.triggers ?? [
         {
           id: "weekday-brief",
           type: "agent.schedule",
@@ -121,6 +216,23 @@ function fakeAgent() {
         },
       ],
     },
+  };
+}
+
+function validSchedule(input?: Partial<ReturnType<typeof validScheduleBase>>) {
+  return {
+    ...validScheduleBase(),
+    ...input,
+  };
+}
+
+function validScheduleBase() {
+  return {
+    id: "weekday-brief",
+    cron: "0 9 * * 1-5",
+    timezone: "America/New_York",
+    prompt: "Review open priorities.",
+    enabled: true,
   };
 }
 

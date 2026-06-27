@@ -3,9 +3,11 @@ import { parseAgentFile, serializeAgentFile } from "./agent-file";
 import { resolveAgentRuntimeConfig } from "./config";
 import {
   AGENT_SELF_EDIT_SKILL_ID,
+  CTO_PR_REVIEW_SKILL_ID,
   computeSkillFolderIntegrity,
   FIRST_PRINCIPLES_SKILL_ID,
   HUMANIZER_SKILL_ID,
+  IMPLEMENTER_SKILL_ID,
   isKnownAgentSkillId,
   listAddableBuiltinSkills,
   MAX_PERSONAL_SKILLS,
@@ -35,6 +37,21 @@ function externalSkill(
       url: "https://github.com/mattpocock/skills",
       ref: "main",
       path: "skills/improve-codebase-architecture",
+    },
+    ...overrides,
+  };
+}
+
+function workspaceSkill(
+  overrides: Partial<AgentExternalSkillReference> = {},
+): AgentExternalSkillReference {
+  return {
+    id: "brand-voice",
+    name: "Brand Voice",
+    description: "Use the company voice.",
+    source: {
+      type: "workspace",
+      path: "skills/brand-voice",
     },
     ...overrides,
   };
@@ -183,6 +200,8 @@ describe("first-principles skill (addable built-in)", () => {
     expect(skillMd).toContain(`@skill/${HUMANIZER_SKILL_ID}`);
     expect(skillMd).toContain(`@skill/${Y_COMBINATOR_KNOWLEDGE_SKILL_ID}`);
     expect(skillMd).toContain(`@skill/${MOVE_TO_OPENCOMPANY_SKILL_ID}`);
+    expect(skillMd).toContain(`@skill/${CTO_PR_REVIEW_SKILL_ID}`);
+    expect(skillMd).toContain(`@skill/${IMPLEMENTER_SKILL_ID}`);
   });
 });
 
@@ -279,6 +298,70 @@ describe("move-to-opencompany skill (addable built-in)", () => {
   });
 });
 
+describe("cto-pr-review skill (addable built-in)", () => {
+  test("is a known built-in but off by default", () => {
+    expect(isKnownAgentSkillId(CTO_PR_REVIEW_SKILL_ID)).toBe(true);
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((s) => s.id)).not.toContain(
+      CTO_PR_REVIEW_SKILL_ID,
+    );
+    expect(resolveEnabledSkillMetadata(baseConfig()).map((s) => s.id)).not.toContain(
+      CTO_PR_REVIEW_SKILL_ID,
+    );
+  });
+
+  test("materializes once listed in config.skills, and teaches blocking review output", () => {
+    const config = baseConfig({ skills: [{ id: CTO_PR_REVIEW_SKILL_ID }] });
+    const skill = resolveEnabledBuiltinSkillFiles(config).find(
+      (s) => s.id === CTO_PR_REVIEW_SKILL_ID,
+    );
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    expect(skillMd).toContain("cto-pr-review");
+    expect(skillMd).toMatch(/findings first/i);
+    expect(skillMd).toMatch(/ordered by severity/i);
+    expect(skillMd).toContain("path/to/file.ts:123");
+    expect(skillMd).toMatch(/Blocked, risky, or ready/);
+    expect(
+      resolveEnabledSkillMetadata(config).find((s) => s.id === CTO_PR_REVIEW_SKILL_ID)?.origin,
+    ).toBe("builtin");
+  });
+
+  test("listAddableBuiltinSkills offers it", () => {
+    expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(CTO_PR_REVIEW_SKILL_ID);
+  });
+});
+
+describe("implementer skill (addable built-in)", () => {
+  test("is a known built-in but off by default", () => {
+    expect(isKnownAgentSkillId(IMPLEMENTER_SKILL_ID)).toBe(true);
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((s) => s.id)).not.toContain(
+      IMPLEMENTER_SKILL_ID,
+    );
+    expect(resolveEnabledSkillMetadata(baseConfig()).map((s) => s.id)).not.toContain(
+      IMPLEMENTER_SKILL_ID,
+    );
+  });
+
+  test("materializes once listed in config.skills, and teaches the implementation loop", () => {
+    const config = baseConfig({ skills: [{ id: IMPLEMENTER_SKILL_ID }] });
+    const skill = resolveEnabledBuiltinSkillFiles(config).find(
+      (s) => s.id === IMPLEMENTER_SKILL_ID,
+    );
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    expect(skillMd).toContain("implementer");
+    expect(skillMd).toMatch(/Write or update one focused test first/);
+    expect(skillMd).toMatch(/verify it fails for the expected reason/i);
+    expect(skillMd).toMatch(/Review your own diff/i);
+    expect(skillMd).toMatch(/Verification run/);
+    expect(
+      resolveEnabledSkillMetadata(config).find((s) => s.id === IMPLEMENTER_SKILL_ID)?.origin,
+    ).toBe("builtin");
+  });
+
+  test("listAddableBuiltinSkills offers it", () => {
+    expect(listAddableBuiltinSkills().map((s) => s.id)).toContain(IMPLEMENTER_SKILL_ID);
+  });
+});
+
 describe("skills frontmatter round-trip", () => {
   test("known skills serialize and parse back", () => {
     const source = serializeAgentFile({
@@ -330,6 +413,20 @@ describe("external skills", () => {
     ).toBeNull();
   });
 
+  test("normalizeExternalSkillReference keeps workspace skill references", () => {
+    const skill = workspaceSkill();
+    expect(normalizeExternalSkillReference(skill)).toEqual(skill);
+  });
+
+  test("normalizeExternalSkillReference rejects workspace skill references with mismatched paths", () => {
+    expect(
+      normalizeExternalSkillReference({
+        ...workspaceSkill(),
+        source: { type: "workspace", path: "skills/other" },
+      }),
+    ).toBeNull();
+  });
+
   test("normalizeAgentSkills keeps external objects alongside built-in ids", () => {
     const skill = externalSkill();
     expect(normalizeAgentSkills([AGENT_SELF_EDIT_SKILL_ID, skill, "made-up"])).toEqual([
@@ -360,13 +457,35 @@ describe("external skills", () => {
     ).toEqual(source);
   });
 
+  test("workspace skills round-trip through serialize/parse as objects", () => {
+    const skill = workspaceSkill();
+    const source = serializeAgentFile({ title: "Agent", body: "Help out.", skills: [skill] });
+    expect(source).toContain("type: workspace");
+    expect(source).toContain("path: skills/brand-voice");
+    expect(source).not.toContain("url:");
+    const parsed = parseAgentFile(source);
+    expect(parsed.config.skills).toEqual([skill]);
+  });
+
   test("resolveEnabledSkillMetadata lists built-ins plus external skills", () => {
     const skill = externalSkill();
     const metadata = resolveEnabledSkillMetadata(baseConfig({ skills: [skill] }));
     expect(metadata.find((m) => m.id === AGENT_SELF_EDIT_SKILL_ID)?.origin).toBe("builtin");
     const external = metadata.find((m) => m.id === skill.id);
     expect(external?.origin).toBe("external");
-    expect(external?.source?.url).toBe(skill.source.url);
+    expect(external?.source?.type).toBe("github");
+    if (external?.source?.type !== "github" || skill.source.type !== "github") {
+      throw new Error("expected GitHub skill sources");
+    }
+    expect(external.source.url).toBe(skill.source.url);
+  });
+
+  test("resolveEnabledSkillMetadata marks workspace skills separately", () => {
+    const skill = workspaceSkill();
+    const metadata = resolveEnabledSkillMetadata(baseConfig({ skills: [skill] }));
+    const resolved = metadata.find((m) => m.id === skill.id);
+    expect(resolved?.origin).toBe("workspace");
+    expect(resolved?.source?.type).toBe("workspace");
   });
 
   test("resolveEnabledBuiltinSkillFiles excludes external skills (no files in code)", () => {

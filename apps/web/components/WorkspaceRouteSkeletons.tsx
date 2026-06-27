@@ -161,6 +161,44 @@ export function BrainPageSkeleton() {
   );
 }
 
+export function SkillsPageSkeleton() {
+  return (
+    <main className="relative flex h-full flex-1 overflow-hidden">
+      <aside className="hidden w-[280px] shrink-0 border-r border-border bg-surface/55 px-3 py-4 md:block">
+        <div className="mb-3 flex items-center justify-between gap-3 px-1">
+          <Block className="h-4 w-16" />
+          <Block className="h-7 w-14" />
+        </div>
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((row) => (
+            <Block key={row} className="h-11 w-full" />
+          ))}
+        </div>
+      </aside>
+      <section className="min-w-0 flex-1 overflow-y-auto">
+        <div
+          className="mx-auto w-full max-w-[820px] px-5 pb-16 pt-8 md:px-8"
+          role="status"
+          aria-label="Loading skills"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <Block className="h-5 w-36" />
+              <Block className="mt-2 h-3 w-52" />
+            </div>
+            <Block className="h-8 w-24" />
+          </div>
+          <div className="mt-7 space-y-4">
+            <Block className="h-9 w-full" />
+            <Block className="h-9 w-full" />
+            <Block className="h-[420px] w-full" />
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function SettingsPageSkeleton() {
   return (
     <PageShell maxWidth="max-w-[860px]">

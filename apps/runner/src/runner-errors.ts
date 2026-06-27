@@ -32,16 +32,20 @@ export class MessageTurnFailedError extends Error {
   }
 }
 
-// Thrown out of the model stream when a turn must suspend for a human. Two reasons:
+// Thrown out of the model stream when a turn must suspend. Three reasons:
 //   - "approval": a tool call hit an "ask" gate (resumes in a `resume_approval` job).
 //   - "question": the model called ask_user_question (resumes in a `resume_question` job).
+//   - "delegation": the model called await_agents (or delegate_to_agent with wait:true) while
+//     delegated children are still running (resumes in a `resume_delegation` job, woken by the
+//     children's finish hooks). Unlike approval/question this is not waiting on a human.
 // It is not a failure: it carries the partial assistant turn (text + the pending tool-call) so
 // the run can persist a clean suspension point, release its lease, and set the session to
-// `awaiting_approval` / `awaiting_input`. The run resumes once the user (or the 7-day backstop)
-// decides. Non-retryable at the job layer — a retry would just re-suspend. For "question" the
-// providerKey/group fields are unused placeholders ("system"/"read").
+// `awaiting_approval` / `awaiting_input` / `awaiting_delegation`. The run resumes once the user
+// (or the 7-day backstop, or a child finish) decides. Non-retryable at the job layer — a retry
+// would just re-suspend. For "question"/"delegation" the providerKey/group fields are unused
+// placeholders ("system"/"read").
 export class RunSuspendedError extends Error {
-  readonly reason: "approval" | "question";
+  readonly reason: "approval" | "question" | "delegation";
   readonly toolCallId: string;
   readonly providerKey: string;
   readonly group: "read" | "post" | "modify" | "merge" | "admin";
@@ -52,7 +56,7 @@ export class RunSuspendedError extends Error {
   readonly reasoningContent: string;
 
   constructor(input: {
-    reason?: "approval" | "question";
+    reason?: "approval" | "question" | "delegation";
     toolCallId: string;
     providerKey: string;
     group: "read" | "post" | "modify" | "merge" | "admin";
@@ -65,7 +69,9 @@ export class RunSuspendedError extends Error {
     super(
       input.reason === "question"
         ? "Run suspended for user question."
-        : "Run suspended for tool approval.",
+        : input.reason === "delegation"
+          ? "Run suspended for delegated agents."
+          : "Run suspended for tool approval.",
     );
     this.name = "RunSuspendedError";
     this.reason = input.reason ?? "approval";

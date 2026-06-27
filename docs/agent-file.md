@@ -27,7 +27,7 @@ Research investors with @exa. Write careful fund-thesis summaries. Keep context 
 A `.agent` file has two parts:
 
 1. **Frontmatter** — a YAML block fenced by `---` lines. Deterministic metadata the runtime needs to dispatch the agent.
-2. **Body** — Markdown that the model receives as its instructions. `@mention` tokens inside the body declaratively bind tools, Brain files/folders, repositories, and workspace agents.
+2. **Body** — Markdown that the model receives as its instructions. `@mention` tokens inside the body declaratively bind tools, Brain files/folders, repositories, skills, and workspace agents.
 
 Files live at `agents/<slug>/<slug>.agent` in the workspace's GitHub repo, where `<slug>` is the lowercased, dash-joined title.
 
@@ -37,6 +37,7 @@ Some frontmatter fields are **derived from body mentions** rather than authored 
 
 - Unique supported `@tool` mentions → written to `tools:`.
 - Unique supported `@brain/<path>` mentions → written to `brain:`.
+- Unique supported `@skill/<id>` mentions → written to `skills:`.
 - A plain `@github` mention writes `integrations.github.allRepositories: true`.
   This gives repository-aware coding tools live access to any repository the
   workspace's GitHub connection can reach.
@@ -200,14 +201,14 @@ final answer plus `childSessionId` as a tool result. Later calls can pass that
 `childSessionId` as `sessionId` with a new prompt to continue the same delegated
 child session.
 
-### `skills` — built-in ids and external skill references
+### `skills` — built-in ids, external skill references, and workspace skill references
 
 Skills are agentskills.io-style folders of instructions that the runtime materializes
 read-only into `./skills/<id>/` inside the session sandbox. The agent reads a skill's
 `SKILL.md` on demand with `read_skill` (progressive disclosure); the system prompt only
 advertises each enabled skill's name and description.
 
-There are two kinds of entry. **Built-in skills** are bare string ids from the catalog
+There are three kinds of entry. **Built-in skills** are bare string ids from the catalog
 (`packages/agent-runtime/src/skills.ts`); unknown ids are dropped. Built-in skills marked
 `defaultEnabled` are available in every session without being listed here, so the key is
 usually omitted and only appears once additional opt-in skills exist.
@@ -224,6 +225,12 @@ Current addable built-in skills include:
 - `humanizer` — editing guidance for making generated prose sound human.
 - `y-combinator-knowledge` — YC-style startup sparring: office-hours framing, user obsession,
   MVP and growth pressure, fundraising discipline, and links to canonical YC/PG teachings.
+- `move-to-opencompany` — import an external knowledge base (a GitHub repo or folders/files)
+  into the Brain safely, with a preview and a receipt.
+- `cto-pr-review` — blocking senior technical review for PRs and diffs, with findings ordered by
+  severity across correctness, architecture, security, migrations, tests, and product risk.
+- `implementer` — disciplined software implementation: read context, test behavior when practical,
+  keep the diff narrow, match local patterns, verify, and self-review before finishing.
 
 **External skills** are brought in from a public GitHub repository (or a skills.sh page,
 resolved through its backing GitHub repo). They serialize as an object carrying provenance
@@ -256,6 +263,31 @@ root-owned and read-only. A malformed external object, or one whose snapshot can
 resolved and isn't cached, is skipped rather than mounted. The runner's `update_agent_file`
 self-edit path preserves existing external skills but cannot add new ones (it has no
 resolver).
+
+**Workspace skills** are company-authored Markdown skills created in OpenCompany's company
+Skills tab. They are synced to the managed workspace repo at `skills/<id>/SKILL.md` and
+serialize with workspace provenance:
+
+```yaml
+skills:
+  - id: brand-voice
+    name: Brand Voice
+    description: Use the company voice and messaging rules.
+    source:
+      type: workspace
+      path: skills/brand-voice
+```
+
+Like external skills, workspace skill file contents are not duplicated into `.agent` files.
+Mentioning `@skill/<id>` in the body enables the skill for that agent; removing the mention
+removes it from the saved config. Workspace skills are mounted read-only under
+`./skills/<id>/` at session start.
+
+For Codex-engine sessions, the runner also mirrors selected workspace/external skills into the
+Codex work root at `.agents/skills/<id>/` so native Codex skill discovery can see them.
+The mirror is tracked with `.agents/skills/.opencompany-managed-skills.json` and reconciles
+only those managed ids, preserving repo-authored or user-created native Codex skills in the same
+directory. OpenCompany runtime-only default skills remain in the OpenCompany `./skills` mount.
 
 The first built-in skill, `agent-self-edit`, teaches the agent to evolve its own `.agent`
 definition. With it enabled, the runtime exposes an internal `update_agent_file` tool: the

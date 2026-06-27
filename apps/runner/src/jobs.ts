@@ -3,6 +3,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import {
   resumeApproval,
+  resumeDelegation,
   resumeQuestionResponse,
   runAfterSession,
   runMessage,
@@ -51,7 +52,8 @@ export type RunnerJobKind =
   | "title"
   | "after_session"
   | "resume_approval"
-  | "resume_question";
+  | "resume_question"
+  | "resume_delegation";
 export type RunnerJobStatus = "pending" | "running" | "completed" | "failed";
 
 export type RunnerJob = {
@@ -264,12 +266,24 @@ export function createDbRunnerJobStore(): RunnerJobStore {
   };
 }
 
+// Lets any in-process enqueue (HTTP route, a delegation spawn, or a child-finish parent-wake)
+// nudge the worker loop the instant a job lands instead of waiting out the poll interval.
+// Registered once by index.ts after the worker starts; a no-op in tests / before registration
+// (the 1s poll still backstops, so a missed wake only adds latency, never drops a job).
+let registeredJobWakeup: (() => void) | null = null;
+
+export function setRunnerJobWakeup(wake: (() => void) | null) {
+  registeredJobWakeup = wake;
+}
+
 export async function enqueueRunnerJob(
   input: EnqueueRunnerJobInput,
   store: RunnerJobStore = createDbRunnerJobStore(),
 ) {
   const idempotencyKey = runnerJobIdempotencyKey(input);
-  return store.enqueue({ ...input, idempotencyKey, now: new Date() });
+  const job = await store.enqueue({ ...input, idempotencyKey, now: new Date() });
+  registeredJobWakeup?.();
+  return job;
 }
 
 export async function claimNextRunnerJob(input: {
@@ -542,6 +556,7 @@ export type RunnerJobHandlers = {
   runAfterSession: typeof runAfterSession;
   resumeApproval: typeof resumeApproval;
   resumeQuestionResponse: typeof resumeQuestionResponse;
+  resumeDelegation: typeof resumeDelegation;
 };
 
 const defaultRunnerJobHandlers: RunnerJobHandlers = {
@@ -552,6 +567,7 @@ const defaultRunnerJobHandlers: RunnerJobHandlers = {
   runAfterSession,
   resumeApproval,
   resumeQuestionResponse,
+  resumeDelegation,
 };
 
 async function dispatchRunnerJob(
@@ -591,6 +607,17 @@ async function dispatchRunnerJob(
   if (job.kind === "resume_question") {
     // The toolCallId rides in the message_id column for this job kind.
     await handlers.resumeQuestionResponse({
+      sessionId: job.sessionId,
+      toolCallId: messageId,
+      env,
+      externalSignal,
+    });
+    return;
+  }
+  if (job.kind === "resume_delegation") {
+    // The parent's suspended tool_call_id rides in the message_id column for this job kind;
+    // the session_id is the parent session being woken now that a delegated child finished.
+    await handlers.resumeDelegation({
       sessionId: job.sessionId,
       toolCallId: messageId,
       env,

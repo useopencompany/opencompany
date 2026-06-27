@@ -261,6 +261,17 @@ export function serializeAgentFile(input: {
 
 function serializeSkillReference(skill: AgentSkillReference): string | Record<string, unknown> {
   if (!isExternalSkillReference(skill)) return skill.id;
+  if (skill.source.type === "workspace") {
+    return {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: {
+        type: skill.source.type,
+        path: skill.source.path,
+      },
+    };
+  }
   return {
     id: skill.id,
     name: skill.name,

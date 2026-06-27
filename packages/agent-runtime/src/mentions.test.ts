@@ -268,6 +268,15 @@ describe("deriveAgentConfigFromBody", () => {
       path: "skills/improve-codebase-architecture",
     },
   };
+  const workspaceSkill = {
+    id: "brand-voice",
+    name: "Brand Voice",
+    description: "Use the company voice.",
+    source: {
+      type: "workspace" as const,
+      path: "skills/brand-voice",
+    },
+  };
 
   it("attaches a resolved external skill referenced via @skill/<id>", () => {
     const { config } = deriveAgentConfigFromBody({
@@ -278,6 +287,17 @@ describe("deriveAgentConfigFromBody", () => {
     });
 
     expect(config.skills).toEqual([skill]);
+  });
+
+  it("attaches a resolved workspace skill referenced via @skill/<id>", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Writer",
+      body: "Use @skill/brand-voice when drafting copy.",
+      repositories: [],
+      skills: [workspaceSkill],
+    });
+
+    expect(config.skills).toEqual([workspaceSkill]);
   });
 
   it("drops an @skill mention with no matching resolved skill", () => {

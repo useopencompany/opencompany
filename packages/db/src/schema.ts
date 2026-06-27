@@ -280,6 +280,38 @@ export const workspaceSkillSnapshots = pgTable(
   }),
 );
 
+export const workspaceSkills = pgTable(
+  "workspace_skills",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    skillId: text("skill_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    body: text("body").notNull().default(""),
+    content: text("content").notNull(),
+    contentHash: text("content_hash").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    githubBlobSha: text("github_blob_sha"),
+    githubCommitSha: text("github_commit_sha"),
+    githubSyncedHash: text("github_synced_hash"),
+    githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
+    githubSyncStatus: text("github_sync_status").notNull().default("pending"),
+    githubSyncError: text("github_sync_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("workspace_skills_workspace_idx").on(table.workspaceId),
+    workspaceSkillIdIdx: uniqueIndex("workspace_skills_workspace_skill_id_idx").on(
+      table.workspaceId,
+      table.skillId,
+    ),
+  }),
+);
+
 export const brainFiles = pgTable(
   "brain_files",
   {
@@ -400,6 +432,7 @@ export const brainFileVersions = pgTable(
 //   - "brain"      -> brainFiles row keyed by (workspaceId, logical brain path)
 //   - "agent_file" -> agentFiles row keyed by (workspaceId, repoPath)
 //   - "agent"      -> agents row keyed by sourceRef (agentId); re-serialized
+//   - "skill"      -> workspaceSkills row keyed by sourceRef (skillId)
 // `repoPath` is always the full repo-relative path (e.g. "brain/spec.md",
 // "agents/leo.agent", "agents/leo/user.md").
 export const workspaceSyncJobs = pgTable(
@@ -432,7 +465,7 @@ export const workspaceSyncJobs = pgTable(
     nextRunAtIdx: index("workspace_sync_jobs_next_run_at_idx").on(table.nextRunAt),
     sourceKindCheck: check(
       "workspace_sync_jobs_source_kind_check",
-      sql`${table.sourceKind} IN ('brain', 'agent_file', 'agent')`,
+      sql`${table.sourceKind} IN ('brain', 'agent_file', 'agent', 'skill')`,
     ),
     operationCheck: check(
       "workspace_sync_jobs_operation_check",
@@ -480,6 +513,11 @@ export const agentSessions = pgTable(
     parentSessionId: text("parent_session_id"),
     parentMessageId: text("parent_message_id"),
     parentToolCallId: text("parent_tool_call_id"),
+    // Delegation nesting depth: 0 for a user/scheduled/memory session, parent.delegationDepth + 1
+    // for a delegated (source="agent") child. Denormalized at child-create so a detached child
+    // run (its own job, no in-process caller) can enforce MAX_AGENT_DELEGATION_DEPTH without
+    // walking the parent chain on every spawn.
+    delegationDepth: integer("delegation_depth").notNull().default(0),
     e2bSandboxId: text("e2b_sandbox_id"),
     workdir: text("workdir").notNull().default("/home/user/workspace"),
     runLeaseId: text("run_lease_id"),
@@ -946,9 +984,10 @@ export const agentSessionRunJobs = pgTable(
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
     // No FK to agent_session_messages: this column is overloaded by job kind. message/
-    // title/after_session jobs store a message id, `resume_approval` jobs store the
-    // tool_call_id (its idempotency key is resume_approval:{sessionId}:{toolCallId}), and
-    // `start` jobs leave it null. Cleanup still cascades via the session_id FK.
+    // title/after_session jobs store a message id, `resume_approval`/`resume_question`/
+    // `resume_delegation` jobs store the tool_call_id (e.g. resume_delegation's idempotency
+    // key is resume_delegation:{parentSessionId}:{parentToolCallId}), and `start` jobs leave
+    // it null. Cleanup still cascades via the session_id FK.
     messageId: text("message_id"),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("pending"),
@@ -973,7 +1012,7 @@ export const agentSessionRunJobs = pgTable(
     ),
     kindCheck: check(
       "agent_session_run_jobs_kind_check",
-      sql`${table.kind} IN ('start', 'message', 'codex_turn', 'title', 'after_session', 'resume_approval', 'resume_question')`,
+      sql`${table.kind} IN ('start', 'message', 'codex_turn', 'title', 'after_session', 'resume_approval', 'resume_question', 'resume_delegation')`,
     ),
     statusCheck: check(
       "agent_session_run_jobs_status_check",
@@ -2084,6 +2123,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   agents: many(agents),
   brainFiles: many(brainFiles),
   agentFiles: many(agentFiles),
+  workspaceSkills: many(workspaceSkills),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
   creditBalance: one(workspaceCreditBalances, {
@@ -2133,6 +2173,13 @@ export const agentFilesRelations = relations(agentFiles, ({ one }) => ({
   agent: one(agents, {
     fields: [agentFiles.agentId],
     references: [agents.id],
+  }),
+}));
+
+export const workspaceSkillsRelations = relations(workspaceSkills, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceSkills.workspaceId],
+    references: [workspaces.id],
   }),
 }));
 
@@ -2467,6 +2514,7 @@ export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
 export type AgentScheduleRun = typeof agentScheduleRuns.$inferSelect;
 export type BrainFile = typeof brainFiles.$inferSelect;
 export type AgentFile = typeof agentFiles.$inferSelect;
+export type WorkspaceSkill = typeof workspaceSkills.$inferSelect;
 export type WorkspaceSyncJob = typeof workspaceSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type SessionStar = typeof sessionStars.$inferSelect;

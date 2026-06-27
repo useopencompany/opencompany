@@ -673,15 +673,15 @@ export async function failRunLease(
   return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: message });
 }
 
-// Park the run for a human decision: set the paused status (`awaiting_approval` for a tool
-// approval, `awaiting_input` for an ask_user_question) and release the lease (clears lease fields)
-// so no runner sits idle holding a stream. The session resumes in a fresh resume run once the
-// approval/question row is decided.
+// Park the run: set the paused status (`awaiting_approval` for a tool approval, `awaiting_input`
+// for an ask_user_question, `awaiting_delegation` for delegated children still running) and
+// release the lease (clears lease fields) so no runner sits idle holding a stream. The session
+// resumes in a fresh resume run once the approval/question row is decided or a child finishes.
 export async function suspendRunLease(
   sessionId: string,
   leaseId: string,
   leaseOwner: string,
-  status: "awaiting_approval" | "awaiting_input" = "awaiting_approval",
+  status: "awaiting_approval" | "awaiting_input" | "awaiting_delegation" = "awaiting_approval",
 ) {
   return finishDbRunLease({
     sessionId,

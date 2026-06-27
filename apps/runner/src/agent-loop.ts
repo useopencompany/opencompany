@@ -36,7 +36,15 @@ import { setActiveRun } from "./active-runs";
 import { syncAgentBundleFromSandbox } from "./agent-bundle";
 import { hydrateMessageAttachments } from "./attachment-hydration";
 import { syncBrainFromSandbox } from "./brain";
-import { createAgentDelegationHandler } from "./delegation";
+import {
+  completeDelegatedChildRunForParent,
+  createAgentDelegationHandler,
+  createAwaitAgentsHandler,
+  type DelegationSuspensionCheck,
+  persistDelegationToolResult,
+  prepareDelegationSuspension,
+  resolveDelegationResume,
+} from "./delegation";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { validateHostedToolEnvironment } from "./hosted-tools";
@@ -136,7 +144,7 @@ export {
   createKnownSecretRedactor,
   selectPublishBranch,
 } from "./amp-tool";
-export { createAgentDelegationHandler } from "./delegation";
+export { completeDelegatedChildRunForParent, createAgentDelegationHandler } from "./delegation";
 export {
   acquireRunLease,
   appendRuntimeEventForLease,
@@ -200,7 +208,6 @@ export async function runMessage(input: {
   messageId: string;
   env: RunnerEnv;
   externalSignal?: AbortSignal;
-  delegationDepth?: number;
 }) {
   // Each turn answers one user message under its own lease. A steer message sent
   // while a run was in flight is answered as the next turn, so every turn stays a
@@ -218,7 +225,6 @@ async function runMessageTurn(input: {
   messageId: string;
   env: RunnerEnv;
   externalSignal?: AbortSignal;
-  delegationDepth?: number;
 }): Promise<{ nextSteerMessageId?: string | undefined } | void> {
   const ctx = createRunContext("runner.run_message", input);
   try {
@@ -233,7 +239,6 @@ async function runMessageTurn(input: {
           message_id: input.messageId,
           run_lease_id: ctx.leaseId,
           runner_instance_id: input.env.instanceId,
-          delegation_depth: input.delegationDepth ?? 0,
         },
       },
       (span) => runMessageWithContext(input, ctx, span),
@@ -252,7 +257,6 @@ async function runMessageWithContext(
     messageId: string;
     env: RunnerEnv;
     externalSignal?: AbortSignal;
-    delegationDepth?: number;
   },
   ctx: RunContext,
   braintrustSpan: BraintrustSpan | undefined,
@@ -269,11 +273,15 @@ async function runMessageWithContext(
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
   let nextSteerMessageId: string | undefined;
   let memoryKeeperRun = false;
+  // A delegated (source="agent") child: at every run terminal/park point it rolls its usage up to
+  // the parent and wakes the parent if the parent is parked awaiting it. Mirrors memoryKeeperRun.
+  let delegatedChildRun = false;
 
   try {
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     const agentConfig = normalizeAgentConfig(row.agent.config);
     memoryKeeperRun = row.session.source === "memory";
+    delegatedChildRun = row.session.source === "agent";
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
       return;
@@ -304,6 +312,9 @@ async function runMessageWithContext(
           lastError: "Memory update skipped because workspace credits are exhausted.",
         });
       }
+      if (delegatedChildRun) {
+        await completeDelegatedChildRunForParent({ childSessionId: input.sessionId });
+      }
       await setStatus(input.sessionId, "ready");
       await appendRuntimeEvent(ctx.db, {
         sessionId: input.sessionId,
@@ -325,6 +336,9 @@ async function runMessageWithContext(
           lastError: "Memory update could not find its kickoff message.",
         });
       }
+      if (delegatedChildRun) {
+        await completeDelegatedChildRunForParent({ childSessionId: input.sessionId });
+      }
       return;
     }
 
@@ -341,6 +355,9 @@ async function runMessageWithContext(
           status: "completed",
         });
       }
+      if (delegatedChildRun) {
+        await completeDelegatedChildRunForParent({ childSessionId: input.sessionId });
+      }
       return;
     }
     if (existingAssistantResponse) {
@@ -350,7 +367,13 @@ async function runMessageWithContext(
       metadata: { assistant_message_id: assistantMessageId },
     });
 
-    const suspendable = (input.delegationDepth ?? 0) === 0;
+    // Delegation depth comes from the child session row (set at child-create), not the in-process
+    // caller: a delegated child now runs as its own detached job with no call stack to thread it.
+    const delegationDepth = row.session.delegationDepth ?? 0;
+    // Every run — top-level or delegated child — is its own independent job with its own lease, so
+    // it can suspend durably (for approval, input, or to await its own delegated children). The old
+    // "only depth 0 suspends" rule existed because delegated children ran in-process; that is gone.
+    const suspendable = true;
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
@@ -518,16 +541,15 @@ async function runMessageWithContext(
       delegateToAgent: createAgentDelegationHandler({
         parentSessionId: input.sessionId,
         parentMessageId: assistantMessageId,
-        parentRunLeaseId: ctx.leaseId,
-        parentRunLeaseOwner: ctx.leaseOwner,
         workspaceId: row.workspace.id,
         userId: row.session.userId,
-        env: input.env,
-        signal: ctx.controller.signal,
-        checkAbort,
-        depth: input.delegationDepth ?? 0,
+        depth: delegationDepth,
         agentReferences: agentConfig.agents ?? [],
-        runChildMessage: runDelegatedChildMessage,
+      }),
+      awaitAgents: createAwaitAgentsHandler({
+        parentSessionId: input.sessionId,
+        workspaceId: row.workspace.id,
+        userId: row.session.userId,
       }),
       runSubagent: createRunSubagentHandler({
         parentSessionId: input.sessionId,
@@ -548,10 +570,29 @@ async function runMessageWithContext(
       }),
     });
 
-    // A top-level run (user or scheduled) has a resumable session a human can approve in,
-    // so its "ask" tool calls suspend durably. Delegated children have a parent blocking
-    // on them and cannot pause, so their "ask" collapses to "deny" (resolved in
-    // collectAssistantStream / resolveToolDecision).
+    // Every run is its own resumable job, so "ask" tool calls suspend durably. await_agents and
+    // delegate_to_agent(wait) suspend the same way: the stream runner asks this closure at
+    // tool-start whether to park the parent (and records which children it awaits).
+    const delegationSuspension: DelegationSuspensionCheck = ({
+      toolName,
+      toolInput,
+      toolCallId,
+      assistantMessageId: currentAssistantMessageId,
+    }) =>
+      prepareDelegationSuspension({
+        toolName,
+        toolInput,
+        toolCallId,
+        assistantMessageId: currentAssistantMessageId,
+        parentSessionId: input.sessionId,
+        parentMessageId: currentAssistantMessageId,
+        workspaceId: row.workspace.id,
+        userId: row.session.userId,
+        depth: delegationDepth,
+        agentReferences: agentConfig.agents ?? [],
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+      });
 
     const turn = await executeStreamingTurn({
       ctx,
@@ -572,6 +613,7 @@ async function runMessageWithContext(
       checkAbort,
       policy: toolPolicy,
       suspendable,
+      delegationSuspension,
       sandboxAcquirer,
       internal: false,
       brainStep: "sync_brain_after_message",
@@ -599,6 +641,12 @@ async function runMessageWithContext(
     });
     if (turn.outcome === "suspended") {
       outcome = "suspended";
+      // A delegated child that parked (for its own approval/input) is terminal-for-parent, so wake
+      // the parent to collect its partial answer. A child parking to await its OWN children stays
+      // active, so the parent's re-check simply re-suspends — harmless.
+      if (delegatedChildRun) {
+        await completeDelegatedChildRunForParent({ childSessionId: input.sessionId });
+      }
       return;
     }
     outcome = "completed";
@@ -613,6 +661,9 @@ async function runMessageWithContext(
           ...(summary ? { summary } : {}),
         }),
       );
+    }
+    if (delegatedChildRun) {
+      await completeDelegatedChildRunForParent({ childSessionId: input.sessionId });
     }
     // The turn ended naturally, so drain the next pending message of ANY send-mode
     // (steer and queue both land here in FIFO order) as the next turn. The lease is
@@ -700,6 +751,9 @@ async function runMessageWithContext(
           lastError: "Memory update aborted.",
         });
       }
+      if (delegatedChildRun) {
+        await completeDelegatedChildRunForParent({ childSessionId: input.sessionId });
+      }
       logger.info("Runner session aborted", {
         event: "opencompany.runner_session_aborted",
         workspace_id: workspaceId,
@@ -773,6 +827,9 @@ async function runMessageWithContext(
         lastError: message,
       });
     }
+    if (delegatedChildRun) {
+      await completeDelegatedChildRunForParent({ childSessionId: input.sessionId });
+    }
     if (!updated && (await isSessionArchived(input.sessionId))) return;
     outcome = "failed";
     logger.error("Runner session failed", {
@@ -844,8 +901,18 @@ async function suspendRunForInput(input: {
     internal: false,
   });
 
-  const status = error.reason === "question" ? "awaiting_input" : "awaiting_approval";
-  const message = error.reason === "question" ? "Waiting for your answer" : "Waiting for approval";
+  const status =
+    error.reason === "question"
+      ? "awaiting_input"
+      : error.reason === "delegation"
+        ? "awaiting_delegation"
+        : "awaiting_approval";
+  const message =
+    error.reason === "question"
+      ? "Waiting for your answer"
+      : error.reason === "delegation"
+        ? "Waiting for delegated agents"
+        : "Waiting for approval";
   await requireLeaseWrite(
     appendRuntimeEventForLease({
       sessionId: ctx.sessionId,
@@ -884,6 +951,7 @@ async function executeStreamingTurn(input: {
   checkAbort: RunControlCheck;
   policy: Awaited<ReturnType<typeof loadWorkspaceToolPolicy>>;
   suspendable: boolean;
+  delegationSuspension?: DelegationSuspensionCheck | undefined;
   sandboxAcquirer: ReturnType<typeof createSandboxAcquirer>;
   internal: boolean;
   brainStep: string;
@@ -910,6 +978,7 @@ async function executeStreamingTurn(input: {
       checkAbort: input.checkAbort,
       policy: input.policy,
       suspendable: input.suspendable,
+      ...(input.delegationSuspension ? { delegationSuspension: input.delegationSuspension } : {}),
       ...(input.extraStopConditions ? { extraStopConditions: input.extraStopConditions } : {}),
     });
   } catch (error) {
@@ -2076,6 +2145,19 @@ async function continueTurnAfterToolResult(input: {
     observabilityContext: input.observabilityContext,
     toolBudget: createHostedToolBudget(),
     onToolTimings: toolLatency.record,
+    delegateToAgent: createAgentDelegationHandler({
+      parentSessionId: input.sessionId,
+      parentMessageId: continuationAssistantMessageId,
+      workspaceId: row.workspace.id,
+      userId: row.session.userId,
+      depth: row.session.delegationDepth ?? 0,
+      agentReferences: input.agentConfig.agents ?? [],
+    }),
+    awaitAgents: createAwaitAgentsHandler({
+      parentSessionId: input.sessionId,
+      workspaceId: row.workspace.id,
+      userId: row.session.userId,
+    }),
     runSubagent: createRunSubagentHandler({
       parentSessionId: input.sessionId,
       parentMessageId: continuationAssistantMessageId,
@@ -2094,6 +2176,27 @@ async function continueTurnAfterToolResult(input: {
       policy: input.toolPolicy,
     }),
   });
+
+  const continuationDelegationSuspension: DelegationSuspensionCheck = ({
+    toolName,
+    toolInput,
+    toolCallId,
+    assistantMessageId: currentAssistantMessageId,
+  }) =>
+    prepareDelegationSuspension({
+      toolName,
+      toolInput,
+      toolCallId,
+      assistantMessageId: currentAssistantMessageId,
+      parentSessionId: input.sessionId,
+      parentMessageId: currentAssistantMessageId,
+      workspaceId: row.workspace.id,
+      userId: row.session.userId,
+      depth: row.session.delegationDepth ?? 0,
+      agentReferences: input.agentConfig.agents ?? [],
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+    });
 
   const turn = await executeStreamingTurn({
     ctx,
@@ -2114,6 +2217,7 @@ async function continueTurnAfterToolResult(input: {
     checkAbort,
     policy: input.toolPolicy,
     suspendable: true,
+    delegationSuspension: continuationDelegationSuspension,
     sandboxAcquirer,
     internal: false,
     brainStep: "sync_brain_after_resume",
@@ -2476,6 +2580,269 @@ async function resumeQuestionResponseWithContext(
   }
 }
 
+// Wake a parent parked awaiting delegated children (status `awaiting_delegation`). Fired by a
+// `resume_delegation` job that a child's finish hook (or the backstop sweep) enqueued. It re-checks
+// the await condition: if not yet met it returns and leaves the parent parked (the next child
+// finish re-enqueues); if met it synthesizes the suspended tool's result from the children's
+// answers and continues the turn — the same suspend/resume substrate as approvals and questions.
+export async function resumeDelegation(input: {
+  sessionId: string;
+  toolCallId: string;
+  env: RunnerEnv;
+  externalSignal?: AbortSignal;
+}) {
+  const ctx = createRunContext("runner.resume_delegation", {
+    sessionId: input.sessionId,
+    messageId: input.toolCallId,
+    env: input.env,
+    ...(input.externalSignal ? { externalSignal: input.externalSignal } : {}),
+  });
+  try {
+    return await traceBraintrust(
+      {
+        name: "runner.resume_delegation",
+        type: "task",
+        tags: ["runner", "agent-session"],
+        metadata: {
+          run_type: "resume_delegation",
+          session_id: input.sessionId,
+          tool_call_id: input.toolCallId,
+          run_lease_id: ctx.leaseId,
+          runner_instance_id: input.env.instanceId,
+        },
+      },
+      (span) => resumeDelegationWithContext(input, ctx, span),
+    );
+  } finally {
+    await flushBraintrust();
+  }
+}
+
+async function resumeDelegationWithContext(
+  input: {
+    sessionId: string;
+    toolCallId: string;
+    env: RunnerEnv;
+    externalSignal?: AbortSignal;
+  },
+  ctx: RunContext,
+  braintrustSpan: BraintrustSpan | undefined,
+) {
+  let leaseAcquired = false;
+  let outcome = "unknown";
+  let modelProvider: string | undefined;
+  let modelName: string | undefined;
+  let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
+
+  try {
+    const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
+    if (row.session.archivedAt) {
+      outcome = "skipped_archived";
+      return;
+    }
+    if (row.session.status === "aborting" || row.session.status === "archiving") {
+      outcome = "skipped_aborted";
+      return;
+    }
+    // Only a parent actually parked awaiting delegation can be resumed here. Any other status
+    // means it already resumed (a sibling wake won the race) or never suspended.
+    if (row.session.status !== "awaiting_delegation") {
+      outcome = "skipped_not_awaiting";
+      return;
+    }
+
+    // Re-evaluate the await condition. Not met yet → leave the parent parked; the next child to
+    // finish re-enqueues, and the backstop sweep covers a lost wake.
+    const resolution = await observeRunStep(ctx, "resolve_delegation", () =>
+      resolveDelegationResume({ parentSessionId: input.sessionId }),
+    );
+    if (!resolution.ready) {
+      outcome = "skipped_children_pending";
+      return;
+    }
+
+    const agentConfig = normalizeAgentConfig(row.agent.config);
+    const workspaceId = row.workspace.id;
+    const userId = row.session.userId;
+    const agentId = row.agent.id;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        agent_path: row.agent.path,
+        session_status: row.session.status,
+      },
+    });
+
+    if (
+      !(await observeRunStep(ctx, "check_workspace_credits", () =>
+        hasPositiveWorkspaceBalance({ db: ctx.db, workspaceId: row.session.workspaceId }),
+      ))
+    ) {
+      outcome = "skipped_no_credits";
+      await setStatus(input.sessionId, "ready");
+      return;
+    }
+
+    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
+      loadWorkspaceToolPolicy(row.workspace.id),
+    );
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
+    const runtime = resolveAgentRuntimeConfig({
+      agent: agentConfig,
+      personalAgent: row.agent.isDefault,
+      modelOverride: row.session.modelName ?? undefined,
+      workspaceName: row.workspace.name,
+      sessionTitle: row.session.title,
+      ...optionalUserContext(row.user),
+      ...bundleContext,
+      toolPolicy: { policy: toolPolicy, suspendable: true },
+    });
+    modelProvider = runtime.model.provider;
+    modelName = runtime.model.name;
+
+    const lease = await observeRunStep(ctx, "acquire_run_lease", () =>
+      acquireRunLease({
+        sessionId: input.sessionId,
+        messageId: input.toolCallId,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        modelProvider: runtime.model.provider,
+        modelName: runtime.model.name,
+      }),
+    );
+    if (!lease) {
+      outcome = "skipped_lease_busy";
+      throw new RunLeaseBusyError();
+    }
+    leaseAcquired = true;
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.leaseOwner, ctx.controller);
+
+    const checkAbort = createLeaseAbortCheck(ctx);
+    await checkAbort({ force: true });
+    validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
+
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "session.status",
+        payload: { status: "running", message: "Agent is running" },
+      }),
+    );
+
+    sandboxAcquirer = createSandboxAcquirer({
+      row,
+      env: input.env,
+      trace: ctx.trace,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+      checkAbort,
+      onHydrated: () => {},
+    });
+
+    const observabilityContext = { workspaceId, userId, agentId, modelProvider, modelName };
+
+    // Idempotency: a prior resume that crashed after persisting the tool-result skips straight to
+    // the continuation rather than synthesizing it twice.
+    const storedMessages = await ctx.db
+      .select()
+      .from(agentSessionMessages)
+      .where(eq(agentSessionMessages.sessionId, input.sessionId))
+      .orderBy(asc(agentSessionMessages.createdAt));
+    const toolResultAlreadyPersisted = storedMessages.some(
+      (message) => message.role === "tool" && message.toolCallId === resolution.toolCallId,
+    );
+    if (!toolResultAlreadyPersisted) {
+      await persistDelegationToolResult({
+        sessionId: input.sessionId,
+        assistantMessageId: resolution.assistantMessageId,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        toolCallId: resolution.toolCallId,
+        toolName: resolution.toolName,
+        result: resolution.result,
+      });
+    }
+
+    outcome = await continueTurnAfterToolResult({
+      ctx,
+      row,
+      agentConfig,
+      runtime,
+      toolPolicy,
+      sandboxAcquirer,
+      observabilityContext,
+      checkAbort,
+      env: input.env,
+      sessionId: input.sessionId,
+    });
+  } catch (error) {
+    if (error instanceof RunLeaseBusyError) {
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
+      throw error;
+    }
+    if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
+      outcome = "stale_lease";
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
+      return;
+    }
+    if (ctx.controller.signal.aborted || error instanceof RunAbortError) {
+      outcome = "aborted";
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
+      if (leaseAcquired) {
+        await failRunLease(
+          input.sessionId,
+          ctx.leaseId,
+          ctx.leaseOwner,
+          "aborting",
+          "Run aborted.",
+        );
+      }
+      return;
+    }
+    const message = error instanceof Error ? error.message : "Unknown runner error";
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: { outcome: "failed", tool_call_id: input.toolCallId },
+    });
+    if (leaseAcquired) {
+      await appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "session.error",
+        payload: { message },
+      });
+      await failRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "failed", message);
+    }
+    captureException(error, {
+      event: "opencompany.runner_resume_delegation_failed",
+      session_id: input.sessionId,
+      tool_call_id: input.toolCallId,
+    });
+    outcome = "failed";
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
+  } finally {
+    await finalizeRun({
+      ctx,
+      outcome,
+      modelProvider,
+      modelName,
+      sandbox: (await sandboxAcquirer?.settle()) ?? null,
+    });
+  }
+}
+
 // Pull the persisted tool-call (name + input) for a suspended approval out of the
 // assistant message that the suspend run left ending in that tool-call.
 function findSuspendedToolCall(
@@ -2501,41 +2868,6 @@ function findSuspendedToolCall(
       };
     }
   }
-  return null;
-}
-
-async function runDelegatedChildMessage(input: {
-  sessionId: string;
-  messageId: string;
-  env: RunnerEnv;
-  signal: AbortSignal;
-  checkAbort: RunControlCheck;
-  depth: number;
-}) {
-  const heartbeat = setInterval(() => {
-    void input.checkAbort().catch(() => {
-      // checkAbort aborts the parent run controller when the lease is lost.
-    });
-  }, 5_000);
-  try {
-    await runMessage({
-      sessionId: input.sessionId,
-      messageId: input.messageId,
-      env: input.env,
-      externalSignal: input.signal,
-      delegationDepth: input.depth + 1,
-    });
-  } catch (error) {
-    if (input.signal.aborted) throw error;
-    return {
-      ok: false,
-      status: "failed",
-      error: error instanceof Error ? error.message : "Delegated agent failed.",
-    };
-  } finally {
-    clearInterval(heartbeat);
-  }
-
   return null;
 }
 

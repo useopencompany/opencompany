@@ -10,10 +10,8 @@ import {
   extractMentionIds,
   FIXED_PERSONAL_AGENT_NAME,
   isExternalSkillReference,
-  isSupportedScheduleCron,
   listAddableBuiltinSkills,
   normalizeAgentConfig,
-  normalizeScheduleTimezone,
   parseAgentFile,
   SUPPORTED_AGENT_TOOLS,
   serializeAgentFile,
@@ -21,21 +19,24 @@ import {
 import type {
   AgentConfig,
   AgentModelId,
-  AgentScheduleTriggerConfig,
   AgentToolId,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agentFiles, agents, inboxItems } from "@opencompany/db/schema";
+import { agentFiles, agents, inboxItems, workspaceSkills } from "@opencompany/db/schema";
 import { and, asc, eq } from "drizzle-orm";
+import { parseScheduleTriggers } from "@/lib/agent-schedules/parse";
 import {
   type AgentBundleFilePayload,
   isAgentBundleTextFile,
   normalizeAgentBundleRelativePath,
   serializeAgentBundleFiles,
 } from "@/lib/agents/bundle-files";
-import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
+import {
+  loadAgentReferencesForWorkspace,
+  loadGitHubIntegrationRepositoriesForWorkspace,
+} from "@/lib/agents/data";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
@@ -43,16 +44,17 @@ import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { MAX_BRAIN_FILE_BYTES } from "@/lib/brain/paths";
 import { listWorkspaceSkillSnapshots, toExternalSkillReference } from "@/lib/skills/snapshots";
+import { toWorkspaceSkillReference } from "@/lib/skills/workspace";
 
 type UpdateBehaviorResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
 type UpdateSchedulesResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
 
 // The personal agent's `.agent` body is the single source of truth: @-mentioned tools, skills,
-// repositories, and integrations are re-derived from it on every save. This re-runs that canonical
-// derivation for a given body — resolving the workspace's repositories and external skills so their
-// mentions bind — and returns the parsed title/body/config plus the serialized source (for hashing).
-// Both the Behavior editor and the manual "Add integration" path go through here so neither can
-// diverge from what the body actually says.
+// repositories, integrations, and company agents are re-derived from it on every save. This re-runs
+// that canonical derivation for a given body — resolving the workspace's repositories, external
+// skills, and workspace-wide agents so their mentions bind — and returns the parsed title/body/config
+// plus the serialized source (for hashing). Both the Behavior editor and the manual "Add
+// integration" path go through here so neither can diverge from what the body actually says.
 async function derivePersonalAgentSave(
   agent: { name: string; config: AgentConfig },
   workspaceId: string,
@@ -78,13 +80,23 @@ async function derivePersonalAgentSave(
       .filter(isExternalSkillReference)
       .map((skill) => [skill.id, skill] as const),
   );
-  const workspaceSkillReferences = (await listWorkspaceSkillSnapshots(workspaceId)).map(
-    toExternalSkillReference,
-  );
+  const [skillSnapshots, authoredSkills] = await Promise.all([
+    listWorkspaceSkillSnapshots(workspaceId),
+    getDb()
+      .select()
+      .from(workspaceSkills)
+      .where(eq(workspaceSkills.workspaceId, workspaceId))
+      .orderBy(asc(workspaceSkills.name), asc(workspaceSkills.skillId)),
+  ]);
+  const workspaceSkillReferences = [
+    ...skillSnapshots.map(toExternalSkillReference),
+    ...authoredSkills.map(toWorkspaceSkillReference),
+  ];
   for (const skill of workspaceSkillReferences) {
     skillsById.set(skill.id, skill);
   }
   const skills = [...skillsById.values()];
+  const workspaceAgents = await loadAgentReferencesForWorkspace(workspaceId);
 
   const derived = deriveAgentConfigFromBody({
     title: FIXED_PERSONAL_AGENT_NAME,
@@ -92,6 +104,7 @@ async function derivePersonalAgentSave(
     engine: currentConfig.engine,
     model: model ?? currentConfig.model.name,
     repositories: derivationRepositories,
+    agents: workspaceAgents,
     skills,
     preferredRepositories: savedRepositories.filter((repository) => repository.binding),
     triggers: currentConfig.triggers,
@@ -209,7 +222,7 @@ export async function updatePersonalAgentSchedules(
     return { ok: false, error: "Personal agent not found." };
   }
 
-  const parsed = parsePersonalScheduleTriggers(schedules, user.timezone);
+  const parsed = parseScheduleTriggers(schedules, { timezone: user.timezone });
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
   const currentConfig = normalizeAgentConfig(agent.config);
@@ -251,49 +264,6 @@ export async function updatePersonalAgentSchedules(
   });
 
   return { ok: true, config: nextConfig };
-}
-
-function parsePersonalScheduleTriggers(
-  schedules: readonly unknown[],
-  userTimezone: string,
-): { ok: true; value: AgentScheduleTriggerConfig[] } | { ok: false; error: string } {
-  if (!Array.isArray(schedules)) {
-    return { ok: false, error: "Routines must be a list." };
-  }
-
-  const timezone = normalizeScheduleTimezone(userTimezone);
-  const ids = new Set<string>();
-  const triggers: AgentScheduleTriggerConfig[] = [];
-
-  for (const [index, item] of schedules.entries()) {
-    const label = `Routine ${index + 1}`;
-    if (!item || typeof item !== "object") {
-      return { ok: false, error: `${label} is invalid.` };
-    }
-    const record = item as Record<string, unknown>;
-    const id = typeof record.id === "string" ? record.id.trim() : "";
-    const cron = typeof record.cron === "string" ? record.cron.trim() : "";
-    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
-
-    if (!id) return { ok: false, error: `${label} needs an id.` };
-    if (ids.has(id)) return { ok: false, error: `Duplicate routine id "${id}".` };
-    if (!cron || !isSupportedScheduleCron(cron)) {
-      return { ok: false, error: `${label} has an unsupported schedule.` };
-    }
-    if (!prompt) return { ok: false, error: `${label} needs a prompt.` };
-
-    ids.add(id);
-    triggers.push({
-      id,
-      type: AGENT_SCHEDULE_TRIGGER_TYPE,
-      cron,
-      timezone,
-      prompt,
-      enabled: record.enabled === true,
-    });
-  }
-
-  return { ok: true, value: triggers };
 }
 
 type ResetPersonalAgentResult = { ok: true } | { ok: false; error: string };
@@ -508,9 +478,17 @@ export async function addPersonalAgentSkill(
 
   const addableBuiltinIds = new Set(listAddableBuiltinSkills().map((skill) => skill.id));
   const { workspace } = await currentWorkspace();
-  const workspaceSkillIds = new Set(
-    (await listWorkspaceSkillSnapshots(workspace.id)).map((snapshot) => snapshot.skillId),
-  );
+  const [skillSnapshots, authoredSkills] = await Promise.all([
+    listWorkspaceSkillSnapshots(workspace.id),
+    getDb()
+      .select({ skillId: workspaceSkills.skillId })
+      .from(workspaceSkills)
+      .where(eq(workspaceSkills.workspaceId, workspace.id)),
+  ]);
+  const workspaceSkillIds = new Set([
+    ...skillSnapshots.map((snapshot) => snapshot.skillId),
+    ...authoredSkills.map((skill) => skill.skillId),
+  ]);
 
   if (!addableBuiltinIds.has(normalized) && !workspaceSkillIds.has(normalized)) {
     return { ok: false, error: "Unknown skill." };
