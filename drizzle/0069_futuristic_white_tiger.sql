@@ -1,0 +1,2 @@
+ALTER TABLE "workspace_billing_settings" ADD COLUMN "daily_spend_limit_enabled" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "workspace_billing_settings" ADD COLUMN "daily_spend_limit_usd_micros" bigint;

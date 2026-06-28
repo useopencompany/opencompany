@@ -1425,9 +1425,15 @@ export const workspaceBillingSettings = pgTable("workspace_billing_settings", {
   workspaceId: text("workspace_id")
     .primaryKey()
     .references(() => workspaces.id, { onDelete: "cascade" }),
+  // Weekly spend limit toggle. NULL limit below = no limit configured.
   spendLimitEnabled: boolean("spend_limit_enabled").notNull().default(false),
   // NULL = no limit configured. Enforced only when spendLimitEnabled is true.
   weeklySpendLimitUsdMicros: bigint("weekly_spend_limit_usd_micros", { mode: "number" }),
+  // Daily spend limit. Independent of the weekly toggle above; when enabled and a
+  // limit is set, runs are blocked once spend since UTC midnight reaches the cap.
+  dailySpendLimitEnabled: boolean("daily_spend_limit_enabled").notNull().default(false),
+  // NULL = no daily limit configured. Enforced only when dailySpendLimitEnabled is true.
+  dailySpendLimitUsdMicros: bigint("daily_spend_limit_usd_micros", { mode: "number" }),
   autoRefillEnabled: boolean("auto_refill_enabled").notNull().default(false),
   // When the balance drops below this threshold, charge the saved card for the amount.
   autoRefillThresholdUsdMicros: bigint("auto_refill_threshold_usd_micros", { mode: "number" }),

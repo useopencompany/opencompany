@@ -156,6 +156,11 @@ export type AnalyticsEventPropertiesByName = {
     enabled: boolean;
     weekly_limit_cents: number | null;
   };
+  daily_spend_limit_updated: {
+    workspace_id: string;
+    enabled: boolean;
+    daily_limit_cents: number | null;
+  };
   auto_refill_enabled: {
     workspace_id: string;
     enabled: boolean;
@@ -375,6 +380,11 @@ export const analyticsEvents = {
     name: "spend_limit_updated",
     description: "A workspace changed its weekly spending limit.",
     safeProperties: ["workspace_id", "enabled", "weekly_limit_cents"],
+  },
+  daily_spend_limit_updated: {
+    name: "daily_spend_limit_updated",
+    description: "A workspace changed its daily spending limit.",
+    safeProperties: ["workspace_id", "enabled", "daily_limit_cents"],
   },
   auto_refill_enabled: {
     name: "auto_refill_enabled",

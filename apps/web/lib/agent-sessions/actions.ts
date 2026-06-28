@@ -53,6 +53,7 @@ import type { SendMode } from "@/lib/agent-sessions/send-mode";
 import { currentWorkspace } from "@/lib/auth";
 import {
   ensureWorkspaceRunAllowance,
+  isSpendLimitReason,
   type RunAllowanceReason,
   runAllowanceErrorMessage,
 } from "@/lib/billing/run-allowance";
@@ -77,7 +78,7 @@ function billingRedirectForSurface(
   surface: SessionStartSurface = "company",
   reason: RunAllowanceReason = "no_balance",
 ) {
-  const query = reason === "weekly_limit_reached" ? "?billing=limit" : "?billing=insufficient";
+  const query = isSpendLimitReason(reason) ? "?billing=limit" : "?billing=insufficient";
   return surface === "personal" ? `${personalPaths.settings}${query}` : `/company/settings${query}`;
 }
 

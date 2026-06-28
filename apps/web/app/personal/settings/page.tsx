@@ -27,6 +27,7 @@ export default async function PersonalSettingsPage() {
           settings: {
             ...billing.settings,
             weekResetsAt: billing.settings.weekResetsAt.toISOString(),
+            dayResetsAt: billing.settings.dayResetsAt.toISOString(),
           },
         }}
       />
