@@ -31,6 +31,8 @@ import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import { runProvisionSlackSupport } from "@/lib/inngest/provision-slack-support";
+import { evaluateDueKpis, evaluateKpi, KPI_EVALUATION_SWEEP_CRON } from "@/lib/kpis/evaluator";
+import { KPI_EVALUATION_REQUESTED_EVENT } from "@/lib/kpis/events";
 import { runDeliverWhatsappReply, runWhatsappDeliverySweep } from "@/lib/messaging/delivery";
 import {
   type DeliverWhatsappReplyInput,
@@ -167,6 +169,42 @@ export const sweepAutoRefills = inngest.createFunction(
       if (result.recharged) recharged += 1;
     }
     return { scanned: workspaces.length, recharged };
+  },
+);
+
+export const evaluateKpiNow = inngest.createFunction(
+  {
+    id: "evaluate-kpi-now",
+    name: "Evaluate KPI now",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.kpiId",
+    },
+    triggers: { event: KPI_EVALUATION_REQUESTED_EVENT },
+  },
+  async ({ event, step }) => {
+    return step.run("evaluate kpi", async () => {
+      return evaluateKpi({
+        workspaceId: event.data.workspaceId,
+        kpiId: event.data.kpiId,
+      });
+    });
+  },
+);
+
+export const sweepKpiEvaluations = inngest.createFunction(
+  {
+    id: "sweep-kpi-evaluations",
+    name: "Sweep KPI evaluations",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: KPI_EVALUATION_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return step.run("evaluate due kpis", async () => {
+      return evaluateDueKpis();
+    });
   },
 );
 
@@ -608,6 +646,8 @@ export const inngestFunctions = [
   sweepRecallIndex,
   sweepOrphanedRunningSessions,
   sweepAutoRefills,
+  evaluateKpiNow,
+  sweepKpiEvaluations,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,

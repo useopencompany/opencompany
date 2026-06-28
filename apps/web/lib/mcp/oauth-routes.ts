@@ -75,6 +75,13 @@ export function createMcpOAuthStartRoute(
 export function createMcpOAuthCallbackRoute(
   provider: McpOAuthProvider,
   upsertServer: UpsertMcpServer,
+  options: {
+    onConnected?: (input: {
+      workspaceId: string;
+      userId: string;
+      serverId: string;
+    }) => Promise<unknown>;
+  } = {},
 ) {
   const failureEvent = `opencompany.${provider.key}_mcp_oauth_callback_failed`;
 
@@ -159,6 +166,29 @@ export function createMcpOAuthCallbackRoute(
         state: stateValue,
       });
       await upsertServer(current.workspace.id, "configured", null);
+      if (options.onConnected) {
+        try {
+          await options.onConnected({
+            workspaceId: current.workspace.id,
+            userId: current.user.id,
+            serverId: server.id,
+          });
+        } catch (error) {
+          captureException(error, {
+            event: failureEvent,
+            reason: "post_connect_side_effect_failed",
+            workspace_id: current.workspace.id,
+            user_id: current.user.id,
+          });
+          logger.warn(`${provider.displayName} MCP post-connect side effect failed`, {
+            event: failureEvent,
+            reason: "post_connect_side_effect_failed",
+            workspace_id: current.workspace.id,
+            user_id: current.user.id,
+            error_message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
 
       return NextResponse.redirect(
         new URL(provider.appendSetupStatus(state.returnTo, "connected"), url),

@@ -18,6 +18,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   serial,
   text,
@@ -43,9 +44,17 @@ export type WorkspaceIntegrationCredentialKind =
   | "webhook_secret"
   | (string & {});
 
+export type WorkspaceIntegrationProviderKind = "agent_action" | "data_source" | (string & {});
+
 export type WorkspaceMcpServerStatus = "configured" | "missing_credential" | "disabled" | "error";
 
 export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
+
+export type WorkspaceKpiProvider = "posthog" | (string & {});
+
+export type WorkspaceKpiTimeGrain = "day" | "week";
+
+export type WorkspaceKpiStatus = "active" | "fetch_failed" | "disabled";
 
 export type WorkspaceCodexCredentialStatus = "connected" | "needs_reauth";
 
@@ -1505,6 +1514,10 @@ export const workspaceIntegrations = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
+    providerKind: text("provider_kind")
+      .$type<WorkspaceIntegrationProviderKind>()
+      .notNull()
+      .default("agent_action"),
     externalId: text("external_id").notNull(),
     connectionLabel: text("connection_label"),
     accountName: text("account_name"),
@@ -1532,6 +1545,11 @@ export const workspaceIntegrations = pgTable(
       table.workspaceId,
       table.provider,
     ),
+    workspaceProviderKindIdx: index("workspace_integrations_workspace_provider_kind_idx").on(
+      table.workspaceId,
+      table.provider,
+      table.providerKind,
+    ),
     workspaceProviderExternalIdx: uniqueIndex(
       "workspace_integrations_workspace_provider_external_idx",
     ).on(table.workspaceId, table.provider, table.externalId),
@@ -1541,6 +1559,10 @@ export const workspaceIntegrations = pgTable(
     statusCheck: check(
       "workspace_integrations_status_check",
       sql`${table.status} IN ('connected', 'needs_reauth', 'sync_failed', 'disconnected')`,
+    ),
+    providerKindCheck: check(
+      "workspace_integrations_provider_kind_check",
+      sql`${table.providerKind} IN ('agent_action', 'data_source')`,
     ),
   }),
 );
@@ -1638,6 +1660,82 @@ export const workspaceIntegrationCredentials = pgTable(
         workspaceIntegrations.provider,
       ],
     }).onDelete("cascade"),
+  }),
+);
+
+export const workspaceKpis = pgTable(
+  "workspace_kpis",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceIntegrationId: text("source_integration_id").notNull(),
+    provider: text("provider").$type<WorkspaceKpiProvider>().notNull(),
+    templateId: text("template_id").notNull(),
+    displayName: text("display_name").notNull(),
+    timeGrain: text("time_grain").$type<WorkspaceKpiTimeGrain>().notNull(),
+    filterParams: jsonb("filter_params")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    status: text("status").$type<WorkspaceKpiStatus>().notNull().default("active"),
+    statusReason: text("status_reason"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceStatusIdx: index("workspace_kpis_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    sourceIntegrationIdx: index("workspace_kpis_source_integration_idx").on(
+      table.sourceIntegrationId,
+    ),
+    sourceIntegrationFk: foreignKey({
+      name: "workspace_kpis_source_integration_workspace_provider_fk",
+      columns: [table.sourceIntegrationId, table.workspaceId, table.provider],
+      foreignColumns: [
+        workspaceIntegrations.id,
+        workspaceIntegrations.workspaceId,
+        workspaceIntegrations.provider,
+      ],
+    }).onDelete("cascade"),
+    timeGrainCheck: check(
+      "workspace_kpis_time_grain_check",
+      sql`${table.timeGrain} IN ('day', 'week')`,
+    ),
+    statusCheck: check(
+      "workspace_kpis_status_check",
+      sql`${table.status} IN ('active', 'fetch_failed', 'disabled')`,
+    ),
+  }),
+);
+
+export const workspaceKpiValues = pgTable(
+  "workspace_kpi_values",
+  {
+    id: text("id").primaryKey(),
+    kpiId: text("kpi_id")
+      .notNull()
+      .references(() => workspaceKpis.id, { onDelete: "cascade" }),
+    pointAt: timestamp("point_at", { withTimezone: true }).notNull(),
+    value: numeric("value").notNull(),
+    grain: text("grain").$type<WorkspaceKpiTimeGrain>().notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    source: jsonb("source").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  },
+  (table) => ({
+    kpiPointIdx: uniqueIndex("workspace_kpi_values_kpi_point_grain_idx").on(
+      table.kpiId,
+      table.pointAt,
+      table.grain,
+    ),
+    kpiFetchedIdx: index("workspace_kpi_values_kpi_fetched_idx").on(table.kpiId, table.fetchedAt),
+    grainCheck: check("workspace_kpi_values_grain_check", sql`${table.grain} IN ('day', 'week')`),
   }),
 );
 
@@ -2146,6 +2244,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   integrations: many(workspaceIntegrations),
   integrationResources: many(workspaceIntegrationResources),
   integrationCredentials: many(workspaceIntegrationCredentials),
+  kpis: many(workspaceKpis),
   experiments: many(workspaceExperiments),
   mcpServers: many(workspaceMcpServers),
   mcpCredentials: many(workspaceMcpCredentials),
@@ -2445,6 +2544,29 @@ export const workspaceIntegrationCredentialsRelations = relations(
   }),
 );
 
+export const workspaceKpisRelations = relations(workspaceKpis, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceKpis.workspaceId],
+    references: [workspaces.id],
+  }),
+  sourceIntegration: one(workspaceIntegrations, {
+    fields: [workspaceKpis.sourceIntegrationId],
+    references: [workspaceIntegrations.id],
+  }),
+  createdByUser: one(users, {
+    fields: [workspaceKpis.createdByUserId],
+    references: [users.id],
+  }),
+  values: many(workspaceKpiValues),
+}));
+
+export const workspaceKpiValuesRelations = relations(workspaceKpiValues, ({ one }) => ({
+  kpi: one(workspaceKpis, {
+    fields: [workspaceKpiValues.kpiId],
+    references: [workspaceKpis.id],
+  }),
+}));
+
 export const workspaceExperimentsRelations = relations(workspaceExperiments, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [workspaceExperiments.workspaceId],
@@ -2510,6 +2632,8 @@ export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
 export type WorkspaceIntegration = typeof workspaceIntegrations.$inferSelect;
 export type WorkspaceIntegrationResource = typeof workspaceIntegrationResources.$inferSelect;
 export type WorkspaceIntegrationCredential = typeof workspaceIntegrationCredentials.$inferSelect;
+export type WorkspaceKpi = typeof workspaceKpis.$inferSelect;
+export type WorkspaceKpiValue = typeof workspaceKpiValues.$inferSelect;
 export type WorkspaceCreditBalance = typeof workspaceCreditBalances.$inferSelect;
 export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSelect;
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;

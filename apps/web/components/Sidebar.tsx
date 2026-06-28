@@ -4,6 +4,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  BarChart3,
   Blocks,
   Bot,
   Brain,
@@ -540,6 +541,12 @@ function SidebarContent({
               icon={Plug}
               label="Integrations"
               active={isActive("/company/integrations")}
+            />
+            <NavItem
+              href="/company/kpis"
+              icon={BarChart3}
+              label="KPIs"
+              active={isActive("/company/kpis")}
             />
             <NavItem
               href="/company/inbox"

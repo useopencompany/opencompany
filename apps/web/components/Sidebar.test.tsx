@@ -131,6 +131,12 @@ describe("Sidebar status menu item", () => {
     );
   });
 
+  it("links to company KPIs from the primary nav", () => {
+    renderSidebar();
+
+    expect(screen.getByRole("link", { name: "KPIs" })).toHaveAttribute("href", "/company/kpis");
+  });
+
   it("links to the Better Stack status page from the account menu", async () => {
     mockStatusPageFetch("operational");
     const user = userEvent.setup();

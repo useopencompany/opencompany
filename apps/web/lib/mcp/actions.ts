@@ -5,6 +5,7 @@ import type { WorkspaceMcpCredentialKind } from "@opencompany/db/schema";
 import { workspaceMcpServers } from "@opencompany/db/schema";
 import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
+import { deletePostHogDataSourcesForWorkspace } from "@/lib/kpis/posthog-data-source";
 import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
 import {
   BETTERSTACK_MCP_ENDPOINT_URL,
@@ -101,7 +102,13 @@ export async function removeSlackMcpConnection() {
 }
 
 export async function removePostHogMcpConnection() {
-  return removeMcpCredentials(POSTHOG_MCP_SERVER_KEY, "PostHog MCP connection was removed.");
+  const result = await removeMcpCredentials(
+    POSTHOG_MCP_SERVER_KEY,
+    "PostHog MCP connection was removed.",
+  );
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
+  await deletePostHogDataSourcesForWorkspace(workspace.id);
+  return result;
 }
 
 export async function removeBetterStackMcpConnection() {

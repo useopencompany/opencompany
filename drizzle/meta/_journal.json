@@ -491,6 +491,13 @@
       "when": 1782650823133,
       "tag": "0069_futuristic_white_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1782655584828,
+      "tag": "0070_eminent_giant_man",
+      "breakpoints": true
     }
   ]
 }
