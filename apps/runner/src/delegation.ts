@@ -25,6 +25,7 @@ import {
   buildToolModelMessage,
   serializeToolOutputForStorage,
   toPersistedModelMessage,
+  validateModelMessage,
 } from "./model-messages";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -406,8 +407,55 @@ export async function prepareDelegationSuspension(input: {
   return { action: "suspend" };
 }
 
+export type AutoAwaitAtTurnEndResult =
+  | { action: "proceed" }
+  | { action: "suspend"; childSessionIds: string[]; toolCallId: string };
+
+export function autoAwaitToolCallId(assistantMessageId: string) {
+  return `auto-await:${assistantMessageId}`;
+}
+
+export function isAutoAwaitToolCallId(toolCallId: string) {
+  return toolCallId.startsWith("auto-await:");
+}
+
+export async function prepareAutoAwaitAtTurnEnd(input: {
+  parentSessionId: string;
+  assistantMessageId: string;
+  leaseId: string;
+  leaseOwner: string;
+}): Promise<AutoAwaitAtTurnEndResult> {
+  const marker = await loadActiveDelegationAwaitMarker(input.parentSessionId);
+  if (
+    marker?.toolCallId &&
+    !(await isDelegationAwaitMarkerResolved(input.parentSessionId, marker))
+  ) {
+    return { action: "proceed" };
+  }
+
+  const targets = await resolveAwaitTargets({ parentSessionId: input.parentSessionId });
+  const states = await loadDelegatedChildrenStates(input.parentSessionId, targets);
+  const activeChildSessionIds = states
+    .filter((state) =>
+      isDelegatedChildActive({ status: state.status, runLeaseId: state.runLeaseId }),
+    )
+    .map((state) => state.id);
+
+  if (activeChildSessionIds.length === 0) return { action: "proceed" };
+
+  const toolCallId = autoAwaitToolCallId(input.assistantMessageId);
+  await writeDelegationAwaitMarker(input, {
+    toolCallId,
+    toolName: "await_agents",
+    mode: "all",
+    childSessionIds: targets,
+    assistantMessageId: input.assistantMessageId,
+  });
+  return { action: "suspend", childSessionIds: targets, toolCallId };
+}
+
 async function writeDelegationAwaitMarker(
-  lease: { parentSessionId: string; parentMessageId: string; leaseId: string; leaseOwner: string },
+  lease: { parentSessionId: string; leaseId: string; leaseOwner: string },
   marker: DelegationAwaitMarker,
 ) {
   await appendRuntimeEvent(getDb(), {
@@ -449,6 +497,25 @@ async function loadActiveDelegationAwaitMarker(
     assistantMessageId:
       typeof payload.assistantMessageId === "string" ? payload.assistantMessageId : "",
   };
+}
+
+async function isDelegationAwaitMarkerResolved(
+  parentSessionId: string,
+  marker: DelegationAwaitMarker,
+): Promise<boolean> {
+  if (!marker.toolCallId) return false;
+  const [row] = await getDb()
+    .select({ id: agentSessionMessages.id })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.sessionId, parentSessionId),
+        eq(agentSessionMessages.role, "tool"),
+        eq(agentSessionMessages.toolCallId, marker.toolCallId),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +621,113 @@ export async function persistDelegationToolResult(input: {
       },
     }),
   );
+}
+
+export async function ensureAutoAwaitToolCallForReplay(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  leaseId: string;
+  leaseOwner: string;
+  toolCallId: string;
+}) {
+  if (!isAutoAwaitToolCallId(input.toolCallId)) return;
+
+  const [message] = await getDb()
+    .select({
+      id: agentSessionMessages.id,
+      content: agentSessionMessages.content,
+      modelMessage: agentSessionMessages.modelMessage,
+    })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.id, input.assistantMessageId),
+        eq(agentSessionMessages.sessionId, input.sessionId),
+        eq(agentSessionMessages.role, "assistant"),
+      ),
+    )
+    .limit(1);
+  if (!message) return;
+
+  const modelMessage = normalizeAssistantModelMessageForAutoAwait(
+    message.modelMessage,
+    message.content,
+  );
+  const content = modelMessage.content;
+  if (
+    content.some(
+      (part) =>
+        part &&
+        typeof part === "object" &&
+        (part as { type?: unknown }).type === "tool-call" &&
+        (part as { toolCallId?: unknown }).toolCallId === input.toolCallId,
+    )
+  ) {
+    return;
+  }
+
+  const nextModelMessage = toPersistedModelMessage({
+    role: "assistant",
+    content: [
+      ...content,
+      {
+        type: "tool-call",
+        toolCallId: input.toolCallId,
+        toolName: "await_agents",
+        input: { mode: "all" },
+      },
+    ],
+  });
+
+  await requireLeaseWrite(
+    updateAssistantModelMessageForLease({
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      leaseId: input.leaseId,
+      leaseOwner: input.leaseOwner,
+      modelMessage: nextModelMessage,
+    }),
+  );
+}
+
+function normalizeAssistantModelMessageForAutoAwait(modelMessage: unknown, content: string) {
+  const parsed =
+    modelMessage && typeof modelMessage === "object"
+      ? validateModelMessage(modelMessage)
+      : validateModelMessage({ role: "assistant", content });
+  if (parsed.role !== "assistant") return { role: "assistant" as const, content: [] };
+  if (Array.isArray(parsed.content)) {
+    return { role: "assistant" as const, content: parsed.content };
+  }
+  return {
+    role: "assistant" as const,
+    content: parsed.content ? [{ type: "text" as const, text: parsed.content }] : [],
+  };
+}
+
+async function updateAssistantModelMessageForLease(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  leaseId: string;
+  leaseOwner: string;
+  modelMessage: Record<string, unknown>;
+}) {
+  const result = await getDb().execute(sql`
+    UPDATE agent_session_messages AS m
+    SET model_message = ${JSON.stringify(input.modelMessage)}::jsonb
+    WHERE m.id = ${input.assistantMessageId}
+      AND m.session_id = ${input.sessionId}
+      AND EXISTS (
+        SELECT 1
+        FROM agent_sessions s
+        WHERE s.id = ${input.sessionId}
+          AND s.run_lease_id = ${input.leaseId}
+          AND s.run_lease_owner = ${input.leaseOwner}
+          AND s.archived_at IS NULL
+      )
+    RETURNING m.id
+  `);
+  return rowsFromExecute(result).length > 0;
 }
 
 // ---------------------------------------------------------------------------

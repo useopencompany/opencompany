@@ -1,18 +1,40 @@
-import { agentSessions, agents } from "@opencompany/db/schema";
+import {
+  agentSessionEvents,
+  agentSessionMessages,
+  agentSessions,
+  agents,
+} from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentConfig } from "./agent-loop-test-support";
 import {
+  autoAwaitToolCallId,
   createAgentDelegationHandler,
+  ensureAutoAwaitToolCallForReplay,
   isDelegatedChildActive,
   MAX_AGENT_DELEGATION_DEPTH,
+  persistDelegationToolResult,
+  prepareAutoAwaitAtTurnEnd,
+  resolveDelegationResume,
 } from "./delegation";
+import {
+  buildAssistantModelMessage,
+  buildModelMessages,
+  toPersistedModelMessage,
+} from "./model-messages";
 
 const dbMocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 const jobMocks = vi.hoisted(() => ({ enqueueRunnerJob: vi.fn(async () => ({ id: 1 })) }));
+const eventMocks = vi.hoisted(() => ({ appendRuntimeEvent: vi.fn(async () => ({ id: 1 })) }));
+const leaseWrites = vi.hoisted(() => ({
+  appendRuntimeEventForLease: vi.fn(async () => true),
+  insertToolMessageForLease: vi.fn(async () => true),
+  requireLeaseWrite: vi.fn(async (value: unknown) => value),
+}));
 
 vi.mock("./db", () => ({ getDb: dbMocks.getDb }));
 vi.mock("./jobs", () => ({ enqueueRunnerJob: jobMocks.enqueueRunnerJob }));
-vi.mock("./events", () => ({ appendRuntimeEvent: vi.fn(async () => ({ id: 1 })) }));
+vi.mock("./events", () => ({ appendRuntimeEvent: eventMocks.appendRuntimeEvent }));
+vi.mock("./lease-writes", () => leaseWrites);
 vi.mock("./delegation-usage", () => ({ emitDelegatedUsageRollup: vi.fn(async () => {}) }));
 vi.mock("@opencompany/observability/braintrust", () => ({
   traceBraintrustStep: vi.fn(async (_name: string, run: () => Promise<unknown>) => run()),
@@ -66,6 +88,116 @@ function createSpawnDb(input: {
     },
     async transaction(callback: (tx: unknown) => Promise<unknown>) {
       return callback(db);
+    },
+  };
+  return db;
+}
+
+function createAutoAwaitDb(input: {
+  marker?: Record<string, unknown> | null;
+  markerToolResult?: Record<string, unknown> | null;
+  children?: Array<{
+    id: string;
+    status: string;
+    runLeaseId: string | null;
+    agentName?: string;
+    agentPath?: string | null;
+    lastError?: string | null;
+  }>;
+  childAnswer?: string | null;
+}) {
+  const children = input.children ?? [];
+  const db = {
+    select() {
+      const query = {
+        table: undefined as unknown,
+        joinedAgents: false,
+        from(table: unknown) {
+          query.table = table;
+          return query;
+        },
+        innerJoin() {
+          query.joinedAgents = true;
+          return query;
+        },
+        where() {
+          return query;
+        },
+        orderBy() {
+          return query;
+        },
+        async limit() {
+          return rows();
+        },
+        then(resolve: (value: unknown[]) => void, reject: (reason: unknown) => void) {
+          Promise.resolve(rows()).then(resolve, reject);
+        },
+      };
+      const rows = () => {
+        if (query.table === agentSessionEvents) {
+          return input.marker ? [{ payload: input.marker }] : [];
+        }
+        if (query.table === agentSessionMessages) {
+          if (input.markerToolResult) return [input.markerToolResult];
+          return input.childAnswer === undefined ? [] : [{ content: input.childAnswer }];
+        }
+        if (query.table === agentSessions && query.joinedAgents) {
+          return children.map((child) => ({
+            id: child.id,
+            status: child.status,
+            runLeaseId: child.runLeaseId,
+            lastError: child.lastError ?? null,
+            agentName: child.agentName ?? "Research",
+            agentPath: child.agentPath ?? "agents/research/research.agent",
+          }));
+        }
+        if (query.table === agentSessions) {
+          return children.map((child) => ({ id: child.id }));
+        }
+        return [];
+      };
+      return query;
+    },
+  };
+  return db;
+}
+
+function createAutoAwaitReplayDb(input: {
+  assistantContent: string;
+  assistantModelMessage: Record<string, unknown> | null;
+}) {
+  const assistant = {
+    id: "msg_assistant",
+    content: input.assistantContent,
+    modelMessage: input.assistantModelMessage,
+  };
+  const db = {
+    assistant,
+    execute: vi.fn(async (query: unknown) => {
+      const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
+      const modelMessageJson = chunks.find(
+        (chunk) => typeof chunk === "string" && chunk.startsWith('{"role":"assistant","content":'),
+      );
+      if (typeof modelMessageJson === "string") {
+        assistant.modelMessage = JSON.parse(modelMessageJson);
+      }
+      return [{ id: assistant.id }];
+    }),
+    select() {
+      const query = {
+        table: undefined as unknown,
+        from(table: unknown) {
+          query.table = table;
+          return query;
+        },
+        where() {
+          return query;
+        },
+        async limit() {
+          return query.table === agentSessionMessages ? [assistant] : [];
+        },
+      };
+      return query;
     },
   };
   return db;
@@ -261,6 +393,262 @@ describe("delegate_to_agent async spawn", () => {
     });
     expect(result).toMatchObject({ ok: false, status: "failed" });
     expect(jobMocks.enqueueRunnerJob).not.toHaveBeenCalled();
+  });
+});
+
+describe("prepareAutoAwaitAtTurnEnd", () => {
+  const baseInput = {
+    parentSessionId: "ses_parent",
+    assistantMessageId: "msg_assistant",
+    leaseId: "lease_1",
+    leaseOwner: "runner_1",
+  };
+
+  it("proceeds when there are no active delegated children and no marker", async () => {
+    dbMocks.getDb.mockReturnValue(createAutoAwaitDb({ children: [] }));
+
+    await expect(prepareAutoAwaitAtTurnEnd(baseInput)).resolves.toEqual({ action: "proceed" });
+    expect(eventMocks.appendRuntimeEvent).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when an unresolved await marker already exists", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createAutoAwaitDb({
+        marker: {
+          toolCallId: "call_await",
+          toolName: "await_agents",
+          mode: "all",
+          childSessionIds: ["ses_child"],
+          assistantMessageId: "msg_prior",
+        },
+        children: [{ id: "ses_child", status: "running", runLeaseId: "lease_child" }],
+      }),
+    );
+
+    await expect(prepareAutoAwaitAtTurnEnd(baseInput)).resolves.toEqual({ action: "proceed" });
+    expect(eventMocks.appendRuntimeEvent).not.toHaveBeenCalled();
+  });
+
+  it("ignores an already-resolved prior marker when active children remain", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createAutoAwaitDb({
+        marker: {
+          toolCallId: "call_prior",
+          toolName: "await_agents",
+          mode: "all",
+          childSessionIds: ["ses_old_child"],
+          assistantMessageId: "msg_prior",
+        },
+        markerToolResult: { id: "msg_tool_prior" },
+        children: [{ id: "ses_child", status: "running", runLeaseId: "lease_child" }],
+      }),
+    );
+
+    await expect(prepareAutoAwaitAtTurnEnd(baseInput)).resolves.toEqual({
+      action: "suspend",
+      childSessionIds: ["ses_child"],
+      toolCallId: "auto-await:msg_assistant",
+    });
+  });
+
+  it("suspends active delegated children and writes a synthetic await marker", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createAutoAwaitDb({
+        children: [
+          { id: "ses_child_1", status: "running", runLeaseId: "lease_child_1" },
+          { id: "ses_child_2", status: "awaiting_delegation", runLeaseId: null },
+          { id: "ses_child_done", status: "completed", runLeaseId: null },
+        ],
+      }),
+    );
+
+    const result = await prepareAutoAwaitAtTurnEnd(baseInput);
+
+    expect(result).toEqual({
+      action: "suspend",
+      childSessionIds: ["ses_child_1", "ses_child_2", "ses_child_done"],
+      toolCallId: "auto-await:msg_assistant",
+    });
+    expect(eventMocks.appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        messageId: "msg_assistant",
+        type: "delegation.awaiting",
+        payload: {
+          toolCallId: "auto-await:msg_assistant",
+          toolName: "await_agents",
+          mode: "all",
+          childSessionIds: ["ses_child_1", "ses_child_2", "ses_child_done"],
+          assistantMessageId: "msg_assistant",
+        },
+      }),
+    );
+  });
+
+  it("resumes a synthetic await with both already-finished and newly-finished children", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createAutoAwaitDb({
+        marker: {
+          toolCallId: "auto-await:msg_assistant",
+          toolName: "await_agents",
+          mode: "all",
+          childSessionIds: ["ses_child_done", "ses_child_slow"],
+          assistantMessageId: "msg_assistant",
+        },
+        children: [
+          { id: "ses_child_done", status: "completed", runLeaseId: null },
+          { id: "ses_child_slow", status: "completed", runLeaseId: null },
+        ],
+        childAnswer: "Delegated answer.",
+      }),
+    );
+
+    await expect(resolveDelegationResume({ parentSessionId: "ses_parent" })).resolves.toEqual({
+      ready: true,
+      toolCallId: "auto-await:msg_assistant",
+      toolName: "await_agents",
+      assistantMessageId: "msg_assistant",
+      result: {
+        agents: [
+          {
+            childSessionId: "ses_child_done",
+            agent: { name: "Research", path: "agents/research/research.agent" },
+            status: "completed",
+            answer: "Delegated answer.",
+          },
+          {
+            childSessionId: "ses_child_slow",
+            agent: { name: "Research", path: "agents/research/research.agent" },
+            status: "completed",
+            answer: "Delegated answer.",
+          },
+        ],
+        pending: 0,
+      },
+    });
+  });
+
+  it("uses a deterministic synthetic tool call id unique to the assistant message", () => {
+    expect(autoAwaitToolCallId("msg_one")).toBe("auto-await:msg_one");
+    expect(autoAwaitToolCallId("msg_two")).toBe("auto-await:msg_two");
+  });
+});
+
+describe("ensureAutoAwaitToolCallForReplay", () => {
+  const baseInput = {
+    sessionId: "ses_parent",
+    assistantMessageId: "msg_assistant",
+    leaseId: "lease_1",
+    leaseOwner: "runner_1",
+    toolCallId: "auto-await:msg_assistant",
+  };
+
+  it("persists a synthetic assistant tool call that replays with its delegated result", async () => {
+    const db = createAutoAwaitReplayDb({
+      assistantContent: "I will wait for the children.",
+      assistantModelMessage: toPersistedModelMessage(
+        buildAssistantModelMessage({
+          content: "I will wait for the children.",
+          parts: [{ type: "text", text: "I will wait for the children." }],
+        }),
+      ),
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await ensureAutoAwaitToolCallForReplay(baseInput);
+    await persistDelegationToolResult({
+      sessionId: "ses_parent",
+      assistantMessageId: "msg_assistant",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      toolCallId: "auto-await:msg_assistant",
+      toolName: "await_agents",
+      result: {
+        agents: [{ childSessionId: "ses_child", status: "completed", answer: "Done." }],
+        pending: 0,
+      },
+    });
+
+    const toolMessageCalls = leaseWrites.insertToolMessageForLease.mock.calls as unknown[][];
+    const insertedToolMessage = toolMessageCalls[0]?.[0] as {
+      modelMessage: Record<string, unknown>;
+    };
+    const messages = buildModelMessages([
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: db.assistant.content,
+        modelMessage: db.assistant.modelMessage,
+      },
+      {
+        id: "msg_tool",
+        role: "tool",
+        content: "",
+        modelMessage: insertedToolMessage.modelMessage,
+      },
+    ]);
+
+    expect(db.assistant.modelMessage).toMatchObject({
+      role: "assistant",
+      content: [
+        { type: "text", text: "I will wait for the children." },
+        {
+          type: "tool-call",
+          toolCallId: "auto-await:msg_assistant",
+          toolName: "await_agents",
+          input: { mode: "all" },
+        },
+      ],
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      role: "assistant",
+      content: [
+        { type: "text", text: "I will wait for the children." },
+        {
+          type: "tool-call",
+          toolCallId: "auto-await:msg_assistant",
+          toolName: "await_agents",
+          input: { mode: "all" },
+        },
+      ],
+    });
+    expect(messages[1]).toMatchObject({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "auto-await:msg_assistant",
+          toolName: "await_agents",
+        },
+      ],
+    });
+  });
+
+  it("does not duplicate an existing synthetic assistant tool call", async () => {
+    const syntheticPart = {
+      type: "tool-call" as const,
+      toolCallId: "auto-await:msg_assistant",
+      toolName: "await_agents",
+      input: { mode: "all" },
+    };
+    const db = createAutoAwaitReplayDb({
+      assistantContent: "I will wait for the children.",
+      assistantModelMessage: toPersistedModelMessage({
+        role: "assistant",
+        content: [{ type: "text", text: "I will wait for the children." }, syntheticPart],
+      }),
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await ensureAutoAwaitToolCallForReplay(baseInput);
+
+    expect(db.execute).not.toHaveBeenCalled();
+    expect(db.assistant.modelMessage).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "I will wait for the children." }, syntheticPart],
+    });
   });
 });
 

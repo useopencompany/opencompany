@@ -908,7 +908,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "delegate_to_agent",
     kind: "internal",
     description:
-      "Delegate a focused task to another workspace agent referenced in this agent's instructions, or continue a prior delegated child session by sessionId. The delegated agent runs on its own engine in an inspectable child session (hidden from sidebar history). By default this returns immediately with the child's sessionId and status; the child keeps running in the background. Use await_agents to collect results, or pass wait:true to block on a single delegation and get its final answer directly.",
+      "Delegate a focused task to another workspace agent referenced in this agent's instructions, or continue a prior delegated child session by sessionId. The delegated agent runs on its own engine in an inspectable child session (hidden from sidebar history). By default this returns immediately with the child's sessionId and status; the child keeps running in the background. If you end your turn with delegated children still running, their results are automatically collected and your turn resumes with them. Use await_agents or pass wait:true when you need to suspend mid-turn.",
     parameters: {
       type: "object",
       properties: {
@@ -930,7 +930,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         wait: {
           type: "boolean",
           description:
-            "When true, block until this single delegated child finishes and return its final answer directly (the single-delegation shortcut). When false or omitted, return immediately with the child sessionId so you can fan out more delegations and collect them later with await_agents.",
+            "When true, block mid-turn until this single delegated child finishes and return its final answer directly (the single-delegation shortcut). When false or omitted, return immediately with the child sessionId so you can fan out more delegations; any still-running children are automatically awaited if you end your turn.",
         },
       },
       required: ["prompt"],
@@ -940,8 +940,8 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Use delegate_to_agent when another configured workspace agent is better suited to a focused subtask.",
       "To start a new delegated session, pass one target agent from the configured agent references and a self-contained prompt.",
       "To continue a prior delegated child session, pass its childSessionId back as sessionId with the next prompt, and omit agent.",
-      "Default (async): the call returns { childSessionId, status:'running' } immediately and the child runs in the background. Spawn several in one turn to fan out, then call await_agents to collect their answers.",
-      "Single one-shot delegation: pass wait:true to block until the child finishes and get its answer back from this same call.",
+      "Default (async): the call returns { childSessionId, status:'running' } immediately and the child runs in the background. Spawn several in one turn to fan out; if you end the turn while children are still running, their answers are automatically collected and the turn resumes with them.",
+      "Call await_agents, or pass wait:true for a single child, when you need to pause mid-turn before doing more work.",
       "Resume a child session only when continuity matters; start a new delegated session for independent subtasks.",
       "Keep delegated prompts bounded; do not delegate recursively unless the user's task clearly requires it.",
     ].join("\n"),
@@ -950,7 +950,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "await_agents",
     kind: "internal",
     description:
-      "Wait for delegated child agents (spawned earlier with delegate_to_agent) to finish, then collect their final answers. Use this after fanning out one or more delegate_to_agent calls. The parent run parks while the children work and resumes automatically when they finish — it does not burn turns polling.",
+      "Wait mid-turn for delegated child agents (spawned earlier with delegate_to_agent) to finish, then collect their final answers. You do not need this just to avoid losing work: if you end your turn with delegated children still running, their results are automatically collected and your turn resumes with them. The parent run parks while the children work and resumes automatically when they finish — it does not burn turns polling.",
     parameters: {
       type: "object",
       properties: {
@@ -971,7 +971,8 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       additionalProperties: false,
     },
     help: [
-      "Call await_agents after delegate_to_agent calls to gather the children's results.",
+      "Call await_agents after delegate_to_agent calls when you need their results before continuing mid-turn.",
+      "If you simply end the turn with delegated children still running, their results are automatically collected and the turn resumes with them.",
       "Omit sessionIds to wait on all running children; pass sessionIds to wait on a specific subset.",
       "mode:'all' waits for everyone, mode:'any' returns after the first finishes, mode:'poll' returns immediately with current states.",
       "Each returned agent includes its childSessionId, status, and (when finished) its answer or error.",
