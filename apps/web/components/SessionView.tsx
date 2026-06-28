@@ -49,6 +49,7 @@ import {
   createContext,
   createElement,
   Fragment,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -920,21 +921,52 @@ function SessionViewContentBody({
     }
     return partsByMessageId;
   }, [runtime.events, runtime.messages]);
+  // Questions the server has already resolved (e.g. superseded by a message) but whose clearing
+  // event we may not have observed. The card's pending/answered state is derived purely from
+  // runtime events, so a missed clearing event would otherwise leave a live, unanswerable card.
+  // Dismissing such a card locally — on a "stale" response from answer/cancel — guarantees it can
+  // never trap the user behind the composer, regardless of which event path leaked.
+  const [resolvedQuestionIds, setResolvedQuestionIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const markQuestionResolved = useCallback((toolCallId: string) => {
+    setResolvedQuestionIds((prev) => {
+      if (prev.has(toolCallId)) return prev;
+      const next = new Set(prev);
+      next.add(toolCallId);
+      return next;
+    });
+  }, []);
   // The single ask_user_question awaiting an answer (the run suspends, so at most one exists). It
   // drives the stepped QuestionComposer that takes over the composer slot. Derived from the same
   // parts that render the transcript, so it stays reactive to the session stream.
+  //
+  // Pick the LAST pending question, not the first: a question resolved server-side but whose
+  // clearing event leaked would linger as "pending" in this event-derived state, and being earlier
+  // would shadow the genuinely live question — locking the composer onto an unanswerable tool-call.
+  // The live question is always the most recent. Locally-resolved ids are excluded outright.
   const pendingQuestion = useMemo(() => {
-    const findPending = (parts: AssistantTurnPart[]) =>
-      parts.find(
-        (part) => part.type === "tool-call" && part.toolCall.question?.status === "pending",
-      );
+    const findLastPending = (parts: AssistantTurnPart[]) => {
+      let found: AssistantTurnPart | undefined;
+      for (const part of parts) {
+        if (
+          part.type === "tool-call" &&
+          part.toolCall.question?.status === "pending" &&
+          !resolvedQuestionIds.has(part.toolCall.id)
+        ) {
+          found = part;
+        }
+      }
+      return found?.type === "tool-call" ? found.toolCall : null;
+    };
+    let latest: ReturnType<typeof findLastPending> = null;
     for (const parts of assistantPartsByMessageId.values()) {
-      const match = findPending(parts);
-      if (match?.type === "tool-call") return match.toolCall;
+      const match = findLastPending(parts);
+      if (match) latest = match;
     }
-    const background = findPending(backgroundActivity.map((entry) => entry.part));
-    return background?.type === "tool-call" ? background.toolCall : null;
-  }, [assistantPartsByMessageId, backgroundActivity]);
+    if (latest) return latest;
+    return findLastPending(backgroundActivity.map((entry) => entry.part));
+  }, [assistantPartsByMessageId, backgroundActivity, resolvedQuestionIds]);
   const lastVisibleMessage = visibleMessages.at(-1);
   // Index of the last user message. Everything from here down (that message, its reply,
   // the working indicator, background tool cards) is the "active turn" and gets wrapped
@@ -1867,6 +1899,7 @@ function SessionViewContentBody({
                 key={pendingQuestion.id}
                 sessionId={session.id}
                 toolCall={pendingQuestion}
+                onResolved={markQuestionResolved}
               />
             </div>
           </div>
@@ -3218,9 +3251,11 @@ function QuestionPendingHint({ question }: { question: NonNullable<RuntimeToolCa
 function QuestionComposer({
   sessionId,
   toolCall,
+  onResolved,
 }: {
   sessionId: string;
   toolCall: RuntimeToolCall;
+  onResolved: (toolCallId: string) => void;
 }) {
   const { showError } = useToast();
   const [isResolving, startResolve] = useTransition();
@@ -3288,7 +3323,14 @@ function QuestionComposer({
       });
       if (!result.ok) {
         setOptimistic(null);
-        showError(result.error);
+        if ("code" in result && result.code === "stale") {
+          // The server says this question is already resolved (e.g. it was superseded by a message
+          // and its clearing event was missed). Dismiss the card locally instead of trapping the
+          // user behind a dead composer — the text composer returns immediately.
+          onResolved(toolCall.id);
+        } else {
+          showError(result.error);
+        }
       }
     });
   };
@@ -3299,7 +3341,11 @@ function QuestionComposer({
       const result = await cancelAgentSessionQuestion({ sessionId, toolCallId: toolCall.id });
       if (!result.ok) {
         setOptimistic(null);
-        showError(result.error);
+        if ("code" in result && result.code === "stale") {
+          onResolved(toolCall.id);
+        } else {
+          showError(result.error);
+        }
       }
     });
   };

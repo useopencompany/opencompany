@@ -595,7 +595,7 @@ export async function submitAgentSessionMessage(
   // session, and do NOT trigger a question resume — the new message run continues the turn (the
   // dangling tool-call is dropped from model history by buildModelMessages). Status-guarded so a
   // concurrent answer/cancel always wins.
-  await db
+  const supersededQuestions = await db
     .update(agentSessionQuestions)
     .set({
       status: "cancelled",
@@ -608,7 +608,52 @@ export async function submitAgentSessionMessage(
         eq(agentSessionQuestions.sessionId, sessionId),
         eq(agentSessionQuestions.status, "pending"),
       ),
-    );
+    )
+    .returning({
+      toolCallId: agentSessionQuestions.toolCallId,
+      messageId: agentSessionQuestions.messageId,
+    });
+
+  // The web reducer only moves a question card out of its interactive `pending` state on a
+  // `question.answered` event — it never reconciles against the DB row. Cancelling the row above
+  // is therefore invisible to the UI on its own: without this emit the superseded question would
+  // render as a live, unanswerable card forever, and `pendingQuestion` would let that stale card
+  // shadow every later question and trap the user (only "Abort session" escapes). Mirror the abort
+  // path: persist the resolution event (so reload-derived state is correct) and publish it to the
+  // durable stream (so the live view clears immediately). The loop is empty in the common case
+  // where no question was pending, so the normal send path pays nothing.
+  for (const question of supersededQuestions) {
+    const [resolutionEvent] = await db
+      .insert(agentSessionEvents)
+      .values({
+        sessionId,
+        messageId: question.messageId,
+        type: "question.answered",
+        payload: {
+          messageId: question.messageId ?? "",
+          toolCallId: question.toolCallId,
+          answered: false,
+          answers: [],
+          resolutionSource: "superseded",
+        },
+      })
+      .returning({
+        id: agentSessionEvents.id,
+        type: agentSessionEvents.type,
+        messageId: agentSessionEvents.messageId,
+        payload: agentSessionEvents.payload,
+        createdAt: agentSessionEvents.createdAt,
+      });
+    if (resolutionEvent) {
+      await appendSessionStreamEvent(sessionId, {
+        id: resolutionEvent.id,
+        type: resolutionEvent.type,
+        messageId: resolutionEvent.messageId,
+        payload: resolutionEvent.payload,
+        createdAt: resolutionEvent.createdAt.toISOString(),
+      });
+    }
+  }
 
   // Steering only applies mid-work — a message sent while a turn is actively in flight (or parked
   // mid-turn awaiting input/approval). When the session is idle or the run is already done, this is
@@ -1042,10 +1087,14 @@ export async function submitAgentSessionQuestionResponse(input: {
     .limit(1);
 
   if (!row) {
-    return { ok: false, error: "Question not found." } as const;
+    return { ok: false, error: "Question not found.", code: "stale" } as const;
   }
   if (row.status !== "pending") {
-    return { ok: false, error: "This question is no longer awaiting an answer." } as const;
+    return {
+      ok: false,
+      error: "This question is no longer awaiting an answer.",
+      code: "stale",
+    } as const;
   }
 
   const validationError = validateQuestionAnswers(row.questions, input.answers);
@@ -1073,7 +1122,11 @@ export async function submitAgentSessionQuestionResponse(input: {
     .returning({ id: agentSessionQuestions.id });
 
   if (updated.length === 0) {
-    return { ok: false, error: "This question is no longer awaiting an answer." } as const;
+    return {
+      ok: false,
+      error: "This question is no longer awaiting an answer.",
+      code: "stale",
+    } as const;
   }
 
   await triggerAgentQuestionResume({
@@ -1130,7 +1183,11 @@ export async function cancelAgentSessionQuestion(input: { sessionId: string; too
     .returning({ id: agentSessionQuestions.id });
 
   if (updated.length === 0) {
-    return { ok: false, error: "This question is no longer awaiting an answer." } as const;
+    return {
+      ok: false,
+      error: "This question is no longer awaiting an answer.",
+      code: "stale",
+    } as const;
   }
 
   await triggerAgentQuestionResume({

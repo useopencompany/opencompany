@@ -2,6 +2,7 @@ import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { appendSessionStreamEvent } from "@/lib/agent-sessions/durable-streams";
 import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionStarted,
@@ -136,6 +137,7 @@ const dispatchAgentSessionStartedMock = vi.mocked(dispatchAgentSessionStarted);
 const triggerAgentApprovalResumeMock = vi.mocked(triggerAgentApprovalResume);
 const triggerAgentMessageRunMock = vi.mocked(triggerAgentMessageRun);
 const captureServerEventMock = vi.mocked(captureServerEvent);
+const appendSessionStreamEventMock = vi.mocked(appendSessionStreamEvent);
 
 function fakeAgent(overrides: Record<string, unknown> = {}) {
   return {
@@ -939,7 +941,7 @@ describe("submitAgentSessionMessage", () => {
       ]);
     // submitAgentSessionMessage supersedes any pending ask_user_question via an UPDATE.
     const update = vi.fn(() => ({
-      set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
+      set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([]) })) })),
     }));
     getDbMock.mockReturnValue({ select, insert, batch, update } as never);
 
@@ -971,6 +973,87 @@ describe("submitAgentSessionMessage", () => {
     });
   });
 
+  it("emits a question.answered(superseded) event when a freeform reply supersedes a pending question", async () => {
+    const limit = vi.fn().mockResolvedValue([
+      {
+        id: "ses_123",
+        agentId: "agt_123",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+        engine: "opencompany",
+        status: "completed",
+      },
+    ]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    // The agentSessionEvents insert for the superseded resolution event reads back [resolutionEvent].
+    // insertUserMessage builds its own inserts through the same chain but executes them via db.batch,
+    // so the shared returning() here is only consumed by the emit under test.
+    const resolutionEventRow = {
+      id: 7,
+      type: "question.answered",
+      messageId: "msg_assistant",
+      payload: {
+        messageId: "msg_assistant",
+        toolCallId: "call_q",
+        answered: false,
+        answers: [],
+        resolutionSource: "superseded",
+      },
+      createdAt: new Date("2026-06-04T10:00:00.000Z"),
+    };
+    const returning = vi.fn(() => [resolutionEventRow]);
+    const values = vi.fn(() => ({ returning }));
+    const insert = vi.fn(() => ({ values }));
+    const batch = vi
+      .fn()
+      .mockResolvedValue([
+        [{ id: "msg_456" }],
+        [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
+      ]);
+    // The supersede UPDATE returns the pending question row(s) it cancelled.
+    const update = vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: vi
+            .fn()
+            .mockResolvedValue([{ toolCallId: "call_q", messageId: "msg_assistant" }]),
+        })),
+      })),
+    }));
+    getDbMock.mockReturnValue({ select, insert, batch, update } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", "Actually, do X instead");
+
+    expect(result).toEqual({ ok: true, messageId: "msg_456" });
+    // Persisted: the clearing runtime event the event-derived UI needs to leave "pending". Without
+    // it the superseded question card lingers forever and traps the user.
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "question.answered",
+        messageId: "msg_assistant",
+        payload: expect.objectContaining({
+          toolCallId: "call_q",
+          answered: false,
+          resolutionSource: "superseded",
+        }),
+      }),
+    );
+    // Streamed live so the card clears immediately, not only on reload.
+    expect(appendSessionStreamEventMock).toHaveBeenCalledWith(
+      "ses_123",
+      expect.objectContaining({
+        type: "question.answered",
+        messageId: "msg_assistant",
+        payload: expect.objectContaining({
+          toolCallId: "call_q",
+          resolutionSource: "superseded",
+        }),
+      }),
+    );
+  });
+
   it("routes Codex follow-up messages to the Codex turn runner and skips after-session checks", async () => {
     const limit = vi.fn().mockResolvedValue([
       {
@@ -994,7 +1077,9 @@ describe("submitAgentSessionMessage", () => {
         [{ id: "msg_456" }],
         [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
       ]);
-    const updateSet = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+    const updateSet = vi.fn(() => ({
+      where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([]) })),
+    }));
     const update = vi.fn(() => ({
       set: updateSet,
     }));
@@ -1050,7 +1135,9 @@ describe("submitAgentSessionMessage", () => {
         [{ id: "msg_456" }],
         [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
       ]);
-    const updateSet = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+    const updateSet = vi.fn(() => ({
+      where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([]) })),
+    }));
     const update = vi.fn(() => ({
       set: updateSet,
     }));
