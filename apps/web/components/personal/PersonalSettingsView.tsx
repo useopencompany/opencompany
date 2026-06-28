@@ -13,6 +13,7 @@ import { resetPersonalAgent } from "@/lib/personal/actions";
 import {
   setCodexEngineEnabled as setCodexEngineEnabledAction,
   setCompanySurfaceEnabled as setCompanySurfaceEnabledAction,
+  setHotContext as setHotContextAction,
   setProMode as setProModeAction,
   setUserTimezone as setUserTimezoneAction,
 } from "@/lib/users/actions";
@@ -30,6 +31,8 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     setCompanySurfaceEnabled,
     codexEngineEnabled,
     setCodexEngineEnabled,
+    hotContext,
+    setHotContext,
     userTimezone,
     userTimezoneSource,
     setUserTimezone,
@@ -95,6 +98,19 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
     });
   }
 
+  function onToggleHotContext(next: boolean) {
+    // Flip optimistically so the toggle responds immediately; the runner reads the persisted value
+    // when assembling prompts for future turns.
+    setHotContext(next);
+    startTransition(async () => {
+      const result = await setHotContextAction(next);
+      if (!result.ok) {
+        setHotContext(!next);
+        showError(result.error, "Could not update hot context");
+      }
+    });
+  }
+
   function onSaveTimezone(next: string, source: "browser" | "manual") {
     const previous = userTimezone;
     const previousSource = userTimezoneSource;
@@ -151,6 +167,15 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
           onPressedChange={onToggleCodexEngine}
           onText="The engine selector is shown on agents."
           offText="Agents stay on the OpenCompany runtime."
+        />
+        <FlagRow
+          label="Hot context (experimental)"
+          description="Injects a small, always-present digest of your memory into every agent turn so the agent stays consistent without having to actively retrieve. Experimental — may increase token usage."
+          pressed={hotContext}
+          disabled={isPending}
+          onPressedChange={onToggleHotContext}
+          onText="Memory context is injected into eligible personal-agent turns."
+          offText="Memory context injection is off."
         />
       </Section>
 

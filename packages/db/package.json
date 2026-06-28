@@ -20,6 +20,10 @@
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"
     },
+    "./user-flags": {
+      "types": "./src/user-flags.ts",
+      "default": "./src/user-flags.ts"
+    },
     "./pool": {
       "types": "./src/pool.ts",
       "default": "./src/pool.ts"

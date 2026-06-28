@@ -145,6 +145,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                   proMode={user.proMode}
                   companySurfaceEnabled={user.companySurfaceEnabled}
                   codexEngineEnabled={user.codexEngineEnabled}
+                  hotContext={user.hotContext}
                 >
                   {children}
                 </PersonalShell>

@@ -943,6 +943,8 @@ function makePersonalAgentContext(
     setCompanySurfaceEnabled: vi.fn(),
     codexEngineEnabled: false,
     setCodexEngineEnabled: vi.fn(),
+    hotContext: false,
+    setHotContext: vi.fn(),
     setUserTimezone: vi.fn(),
     setUserTimezoneSource: vi.fn(),
     getDraft: () => ({ body: "Help me.", content: { type: "doc" } }),

@@ -102,6 +102,7 @@ export type PersonalShellProps = {
   proMode: boolean;
   companySurfaceEnabled: boolean;
   codexEngineEnabled: boolean;
+  hotContext: boolean;
   children: React.ReactNode;
 };
 
@@ -129,6 +130,7 @@ export default function PersonalShell({
   proMode: initialProMode,
   companySurfaceEnabled: initialCompanySurfaceEnabled,
   codexEngineEnabled: initialCodexEngineEnabled,
+  hotContext: initialHotContext,
   children,
 }: PersonalShellProps) {
   const { showError } = useToast();
@@ -136,6 +138,7 @@ export default function PersonalShell({
   const [proMode, setProMode] = useState(initialProMode);
   const [companySurfaceEnabled, setCompanySurfaceEnabled] = useState(initialCompanySurfaceEnabled);
   const [codexEngineEnabled, setCodexEngineEnabled] = useState(initialCodexEngineEnabled);
+  const [hotContext, setHotContext] = useState(initialHotContext);
   const [userTimezone, setUserTimezone] = useState(initialUserTimezone);
   const [userTimezoneSource, setUserTimezoneSource] =
     useState<UserTimezoneSource>(initialUserTimezoneSource);
@@ -309,6 +312,8 @@ export default function PersonalShell({
       setCompanySurfaceEnabled,
       codexEngineEnabled,
       setCodexEngineEnabled,
+      hotContext,
+      setHotContext,
       setUserTimezone,
       setUserTimezoneSource,
       githubRequested,
@@ -333,6 +338,7 @@ export default function PersonalShell({
       proMode,
       companySurfaceEnabled,
       codexEngineEnabled,
+      hotContext,
       userTimezone,
       userTimezoneSource,
       workspaceId,

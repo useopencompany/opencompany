@@ -191,7 +191,7 @@ describe("hot context", () => {
     expect(buildSource).toHaveBeenCalledTimes(1);
   });
 
-  it("does not read or snapshot when the caller gate is disabled", async () => {
+  it("does not inject, read, or snapshot when the hot-context flag is disabled", async () => {
     const store = fakeStore(new Map());
     const buildSource = vi.fn();
     const loadSnapshot = vi.spyOn(store, "loadSnapshot");
@@ -205,6 +205,7 @@ describe("hot context", () => {
     });
 
     expect(block).toBeNull();
+    expect(prependHotContextBlock("Base system prompt", block)).toBe("Base system prompt");
     expect(loadSnapshot).not.toHaveBeenCalled();
     expect(saveSnapshot).not.toHaveBeenCalled();
     expect(buildSource).not.toHaveBeenCalled();

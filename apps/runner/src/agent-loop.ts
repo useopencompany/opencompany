@@ -16,6 +16,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { agentFiles, agentSessionMessages } from "@opencompany/db/schema";
+import { isHotContextEnabled } from "@opencompany/db/user-flags";
 import {
   captureException,
   createLogger,
@@ -454,7 +455,7 @@ async function runMessageWithContext(
     const hotContextStore = createDbHotContextStore(ctx.db);
     const hotContextBlock = await observeRunStep(ctx, "load_hot_context", () =>
       loadSessionHotContextBlock({
-        enabled: isPersonalMemorySession(row, agentConfig),
+        enabled: isHotContextEnabled(row.user) && isPersonalMemorySession(row, agentConfig),
         sessionId: input.sessionId,
         store: hotContextStore,
         buildSource: async () => ({

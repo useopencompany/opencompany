@@ -80,6 +80,12 @@ export type PersonalAgentContextValue = {
   codexEngineEnabled: boolean;
   setCodexEngineEnabled: (next: boolean) => void;
 
+  // Per-user "Hot context" feature flag. Seeded from the DB at layout load; the setter flips it
+  // optimistically so the Settings toggle reflects immediately. The runner reads the persisted
+  // value on each session load before assembling the system prompt.
+  hotContext: boolean;
+  setHotContext: (next: boolean) => void;
+
   setUserTimezone: (next: string) => void;
   setUserTimezoneSource: (next: UserTimezoneSource) => void;
 

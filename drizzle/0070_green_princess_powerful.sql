@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "hot_context" boolean DEFAULT false NOT NULL;

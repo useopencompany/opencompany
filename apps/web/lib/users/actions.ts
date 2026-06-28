@@ -149,6 +149,31 @@ export async function setCodexEngineEnabled(next: boolean) {
   return { ok: true as const };
 }
 
+// Per-user "Hot context" feature flag, set from personal Settings. Persisted on
+// `users.hotContext` so the runner picks it up from the session's joined user row when assembling
+// the system prompt. The personal Settings toggle flips it optimistically via PersonalAgentContext.
+export async function setHotContext(next: boolean) {
+  const context = await currentWorkspace({ optional: true });
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  try {
+    await getDb()
+      .update(users)
+      .set({ hotContext: next, updatedAt: new Date() })
+      .where(eq(users.id, context.user.id));
+  } catch {
+    return {
+      ok: false as const,
+      error: "Could not update the hot context flag. Please try again.",
+    };
+  }
+
+  revalidatePath("/personal", "layout");
+  return { ok: true as const };
+}
+
 export async function setUserTimezone(
   input: string | { timezone: string; source?: Exclude<UserTimezoneSource, "unset"> },
 ) {

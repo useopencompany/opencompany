@@ -117,6 +117,11 @@ export const users = pgTable(
     // everyone until they opt in from Settings → Feature flags. Kept on `users` (a tiny boolean)
     // so the auth hot path loads it for free, mirroring `proMode`/`companySurfaceEnabled`.
     codexEngineEnabled: boolean("codex_engine_enabled").notNull().default(false),
+    // Per-user opt-in for the runner hot-context layer. When true eligible personal-memory
+    // sessions get a small, session-stable memory digest injected into the system prompt. Off for
+    // everyone until they opt in from personal Settings. Kept on `users` (a tiny boolean) so the
+    // auth hot path and runner session load get it for free, mirroring `proMode`.
+    hotContext: boolean("hot_context").notNull().default(false),
     // IANA timezone used by user-owned scheduled routines. Individual personal routines derive
     // from this setting so users manage their local time in one place.
     timezone: text("timezone").notNull().default("UTC"),
