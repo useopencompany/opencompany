@@ -134,6 +134,43 @@ describe("hot context", () => {
     expect(buildSource).toHaveBeenCalledTimes(1);
   });
 
+  it("returns the canonical snapshot for concurrent first-turn creation attempts", async () => {
+    const snapshots = new Map<string, string>();
+    const store = fakeCanonicalStore(snapshots);
+    const buildSource = vi
+      .fn()
+      .mockResolvedValueOnce({
+        agentPath: "agents/leo/leo.agent",
+        latestKeeperSummary: "First runner summary.",
+        agentFiles: [{ path: "agents/leo/user.md", content: "Ada prefers concise updates." }],
+      })
+      .mockResolvedValueOnce({
+        agentPath: "agents/leo/leo.agent",
+        latestKeeperSummary: "Second runner summary.",
+        agentFiles: [{ path: "agents/leo/user.md", content: "Changed before retry." }],
+      });
+
+    const [first, second] = await Promise.all([
+      loadSessionHotContextBlock({
+        enabled: true,
+        sessionId: "ses_concurrent",
+        store,
+        buildSource,
+      }),
+      loadSessionHotContextBlock({
+        enabled: true,
+        sessionId: "ses_concurrent",
+        store,
+        buildSource,
+      }),
+    ]);
+
+    expect(first).toBeTruthy();
+    expect(second).toBe(first);
+    expect(snapshots.get("ses_concurrent")).toBe(first);
+    expect(buildSource).toHaveBeenCalledTimes(2);
+  });
+
   it("omits gracefully and snapshots empty when no digest exists", async () => {
     const snapshots = new Map<string, string>();
     const buildSource = vi.fn().mockResolvedValue({
@@ -198,6 +235,24 @@ function fakeStore(snapshots: Map<string, string>): HotContextStore {
     },
     async saveSnapshot(sessionId, block) {
       snapshots.set(sessionId, block);
+      return block;
+    },
+    async loadLatestKeeperSummary() {
+      return undefined;
+    },
+  };
+}
+
+function fakeCanonicalStore(snapshots: Map<string, string>): HotContextStore {
+  return {
+    async loadSnapshot(sessionId) {
+      return snapshots.has(sessionId) ? snapshots.get(sessionId) : undefined;
+    },
+    async saveSnapshot(sessionId, block) {
+      const existing = snapshots.get(sessionId);
+      if (existing !== undefined) return existing;
+      snapshots.set(sessionId, block);
+      return block;
     },
     async loadLatestKeeperSummary() {
       return undefined;

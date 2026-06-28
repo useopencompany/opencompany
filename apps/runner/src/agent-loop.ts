@@ -400,27 +400,6 @@ async function runMessageWithContext(
       row.agent.id,
       row.agent.path,
     );
-    const hotContextStore = createDbHotContextStore(ctx.db);
-    const hotContextBlock = await observeRunStep(ctx, "load_hot_context", () =>
-      loadSessionHotContextBlock({
-        enabled: isPersonalMemorySession(row, agentConfig),
-        sessionId: input.sessionId,
-        store: hotContextStore,
-        buildSource: async () => ({
-          agentPath: row.agent.path,
-          agentFiles: await loadAgentFilesForHotContext({
-            db: ctx.db,
-            workspaceId: row.workspace.id,
-            agentId: row.agent.id,
-          }),
-          latestKeeperSummary: await hotContextStore.loadLatestKeeperSummary({
-            workspaceId: row.workspace.id,
-            userId: row.session.userId,
-            agentId: row.agent.id,
-          }),
-        }),
-      }),
-    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       personalAgent: row.agent.isDefault,
@@ -440,10 +419,6 @@ async function runMessageWithContext(
     const enabledTools = memoryKeeperRun
       ? restrictToolsForMemoryKeeper(runtime.tools)
       : runtime.tools;
-    const baseSystemPrompt = memoryKeeperRun
-      ? `${runtime.systemPrompt}\n\n${MEMORY_KEEPER_SYSTEM_PROMPT}`
-      : runtime.systemPrompt;
-    const systemPrompt = prependHotContextBlock(baseSystemPrompt, hotContextBlock);
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
     logBraintrustSpan(braintrustSpan, {
@@ -476,6 +451,31 @@ async function runMessageWithContext(
     const checkAbort = createLeaseAbortCheck(ctx);
     await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
     validateHostedToolEnvironment({ enabledTools, env: input.env });
+    const hotContextStore = createDbHotContextStore(ctx.db);
+    const hotContextBlock = await observeRunStep(ctx, "load_hot_context", () =>
+      loadSessionHotContextBlock({
+        enabled: isPersonalMemorySession(row, agentConfig),
+        sessionId: input.sessionId,
+        store: hotContextStore,
+        buildSource: async () => ({
+          agentPath: row.agent.path,
+          agentFiles: await loadAgentFilesForHotContext({
+            db: ctx.db,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+          }),
+          latestKeeperSummary: await hotContextStore.loadLatestKeeperSummary({
+            workspaceId: row.workspace.id,
+            userId: row.session.userId,
+            agentId: row.agent.id,
+          }),
+        }),
+      }),
+    );
+    const baseSystemPrompt = memoryKeeperRun
+      ? `${runtime.systemPrompt}\n\n${MEMORY_KEEPER_SYSTEM_PROMPT}`
+      : runtime.systemPrompt;
+    const systemPrompt = prependHotContextBlock(baseSystemPrompt, hotContextBlock);
 
     await requireLeaseWrite(
       timeAsync(ctx.trace, "append_running_status", () =>

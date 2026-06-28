@@ -6,7 +6,7 @@ import {
   agentSessions,
 } from "@opencompany/db/schema";
 import { isCanonicalType, parseDocument } from "@opencompany/memory";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { RunContext } from "./run-context";
 
 const HOT_CONTEXT_SNAPSHOT_EVENT = "hot_context.snapshot";
@@ -26,7 +26,7 @@ type HotContextSource = {
 
 export type HotContextStore = {
   loadSnapshot(sessionId: string): Promise<string | undefined>;
-  saveSnapshot(sessionId: string, block: string): Promise<void>;
+  saveSnapshot(sessionId: string, block: string): Promise<string>;
   loadLatestKeeperSummary(input: {
     workspaceId: string;
     userId: string;
@@ -37,25 +37,20 @@ export type HotContextStore = {
 export function createDbHotContextStore(db: RunContext["db"]): HotContextStore {
   return {
     async loadSnapshot(sessionId) {
-      const rows = await db
-        .select({ payload: agentSessionEvents.payload })
-        .from(agentSessionEvents)
-        .where(
-          and(
-            eq(agentSessionEvents.sessionId, sessionId),
-            eq(agentSessionEvents.type, HOT_CONTEXT_SNAPSHOT_EVENT),
-          ),
-        )
-        .orderBy(asc(agentSessionEvents.id))
-        .limit(1);
-      const block = rows[0]?.payload?.block;
-      return typeof block === "string" ? block : undefined;
+      return loadSnapshotFromDb(db, sessionId);
     },
     async saveSnapshot(sessionId, block) {
-      await db.insert(agentSessionEvents).values({
-        sessionId,
-        type: HOT_CONTEXT_SNAPSHOT_EVENT,
-        payload: { block },
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT id FROM agent_sessions WHERE id = ${sessionId} FOR UPDATE`);
+        const existing = await loadSnapshotFromDb(tx, sessionId);
+        if (existing !== undefined) return existing;
+
+        await tx.insert(agentSessionEvents).values({
+          sessionId,
+          type: HOT_CONTEXT_SNAPSHOT_EVENT,
+          payload: { block },
+        });
+        return block;
       });
     },
     async loadLatestKeeperSummary(input) {
@@ -80,6 +75,22 @@ export function createDbHotContextStore(db: RunContext["db"]): HotContextStore {
   };
 }
 
+async function loadSnapshotFromDb(db: RunContext["db"], sessionId: string) {
+  const rows = await db
+    .select({ payload: agentSessionEvents.payload })
+    .from(agentSessionEvents)
+    .where(
+      and(
+        eq(agentSessionEvents.sessionId, sessionId),
+        eq(agentSessionEvents.type, HOT_CONTEXT_SNAPSHOT_EVENT),
+      ),
+    )
+    .orderBy(asc(agentSessionEvents.id))
+    .limit(1);
+  const block = rows[0]?.payload?.block;
+  return typeof block === "string" ? block : undefined;
+}
+
 export async function loadSessionHotContextBlock(input: {
   enabled: boolean;
   sessionId: string;
@@ -91,9 +102,9 @@ export async function loadSessionHotContextBlock(input: {
   const existing = await input.store.loadSnapshot(input.sessionId);
   if (existing !== undefined) return existing.trim() ? existing : null;
 
-  const block = buildHotContextBlock(await input.buildSource());
-  await input.store.saveSnapshot(input.sessionId, block ?? "");
-  return block;
+  const block = buildHotContextBlock(await input.buildSource()) ?? "";
+  const snapshot = await input.store.saveSnapshot(input.sessionId, block);
+  return snapshot.trim() ? snapshot : null;
 }
 
 export function loadAgentFilesForHotContext(input: {
