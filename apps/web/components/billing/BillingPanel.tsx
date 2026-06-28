@@ -18,11 +18,13 @@ import {
   redeemCreditCode,
   startAutoRefillSetup,
   updateAutoRefillSettings,
+  updateDailySpendLimit,
   updateSpendLimit,
 } from "@/lib/billing/actions";
 import {
   isValidAutoRefillAmountCents,
   isValidAutoRefillThresholdCents,
+  isValidDailySpendLimitCents,
   isValidTopUpAmountCents,
   isValidWeeklySpendLimitCents,
   MAX_TOP_UP_AMOUNT_CENTS,
@@ -65,6 +67,10 @@ export type BillingData = {
     weeklySpendLimitUsdMicros: number | null;
     weeklySpendUsdMicros: number;
     weekResetsAt: string;
+    dailySpendLimitEnabled: boolean;
+    dailySpendLimitUsdMicros: number | null;
+    dailySpendUsdMicros: number;
+    dayResetsAt: string;
     autoRefillEnabled: boolean;
     autoRefillThresholdUsdMicros: number | null;
     autoRefillAmountUsdMicros: number | null;
@@ -314,19 +320,49 @@ function microsToDollarInput(micros: number | null) {
   return String(micros / 1_000_000);
 }
 
-function SpendingLimitCard({ settings }: { settings: BillingData["settings"] }) {
+// One spending-limit window (daily or weekly) rendered as a compact row inside the
+// shared SpendingLimitsCard. Parameterized so both windows share the input/validate/
+// save/progress logic — the only differences are the labels and which server action
+// persists the value.
+function LimitRow({
+  label,
+  resetHint,
+  enabled,
+  limitUsdMicros,
+  spendUsdMicros,
+  resetsAt,
+  placeholder,
+  validate,
+  invalidMessage,
+  onSave,
+}: {
+  label: string;
+  resetHint: string;
+  enabled: boolean;
+  limitUsdMicros: number | null;
+  spendUsdMicros: number;
+  resetsAt: string;
+  placeholder: string;
+  validate: (cents: number) => boolean;
+  invalidMessage: string;
+  onSave: (input: {
+    enabled: boolean;
+    cents: number | null;
+  }) => Promise<{ ok: true } | { ok: false; error: string }>;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [limitInput, setLimitInput] = useState(
-    microsToDollarInput(settings.weeklySpendLimitUsdMicros),
-  );
+  const [limitInput, setLimitInput] = useState(microsToDollarInput(limitUsdMicros));
 
-  const limit = settings.weeklySpendLimitUsdMicros;
-  const active = settings.spendLimitEnabled && limit != null;
-  const spend = settings.weeklySpendUsdMicros;
-  const pct = active && limit > 0 ? Math.min(100, Math.round((spend / limit) * 100)) : 0;
-  const resetLabel = new Date(settings.weekResetsAt).toLocaleDateString(undefined, {
+  const active = enabled && limitUsdMicros != null;
+  const pct =
+    active && limitUsdMicros > 0
+      ? Math.min(100, Math.round((spendUsdMicros / limitUsdMicros) * 100))
+      : 0;
+  // Date-only label (no clock time) so it never contradicts the reset-cadence hint
+  // and stays stable between server and client renders.
+  const resetLabel = new Date(resetsAt).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
   });
@@ -335,14 +371,14 @@ function SpendingLimitCard({ settings }: { settings: BillingData["settings"] }) 
     setError(null);
     const dollars = Number.parseFloat(limitInput);
     const cents = Math.round(dollars * 100);
-    if (nextEnabled && (!Number.isFinite(dollars) || !isValidWeeklySpendLimitCents(cents))) {
-      setError("Enter a weekly limit between $1 and $10,000.");
+    if (nextEnabled && (!Number.isFinite(dollars) || !validate(cents))) {
+      setError(invalidMessage);
       return;
     }
     startTransition(async () => {
-      const result = await updateSpendLimit({
+      const result = await onSave({
         enabled: nextEnabled,
-        weeklyLimitCents: Number.isFinite(cents) ? cents : null,
+        cents: Number.isFinite(cents) ? cents : null,
       });
       if (!result.ok) {
         setError(result.error);
@@ -353,68 +389,114 @@ function SpendingLimitCard({ settings }: { settings: BillingData["settings"] }) 
   };
 
   return (
+    <div className="py-3 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-medium text-ink">{label}</div>
+          <div className="mt-0.5 text-[11.5px] text-ink-muted">
+            {active ? (
+              <>
+                <span className="font-medium text-ink">{formatUsdMicros(spendUsdMicros)}</span> of{" "}
+                {formatUsdMicros(limitUsdMicros)} · resets {resetLabel}
+              </>
+            ) : (
+              resetHint
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex h-8 items-center rounded-md border border-border bg-surface focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15">
+            <span className="pl-2.5 text-[12.5px] text-ink-subtle">$</span>
+            <input
+              inputMode="decimal"
+              value={limitInput}
+              onChange={(event) => {
+                setLimitInput(event.target.value);
+                setError(null);
+              }}
+              placeholder={placeholder}
+              className="h-full w-[92px] bg-transparent px-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
+            />
+          </div>
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => save(true)}
+            className="inline-flex h-8 shrink-0 items-center rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isPending ? "Saving..." : active ? "Update" : "Set"}
+          </button>
+          {active && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => save(false)}
+              className="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Turn off
+            </button>
+          )}
+        </div>
+      </div>
+      {active && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
+          <div
+            className={`h-full rounded-full ${pct >= 100 ? "bg-danger" : "bg-ink"}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+      {error && <div className="mt-1.5 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+// Daily + weekly caps in a single card so the two related controls read as one
+// "Spending limits" feature instead of two near-identical boxes.
+function SpendingLimitsCard({ settings }: { settings: BillingData["settings"] }) {
+  return (
     <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
       <div className="flex items-start gap-3">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
           <WalletCards size={15} strokeWidth={1.8} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">Spending limit</div>
+          <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+            Spending limits
+          </div>
           <div className="mt-0.5 text-[12px] leading-5 text-ink-muted">
-            Pause agents once weekly usage reaches your cap.
+            Pause agents automatically once usage reaches a cap.
           </div>
-
-          {active && (
-            <div className="mt-3">
-              <div className="flex items-center justify-between text-[12px] text-ink-muted">
-                <span className="font-medium text-ink">{formatUsdMicros(spend)} spent</span>
-                <span>
-                  {pct}% of {formatUsdMicros(limit)} · resets {resetLabel}
-                </span>
-              </div>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-surface-muted">
-                <div
-                  className={`h-full rounded-full ${pct >= 100 ? "bg-danger" : "bg-ink"}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <div className="flex h-8 items-center rounded-md border border-border bg-surface focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15">
-              <span className="pl-2.5 text-[12.5px] text-ink-subtle">$</span>
-              <input
-                inputMode="decimal"
-                value={limitInput}
-                onChange={(event) => {
-                  setLimitInput(event.target.value);
-                  setError(null);
-                }}
-                placeholder="Weekly limit"
-                className="h-full w-[120px] bg-transparent px-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
-              />
-            </div>
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => save(true)}
-              className="inline-flex h-8 shrink-0 items-center rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isPending ? "Saving..." : active ? "Update limit" : "Set limit"}
-            </button>
-            {active && (
-              <button
-                type="button"
-                disabled={isPending}
-                onClick={() => save(false)}
-                className="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Turn off
-              </button>
-            )}
+          <div className="mt-3 divide-y divide-border-subtle">
+            <LimitRow
+              label="Daily"
+              resetHint="Resets at midnight UTC"
+              enabled={settings.dailySpendLimitEnabled}
+              limitUsdMicros={settings.dailySpendLimitUsdMicros}
+              spendUsdMicros={settings.dailySpendUsdMicros}
+              resetsAt={settings.dayResetsAt}
+              placeholder="Daily limit"
+              validate={isValidDailySpendLimitCents}
+              invalidMessage="Enter a daily limit between $1 and $10,000."
+              onSave={({ enabled, cents }) =>
+                updateDailySpendLimit({ enabled, dailyLimitCents: cents })
+              }
+            />
+            <LimitRow
+              label="Weekly"
+              resetHint="Resets Monday at midnight UTC"
+              enabled={settings.spendLimitEnabled}
+              limitUsdMicros={settings.weeklySpendLimitUsdMicros}
+              spendUsdMicros={settings.weeklySpendUsdMicros}
+              resetsAt={settings.weekResetsAt}
+              placeholder="Weekly limit"
+              validate={isValidWeeklySpendLimitCents}
+              invalidMessage="Enter a weekly limit between $1 and $10,000."
+              onSave={({ enabled, cents }) =>
+                updateSpendLimit({ enabled, weeklyLimitCents: cents })
+              }
+            />
           </div>
-          {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
         </div>
       </div>
     </div>
@@ -678,7 +760,7 @@ export function BillingPanel({
         {checkoutError && <div className="mt-2 text-[12px] text-danger">{checkoutError}</div>}
       </div>
 
-      <SpendingLimitCard settings={billing.settings} />
+      <SpendingLimitsCard settings={billing.settings} />
       <AutomaticRefillCard settings={billing.settings} returnPath={settingsReturnPath} />
 
       <form

@@ -5,6 +5,8 @@ import {
   calculatePlatformFeeUsdMicros,
   calculateSandboxUsageCost,
   checkWorkspaceRunAllowance,
+  getDayResetAtUtc,
+  getDayStartUtc,
   getUsageSpendSinceUsdMicros,
   getWeekResetAtUtc,
   getWeekStartUtc,
@@ -367,6 +369,23 @@ describe("getWeekStartUtc / getWeekResetAtUtc", () => {
   });
 });
 
+describe("getDayStartUtc / getDayResetAtUtc", () => {
+  it("returns midnight UTC for the day containing the timestamp", () => {
+    const start = getDayStartUtc(new Date("2026-06-17T13:45:30.123Z"));
+    expect(start.toISOString()).toBe("2026-06-17T00:00:00.000Z");
+  });
+
+  it("treats midnight UTC as the start of its own day", () => {
+    const start = getDayStartUtc(new Date("2026-06-17T00:00:00.000Z"));
+    expect(start.toISOString()).toBe("2026-06-17T00:00:00.000Z");
+  });
+
+  it("reset is exactly one day after the day start", () => {
+    const reset = getDayResetAtUtc(new Date("2026-06-17T13:45:30.123Z"));
+    expect(reset.toISOString()).toBe("2026-06-18T00:00:00.000Z");
+  });
+});
+
 describe("getUsageSpendSinceUsdMicros", () => {
   it("returns the summed magnitude of usage debits", async () => {
     const db = { execute: async () => ({ rows: [{ spendUsdMicros: 1_234_500 }] }) };
@@ -462,5 +481,62 @@ describe("checkWorkspaceRunAllowance", () => {
     });
     const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
     expect(result.allowed).toBe(true);
+  });
+
+  it("blocks with daily_limit_reached when daily spend meets the enabled daily limit", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 5_000_000,
+      spendLimitEnabled: false,
+      weeklySpendLimitUsdMicros: null,
+      weeklySpendUsdMicros: 0,
+      dailySpendLimitEnabled: true,
+      dailySpendLimitUsdMicros: 1_000_000,
+      dailySpendUsdMicros: 1_000_000,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result).toMatchObject({ allowed: false, reason: "daily_limit_reached" });
+  });
+
+  it("does not enforce the daily limit when dailySpendLimitEnabled is false", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 5_000_000,
+      spendLimitEnabled: false,
+      weeklySpendLimitUsdMicros: null,
+      weeklySpendUsdMicros: 0,
+      dailySpendLimitEnabled: false,
+      dailySpendLimitUsdMicros: 1_000_000,
+      dailySpendUsdMicros: 9_000_000,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result.allowed).toBe(true);
+  });
+
+  it("prioritizes daily_limit_reached over weekly_limit_reached when both apply", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 5_000_000,
+      spendLimitEnabled: true,
+      weeklySpendLimitUsdMicros: 2_000_000,
+      weeklySpendUsdMicros: 2_000_000,
+      dailySpendLimitEnabled: true,
+      dailySpendLimitUsdMicros: 1_000_000,
+      dailySpendUsdMicros: 1_000_000,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result.reason).toBe("daily_limit_reached");
+  });
+
+  it("allows when daily spend is below the daily limit", async () => {
+    const db = dbReturning({
+      balanceUsdMicros: 3_000_000,
+      spendLimitEnabled: false,
+      weeklySpendLimitUsdMicros: null,
+      weeklySpendUsdMicros: 0,
+      dailySpendLimitEnabled: true,
+      dailySpendLimitUsdMicros: 1_000_000,
+      dailySpendUsdMicros: 999_999,
+    });
+    const result = await checkWorkspaceRunAllowance({ db, workspaceId: "wks_1" });
+    expect(result.allowed).toBe(true);
+    expect(result.dailySpendUsdMicros).toBe(999_999);
   });
 });

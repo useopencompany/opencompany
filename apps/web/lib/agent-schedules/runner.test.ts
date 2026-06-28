@@ -40,7 +40,7 @@ const ensureWorkspaceRunAllowanceMock = vi.mocked(ensureWorkspaceRunAllowance);
 
 function allowanceResult(
   allowed: boolean,
-  reason: "no_balance" | "weekly_limit_reached" = "no_balance",
+  reason: "no_balance" | "weekly_limit_reached" | "daily_limit_reached" = "no_balance",
 ) {
   const base = {
     balanceUsdMicros: allowed ? 1_000_000 : 0,
@@ -48,6 +48,10 @@ function allowanceResult(
     weeklySpendLimitUsdMicros: null,
     spendLimitEnabled: false,
     weekStartsAt: new Date(0),
+    dailySpendUsdMicros: 0,
+    dailySpendLimitUsdMicros: null,
+    dailySpendLimitEnabled: false,
+    dayStartsAt: new Date(0),
   };
   return allowed
     ? ({ allowed: true, allowance: { allowed: true, reason: null, ...base } } as const)
@@ -190,6 +194,27 @@ describe("sweepAgentSchedules", () => {
       expect.objectContaining({
         status: "failed",
         error: "Workspace has no credits.",
+        reservationToken: null,
+        pendingExpiresAt: null,
+      }),
+    );
+  });
+
+  it("marks a reserved run failed with the daily-limit message when the daily cap is hit", async () => {
+    const db = fakeDb({ reserveRows: [{ id: 1, reservationToken: "claim_123" }] });
+    getDbMock.mockReturnValue(db as never);
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(
+      allowanceResult(false, "daily_limit_reached"),
+    );
+
+    const result = await sweepAgentSchedules(new Date("2026-06-01T09:00:00.000Z"));
+
+    expect(result).toMatchObject({ dueRuns: 1, startedRuns: 0, failedRuns: 1 });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+    expect(db.scheduleRunUpdates).toContainEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: "Workspace daily spending limit reached.",
         reservationToken: null,
         pendingExpiresAt: null,
       }),

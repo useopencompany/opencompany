@@ -1,6 +1,7 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
   checkWorkspaceRunAllowance,
+  isSpendLimitReason,
   usdMicrosToCents,
   type WorkspaceRunAllowance,
 } from "@opencompany/billing";
@@ -47,8 +48,9 @@ export async function maybeTriggerAutoRefill(input: {
   const db = input.db ?? getDb();
   const { allowance } = input;
 
-  // Never refill into a wall — if the weekly cap is the blocker, money won't help.
-  if (allowance.reason === "weekly_limit_reached") return { recharged: false };
+  // Never refill into a wall — if a spend cap (daily or weekly) is the blocker, money
+  // won't help; the user must raise the limit or wait for the reset.
+  if (isSpendLimitReason(allowance.reason)) return { recharged: false };
 
   const settings = await loadWorkspaceBillingSettings(input.workspaceId, db);
   if (

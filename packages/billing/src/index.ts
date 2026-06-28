@@ -743,6 +743,20 @@ export function getWeekResetAtUtc(now: Date): Date {
   return next;
 }
 
+// 00:00:00.000 UTC of the day containing `now`. The daily spend limit resets on
+// this fixed UTC-midnight boundary (not a rolling 24h window), mirroring the
+// weekly cadence so the UI can show a concrete "resets at <time>".
+export function getDayStartUtc(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+// Start of the next day — the moment the current day's spend resets to zero.
+export function getDayResetAtUtc(now: Date): Date {
+  const next = getDayStartUtc(now);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
+
 function toFiniteNumber(value: number | string | null | undefined, fallback = 0): number {
   if (value === null || value === undefined) return fallback;
   const parsed = typeof value === "string" ? Number.parseInt(value, 10) : value;
@@ -772,7 +786,25 @@ export async function getUsageSpendSinceUsdMicros(input: {
   return toFiniteNumber(rows[0]?.spendUsdMicros);
 }
 
-export type RunAllowanceReason = "no_balance" | "weekly_limit_reached";
+export type RunAllowanceReason = "no_balance" | "weekly_limit_reached" | "daily_limit_reached";
+
+// True when a block is an intentional spend cap (daily or weekly) rather than an
+// empty balance. Callers use this to branch UX (raise-the-limit vs add-credits) and
+// to suppress auto-refill — so a new limit window only has to be added here, not at
+// every call site.
+export function isSpendLimitReason(reason: RunAllowanceReason | null | undefined): boolean {
+  return reason === "daily_limit_reached" || reason === "weekly_limit_reached";
+}
+
+// Human label for the window a spend-limit reason refers to ("daily"/"weekly").
+// Returns null for non-limit reasons.
+export function spendLimitWindowLabel(
+  reason: RunAllowanceReason | null | undefined,
+): "daily" | "weekly" | null {
+  if (reason === "daily_limit_reached") return "daily";
+  if (reason === "weekly_limit_reached") return "weekly";
+  return null;
+}
 
 export type WorkspaceRunAllowance = {
   allowed: boolean;
@@ -782,15 +814,20 @@ export type WorkspaceRunAllowance = {
   weeklySpendLimitUsdMicros: number | null;
   spendLimitEnabled: boolean;
   weekStartsAt: Date;
+  dailySpendUsdMicros: number;
+  dailySpendLimitUsdMicros: number | null;
+  dailySpendLimitEnabled: boolean;
+  dayStartsAt: Date;
 };
 
-// Single-round-trip gate combining the positive-balance check with the weekly
-// spend limit. Read-only and side-effect free so it can be reused by run gates,
-// the auto-refill evaluator, and the billing UI.
+// Single-round-trip gate combining the positive-balance check with the daily and
+// weekly spend limits. Read-only and side-effect free so it can be reused by run
+// gates, the auto-refill evaluator, and the billing UI.
 //
-// Reason priority: weekly_limit_reached takes precedence over no_balance, because
-// when the cap is hit adding credits (or auto-refilling) won't unblock the user —
-// they must raise the limit or wait for the weekly reset.
+// Reason priority: daily_limit_reached > weekly_limit_reached > no_balance. The
+// limit reasons take precedence over no_balance because when a cap is hit adding
+// credits (or auto-refilling) won't unblock the user — they must raise the limit
+// or wait for the reset. Daily is reported first as the tighter window.
 export async function checkWorkspaceRunAllowance(input: {
   db: ExecutableDb;
   workspaceId: string;
@@ -798,6 +835,11 @@ export async function checkWorkspaceRunAllowance(input: {
 }): Promise<WorkspaceRunAllowance> {
   const now = input.now ?? new Date();
   const weekStartsAt = getWeekStartUtc(now);
+  const dayStartsAt = getDayStartUtc(now);
+  const usageSources = sql.join(
+    USAGE_LEDGER_SOURCES.map((source) => sql`${source}`),
+    sql`, `,
+  );
 
   const result = await input.db.execute(sql`
     WITH bal AS (
@@ -807,27 +849,38 @@ export async function checkWorkspaceRunAllowance(input: {
       LIMIT 1
     ),
     settings AS (
-      SELECT spend_limit_enabled, weekly_spend_limit_usd_micros
+      SELECT
+        spend_limit_enabled,
+        weekly_spend_limit_usd_micros,
+        daily_spend_limit_enabled,
+        daily_spend_limit_usd_micros
       FROM workspace_billing_settings
       WHERE workspace_id = ${input.workspaceId}
       LIMIT 1
     ),
     spend AS (
-      SELECT COALESCE(SUM(-amount_usd_micros), 0) AS weekly_spend
+      -- Single scan over the weekly window; the daily sum is the same window narrowed
+      -- by FILTER, since the current day always falls inside the current week.
+      SELECT
+        COALESCE(SUM(-amount_usd_micros), 0) AS weekly_spend,
+        COALESCE(
+          SUM(-amount_usd_micros) FILTER (WHERE created_at >= ${dayStartsAt.toISOString()}),
+          0
+        ) AS daily_spend
       FROM workspace_credit_ledger
       WHERE workspace_id = ${input.workspaceId}
         AND amount_usd_micros < 0
-        AND source IN (${sql.join(
-          USAGE_LEDGER_SOURCES.map((source) => sql`${source}`),
-          sql`, `,
-        )})
+        AND source IN (${usageSources})
         AND created_at >= ${weekStartsAt.toISOString()}
     )
     SELECT
       COALESCE((SELECT balance FROM bal), 0) AS "balanceUsdMicros",
       COALESCE((SELECT spend_limit_enabled FROM settings), false) AS "spendLimitEnabled",
       (SELECT weekly_spend_limit_usd_micros FROM settings) AS "weeklySpendLimitUsdMicros",
-      COALESCE((SELECT weekly_spend FROM spend), 0) AS "weeklySpendUsdMicros"
+      COALESCE((SELECT weekly_spend FROM spend), 0) AS "weeklySpendUsdMicros",
+      COALESCE((SELECT daily_spend_limit_enabled FROM settings), false) AS "dailySpendLimitEnabled",
+      (SELECT daily_spend_limit_usd_micros FROM settings) AS "dailySpendLimitUsdMicros",
+      COALESCE((SELECT daily_spend FROM spend), 0) AS "dailySpendUsdMicros"
   `);
 
   const rows = rowsFromExecute<{
@@ -835,6 +888,9 @@ export async function checkWorkspaceRunAllowance(input: {
     spendLimitEnabled: boolean;
     weeklySpendLimitUsdMicros: number | string | null;
     weeklySpendUsdMicros: number | string;
+    dailySpendLimitEnabled: boolean;
+    dailySpendLimitUsdMicros: number | string | null;
+    dailySpendUsdMicros: number | string;
   }>(result);
   const row = rows[0];
 
@@ -845,6 +901,12 @@ export async function checkWorkspaceRunAllowance(input: {
       ? null
       : toFiniteNumber(row.weeklySpendLimitUsdMicros);
   const weeklySpendUsdMicros = toFiniteNumber(row?.weeklySpendUsdMicros);
+  const dailySpendLimitEnabled = row?.dailySpendLimitEnabled === true;
+  const dailySpendLimitUsdMicros =
+    row?.dailySpendLimitUsdMicros === null || row?.dailySpendLimitUsdMicros === undefined
+      ? null
+      : toFiniteNumber(row.dailySpendLimitUsdMicros);
+  const dailySpendUsdMicros = toFiniteNumber(row?.dailySpendUsdMicros);
 
   const base = {
     balanceUsdMicros,
@@ -852,7 +914,19 @@ export async function checkWorkspaceRunAllowance(input: {
     weeklySpendLimitUsdMicros,
     spendLimitEnabled,
     weekStartsAt,
+    dailySpendUsdMicros,
+    dailySpendLimitUsdMicros,
+    dailySpendLimitEnabled,
+    dayStartsAt,
   };
+
+  if (
+    dailySpendLimitEnabled &&
+    dailySpendLimitUsdMicros !== null &&
+    dailySpendUsdMicros >= dailySpendLimitUsdMicros
+  ) {
+    return { allowed: false, reason: "daily_limit_reached", ...base };
+  }
 
   if (
     spendLimitEnabled &&

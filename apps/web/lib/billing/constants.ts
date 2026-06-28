@@ -32,6 +32,19 @@ export function isValidWeeklySpendLimitCents(value: number) {
   );
 }
 
+// Daily spending limit bounds. Same range as the weekly cap; the two limits are
+// independent and either/both can be active.
+export const MIN_DAILY_SPEND_LIMIT_CENTS = 100; // $1
+export const MAX_DAILY_SPEND_LIMIT_CENTS = 1_000_000; // $10,000
+
+export function isValidDailySpendLimitCents(value: number) {
+  return (
+    Number.isSafeInteger(value) &&
+    value >= MIN_DAILY_SPEND_LIMIT_CENTS &&
+    value <= MAX_DAILY_SPEND_LIMIT_CENTS
+  );
+}
+
 // Automatic refill bounds. The charged amount reuses the top-up range; the
 // threshold (balance at which a refill fires) may be anywhere from $0 up to the
 // max top-up.

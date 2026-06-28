@@ -484,6 +484,13 @@
       "when": 1782461238725,
       "tag": "0068_mysterious_king_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1782650823133,
+      "tag": "0069_futuristic_white_tiger",
+      "breakpoints": true
     }
   ]
 }

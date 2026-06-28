@@ -10,12 +10,15 @@ import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
 import {
   isValidAutoRefillAmountCents,
   isValidAutoRefillThresholdCents,
+  isValidDailySpendLimitCents,
   isValidTopUpAmountCents,
   isValidWeeklySpendLimitCents,
   MAX_AUTO_REFILL_AMOUNT_CENTS,
+  MAX_DAILY_SPEND_LIMIT_CENTS,
   MAX_TOP_UP_AMOUNT_CENTS,
   MAX_WEEKLY_SPEND_LIMIT_CENTS,
   MIN_AUTO_REFILL_AMOUNT_CENTS,
+  MIN_DAILY_SPEND_LIMIT_CENTS,
   MIN_TOP_UP_AMOUNT_CENTS,
   MIN_WEEKLY_SPEND_LIMIT_CENTS,
 } from "@/lib/billing/constants";
@@ -229,6 +232,48 @@ export async function updateSpendLimit(input: {
       workspace_id: workspace.id,
       enabled: input.enabled,
       weekly_limit_cents: input.weeklyLimitCents,
+    }),
+  );
+
+  revalidateBillingSurfaces();
+  return { ok: true as const };
+}
+
+export async function updateDailySpendLimit(input: {
+  enabled: boolean;
+  dailyLimitCents: number | null;
+}) {
+  const context = await currentWorkspace({ optional: true });
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+  const { workspace } = context;
+
+  let dailySpendLimitUsdMicros: number | null = null;
+  if (input.dailyLimitCents != null) {
+    if (!isValidDailySpendLimitCents(input.dailyLimitCents)) {
+      return {
+        ok: false as const,
+        error: `Daily limit must be between $${MIN_DAILY_SPEND_LIMIT_CENTS / 100} and $${
+          MAX_DAILY_SPEND_LIMIT_CENTS / 100
+        }.`,
+      };
+    }
+    dailySpendLimitUsdMicros = centsToUsdMicros(input.dailyLimitCents);
+  } else if (input.enabled) {
+    return { ok: false as const, error: "Set a daily limit amount before enabling it." };
+  }
+
+  await upsertWorkspaceBillingSettings(workspace.id, {
+    dailySpendLimitEnabled: input.enabled,
+    dailySpendLimitUsdMicros,
+  });
+
+  after(() =>
+    captureServerEvent("daily_spend_limit_updated", context.user.id, {
+      workspace_id: workspace.id,
+      enabled: input.enabled,
+      daily_limit_cents: input.dailyLimitCents,
     }),
   );
 

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   centsToUsdMicros,
+  getDayResetAtUtc,
+  getDayStartUtc,
   getUsageSpendSinceUsdMicros,
   getWeekResetAtUtc,
   getWeekStartUtc,
@@ -73,34 +75,42 @@ export async function loadBillingOverview(workspaceId: string) {
   const db = getDb();
   const now = new Date();
   const weekStartsAt = getWeekStartUtc(now);
-  const [balanceRow, ledgerRows, spendRows, sessionChargeRows, settings, weeklySpendUsdMicros] =
-    await Promise.all([
-      db
-        .select({
-          balanceCents: workspaceCreditBalances.balanceCents,
-          balanceUsdMicros: workspaceCreditBalances.balanceUsdMicros,
-        })
-        .from(workspaceCreditBalances)
-        .where(eq(workspaceCreditBalances.workspaceId, workspaceId))
-        .limit(1),
-      db
-        .select({
-          id: workspaceCreditLedger.id,
-          amountCents: workspaceCreditLedger.amountCents,
-          amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
-          source: workspaceCreditLedger.source,
-          sessionId: workspaceCreditLedger.sessionId,
-          providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
-          platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
-          createdAt: workspaceCreditLedger.createdAt,
-          costBasis: workspaceCreditLedger.costBasis,
-          metadata: workspaceCreditLedger.metadata,
-        })
-        .from(workspaceCreditLedger)
-        .where(eq(workspaceCreditLedger.workspaceId, workspaceId))
-        .orderBy(desc(workspaceCreditLedger.createdAt))
-        .limit(20),
-      db.execute(sql`
+  const dayStartsAt = getDayStartUtc(now);
+  const [
+    balanceRow,
+    ledgerRows,
+    spendRows,
+    sessionChargeRows,
+    settings,
+    weeklySpendUsdMicros,
+    dailySpendUsdMicros,
+  ] = await Promise.all([
+    db
+      .select({
+        balanceCents: workspaceCreditBalances.balanceCents,
+        balanceUsdMicros: workspaceCreditBalances.balanceUsdMicros,
+      })
+      .from(workspaceCreditBalances)
+      .where(eq(workspaceCreditBalances.workspaceId, workspaceId))
+      .limit(1),
+    db
+      .select({
+        id: workspaceCreditLedger.id,
+        amountCents: workspaceCreditLedger.amountCents,
+        amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
+        source: workspaceCreditLedger.source,
+        sessionId: workspaceCreditLedger.sessionId,
+        providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
+        platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
+        createdAt: workspaceCreditLedger.createdAt,
+        costBasis: workspaceCreditLedger.costBasis,
+        metadata: workspaceCreditLedger.metadata,
+      })
+      .from(workspaceCreditLedger)
+      .where(eq(workspaceCreditLedger.workspaceId, workspaceId))
+      .orderBy(desc(workspaceCreditLedger.createdAt))
+      .limit(20),
+    db.execute(sql`
       SELECT
         COALESCE(SUM(-amount_usd_micros) FILTER (
           WHERE amount_usd_micros < 0 AND created_at >= now() - interval '7 days'
@@ -111,7 +121,7 @@ export async function loadBillingOverview(workspaceId: string) {
       FROM workspace_credit_ledger
       WHERE workspace_id = ${workspaceId}
     `),
-      db.execute(sql`
+    db.execute(sql`
       WITH RECURSIVE session_tree(id, root_id, path) AS (
         SELECT id, id AS root_id, ARRAY[id]::text[]
         FROM agent_sessions
@@ -152,9 +162,10 @@ export async function loadBillingOverview(workspaceId: string) {
       ORDER BY MAX(ledger_with_root.created_at) DESC
       LIMIT 5
     `),
-      loadWorkspaceBillingSettings(workspaceId, db),
-      getUsageSpendSinceUsdMicros({ db, workspaceId, since: weekStartsAt }),
-    ]);
+    loadWorkspaceBillingSettings(workspaceId, db),
+    getUsageSpendSinceUsdMicros({ db, workspaceId, since: weekStartsAt }),
+    getUsageSpendSinceUsdMicros({ db, workspaceId, since: dayStartsAt }),
+  ]);
   const balanceUsdMicros =
     balanceRow[0]?.balanceUsdMicros ?? centsToUsdMicros(balanceRow[0]?.balanceCents ?? 0);
   const spend = rowsFromExecute<{
@@ -190,6 +201,10 @@ export async function loadBillingOverview(workspaceId: string) {
       weeklySpendLimitUsdMicros: settings?.weeklySpendLimitUsdMicros ?? null,
       weeklySpendUsdMicros,
       weekResetsAt: getWeekResetAtUtc(now),
+      dailySpendLimitEnabled: settings?.dailySpendLimitEnabled ?? false,
+      dailySpendLimitUsdMicros: settings?.dailySpendLimitUsdMicros ?? null,
+      dailySpendUsdMicros,
+      dayResetsAt: getDayResetAtUtc(now),
       autoRefillEnabled: settings?.autoRefillEnabled ?? false,
       autoRefillThresholdUsdMicros: settings?.autoRefillThresholdUsdMicros ?? null,
       autoRefillAmountUsdMicros: settings?.autoRefillAmountUsdMicros ?? null,
@@ -586,6 +601,8 @@ type BillingSettingsPatch = Partial<
     WorkspaceBillingSettings,
     | "spendLimitEnabled"
     | "weeklySpendLimitUsdMicros"
+    | "dailySpendLimitEnabled"
+    | "dailySpendLimitUsdMicros"
     | "autoRefillEnabled"
     | "autoRefillThresholdUsdMicros"
     | "autoRefillAmountUsdMicros"

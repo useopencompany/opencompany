@@ -7,6 +7,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentScheduleTriggerConfig } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
+import { spendLimitWindowLabel } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import type { Agent, AgentScheduleRun } from "@opencompany/db/schema";
 import {
@@ -84,8 +85,9 @@ export async function runScheduledAgent(input: {
       workspaceId: input.agent.workspaceId,
     });
     if (!allowance.allowed) {
-      if (allowance.reason === "weekly_limit_reached") {
-        await failScheduleRun(reserved, "Workspace weekly spending limit reached.");
+      const limitWindow = spendLimitWindowLabel(allowance.reason);
+      if (limitWindow) {
+        await failScheduleRun(reserved, `Workspace ${limitWindow} spending limit reached.`);
         return { status: "failed" as const, reason: "spend_limit_reached" };
       }
       await failScheduleRun(reserved, "Workspace has no credits.");

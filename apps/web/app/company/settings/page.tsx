@@ -88,6 +88,7 @@ export default async function SettingsPage() {
         settings: {
           ...billing.settings,
           weekResetsAt: billing.settings.weekResetsAt.toISOString(),
+          dayResetsAt: billing.settings.dayResetsAt.toISOString(),
         },
       }}
     />

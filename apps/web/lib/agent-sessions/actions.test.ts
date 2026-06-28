@@ -38,8 +38,15 @@ vi.mock(import("@opencompany/agent-runtime"), async (importOriginal) => {
 
 vi.mock("@/lib/billing/run-allowance", () => ({
   ensureWorkspaceRunAllowance: vi.fn(),
+  isSpendLimitReason: (reason: string) =>
+    reason === "daily_limit_reached" || reason === "weekly_limit_reached",
   // Keep the real wording so error-message assertions stay meaningful.
   runAllowanceErrorMessage: (reason: string, action: "start" | "continue") => {
+    if (reason === "daily_limit_reached") {
+      return action === "start"
+        ? "Daily spending limit reached. Raise the limit in billing settings or wait until it resets to start a session."
+        : "Daily spending limit reached. Raise the limit in billing settings or wait until it resets to continue this session.";
+    }
     if (reason === "weekly_limit_reached") {
       return action === "start"
         ? "Weekly spending limit reached. Raise the limit in billing settings to start a session."
@@ -100,7 +107,7 @@ const ensureWorkspaceRunAllowanceMock = vi.mocked(ensureWorkspaceRunAllowance);
 // blocked outcome with the given reason (defaults to an empty balance).
 function allowanceResult(
   allowed: boolean,
-  reason: "no_balance" | "weekly_limit_reached" = "no_balance",
+  reason: "no_balance" | "weekly_limit_reached" | "daily_limit_reached" = "no_balance",
 ) {
   const base = {
     balanceUsdMicros: allowed ? 1_000_000 : 0,
@@ -108,6 +115,10 @@ function allowanceResult(
     weeklySpendLimitUsdMicros: null,
     spendLimitEnabled: false,
     weekStartsAt: new Date(0),
+    dailySpendUsdMicros: 0,
+    dailySpendLimitUsdMicros: null,
+    dailySpendLimitEnabled: false,
+    dayStartsAt: new Date(0),
   };
   return allowed
     ? ({ allowed: true, allowance: { allowed: true, reason: null, ...base } } as const)
@@ -277,6 +288,23 @@ describe("createAgentSession", () => {
       error: "Add workspace credits to start a session.",
       redirectTo: "/personal/settings?billing=insufficient",
       reason: "no_balance",
+    });
+    expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
+  });
+
+  it("routes a daily-limit block to the limit surface, not the out-of-credits one", async () => {
+    ensureWorkspaceRunAllowanceMock.mockResolvedValue(
+      allowanceResult(false, "daily_limit_reached"),
+    );
+
+    const result = await createAgentSession("agt_123");
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Daily spending limit reached. Raise the limit in billing settings or wait until it resets to start a session.",
+      redirectTo: "/company/settings?billing=limit",
+      reason: "daily_limit_reached",
     });
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
   });
