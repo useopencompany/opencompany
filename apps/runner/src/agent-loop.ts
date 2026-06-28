@@ -49,6 +49,12 @@ import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { validateHostedToolEnvironment } from "./hosted-tools";
 import {
+  createDbHotContextStore,
+  loadAgentFilesForHotContext,
+  loadSessionHotContextBlock,
+  prependHotContextBlock,
+} from "./hot-context";
+import {
   acquireRunLease,
   appendRuntimeEventForLease,
   createAssistantMessageForLease,
@@ -201,6 +207,12 @@ async function loadAgentBundleContext(
     userMemory: byPath.get(`${bundleDir}/user.md`),
     personalSkills: skills.map((skill) => skill.metadata),
   };
+}
+
+function isPersonalMemorySession(row: LoadedSession): boolean {
+  return (
+    row.agent.isDefault && (row.session.source === "user" || row.session.source === "whatsapp")
+  );
 }
 
 export async function runMessage(input: {
@@ -383,6 +395,27 @@ async function runMessageWithContext(
       row.agent.id,
       row.agent.path,
     );
+    const hotContextStore = createDbHotContextStore(ctx.db);
+    const hotContextBlock = await observeRunStep(ctx, "load_hot_context", () =>
+      loadSessionHotContextBlock({
+        enabled: isPersonalMemorySession(row),
+        sessionId: input.sessionId,
+        store: hotContextStore,
+        buildSource: async () => ({
+          agentPath: row.agent.path,
+          agentFiles: await loadAgentFilesForHotContext({
+            db: ctx.db,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+          }),
+          latestKeeperSummary: await hotContextStore.loadLatestKeeperSummary({
+            workspaceId: row.workspace.id,
+            userId: row.session.userId,
+            agentId: row.agent.id,
+          }),
+        }),
+      }),
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       personalAgent: row.agent.isDefault,
@@ -402,9 +435,10 @@ async function runMessageWithContext(
     const enabledTools = memoryKeeperRun
       ? restrictToolsForMemoryKeeper(runtime.tools)
       : runtime.tools;
-    const systemPrompt = memoryKeeperRun
+    const baseSystemPrompt = memoryKeeperRun
       ? `${runtime.systemPrompt}\n\n${MEMORY_KEEPER_SYSTEM_PROMPT}`
       : runtime.systemPrompt;
+    const systemPrompt = prependHotContextBlock(baseSystemPrompt, hotContextBlock);
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
     logBraintrustSpan(braintrustSpan, {
