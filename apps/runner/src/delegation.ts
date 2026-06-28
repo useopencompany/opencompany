@@ -435,23 +435,23 @@ export async function prepareAutoAwaitAtTurnEnd(input: {
 
   const targets = await resolveAwaitTargets({ parentSessionId: input.parentSessionId });
   const states = await loadDelegatedChildrenStates(input.parentSessionId, targets);
-  const childSessionIds = states
+  const activeChildSessionIds = states
     .filter((state) =>
       isDelegatedChildActive({ status: state.status, runLeaseId: state.runLeaseId }),
     )
     .map((state) => state.id);
 
-  if (childSessionIds.length === 0) return { action: "proceed" };
+  if (activeChildSessionIds.length === 0) return { action: "proceed" };
 
   const toolCallId = autoAwaitToolCallId(input.assistantMessageId);
   await writeDelegationAwaitMarker(input, {
     toolCallId,
     toolName: "await_agents",
     mode: "all",
-    childSessionIds,
+    childSessionIds: targets,
     assistantMessageId: input.assistantMessageId,
   });
-  return { action: "suspend", childSessionIds, toolCallId };
+  return { action: "suspend", childSessionIds: targets, toolCallId };
 }
 
 async function writeDelegationAwaitMarker(
