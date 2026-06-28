@@ -142,11 +142,14 @@ export async function evaluateKpiWithDependencies(input: {
   } catch (error) {
     const reason =
       error instanceof PostHogAuthenticationError
-        ? "PostHog connection needs reauthorization."
+        ? error.message
         : error instanceof Error
           ? error.message
           : "KPI evaluation failed.";
-    await input.markKpiStatus("active", reason);
+    await input.markKpiStatus(
+      error instanceof PostHogAuthenticationError ? "fetch_failed" : "active",
+      reason,
+    );
     return { status: "failed", kpiId: input.kpi.id, reason };
   }
 }
@@ -159,6 +162,15 @@ export async function listDueKpis(input: { now?: Date; limit?: number }) {
   return getDb()
     .select({ workspaceId: workspaceKpis.workspaceId, kpiId: workspaceKpis.id })
     .from(workspaceKpis)
+    .innerJoin(
+      workspaceIntegrations,
+      and(
+        eq(workspaceIntegrations.id, workspaceKpis.sourceIntegrationId),
+        eq(workspaceIntegrations.workspaceId, workspaceKpis.workspaceId),
+        eq(workspaceIntegrations.provider, workspaceKpis.provider),
+        eq(workspaceIntegrations.status, "connected"),
+      ),
+    )
     .where(
       and(
         inArray(workspaceKpis.status, ["active", "fetch_failed"]),

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { markIntegrationCredentialRefreshFailed } from "@/lib/integrations/credential-storage";
 import { evaluateKpiWithDependencies, evaluationWindow, grainBoundary } from "@/lib/kpis/evaluator";
 
 vi.mock("@/lib/integrations/credential-storage", () => ({
@@ -9,6 +10,7 @@ vi.mock("@/lib/integrations/credential-storage", () => ({
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     encryptionKeyVersion: 1,
   })),
+  markIntegrationCredentialRefreshFailed: vi.fn(async () => undefined),
 }));
 
 const baseKpi = {
@@ -83,6 +85,44 @@ describe("KPI evaluator", () => {
     expect(result.status).toBe("failed");
     expect(upsertValue).not.toHaveBeenCalled();
     expect(markKpiStatus).toHaveBeenCalledWith("active", "PostHog Query API returned 500.");
+  });
+
+  it("marks PostHog 403 as an integration permission failure instead of a retryable fetch error", async () => {
+    const upsertValue = vi.fn(async () => {});
+    const markKpiStatus = vi.fn(async () => {});
+    const fetchFn = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+
+    const result = await evaluateKpiWithDependencies({
+      kpi: baseKpi,
+      integration,
+      now: new Date("2026-02-08T12:30:00.000Z"),
+      fetchFn,
+      upsertValue,
+      markKpiStatus,
+    });
+
+    expect(result).toEqual({
+      status: "failed",
+      kpiId: "wkpi_test",
+      reason:
+        "PostHog connection lacks required query permission. Reconnect PostHog to resume KPI updates.",
+    });
+    expect(upsertValue).not.toHaveBeenCalled();
+    expect(markIntegrationCredentialRefreshFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "wks_test",
+        integrationId: "wint_posthog",
+        provider: "posthog",
+        status: "sync_failed",
+      }),
+    );
+    expect(markKpiStatus).toHaveBeenCalledWith(
+      "fetch_failed",
+      "PostHog connection lacks required query permission. Reconnect PostHog to resume KPI updates.",
+    );
+    expect(markKpiStatus).not.toHaveBeenCalledWith("active", "PostHog Query API returned 403.");
   });
 
   it("uses Monday UTC as the week grain boundary", () => {

@@ -177,6 +177,27 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     }
   }
 
+  async function refreshTokens(context: McpOAuthContext) {
+    const stored = await loadStoredPayload(context);
+    if (!stored.payload.tokens?.refresh_token) return stored;
+
+    const provider = createClientProvider({
+      workspaceId: context.workspaceId,
+      serverId: context.serverId,
+      stored,
+    });
+
+    const result = await auth(provider, {
+      serverUrl: endpointUrl,
+      ...(config.authScope ? { scope: config.authScope } : {}),
+    });
+    if (result !== "AUTHORIZED") {
+      throw new Error(`${displayName} MCP OAuth refresh did not complete.`);
+    }
+
+    return loadStoredPayload(context);
+  }
+
   function startFailureStatusReason(errorMessage: string) {
     if (errorMessage.includes("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY")) {
       return `Set INTEGRATION_CREDENTIAL_ENCRYPTION_KEY to a base64-encoded 32-byte key, then reconnect ${displayName}.`;
@@ -202,7 +223,8 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     };
 
     async function persist(next: McpOAuthPayload) {
-      const nextExpiresAt = next.tokens === payload.tokens ? expiresAt : tokenExpiresAt(next.tokens);
+      const nextExpiresAt =
+        next.tokens === payload.tokens ? expiresAt : tokenExpiresAt(next.tokens);
       payload = next;
       expiresAt = nextExpiresAt;
       await saveMcpCredential({
@@ -286,6 +308,7 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     loadPayload,
     start,
     complete,
+    refreshTokens,
     startFailureStatusReason,
   };
 }

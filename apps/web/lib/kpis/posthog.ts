@@ -1,5 +1,5 @@
-import type { WorkspaceIntegration } from "@opencompany/db/schema";
 import { getDb } from "@opencompany/db/client";
+import type { WorkspaceIntegration } from "@opencompany/db/schema";
 import { workspaceMcpServers } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/lib/integrations/credential-storage";
 import { loadMcpCredential } from "@/lib/mcp/credential-storage";
 import { POSTHOG_MCP_OAUTH_CREDENTIAL_KIND, POSTHOG_MCP_SERVER_KEY } from "@/lib/mcp/data";
+import { posthogMcpOAuth } from "@/lib/mcp/oauth-providers";
 
 export const POSTHOG_KPI_PROVIDER = "posthog";
 export const POSTHOG_KPI_CREDENTIAL_KIND = "oauth_token";
@@ -158,6 +159,12 @@ async function fetchPostHogCount(input: {
       await markPostHogNeedsReauth(input.integration);
       throw new PostHogAuthenticationError();
     }
+    if (retryResponse.status === 403) {
+      await markPostHogPermissionFailed(input.integration);
+      throw new PostHogAuthenticationError(
+        "PostHog connection lacks required query permission. Reconnect PostHog to resume KPI updates.",
+      );
+    }
     return readPostHogCountResponse({
       response: retryResponse,
       durationMs: Date.now() - retryStartedAt,
@@ -165,6 +172,13 @@ async function fetchPostHogCount(input: {
       queryName: input.queryName,
       window: input.window,
     });
+  }
+
+  if (response.status === 403) {
+    await markPostHogPermissionFailed(input.integration);
+    throw new PostHogAuthenticationError(
+      "PostHog connection lacks required query permission. Reconnect PostHog to resume KPI updates.",
+    );
   }
 
   return readPostHogCountResponse({
@@ -283,12 +297,27 @@ async function syncPostHogCredentialFromMcp(
     kind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
   });
   if (!credential) return null;
-  const tokens = credential.payload.tokens;
-  const accessToken = readTokenString(tokens, "access_token");
+  let tokens = credential.payload.tokens;
+  let accessToken = readTokenString(tokens, "access_token");
   if (!accessToken) return null;
 
-  const expiresAt = credential.expiresAt ?? readTokenExpiresAt(tokens, now);
-  if (expiresAt && expiresAt.getTime() - now.getTime() <= TOKEN_REFRESH_SKEW_MS) return null;
+  let expiresAt = credential.expiresAt ?? readTokenExpiresAt(tokens, now);
+  if (expiresAt && expiresAt.getTime() - now.getTime() <= TOKEN_REFRESH_SKEW_MS) {
+    if (!readTokenString(tokens, "refresh_token")) return null;
+    try {
+      const refreshed = await posthogMcpOAuth.refreshTokens({
+        workspaceId: integration.workspaceId,
+        serverId: server.id,
+      });
+      tokens = refreshed.payload.tokens;
+      expiresAt = refreshed.expiresAt ?? readTokenExpiresAt(tokens, now);
+    } catch {
+      return null;
+    }
+    accessToken = readTokenString(tokens, "access_token");
+    if (!accessToken) return null;
+    if (expiresAt && expiresAt.getTime() - now.getTime() <= TOKEN_REFRESH_SKEW_MS) return null;
+  }
 
   await refreshIntegrationCredential({
     workspaceId: integration.workspaceId,
@@ -319,6 +348,22 @@ async function markPostHogNeedsReauth(
     provider: POSTHOG_KPI_PROVIDER,
     status: "needs_reauth",
     statusReason: "PostHog authorization expired. Reconnect PostHog to resume KPI updates.",
+  });
+}
+
+async function markPostHogPermissionFailed(
+  integration: Pick<
+    WorkspaceIntegration,
+    "id" | "workspaceId" | "provider" | "externalId" | "metadata"
+  >,
+) {
+  await markIntegrationCredentialRefreshFailed({
+    workspaceId: integration.workspaceId,
+    integrationId: integration.id,
+    provider: POSTHOG_KPI_PROVIDER,
+    status: "sync_failed",
+    statusReason:
+      "PostHog query permission is missing. Reconnect PostHog with query:read access to resume KPI updates.",
   });
 }
 
