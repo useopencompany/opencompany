@@ -41,7 +41,9 @@ import {
   createAgentDelegationHandler,
   createAwaitAgentsHandler,
   type DelegationSuspensionCheck,
+  ensureAutoAwaitToolCallForReplay,
   persistDelegationToolResult,
+  prepareAutoAwaitAtTurnEnd,
   prepareDelegationSuspension,
   resolveDelegationResume,
 } from "./delegation";
@@ -1068,6 +1070,36 @@ async function executeStreamingTurn(input: {
 
   if (input.emptyOutputFallback === undefined && exceededToolStepLimit) {
     assertTurnComplete(streamResult);
+  }
+
+  if (!input.internal && input.delegationSuspension) {
+    const autoAwait = await prepareAutoAwaitAtTurnEnd({
+      parentSessionId: ctx.sessionId,
+      assistantMessageId,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+    });
+    if (autoAwait.action === "suspend") {
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: ctx.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "session.status",
+          payload: { status: "awaiting_delegation", message: "Waiting for delegated agents" },
+        }),
+      );
+      await recordSandboxUsageBestEffort({
+        ctx,
+        assistantMessageId,
+        sandboxBilling: input.sandboxAcquirer.billingSnapshot(),
+      });
+      await requireLeaseWrite(
+        suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "awaiting_delegation"),
+      );
+      return { outcome: "suspended" };
+    }
   }
 
   if (incompleteTurn) {
@@ -2762,6 +2794,13 @@ async function resumeDelegationWithContext(
       (message) => message.role === "tool" && message.toolCallId === resolution.toolCallId,
     );
     if (!toolResultAlreadyPersisted) {
+      await ensureAutoAwaitToolCallForReplay({
+        sessionId: input.sessionId,
+        assistantMessageId: resolution.assistantMessageId,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        toolCallId: resolution.toolCallId,
+      });
       await persistDelegationToolResult({
         sessionId: input.sessionId,
         assistantMessageId: resolution.assistantMessageId,

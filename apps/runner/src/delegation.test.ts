@@ -1,18 +1,26 @@
-import { agentSessions, agents } from "@opencompany/db/schema";
+import {
+  agentSessionEvents,
+  agentSessionMessages,
+  agentSessions,
+  agents,
+} from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentConfig } from "./agent-loop-test-support";
 import {
+  autoAwaitToolCallId,
   createAgentDelegationHandler,
   isDelegatedChildActive,
   MAX_AGENT_DELEGATION_DEPTH,
+  prepareAutoAwaitAtTurnEnd,
 } from "./delegation";
 
 const dbMocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 const jobMocks = vi.hoisted(() => ({ enqueueRunnerJob: vi.fn(async () => ({ id: 1 })) }));
+const eventMocks = vi.hoisted(() => ({ appendRuntimeEvent: vi.fn(async () => ({ id: 1 })) }));
 
 vi.mock("./db", () => ({ getDb: dbMocks.getDb }));
 vi.mock("./jobs", () => ({ enqueueRunnerJob: jobMocks.enqueueRunnerJob }));
-vi.mock("./events", () => ({ appendRuntimeEvent: vi.fn(async () => ({ id: 1 })) }));
+vi.mock("./events", () => ({ appendRuntimeEvent: eventMocks.appendRuntimeEvent }));
 vi.mock("./delegation-usage", () => ({ emitDelegatedUsageRollup: vi.fn(async () => {}) }));
 vi.mock("@opencompany/observability/braintrust", () => ({
   traceBraintrustStep: vi.fn(async (_name: string, run: () => Promise<unknown>) => run()),
@@ -66,6 +74,73 @@ function createSpawnDb(input: {
     },
     async transaction(callback: (tx: unknown) => Promise<unknown>) {
       return callback(db);
+    },
+  };
+  return db;
+}
+
+function createAutoAwaitDb(input: {
+  marker?: Record<string, unknown> | null;
+  markerToolResult?: Record<string, unknown> | null;
+  children?: Array<{
+    id: string;
+    status: string;
+    runLeaseId: string | null;
+    agentName?: string;
+    agentPath?: string | null;
+    lastError?: string | null;
+  }>;
+}) {
+  const children = input.children ?? [];
+  const db = {
+    select() {
+      const query = {
+        table: undefined as unknown,
+        joinedAgents: false,
+        from(table: unknown) {
+          query.table = table;
+          return query;
+        },
+        innerJoin() {
+          query.joinedAgents = true;
+          return query;
+        },
+        where() {
+          return query;
+        },
+        orderBy() {
+          return query;
+        },
+        async limit() {
+          return rows();
+        },
+        then(resolve: (value: unknown[]) => void, reject: (reason: unknown) => void) {
+          Promise.resolve(rows()).then(resolve, reject);
+        },
+      };
+      const rows = () => {
+        if (query.table === agentSessionEvents) {
+          return input.marker ? [{ payload: input.marker }] : [];
+        }
+        if (query.table === agentSessionMessages) {
+          return input.markerToolResult ? [input.markerToolResult] : [];
+        }
+        if (query.table === agentSessions && query.joinedAgents) {
+          return children.map((child) => ({
+            id: child.id,
+            status: child.status,
+            runLeaseId: child.runLeaseId,
+            lastError: child.lastError ?? null,
+            agentName: child.agentName ?? "Research",
+            agentPath: child.agentPath ?? "agents/research/research.agent",
+          }));
+        }
+        if (query.table === agentSessions) {
+          return children.map((child) => ({ id: child.id }));
+        }
+        return [];
+      };
+      return query;
     },
   };
   return db;
@@ -261,6 +336,102 @@ describe("delegate_to_agent async spawn", () => {
     });
     expect(result).toMatchObject({ ok: false, status: "failed" });
     expect(jobMocks.enqueueRunnerJob).not.toHaveBeenCalled();
+  });
+});
+
+describe("prepareAutoAwaitAtTurnEnd", () => {
+  const baseInput = {
+    parentSessionId: "ses_parent",
+    assistantMessageId: "msg_assistant",
+    leaseId: "lease_1",
+    leaseOwner: "runner_1",
+  };
+
+  it("proceeds when there are no active delegated children and no marker", async () => {
+    dbMocks.getDb.mockReturnValue(createAutoAwaitDb({ children: [] }));
+
+    await expect(prepareAutoAwaitAtTurnEnd(baseInput)).resolves.toEqual({ action: "proceed" });
+    expect(eventMocks.appendRuntimeEvent).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when an unresolved await marker already exists", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createAutoAwaitDb({
+        marker: {
+          toolCallId: "call_await",
+          toolName: "await_agents",
+          mode: "all",
+          childSessionIds: ["ses_child"],
+          assistantMessageId: "msg_prior",
+        },
+        children: [{ id: "ses_child", status: "running", runLeaseId: "lease_child" }],
+      }),
+    );
+
+    await expect(prepareAutoAwaitAtTurnEnd(baseInput)).resolves.toEqual({ action: "proceed" });
+    expect(eventMocks.appendRuntimeEvent).not.toHaveBeenCalled();
+  });
+
+  it("ignores an already-resolved prior marker when active children remain", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createAutoAwaitDb({
+        marker: {
+          toolCallId: "call_prior",
+          toolName: "await_agents",
+          mode: "all",
+          childSessionIds: ["ses_old_child"],
+          assistantMessageId: "msg_prior",
+        },
+        markerToolResult: { id: "msg_tool_prior" },
+        children: [{ id: "ses_child", status: "running", runLeaseId: "lease_child" }],
+      }),
+    );
+
+    await expect(prepareAutoAwaitAtTurnEnd(baseInput)).resolves.toEqual({
+      action: "suspend",
+      childSessionIds: ["ses_child"],
+      toolCallId: "auto-await:msg_assistant",
+    });
+  });
+
+  it("suspends active delegated children and writes a synthetic await marker", async () => {
+    dbMocks.getDb.mockReturnValue(
+      createAutoAwaitDb({
+        children: [
+          { id: "ses_child_1", status: "running", runLeaseId: "lease_child_1" },
+          { id: "ses_child_2", status: "awaiting_delegation", runLeaseId: null },
+          { id: "ses_child_done", status: "completed", runLeaseId: null },
+        ],
+      }),
+    );
+
+    const result = await prepareAutoAwaitAtTurnEnd(baseInput);
+
+    expect(result).toEqual({
+      action: "suspend",
+      childSessionIds: ["ses_child_1", "ses_child_2"],
+      toolCallId: "auto-await:msg_assistant",
+    });
+    expect(eventMocks.appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        messageId: "msg_assistant",
+        type: "delegation.awaiting",
+        payload: {
+          toolCallId: "auto-await:msg_assistant",
+          toolName: "await_agents",
+          mode: "all",
+          childSessionIds: ["ses_child_1", "ses_child_2"],
+          assistantMessageId: "msg_assistant",
+        },
+      }),
+    );
+  });
+
+  it("uses a deterministic synthetic tool call id unique to the assistant message", () => {
+    expect(autoAwaitToolCallId("msg_one")).toBe("auto-await:msg_one");
+    expect(autoAwaitToolCallId("msg_two")).toBe("auto-await:msg_two");
   });
 });
 
