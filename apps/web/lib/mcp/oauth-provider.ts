@@ -108,9 +108,15 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
   }
 
   async function loadPayload(context: McpOAuthContext): Promise<McpOAuthPayload> {
+    return (await loadStoredPayload(context)).payload;
+  }
+
+  async function loadStoredPayload(
+    context: McpOAuthContext,
+  ): Promise<{ payload: McpOAuthPayload; expiresAt: Date | null }> {
     const credential = await loadMcpCredential({ ...context, kind: credentialKind });
-    if (!credential) return {};
-    return parsePayload(credential.payload);
+    if (!credential) return { payload: {}, expiresAt: null };
+    return { payload: parsePayload(credential.payload), expiresAt: credential.expiresAt };
   }
 
   async function start(input: {
@@ -128,7 +134,7 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     const provider = createClientProvider({
       workspaceId: input.workspaceId,
       serverId: input.serverId,
-      payload: await loadPayload(input),
+      stored: await loadStoredPayload(input),
       state,
       onAuthorizationUrl: (url) => {
         authorizationUrl = url.toString();
@@ -157,7 +163,7 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
     const provider = createClientProvider({
       workspaceId: input.workspaceId,
       serverId: input.serverId,
-      payload: await loadPayload(input),
+      stored: await loadStoredPayload(input),
     });
 
     const result = await auth(provider, {
@@ -184,22 +190,26 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
   function createClientProvider(input: {
     workspaceId: string;
     serverId: string;
-    payload: McpOAuthPayload;
+    stored: { payload: McpOAuthPayload; expiresAt: Date | null };
     state?: string;
     onAuthorizationUrl?: (url: URL) => void;
   }): OAuthClientProvider {
-    let payload = input.payload;
+    let payload = input.stored.payload;
+    let expiresAt = input.stored.expiresAt;
     const context = {
       workspaceId: input.workspaceId,
       serverId: input.serverId,
     };
 
     async function persist(next: McpOAuthPayload) {
+      const nextExpiresAt = next.tokens === payload.tokens ? expiresAt : tokenExpiresAt(next.tokens);
       payload = next;
+      expiresAt = nextExpiresAt;
       await saveMcpCredential({
         ...context,
         kind: credentialKind,
         payload: { ...next },
+        expiresAt,
       });
     }
 
@@ -307,4 +317,11 @@ function isOAuthTokens(value: unknown): value is OAuthTokens {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function tokenExpiresAt(tokens: OAuthTokens | undefined) {
+  if (!tokens || typeof tokens.expires_in !== "number" || !Number.isFinite(tokens.expires_in)) {
+    return null;
+  }
+  return new Date(Date.now() + tokens.expires_in * 1000);
 }

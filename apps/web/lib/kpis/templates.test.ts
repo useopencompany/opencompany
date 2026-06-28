@@ -58,6 +58,22 @@ describe("PostHog KPI templates", () => {
     expect(body.query.kind).toBe("HogQLQuery");
     expect(body.query.query).toContain("count(DISTINCT distinct_id)");
     expect(body.query.query).toContain("timestamp >=");
+    expect(body.query.query).toContain("'2026-02-07T12:00:00.000Z'");
+    expect(body.query.query).toContain("'2026-02-08T12:00:00.000Z'");
+    expect(result.source?.current).toEqual(
+      expect.objectContaining({
+        provider: "posthog",
+        queryName: "opencompany_kpi_distinct_users",
+        projectId: "123",
+        isCached: false,
+        window: {
+          start: "2026-02-07T12:00:00.000Z",
+          end: "2026-02-08T12:00:00.000Z",
+        },
+      }),
+    );
+    expect(JSON.stringify(result.source)).not.toContain("results");
+    expect(JSON.stringify(result.source)).not.toContain("SELECT");
   });
 
   it("fetches Signups as a count of configured event names", async () => {

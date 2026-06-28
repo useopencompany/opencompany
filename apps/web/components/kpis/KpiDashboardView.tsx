@@ -16,7 +16,8 @@ export function KpiDashboardView({ state }: { state: KpiDashboardState }) {
           <div>
             <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">KPIs</h1>
             <p className="mt-1 max-w-[620px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
-              Track live product metrics from connected data sources. PostHog is available in v1.
+              Track live product metrics from connected data sources. PostHog Cloud US/EU is
+              available in v1.
             </p>
           </div>
           <button
@@ -101,8 +102,13 @@ function KpiCard({ card }: { card: KpiDashboardState["cards"][number] }) {
           <div className="text-[30px] font-semibold leading-none tracking-[-0.01em] text-ink">
             {card.current === null ? "..." : formatNumber(card.current)}
           </div>
+          {card.currentIsStale ? (
+            <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10.5px] font-medium uppercase text-amber-800">
+              Stale{card.stalePointAt ? ` · ${formatDate(card.stalePointAt)}` : ""}
+            </div>
+          ) : null}
           <div
-            className={`mt-2 text-[12px] font-medium ${
+            className={`${card.currentIsStale ? "mt-1.5" : "mt-2"} text-[12px] font-medium ${
               delta === null ? "text-ink-subtle" : delta >= 0 ? "text-emerald-700" : "text-red-700"
             }`}
           >
@@ -319,4 +325,10 @@ function computeDelta(current: number | null, previous: number | null) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
+    new Date(value),
+  );
 }

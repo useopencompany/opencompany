@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { evaluateKpiWithDependencies, grainBoundary } from "@/lib/kpis/evaluator";
+import { evaluateKpiWithDependencies, evaluationWindow, grainBoundary } from "@/lib/kpis/evaluator";
 
 vi.mock("@/lib/integrations/credential-storage", () => ({
   loadIntegrationCredential: vi.fn(async () => ({
@@ -48,22 +48,27 @@ describe("KPI evaluator", () => {
     });
 
     expect(result).toMatchObject({ status: "stored", kpiId: "wkpi_test", value: 21 });
-    expect(upsertValue).toHaveBeenCalledWith(
+    const storedValue = vi.mocked(upsertValue).mock.calls[0]?.[0];
+    expect(storedValue).toEqual(
       expect.objectContaining({
         kpiId: "wkpi_test",
-        pointAt: new Date("2026-02-08T00:00:00.000Z"),
+        pointAt: new Date("2026-02-07T00:00:00.000Z"),
         value: 21,
         grain: "day",
       }),
     );
+    expect(storedValue?.source.window).toEqual({
+      start: "2026-02-07T00:00:00.000Z",
+      end: "2026-02-08T00:00:00.000Z",
+    });
     expect(markKpiStatus).toHaveBeenCalledWith("active", null);
   });
 
-  it("marks fetch_failed and does not poison values when live fetch fails", async () => {
+  it("keeps retryable fetch failures scheduled and does not poison values", async () => {
     const upsertValue = vi.fn(async () => {});
     const markKpiStatus = vi.fn(async () => {});
     const fetchFn = vi.fn(
-      async () => new Response("nope", { status: 401 }),
+      async () => new Response("nope", { status: 500 }),
     ) as unknown as typeof fetch;
 
     const result = await evaluateKpiWithDependencies({
@@ -77,12 +82,23 @@ describe("KPI evaluator", () => {
 
     expect(result.status).toBe("failed");
     expect(upsertValue).not.toHaveBeenCalled();
-    expect(markKpiStatus).toHaveBeenCalledWith("fetch_failed", "PostHog Query API returned 401.");
+    expect(markKpiStatus).toHaveBeenCalledWith("active", "PostHog Query API returned 500.");
   });
 
   it("uses Monday UTC as the week grain boundary", () => {
     expect(grainBoundary("week", new Date("2026-02-08T12:00:00.000Z")).toISOString()).toBe(
       "2026-02-02T00:00:00.000Z",
     );
+  });
+
+  it("stores the last completed UTC bucket for scheduled evaluation", () => {
+    expect(evaluationWindow("day", new Date("2026-02-08T02:15:00.000Z"))).toEqual({
+      start: new Date("2026-02-07T00:00:00.000Z"),
+      end: new Date("2026-02-08T00:00:00.000Z"),
+    });
+    expect(evaluationWindow("week", new Date("2026-02-09T02:15:00.000Z"))).toEqual({
+      start: new Date("2026-02-02T00:00:00.000Z"),
+      end: new Date("2026-02-09T00:00:00.000Z"),
+    });
   });
 });

@@ -142,7 +142,7 @@ export async function deletePostHogDataSourcesForWorkspace(workspaceId: string) 
     );
 }
 
-async function discoverPostHogProfile(accessToken: string, fetchFn: typeof fetch = fetch) {
+export async function discoverPostHogProfile(accessToken: string, fetchFn: typeof fetch = fetch) {
   let lastError: Error | null = null;
   for (const apiHost of POSTHOG_API_HOSTS) {
     try {

@@ -8,6 +8,7 @@ import {
   workspaceKpiValues,
 } from "@opencompany/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
+import { PostHogAuthenticationError } from "@/lib/kpis/posthog";
 import { getKpiTemplate, parseKpiFilterParams } from "@/lib/kpis/templates";
 
 export const KPI_EVALUATION_SWEEP_CRON = "15 2 * * *";
@@ -113,30 +114,39 @@ export async function evaluateKpiWithDependencies(input: {
   }
 
   try {
+    const window = evaluationWindow(input.kpi.timeGrain, input.now);
     const result = await template.liveFetch({
       integration: input.integration,
       timeGrain: input.kpi.timeGrain,
       filterParams: parseKpiFilterParams(input.kpi.filterParams),
-      now: input.now,
+      now: window.end,
       ...fetchOption(input.fetchFn),
     });
-    const pointAt = grainBoundary(input.kpi.timeGrain, input.now);
     await input.upsertValue({
       kpiId: input.kpi.id,
-      pointAt,
+      pointAt: window.start,
       value: result.current,
       grain: input.kpi.timeGrain,
       source: {
         provider: input.kpi.provider,
         templateId: input.kpi.templateId,
+        window: {
+          start: window.start.toISOString(),
+          end: window.end.toISOString(),
+        },
         liveFetch: result.source ?? {},
       },
     });
     await input.markKpiStatus("active", null);
-    return { status: "stored", kpiId: input.kpi.id, pointAt, value: result.current };
+    return { status: "stored", kpiId: input.kpi.id, pointAt: window.start, value: result.current };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "KPI evaluation failed.";
-    await input.markKpiStatus("fetch_failed", reason);
+    const reason =
+      error instanceof PostHogAuthenticationError
+        ? "PostHog connection needs reauthorization."
+        : error instanceof Error
+          ? error.message
+          : "KPI evaluation failed.";
+    await input.markKpiStatus("active", reason);
     return { status: "failed", kpiId: input.kpi.id, reason };
   }
 }
@@ -149,7 +159,12 @@ export async function listDueKpis(input: { now?: Date; limit?: number }) {
   return getDb()
     .select({ workspaceId: workspaceKpis.workspaceId, kpiId: workspaceKpis.id })
     .from(workspaceKpis)
-    .where(and(eq(workspaceKpis.status, "active"), inArray(workspaceKpis.timeGrain, dueGrains)))
+    .where(
+      and(
+        inArray(workspaceKpis.status, ["active", "fetch_failed"]),
+        inArray(workspaceKpis.timeGrain, dueGrains),
+      ),
+    )
     .orderBy(workspaceKpis.createdAt)
     .limit(input.limit ?? 100);
 }
@@ -173,6 +188,15 @@ export function grainBoundary(grain: WorkspaceKpiTimeGrain, date: Date) {
   const dayOfWeek = day.getUTCDay();
   const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
   return new Date(day.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
+}
+
+export function evaluationWindow(grain: WorkspaceKpiTimeGrain, date: Date) {
+  const end = grainBoundary(grain, date);
+  const durationMs = (grain === "week" ? 7 : 1) * 24 * 60 * 60 * 1000;
+  return {
+    start: new Date(end.getTime() - durationMs),
+    end,
+  };
 }
 
 function isWeekBoundary(date: Date) {

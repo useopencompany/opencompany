@@ -30,6 +30,8 @@ export type KpiDashboardCard = {
   statusReason: string | null;
   current: number | null;
   previous: number | null;
+  currentIsStale: boolean;
+  stalePointAt: string | null;
   liveError: string | null;
   points: Array<{ pointAt: string; value: number }>;
 };
@@ -79,8 +81,16 @@ export async function loadKpiDashboardState(workspaceId: string): Promise<KpiDas
   await mapLimit(kpis.slice(0, MAX_LIVE_FETCH_KPIS), LIVE_FETCH_CONCURRENCY, async (kpi) => {
     const template = getKpiTemplate(kpi.provider, kpi.templateId);
     const integration = integrationById.get(kpi.sourceIntegrationId);
-    if (!template || !integration || kpi.status === "disabled") {
+    if (!template || kpi.status === "disabled") {
       liveByKpi.set(kpi.id, { current: null, previous: null, error: null });
+      return;
+    }
+    if (!integration) {
+      liveByKpi.set(kpi.id, {
+        current: null,
+        previous: null,
+        error: "PostHog connection needs reauthorization.",
+      });
       return;
     }
     try {
@@ -108,12 +118,14 @@ export async function loadKpiDashboardState(workspaceId: string): Promise<KpiDas
     templates: posthogTemplates(),
     cards: kpis.map((kpi) => {
       const template = getKpiTemplate(kpi.provider, kpi.templateId);
+      const storedPoints = pointsByKpi.get(kpi.id) ?? [];
       const live = liveByKpi.get(kpi.id) ?? {
         current: null,
         previous: null,
         error:
           kpis.indexOf(kpi) >= MAX_LIVE_FETCH_KPIS ? "Live fetch skipped for this render." : null,
       };
+      const resolved = resolveKpiCardValues(live, storedPoints);
       return {
         id: kpi.id,
         displayName: kpi.displayName,
@@ -124,10 +136,12 @@ export async function loadKpiDashboardState(workspaceId: string): Promise<KpiDas
         timeGrain: kpi.timeGrain,
         status: kpi.status,
         statusReason: kpi.statusReason,
-        current: live.current,
-        previous: live.previous,
+        current: resolved.current,
+        previous: resolved.previous,
+        currentIsStale: resolved.currentIsStale,
+        stalePointAt: resolved.stalePointAt,
         liveError: live.error,
-        points: (pointsByKpi.get(kpi.id) ?? [])
+        points: storedPoints
           .slice()
           .reverse()
           .map((point) => ({
@@ -190,6 +204,35 @@ async function loadRecentKpiValues(workspaceId: string, kpiIds: string[]) {
     }
   }
   return pointsByKpi;
+}
+
+export function resolveKpiCardValues(
+  live: { current: number | null; previous: number | null; error: string | null },
+  storedPoints: Pick<WorkspaceKpiValue, "pointAt" | "value">[],
+) {
+  if (live.current !== null) {
+    return {
+      current: live.current,
+      previous: live.previous,
+      currentIsStale: false,
+      stalePointAt: null,
+    };
+  }
+  if (!live.error) {
+    return { current: null, previous: null, currentIsStale: false, stalePointAt: null };
+  }
+
+  const latest = storedPoints[0];
+  if (!latest) {
+    return { current: null, previous: null, currentIsStale: false, stalePointAt: null };
+  }
+
+  return {
+    current: numericValue(latest.value),
+    previous: storedPoints[1] ? numericValue(storedPoints[1].value) : null,
+    currentIsStale: true,
+    stalePointAt: latest.pointAt.toISOString(),
+  };
 }
 
 function posthogTemplates() {
