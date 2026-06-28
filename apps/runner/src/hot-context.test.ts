@@ -154,6 +154,25 @@ describe("hot context", () => {
     expect(buildSource).toHaveBeenCalledTimes(1);
   });
 
+  it("does not read or snapshot when the caller gate is disabled", async () => {
+    const store = fakeStore(new Map());
+    const buildSource = vi.fn();
+    const loadSnapshot = vi.spyOn(store, "loadSnapshot");
+    const saveSnapshot = vi.spyOn(store, "saveSnapshot");
+
+    const block = await loadSessionHotContextBlock({
+      enabled: false,
+      sessionId: "ses_company",
+      store,
+      buildSource,
+    });
+
+    expect(block).toBeNull();
+    expect(loadSnapshot).not.toHaveBeenCalled();
+    expect(saveSnapshot).not.toHaveBeenCalled();
+    expect(buildSource).not.toHaveBeenCalled();
+  });
+
   it("prepends additively without changing warm memory and recall tools", () => {
     const runtime = resolveAgentRuntimeConfig({
       agent: personalConfig(),

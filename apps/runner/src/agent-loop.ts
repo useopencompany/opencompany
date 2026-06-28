@@ -209,9 +209,14 @@ async function loadAgentBundleContext(
   };
 }
 
-function isPersonalMemorySession(row: LoadedSession): boolean {
+function isPersonalMemorySession(
+  row: LoadedSession,
+  agentConfig: ReturnType<typeof normalizeAgentConfig>,
+): boolean {
   return (
-    row.agent.isDefault && (row.session.source === "user" || row.session.source === "whatsapp")
+    row.agent.isDefault &&
+    (row.session.source === "user" || row.session.source === "whatsapp") &&
+    resolveEnabledSkillMetadata(agentConfig).some((skill) => skill.id === MEMORY_SKILL_ID)
   );
 }
 
@@ -398,7 +403,7 @@ async function runMessageWithContext(
     const hotContextStore = createDbHotContextStore(ctx.db);
     const hotContextBlock = await observeRunStep(ctx, "load_hot_context", () =>
       loadSessionHotContextBlock({
-        enabled: isPersonalMemorySession(row),
+        enabled: isPersonalMemorySession(row, agentConfig),
         sessionId: input.sessionId,
         store: hotContextStore,
         buildSource: async () => ({
