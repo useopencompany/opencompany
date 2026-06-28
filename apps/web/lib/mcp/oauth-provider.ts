@@ -71,6 +71,10 @@ export type McpOAuthProvider = ReturnType<typeof createMcpOAuthProvider>;
 
 export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
   const { key, displayName, endpointUrl, credentialKind } = config;
+  const refreshPromises = new Map<
+    string,
+    Promise<{ payload: McpOAuthPayload; expiresAt: Date | null }>
+  >();
 
   function callbackUrl() {
     return `${getAppUrl()}/api/mcp/${key}/callback`;
@@ -178,6 +182,20 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
   }
 
   async function refreshTokens(context: McpOAuthContext) {
+    const refreshKey = oauthContextKey(context);
+    const existing = refreshPromises.get(refreshKey);
+    if (existing) return existing;
+
+    const refreshPromise = refreshTokensOnce(context).finally(() => {
+      if (refreshPromises.get(refreshKey) === refreshPromise) {
+        refreshPromises.delete(refreshKey);
+      }
+    });
+    refreshPromises.set(refreshKey, refreshPromise);
+    return refreshPromise;
+  }
+
+  async function refreshTokensOnce(context: McpOAuthContext) {
     const stored = await loadStoredPayload(context);
     if (!stored.payload.tokens?.refresh_token) return stored;
 
@@ -284,6 +302,12 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
         if (scope === "all") {
           await persist({});
         } else if (scope === "tokens") {
+          const current = await loadStoredPayload(context);
+          if (!oauthTokensEqual(payload.tokens, current.payload.tokens)) {
+            payload = current.payload;
+            expiresAt = current.expiresAt;
+            return;
+          }
           await persist(omitOAuthPayload(payload, ["tokens"]));
         } else if (scope === "verifier") {
           await persist(omitOAuthPayload(payload, ["codeVerifier", "state"]));
@@ -313,6 +337,10 @@ export function createMcpOAuthProvider(config: McpOAuthProviderConfig) {
   };
 }
 
+function oauthContextKey(context: McpOAuthContext) {
+  return `${context.workspaceId}:${context.serverId}`;
+}
+
 function omitOAuthPayload<TKey extends keyof McpOAuthPayload>(
   payload: McpOAuthPayload,
   keys: TKey[],
@@ -320,6 +348,18 @@ function omitOAuthPayload<TKey extends keyof McpOAuthPayload>(
   const next = { ...payload };
   for (const key of keys) delete next[key];
   return next;
+}
+
+function oauthTokensEqual(left: OAuthTokens | undefined, right: OAuthTokens | undefined) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return (
+    left.access_token === right.access_token &&
+    left.token_type === right.token_type &&
+    left.refresh_token === right.refresh_token &&
+    left.scope === right.scope &&
+    left.expires_in === right.expires_in
+  );
 }
 
 function isOAuthClientInformation(value: unknown): value is OAuthClientInformation {

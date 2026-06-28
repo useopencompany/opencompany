@@ -1,5 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { auth } from "@ai-sdk/mcp";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  loadIntegrationCredential,
+  markIntegrationCredentialRefreshFailed,
+} from "@/lib/integrations/credential-storage";
 import { KPI_TEMPLATE_CATALOG } from "@/lib/kpis/templates";
+
+const db = vi.hoisted(() => ({
+  select: vi.fn(),
+}));
+
+const mcpOAuth = vi.hoisted(() => ({
+  credential: null as null | {
+    payload: Record<string, unknown>;
+    expiresAt: Date | null;
+    lastRotatedAt: Date | null;
+    updatedAt: Date;
+    encryptionKeyVersion: number;
+  },
+  nextTokens: null as null | Record<string, unknown>,
+}));
+
+vi.mock("@opencompany/db/client", () => ({
+  getDb: () => db,
+}));
 
 vi.mock("@/lib/integrations/credential-storage", () => ({
   loadIntegrationCredential: vi.fn(async () => ({
@@ -9,6 +33,30 @@ vi.mock("@/lib/integrations/credential-storage", () => ({
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     encryptionKeyVersion: 1,
   })),
+  markIntegrationCredentialRefreshFailed: vi.fn(async () => undefined),
+  refreshIntegrationCredential: vi.fn(async () => undefined),
+}));
+
+vi.mock("@/lib/mcp/credential-storage", () => ({
+  loadMcpCredential: vi.fn(async () => mcpOAuth.credential),
+  saveMcpCredential: vi.fn(async (input) => {
+    mcpOAuth.credential = {
+      payload: input.payload,
+      expiresAt: input.expiresAt ?? null,
+      lastRotatedAt: new Date("2026-02-08T00:00:00.000Z"),
+      updatedAt: new Date("2026-02-08T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    };
+  }),
+}));
+
+vi.mock("@ai-sdk/mcp", () => ({
+  auth: vi.fn(async (provider) => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (!mcpOAuth.nextTokens) return "REDIRECT";
+    await provider.saveTokens(mcpOAuth.nextTokens);
+    return "AUTHORIZED";
+  }),
 }));
 
 const integration = {
@@ -20,6 +68,26 @@ const integration = {
 };
 
 describe("PostHog KPI templates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mcpOAuth.credential = null;
+    mcpOAuth.nextTokens = null;
+    vi.mocked(loadIntegrationCredential).mockResolvedValue({
+      payload: { accessToken: "posthog-token" },
+      expiresAt: null,
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    });
+    db.select.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: "wmcps_posthog" }],
+        }),
+      }),
+    });
+  });
+
   it("computes the latest stored point", () => {
     const template = KPI_TEMPLATE_CATALOG.posthog.posthog_dau;
 
@@ -74,6 +142,59 @@ describe("PostHog KPI templates", () => {
     );
     expect(JSON.stringify(result.source)).not.toContain("results");
     expect(JSON.stringify(result.source)).not.toContain("SELECT");
+  });
+
+  it("refreshes a near-expired MCP credential once for current and previous windows", async () => {
+    vi.mocked(loadIntegrationCredential).mockResolvedValue({
+      payload: { accessToken: "old-token" },
+      expiresAt: new Date(Date.now() + 60 * 1000),
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-02-01T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    });
+    mcpOAuth.credential = {
+      payload: {
+        tokens: {
+          access_token: "old-mcp-token",
+          token_type: "Bearer",
+          refresh_token: "refresh-token",
+          scope: "query:read",
+        },
+      },
+      expiresAt: new Date(Date.now() + 60 * 1000),
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-02-01T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    };
+    mcpOAuth.nextTokens = {
+      access_token: "fresh-token",
+      token_type: "Bearer",
+      refresh_token: "rotated-refresh-token",
+      scope: "query:read",
+      expires_in: 3600,
+    };
+    const fetchMock = vi.fn(async () =>
+      Response.json({ results: [[42]], is_cached: false }),
+    ) as unknown as typeof fetch;
+    const template = KPI_TEMPLATE_CATALOG.posthog.posthog_dau;
+
+    const result = await template.liveFetch({
+      integration,
+      timeGrain: "day",
+      filterParams: { mode: "template", version: 1, values: {} },
+      now: new Date("2026-02-08T12:00:00.000Z"),
+      fetchFn: fetchMock,
+    });
+
+    expect(result).toMatchObject({ current: 42, previous: 42 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(auth).toHaveBeenCalledTimes(1);
+    expect(markIntegrationCredentialRefreshFailed).not.toHaveBeenCalled();
+    for (const call of vi.mocked(fetchMock).mock.calls) {
+      expect(call[1]?.headers).toEqual(
+        expect.objectContaining({ authorization: "Bearer fresh-token" }),
+      );
+    }
   });
 
   it("fetches Signups as a count of configured event names", async () => {

@@ -242,4 +242,92 @@ describe("MCP OAuth provider factory", () => {
       tokens: { access_token: "tok", token_type: "Bearer" },
     });
   });
+
+  it("shares concurrent token refreshes for the same workspace server", async () => {
+    const staleCredential = {
+      payload: {
+        tokens: {
+          access_token: "old-token",
+          token_type: "Bearer",
+          refresh_token: "refresh-token",
+        },
+      },
+      expiresAt: new Date("2026-02-08T00:00:00.000Z"),
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-02-01T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    };
+    const freshCredential = {
+      ...staleCredential,
+      payload: {
+        tokens: {
+          access_token: "fresh-token",
+          token_type: "Bearer",
+          refresh_token: "rotated-refresh-token",
+          expires_in: 3600,
+        },
+      },
+    };
+    vi.mocked(loadMcpCredential)
+      .mockResolvedValueOnce(staleCredential)
+      .mockResolvedValueOnce(freshCredential);
+    vi.mocked(auth).mockImplementationOnce(async (provider) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await provider.saveTokens?.({
+        access_token: "fresh-token",
+        token_type: "Bearer",
+        refresh_token: "rotated-refresh-token",
+        expires_in: 3600,
+      });
+      return "AUTHORIZED";
+    });
+
+    const [left, right] = await Promise.all([
+      posthogMcpOAuth.refreshTokens({ workspaceId: "wks_123", serverId: "wmcps_posthog" }),
+      posthogMcpOAuth.refreshTokens({ workspaceId: "wks_123", serverId: "wmcps_posthog" }),
+    ]);
+
+    expect(auth).toHaveBeenCalledTimes(1);
+    expect(left.payload.tokens?.access_token).toBe("fresh-token");
+    expect(right.payload.tokens?.access_token).toBe("fresh-token");
+  });
+
+  it("does not let stale token invalidation remove a newer stored refresh result", async () => {
+    const staleCredential = {
+      payload: {
+        tokens: {
+          access_token: "old-token",
+          token_type: "Bearer",
+          refresh_token: "refresh-token",
+        },
+      },
+      expiresAt: new Date("2026-02-08T00:00:00.000Z"),
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-02-01T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    };
+    const newerCredential = {
+      ...staleCredential,
+      payload: {
+        tokens: {
+          access_token: "fresh-token",
+          token_type: "Bearer",
+          refresh_token: "rotated-refresh-token",
+        },
+      },
+    };
+    vi.mocked(loadMcpCredential)
+      .mockResolvedValueOnce(staleCredential)
+      .mockResolvedValueOnce(newerCredential);
+    vi.mocked(auth).mockImplementationOnce(async (provider) => {
+      await provider.invalidateCredentials?.("tokens");
+      throw new Error("refresh failed");
+    });
+
+    await expect(
+      posthogMcpOAuth.refreshTokens({ workspaceId: "wks_123", serverId: "wmcps_posthog" }),
+    ).rejects.toThrow("refresh failed");
+
+    expect(saveMcpCredential).not.toHaveBeenCalled();
+  });
 });

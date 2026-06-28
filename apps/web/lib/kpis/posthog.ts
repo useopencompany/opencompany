@@ -312,7 +312,16 @@ async function syncPostHogCredentialFromMcp(
       tokens = refreshed.payload.tokens;
       expiresAt = refreshed.expiresAt ?? readTokenExpiresAt(tokens, now);
     } catch {
-      return null;
+      const recovered = await loadMcpCredential({
+        workspaceId: integration.workspaceId,
+        serverId: server.id,
+        kind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
+      });
+      tokens = recovered?.payload.tokens;
+      accessToken = readTokenString(tokens, "access_token");
+      expiresAt = recovered?.expiresAt ?? readTokenExpiresAt(tokens, now);
+      if (!accessToken) return null;
+      if (expiresAt && expiresAt.getTime() - now.getTime() <= TOKEN_REFRESH_SKEW_MS) return null;
     }
     accessToken = readTokenString(tokens, "access_token");
     if (!accessToken) return null;

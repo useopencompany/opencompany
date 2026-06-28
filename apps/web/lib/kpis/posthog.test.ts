@@ -207,6 +207,67 @@ describe("PostHog KPI fetch", () => {
     );
   });
 
+  it("uses a concurrently refreshed MCP credential before marking needs_reauth", async () => {
+    vi.mocked(loadIntegrationCredential).mockResolvedValueOnce({
+      payload: { accessToken: "old-token" },
+      expiresAt: new Date("2026-02-08T00:00:00.000Z"),
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-02-01T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    });
+    mcpOAuth.credential = {
+      payload: {
+        tokens: {
+          access_token: "old-mcp-token",
+          token_type: "Bearer",
+          refresh_token: "refresh-token",
+        },
+      },
+      expiresAt: new Date(Date.now() + 60 * 1000),
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-02-01T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    };
+    vi.mocked(auth).mockImplementationOnce(async () => {
+      mcpOAuth.credential = {
+        payload: {
+          tokens: {
+            access_token: "fresh-token",
+            token_type: "Bearer",
+            refresh_token: "rotated-refresh-token",
+            scope: "query:read",
+          },
+        },
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        lastRotatedAt: new Date("2026-02-08T00:00:00.000Z"),
+        updatedAt: new Date("2026-02-08T00:00:00.000Z"),
+        encryptionKeyVersion: 1,
+      };
+      throw new Error("refresh failed");
+    });
+    const fetchFn = vi.fn(async () => Response.json({ results: [[9]] })) as unknown as typeof fetch;
+
+    const result = await fetchPostHogDistinctUsers({
+      integration,
+      window: {
+        start: new Date("2026-02-07T00:00:00.000Z"),
+        end: new Date("2026-02-08T00:00:00.000Z"),
+      },
+      fetchFn,
+    });
+
+    expect(result.value).toBe(9);
+    expect(auth).toHaveBeenCalledTimes(1);
+    expect(markIntegrationCredentialRefreshFailed).not.toHaveBeenCalled();
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://us.posthog.com/api/projects/123/query/",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer fresh-token" }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
   it("marks the integration needs_reauth when a fresh token is rejected", async () => {
     vi.mocked(loadIntegrationCredential).mockResolvedValueOnce({
       payload: { accessToken: "rejected-token" },
