@@ -37,6 +37,7 @@ describe("agent editor mention tools", () => {
       "openai/gpt-5.2-codex",
       "anthropic/claude-haiku-4.5",
       "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-sonnet-5",
       "anthropic/claude-opus-4.7",
       "anthropic/claude-opus-4.8",
       "anthropic/claude-fable-5",

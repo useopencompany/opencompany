@@ -124,16 +124,13 @@ const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 3_750_000,
     outputUsdMicrosPerMillion: 15_000_000,
   },
-  // Claude Sonnet 5 — introductory pricing through 2026-08-31. Switch to standard
-  // ($3 input / $15 output; cache read $0.30; cache write $3.75) on 2026-09-01.
-  // Tracked follow-up.
   "anthropic/claude-sonnet-5": {
     model: "anthropic/claude-sonnet-5",
     provider: "anthropic",
-    inputUsdMicrosPerMillion: 2_000_000,
-    cachedInputUsdMicrosPerMillion: 200_000,
-    cacheWriteUsdMicrosPerMillion: 2_500_000,
-    outputUsdMicrosPerMillion: 10_000_000,
+    inputUsdMicrosPerMillion: 3_000_000,
+    cachedInputUsdMicrosPerMillion: 300_000,
+    cacheWriteUsdMicrosPerMillion: 3_750_000,
+    outputUsdMicrosPerMillion: 15_000_000,
   },
   "anthropic/claude-opus-4.7": {
     model: "anthropic/claude-opus-4.7",

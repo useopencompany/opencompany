@@ -47,6 +47,7 @@ describe("calculateModelUsageCost", () => {
     ["openai/gpt-5.5", 40_500],
     ["openai/gpt-5.2-codex", 17_675],
     ["openai/gpt-5.4-nano", 1_670],
+    ["anthropic/claude-sonnet-5", 22_050],
     ["anthropic/claude-opus-4.7", 36_750],
     ["anthropic/claude-opus-4.8", 36_750],
     ["anthropic/claude-fable-5", 73_500],
