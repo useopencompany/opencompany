@@ -124,6 +124,14 @@ const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 3_750_000,
     outputUsdMicrosPerMillion: 15_000_000,
   },
+  "anthropic/claude-sonnet-5": {
+    model: "anthropic/claude-sonnet-5",
+    provider: "anthropic",
+    inputUsdMicrosPerMillion: 3_000_000,
+    cachedInputUsdMicrosPerMillion: 300_000,
+    cacheWriteUsdMicrosPerMillion: 3_750_000,
+    outputUsdMicrosPerMillion: 15_000_000,
+  },
   "anthropic/claude-opus-4.7": {
     model: "anthropic/claude-opus-4.7",
     provider: "anthropic",

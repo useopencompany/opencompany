@@ -85,6 +85,7 @@ The model the OpenCompany engine runs on. Must be one of:
 | `openai/gpt-5.4`                           | High-capability reasoning across long workflows.                |
 | `anthropic/claude-haiku-4.5`               | Cost-efficient Claude for fast workloads.                       |
 | `anthropic/claude-sonnet-4.6`              | High-capability Claude for coding-heavy and professional tasks. |
+| `anthropic/claude-sonnet-5`                | Latest Claude Sonnet for agentic coding and long workflows.     |
 | `anthropic/claude-opus-4.7`                | Highest-capability Claude for demanding agent workflows.        |
 | `anthropic/claude-opus-4.8`                | Latest highest-capability Claude for demanding agent workflows. |
 | `anthropic/claude-fable-5`                 | Mythos-class Claude for long-running, complex agent tasks.      |
