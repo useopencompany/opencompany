@@ -499,7 +499,7 @@ export async function runSandboxTool(input: {
     // a FAILED command — otherwise a successful `gh pr view`/`gh issue view` whose body merely quotes
     // the phrase would get a spurious hint.
     const permissionHint =
-      exitCode !== 0 ? gitHubPermissionErrorHint(`${stdout}\n${stderr}`) : null;
+      exitCode !== 0 ? gitHubPermissionErrorHint(`${stdout}\n${stderr}`, { ghArgv }) : null;
     return truncate({
       stdout,
       stderr,

@@ -909,6 +909,32 @@ describe("runSandboxTool", () => {
     expect(result.permissionHint).toMatch(/Issues: Read/);
   });
 
+  it("attaches an operation-aware permissionHint for failed gh commands", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn(async () => {
+          throw Object.assign(new Error("exit status 1"), {
+            name: "CommandExitError",
+            stdout: "",
+            stderr: "HTTP 403: Resource not accessible by integration",
+            exitCode: 1,
+          });
+        }),
+      },
+    };
+
+    const result = (await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "run list" },
+    })) as { exitCode: number | null; permissionHint?: string };
+
+    expect(result.exitCode).toBe(1);
+    expect(result.permissionHint).toMatch(/Actions: Read/);
+    expect(result.permissionHint).not.toMatch(/Issues: Read/);
+  });
+
   it("quotes parsed gh arguments before dispatching through the sandbox shell", async () => {
     const sandbox = {
       commands: {

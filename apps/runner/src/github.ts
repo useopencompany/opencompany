@@ -13,14 +13,179 @@ const cachedTokens = new Map<string, InstallationToken>();
 // into an actionable instruction the agent — or an operator reading logs — can act on directly.
 const GITHUB_PERMISSION_ERROR_PATTERN = /resource not accessible by integration/i;
 
-export function gitHubPermissionErrorHint(detail: string): string | null {
+type GitHubPermissionOperation = {
+  path?: string | undefined;
+  method?: string | undefined;
+  ghArgv?: string[] | undefined;
+};
+
+const GENERIC_REPOSITORY_PERMISSION = "one or more repository permissions";
+
+export function gitHubPermissionErrorHint(
+  detail: string,
+  operation?: GitHubPermissionOperation,
+): string | null {
   if (!GITHUB_PERMISSION_ERROR_PATTERN.test(detail)) return null;
+  const permissions = githubOperationPermissions(operation);
+  const permissionText =
+    permissions.length > 0 ? permissions.join(" + ") : GENERIC_REPOSITORY_PERMISSION;
   return [
-    "GitHub denied this action: the GitHub App installation lacks the required permission",
+    "GitHub denied this action: the GitHub App installation lacks the required repository",
+    `permission(s): ${permissionText}`,
     '(403 "Resource not accessible by integration").',
-    'If this is an Issues operation (e.g. creating an issue), grant the GitHub App "Issues: Read',
-    "& write" + " and have the org installation re-approve the expanded permissions, then retry.",
+    `Grant the GitHub App ${permissionText} and have the org installation re-approve the expanded permissions, then retry.`,
   ].join(" ");
+}
+
+function githubOperationPermissions(operation: GitHubPermissionOperation | undefined) {
+  if (operation?.ghArgv) {
+    const ghPermissions = githubCliOperationPermissions(operation.ghArgv);
+    if (ghPermissions.length > 0) return ghPermissions;
+  }
+  return githubEndpointPermissions(operation?.path, operation?.method);
+}
+
+function githubCliOperationPermissions(ghArgv: string[]) {
+  const argv = dropGitHubCliGlobalFlags(ghArgv);
+  const [command, subcommand] = argv;
+  if (!command) return [];
+
+  if (command === "run") return ["Actions: Read"];
+  if (command === "pr") {
+    if (subcommand === "checks") return ["Checks: Read", "Statuses: Read"];
+    if (subcommand === "merge") {
+      return ["Administration: Write", "Pull requests: Read & write", "Contents: Read & write"];
+    }
+    if (subcommand === "create" || subcommand === "comment") return ["Pull requests: Read & write"];
+  }
+  if (command === "issue" && subcommand === "create") return ["Issues: Read & write"];
+  if (command === "api") {
+    const apiOperation = parseGitHubCliApiOperation(argv.slice(1));
+    return githubEndpointPermissions(apiOperation.path, apiOperation.method);
+  }
+
+  return [];
+}
+
+function dropGitHubCliGlobalFlags(argv: string[]) {
+  let index = 0;
+  while (index < argv.length) {
+    const arg = argv[index];
+    if (!arg?.startsWith("-")) break;
+    index += githubCliFlagConsumesValue(arg) ? 2 : 1;
+  }
+  return argv.slice(index);
+}
+
+function parseGitHubCliApiOperation(argv: string[]) {
+  let method: string | undefined;
+  let path: string | undefined;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg) continue;
+
+    if (arg === "-X" || arg === "--method" || arg === "--request") {
+      method = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--method=")) {
+      method = arg.slice("--method=".length);
+      continue;
+    }
+    if (arg.startsWith("--request=")) {
+      method = arg.slice("--request=".length);
+      continue;
+    }
+    if (arg.startsWith("-X") && arg.length > 2) {
+      method = arg.slice(2);
+      continue;
+    }
+    if (githubCliApiFlagConsumesValue(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) continue;
+
+    path ??= arg;
+  }
+
+  return { path, method: method ?? "GET" };
+}
+
+function githubCliFlagConsumesValue(arg: string) {
+  return ["--repo", "-R", "--hostname", "--config"].includes(arg);
+}
+
+function githubCliApiFlagConsumesValue(arg: string) {
+  return [
+    "--field",
+    "-F",
+    "--raw-field",
+    "-f",
+    "--header",
+    "-H",
+    "--input",
+    "--jq",
+    "-q",
+    "--template",
+  ].includes(arg);
+}
+
+function githubEndpointPermissions(path: string | undefined, method: string | undefined) {
+  const segments = githubRepositoryEndpointSegments(path);
+  const normalizedMethod = (method ?? "GET").toUpperCase();
+  if (segments.length === 0) return [];
+
+  if (segments[0] === "actions" && (segments[1] === "runs" || segments[1] === "workflows")) {
+    return ["Actions: Read"];
+  }
+  if (segments[0] === "commits") {
+    if (segments[2] === "status") return ["Statuses: Read"];
+    if (segments[2] === "check-suites") return ["Checks: Read"];
+    if (segments[2] === "check-runs") return ["Checks: Read"];
+  }
+  if (segments[0] === "check-runs") return ["Checks: Read"];
+  if (segments[0] === "issues") {
+    if (normalizedMethod === "GET") return ["Issues: Read"];
+    if (normalizedMethod === "POST") return ["Issues: Read & write"];
+  }
+  if (segments[0] === "pulls") {
+    if (segments[2] === "merge" && normalizedMethod === "PUT") {
+      return ["Administration: Write", "Pull requests: Read & write", "Contents: Read & write"];
+    }
+    if (segments[2] === "comments" && normalizedMethod === "POST") {
+      return ["Pull requests: Read & write"];
+    }
+    if (normalizedMethod === "GET") return ["Pull requests: Read"];
+    if (normalizedMethod === "POST") return ["Pull requests: Read & write"];
+  }
+  if (segments[0] === "branches" && segments.includes("protection")) {
+    if (normalizedMethod === "GET") return ["Administration: Read"];
+    if (["DELETE", "PATCH", "POST", "PUT"].includes(normalizedMethod)) {
+      return ["Administration: Write"];
+    }
+  }
+
+  return [];
+}
+
+function githubRepositoryEndpointSegments(path: string | undefined) {
+  const normalizedPath = normalizeGitHubApiPath(path);
+  if (!normalizedPath) return [];
+  const segments = normalizedPath.split("/").filter(Boolean);
+  if (segments[0] === "repos" && segments.length >= 4) return segments.slice(3);
+  return segments;
+}
+
+function normalizeGitHubApiPath(path: string | undefined) {
+  if (!path) return "";
+  try {
+    return new URL(path, "https://api.github.com").pathname;
+  } catch {
+    return path.split(/[?#]/, 1)[0] ?? "";
+  }
 }
 
 export async function getGitHubInstallationToken(
@@ -251,7 +416,7 @@ async function githubRequest<T>(input: {
   if (!response.ok) {
     const detail = await response.text();
     if (response.status === 403) {
-      const hint = gitHubPermissionErrorHint(detail);
+      const hint = gitHubPermissionErrorHint(detail, { path: input.path, method: input.method });
       if (hint) throw new Error(hint);
     }
     throw new Error(`GitHub request failed with ${response.status}: ${detail}`);
