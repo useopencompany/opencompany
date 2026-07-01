@@ -1,4 +1,5 @@
 import { createSign } from "node:crypto";
+import { hasGhApiRequestBody, readGhApiMethod } from "@opencompany/agent-runtime";
 
 type InstallationToken = {
   token: string;
@@ -50,10 +51,16 @@ function githubCliOperationPermissions(ghArgv: string[]) {
   const [command, subcommand] = argv;
   if (!command) return [];
 
-  if (command === "run") return ["Actions: Read"];
+  if (command === "run") {
+    if (["download", "list", "view", "watch"].includes(subcommand ?? "")) return ["Actions: Read"];
+    if (["cancel", "delete", "rerun"].includes(subcommand ?? "")) return ["Actions: Write"];
+    return [];
+  }
   if (command === "pr") {
     if (subcommand === "checks") return ["Checks: Read", "Statuses: Read"];
     if (subcommand === "merge") {
+      // `gh pr merge` may use GraphQL and branch-protection operations beyond the
+      // least-privilege REST merge endpoint, so keep the broader operational hint here.
       return ["Administration: Write", "Pull requests: Read & write", "Contents: Read & write"];
     }
     if (subcommand === "create" || subcommand === "comment") return ["Pull requests: Read & write"];
@@ -78,7 +85,7 @@ function dropGitHubCliGlobalFlags(argv: string[]) {
 }
 
 function parseGitHubCliApiOperation(argv: string[]) {
-  let method: string | undefined;
+  const method = readGhApiMethod(argv) ?? (hasGhApiRequestBody(argv) ? "POST" : "GET");
   let path: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -86,20 +93,10 @@ function parseGitHubCliApiOperation(argv: string[]) {
     if (!arg) continue;
 
     if (arg === "-X" || arg === "--method" || arg === "--request") {
-      method = argv[index + 1];
       index += 1;
       continue;
     }
-    if (arg.startsWith("--method=")) {
-      method = arg.slice("--method=".length);
-      continue;
-    }
-    if (arg.startsWith("--request=")) {
-      method = arg.slice("--request=".length);
-      continue;
-    }
-    if (arg.startsWith("-X") && arg.length > 2) {
-      method = arg.slice(2);
+    if (arg.startsWith("--method=") || arg.startsWith("--request=")) {
       continue;
     }
     if (githubCliApiFlagConsumesValue(arg)) {
@@ -111,7 +108,7 @@ function parseGitHubCliApiOperation(argv: string[]) {
     path ??= arg;
   }
 
-  return { path, method: method ?? "GET" };
+  return { path, method };
 }
 
 function githubCliFlagConsumesValue(arg: string) {
@@ -138,28 +135,54 @@ function githubEndpointPermissions(path: string | undefined, method: string | un
   const normalizedMethod = (method ?? "GET").toUpperCase();
   if (segments.length === 0) return [];
 
-  if (segments[0] === "actions" && (segments[1] === "runs" || segments[1] === "workflows")) {
-    return ["Actions: Read"];
+  if (segments[0] === "actions") {
+    if (normalizedMethod === "GET" && (segments[1] === "runs" || segments[1] === "workflows")) {
+      return ["Actions: Read"];
+    }
+    if (
+      normalizedMethod === "POST" &&
+      ((segments[1] === "jobs" && segments[3] === "rerun") ||
+        (segments[1] === "runs" &&
+          ["cancel", "force-cancel", "rerun", "rerun-failed-jobs"].includes(segments[3] ?? "")))
+    ) {
+      return ["Actions: Write"];
+    }
+    return [];
   }
   if (segments[0] === "commits") {
-    if (segments[2] === "status") return ["Statuses: Read"];
-    if (segments[2] === "check-suites") return ["Checks: Read"];
-    if (segments[2] === "check-runs") return ["Checks: Read"];
+    if (normalizedMethod === "GET" && (segments[2] === "status" || segments[2] === "statuses")) {
+      return ["Statuses: Read"];
+    }
+    if (normalizedMethod === "GET" && segments[2] === "check-suites") return ["Checks: Read"];
+    if (normalizedMethod === "GET" && segments[2] === "check-runs") return ["Checks: Read"];
   }
-  if (segments[0] === "check-runs") return ["Checks: Read"];
+  if (segments[0] === "statuses") {
+    if (normalizedMethod === "GET") return ["Statuses: Read"];
+    if (normalizedMethod === "POST") return ["Statuses: Read & write"];
+  }
+  if (segments[0] === "check-runs") {
+    if (normalizedMethod === "GET") return ["Checks: Read"];
+    if (["PATCH", "POST"].includes(normalizedMethod)) return ["Checks: Write"];
+  }
+  if (segments[0] === "check-suites") {
+    if (normalizedMethod === "GET") return ["Checks: Read"];
+    if (normalizedMethod === "POST" && segments[2] === "rerequest") return ["Checks: Write"];
+  }
   if (segments[0] === "issues") {
     if (normalizedMethod === "GET") return ["Issues: Read"];
-    if (normalizedMethod === "POST") return ["Issues: Read & write"];
+    if (["PATCH", "POST", "PUT"].includes(normalizedMethod)) return ["Issues: Read & write"];
   }
   if (segments[0] === "pulls") {
     if (segments[2] === "merge" && normalizedMethod === "PUT") {
-      return ["Administration: Write", "Pull requests: Read & write", "Contents: Read & write"];
+      return ["Contents: Read & write"];
     }
     if (segments[2] === "comments" && normalizedMethod === "POST") {
       return ["Pull requests: Read & write"];
     }
     if (normalizedMethod === "GET") return ["Pull requests: Read"];
-    if (normalizedMethod === "POST") return ["Pull requests: Read & write"];
+    if (["PATCH", "POST", "PUT"].includes(normalizedMethod)) {
+      return ["Pull requests: Read & write"];
+    }
   }
   if (segments[0] === "branches" && segments.includes("protection")) {
     if (normalizedMethod === "GET") return ["Administration: Read"];

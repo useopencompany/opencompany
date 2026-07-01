@@ -1,3 +1,4 @@
+import { hasGhApiRequestBody, readGhApiMethod } from "./github-cli";
 import { BUILTIN_USE_TOOL_NAME, type RuntimeToolName } from "./tools";
 
 // Human-readable permission groups exposed to users, ordered from least to most
@@ -1029,7 +1030,7 @@ function classifyGhApi(argv: string[], endpoint: string | undefined): Permission
     return argv.some((arg) => /\bmutation\b/i.test(arg)) ? "admin" : "read";
   }
   // gh defaults to GET without a body and POST with one.
-  const method = readGhApiMethod(argv) ?? (hasGhApiRequestBody(argv) ? "POST" : "GET");
+  const method = readGhApiMethod(argv, 1) ?? (hasGhApiRequestBody(argv) ? "POST" : "GET");
   if (method === "GET") return "read";
   if (ghApiTouchesSegments(argv, GH_API_SENSITIVE_SEGMENTS)) return "admin";
   if (method === "POST" || method === "PUT" || method === "PATCH") {
@@ -1038,47 +1039,6 @@ function classifyGhApi(argv: string[], endpoint: string | undefined): Permission
   }
   // DELETE and anything unrecognized — including DELETE on a merge path.
   return "admin";
-}
-
-function hasGhApiRequestBody(argv: string[]) {
-  return argv.some((arg) => {
-    return (
-      // gh is a pflag CLI, so shorthand flags accept attached values: `-ftitle=x` and
-      // `-f=title=x` are valid body fields, not just the bare `-f value` form. Match
-      // by prefix so the attached forms can't classify as a body-less read.
-      arg.startsWith("-f") ||
-      arg.startsWith("-F") ||
-      arg === "--field" ||
-      arg === "--raw-field" ||
-      arg === "--input" ||
-      arg.startsWith("--field=") ||
-      arg.startsWith("--raw-field=") ||
-      arg.startsWith("--input=")
-    );
-  });
-}
-
-function readGhApiMethod(argv: string[]): string | undefined {
-  for (let index = 1; index < argv.length; index++) {
-    const arg = argv[index]!;
-    if (arg === "--method" || arg === "-X") {
-      const value = argv[index + 1];
-      return value ? value.toUpperCase() : "DELETE";
-    }
-    if (arg.startsWith("--method=")) {
-      return arg.slice("--method=".length).toUpperCase();
-    }
-    // pflag shorthand with an attached value: `-XDELETE` / `-X=DELETE`. Without this,
-    // the attached forms fell through to "no method" and a destructive call classified
-    // as read. An empty attached value (`-X=`) is unparseable → "DELETE" so it lands
-    // in the admin group rather than being waved through.
-    if (arg.startsWith("-X")) {
-      const attached = arg.slice(2);
-      const value = attached.startsWith("=") ? attached.slice(1) : attached;
-      return value ? value.toUpperCase() : "DELETE";
-    }
-  }
-  return undefined;
 }
 
 export function parseGitHubCliArgs(args: unknown): string[] | null {
