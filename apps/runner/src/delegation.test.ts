@@ -5,9 +5,14 @@ import {
   agents,
 } from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentConfig } from "./agent-loop-test-support";
+import {
+  agentConfig,
+  createDelegationDb,
+  defaultDelegationRollupRow,
+} from "./agent-loop-test-support";
 import {
   autoAwaitToolCallId,
+  completeDelegatedChildRunForParent,
   createAgentDelegationHandler,
   ensureAutoAwaitToolCallForReplay,
   isDelegatedChildActive,
@@ -35,7 +40,6 @@ vi.mock("./db", () => ({ getDb: dbMocks.getDb }));
 vi.mock("./jobs", () => ({ enqueueRunnerJob: jobMocks.enqueueRunnerJob }));
 vi.mock("./events", () => ({ appendRuntimeEvent: eventMocks.appendRuntimeEvent }));
 vi.mock("./lease-writes", () => leaseWrites);
-vi.mock("./delegation-usage", () => ({ emitDelegatedUsageRollup: vi.fn(async () => {}) }));
 vi.mock("@opencompany/observability/braintrust", () => ({
   traceBraintrustStep: vi.fn(async (_name: string, run: () => Promise<unknown>) => run()),
 }));
@@ -532,6 +536,57 @@ describe("prepareAutoAwaitAtTurnEnd", () => {
   it("uses a deterministic synthetic tool call id unique to the assistant message", () => {
     expect(autoAwaitToolCallId("msg_one")).toBe("auto-await:msg_one");
     expect(autoAwaitToolCallId("msg_two")).toBe("auto-await:msg_two");
+  });
+});
+
+describe("completeDelegatedChildRunForParent", () => {
+  it("rolls child sandbox usage cost up to the parent delegated usage event", async () => {
+    const sandboxCostUsdMicros = 1_997;
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wks_1",
+          userId: "usr_1",
+          agentId: "agt_codex",
+          status: "completed",
+          source: "agent",
+          parentSessionId: "ses_parent",
+          parentMessageId: "msg_parent",
+          parentToolCallId: "call_delegate",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+      rollupRow: {
+        ...defaultDelegationRollupRow(),
+        totalCostUsdMicros: sandboxCostUsdMicros,
+        sandboxCostUsdMicros,
+      },
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await completeDelegatedChildRunForParent({ childSessionId: "ses_child" });
+
+    expect(eventMocks.appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        messageId: "msg_parent",
+        type: "session.delegated_usage",
+        payload: expect.objectContaining({
+          childSessionId: "ses_child",
+          parentToolCallId: "call_delegate",
+          cost: expect.objectContaining({
+            sandboxCostUsdMicros,
+          }),
+        }),
+      }),
+    );
+    const appendRuntimeEventCalls = eventMocks.appendRuntimeEvent.mock.calls as unknown as Array<
+      [unknown, { payload?: { cost?: { sandboxCostUsdMicros?: number } } }]
+    >;
+    expect(appendRuntimeEventCalls[0]?.[1].payload?.cost?.sandboxCostUsdMicros).toBeGreaterThan(0);
   });
 });
 
