@@ -455,6 +455,7 @@ async function runCodexTurnWithContext(
     if (ctx.controller.signal.aborted || error instanceof RunAbortError) {
       outcome = "aborted";
       if (leaseAcquired) {
+        await recordSandboxUsageBestEffort({ ctx, assistantMessageId, sandboxBilling });
         await failRunLease(
           input.sessionId,
           ctx.leaseId,
@@ -506,6 +507,7 @@ async function runCodexTurnWithContext(
         type: "session.error",
         payload: { message },
       });
+      await recordSandboxUsageBestEffort({ ctx, assistantMessageId, sandboxBilling });
       const updated = await failRunLease(
         input.sessionId,
         ctx.leaseId,
