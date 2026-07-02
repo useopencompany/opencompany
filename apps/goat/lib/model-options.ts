@@ -1,0 +1,24 @@
+import { AGENT_MODEL_CATALOG } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
+
+const GOAT_MODEL_IDS = [
+  "openai/gpt-5.4-mini",
+  "openai/gpt-5.4",
+  "anthropic/claude-sonnet-4.6",
+  "xai/grok-4.3",
+] as const satisfies readonly AgentModelId[];
+
+const GOAT_MODEL_ID_SET = new Set<string>(GOAT_MODEL_IDS);
+
+export const GOAT_MODELS = AGENT_MODEL_CATALOG.filter((model) => GOAT_MODEL_ID_SET.has(model.id));
+
+export type GoatModelOption = (typeof GOAT_MODELS)[number];
+
+export const DEFAULT_GOAT_MODEL: AgentModelId = "openai/gpt-5.4-mini";
+
+export function normalizeGoatModel(value: unknown): AgentModelId {
+  if (typeof value === "string" && GOAT_MODEL_ID_SET.has(value)) {
+    return value as AgentModelId;
+  }
+  return DEFAULT_GOAT_MODEL;
+}

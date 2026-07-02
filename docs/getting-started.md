@@ -83,6 +83,7 @@ bun run dev
 6. Start a local Electric sync container against that database and set `ELECTRIC_URL`. A
    container runtime is required — setup fails fast with install instructions if OrbStack/Docker
    is missing or not running. See [docs/stack/electric-sync.md](stack/electric-sync.md).
+7. Mirror the DB/Auth/runner/Electric values Goat needs into `apps/goat/.env.local`.
 
 Re-running it is safe.
 
@@ -98,6 +99,7 @@ These are the root commands a contributor is expected to run directly:
 | `bun run setup:stripe` | Fill only missing local Stripe values after the main setup already ran. |
 | `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
 | `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, a local Durable Streams server (auto-sets `DURABLE_STREAMS_URL`), and ngrok when available. |
+| `bun run dev:goat` | Start the Goat experiment app plus the runner with the same local Durable Streams/ngrok wrapper. Goat runs on port 3002 by default. Run `bun run setup` first so Electric and `apps/goat/.env.local` are ready. |
 | `bun run dev:stream` | Start the same full local stack with streaming logs instead of the Turbo TUI. |
 | `bun run dev:logs` | Read the latest local dev logs from `.context/logs/dev-turbo.json`; use `-- --source runner`, `-- --source web`, `-- --errors`, `-- --grep <text>`, or `-- --follow`. |
 | `bun run dev:web` | Start only the Next.js web app. |

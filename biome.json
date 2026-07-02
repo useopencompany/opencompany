@@ -9,6 +9,7 @@
     "ignoreUnknown": true,
     "includes": [
       "**",
+      "!**/.context",
       "!**/.next",
       "!**/.agents",
       "!**/.source",

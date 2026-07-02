@@ -1,0 +1,38 @@
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { normalizeGoatModel } from "@/lib/model-options";
+
+export const GOAT_CHAT_PROMPT_MAX_LENGTH = 10_000;
+
+export type GoatChatInput = {
+  prompt: string;
+  model: AgentModelId;
+  sessionId: string | null;
+};
+
+export function validateGoatChatInput(input: {
+  prompt: unknown;
+  model: unknown;
+  sessionId?: unknown;
+}): { ok: true; value: GoatChatInput } | { ok: false; error: string } {
+  const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+  if (!prompt) {
+    return { ok: false, error: "Enter a message before sending." };
+  }
+  if (prompt.length > GOAT_CHAT_PROMPT_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Messages can be at most ${GOAT_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+    };
+  }
+
+  const rawSessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+
+  return {
+    ok: true,
+    value: {
+      prompt,
+      model: normalizeGoatModel(input.model),
+      sessionId: rawSessionId || null,
+    },
+  };
+}

@@ -13,6 +13,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./delegation";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
+import { setGoatTaskWakeup, startGoatTaskWorker } from "./goat-worker";
 import { setRunnerJobWakeup, startRunnerJobWorker } from "./jobs";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { assertPreviewIdentity } from "./preview-guard";
@@ -80,9 +81,11 @@ const jobWorker = startRunnerJobWorker(env, {
     return interrupted;
   },
 });
+const goatTaskWorker = startGoatTaskWorker(env);
 // Let any in-process enqueue (delegation spawn, child-finish parent-wake) nudge the worker
 // immediately instead of waiting out the poll interval — the same wake the HTTP server uses.
 setRunnerJobWakeup(jobWorker.notify);
+setGoatTaskWakeup(goatTaskWorker.notify);
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -91,6 +94,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       event: "opencompany.runner_shutdown_started",
       signal,
       active_job_count: jobWorker.activeCount(),
+      active_goat_task_count: goatTaskWorker.activeCount(),
       active_run_count: listActiveRuns().length,
     });
     // Stop accepting work and drain in-flight jobs/requests first, flush any pending
@@ -114,6 +118,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           });
         },
       }),
+      goatTaskWorker.stop(),
       server.close(),
     ])
       .then(() => Promise.allSettled([flushAllSessionStreams()]))

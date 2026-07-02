@@ -151,6 +151,9 @@ const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
 const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
+const LOCAL_GOAT_APP_URL = "http://localhost:3002";
+const LOCAL_GOAT_WORKOS_REDIRECT_URI = `${LOCAL_GOAT_APP_URL}/auth/callback`;
+const GOAT_ENV_PATH = "apps/goat/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
@@ -159,7 +162,30 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
+  GOAT_PORT: "3002",
+  GOAT_NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
+  GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
 };
+const GOAT_LOCAL_ENV_KEYS = [
+  "GOAT_PORT",
+  "DATABASE_URL",
+  "WORKOS_CLIENT_ID",
+  "WORKOS_API_KEY",
+  "WORKOS_COOKIE_PASSWORD",
+  "RUNNER_PUBLIC_URL",
+  "RUNNER_INTERNAL_URL",
+  "RUNNER_INTERNAL_TOKEN",
+  "ELECTRIC_URL",
+  "ELECTRIC_SOURCE_ID",
+  "ELECTRIC_SOURCE_SECRET",
+  "ELECTRIC_SECRET",
+  "ELECTRIC_TOKEN",
+  "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
+  "NEXT_PUBLIC_OBSERVABILITY_ENV",
+  "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
+  "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
+  "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
+];
 
 function assertNodeVersion() {
   const current = versions.node.split(".").map(Number);
@@ -442,6 +468,30 @@ async function ensureLocalDevDefaults() {
 
   writeEnvValues(".env.local", missingDefaults);
   ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
+}
+
+async function ensureGoatEnvFile() {
+  step("Goat app env file");
+
+  const env = readEffectiveLocalEnv();
+  const goatAppUrl = env.GOAT_NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
+  const goatRedirectUri = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${goatAppUrl}/auth/callback`;
+  const values = {
+    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
+    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_APP_URL: goatAppUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    WORKOS_REDIRECT_URI: goatRedirectUri,
+  };
+
+  for (const key of GOAT_LOCAL_ENV_KEYS) {
+    if (!isPlaceholder(env[key])) {
+      values[key] = env[key];
+    }
+  }
+
+  writeEnvValues(GOAT_ENV_PATH, values);
+  ok(`Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/Electric env`);
 }
 
 async function ensurePersonalEnvFile() {
@@ -823,6 +873,7 @@ async function main() {
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
     await ensureLocalDevDefaults();
+    await ensureGoatEnvFile();
     ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
@@ -904,6 +955,12 @@ async function main() {
         reason: "start local Electric and set ELECTRIC_URL for live agents/sessions sync",
       });
     }
+    if (!existsSync(GOAT_ENV_PATH)) {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `write ${GOAT_ENV_PATH} for direct Goat app local tooling`,
+      });
+    }
     console.log(
       JSON.stringify(
         { ...state, electric, electricUrl: electricUrlSet ? "set" : "placeholder", nextSteps },
@@ -935,9 +992,12 @@ async function main() {
   await ensureStripe(inspectState());
   await runMigrations();
   await ensureElectric();
+  await ensureGoatEnvFile();
 
   if (!START_DEV_MODE) {
-    console.log("\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m when ready.\n");
+    console.log(
+      "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m or \x1b[1mbun run dev:goat\x1b[0m when ready.\n",
+    );
     return;
   }
 

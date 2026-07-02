@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { executeGoatGoogleTool } from "./goat-google-tools";
+import { createGoatToolToken } from "./goat-tool-auth";
+import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
 import { createServer } from "./server";
 
@@ -12,6 +15,15 @@ vi.mock("./jobs", () => ({
     id: 1,
     status: "pending",
   })),
+}));
+
+vi.mock("./goat-worker", () => ({
+  wakeGoatTaskWorker: vi.fn(),
+}));
+
+vi.mock("./goat-google-tools", () => ({
+  executeGoatGoogleTool: vi.fn(async () => ({ messages: [] })),
+  isGoatGoogleToolName: (name: string) => name === "gmail_search",
 }));
 
 const env = {
@@ -100,6 +112,71 @@ describe("internal session start endpoint", () => {
       kind: "start",
       sessionId: "ses_123",
     });
+  });
+});
+
+describe("internal Goat task run endpoint", () => {
+  it("wakes the Goat worker for authenticated task requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/tasks/goat_task_123/run",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(wakeGoatTaskWorker).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Goat tool endpoint", () => {
+  it("executes authenticated task-scoped tool requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+    const token = createGoatToolToken({
+      taskId: "goat_task_123",
+      userWorkosId: "user_123",
+      secret: env.internalToken,
+      expiresInMs: 60_000,
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/goat/tools/goat_task_123",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: "gmail_search",
+        args: { query: "is:unread" },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, output: { messages: [] } });
+    expect(executeGoatGoogleTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "gmail_search",
+        args: { query: "is:unread" },
+        userWorkosId: "user_123",
+      }),
+    );
+  });
+
+  it("rejects Goat tool requests without a valid task token", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/goat/tools/goat_task_123",
+      headers: { authorization: "Bearer invalid" },
+      payload: { name: "gmail_search", args: {} },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(executeGoatGoogleTool).not.toHaveBeenCalled();
   });
 });
 

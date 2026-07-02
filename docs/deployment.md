@@ -117,6 +117,29 @@ Forward production web logs to the Better Stack source `opencompany-web-producti
 Vercel Better Stack integration or a Vercel Log Drain. Keep the source token in Vercel/Infisical,
 not in git.
 
+### Vercel Goat
+
+`apps/goat` deploys as a separate manual Vercel project/domain for the experiment. Keep the project
+root at the repo root and override the project build command:
+
+- Install command: `bun install --frozen-lockfile`
+- Build command: `bun run vercel-build:goat`
+- Production branch: `main`
+- Framework preset: Next.js
+- Automatic Git deploys: off for v1; deploy manually after migrations and runner compatibility are
+  confirmed.
+
+Set the Goat project envs from [env-vars.md → Vercel Goat](./env-vars.md#vercel-goat). Register the
+Goat redirect URI in the same WorkOS environment as the core app:
+
+```text
+https://<goat-domain>/auth/callback
+```
+
+The first Goat release needs the `goat` schema migration applied to the shared Neon database before
+the app is served. Rollback is additive for the MVP: disabling the Goat Vercel project stops new
+task creation without affecting core `public` schema data.
+
 ### Render
 
 Create the runner from `render.yaml`.
@@ -140,6 +163,7 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
+- `EXA_API_KEY` (required when Goat tasks are enabled)
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`

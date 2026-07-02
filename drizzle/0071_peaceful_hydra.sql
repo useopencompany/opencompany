@@ -1,0 +1,1 @@
+ALTER TABLE "goat"."tasks" ADD COLUMN "debug_trace" jsonb DEFAULT '{}'::jsonb NOT NULL;

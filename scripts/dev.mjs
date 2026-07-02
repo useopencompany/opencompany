@@ -18,8 +18,11 @@ import {
   waitForNgrokUrl,
 } from "./lib/ngrok-dev.mjs";
 
-const turboArgs = process.argv.slice(2);
-const port = valueFor(turboArgs, "--port") ?? process.env.PORT ?? "3000";
+const { appMode, turboArgs } = parseArgs(process.argv.slice(2));
+const defaultPort = appMode === "goat" ? (process.env.GOAT_PORT ?? "3002") : "3000";
+const port =
+  valueFor(turboArgs, "--port") ??
+  (appMode === "goat" ? defaultPort : (process.env.PORT ?? defaultPort));
 const isCI = process.env.CI === "true" || process.env.CI === "1";
 const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
 configureDevLogFile(turboArgs);
@@ -46,6 +49,7 @@ const dev = spawn(turboBin, ["dev", ...turboArgs], {
     ...process.env,
     ...tunnelEnv,
     ...durableEnv,
+    ...envForAppMode(),
     INNGEST_DEV: process.env.INNGEST_DEV ?? "1",
   },
 });
@@ -72,6 +76,56 @@ function configureDevLogFile(args) {
   console.log(`\nDev logs: ${logFile}`);
   console.log("Read them with: bun run dev:logs -- --tail 100 --source runner\n");
   return logFile;
+}
+
+function parseArgs(args) {
+  let appMode = "web";
+  const turboArgs = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--app") {
+      appMode = args[index + 1] === "goat" ? "goat" : "web";
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--app=")) {
+      appMode = arg.slice("--app=".length) === "goat" ? "goat" : "web";
+      continue;
+    }
+    turboArgs.push(arg);
+  }
+  return { appMode, turboArgs };
+}
+
+function envForAppMode() {
+  if (appMode !== "goat") return {};
+
+  const goatAppUrl = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() || `http://localhost:${port}`;
+  const goatRedirectUri =
+    process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() || `${goatAppUrl}/auth/callback`;
+
+  return {
+    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
+    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    RUNNER_ALLOWED_ORIGINS: appendCsvValues(
+      process.env.RUNNER_ALLOWED_ORIGINS,
+      [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL].filter(Boolean),
+    ),
+  };
+}
+
+function appendCsvValues(raw, values) {
+  const existing = (raw ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const seen = new Set(existing);
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    existing.push(value);
+    seen.add(value);
+  }
+  return existing.join(",");
 }
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

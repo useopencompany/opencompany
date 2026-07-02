@@ -16,6 +16,14 @@
       "types": "./src/codex-auth.ts",
       "default": "./src/codex-auth.ts"
     },
+    "./goat-integrations": {
+      "types": "./src/goat-integrations.ts",
+      "default": "./src/goat-integrations.ts"
+    },
+    "./goat-schema": {
+      "types": "./src/goat-schema.ts",
+      "default": "./src/goat-schema.ts"
+    },
     "./schema": {
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"

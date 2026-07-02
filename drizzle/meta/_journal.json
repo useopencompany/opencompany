@@ -491,6 +491,48 @@
       "when": 1782650823133,
       "tag": "0069_futuristic_white_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1782983153998,
+      "tag": "0070_pale_mastermind",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1782985742977,
+      "tag": "0071_peaceful_hydra",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1782986292429,
+      "tag": "0072_mean_bloodstorm",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1782986419868,
+      "tag": "0073_fixed_senator_kelly",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1782987063041,
+      "tag": "0074_grey_pride",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1782989354414,
+      "tag": "0075_abnormal_champions",
+      "breakpoints": true
     }
   ]
 }
