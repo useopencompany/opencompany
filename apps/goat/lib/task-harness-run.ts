@@ -244,6 +244,7 @@ export function buildGoatHarnessRun(input: {
   modelUsage?: readonly GoatTaskRunModelUsageInput[];
   toolUsage?: readonly GoatTaskRunToolUsageInput[];
   sandboxUsage?: readonly GoatTaskRunSandboxUsageInput[];
+  cost?: GoatRunCostSummary;
 }): GoatHarnessRunViewModel {
   const task = normalizeTask(input.task);
   const messages = input.messages.map(normalizeMessage).toSorted(compareCreatedAt);
@@ -260,11 +261,13 @@ export function buildGoatHarnessRun(input: {
     assistantMessages,
     toolCalls,
     events,
-    cost: buildCostSummary({
-      modelUsage: input.modelUsage ?? [],
-      toolUsage: input.toolUsage ?? [],
-      sandboxUsage: input.sandboxUsage ?? [],
-    }),
+    cost:
+      input.cost ??
+      buildCostSummary({
+        modelUsage: input.modelUsage ?? [],
+        toolUsage: input.toolUsage ?? [],
+        sandboxUsage: input.sandboxUsage ?? [],
+      }),
   };
 }
 

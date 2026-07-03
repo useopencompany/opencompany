@@ -21,8 +21,15 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
     notFound();
   }
 
-  const { task, messages, events } = runData;
-  const run = buildGoatHarnessRun({ task, messages, events });
+  const { task, messages, events, modelUsage, toolUsage, sandboxUsage } = runData;
+  const run = buildGoatHarnessRun({
+    task,
+    messages,
+    events,
+    modelUsage,
+    toolUsage,
+    sandboxUsage,
+  });
 
   return (
     <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
