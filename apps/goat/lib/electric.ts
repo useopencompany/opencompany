@@ -31,6 +31,30 @@ const SHAPE_SCOPES = {
     table: "goat.task_events",
     where: scopedTaskWhere,
   },
+  task_model_usage: {
+    table: "goat.task_model_usage",
+    where: scopedTaskWhere,
+  },
+  "goat.task_model_usage": {
+    table: "goat.task_model_usage",
+    where: scopedTaskWhere,
+  },
+  task_tool_usage: {
+    table: "goat.task_tool_usage",
+    where: scopedTaskWhere,
+  },
+  "goat.task_tool_usage": {
+    table: "goat.task_tool_usage",
+    where: scopedTaskWhere,
+  },
+  task_sandbox_usage: {
+    table: "goat.task_sandbox_usage",
+    where: scopedTaskWhere,
+  },
+  "goat.task_sandbox_usage": {
+    table: "goat.task_sandbox_usage",
+    where: scopedTaskWhere,
+  },
   integrations: {
     table: "goat.integrations",
     where: scopedUserWhere,
