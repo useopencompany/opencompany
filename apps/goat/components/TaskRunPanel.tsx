@@ -9,7 +9,10 @@ import {
   createGoatCollections,
   type GoatTaskEventRow,
   type GoatTaskMessageRow,
+  type GoatTaskModelUsageRow,
   type GoatTaskRow,
+  type GoatTaskSandboxUsageRow,
+  type GoatTaskToolUsageRow,
 } from "@/lib/task-collections";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 
@@ -54,21 +57,71 @@ function LiveTaskRunProvider({
   const { data: eventRows, isLoading: eventsLoading } = useLiveQuery((q) =>
     q.from({ event: scoped.events }),
   );
+  const { data: modelUsageRows, isLoading: modelUsageLoading } = useLiveQuery((q) =>
+    q.from({ usage: scoped.modelUsage }),
+  );
+  const { data: toolUsageRows, isLoading: toolUsageLoading } = useLiveQuery((q) =>
+    q.from({ usage: scoped.toolUsage }),
+  );
+  const { data: sandboxUsageRows, isLoading: sandboxUsageLoading } = useLiveQuery((q) =>
+    q.from({ usage: scoped.sandboxUsage }),
+  );
 
   const run = useMemo(() => {
-    if (taskLoading && messagesLoading && eventsLoading) return initialRun;
+    if (
+      taskLoading &&
+      messagesLoading &&
+      eventsLoading &&
+      modelUsageLoading &&
+      toolUsageLoading &&
+      sandboxUsageLoading
+    ) {
+      return initialRun;
+    }
     const liveTask = (taskRows ?? []).find(
       (task) => task.id === initialRun.task.id || task.display_id === initialRun.task.displayId,
     );
     const liveMessages = (messageRows ?? []) as GoatTaskMessageRow[];
     const liveEvents = (eventRows ?? []) as GoatTaskEventRow[];
-    if (!liveTask && liveMessages.length === 0 && liveEvents.length === 0) return initialRun;
+    const liveModelUsage = (modelUsageRows ?? []) as GoatTaskModelUsageRow[];
+    const liveToolUsage = (toolUsageRows ?? []) as GoatTaskToolUsageRow[];
+    const liveSandboxUsage = (sandboxUsageRows ?? []) as GoatTaskSandboxUsageRow[];
+    const hasLiveCostRows =
+      liveModelUsage.length > 0 || liveToolUsage.length > 0 || liveSandboxUsage.length > 0;
+    if (
+      !liveTask &&
+      liveMessages.length === 0 &&
+      liveEvents.length === 0 &&
+      liveModelUsage.length === 0 &&
+      liveToolUsage.length === 0 &&
+      liveSandboxUsage.length === 0
+    ) {
+      return initialRun;
+    }
     return buildGoatHarnessRun({
       task: (liveTask ?? taskFromInitialRun(initialRun)) as GoatTaskRow,
       messages: liveMessages,
       events: liveEvents,
+      modelUsage: liveModelUsage,
+      toolUsage: liveToolUsage,
+      sandboxUsage: liveSandboxUsage,
+      ...(hasLiveCostRows ? {} : { cost: initialRun.cost }),
     });
-  }, [eventRows, eventsLoading, initialRun, messageRows, messagesLoading, taskLoading, taskRows]);
+  }, [
+    eventRows,
+    eventsLoading,
+    initialRun,
+    messageRows,
+    messagesLoading,
+    modelUsageLoading,
+    modelUsageRows,
+    sandboxUsageLoading,
+    sandboxUsageRows,
+    taskLoading,
+    taskRows,
+    toolUsageLoading,
+    toolUsageRows,
+  ]);
 
   return children(run);
 }

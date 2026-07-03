@@ -61,6 +61,77 @@ export type GoatTaskEventRow = {
   created_at: string;
 };
 
+export type GoatTaskModelUsageRow = {
+  id: number;
+  task_id: string;
+  user_workos_id: string;
+  message_id: string | null;
+  run_lease_id: string | null;
+  phase: string;
+  step_index: number;
+  model_provider: string;
+  model_name: string;
+  response_id: string | null;
+  response_model_id: string | null;
+  finish_reason: string | null;
+  raw_finish_reason: string | null;
+  input_tokens: number;
+  input_no_cache_tokens: number;
+  input_cache_read_tokens: number;
+  input_cache_write_tokens: number;
+  output_tokens: number;
+  output_text_tokens: number;
+  output_reasoning_tokens: number;
+  total_tokens: number;
+  raw_usage: Record<string, unknown>;
+  provider_created_at: string | null;
+  provider_cost_usd_micros: number;
+  platform_fee_usd_micros: number;
+  total_cost_usd_micros: number;
+  cost_basis: Record<string, unknown>;
+  created_at: string;
+};
+
+export type GoatTaskToolUsageRow = {
+  id: number;
+  task_id: string;
+  user_workos_id: string;
+  message_id: string | null;
+  run_lease_id: string | null;
+  tool_call_id: string;
+  tool_name: string;
+  provider: string;
+  operation: string;
+  provider_request_id: string | null;
+  provider_cost_usd_micros: number;
+  platform_fee_usd_micros: number;
+  total_cost_usd_micros: number;
+  raw_usage: Record<string, unknown>;
+  cost_basis: Record<string, unknown>;
+  created_at: string;
+};
+
+export type GoatTaskSandboxUsageRow = {
+  id: number;
+  task_id: string;
+  user_workos_id: string;
+  message_id: string | null;
+  run_lease_id: string | null;
+  sandbox_id: string;
+  template: string | null;
+  vcpu: number | null;
+  ram_mib: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+  active_ms: number;
+  provider_cost_usd_micros: number;
+  platform_fee_usd_micros: number;
+  total_cost_usd_micros: number;
+  raw_metrics: Record<string, unknown>;
+  cost_basis: Record<string, unknown>;
+  created_at: string;
+};
+
 export type GoatIntegrationRow = {
   id: string;
   user_workos_id: string;
@@ -119,6 +190,24 @@ export function createGoatCollections() {
     events: createGoatElectricCollection<GoatTaskEventRow>({
       id: `goat:task_events:${taskId}`,
       table: "goat.task_events",
+      params: { task_id: taskId },
+      getKey: (row) => row.id,
+    }),
+    modelUsage: createGoatElectricCollection<GoatTaskModelUsageRow>({
+      id: `goat:task_model_usage:${taskId}`,
+      table: "goat.task_model_usage",
+      params: { task_id: taskId },
+      getKey: (row) => row.id,
+    }),
+    toolUsage: createGoatElectricCollection<GoatTaskToolUsageRow>({
+      id: `goat:task_tool_usage:${taskId}`,
+      table: "goat.task_tool_usage",
+      params: { task_id: taskId },
+      getKey: (row) => row.id,
+    }),
+    sandboxUsage: createGoatElectricCollection<GoatTaskSandboxUsageRow>({
+      id: `goat:task_sandbox_usage:${taskId}`,
+      table: "goat.task_sandbox_usage",
       params: { task_id: taskId },
       getKey: (row) => row.id,
     }),
