@@ -496,21 +496,22 @@ async function deleteBrainDocumentFromSandbox(input: {
 async function ensureBrainFolder(userWorkosId: string, path: string) {
   if (!isValidGoatBrainFolder(path)) return;
   const now = new Date();
+  const source = (DEFAULT_GOAT_BRAIN_FOLDERS as readonly string[]).includes(path)
+    ? "system"
+    : "custom";
   await getDb()
     .insert(goatBrainFolders)
     .values({
       id: `goat_brain_folder_${randomUUID()}`,
       userWorkosId,
       path,
-      source: (DEFAULT_GOAT_BRAIN_FOLDERS as readonly string[]).includes(path)
-        ? "system"
-        : "custom",
+      source,
       createdAt: now,
       updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [goatBrainFolders.userWorkosId, goatBrainFolders.path],
-      set: { updatedAt: now },
+      set: { source, updatedAt: now },
     });
 }
 

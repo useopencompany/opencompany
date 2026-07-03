@@ -8,6 +8,17 @@ import {
   type StartTaskToolInput,
   type StartTaskToolOutput,
 } from "@/lib/chat-ui";
+import {
+  GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
+  GOAT_BRAIN_TOOL_DESCRIPTION,
+  OPENCOMPANY_CHAT_SYSTEM_PROMPT,
+  START_TASK_NAME_DESCRIPTION,
+  START_TASK_PROMPT_DESCRIPTION,
+  START_TASK_REASON_DESCRIPTION,
+  START_TASK_TOOL_DESCRIPTION,
+} from "@/lib/prompts";
+
+export { OPENCOMPANY_CHAT_SYSTEM_PROMPT } from "@/lib/prompts";
 
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 
@@ -100,16 +111,14 @@ export function createOpenCompanyChatToolContext(input: {
     getStartedTask: () => startedTask,
     tools: {
       [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
-        description:
-          'Run the user\'s personal Goat brain CLI for durable notes and recall. Use this when the user asks to remember, save, recall, inspect, edit, link, or search personal/company context that should stay available later. Pass only CLI arguments, for example: query --text "pricing" --hops 1 --limit 5, create --folder inbox --title "Hiring note" --truth "...", append-timeline note-id --body "...", or doctor.',
+        description: GOAT_BRAIN_TOOL_DESCRIPTION,
         inputSchema: jsonSchema<GoatBrainToolInput>({
           type: "object",
           additionalProperties: false,
           properties: {
             args: {
               type: "string",
-              description:
-                "Arguments for the goat-brain CLI, excluding the executable name. Do not include shell operators. Prefer query/get before editing unless the user clearly asked to remember or update something.",
+              description: GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
             },
           },
           required: ["args"],
@@ -124,24 +133,22 @@ export function createOpenCompanyChatToolContext(input: {
         },
       }),
       [START_TASK_TOOL_NAME]: tool<StartTaskToolInput, StartTaskToolOutput>({
-        description:
-          "Start a task when the user's request should become an asynchronous tracked Result, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent.",
+        description: START_TASK_TOOL_DESCRIPTION,
         inputSchema: jsonSchema<StartTaskToolInput>({
           type: "object",
           additionalProperties: false,
           properties: {
             prompt: {
               type: "string",
-              description:
-                "A self-contained task prompt. Preserve the user's goal, relevant context, success criteria, and any constraints needed by the just-in-time agent.",
+              description: START_TASK_PROMPT_DESCRIPTION,
             },
             name: {
               type: "string",
-              description: "A short 2-7 word task name for the Results list.",
+              description: START_TASK_NAME_DESCRIPTION,
             },
             reason: {
               type: "string",
-              description: "Short reason this should run as a task instead of a chat answer.",
+              description: START_TASK_REASON_DESCRIPTION,
             },
           },
           required: ["prompt", "name"],
@@ -182,29 +189,6 @@ export function createOpenCompanyChatDebugTrace(input: {
     ...(input.error ? { error: input.error } : {}),
   };
 }
-
-export const OPENCOMPANY_CHAT_SYSTEM_PROMPT = [
-  "<system>",
-  "You are OpenCompany, the main agent for getting work done and building the user's agentic company.",
-  "You run in the main app as a chat interface. The rest of the app is organized around tasks: durable work items that can be spawned from this main agent when useful, tracked in Results, and executed by more specialized agents.",
-  "</system>",
-  "<behavior>",
-  "Decide from the user's intent whether to handle the request in this chat loop or start a task.",
-  "Handle the request directly when you can give a useful answer, make a small edit, brainstorm, explain, decide, draft, or ask a short clarifying question without needing extra execution context.",
-  "Use the goat_brain tool inside chat when the user asks you to remember, save, recall, search, inspect, or lightly edit durable personal context. The tool runs the real personal-brain CLI against the user's Goat brain.",
-  "Start a task when the user asks for research, investigation, monitoring, comparison across sources, connected-account work, longer-running execution, or anything that should be tracked as a Result.",
-  "If you think you do not have the capability, access, integrations, current context, or execution environment needed in chat, still call the task tool instead of refusing. Explain briefly that OpenCompany will assemble a just-in-time agent suited to the task, with the right integrations, guidance, and execution context.",
-  "Requests to check, read, summarize, triage, or monitor the user's latest emails, inbox, Gmail, calendar, or connected accounts are task requests.",
-  "When you start a task, keep the chat response short and say that it was added to Results.",
-  "Do not claim to browse, use a sandbox, access connected accounts, or complete asynchronous task work inside chat. You may say you checked or updated the user's Brain only after using goat_brain successfully.",
-  "</behavior>",
-  "<soul>",
-  "Be a proactive, founder-focused operator: direct, practical, and biased toward forward motion.",
-  "Think like a sharp chief of staff for an early company. Clarify only when it materially changes the work; otherwise make the best reasonable assumption and move.",
-  "Protect the user's time. Surface the decision, next action, or tradeoff plainly. Prefer crisp execution over commentary.",
-  "Care about leverage: turn vague intent into useful work, preserve context for future tasks, and help the company compound its operating knowledge.",
-  "</soul>",
-].join(" ");
 
 export function normalizeAgentText(text: string, startedTask: StartedTask | null) {
   const trimmed = text.trim();

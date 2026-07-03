@@ -20,6 +20,12 @@ import {
   type GoatToolLifecycleInput,
   normalizeGoatTaskToolNames,
 } from "./goat-tools";
+import type { HostedToolUsage } from "./hosted-tools";
+import {
+  buildGoatHarnessCreationPrompt,
+  GOAT_HARNESS_CREATION_SYSTEM_PROMPT,
+} from "./prompts/goat-harness-creation";
+import { GOAT_TASK_HARNESS_SYSTEM_PROMPT } from "./prompts/goat-task-harness";
 
 const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_GOAT_MAX_MODEL_STEPS = 8;
@@ -64,6 +70,36 @@ export type GoatTaskRunSink = {
     payload?: Record<string, unknown>;
     messageId?: string | null;
   }): Promise<void>;
+  recordModelUsage(input: {
+    messageId?: string | null;
+    phase: "planner" | "execution";
+    stepIndex: number;
+    modelProvider: string;
+    modelName: string;
+    usage: LanguageModelUsage;
+    responseId?: string | null;
+    responseModelId?: string | null;
+    finishReason?: string | null;
+    rawFinishReason?: string | null;
+    providerCreatedAt?: Date | null;
+  }): Promise<void>;
+  recordToolUsage(input: {
+    messageId?: string | null;
+    toolCallId: string;
+    toolName: GoatTaskToolName;
+    usage: HostedToolUsage;
+  }): Promise<void>;
+  recordSandboxUsage(input: {
+    messageId?: string | null;
+    sandboxId: string;
+    template: string | null;
+    vcpu: number | null;
+    ramMib: number | null;
+    startedAt: Date;
+    endedAt: Date;
+    activeMs: number;
+    rawMetrics?: Record<string, unknown>;
+  }): Promise<void>;
 };
 
 export type GoatTaskExecutorInput = {
@@ -100,6 +136,15 @@ export async function executeGoatTask(
     signal: input.signal,
   });
   const harnessSpec = planned.harnessSpec;
+  if (planned.usage) {
+    await input.sink.recordModelUsage({
+      phase: "planner",
+      stepIndex: 0,
+      modelProvider: "vercel-ai-gateway",
+      modelName: GOAT_PLANNER_MODEL,
+      usage: planned.usage,
+    });
+  }
 
   await input.reportStage("running", { harnessSpec, debugTrace: planned.debugTrace });
   await input.sink.appendEvent({
@@ -231,6 +276,14 @@ async function runGoatTaskModelStreamInner(input: {
         if (messageId) {
           await input.sink.completeToolMessage({ ...event, messageId });
         }
+        if (event.usage) {
+          await input.sink.recordToolUsage({
+            messageId: messageId ?? null,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            usage: event.usage,
+          });
+        }
         await input.sink.appendEvent({
           type: "tool.completed",
           messageId: messageId ?? null,
@@ -269,6 +322,7 @@ async function runGoatTaskModelStreamInner(input: {
   let assistantContent = "";
   let usage: LanguageModelUsage | undefined;
   let lastFlushAt = 0;
+  let stepIndex = 0;
 
   const flushContent = async (force = false) => {
     const now = Date.now();
@@ -286,7 +340,33 @@ async function runGoatTaskModelStreamInner(input: {
       assistantContent += part.text;
       await flushContent(false);
     } else if (part.type === "finish-step") {
-      usage = part.usage;
+      const finishPart = part as {
+        usage?: LanguageModelUsage;
+        response?: {
+          id?: string | null;
+          modelId?: string | null;
+          timestamp?: Date | null;
+        };
+        finishReason?: string | null;
+        rawFinishReason?: string | null;
+      };
+      usage = finishPart.usage;
+      if (finishPart.usage) {
+        await input.sink.recordModelUsage({
+          messageId: input.assistantMessageId,
+          phase: "execution",
+          stepIndex,
+          modelProvider: "vercel-ai-gateway",
+          modelName: input.harnessSpec.model,
+          usage: finishPart.usage,
+          responseId: finishPart.response?.id ?? null,
+          responseModelId: finishPart.response?.modelId ?? null,
+          finishReason: finishPart.finishReason ?? null,
+          rawFinishReason: finishPart.rawFinishReason ?? null,
+          providerCreatedAt: finishPart.response?.timestamp ?? null,
+        });
+      }
+      stepIndex += 1;
       await flushContent(true);
     } else if (part.type === "error") {
       throw part.error instanceof Error ? part.error : new Error("Goat model stream failed.");
@@ -322,23 +402,22 @@ async function planGoatHarnessForTask(input: {
   gatewayApiKey: string;
   availableTools: readonly GoatTaskToolName[];
   signal?: AbortSignal;
-}): Promise<{ harnessSpec: GoatHarnessSpec; debugTrace: GoatTaskDebugTrace }> {
+}): Promise<{
+  harnessSpec: GoatHarnessSpec;
+  debugTrace: GoatTaskDebugTrace;
+  usage?: LanguageModelUsage;
+}> {
   const availableTools = normalizeGoatTaskToolNames(input.availableTools);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
   const schema = goatHarnessSpecResponseSchema(availableTools, input.model);
-  const systemPrompt =
-    "You plan a Goat durable task harness. Return a strict goat.harness.v1 object. " +
-    "The selected task model is fixed and may not be changed. Select only operation-level tools " +
-    "from the available list. Rewrite stale chat-layer limitations into clear instructions to use " +
-    "connected read-only tools when available. The task result comes from the final assistant " +
-    'message; there is no final-result tool. resultMode must be "assistant_final".';
-  const userPrompt = `Selected task model: ${input.model}
-Available operation tools: ${availableTools.join(", ")}
-Default max model steps: ${DEFAULT_GOAT_MAX_MODEL_STEPS}
-
-Task:
-${input.prompt}`;
+  const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
+  const userPrompt = buildGoatHarnessCreationPrompt({
+    prompt: input.prompt,
+    model: input.model,
+    availableTools,
+    defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
+  });
 
   const result = await withGoatSpan(
     GOAT_SPANS.taskPlan,
@@ -376,6 +455,9 @@ ${input.prompt}`;
         },
       },
     },
+    ...(isLanguageModelUsage((result as { usage?: unknown }).usage)
+      ? { usage: (result as { usage: LanguageModelUsage }).usage }
+      : {}),
   };
 }
 
@@ -443,14 +525,7 @@ function normalizeHarnessSpec(
 }
 
 function defaultTaskSystemPrompt() {
-  return (
-    "You are Goat's background task runner. Use only the tools provided when they help. " +
-    "Gmail and Google Calendar tools are read-only private context. Linear MCP tools can read " +
-    "or change Linear records depending on the selected tool; only create or update records when " +
-    "the user explicitly requested that action. Do not claim to send, edit, delete, schedule, or modify " +
-    "anything outside the provided tools. Finish with a direct final assistant message that " +
-    "answers the user's task and clearly states uncertainty when relevant."
-  );
+  return GOAT_TASK_HARNESS_SYSTEM_PROMPT;
 }
 
 function toolEventPayload(event: GoatToolLifecycleInput) {
@@ -483,6 +558,10 @@ function recordUsageMetrics(
 function readUsageNumber(usage: LanguageModelUsage, key: keyof LanguageModelUsage) {
   const value = usage[key];
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function isLanguageModelUsage(value: unknown): value is LanguageModelUsage {
+  return Boolean(value && typeof value === "object");
 }
 
 export class GoatHarnessRunError extends Error {

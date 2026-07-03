@@ -13,22 +13,24 @@ export type NormalizedModelUsage = {
 };
 
 export function normalizeModelUsage(usage: LanguageModelUsage): NormalizedModelUsage {
+  const inputTokenDetails = usage.inputTokenDetails ?? {};
+  const outputTokenDetails = usage.outputTokenDetails ?? {};
   const inputTokens = tokenCount(usage.inputTokens);
   const inputCacheReadTokens = tokenCount(
-    usage.inputTokenDetails.cacheReadTokens ?? usage.cachedInputTokens,
+    inputTokenDetails.cacheReadTokens ?? usage.cachedInputTokens,
   );
-  const inputCacheWriteTokens = tokenCount(usage.inputTokenDetails.cacheWriteTokens);
+  const inputCacheWriteTokens = tokenCount(inputTokenDetails.cacheWriteTokens);
   const inputNoCacheTokens = tokenCount(
-    usage.inputTokenDetails.noCacheTokens ??
+    inputTokenDetails.noCacheTokens ??
       subtractIfKnown(inputTokens, inputCacheReadTokens + inputCacheWriteTokens),
   );
 
   const outputTokens = tokenCount(usage.outputTokens);
   const outputReasoningTokens = tokenCount(
-    usage.outputTokenDetails.reasoningTokens ?? usage.reasoningTokens,
+    outputTokenDetails.reasoningTokens ?? usage.reasoningTokens,
   );
   const outputTextTokens = tokenCount(
-    usage.outputTokenDetails.textTokens ?? subtractIfKnown(outputTokens, outputReasoningTokens),
+    outputTokenDetails.textTokens ?? subtractIfKnown(outputTokens, outputReasoningTokens),
   );
 
   return {

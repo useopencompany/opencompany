@@ -86,6 +86,7 @@ function LiveTaskRunProvider({
     const liveModelUsage = (modelUsageRows ?? []) as GoatTaskModelUsageRow[];
     const liveToolUsage = (toolUsageRows ?? []) as GoatTaskToolUsageRow[];
     const liveSandboxUsage = (sandboxUsageRows ?? []) as GoatTaskSandboxUsageRow[];
+    const costRowsLoading = modelUsageLoading || toolUsageLoading || sandboxUsageLoading;
     const hasLiveCostRows =
       liveModelUsage.length > 0 || liveToolUsage.length > 0 || liveSandboxUsage.length > 0;
     if (
@@ -102,10 +103,10 @@ function LiveTaskRunProvider({
       task: (liveTask ?? taskFromInitialRun(initialRun)) as GoatTaskRow,
       messages: liveMessages,
       events: liveEvents,
-      modelUsage: liveModelUsage,
-      toolUsage: liveToolUsage,
-      sandboxUsage: liveSandboxUsage,
-      ...(hasLiveCostRows ? {} : { cost: initialRun.cost }),
+      modelUsage: costRowsLoading ? [] : liveModelUsage,
+      toolUsage: costRowsLoading ? [] : liveToolUsage,
+      sandboxUsage: costRowsLoading ? [] : liveSandboxUsage,
+      ...(costRowsLoading || !hasLiveCostRows ? { cost: initialRun.cost } : {}),
     });
   }, [
     eventRows,

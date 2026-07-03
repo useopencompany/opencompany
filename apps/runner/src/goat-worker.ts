@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
+import {
+  calculateHostedToolUsageCost,
+  calculateModelUsageCost,
+  calculateSandboxUsageCost,
+} from "@opencompany/billing";
 import type {
   GoatHarnessSpec,
   GoatTaskDebugTrace,
   GoatTaskEventType,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
+  GoatTaskModelUsagePhase,
   GoatTaskToolName,
 } from "@opencompany/db/goat-schema";
 import { goatTasks } from "@opencompany/db/goat-schema";
@@ -27,6 +33,7 @@ import {
   type GoatTaskExecutorResult,
 } from "./goat-harness";
 import { rowsFromExecute } from "./sql-exec";
+import { type NormalizedModelUsage, normalizeModelUsage } from "./usage";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-worker" });
 
@@ -36,6 +43,12 @@ export const GOAT_TASK_HEARTBEAT_INTERVAL_MS = 5_000;
 type GoatTask = typeof goatTasks.$inferSelect;
 type GoatTaskStage = GoatTask["stage"];
 type GoatTaskExecutor = (input: GoatTaskExecutorInput) => Promise<GoatTaskExecutorResult>;
+type GoatUsageCostWrite = {
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+  totalCostUsdMicros: number;
+  costBasis: Record<string, unknown>;
+};
 
 export type GoatTaskStore = {
   claimNext(input: {
@@ -115,6 +128,54 @@ export type GoatTaskStore = {
     messageId?: string | null;
     type: GoatTaskEventType;
     payload: Record<string, unknown>;
+  }): Promise<boolean>;
+  recordModelUsage(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId?: string | null;
+    phase: GoatTaskModelUsagePhase;
+    stepIndex: number;
+    modelProvider: string;
+    modelName: string;
+    responseId?: string | null;
+    responseModelId?: string | null;
+    finishReason?: string | null;
+    rawFinishReason?: string | null;
+    usage: NormalizedModelUsage;
+    providerCreatedAt?: Date | null;
+    cost: GoatUsageCostWrite;
+  }): Promise<boolean>;
+  recordToolUsage(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId?: string | null;
+    toolCallId: string;
+    toolName: GoatTaskToolName;
+    provider: string;
+    operation: string;
+    providerRequestId?: string | null;
+    rawUsage: Record<string, unknown>;
+    cost: GoatUsageCostWrite;
+  }): Promise<boolean>;
+  recordSandboxUsage(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId?: string | null;
+    sandboxId: string;
+    template: string | null;
+    vcpu: number | null;
+    ramMib: number | null;
+    startedAt: Date;
+    endedAt: Date;
+    activeMs: number;
+    rawMetrics: Record<string, unknown>;
+    cost: GoatUsageCostWrite;
   }): Promise<boolean>;
   complete(input: {
     id: string;
@@ -368,6 +429,169 @@ export function createDbGoatTaskStore(): GoatTaskStore {
           ${input.messageId ?? null},
           ${input.type},
           ${JSON.stringify(input.payload)}::jsonb,
+          ${input.now}
+        FROM goat.tasks AS task
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: number }>(result).length > 0;
+    },
+
+    async recordModelUsage(input) {
+      const result = await getDb().execute(sql`
+        INSERT INTO goat.task_model_usage (
+          task_id,
+          user_workos_id,
+          message_id,
+          run_lease_id,
+          phase,
+          step_index,
+          model_provider,
+          model_name,
+          response_id,
+          response_model_id,
+          finish_reason,
+          raw_finish_reason,
+          input_tokens,
+          input_no_cache_tokens,
+          input_cache_read_tokens,
+          input_cache_write_tokens,
+          output_tokens,
+          output_text_tokens,
+          output_reasoning_tokens,
+          total_tokens,
+          raw_usage,
+          provider_created_at,
+          provider_cost_usd_micros,
+          platform_fee_usd_micros,
+          total_cost_usd_micros,
+          cost_basis,
+          created_at
+        )
+        SELECT
+          task.id,
+          task.user_workos_id,
+          ${input.messageId ?? null},
+          ${input.leaseId},
+          ${input.phase},
+          ${input.stepIndex},
+          ${input.modelProvider},
+          ${input.modelName},
+          ${input.responseId ?? null},
+          ${input.responseModelId ?? null},
+          ${input.finishReason ?? null},
+          ${input.rawFinishReason ?? null},
+          ${input.usage.inputTokens},
+          ${input.usage.inputNoCacheTokens},
+          ${input.usage.inputCacheReadTokens},
+          ${input.usage.inputCacheWriteTokens},
+          ${input.usage.outputTokens},
+          ${input.usage.outputTextTokens},
+          ${input.usage.outputReasoningTokens},
+          ${input.usage.totalTokens},
+          ${JSON.stringify(input.usage.rawUsage)}::jsonb,
+          ${input.providerCreatedAt ?? null},
+          ${input.cost.providerCostUsdMicros},
+          ${input.cost.platformFeeUsdMicros},
+          ${input.cost.totalCostUsdMicros},
+          ${JSON.stringify(input.cost.costBasis)}::jsonb,
+          ${input.now}
+        FROM goat.tasks AS task
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: number }>(result).length > 0;
+    },
+
+    async recordToolUsage(input) {
+      const result = await getDb().execute(sql`
+        INSERT INTO goat.task_tool_usage (
+          task_id,
+          user_workos_id,
+          message_id,
+          run_lease_id,
+          tool_call_id,
+          tool_name,
+          provider,
+          operation,
+          provider_request_id,
+          provider_cost_usd_micros,
+          platform_fee_usd_micros,
+          total_cost_usd_micros,
+          raw_usage,
+          cost_basis,
+          created_at
+        )
+        SELECT
+          task.id,
+          task.user_workos_id,
+          ${input.messageId ?? null},
+          ${input.leaseId},
+          ${input.toolCallId},
+          ${input.toolName},
+          ${input.provider},
+          ${input.operation},
+          ${input.providerRequestId ?? null},
+          ${input.cost.providerCostUsdMicros},
+          ${input.cost.platformFeeUsdMicros},
+          ${input.cost.totalCostUsdMicros},
+          ${JSON.stringify(input.rawUsage)}::jsonb,
+          ${JSON.stringify(input.cost.costBasis)}::jsonb,
+          ${input.now}
+        FROM goat.tasks AS task
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: number }>(result).length > 0;
+    },
+
+    async recordSandboxUsage(input) {
+      const result = await getDb().execute(sql`
+        INSERT INTO goat.task_sandbox_usage (
+          task_id,
+          user_workos_id,
+          message_id,
+          run_lease_id,
+          sandbox_id,
+          template,
+          vcpu,
+          ram_mib,
+          started_at,
+          ended_at,
+          active_ms,
+          provider_cost_usd_micros,
+          platform_fee_usd_micros,
+          total_cost_usd_micros,
+          raw_metrics,
+          cost_basis,
+          created_at
+        )
+        SELECT
+          task.id,
+          task.user_workos_id,
+          ${input.messageId ?? null},
+          ${input.leaseId},
+          ${input.sandboxId},
+          ${input.template},
+          ${input.vcpu},
+          ${input.ramMib},
+          ${input.startedAt},
+          ${input.endedAt},
+          ${input.activeMs},
+          ${input.cost.providerCostUsdMicros},
+          ${input.cost.platformFeeUsdMicros},
+          ${input.cost.totalCostUsdMicros},
+          ${JSON.stringify(input.rawMetrics)}::jsonb,
+          ${JSON.stringify(input.cost.costBasis)}::jsonb,
           ${input.now}
         FROM goat.tasks AS task
         WHERE task.id = ${input.id}
@@ -724,6 +948,105 @@ export async function runClaimedGoatTask(input: {
                 messageId: eventInput.messageId ?? null,
               }),
               "append event",
+            );
+          },
+          recordModelUsage: async (usageInput) => {
+            const usage = normalizeModelUsage(usageInput.usage);
+            const cost = calculateModelUsageCost({
+              modelName: usageInput.modelName,
+              inputTokens: usage.inputTokens,
+              inputNoCacheTokens: usage.inputNoCacheTokens,
+              inputCacheReadTokens: usage.inputCacheReadTokens,
+              inputCacheWriteTokens: usage.inputCacheWriteTokens,
+              outputTokens: usage.outputTokens,
+            });
+            await requireLeaseWrite(
+              store.recordModelUsage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: usageInput.messageId ?? null,
+                phase: usageInput.phase,
+                stepIndex: usageInput.stepIndex,
+                modelProvider: usageInput.modelProvider,
+                modelName: usageInput.modelName,
+                responseId: usageInput.responseId ?? null,
+                responseModelId: usageInput.responseModelId ?? null,
+                finishReason: usageInput.finishReason ?? null,
+                rawFinishReason: usageInput.rawFinishReason ?? null,
+                usage,
+                providerCreatedAt: usageInput.providerCreatedAt ?? null,
+                cost: {
+                  providerCostUsdMicros: cost.providerCostUsdMicros,
+                  platformFeeUsdMicros: cost.platformFeeUsdMicros,
+                  totalCostUsdMicros: cost.totalCostUsdMicros,
+                  costBasis: cost.costBasis,
+                },
+              }),
+              "record model usage",
+            );
+          },
+          recordToolUsage: async (usageInput) => {
+            const cost = calculateHostedToolUsageCost({
+              provider: usageInput.usage.provider,
+              operation: usageInput.usage.operation,
+              providerCostUsdMicros: usageInput.usage.costUsdMicros,
+              ...(usageInput.usage.costSource ? { costSource: usageInput.usage.costSource } : {}),
+            });
+            await requireLeaseWrite(
+              store.recordToolUsage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: usageInput.messageId ?? null,
+                toolCallId: usageInput.toolCallId,
+                toolName: usageInput.toolName,
+                provider: usageInput.usage.provider,
+                operation: usageInput.usage.operation,
+                providerRequestId: usageInput.usage.providerRequestId ?? null,
+                rawUsage: usageInput.usage.rawUsage,
+                cost: {
+                  providerCostUsdMicros: cost.providerCostUsdMicros,
+                  platformFeeUsdMicros: cost.platformFeeUsdMicros,
+                  totalCostUsdMicros: cost.totalCostUsdMicros,
+                  costBasis: cost.costBasis,
+                },
+              }),
+              "record tool usage",
+            );
+          },
+          recordSandboxUsage: async (usageInput) => {
+            const cost = calculateSandboxUsageCost({
+              template: usageInput.template,
+              vcpu: usageInput.vcpu ?? 0,
+              ramMiB: usageInput.ramMib ?? 0,
+              activeMs: usageInput.activeMs,
+            });
+            await requireLeaseWrite(
+              store.recordSandboxUsage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: usageInput.messageId ?? null,
+                sandboxId: usageInput.sandboxId,
+                template: usageInput.template,
+                vcpu: usageInput.vcpu,
+                ramMib: usageInput.ramMib,
+                startedAt: usageInput.startedAt,
+                endedAt: usageInput.endedAt,
+                activeMs: usageInput.activeMs,
+                rawMetrics: usageInput.rawMetrics ?? {},
+                cost: {
+                  providerCostUsdMicros: cost.providerCostUsdMicros,
+                  platformFeeUsdMicros: cost.platformFeeUsdMicros,
+                  totalCostUsdMicros: cost.totalCostUsdMicros,
+                  costBasis: cost.costBasis,
+                },
+              }),
+              "record sandbox usage",
             );
           },
         },

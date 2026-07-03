@@ -2,8 +2,8 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, sql } from "drizzle-orm";
 import {
-  check,
   bigint,
+  check,
   foreignKey,
   index,
   integer,
@@ -497,9 +497,7 @@ export const goatTaskModelUsage = goat.table(
     platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
       .notNull()
       .default(0),
-    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" })
-      .notNull()
-      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
     costBasis: jsonb("cost_basis")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -549,9 +547,7 @@ export const goatTaskToolUsage = goat.table(
     platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
       .notNull()
       .default(0),
-    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" })
-      .notNull()
-      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
     rawUsage: jsonb("raw_usage")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -604,9 +600,7 @@ export const goatTaskSandboxUsage = goat.table(
     platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
       .notNull()
       .default(0),
-    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" })
-      .notNull()
-      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
     rawMetrics: jsonb("raw_metrics")
       .$type<Record<string, unknown>>()
       .notNull()

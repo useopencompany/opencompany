@@ -11,6 +11,8 @@ import type {
 } from "@opencompany/db/goat-schema";
 import { createGoatElectricCollection } from "@/lib/electric-collection";
 
+type ElectricNumber = number | string;
+
 export type GoatTaskRow = {
   id: string;
   display_id: string;
@@ -75,19 +77,19 @@ export type GoatTaskModelUsageRow = {
   response_model_id: string | null;
   finish_reason: string | null;
   raw_finish_reason: string | null;
-  input_tokens: number;
-  input_no_cache_tokens: number;
-  input_cache_read_tokens: number;
-  input_cache_write_tokens: number;
-  output_tokens: number;
-  output_text_tokens: number;
-  output_reasoning_tokens: number;
-  total_tokens: number;
+  input_tokens: ElectricNumber;
+  input_no_cache_tokens: ElectricNumber;
+  input_cache_read_tokens: ElectricNumber;
+  input_cache_write_tokens: ElectricNumber;
+  output_tokens: ElectricNumber;
+  output_text_tokens: ElectricNumber;
+  output_reasoning_tokens: ElectricNumber;
+  total_tokens: ElectricNumber;
   raw_usage: Record<string, unknown>;
   provider_created_at: string | null;
-  provider_cost_usd_micros: number;
-  platform_fee_usd_micros: number;
-  total_cost_usd_micros: number;
+  provider_cost_usd_micros: ElectricNumber;
+  platform_fee_usd_micros: ElectricNumber;
+  total_cost_usd_micros: ElectricNumber;
   cost_basis: Record<string, unknown>;
   created_at: string;
 };
@@ -103,9 +105,9 @@ export type GoatTaskToolUsageRow = {
   provider: string;
   operation: string;
   provider_request_id: string | null;
-  provider_cost_usd_micros: number;
-  platform_fee_usd_micros: number;
-  total_cost_usd_micros: number;
+  provider_cost_usd_micros: ElectricNumber;
+  platform_fee_usd_micros: ElectricNumber;
+  total_cost_usd_micros: ElectricNumber;
   raw_usage: Record<string, unknown>;
   cost_basis: Record<string, unknown>;
   created_at: string;
@@ -123,10 +125,10 @@ export type GoatTaskSandboxUsageRow = {
   ram_mib: number | null;
   started_at: string | null;
   ended_at: string | null;
-  active_ms: number;
-  provider_cost_usd_micros: number;
-  platform_fee_usd_micros: number;
-  total_cost_usd_micros: number;
+  active_ms: ElectricNumber;
+  provider_cost_usd_micros: ElectricNumber;
+  platform_fee_usd_micros: ElectricNumber;
+  total_cost_usd_micros: ElectricNumber;
   raw_metrics: Record<string, unknown>;
   cost_basis: Record<string, unknown>;
   created_at: string;

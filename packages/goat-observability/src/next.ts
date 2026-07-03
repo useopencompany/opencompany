@@ -4,7 +4,11 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { OTLPHttpJsonTraceExporter, registerOTel } from "@vercel/otel";
-import { GOAT_OBSERVABILITY_SERVICE_NAME, isGoatObservabilityEnabled } from ".";
+import {
+  GOAT_OBSERVABILITY_SERVICE_NAME,
+  GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
+  isGoatObservabilityEnabled,
+} from ".";
 import { parseOtlpHeaders } from "./node";
 
 let registered = false;
@@ -30,8 +34,7 @@ export function registerGoatNextObservability(input: { serviceName?: string } = 
       url: `${endpoint.replace(/\/+$/, "")}/v1/metrics`,
       ...(headers ? { headers } : {}),
     }),
-    exportIntervalMillis:
-      readPositiveInteger(process.env.GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS) ?? 60_000,
+    exportIntervalMillis: GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
   });
   metrics.setGlobalMeterProvider(
     new MeterProvider({
@@ -42,12 +45,6 @@ export function registerGoatNextObservability(input: { serviceName?: string } = 
       readers: [metricReader],
     }),
   );
-}
-
-function readPositiveInteger(value: string | undefined) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return Math.trunc(parsed);
 }
 
 function readRelease() {

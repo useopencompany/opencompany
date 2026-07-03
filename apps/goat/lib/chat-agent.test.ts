@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
 import { GOAT_BRAIN_TOOL_NAME, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import {
+  OPENCOMPANY_CHAT_BEHAVIOR,
+  OPENCOMPANY_CHAT_SOUL,
+  OPENCOMPANY_CHAT_SYSTEM,
+} from "@/lib/prompts";
 
 describe("runOpenCompanyChatAgent", () => {
   it("instructs the model to delegate latest-email checks", async () => {
@@ -14,14 +19,14 @@ describe("runOpenCompanyChatAgent", () => {
       startTask,
       generateTextImpl: (async (options: unknown) => {
         const system = extractSystemPrompt(options);
-        expect(system).toContain("<system>");
+        expect(system).toContain(OPENCOMPANY_CHAT_SYSTEM);
         expect(system).toContain("You are OpenCompany");
-        expect(system).toContain("<behavior>");
+        expect(system).toContain(OPENCOMPANY_CHAT_BEHAVIOR);
         expect(system).toContain("still call the task tool instead of refusing");
         expect(system).toContain("inbox");
         expect(system).toContain("Gmail");
         expect(system).toContain("goat_brain");
-        expect(system).toContain("<soul>");
+        expect(system).toContain(OPENCOMPANY_CHAT_SOUL);
         expect(system).toContain("founder-focused operator");
         expect(extractStartTaskToolDescription(options)).toContain(
           "specialized just-in-time agent",
@@ -126,6 +131,8 @@ describe("runOpenCompanyChatAgent", () => {
       runBrainCli,
       generateTextImpl: (async (options: unknown) => {
         expect(extractGoatBrainToolDescription(options)).toContain("personal Goat brain CLI");
+        expect(extractGoatBrainToolDescription(options)).toContain("references");
+        expect(extractGoatBrainToolDescription(options)).toContain("docs");
         const toolResult = await executeGoatBrainTool(options, {
           args: 'query --text "hiring" --hops 1 --limit 5',
         });

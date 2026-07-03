@@ -3,14 +3,14 @@ const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"]
 const SHAPE_SCOPES = {
   tasks: {
     table: "goat.tasks",
-    where: (userWorkosId: string, _requestUrl: URL) => ({
+    where: (userWorkosId: string) => ({
       clause: `"user_workos_id" = $1`,
       params: [userWorkosId],
     }),
   },
   "goat.tasks": {
     table: "goat.tasks",
-    where: (userWorkosId: string, _requestUrl: URL) => ({
+    where: (userWorkosId: string) => ({
       clause: `"user_workos_id" = $1`,
       params: [userWorkosId],
     }),
@@ -141,7 +141,7 @@ function scopedTaskWhere(userWorkosId: string, requestUrl: URL) {
   };
 }
 
-function scopedUserWhere(userWorkosId: string, _requestUrl: URL) {
+function scopedUserWhere(userWorkosId: string) {
   return {
     clause: `"user_workos_id" = $1`,
     params: [userWorkosId],

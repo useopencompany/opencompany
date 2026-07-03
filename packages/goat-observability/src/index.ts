@@ -8,6 +8,8 @@ import {
 } from "@opentelemetry/api";
 
 export const GOAT_OBSERVABILITY_SERVICE_NAME = "opencompany-goat";
+export const GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS = 60_000;
+export const GOAT_OTEL_TRACE_SAMPLE_RATE = 1;
 
 export const GOAT_SPANS = {
   chatTurn: "goat.chat.turn",

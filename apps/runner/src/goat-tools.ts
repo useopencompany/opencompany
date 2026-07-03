@@ -1,3 +1,4 @@
+import type { RuntimeToolName } from "@opencompany/agent-runtime";
 import type { GoatTaskToolName } from "@opencompany/db/goat-schema";
 import { GOAT_SPANS, recordGoatToolCall, startGoatSpan } from "@opencompany/goat-observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
@@ -12,6 +13,7 @@ import {
   type GoatLinearMcpToolName,
   isGoatLinearMcpToolName,
 } from "./goat-linear-mcp-tools";
+import { executeHostedTool, type HostedToolUsage } from "./hosted-tools";
 
 export const GOAT_TASK_TOOL_NAMES = [
   "exa_search",
@@ -28,7 +30,6 @@ export const GOAT_TASK_TOOL_NAMES = [
 ] as const satisfies readonly GoatTaskToolName[];
 
 const GOAT_TASK_TOOL_SET = new Set<GoatTaskToolName>(GOAT_TASK_TOOL_NAMES);
-const EXA_SEARCH_URL = "https://api.exa.ai/search";
 
 export type GoatToolLifecycleInput = {
   toolCallId: string;
@@ -38,6 +39,7 @@ export type GoatToolLifecycleInput = {
 
 export type GoatToolLifecycleCompletion = GoatToolLifecycleInput & {
   output: unknown;
+  usage?: HostedToolUsage;
 };
 
 export type GoatToolLifecycleFailure = GoatToolLifecycleInput & {
@@ -90,6 +92,7 @@ export function buildGoatTaskTools(input: {
     toolInput: unknown,
     toolCallId: string,
     output: unknown,
+    usage: HostedToolUsage | undefined,
   ) => {
     const messageId = messageIdsByCallId.get(toolCallId);
     await input.lifecycle?.onToolCompleted?.({
@@ -97,6 +100,7 @@ export function buildGoatTaskTools(input: {
       toolName,
       input: toolInput,
       output,
+      ...(usage ? { usage } : {}),
       ...(messageId ? { messageId } : {}),
     });
   };
@@ -139,14 +143,14 @@ export function buildGoatTaskTools(input: {
         };
         const span = startGoatSpan(GOAT_SPANS.taskToolCall, attributes);
         try {
-          const output = await executeGoatTaskTool({
+          const result = await executeGoatTaskTool({
             toolName,
             toolInput,
             userWorkosId: input.userWorkosId,
             env: input.env,
             signal: input.signal,
           });
-          await completeTool(toolName, toolInput, options.toolCallId, output);
+          await completeTool(toolName, toolInput, options.toolCallId, result.output, result.usage);
           span.end({
             ...attributes,
             "goat.outcome": "success",
@@ -156,7 +160,7 @@ export function buildGoatTaskTools(input: {
             outcome: "success",
             attributes,
           });
-          return output;
+          return result.output;
         } catch (error) {
           if (input.signal.aborted) {
             span.end({
@@ -201,70 +205,66 @@ async function executeGoatTaskTool(input: {
   userWorkosId: string;
   env: RunnerEnv;
   signal: AbortSignal;
-}) {
+}): Promise<{ output: unknown; usage?: HostedToolUsage }> {
   if (input.toolName === "exa_search") {
     return executeExaSearch({
       args: input.toolInput,
-      ...(input.env.exaApiKey ? { apiKey: input.env.exaApiKey } : {}),
+      env: input.env,
       signal: input.signal,
     });
   }
   if (isGoatGoogleToolName(input.toolName)) {
-    return executeGoatGoogleTool({
+    const output = await executeGoatGoogleTool({
       name: input.toolName as GoatGoogleToolName,
       args: input.toolInput,
       userWorkosId: input.userWorkosId,
       env: input.env,
       signal: input.signal,
     });
+    return { output, usage: zeroCostToolUsage(input.toolName, input.toolName) };
   }
   if (isGoatLinearMcpToolName(input.toolName)) {
-    return executeGoatLinearMcpTool({
+    const output = await executeGoatLinearMcpTool({
       name: input.toolName as GoatLinearMcpToolName,
       args: input.toolInput,
       userWorkosId: input.userWorkosId,
       signal: input.signal,
     });
+    return {
+      output,
+      usage: zeroCostToolUsage(input.toolName, linearOperation(input.toolName, input.toolInput)),
+    };
   }
-  return { ok: false, error: `Unknown Goat tool "${input.toolName}".` };
+  return {
+    output: { ok: false, error: `Unknown Goat tool "${input.toolName}".` },
+    usage: zeroCostToolUsage(input.toolName, input.toolName),
+  };
 }
 
-async function executeExaSearch(input: { args: unknown; apiKey?: string; signal: AbortSignal }) {
-  if (!input.apiKey) throw new Error("EXA_API_KEY is required for exa_search.");
+async function executeExaSearch(input: { args: unknown; env: RunnerEnv; signal: AbortSignal }) {
   const args = asRecord(input.args);
   const query = readString(args, "query");
-  if (!query) throw new Error("exa_search requires query.");
-  const numResults = clampNumber(readNumber(args, "numResults") ?? 5, 1, 10);
-  const type = readExaSearchType(args.type);
-
-  const response = await fetch(EXA_SEARCH_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": input.apiKey,
-    },
-    body: JSON.stringify({
-      query,
-      type,
-      numResults,
-      contents: {
-        highlights: true,
-        text: true,
-      },
-    }),
+  const hosted = await executeHostedTool({
+    name: "exa_search" as RuntimeToolName,
+    args: input.args,
+    env: input.env,
+    enabledTools: ["exa_search" as RuntimeToolName],
     signal: input.signal,
   });
+  return {
+    output: {
+      ok: true,
+      query,
+      results: compactHostedExaResults(hosted.output),
+    },
+    ...(hosted.usage ? { usage: hosted.usage } : {}),
+  };
+}
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Exa search failed (${response.status}): ${detail.trim().slice(0, 500) || response.statusText}`,
-    );
-  }
-
-  const body = (await response.json()) as { results?: unknown[] };
-  const results = Array.isArray(body.results) ? body.results.map(compactExaResult) : [];
-  return { ok: true, query, results };
+function compactHostedExaResults(output: unknown) {
+  const record = asRecord(output);
+  const results = Array.isArray(record.results) ? record.results : [];
+  return results.map(compactExaResult);
 }
 
 function compactExaResult(value: unknown) {
@@ -436,8 +436,31 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
   }
 }
 
-function readExaSearchType(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : "auto";
+function zeroCostToolUsage(toolName: GoatTaskToolName, operation: string): HostedToolUsage {
+  return {
+    provider: goatToolProvider(toolName),
+    operation,
+    costUsdMicros: 0,
+    costSource: "subscription",
+    rawUsage: {
+      display_only: true,
+      toolName,
+      operation,
+    },
+  };
+}
+
+function goatToolProvider(toolName: GoatTaskToolName) {
+  if (toolName.startsWith("gmail_")) return "gmail";
+  if (toolName.startsWith("calendar_")) return "google_calendar";
+  if (toolName.startsWith("linear_")) return "linear";
+  if (toolName === "exa_search") return "exa";
+  return "goat";
+}
+
+function linearOperation(toolName: GoatTaskToolName, toolInput: unknown) {
+  if (toolName !== "linear_use_tool") return toolName;
+  return readString(asRecord(toolInput), "tool") || toolName;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -449,15 +472,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 function readString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "string" ? value.trim() : "";
-}
-
-function readNumber(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Math.trunc(value)));
 }
 
 function truncate(value: string, maxLength: number) {

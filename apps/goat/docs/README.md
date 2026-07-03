@@ -8,7 +8,7 @@ intended as a baseline before changing the system.
 Goat has two LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
-   This agent either answers directly or calls `start_task`.
+   This agent answers directly, calls `goat_brain`, or calls `start_task`.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
 
@@ -30,6 +30,7 @@ Browser
       persist user chat message
       streamText(default Goat chat agent)
         answer directly
+        OR call goat_brain
         OR call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
@@ -87,13 +88,15 @@ optionally stops the active stream, and marks the chat session closed through
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Creates the `start_task` tool context.
+6. Creates the chat tool context for `start_task` and `goat_brain`.
 7. Calls `streamText` through Vercel AI Gateway with the selected model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
 
-The chat agent's system prompt is `OPENCOMPANY_CHAT_SYSTEM_PROMPT`. Its only tool is
-`start_task`. The prompt tells the model to answer directly for small or ambiguous work and
+The chat agent's system prompt is `OPENCOMPANY_CHAT_SYSTEM_PROMPT`, assembled from structured
+blocks in `apps/goat/lib/prompts/main-chat.ts`. Its tools are `start_task` and `goat_brain`; tool
+descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`. The prompt tells the model to
+answer directly for small or ambiguous work, use `goat_brain` for durable personal context, and
 start a task for research, monitoring, comparison, connected-account work, or durable work that
 belongs in Results.
 
@@ -196,6 +199,7 @@ The planner is a separate AI SDK `generateObject` Gateway call using:
 
 - Model: `anthropic/claude-sonnet-4.6`
 - strict JSON schema
+- Structured prompt blocks from `apps/runner/src/prompts/goat-harness-creation.ts`
 
 The planner returns a `GoatHarnessSpec`:
 
@@ -366,14 +370,17 @@ Goat does not currently expose that parent/child session model in its app surfac
 Common changes and where they belong:
 
 - Change when chat starts a task: `OPENCOMPANY_CHAT_SYSTEM_PROMPT` and
-  `createOpenCompanyChatToolContext` in `apps/goat/lib/chat-agent.ts`.
+  `createOpenCompanyChatToolContext` in `apps/goat/lib/chat-agent.ts`; prompt blocks live in
+  `apps/goat/lib/prompts/main-chat.ts`.
 - Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
   `apps/goat/components/GoatSurface.tsx`.
 - Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.
 - Change runner dispatch: `apps/goat/lib/task-runner.ts` and the Goat route in
   `apps/runner/src/server.ts`.
 - Change planner behavior or harness spec schema: `planGoatHarnessForTask` in
-  `apps/runner/src/goat-harness.ts`.
+  `apps/runner/src/goat-harness.ts` and prompt blocks in
+  `apps/runner/src/prompts/goat-harness-creation.ts`.
+- Change fallback task harness instructions: `apps/runner/src/prompts/goat-task-harness.ts`.
 - Add or change harness tools: `apps/runner/src/goat-tools.ts`, implementation files like
   `apps/runner/src/goat-google-tools.ts`, and `GoatTaskToolName` in
   `packages/db/src/goat-schema.ts`.

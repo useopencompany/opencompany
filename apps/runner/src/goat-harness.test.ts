@@ -3,6 +3,8 @@ import type { GoatHarnessSpec, goatTasks } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import { executeGoatTask, type GoatTaskRunSink, planGoatHarness } from "./goat-harness";
+import { GOAT_HARNESS_CREATION_SYSTEM_PROMPT } from "./prompts/goat-harness-creation";
+import { GOAT_TASK_HARNESS_SYSTEM_PROMPT } from "./prompts/goat-task-harness";
 
 const aiMock = vi.hoisted(() => ({
   generateObject: vi.fn(),
@@ -81,6 +83,9 @@ describe("planGoatHarness", () => {
       system: string;
       prompt: string;
     };
+    expect(request.system).toBe(GOAT_HARNESS_CREATION_SYSTEM_PROMPT);
+    expect(request.system).toContain("<tool_policy>");
+    expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
     expect(request.prompt).toContain("Available operation tools: exa_search, gmail_search");
     expect(request.prompt).toContain("no inbox access is available in chat");
@@ -98,14 +103,14 @@ describe("planGoatHarness", () => {
       },
     });
 
-    await expect(
-      planGoatHarness({
-        prompt: "Research Marseille.",
-        model,
-        availableTools: ["exa_search"],
-        gatewayApiKey: "gateway",
-      }),
-    ).resolves.toMatchObject({
+    const result = await planGoatHarness({
+      prompt: "Research Marseille.",
+      model,
+      availableTools: ["exa_search"],
+      gatewayApiKey: "gateway",
+    });
+
+    expect(result).toMatchObject({
       schemaVersion: "goat.harness.v1",
       model,
       initialUserMessage: "Research Marseille.",
@@ -113,6 +118,7 @@ describe("planGoatHarness", () => {
       maxModelSteps: 8,
       resultMode: "assistant_final",
     });
+    expect(result.systemPrompt).toBe(GOAT_TASK_HARNESS_SYSTEM_PROMPT);
   });
 
   it("keeps Linear MCP meta-tools when they are available", async () => {
@@ -191,6 +197,69 @@ describe("executeGoatTask", () => {
         }),
       }),
     );
+    expect(sink.recordModelUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "assistant_msg_1",
+        phase: "execution",
+        stepIndex: 0,
+        modelProvider: "vercel-ai-gateway",
+        modelName: model,
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      }),
+    );
+  });
+
+  it("records planner usage and every execution finish-step", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: harnessSpec,
+      usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 },
+    });
+    aiMock.streamText.mockReturnValueOnce({
+      fullStream: streamParts(
+        { type: "text-delta", text: "Done" },
+        { type: "finish-step", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
+        { type: "finish-step", usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 } },
+      ),
+      text: Promise.resolve("Done."),
+    });
+    const sink = createSink();
+
+    await executeGoatTask({
+      task: task(),
+      env: env(),
+      signal: new AbortController().signal,
+      sink,
+      reportStage: vi.fn(async () => {}),
+    });
+
+    expect(sink.recordModelUsage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        phase: "planner",
+        stepIndex: 0,
+        modelProvider: "vercel-ai-gateway",
+        modelName: "anthropic/claude-sonnet-4.6",
+        usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 },
+      }),
+    );
+    expect(sink.recordModelUsage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messageId: "assistant_msg_1",
+        phase: "execution",
+        stepIndex: 0,
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      }),
+    );
+    expect(sink.recordModelUsage).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        messageId: "assistant_msg_1",
+        phase: "execution",
+        stepIndex: 1,
+        usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 },
+      }),
+    );
   });
 
   it("fails the assistant message when final assistant content is empty", async () => {
@@ -234,6 +303,9 @@ function createSink(): GoatTaskRunSink {
     completeToolMessage: vi.fn(async () => {}),
     failToolMessage: vi.fn(async () => {}),
     appendEvent: vi.fn(async () => {}),
+    recordModelUsage: vi.fn(async () => {}),
+    recordToolUsage: vi.fn(async () => {}),
+    recordSandboxUsage: vi.fn(async () => {}),
   };
 }
 

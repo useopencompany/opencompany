@@ -1,15 +1,15 @@
 import type {
   GoatTaskEvent,
   GoatTaskEventType,
-  GoatTaskModelUsage,
   GoatTaskMessage,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
+  GoatTaskModelUsage,
   GoatTaskSandboxUsage,
   GoatTaskStage,
   GoatTaskStatus,
-  GoatTaskToolUsage,
   GoatTaskToolName,
+  GoatTaskToolUsage,
 } from "@opencompany/db/goat-schema";
 
 export type GoatTaskRunTaskInput =
@@ -86,19 +86,19 @@ export type GoatTaskRunModelUsageInput =
       response_model_id: string | null;
       finish_reason: string | null;
       raw_finish_reason: string | null;
-      input_tokens: number;
-      input_no_cache_tokens: number;
-      input_cache_read_tokens: number;
-      input_cache_write_tokens: number;
-      output_tokens: number;
-      output_text_tokens: number;
-      output_reasoning_tokens: number;
-      total_tokens: number;
+      input_tokens: UsageNumberInput;
+      input_no_cache_tokens: UsageNumberInput;
+      input_cache_read_tokens: UsageNumberInput;
+      input_cache_write_tokens: UsageNumberInput;
+      output_tokens: UsageNumberInput;
+      output_text_tokens: UsageNumberInput;
+      output_reasoning_tokens: UsageNumberInput;
+      total_tokens: UsageNumberInput;
       raw_usage: Record<string, unknown>;
       provider_created_at: string | null;
-      provider_cost_usd_micros: number;
-      platform_fee_usd_micros: number;
-      total_cost_usd_micros: number;
+      provider_cost_usd_micros: UsageNumberInput;
+      platform_fee_usd_micros: UsageNumberInput;
+      total_cost_usd_micros: UsageNumberInput;
       cost_basis: Record<string, unknown>;
       created_at: string;
     };
@@ -116,9 +116,9 @@ export type GoatTaskRunToolUsageInput =
       provider: string;
       operation: string;
       provider_request_id: string | null;
-      provider_cost_usd_micros: number;
-      platform_fee_usd_micros: number;
-      total_cost_usd_micros: number;
+      provider_cost_usd_micros: UsageNumberInput;
+      platform_fee_usd_micros: UsageNumberInput;
+      total_cost_usd_micros: UsageNumberInput;
       raw_usage: Record<string, unknown>;
       cost_basis: Record<string, unknown>;
       created_at: string;
@@ -138,10 +138,10 @@ export type GoatTaskRunSandboxUsageInput =
       ram_mib: number | null;
       started_at: string | null;
       ended_at: string | null;
-      active_ms: number;
-      provider_cost_usd_micros: number;
-      platform_fee_usd_micros: number;
-      total_cost_usd_micros: number;
+      active_ms: UsageNumberInput;
+      provider_cost_usd_micros: UsageNumberInput;
+      platform_fee_usd_micros: UsageNumberInput;
+      total_cost_usd_micros: UsageNumberInput;
       raw_metrics: Record<string, unknown>;
       cost_basis: Record<string, unknown>;
       created_at: string;
@@ -201,6 +201,8 @@ export type GoatRunToolUsageSummary = {
   platformFeeUsdMicros: number;
   calls: number;
 };
+
+type UsageNumberInput = number | string;
 
 export type GoatRunMessage = {
   id: string;
@@ -332,11 +334,7 @@ function buildCostSummary(input: {
       "providerCostUsdMicros",
       "provider_cost_usd_micros",
     );
-    const platformFee = readUsageNumber(
-      usage,
-      "platformFeeUsdMicros",
-      "platform_fee_usd_micros",
-    );
+    const platformFee = readUsageNumber(usage, "platformFeeUsdMicros", "platform_fee_usd_micros");
     toolCostUsdMicros += totalCost;
     toolProviderCostUsdMicros += providerCost;
     toolPlatformFeeUsdMicros += platformFee;
@@ -640,7 +638,13 @@ function readString(value: unknown) {
 function readUsageNumber(value: unknown, camelKey: string, snakeKey: string) {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const raw = record[camelKey] ?? record[snakeKey];
-  return typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
+  const valueNumber =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && raw.trim() !== ""
+        ? Number(raw)
+        : Number.NaN;
+  return Number.isFinite(valueNumber) ? Math.max(0, Math.trunc(valueNumber)) : 0;
 }
 
 function readUsageString(value: unknown, camelKey: string, snakeKey: string) {

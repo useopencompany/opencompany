@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -527,6 +528,18 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+function isCliEntrypoint() {
+  if (!process.argv[1]) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  const argvPath = path.resolve(process.argv[1]);
+  if (modulePath === argvPath) return true;
+  try {
+    return realpathSync(modulePath) === realpathSync(argvPath);
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntrypoint()) {
   void main();
 }

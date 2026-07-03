@@ -121,6 +121,11 @@ const OBSERVABILITY_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
 ];
+const GOAT_OBSERVABILITY_ENV_KEYS = [
+  "GOAT_OBSERVABILITY_ENABLED",
+  "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
+  "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+];
 const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "NEON_PARENT_BRANCH",
   "NEON_API_KEY",
@@ -140,6 +145,7 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   ...LINEAR_ENV_KEYS,
   ...RUNNER_ENV_KEYS,
   ...OBSERVABILITY_ENV_KEYS,
+  ...GOAT_OBSERVABILITY_ENV_KEYS,
 ];
 const SHARED_DEV_ENV_KEYS = [
   ...WORKOS_ENV_KEYS,
@@ -187,6 +193,7 @@ const GOAT_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
   "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
+  ...GOAT_OBSERVABILITY_ENV_KEYS,
 ];
 
 function assertNodeVersion() {
@@ -493,7 +500,7 @@ async function ensureGoatEnvFile() {
   }
 
   writeEnvValues(GOAT_ENV_PATH, values);
-  ok(`Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/Electric env`);
+  ok(`Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/Electric/observability env`);
 }
 
 async function ensurePersonalEnvFile() {

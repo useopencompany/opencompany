@@ -7,6 +7,8 @@ export const DEFAULT_GOAT_BRAIN_FOLDERS = [
   "people",
   "projects",
   "research",
+  "references",
+  "docs",
   "ideas",
   "concepts",
 ] as const;

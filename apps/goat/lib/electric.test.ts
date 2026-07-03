@@ -60,6 +60,25 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it.each([
+    "goat.task_model_usage",
+    "goat.task_tool_usage",
+    "goat.task_sandbox_usage",
+  ])("scopes %s to the user and trusted task id", (table) => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        `https://goat.example.com/api/electric/v1/shape?table=${table}&task_id=goat_task_1&where=1=1`,
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url?.searchParams.get("table")).toBe(table);
+    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1 AND "task_id" = $2');
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    expect(url?.searchParams.get("params[2]")).toBe("goat_task_1");
+  });
+
+  it.each([
     "goat.integrations",
     "goat.brain_folders",
     "goat.brain_documents",

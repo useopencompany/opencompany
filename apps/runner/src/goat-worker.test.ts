@@ -165,6 +165,116 @@ describe("runClaimedGoatTask", () => {
     );
   });
 
+  it("prices usage records before writing them through the store", async () => {
+    const store = createStore();
+    const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
+      await input.sink.recordModelUsage({
+        messageId: "assistant_msg_1",
+        phase: "execution",
+        stepIndex: 0,
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+        usage: {
+          inputTokens: 1_000,
+          outputTokens: 100,
+          totalTokens: 1_100,
+          inputTokenDetails: {
+            noCacheTokens: undefined,
+            cacheReadTokens: undefined,
+            cacheWriteTokens: undefined,
+          },
+          outputTokenDetails: {
+            textTokens: undefined,
+            reasoningTokens: undefined,
+          },
+        },
+      });
+      await input.sink.recordToolUsage({
+        messageId: "tool_msg_1",
+        toolCallId: "call_search",
+        toolName: "exa_search",
+        usage: {
+          provider: "exa",
+          operation: "search",
+          providerRequestId: "exa_req_1",
+          costUsdMicros: 1_000,
+          rawUsage: { requestId: "exa_req_1" },
+        },
+      });
+      await input.sink.recordSandboxUsage({
+        messageId: "assistant_msg_1",
+        sandboxId: "sbx_1",
+        template: "goat",
+        vcpu: 2,
+        ramMib: 512,
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+        endedAt: new Date("2026-01-01T00:00:10.000Z"),
+        activeMs: 10_000,
+      });
+      return {
+        result: "Done.",
+        harnessSpec,
+        debugTrace,
+      };
+    });
+
+    await runClaimedGoatTask({
+      task: task(),
+      env: env(),
+      store,
+      executor,
+    });
+
+    expect(store.recordModelUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "goat_task_1",
+        leaseId: "lease_1",
+        messageId: "assistant_msg_1",
+        phase: "execution",
+        stepIndex: 0,
+        usage: expect.objectContaining({
+          inputTokens: 1_000,
+          outputTokens: 100,
+          totalTokens: 1_100,
+        }),
+        cost: expect.objectContaining({
+          providerCostUsdMicros: expect.any(Number),
+          platformFeeUsdMicros: expect.any(Number),
+          totalCostUsdMicros: expect.any(Number),
+          costBasis: expect.objectContaining({ kind: "model_usage" }),
+        }),
+      }),
+    );
+    expect(store.recordToolUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCallId: "call_search",
+        toolName: "exa_search",
+        provider: "exa",
+        operation: "search",
+        providerRequestId: "exa_req_1",
+        cost: expect.objectContaining({
+          providerCostUsdMicros: 1_000,
+          platformFeeUsdMicros: 100,
+          totalCostUsdMicros: 1_100,
+          costBasis: expect.objectContaining({ kind: "tool_usage" }),
+        }),
+      }),
+    );
+    expect(store.recordSandboxUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sandboxId: "sbx_1",
+        template: "goat",
+        activeMs: 10_000,
+        cost: expect.objectContaining({
+          providerCostUsdMicros: expect.any(Number),
+          platformFeeUsdMicros: expect.any(Number),
+          totalCostUsdMicros: expect.any(Number),
+          costBasis: expect.objectContaining({ kind: "sandbox_usage" }),
+        }),
+      }),
+    );
+  });
+
   it("aborts without completing when heartbeat loses the lease", async () => {
     vi.useFakeTimers();
     try {
@@ -247,6 +357,9 @@ function createStore(): GoatTaskStore {
     completeMessage: vi.fn(async () => true),
     failMessage: vi.fn(async () => true),
     appendEvent: vi.fn(async () => true),
+    recordModelUsage: vi.fn(async () => true),
+    recordToolUsage: vi.fn(async () => true),
+    recordSandboxUsage: vi.fn(async () => true),
     complete: vi.fn(async () => true),
     fail: vi.fn(async () => true),
   };

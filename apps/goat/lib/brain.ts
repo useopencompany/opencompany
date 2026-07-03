@@ -99,6 +99,16 @@ export async function ensureGoatBrainDefaultFolders(userWorkosId: string) {
       .onConflictDoNothing({
         target: [goatBrainFolders.userWorkosId, goatBrainFolders.path],
       });
+    await db
+      .update(goatBrainFolders)
+      .set({ source: "system", updatedAt: now })
+      .where(
+        and(
+          eq(goatBrainFolders.userWorkosId, userWorkosId),
+          eq(goatBrainFolders.path, path),
+          eq(goatBrainFolders.source, "custom"),
+        ),
+      );
   }
 }
 
@@ -111,6 +121,7 @@ export async function createGoatBrainFolderForUser(
     return { ok: false, error: "Folder path must be a safe lowercase path." };
   }
 
+  const source = DEFAULT_GOAT_BRAIN_FOLDERS.includes(path as never) ? "system" : "custom";
   await ensureGoatBrainDefaultFolders(userWorkosId);
   const now = new Date();
   const [folder] = await getDb()
@@ -119,13 +130,13 @@ export async function createGoatBrainFolderForUser(
       id: `goat_brain_folder_${randomUUID()}`,
       userWorkosId,
       path,
-      source: DEFAULT_GOAT_BRAIN_FOLDERS.includes(path as never) ? "system" : "custom",
+      source,
       createdAt: now,
       updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [goatBrainFolders.userWorkosId, goatBrainFolders.path],
-      set: { updatedAt: now },
+      set: { source, updatedAt: now },
     })
     .returning();
 

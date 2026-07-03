@@ -5,7 +5,12 @@ import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { TraceIdRatioBasedSampler } from "@opentelemetry/sdk-trace-base";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { GOAT_OBSERVABILITY_SERVICE_NAME, isGoatObservabilityEnabled } from ".";
+import {
+  GOAT_OBSERVABILITY_SERVICE_NAME,
+  GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
+  GOAT_OTEL_TRACE_SAMPLE_RATE,
+  isGoatObservabilityEnabled,
+} from ".";
 
 let sdk: NodeSDK | null = null;
 
@@ -24,8 +29,7 @@ export function registerGoatNodeObservability(input: { serviceName?: string } = 
       url: metricsEndpoint(endpoint),
       ...(headers ? { headers } : {}),
     }),
-    exportIntervalMillis:
-      readPositiveInteger(process.env.GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS) ?? 60_000,
+    exportIntervalMillis: GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
   });
 
   sdk = new NodeSDK({
@@ -35,7 +39,7 @@ export function registerGoatNodeObservability(input: { serviceName?: string } = 
     }),
     traceExporter,
     metricReader,
-    sampler: new TraceIdRatioBasedSampler(readSampleRate()),
+    sampler: new TraceIdRatioBasedSampler(GOAT_OTEL_TRACE_SAMPLE_RATE),
   });
   sdk.start();
   return sdk;
@@ -72,18 +76,6 @@ function metricsEndpoint(endpoint: string) {
   return endpoint.replace(/\/+$/, "").endsWith("/v1/metrics")
     ? endpoint.replace(/\/+$/, "")
     : `${endpoint.replace(/\/+$/, "")}/v1/metrics`;
-}
-
-function readSampleRate() {
-  const value = Number(process.env.GOAT_OTEL_TRACE_SAMPLE_RATE ?? "1");
-  if (!Number.isFinite(value)) return 1;
-  return Math.max(0, Math.min(1, value));
-}
-
-function readPositiveInteger(value: string | undefined) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return Math.trunc(parsed);
 }
 
 function readRelease() {

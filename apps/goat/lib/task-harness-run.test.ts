@@ -109,6 +109,135 @@ describe("buildGoatHarnessRun", () => {
     expect(run.hasDurableRun).toBe(false);
     expect(run.task.result).toBe("Stored result.");
     expect(run.legacyDetailText).toBe("Detailed run events are available for new tasks only.");
+    expect(run.cost).toMatchObject({
+      hasRecordedCosts: false,
+      totalCostUsdMicros: 0,
+      modelCostUsdMicros: 0,
+      toolCostUsdMicros: 0,
+      sandboxCostUsdMicros: 0,
+    });
+  });
+
+  it("aggregates model tool and sandbox costs", () => {
+    const run = buildGoatHarnessRun({
+      task: task(),
+      messages: [],
+      events: [],
+      modelUsage: [
+        modelUsage({
+          total_cost_usd_micros: 1_100,
+          provider_cost_usd_micros: 1_000,
+          platform_fee_usd_micros: 100,
+          input_tokens: 40,
+          output_tokens: 10,
+          total_tokens: 50,
+        }),
+        modelUsage({
+          id: 2,
+          phase: "execution",
+          step_index: 1,
+          total_cost_usd_micros: 2_200,
+          provider_cost_usd_micros: 2_000,
+          platform_fee_usd_micros: 200,
+          input_tokens: 30,
+          output_tokens: 20,
+          total_tokens: 50,
+        }),
+      ],
+      toolUsage: [
+        toolUsage({
+          total_cost_usd_micros: 550,
+          provider_cost_usd_micros: 500,
+          platform_fee_usd_micros: 50,
+        }),
+        toolUsage({
+          id: 2,
+          total_cost_usd_micros: 330,
+          provider_cost_usd_micros: 300,
+          platform_fee_usd_micros: 30,
+        }),
+      ],
+      sandboxUsage: [
+        sandboxUsage({
+          total_cost_usd_micros: 220,
+          provider_cost_usd_micros: 200,
+          platform_fee_usd_micros: 20,
+        }),
+      ],
+    });
+
+    expect(run.cost).toMatchObject({
+      hasRecordedCosts: true,
+      totalCostUsdMicros: 4_400,
+      modelCostUsdMicros: 3_300,
+      toolCostUsdMicros: 880,
+      sandboxCostUsdMicros: 220,
+      providerCostUsdMicros: 4_000,
+      platformFeeUsdMicros: 400,
+      tokens: {
+        inputTokens: 70,
+        outputTokens: 30,
+        totalTokens: 100,
+      },
+      toolUsageByProviderOperation: [
+        {
+          provider: "exa",
+          operation: "search",
+          costUsdMicros: 880,
+          providerCostUsdMicros: 800,
+          platformFeeUsdMicros: 80,
+          calls: 2,
+        },
+      ],
+    });
+  });
+
+  it("aggregates Electric numeric string usage rows", () => {
+    const run = buildGoatHarnessRun({
+      task: task(),
+      messages: [],
+      events: [],
+      modelUsage: [
+        modelUsage({
+          total_cost_usd_micros: "1100",
+          provider_cost_usd_micros: "1000",
+          platform_fee_usd_micros: "100",
+          input_tokens: "40",
+          output_tokens: "10",
+          total_tokens: "50",
+        }),
+      ],
+      toolUsage: [
+        toolUsage({
+          total_cost_usd_micros: "550",
+          provider_cost_usd_micros: "500",
+          platform_fee_usd_micros: "50",
+        }),
+      ],
+      sandboxUsage: [
+        sandboxUsage({
+          active_ms: "60000",
+          total_cost_usd_micros: "220",
+          provider_cost_usd_micros: "200",
+          platform_fee_usd_micros: "20",
+        }),
+      ],
+    });
+
+    expect(run.cost).toMatchObject({
+      hasRecordedCosts: true,
+      totalCostUsdMicros: 1_870,
+      modelCostUsdMicros: 1_100,
+      toolCostUsdMicros: 550,
+      sandboxCostUsdMicros: 220,
+      providerCostUsdMicros: 1_700,
+      platformFeeUsdMicros: 170,
+      tokens: {
+        inputTokens: 40,
+        outputTokens: 10,
+        totalTokens: 50,
+      },
+    });
   });
 
   it("bounds long previews without truncating raw JSON", () => {
@@ -136,6 +265,86 @@ describe("buildGoatHarnessRun", () => {
 
 function task(overrides: Record<string, unknown> = {}) {
   return { ...taskBase(), ...overrides };
+}
+
+function modelUsage(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    task_id: "goat_task_1",
+    user_workos_id: "user_1",
+    message_id: null,
+    run_lease_id: "lease_1",
+    phase: "planner",
+    step_index: 0,
+    model_provider: "vercel-ai-gateway",
+    model_name: "openai/gpt-5.4-mini",
+    response_id: null,
+    response_model_id: null,
+    finish_reason: null,
+    raw_finish_reason: null,
+    input_tokens: 0,
+    input_no_cache_tokens: 0,
+    input_cache_read_tokens: 0,
+    input_cache_write_tokens: 0,
+    output_tokens: 0,
+    output_text_tokens: 0,
+    output_reasoning_tokens: 0,
+    total_tokens: 0,
+    raw_usage: {},
+    provider_created_at: null,
+    provider_cost_usd_micros: 0,
+    platform_fee_usd_micros: 0,
+    total_cost_usd_micros: 0,
+    cost_basis: {},
+    created_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function toolUsage(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    task_id: "goat_task_1",
+    user_workos_id: "user_1",
+    message_id: null,
+    run_lease_id: "lease_1",
+    tool_call_id: "call_search",
+    tool_name: "exa_search",
+    provider: "exa",
+    operation: "search",
+    provider_request_id: null,
+    provider_cost_usd_micros: 0,
+    platform_fee_usd_micros: 0,
+    total_cost_usd_micros: 0,
+    raw_usage: {},
+    cost_basis: {},
+    created_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function sandboxUsage(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    task_id: "goat_task_1",
+    user_workos_id: "user_1",
+    message_id: null,
+    run_lease_id: "lease_1",
+    sandbox_id: "sbx_1",
+    template: null,
+    vcpu: 2,
+    ram_mib: 512,
+    started_at: "2026-01-01T00:00:00.000Z",
+    ended_at: "2026-01-01T00:01:00.000Z",
+    active_ms: 60_000,
+    provider_cost_usd_micros: 0,
+    platform_fee_usd_micros: 0,
+    total_cost_usd_micros: 0,
+    raw_metrics: {},
+    cost_basis: {},
+    created_at: "2026-01-01T00:01:00.000Z",
+    ...overrides,
+  };
 }
 
 function taskBase() {
