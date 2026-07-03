@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronRight, CircleDotDashed } from "lucide-react";
+import { ArrowLeft, ChevronRight, CircleDotDashed, TerminalSquare } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Markdown } from "@/components/Markdown";
@@ -25,7 +25,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
 
   const isActive = task.status === "queued" || task.status === "running";
   const plannerDebug = task.debugTrace?.planner ?? null;
-  const harnessTurns = task.debugTrace?.harness?.turns ?? null;
+  const harnessDebug = task.debugTrace?.harness ?? null;
   const taskSteps = deriveGoatTaskSteps(task);
 
   return (
@@ -79,9 +79,18 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
           </section>
 
           <section className="flex flex-col gap-1">
-            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              What happened
-            </h2>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                What happened
+              </h2>
+              <Link
+                href={`/tasks/${task.displayId}/run`}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                <TerminalSquare size={12} strokeWidth={1.8} />
+                View full harness run
+              </Link>
+            </div>
             <ol className="mt-1 flex flex-col gap-1 border-l border-border pl-3">
               {taskSteps.map((step, index) => (
                 <li
@@ -111,7 +120,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
             />
             <DebugJsonBlock
               label="Task model turns"
-              value={harnessTurns}
+              value={harnessDebug}
               emptyText="No model turns captured yet."
             />
           </section>

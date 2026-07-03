@@ -3,6 +3,34 @@ import { runGoatChatAgent } from "@/lib/chat-agent";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 describe("runGoatChatAgent", () => {
+  it("instructs the model to delegate latest-email checks", async () => {
+    const startTask = vi.fn();
+
+    await runGoatChatAgent({
+      messages: [{ role: "user", content: "check my latest emails" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      generateTextImpl: (async (options: unknown) => {
+        const system = extractSystemPrompt(options);
+        expect(system).toContain("check my latest emails");
+        expect(system).toContain("must start a task");
+        expect(system).toContain("inbox");
+        expect(system).toContain("Gmail");
+        expect(extractStartTaskToolDescription(options)).toContain(
+          "connected-account context like Gmail or Calendar",
+        );
+        return {
+          text: "I'll start a task for that.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
   it("returns a normal assistant message without creating a task", async () => {
     const startTask = vi.fn();
 
@@ -74,6 +102,17 @@ describe("runGoatChatAgent", () => {
     expect(result.content).toBe("I started a task and added it to Results.");
   });
 });
+
+function extractSystemPrompt(options: unknown) {
+  return (options as { system?: string }).system ?? "";
+}
+
+function extractStartTaskToolDescription(options: unknown) {
+  return (
+    (options as { tools?: { start_goat_task?: { description?: string } } }).tools?.start_goat_task
+      ?.description ?? ""
+  );
+}
 
 function extractLastUserMessage(options: unknown) {
   const messages = (options as { messages?: Array<{ role: string; content: string }> }).messages;

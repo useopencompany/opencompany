@@ -63,7 +63,7 @@ describe("runClaimedGoatTask", () => {
   it("heartbeats stage updates and stores successful results", async () => {
     const store = createStore();
     const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
-      await input.reportStage("running", { harnessSpec, sandboxId: "sbx_123" });
+      await input.reportStage("running", { harnessSpec, debugTrace, sandboxId: "sbx_123" });
       return {
         result: "Done.",
         harnessSpec,
@@ -83,6 +83,7 @@ describe("runClaimedGoatTask", () => {
       expect.objectContaining({
         id: "goat_task_1",
         stage: "running",
+        debugTrace,
         sandboxId: "sbx_123",
       }),
     );

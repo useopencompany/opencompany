@@ -8,15 +8,21 @@ import type {
 import { createLogger } from "@opencompany/observability";
 import type { RunnerEnv } from "./env";
 import { createGoatToolToken } from "./goat-tool-auth";
-import { armSandboxIdleTimeout, commandExitResult, createOrConnectSandbox } from "./sandbox";
+import {
+  armSandboxIdleTimeout,
+  commandExitResult,
+  createOrConnectSandbox,
+  guardCommandStreamCallbacks,
+} from "./sandbox";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-harness" });
 
 const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1";
-const GOAT_PLANNER_MODEL = "openai/gpt-5.4-mini";
+const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const GOAT_HARNESS_PATH = "/tmp/goat-harness.mjs";
 const GOAT_HARNESS_TIMEOUT_MS = 10 * 60 * 1000;
 const GOAT_TOOL_TOKEN_TTL_MS = GOAT_HARNESS_TIMEOUT_MS + 60_000;
+const GOAT_HARNESS_PROGRESS_PREFIX = "__goat_harness_progress__";
 const DEFAULT_GOAT_HARNESS_TOOLS: GoatHarnessToolId[] = ["exa", "goat_result"];
 const GOAT_GOOGLE_HARNESS_TOOLS = new Set<GoatHarnessToolId>(["gmail", "google_calendar"]);
 
@@ -47,7 +53,7 @@ export type GoatTaskExecutorInput = {
   signal: AbortSignal;
   reportStage: (
     stage: GoatTask["stage"],
-    patch?: Partial<Pick<GoatTask, "harnessSpec" | "sandboxId">>,
+    patch?: Partial<Pick<GoatTask, "harnessSpec" | "sandboxId" | "debugTrace">>,
   ) => Promise<void>;
 };
 
@@ -77,7 +83,8 @@ export async function executeGoatTask(
     signal: input.signal,
   });
   const harnessSpec = planned.harnessSpec;
-  await input.reportStage("sandboxing", { harnessSpec });
+  await input.reportStage("sandboxing", { harnessSpec, debugTrace: planned.debugTrace });
+  assertGoatGoogleBridgeAvailable(harnessSpec, input.env);
   assertNotAborted(input.signal);
 
   const sandbox = await createOrConnectSandbox({
@@ -95,6 +102,13 @@ export async function executeGoatTask(
     harnessSpec,
     task: input.task,
     env: input.env,
+    onProgress: async (debugTrace) => {
+      await input.reportStage("running", {
+        harnessSpec,
+        sandboxId: sandbox.sandboxId,
+        debugTrace: mergeDebugTrace(planned.debugTrace, debugTrace),
+      });
+    },
   });
   const parsed = parseGoatHarnessOutput(String(commandResult.stdout ?? ""));
   const debugTrace = mergeDebugTrace(planned.debugTrace, parsed.debugTrace);
@@ -129,25 +143,53 @@ async function runGoatHarnessCommand(input: {
   harnessSpec: GoatHarnessSpec;
   task: GoatTask;
   env: RunnerEnv;
+  onProgress?: (debugTrace: GoatTaskDebugTrace) => void | Promise<void>;
 }): Promise<{ stdout?: unknown; stderr?: unknown; exitCode?: number | null }> {
+  let stdoutBuffer = "";
+  const emitProgressLine = (line: string) => {
+    const progress = parseGoatHarnessProgressLine(line.trim());
+    if (!progress) return;
+    return input.onProgress?.(progress);
+  };
+  const flushProgressBuffer = async () => {
+    if (!stdoutBuffer.trim()) return;
+    await emitProgressLine(stdoutBuffer);
+    stdoutBuffer = "";
+  };
+  const guardedRun = guardCommandStreamCallbacks({
+    timeoutMs: GOAT_HARNESS_TIMEOUT_MS,
+    envs: {
+      VERCEL_AI_GATEWAY_API_KEY: input.env.vercelAiGatewayApiKey,
+      EXA_API_KEY: input.env.exaApiKey ?? "",
+      GOAT_MODEL: input.harnessSpec.model ?? input.task.model,
+      GOAT_PROMPT: input.harnessSpec.prompt ?? input.task.prompt,
+      GOAT_HARNESS_SPEC: JSON.stringify(input.harnessSpec),
+      ...goatToolBridgeEnv(input),
+    },
+    onStdout: async (data: string) => {
+      stdoutBuffer += data;
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        await emitProgressLine(line);
+      }
+    },
+  });
+
+  let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
   try {
-    const bridgeEnv = goatToolBridgeEnv(input);
-    return await input.sandbox.commands.run(`node ${shellQuote(GOAT_HARNESS_PATH)}`, {
-      timeoutMs: GOAT_HARNESS_TIMEOUT_MS,
-      envs: {
-        VERCEL_AI_GATEWAY_API_KEY: input.env.vercelAiGatewayApiKey,
-        EXA_API_KEY: input.env.exaApiKey ?? "",
-        GOAT_MODEL: input.harnessSpec.model ?? input.task.model,
-        GOAT_PROMPT: input.harnessSpec.prompt ?? input.task.prompt,
-        GOAT_HARNESS_SPEC: JSON.stringify(input.harnessSpec),
-        ...bridgeEnv,
-      },
-    });
+    result = await input.sandbox.commands.run(
+      `node ${shellQuote(GOAT_HARNESS_PATH)}`,
+      guardedRun.options,
+    );
   } catch (error) {
     const exitResult = commandExitResult(error);
-    if (exitResult) return exitResult;
-    throw error;
+    if (!exitResult) throw error;
+    result = exitResult;
   }
+  await flushProgressBuffer();
+  await guardedRun.rethrow();
+  return result;
 }
 
 export async function planGoatHarness(input: {
@@ -177,7 +219,7 @@ async function planGoatHarnessForTask(input: {
       role: "system",
       content: `Return only JSON for a Goat just-in-time harness spec. Schema: {"prompt":string,"model":string,"tools":${JSON.stringify(
         availableTools,
-      )},"resultMode":"freeform"}. Tool ids are provider-level only. Always include "exa" and "goat_result". Include "gmail" only if the task needs Gmail. Include "google_calendar" only if the task needs Calendar. Do not add operation-level tool names, shell tools, files, or network targets.`,
+      )},"resultMode":"freeform"}. Tool ids are provider-level only. Always include "exa" and "goat_result". The available tools list is the source of truth for what the background harness can use. Include "gmail" when the task needs email context and Gmail is available. Include "google_calendar" when the task needs calendar context and Google Calendar is available. If the task text contains stale chat-layer limitations like no inbox/calendar access, asking the user to paste/export connected data, or "once provided" wording, rewrite the prompt for the harness to use the available connected tool instead. Do not add operation-level tool names, shell tools, files, or network targets.`,
     },
     {
       role: "user",
@@ -288,6 +330,19 @@ export function parseGoatHarnessOutput(stdout: string): GoatHarnessOutput {
   return { ok: false, error: "Goat harness did not return a result." };
 }
 
+function parseGoatHarnessProgressLine(line: string): GoatTaskDebugTrace | undefined {
+  if (!line.startsWith(GOAT_HARNESS_PROGRESS_PREFIX)) return undefined;
+  const payload = line.slice(GOAT_HARNESS_PROGRESS_PREFIX.length).trim();
+  if (!payload) return undefined;
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    return readDebugTrace((parsed as Record<string, unknown>).debugTrace);
+  } catch {
+    return undefined;
+  }
+}
+
 class GoatHarnessRunError extends Error {
   debugTrace: GoatTaskDebugTrace;
 
@@ -377,6 +432,17 @@ function goatToolBridgeEnv(input: {
   };
 }
 
+function assertGoatGoogleBridgeAvailable(harnessSpec: GoatHarnessSpec, env: RunnerEnv) {
+  const tools = normalizeAvailableHarnessTools(harnessSpec.tools);
+  const needsBridge = tools.some((tool) => GOAT_GOOGLE_HARNESS_TOOLS.has(tool));
+  if (!needsBridge || env.publicUrl) return;
+
+  throw new Error(
+    "Goat Google tools require RUNNER_LLM_BROKER_PUBLIC_URL so the E2B sandbox can call the runner. " +
+      "Run bun run dev:goat with ngrok configured, or expose runner port 3040 through a public tunnel and set RUNNER_LLM_BROKER_PUBLIC_URL.",
+  );
+}
+
 function parseHarnessSpec(content: string | null): Partial<GoatHarnessSpec> | null {
   if (!content) return null;
   try {
@@ -428,6 +494,7 @@ function buildGoatHarnessScript() {
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const EXA_SEARCH_URL = "https://api.exa.ai/search";
 const MAX_TOOL_STEPS = 8;
+const PROGRESS_PREFIX = ${JSON.stringify(GOAT_HARNESS_PROGRESS_PREFIX)};
 
 const gatewayKey = requiredEnv("VERCEL_AI_GATEWAY_API_KEY");
 const exaKey = requiredEnv("EXA_API_KEY");
@@ -635,11 +702,15 @@ function goatResultTool() {
   };
 }
 
+const systemPrompt =
+  "You are the Goat task harness. Use the available tools only when needed, treat Gmail and Google Calendar as read-only private context, and never claim to send or modify anything. You must finish by calling goat_result({ text }). Keep the result useful, direct, and source-aware when search was used.";
+const toolChoice = "auto";
+const toolsSentToModel = tools.map(sanitizeValue);
+
 const messages = [
   {
     role: "system",
-    content:
-      "You are the Goat task harness. Use the available tools only when needed, treat Gmail and Google Calendar as read-only private context, and never claim to send or modify anything. You must finish by calling goat_result({ text }). Keep the result useful, direct, and source-aware when search was used.",
+    content: systemPrompt,
   },
   { role: "user", content: prompt },
 ];
@@ -669,8 +740,9 @@ try {
       responseMessage: sanitizeMessage(assistantMessage),
       toolResults: [],
     };
+    turns.push(turn);
+    outputProgress();
     if (toolCalls.length === 0) {
-      turns.push(turn);
       break;
     }
     messages.push(assistantMessage);
@@ -687,7 +759,7 @@ try {
           args: sanitizeValue(args),
           result: { text },
         });
-        turns.push(turn);
+        outputProgress();
         outputSuccess(text);
         process.exit(0);
       }
@@ -703,7 +775,7 @@ try {
             args: sanitizeValue(args),
             error: error instanceof Error ? error.message : "exa_search failed",
           });
-          turns.push(turn);
+          outputProgress();
           throw error;
         }
         turn.toolResults.push({
@@ -712,6 +784,7 @@ try {
           args: sanitizeValue(args),
           result: compactExaResult(result),
         });
+        outputProgress();
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
@@ -731,7 +804,7 @@ try {
             args: sanitizeValue(args),
             error: error instanceof Error ? error.message : "Goat remote tool failed",
           });
-          turns.push(turn);
+          outputProgress();
           throw error;
         }
         turn.toolResults.push({
@@ -740,6 +813,7 @@ try {
           args: sanitizeValue(args),
           result: sanitizeValue(result),
         });
+        outputProgress();
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
@@ -759,8 +833,8 @@ try {
         args: sanitizeValue(args),
         error: "Unknown tool.",
       });
+      outputProgress();
     }
-    turns.push(turn);
   }
 
   if (fallbackText) {
@@ -785,11 +859,18 @@ function outputSuccess(result) {
   output({ ok: true, result, debugTrace: buildDebugTrace() });
 }
 
+function outputProgress() {
+  console.log(PROGRESS_PREFIX + JSON.stringify({ debugTrace: buildDebugTrace() }));
+}
+
 function buildDebugTrace() {
   return {
     schemaVersion: "goat.debug.v1",
     harness: {
       model,
+      systemPrompt,
+      toolsSentToModel,
+      toolChoice,
       turns,
     },
   };
@@ -806,7 +887,7 @@ async function chatCompletion(messages) {
       model,
       messages,
       tools,
-      tool_choice: "auto",
+      tool_choice: toolChoice,
     }),
   });
   const body = await readJson(response);

@@ -42,6 +42,7 @@ export type GoatTaskStore = {
     now: Date;
     stage: GoatTaskStage;
     harnessSpec?: GoatHarnessSpec;
+    debugTrace?: GoatTaskDebugTrace;
     sandboxId?: string | null;
   }): Promise<boolean>;
   complete(input: {
@@ -113,6 +114,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
         UPDATE goat.tasks
         SET stage = ${input.stage},
             harness_spec = COALESCE(${input.harnessSpec ? JSON.stringify(input.harnessSpec) : null}::jsonb, harness_spec),
+            debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
             sandbox_id = COALESCE(${input.sandboxId ?? null}, sandbox_id),
             updated_at = ${input.now}
         WHERE id = ${input.id}

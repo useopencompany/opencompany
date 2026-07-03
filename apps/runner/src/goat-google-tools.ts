@@ -1,4 +1,3 @@
-import { getDb } from "@opencompany/db/client";
 import {
   loadGoatIntegrationCredential,
   markGoatIntegrationStatus,
@@ -7,6 +6,7 @@ import {
 import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, eq, ne } from "drizzle-orm";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 
 export type GoatGoogleToolName =
@@ -184,6 +184,7 @@ async function getAccessToken(input: {
     integrationId: input.account.integrationId,
     provider: input.account.provider,
     kind: "oauth_token",
+    db: getDb(),
   });
   if (!credential) {
     throw new Error(`Reconnect ${displayName(input.account.provider)} in Settings.`);
@@ -266,6 +267,7 @@ async function refreshAccessToken(
     kind: "oauth_token",
     payload: stripUndefined(nextTokens),
     expiresAt,
+    db: getDb(),
   });
 
   return result.access_token;
@@ -281,6 +283,7 @@ async function markNeedsReauth(
     provider: input.account.provider,
     status: "needs_reauth",
     statusReason: reason,
+    db: getDb(),
   });
 }
 

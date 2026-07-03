@@ -262,7 +262,7 @@ Set these in the Render `opencompany-runner` service.
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
 | `OPENCOMPANY_CODEX_E2B_TEMPLATE` | No | Optional Codex-specific E2B template; defaults to `codex`. Build `apps/runner/e2b/codex` as `opencompany-codex-toolbox` and set this in runner envs to roll onto the custom toolbox image. |
-| `RUNNER_LLM_BROKER_PUBLIC_URL` | No | Public base URL of the runner for the LLM broker (`/broker/*`). Defaults to Render's `RENDER_EXTERNAL_URL`; unset (local dev) disables the broker and falls back to direct provider-key injection into the sandbox. Distinct from the web-side `RUNNER_PUBLIC_URL`, which points at localhost in local dev. |
+| `RUNNER_LLM_BROKER_PUBLIC_URL` | No | Public base URL of the runner for E2B sandbox callbacks: the LLM broker (`/broker/*`) and Goat Google tools (`/goat/tools/*`). Defaults to Render's `RENDER_EXTERNAL_URL`; unset local dev disables callback-only features unless you expose the local runner port (3040) through a public tunnel. Distinct from the web-side `RUNNER_PUBLIC_URL`, which points at localhost in local dev. |
 | `RUNNER_LLM_BROKER_ENABLED` | No | Kill switch for the LLM broker, defaults to `true`. Set `false` to revert sandboxed CLIs to direct key injection without a deploy. |
 | `RUNNER_CODEX_API_KEY_FALLBACK_ENABLED` | No | Explicit kill switch for the legacy Codex API-key path when no workspace Codex account is connected. Defaults to disabled in production and enabled outside production. Set `false` locally to force device-auth testing. |
 | `OPENAI_CODEX_API_KEY` | Codex fallback only | Platform OpenAI key used by the legacy Codex fallback path. Brokered fallback runs use it server-side as the LLM broker's upstream credential for the `openai` provider (`codex_coder`); local-dev fallback maps it to `CODEX_API_KEY` for the Codex CLI. Production/company runs should use the workspace Codex account connected in company settings instead. |
@@ -452,17 +452,18 @@ Useful local-only vars:
 | `NEON_ROLE_NAME` | Optional nonstandard Neon role. |
 | `PORT` | Optional local web port override. |
 | `INNGEST_SDK_URL` | Optional local Inngest SDK URL override. |
-| `OPENCOMPANY_NGROK_URL` | Optional stable ngrok origin for local integration callback testing. |
+| `OPENCOMPANY_NGROK_URL` | Optional stable ngrok origin for local integration callback testing. In Goat dev mode, the same origin is routed through a local proxy to both the Goat app and runner callbacks. |
 | `NGROK_AUTHTOKEN` | Optional ngrok auth token for local dev. Prefer the local ngrok config unless sharing through Infisical. |
 | `OPENCOMPANY_NGROK_REQUIRED` | Set to `1` to fail `bun run dev` when ngrok cannot start. Fixed ngrok URLs are treated as required. |
 | `OPENCOMPANY_NGROK_DISABLED` | Set to `1` to skip automatic ngrok startup in `bun run dev`. |
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
 
-For local GitHub integration testing, `bun run dev` starts ngrok automatically when the local ngrok
-CLI is authenticated. It injects `NEXT_PUBLIC_APP_URL` and `RUNNER_ALLOWED_ORIGINS` into the dev
-process without changing `.env.local`. Local WorkOS redirects stay on
-`http://localhost:3000/auth/callback`; use `bun run github:tunnel` when you need to persist a tunnel
-origin to `.env.local`.
+For local integration testing, `bun run dev` starts ngrok automatically when the local ngrok CLI is
+authenticated. It injects `NEXT_PUBLIC_APP_URL` and `RUNNER_ALLOWED_ORIGINS` into the dev process
+without changing `.env.local`. `bun run dev:goat` additionally exposes a local proxy through ngrok
+and injects `RUNNER_LLM_BROKER_PUBLIC_URL` so E2B Goat tasks can call runner `/goat/tools/*` and
+`/broker/*` routes. Local WorkOS redirects stay on `http://localhost:3000/auth/callback`; use
+`bun run github:tunnel` when you need to persist a tunnel origin to `.env.local`.
 
 ## Checks
 

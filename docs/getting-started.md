@@ -99,7 +99,7 @@ These are the root commands a contributor is expected to run directly:
 | `bun run setup:stripe` | Fill only missing local Stripe values after the main setup already ran. |
 | `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
 | `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, a local Durable Streams server (auto-sets `DURABLE_STREAMS_URL`), and ngrok when available. |
-| `bun run dev:goat` | Start the Goat experiment app plus the runner with the same local Durable Streams/ngrok wrapper. Goat runs on port 3002 by default. Run `bun run setup` first so Electric and `apps/goat/.env.local` are ready. |
+| `bun run dev:goat` | Start the Goat experiment app plus the runner with the same local Durable Streams/ngrok wrapper. Goat runs on port 3002 by default. When ngrok is available, it exposes one public URL through a local proxy so E2B Goat tasks can reach runner `/goat/tools/*` and `/broker/*` callbacks. Run `bun run setup` first so Electric and `apps/goat/.env.local` are ready. |
 | `bun run dev:stream` | Start the same full local stack with streaming logs instead of the Turbo TUI. |
 | `bun run dev:logs` | Read the latest local dev logs from `.context/logs/dev-turbo.json`; use `-- --source runner`, `-- --source web`, `-- --errors`, `-- --grep <text>`, or `-- --follow`. |
 | `bun run dev:web` | Start only the Next.js web app. |
@@ -143,8 +143,10 @@ dev values contain an ngrok URL.
 If you want setup to launch the dev server after migrations, run `bun run setup:dev`.
 
 `bun run dev` also attempts to start ngrok before the app when the local ngrok CLI is authenticated.
-That gives integrations such as GitHub a public callback URL without a separate command. Set
-`OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel. WorkOS still redirects to localhost for local
+That gives integrations such as GitHub a public callback URL without a separate command. In Goat
+mode, the wrapper exposes a local proxy through ngrok and injects `RUNNER_LLM_BROKER_PUBLIC_URL`
+into the runner process so sandboxed Goat Gmail/Calendar tools can call back to `/goat/tools/*`.
+Set `OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel. WorkOS still redirects to localhost for local
 sign-in.
 
 `bun run dev` and `bun run dev:stream` also write Turbo's structured task output to

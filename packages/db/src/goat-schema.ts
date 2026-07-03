@@ -51,6 +51,9 @@ export type GoatTaskDebugTrace = {
   };
   harness?: {
     model?: string;
+    systemPrompt?: string;
+    toolsSentToModel?: unknown[];
+    toolChoice?: string;
     turns?: Array<{
       step: number;
       requestMessages?: unknown[];

@@ -1,7 +1,10 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type {
+  GoatTaskStage,
+  GoatTaskStatus,
+} from "@opencompany/db/goat-schema";
 import { toast } from "@opencompany/ui/components/sonner";
 import { DefaultChatTransport } from "ai";
 import {
@@ -19,7 +22,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { Markdown } from "@/components/Markdown";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
@@ -31,6 +41,9 @@ import {
 } from "@/lib/chat-ui";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import { archiveGoatTaskAction } from "@/lib/tasks";
+
+const TEXTAREA_MAX_HEIGHT_PX = 128;
+const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
 export type GoatTaskView = {
   id: string;
@@ -61,13 +74,25 @@ export function GoatSurface({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const lastError = useRef<string | null>(null);
-  const [input, setInput] = useState("");
-  const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
-  const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
-  const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
-  const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  const locallyClosedSessionIdsRef = useRef<Set<string>>(new Set());
+  const isPinnedAtBottomRef = useRef(true);
+  const userScrollIntentRef = useRef(false);
+  const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
   );
+  const [input, setInput] = useState("");
+  const [mode, setMode] = useState<"home" | "chat">(() =>
+    initialChat ? "chat" : "home",
+  );
+  const [chatSessionId, setChatSessionId] = useState<string | null>(
+    initialChat?.id ?? null,
+  );
+  const [chatModel, setChatModel] = useState(
+    initialChat?.model ?? defaultModel,
+  );
+  const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [, startArchiveTransition] = useTransition();
   const [, startCloseTransition] = useTransition();
   const transport = useMemo(
@@ -108,9 +133,27 @@ export function GoatSurface({
     },
   });
   const isGenerating = status === "submitted" || status === "streaming";
+  const hasMessages = messages.length > 0;
 
   useEffect(() => {
     if (isGenerating) return;
+    // router.refresh() can lag one render behind local useChat state. Keep local
+    // turns visible until the server props catch up for both new and existing chats.
+    const localHasChat =
+      mode === "chat" && (messages.length > 0 || Boolean(chatSessionId));
+    const serverMessageCount = initialChat?.messages.length ?? 0;
+    const serverIsSameChat = Boolean(
+      initialChat && chatSessionId && initialChat.id === chatSessionId,
+    );
+    const serverIsBehindLocal =
+      localHasChat &&
+      ((!initialChat && messages.length > 0) ||
+        (serverIsSameChat && messages.length > serverMessageCount));
+    if (serverIsBehindLocal) return;
+    if (initialChat && locallyClosedSessionIdsRef.current.has(initialChat.id)) {
+      return;
+    }
+
     const frame = requestAnimationFrame(() => {
       setChatSessionId(initialChat?.id ?? null);
       setChatModel(initialChat?.model ?? defaultModel);
@@ -118,17 +161,47 @@ export function GoatSurface({
       setMode(initialChat ? "chat" : "home");
     });
     return () => cancelAnimationFrame(frame);
-  }, [defaultModel, initialChat, isGenerating, setMessages]);
+  }, [
+    chatSessionId,
+    defaultModel,
+    initialChat,
+    isGenerating,
+    messages.length,
+    mode,
+    setMessages,
+  ]);
 
   useEffect(() => {
-    const thread = threadRef.current;
-    if (!thread) return;
-    if (typeof thread.scrollTo === "function") {
-      thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+    const el = inputRef.current;
+    if (!el) return;
+    if (input.length === 0) {
+      el.style.height = "";
       return;
     }
-    thread.scrollTop = thread.scrollHeight;
-  }, [messages, status]);
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+  }, [input]);
+
+  useLayoutEffect(() => {
+    if (mode !== "chat" || !hasMessages) return;
+    const thread = threadRef.current;
+    if (!thread || typeof thread.scrollTo !== "function") return;
+    thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
+    isPinnedAtBottomRef.current = true;
+  }, [hasMessages, mode]);
+
+  useEffect(() => {
+    if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
+    if (
+      messages.length === 0 &&
+      status !== "submitted" &&
+      status !== "streaming"
+    )
+      return;
+    const thread = threadRef.current;
+    if (!thread || typeof thread.scrollTo !== "function") return;
+    thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
+  }, [messages, mode, status]);
 
   useEffect(() => {
     if (!chatError || chatError.message === lastError.current) return;
@@ -136,11 +209,22 @@ export function GoatSurface({
     setMode("chat");
   }, [chatError]);
 
+  useEffect(
+    () => () => {
+      if (userScrollIntentTimerRef.current)
+        clearTimeout(userScrollIntentTimerRef.current);
+    },
+    [],
+  );
+
   const sortedTasks = useMemo(
     () =>
       tasks
         .filter((task) => !optimisticallyArchivedIds.has(task.id))
-        .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+        .toSorted(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
     [optimisticallyArchivedIds, tasks],
   );
 
@@ -171,16 +255,23 @@ export function GoatSurface({
 
     clearError();
     setMode("chat");
+    isPinnedAtBottomRef.current = true;
     setInput("");
     void sendMessage({ text: prompt }).catch((error) => {
       setInput(prompt);
-      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Goat could not answer that right now.",
+      );
     });
   };
 
   const closeChat = () => {
     const closingSessionId = chatSessionId;
     if (isGenerating) void stop();
+    if (closingSessionId)
+      locallyClosedSessionIdsRef.current.add(closingSessionId);
     setMode("home");
     setMessages([]);
     setChatSessionId(null);
@@ -191,6 +282,7 @@ export function GoatSurface({
     startCloseTransition(async () => {
       const result = await closeGoatChatSessionAction(closingSessionId);
       if (!result.ok) {
+        locallyClosedSessionIdsRef.current.delete(closingSessionId);
         toast.error(result.error ?? "Could not close chat.");
       }
       router.refresh();
@@ -206,6 +298,15 @@ export function GoatSurface({
       event.preventDefault();
       closeChat();
     }
+  };
+
+  const markUserScrollIntent = () => {
+    userScrollIntentRef.current = true;
+    if (userScrollIntentTimerRef.current)
+      clearTimeout(userScrollIntentTimerRef.current);
+    userScrollIntentTimerRef.current = setTimeout(() => {
+      userScrollIntentRef.current = false;
+    }, 250);
   };
 
   return (
@@ -236,10 +337,16 @@ export function GoatSurface({
               </h2>
               {sortedTasks.length > 0 ? (
                 sortedTasks.map((task) => (
-                  <ResultRow key={task.id} task={task} onArchive={archiveTask} />
+                  <ResultRow
+                    key={task.id}
+                    task={task}
+                    onArchive={archiveTask}
+                  />
                 ))
               ) : (
-                <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No results yet.</p>
+                <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">
+                  No results yet.
+                </p>
               )}
             </section>
           </div>
@@ -247,7 +354,11 @@ export function GoatSurface({
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
           <div className="flex w-full max-w-[560px] items-center gap-2 px-6 pb-2 pt-5">
-            <Sparkles size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+            <Sparkles
+              size={14}
+              strokeWidth={2}
+              className="shrink-0 text-ink-subtle"
+            />
             <span className="text-[13px] font-medium text-ink">Chat</span>
             <button
               type="button"
@@ -263,6 +374,16 @@ export function GoatSurface({
           <div
             ref={threadRef}
             className="min-h-0 w-full flex-1 justify-center overflow-y-auto px-6"
+            onWheel={markUserScrollIntent}
+            onTouchMove={markUserScrollIntent}
+            onScroll={(event) => {
+              if (!userScrollIntentRef.current) return;
+              const el = event.currentTarget;
+              const distanceFromBottom =
+                el.scrollHeight - el.scrollTop - el.clientHeight;
+              isPinnedAtBottomRef.current =
+                distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+            }}
           >
             <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 pb-40 pt-2">
               {messages.map((message) => (
@@ -289,18 +410,22 @@ export function GoatSurface({
             </p>
           ) : null}
           <div className="flex items-end gap-2.5 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
-            <Sparkles size={15} strokeWidth={1.9} className="mb-[3px] shrink-0 text-ink-subtle" />
             <textarea
               ref={inputRef}
               rows={1}
               id="prompt"
               name="prompt"
               value={input}
-              placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
+              placeholder={
+                mode === "chat"
+                  ? "Reply..."
+                  : "Ask a question or describe a task..."
+              }
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onKeyDown}
               disabled={isGenerating}
               className="max-h-32 flex-1 resize-none self-center bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+              style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
               maxLength={10_000}
               required
             />
@@ -340,7 +465,9 @@ function ResultRow({
         />
 
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="truncate text-[14px] font-medium leading-tight text-ink">{title}</span>
+          <span className="truncate text-[14px] font-medium leading-tight text-ink">
+            {title}
+          </span>
           <span className="hidden truncate text-[12.5px] leading-tight text-ink-subtle sm:inline">
             {task.displayId} · {meta.detail}
           </span>
@@ -348,7 +475,9 @@ function ResultRow({
 
         <span
           className={`shrink-0 text-[12px] text-ink-subtle transition-opacity duration-150 ${
-            canArchive ? "group-hover/result:opacity-0 group-focus-within/result:opacity-0" : ""
+            canArchive
+              ? "group-hover/result:opacity-0 group-focus-within/result:opacity-0"
+              : ""
           }`}
         >
           {formatRelativeTime(task.createdAt)}
@@ -477,7 +606,11 @@ function taskFromMessage(message: GoatChatUiMessage) {
   if (metadataTask) return metadataTask;
 
   for (const part of message.parts) {
-    if (part.type !== "tool-start_goat_task" || part.state !== "output-available") continue;
+    if (
+      part.type !== "tool-start_goat_task" ||
+      part.state !== "output-available"
+    )
+      continue;
     const output = part.output;
     if (!isStartTaskToolOutput(output)) continue;
     return {
@@ -490,7 +623,9 @@ function taskFromMessage(message: GoatChatUiMessage) {
   return null;
 }
 
-function isStartTaskToolOutput(value: unknown): value is GoatStartTaskToolOutput {
+function isStartTaskToolOutput(
+  value: unknown,
+): value is GoatStartTaskToolOutput {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const output = value as Record<string, unknown>;
   return (
@@ -547,7 +682,7 @@ function firstLine(value: string | null) {
 function formatRelativeTime(value: string) {
   const timestamp = new Date(value).getTime();
   const elapsedMs = Date.now() - timestamp;
-  if (!Number.isFinite(timestamp) || elapsedMs < 30_000) return "now";
+  if (!Number.isFinite(timestamp) || elapsedMs < 30_000) return "just now";
 
   const elapsedMinutes = Math.floor(elapsedMs / 60_000);
   if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;

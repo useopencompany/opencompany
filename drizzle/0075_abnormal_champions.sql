@@ -34,11 +34,11 @@ CREATE TABLE "goat"."integrations" (
 );
 --> statement-breakpoint
 ALTER TABLE "goat"."integration_credentials" ADD CONSTRAINT "integration_credentials_user_workos_id_users_workos_user_id_fk" FOREIGN KEY ("user_workos_id") REFERENCES "goat"."users"("workos_user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "goat_integrations_id_user_provider_idx" ON "goat"."integrations" USING btree ("id","user_workos_id","provider");--> statement-breakpoint
 ALTER TABLE "goat"."integration_credentials" ADD CONSTRAINT "goat_integration_credentials_integration_user_provider_fk" FOREIGN KEY ("integration_id","user_workos_id","provider") REFERENCES "goat"."integrations"("id","user_workos_id","provider") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "goat"."integrations" ADD CONSTRAINT "integrations_user_workos_id_users_workos_user_id_fk" FOREIGN KEY ("user_workos_id") REFERENCES "goat"."users"("workos_user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "goat_integration_credentials_user_provider_idx" ON "goat"."integration_credentials" USING btree ("user_workos_id","provider");--> statement-breakpoint
 CREATE INDEX "goat_integration_credentials_integration_idx" ON "goat"."integration_credentials" USING btree ("integration_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "goat_integration_credentials_integration_kind_idx" ON "goat"."integration_credentials" USING btree ("integration_id","kind");--> statement-breakpoint
 CREATE INDEX "goat_integrations_user_provider_idx" ON "goat"."integrations" USING btree ("user_workos_id","provider");--> statement-breakpoint
-CREATE UNIQUE INDEX "goat_integrations_user_provider_external_idx" ON "goat"."integrations" USING btree ("user_workos_id","provider","external_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "goat_integrations_id_user_provider_idx" ON "goat"."integrations" USING btree ("id","user_workos_id","provider");
+CREATE UNIQUE INDEX "goat_integrations_user_provider_external_idx" ON "goat"."integrations" USING btree ("user_workos_id","provider","external_id");

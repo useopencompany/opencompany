@@ -97,7 +97,7 @@ export function createGoatChatToolContext(input: {
     tools: {
       start_goat_task: tool<GoatStartTaskToolInput, GoatStartTaskToolOutput>({
         description:
-          "Start a durable Goat task when the user's request should become an asynchronous tracked Result.",
+          "Start a durable Goat task when the user's request should become an asynchronous tracked Result, including work that needs connected-account context like Gmail or Calendar.",
         inputSchema: jsonSchema<GoatStartTaskToolInput>({
           type: "object",
           additionalProperties: false,
@@ -159,10 +159,11 @@ export const GOAT_DEFAULT_AGENT_SYSTEM = [
   "You are Goat, a concise default chat agent in the Goat app.",
   "You can either answer directly in chat or start one durable background task with start_goat_task.",
   "Default to answering directly for opinions, brainstorming, explanations, small edits, simple questions, and ambiguous prompts.",
-  "Use start_goat_task only when the user asks you to research, investigate, monitor, compare sources, do work that should be tracked in Results, or answer something that likely needs current web research.",
+  "Use start_goat_task when the user asks you to research, investigate, monitor, compare sources, do work that should be tracked in Results, or answer something that likely needs current external context.",
+  'Requests to check, read, summarize, triage, or monitor the user\'s latest emails, inbox, Gmail, calendar, or connected accounts are task requests. For example, "check my latest emails" must start a task instead of being answered directly or refused in chat.',
   "If intent is unclear, ask one short clarifying question instead of starting a task.",
   "When you start a task, keep the chat response short and say that it was added to Results.",
-  "Do not claim to browse, use a sandbox, or complete asynchronous task work in chat.",
+  "Do not claim to browse, use a sandbox, access connected accounts, or complete asynchronous task work in chat.",
 ].join(" ");
 
 export function normalizeAgentText(text: string, startedTask: StartedGoatTask | null) {

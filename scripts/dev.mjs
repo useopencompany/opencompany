@@ -9,6 +9,7 @@ import {
   DURABLE_STREAMS_DEV_URL,
   startDurableStreamsDevServer,
 } from "./lib/durable-streams-dev.mjs";
+import { startGoatDevProxy } from "./lib/goat-dev-proxy.mjs";
 import {
   envForTunnel,
   ngrokConfigState,
@@ -28,9 +29,15 @@ const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
 configureDevLogFile(turboArgs);
 let ngrok;
 let tunnelEnv = {};
+let goatDevProxy = null;
 
 if (!tunnelDisabled) {
-  ngrok = await startDefaultTunnel(port);
+  const tunnelTarget = await prepareTunnelTarget(port);
+  ngrok = await startDefaultTunnel(tunnelTarget.port, {
+    appPort: port,
+    exposesRunnerCallbacks: tunnelTarget.exposesRunnerCallbacks,
+  });
+  if (!ngrok) stopGoatDevProxy();
 }
 
 // Local session-transcript streaming. The web proxy and runner read
@@ -60,6 +67,13 @@ function stopDurableStreams() {
   if (durableStreams) {
     durableStreams.stop().catch(() => {});
     durableStreams = null;
+  }
+}
+
+function stopGoatDevProxy() {
+  if (goatDevProxy) {
+    goatDevProxy.close().catch(() => {});
+    goatDevProxy = null;
   }
 }
 
@@ -133,6 +147,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     shuttingDown = true;
     if (ngrok && !ngrok.killed) ngrok.kill(signal);
     stopDurableStreams();
+    stopGoatDevProxy();
     if (!dev.killed) dev.kill(signal);
   });
 }
@@ -140,6 +155,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 dev.on("exit", (code, signal) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
   stopDurableStreams();
+  stopGoatDevProxy();
   if (shuttingDown) exit(0);
   if (signal) exit(1);
   exit(code ?? 0);
@@ -148,6 +164,7 @@ dev.on("exit", (code, signal) => {
 dev.on("error", (error) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
   stopDurableStreams();
+  stopGoatDevProxy();
   console.error(`\nFailed to start turbo dev: ${error.message}\n`);
   exit(1);
 });
@@ -185,7 +202,38 @@ async function startDurableStreams() {
   }
 }
 
-async function startDefaultTunnel(targetPort) {
+async function prepareTunnelTarget(appPort) {
+  if (appMode !== "goat") {
+    return { port: appPort, exposesRunnerCallbacks: false };
+  }
+
+  const runnerPort = localRunnerPort();
+  goatDevProxy = await startGoatDevProxy({ appPort, runnerPort });
+  console.log(`\nGoat dev proxy ready: http://127.0.0.1:${goatDevProxy.port}`);
+  console.log(`  app routes    -> ${goatDevProxy.routes.app}`);
+  console.log(`  runner routes -> ${goatDevProxy.routes.runner} (/broker/*, /goat/tools/*)\n`);
+  return { port: goatDevProxy.port, exposesRunnerCallbacks: true };
+}
+
+function localRunnerPort() {
+  const configured =
+    process.env.RUNNER_INTERNAL_URL?.trim() || process.env.RUNNER_PUBLIC_URL?.trim();
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      if (url.port) return url.port;
+      return url.protocol === "https:" ? "443" : "80";
+    } catch {
+      // Fall through to the local dev default.
+    }
+  }
+  return "3040";
+}
+
+async function startDefaultTunnel(
+  targetPort,
+  { appPort = targetPort, exposesRunnerCallbacks = false } = {},
+) {
   const url = requestedNgrokUrl(turboArgs);
   const required = Boolean(url) || process.env.OPENCOMPANY_NGROK_REQUIRED === "1";
   const config = ngrokConfigState();
@@ -228,10 +276,20 @@ async function startDefaultTunnel(targetPort) {
   }
 
   try {
-    tunnelEnv = envForTunnel(publicUrl, process.env, { localPort: targetPort });
+    tunnelEnv = envForTunnel(publicUrl, process.env, { localPort: appPort });
+    if (exposesRunnerCallbacks) {
+      tunnelEnv.RUNNER_LLM_BROKER_PUBLIC_URL = publicUrl;
+    }
     console.log(`\nngrok tunnel ready: ${publicUrl}`);
-    console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
+    if (exposesRunnerCallbacks) {
+      console.log(`Goat public URL: ${publicUrl}`);
+    } else {
+      console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
+    }
     console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
+    if (exposesRunnerCallbacks) {
+      console.log(`Runner sandbox callback URL: ${publicUrl}`);
+    }
     console.log("Injected tunnel env into the dev process without changing .env.local.\n");
   } catch (error) {
     child.kill("SIGTERM");

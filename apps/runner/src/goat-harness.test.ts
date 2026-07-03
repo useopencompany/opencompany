@@ -112,7 +112,7 @@ describe("planGoatHarness", () => {
     const [, requestInit] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     const requestBody = JSON.parse(String(requestInit.body));
     expect(requestBody).toMatchObject({
-      model: "openai/gpt-5.4-mini",
+      model: "anthropic/claude-sonnet-4.6",
       stream: false,
       temperature: 0,
       response_format: {
@@ -135,6 +135,61 @@ describe("planGoatHarness", () => {
       "google_calendar",
       "goat_result",
     ]);
+    expect(requestBody.messages[0].content).toContain(
+      "The available tools list is the source of truth for what the background harness can use.",
+    );
+    expect(requestBody.messages[0].content).toContain(
+      "If the task text contains stale chat-layer limitations",
+    );
+  });
+
+  it("asks the planner to use connected Gmail despite stale chat-layer access wording", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    prompt: "Use Gmail to summarize the latest emails and extract action items.",
+                    model: "openai/gpt-5.4-mini",
+                    tools: ["gmail", "goat_result"],
+                    resultMode: "freeform",
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      planGoatHarness({
+        prompt:
+          "Summarize the user's latest emails. Since no inbox access is available in chat, ask the user to provide/export their latest emails.",
+        model: "openai/gpt-5.4-mini",
+        availableTools: ["exa", "gmail", "goat_result"],
+        gatewayApiKey: "gateway",
+        fetchImpl: fetchImpl as never,
+      }),
+    ).resolves.toEqual({
+      prompt: "Use Gmail to summarize the latest emails and extract action items.",
+      model: "openai/gpt-5.4-mini",
+      tools: ["exa", "gmail", "goat_result"],
+      resultMode: "freeform",
+    });
+
+    const [, requestInit] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const requestBody = JSON.parse(String(requestInit.body));
+    expect(requestBody.messages[0].content).toContain(
+      'Include "gmail" when the task needs email context and Gmail is available.',
+    );
+    expect(requestBody.messages[0].content).toContain(
+      "rewrite the prompt for the harness to use the available connected tool instead",
+    );
+    expect(requestBody.messages[1].content).toContain("no inbox access is available in chat");
   });
 
   it("surfaces gateway error messages when planning is rejected", async () => {
@@ -246,6 +301,12 @@ describe("executeGoatTask", () => {
     const [, scriptContent] = filesWrite.mock.calls[0] as unknown as [string, string];
     const script = String(scriptContent);
     expect(script).toContain("Authorization: `Bearer ${gatewayKey}`,");
+    expect(script).toContain("const systemPrompt =");
+    expect(script).toContain('const toolChoice = "auto";');
+    expect(script).toContain("const toolsSentToModel = tools.map(sanitizeValue);");
+    expect(script).toContain("systemPrompt,");
+    expect(script).toContain("toolsSentToModel,");
+    expect(script).toContain("toolChoice,");
     expect(script).not.toContain("\\`");
   });
 
@@ -290,12 +351,122 @@ describe("executeGoatTask", () => {
       debugTrace: {
         schemaVersion: "goat.debug.v1",
         planner: {
-          model: "openai/gpt-5.4-mini",
+          model: "anthropic/claude-sonnet-4.6",
           response: { content: JSON.stringify(harnessSpec) },
         },
         harness: harnessDebugTrace.harness,
       },
     });
+  });
+
+  it("reports streamed harness progress while the sandbox command is still running", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: JSON.stringify(harnessSpec) } }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const progressTrace: GoatTaskDebugTrace = {
+      schemaVersion: "goat.debug.v1",
+      harness: {
+        model: "openai/gpt-5.4-mini",
+        turns: [
+          {
+            step: 0,
+            responseMessage: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    name: "exa_search",
+                    arguments: JSON.stringify({ query: "Marseille" }),
+                  },
+                },
+              ],
+            },
+            toolResults: [],
+          },
+        ],
+      },
+    };
+    const run = vi.fn(
+      async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+        await options.onStdout?.(
+          `__goat_harness_progress__${JSON.stringify({ debugTrace: progressTrace })}\n`,
+        );
+        return {
+          stdout: `${JSON.stringify({
+            ok: true,
+            result: "Done.",
+            debugTrace: harnessDebugTrace,
+          })}\n`,
+          stderr: "",
+          exitCode: 0,
+        };
+      },
+    );
+    sandboxMocks.createOrConnectSandbox.mockResolvedValue({
+      sandboxId: "sbx_1",
+      files: { write: vi.fn(async () => {}) },
+      commands: { run },
+    });
+    const reportStage = vi.fn(async () => {});
+
+    await executeGoatTask({
+      task: goatTask(),
+      env: runnerEnv(),
+      signal: new AbortController().signal,
+      reportStage,
+    });
+
+    expect(reportStage).toHaveBeenCalledWith(
+      "running",
+      expect.objectContaining({
+        sandboxId: "sbx_1",
+        debugTrace: expect.objectContaining({
+          planner: expect.any(Object),
+          harness: progressTrace.harness,
+        }),
+      }),
+    );
+  });
+
+  it("fails before sandbox execution when Google tools need a public callback URL", async () => {
+    const gmailHarnessSpec: GoatHarnessSpec = {
+      ...harnessSpec,
+      tools: ["exa", "gmail", "goat_result"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: JSON.stringify(gmailHarnessSpec) } }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await expect(
+      executeGoatTask({
+        task: goatTask({ harnessSpec: gmailHarnessSpec }),
+        env: runnerEnv({ publicUrl: undefined }),
+        signal: new AbortController().signal,
+        reportStage: vi.fn(async () => {}),
+      }),
+    ).rejects.toThrow("Goat Google tools require RUNNER_LLM_BROKER_PUBLIC_URL");
+    expect(sandboxMocks.createOrConnectSandbox).not.toHaveBeenCalled();
   });
 });
 

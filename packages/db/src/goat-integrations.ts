@@ -7,13 +7,16 @@ import {
   loadEncryptionKey,
 } from "@opencompany/crypto";
 import { and, eq } from "drizzle-orm";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getDb } from "./client";
+import type * as goatSchema from "./goat-schema";
 import {
   type GoatIntegrationCredentialKind,
   type GoatIntegrationProvider,
   goatIntegrationCredentials,
   goatIntegrations,
 } from "./goat-schema";
+import type * as publicSchema from "./schema";
 
 export type GoatGoogleOAuthTokens = {
   access_token: string;
@@ -23,8 +26,14 @@ export type GoatGoogleOAuthTokens = {
   id_token?: string;
 };
 
-type GoatIntegrationDb = Pick<ReturnType<typeof getDb>, "insert" | "select" | "update">;
-type GoatIntegrationRootDb = GoatIntegrationDb & Pick<ReturnType<typeof getDb>, "transaction">;
+type DbSchema = typeof publicSchema & typeof goatSchema;
+type GoatIntegrationDb = Pick<
+  PgDatabase<PgQueryResultHKT, DbSchema>,
+  "insert" | "select" | "update"
+>;
+type GoatIntegrationRootDb = GoatIntegrationDb & {
+  transaction<T>(callback: (tx: GoatIntegrationDb) => Promise<T>): Promise<T>;
+};
 
 export type GoatIntegrationCredentialContext = {
   userWorkosId: string;
@@ -50,7 +59,7 @@ export async function connectGoatGoogleIntegration(input: {
   tokens: GoatGoogleOAuthTokens;
   expiresAt: Date | null;
   scopes: string[];
-  db?: GoatIntegrationRootDb;
+  db?: GoatIntegrationDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -186,14 +195,13 @@ export async function refreshGoatIntegrationCredential(
   input: GoatIntegrationCredentialContext & {
     payload: Record<string, unknown>;
     expiresAt?: Date | null;
-    db?: GoatIntegrationRootDb;
+    db: GoatIntegrationRootDb;
     now?: Date;
   },
 ) {
-  const db = input.db ?? getDb();
   const now = input.now ?? new Date();
 
-  return db.transaction(async (tx) => {
+  return input.db.transaction(async (tx) => {
     const credential = await saveGoatIntegrationCredential({ ...input, db: tx, now });
     await markGoatIntegrationStatus({
       userWorkosId: input.userWorkosId,
@@ -261,7 +269,7 @@ export async function markGoatIntegrationStatus(input: {
   provider: GoatIntegrationProvider;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected";
   statusReason?: string | null;
-  db?: Pick<ReturnType<typeof getDb>, "update">;
+  db?: Pick<GoatIntegrationDb, "update">;
   now?: Date;
 }) {
   await (input.db ?? getDb())
