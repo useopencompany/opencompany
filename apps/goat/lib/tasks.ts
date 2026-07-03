@@ -4,7 +4,14 @@ import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import type { GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
-import { goatTaskEvents, goatTaskMessages, goatTasks } from "@opencompany/db/goat-schema";
+import {
+  goatTaskEvents,
+  goatTaskMessages,
+  goatTaskModelUsage,
+  goatTaskSandboxUsage,
+  goatTasks,
+  goatTaskToolUsage,
+} from "@opencompany/db/goat-schema";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
@@ -59,7 +66,7 @@ export async function getCurrentUserGoatTaskRun(taskId: string) {
 
   if (!task) return null;
 
-  const [messages, events] = await Promise.all([
+  const [messages, events, modelUsage, toolUsage, sandboxUsage] = await Promise.all([
     getDb()
       .select()
       .from(goatTaskMessages)
@@ -77,9 +84,39 @@ export async function getCurrentUserGoatTaskRun(taskId: string) {
         and(eq(goatTaskEvents.userWorkosId, user.workosUserId), eq(goatTaskEvents.taskId, task.id)),
       )
       .orderBy(asc(goatTaskEvents.id)),
+    getDb()
+      .select()
+      .from(goatTaskModelUsage)
+      .where(
+        and(
+          eq(goatTaskModelUsage.userWorkosId, user.workosUserId),
+          eq(goatTaskModelUsage.taskId, task.id),
+        ),
+      )
+      .orderBy(asc(goatTaskModelUsage.createdAt), asc(goatTaskModelUsage.id)),
+    getDb()
+      .select()
+      .from(goatTaskToolUsage)
+      .where(
+        and(
+          eq(goatTaskToolUsage.userWorkosId, user.workosUserId),
+          eq(goatTaskToolUsage.taskId, task.id),
+        ),
+      )
+      .orderBy(asc(goatTaskToolUsage.createdAt), asc(goatTaskToolUsage.id)),
+    getDb()
+      .select()
+      .from(goatTaskSandboxUsage)
+      .where(
+        and(
+          eq(goatTaskSandboxUsage.userWorkosId, user.workosUserId),
+          eq(goatTaskSandboxUsage.taskId, task.id),
+        ),
+      )
+      .orderBy(asc(goatTaskSandboxUsage.createdAt), asc(goatTaskSandboxUsage.id)),
   ]);
 
-  return { task, messages, events };
+  return { task, messages, events, modelUsage, toolUsage, sandboxUsage };
 }
 
 export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTaskResult> {
