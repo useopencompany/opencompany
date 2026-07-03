@@ -1,11 +1,14 @@
 import type {
   GoatTaskEvent,
   GoatTaskEventType,
+  GoatTaskModelUsage,
   GoatTaskMessage,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
+  GoatTaskSandboxUsage,
   GoatTaskStage,
   GoatTaskStatus,
+  GoatTaskToolUsage,
   GoatTaskToolName,
 } from "@opencompany/db/goat-schema";
 
@@ -67,6 +70,83 @@ export type GoatTaskRunEventInput =
       created_at: string;
     };
 
+export type GoatTaskRunModelUsageInput =
+  | GoatTaskModelUsage
+  | {
+      id: number;
+      task_id: string;
+      user_workos_id: string;
+      message_id: string | null;
+      run_lease_id: string | null;
+      phase: string;
+      step_index: number;
+      model_provider: string;
+      model_name: string;
+      response_id: string | null;
+      response_model_id: string | null;
+      finish_reason: string | null;
+      raw_finish_reason: string | null;
+      input_tokens: number;
+      input_no_cache_tokens: number;
+      input_cache_read_tokens: number;
+      input_cache_write_tokens: number;
+      output_tokens: number;
+      output_text_tokens: number;
+      output_reasoning_tokens: number;
+      total_tokens: number;
+      raw_usage: Record<string, unknown>;
+      provider_created_at: string | null;
+      provider_cost_usd_micros: number;
+      platform_fee_usd_micros: number;
+      total_cost_usd_micros: number;
+      cost_basis: Record<string, unknown>;
+      created_at: string;
+    };
+
+export type GoatTaskRunToolUsageInput =
+  | GoatTaskToolUsage
+  | {
+      id: number;
+      task_id: string;
+      user_workos_id: string;
+      message_id: string | null;
+      run_lease_id: string | null;
+      tool_call_id: string;
+      tool_name: string;
+      provider: string;
+      operation: string;
+      provider_request_id: string | null;
+      provider_cost_usd_micros: number;
+      platform_fee_usd_micros: number;
+      total_cost_usd_micros: number;
+      raw_usage: Record<string, unknown>;
+      cost_basis: Record<string, unknown>;
+      created_at: string;
+    };
+
+export type GoatTaskRunSandboxUsageInput =
+  | GoatTaskSandboxUsage
+  | {
+      id: number;
+      task_id: string;
+      user_workos_id: string;
+      message_id: string | null;
+      run_lease_id: string | null;
+      sandbox_id: string;
+      template: string | null;
+      vcpu: number | null;
+      ram_mib: number | null;
+      started_at: string | null;
+      ended_at: string | null;
+      active_ms: number;
+      provider_cost_usd_micros: number;
+      platform_fee_usd_micros: number;
+      total_cost_usd_micros: number;
+      raw_metrics: Record<string, unknown>;
+      cost_basis: Record<string, unknown>;
+      created_at: string;
+    };
+
 export type GoatHarnessRunViewModel = {
   hasDurableRun: boolean;
   legacyDetailText: string;
@@ -87,6 +167,39 @@ export type GoatHarnessRunViewModel = {
   assistantMessages: GoatRunMessage[];
   toolCalls: GoatHarnessRunToolCall[];
   events: GoatRunEvent[];
+  cost: GoatRunCostSummary;
+};
+
+export type GoatRunCostSummary = {
+  hasRecordedCosts: boolean;
+  totalCostUsdMicros: number;
+  modelCostUsdMicros: number;
+  toolCostUsdMicros: number;
+  sandboxCostUsdMicros: number;
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+  tokens: GoatRunTokenSummary;
+  toolUsageByProviderOperation: GoatRunToolUsageSummary[];
+};
+
+export type GoatRunTokenSummary = {
+  inputTokens: number;
+  inputNoCacheTokens: number;
+  inputCacheReadTokens: number;
+  inputCacheWriteTokens: number;
+  outputTokens: number;
+  outputTextTokens: number;
+  outputReasoningTokens: number;
+  totalTokens: number;
+};
+
+export type GoatRunToolUsageSummary = {
+  provider: string;
+  operation: string;
+  costUsdMicros: number;
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+  calls: number;
 };
 
 export type GoatRunMessage = {
@@ -128,6 +241,9 @@ export function buildGoatHarnessRun(input: {
   task: GoatTaskRunTaskInput;
   messages: readonly GoatTaskRunMessageInput[];
   events: readonly GoatTaskRunEventInput[];
+  modelUsage?: readonly GoatTaskRunModelUsageInput[];
+  toolUsage?: readonly GoatTaskRunToolUsageInput[];
+  sandboxUsage?: readonly GoatTaskRunSandboxUsageInput[];
 }): GoatHarnessRunViewModel {
   const task = normalizeTask(input.task);
   const messages = input.messages.map(normalizeMessage).toSorted(compareCreatedAt);
@@ -144,6 +260,149 @@ export function buildGoatHarnessRun(input: {
     assistantMessages,
     toolCalls,
     events,
+    cost: buildCostSummary({
+      modelUsage: input.modelUsage ?? [],
+      toolUsage: input.toolUsage ?? [],
+      sandboxUsage: input.sandboxUsage ?? [],
+    }),
+  };
+}
+
+function buildCostSummary(input: {
+  modelUsage: readonly GoatTaskRunModelUsageInput[];
+  toolUsage: readonly GoatTaskRunToolUsageInput[];
+  sandboxUsage: readonly GoatTaskRunSandboxUsageInput[];
+}): GoatRunCostSummary {
+  const tokens = emptyTokenSummary();
+  let modelCostUsdMicros = 0;
+  let modelProviderCostUsdMicros = 0;
+  let modelPlatformFeeUsdMicros = 0;
+
+  for (const usage of input.modelUsage) {
+    modelCostUsdMicros += readUsageNumber(usage, "totalCostUsdMicros", "total_cost_usd_micros");
+    modelProviderCostUsdMicros += readUsageNumber(
+      usage,
+      "providerCostUsdMicros",
+      "provider_cost_usd_micros",
+    );
+    modelPlatformFeeUsdMicros += readUsageNumber(
+      usage,
+      "platformFeeUsdMicros",
+      "platform_fee_usd_micros",
+    );
+    tokens.inputTokens += readUsageNumber(usage, "inputTokens", "input_tokens");
+    tokens.inputNoCacheTokens += readUsageNumber(
+      usage,
+      "inputNoCacheTokens",
+      "input_no_cache_tokens",
+    );
+    tokens.inputCacheReadTokens += readUsageNumber(
+      usage,
+      "inputCacheReadTokens",
+      "input_cache_read_tokens",
+    );
+    tokens.inputCacheWriteTokens += readUsageNumber(
+      usage,
+      "inputCacheWriteTokens",
+      "input_cache_write_tokens",
+    );
+    tokens.outputTokens += readUsageNumber(usage, "outputTokens", "output_tokens");
+    tokens.outputTextTokens += readUsageNumber(usage, "outputTextTokens", "output_text_tokens");
+    tokens.outputReasoningTokens += readUsageNumber(
+      usage,
+      "outputReasoningTokens",
+      "output_reasoning_tokens",
+    );
+    tokens.totalTokens += readUsageNumber(usage, "totalTokens", "total_tokens");
+  }
+
+  let toolCostUsdMicros = 0;
+  let toolProviderCostUsdMicros = 0;
+  let toolPlatformFeeUsdMicros = 0;
+  const toolGroups = new Map<string, GoatRunToolUsageSummary>();
+  for (const usage of input.toolUsage) {
+    const provider = readUsageString(usage, "provider", "provider") || "unknown";
+    const operation = readUsageString(usage, "operation", "operation") || "unknown";
+    const totalCost = readUsageNumber(usage, "totalCostUsdMicros", "total_cost_usd_micros");
+    const providerCost = readUsageNumber(
+      usage,
+      "providerCostUsdMicros",
+      "provider_cost_usd_micros",
+    );
+    const platformFee = readUsageNumber(
+      usage,
+      "platformFeeUsdMicros",
+      "platform_fee_usd_micros",
+    );
+    toolCostUsdMicros += totalCost;
+    toolProviderCostUsdMicros += providerCost;
+    toolPlatformFeeUsdMicros += platformFee;
+    const key = `${provider}\u0000${operation}`;
+    const current = toolGroups.get(key) ?? makeToolUsageSummary(provider, operation);
+    current.costUsdMicros += totalCost;
+    current.providerCostUsdMicros += providerCost;
+    current.platformFeeUsdMicros += platformFee;
+    current.calls += 1;
+    toolGroups.set(key, current);
+  }
+
+  let sandboxCostUsdMicros = 0;
+  let sandboxProviderCostUsdMicros = 0;
+  let sandboxPlatformFeeUsdMicros = 0;
+  for (const usage of input.sandboxUsage) {
+    sandboxCostUsdMicros += readUsageNumber(usage, "totalCostUsdMicros", "total_cost_usd_micros");
+    sandboxProviderCostUsdMicros += readUsageNumber(
+      usage,
+      "providerCostUsdMicros",
+      "provider_cost_usd_micros",
+    );
+    sandboxPlatformFeeUsdMicros += readUsageNumber(
+      usage,
+      "platformFeeUsdMicros",
+      "platform_fee_usd_micros",
+    );
+  }
+
+  return {
+    hasRecordedCosts:
+      input.modelUsage.length > 0 || input.toolUsage.length > 0 || input.sandboxUsage.length > 0,
+    totalCostUsdMicros: modelCostUsdMicros + toolCostUsdMicros + sandboxCostUsdMicros,
+    modelCostUsdMicros,
+    toolCostUsdMicros,
+    sandboxCostUsdMicros,
+    providerCostUsdMicros:
+      modelProviderCostUsdMicros + toolProviderCostUsdMicros + sandboxProviderCostUsdMicros,
+    platformFeeUsdMicros:
+      modelPlatformFeeUsdMicros + toolPlatformFeeUsdMicros + sandboxPlatformFeeUsdMicros,
+    tokens,
+    toolUsageByProviderOperation: Array.from(toolGroups.values()).toSorted((a, b) => {
+      const provider = a.provider.localeCompare(b.provider);
+      return provider === 0 ? a.operation.localeCompare(b.operation) : provider;
+    }),
+  };
+}
+
+function emptyTokenSummary(): GoatRunTokenSummary {
+  return {
+    inputTokens: 0,
+    inputNoCacheTokens: 0,
+    inputCacheReadTokens: 0,
+    inputCacheWriteTokens: 0,
+    outputTokens: 0,
+    outputTextTokens: 0,
+    outputReasoningTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function makeToolUsageSummary(provider: string, operation: string): GoatRunToolUsageSummary {
+  return {
+    provider,
+    operation,
+    costUsdMicros: 0,
+    providerCostUsdMicros: 0,
+    platformFeeUsdMicros: 0,
+    calls: 0,
   };
 }
 
@@ -373,4 +632,16 @@ function parsePreview(preview: string) {
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function readUsageNumber(value: unknown, camelKey: string, snakeKey: string) {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const raw = record[camelKey] ?? record[snakeKey];
+  return typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
+}
+
+function readUsageString(value: unknown, camelKey: string, snakeKey: string) {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const raw = record[camelKey] ?? record[snakeKey];
+  return typeof raw === "string" ? raw.trim() : "";
 }
