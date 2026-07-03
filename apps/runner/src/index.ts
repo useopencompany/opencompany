@@ -1,5 +1,9 @@
 import "./load-env";
 import {
+  registerGoatNodeObservability,
+  shutdownGoatNodeObservability,
+} from "@opencompany/goat-observability/node";
+import {
   captureException,
   createLogger,
   flushObservability,
@@ -32,6 +36,7 @@ const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 240_000;
 const RENDER_SHUTDOWN_POST_INTERRUPT_WAIT_MS = 30_000;
 
 initializeExceptionReporting();
+registerGoatNodeObservability({ serviceName: "opencompany-runner-goat" });
 installProcessErrorBackstop();
 
 const env = loadEnv();
@@ -128,7 +133,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           event: "opencompany.runner_shutdown_finished",
           signal,
         });
-        return Promise.allSettled([flushObservability(), flushBraintrust()]);
+        return Promise.allSettled([
+          flushObservability(),
+          flushBraintrust(),
+          shutdownGoatNodeObservability(),
+        ]);
       })
       .finally(() => {
         process.exit(0);

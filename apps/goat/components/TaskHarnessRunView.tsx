@@ -2,80 +2,111 @@
 
 import {
   AlertCircle,
-  Brain,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
-  FileText,
+  ListTodo,
   LoaderCircle,
   Mail,
   Search,
-  TerminalSquare,
   Wrench,
 } from "lucide-react";
 import { useState } from "react";
 import { Markdown } from "@/components/Markdown";
 import type {
   GoatHarnessRunToolCall,
-  GoatHarnessRunTurn,
   GoatHarnessRunViewModel,
+  GoatRunMessage,
 } from "@/lib/task-harness-run";
 
 export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
-  const turns = run.harness?.turns ?? [];
-  const hasCapturedActivity = turns.some(
-    (turn) =>
-      Boolean(turn.responseMessage?.contentPreview) ||
-      turn.toolCalls.length > 0 ||
-      Boolean(finalResultTextFromTurn(turn)),
+  const assistantMessages = run.assistantMessages.filter(
+    (message) => message.content.trim() || message.status === "running",
   );
+  const finalResult = run.task.result || lastCompletedAssistantContent(run.assistantMessages);
+
+  if (!run.hasDurableRun) {
+    return (
+      <div className="flex w-full max-w-[720px] flex-col gap-5">
+        <TranscriptMessage role="user" content={run.task.prompt} />
+        {finalResult ? <TranscriptMessage role="assistant" content={finalResult} /> : null}
+        {run.task.error ? (
+          <div className="max-w-full rounded-lg border border-danger-border bg-danger-bg px-3 py-2.5 text-[13px] leading-5 text-danger md:max-w-[68%]">
+            {run.task.error}
+          </div>
+        ) : null}
+        <div className="max-w-full text-[13px] leading-6 text-ink-muted md:max-w-[68%]">
+          {run.legacyDetailText}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-full max-w-[720px] flex-col gap-5">
-      <TranscriptMessage role="user" content={run.task.prompt} />
+      <TranscriptMessage role="user" content={run.userMessage?.content || run.task.prompt} />
 
-      {hasCapturedActivity ? (
-        <div className="flex flex-col gap-5">
-          {turns.map((turn) => (
-            <TranscriptTurn key={turn.step} turn={turn} />
+      {run.toolCalls.length > 0 ? (
+        <div className="space-y-1.5 md:max-w-[72%]">
+          {run.toolCalls.map((toolCall) => (
+            <ToolCallRow key={toolCall.id} toolCall={toolCall} />
           ))}
         </div>
-      ) : (
-        <div className="max-w-full text-[13px] leading-6 text-ink-muted md:max-w-[68%]">
-          The harness has not captured an assistant message or tool call yet. This page refreshes
-          while the task is active.
+      ) : null}
+
+      {assistantMessages.length > 0 ? (
+        <div className="flex flex-col gap-5">
+          {assistantMessages.map((message) => (
+            <AssistantMessage key={message.id} message={message} />
+          ))}
         </div>
-      )}
+      ) : run.task.status === "queued" || run.task.status === "running" ? (
+        <div className="max-w-full text-[13px] leading-6 text-ink-muted md:max-w-[68%]">
+          The runner is preparing the task transcript.
+        </div>
+      ) : null}
+
+      {run.task.error ? (
+        <div className="max-w-full rounded-lg border border-danger-border bg-danger-bg px-3 py-2.5 text-[13px] leading-5 text-danger md:max-w-[68%]">
+          {run.task.error}
+        </div>
+      ) : null}
+
+      {finalResult ? (
+        <section className="mt-2 flex flex-col gap-2 border-border border-t pt-5">
+          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Result
+          </h2>
+          <Markdown
+            content={finalResult}
+            className="rounded-lg bg-surface-muted px-3 py-2.5 text-[13px] leading-5 text-ink"
+          />
+        </section>
+      ) : null}
     </div>
   );
 }
 
-function TranscriptTurn({ turn }: { turn: GoatHarnessRunTurn }) {
-  const assistantText = turn.responseMessage?.contentPreview;
-  const finalResultText = finalResultTextFromTurn(turn);
-  const visibleToolCalls = turn.toolCalls.filter((toolCall) => toolCall.name !== "goat_result");
-  if (!assistantText && visibleToolCalls.length === 0 && !finalResultText) return null;
-
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-full space-y-3 break-words text-[14px] leading-6 text-ink/90 md:max-w-[68%]">
-        {assistantText ? <TranscriptMessage role="assistant" content={assistantText} /> : null}
-        {visibleToolCalls.length > 0 ? (
-          <div className="space-y-1.5">
-            {visibleToolCalls.map((toolCall) => (
-              <ToolCallRow key={toolCall.id} toolCall={toolCall} />
-            ))}
-          </div>
-        ) : null}
-        {finalResultText ? <TranscriptMessage role="assistant" content={finalResultText} /> : null}
+function AssistantMessage({ message }: { message: GoatRunMessage }) {
+  if (!message.content.trim() && message.status === "running") {
+    return (
+      <div className="flex items-center gap-1.5 text-[13px] leading-6 text-ink-muted">
+        <LoaderCircle size={12} strokeWidth={2} className="animate-spin text-warning" />
+        Assistant is working
       </div>
-    </div>
-  );
+    );
+  }
+
+  return <TranscriptMessage role="assistant" content={message.content} />;
 }
 
 function TranscriptMessage({ role, content }: { role: "user" | "assistant"; content: string }) {
   if (role === "assistant") {
-    return <Markdown content={content} />;
+    return (
+      <div className="max-w-full break-words text-[14px] leading-6 text-ink/90 md:max-w-[68%]">
+        <Markdown content={content} />
+      </div>
+    );
   }
 
   return (
@@ -89,7 +120,6 @@ function TranscriptMessage({ role, content }: { role: "user" | "assistant"; cont
 
 function ToolCallRow({ toolCall }: { toolCall: GoatHarnessRunToolCall }) {
   const [expanded, setExpanded] = useState(false);
-  const status = toolCall.errorPreview ? "failed" : toolCall.status;
   const display = toolCallDisplay(toolCall);
   return (
     <div
@@ -122,7 +152,7 @@ function ToolCallRow({ toolCall }: { toolCall: GoatHarnessRunToolCall }) {
               <span className="min-w-0 truncate">{display.detail}</span>
             </span>
           ) : null}
-          <StatusText status={status} />
+          <StatusText status={toolCall.status} />
         </button>
       </div>
       {expanded ? (
@@ -149,12 +179,8 @@ function ToolIcon({ toolCall }: { toolCall: GoatHarnessRunToolCall }) {
   if (toolCall.kind === "search") return <Search size={11} strokeWidth={1.75} />;
   if (toolCall.kind === "gmail") return <Mail size={11} strokeWidth={1.75} />;
   if (toolCall.kind === "calendar") return <CalendarDays size={11} strokeWidth={1.75} />;
-  if (toolCall.kind === "result") return <CheckCircle2 size={11} strokeWidth={1.75} />;
-  if (toolCall.name.includes("brain")) return <Brain size={11} strokeWidth={1.75} />;
-  if (toolCall.name.includes("file")) return <FileText size={11} strokeWidth={1.75} />;
-  if (toolCall.name.includes("shell") || toolCall.name.includes("bash")) {
-    return <TerminalSquare size={11} strokeWidth={1.75} />;
-  }
+  if (toolCall.kind === "linear") return <ListTodo size={11} strokeWidth={1.75} />;
+  if (toolCall.status === "completed") return <CheckCircle2 size={11} strokeWidth={1.75} />;
   return <Wrench size={11} strokeWidth={1.75} />;
 }
 
@@ -213,18 +239,15 @@ function toolCallDisplay(toolCall: GoatHarnessRunToolCall) {
         readJsonPreviewField(toolCall.inputPreview, "query"),
     };
   }
-  if (toolCall.name === "goat_result") return { label: "Final result", detail: "" };
+  if (toolCall.name.startsWith("linear_")) {
+    return {
+      label: toolCall.label,
+      detail:
+        readJsonPreviewField(toolCall.inputPreview, "query") ||
+        readJsonPreviewField(toolCall.inputPreview, "tool"),
+    };
+  }
   return { label: toolCall.label, detail: "" };
-}
-
-function finalResultTextFromTurn(turn: GoatHarnessRunTurn) {
-  const toolCall = turn.toolCalls.find((item) => item.name === "goat_result");
-  if (!toolCall) return "";
-  return (
-    readJsonPreviewField(toolCall.outputPreview, "text") ||
-    readJsonPreviewField(toolCall.inputPreview, "text") ||
-    toolCall.outputPreview.trim()
-  );
 }
 
 function readJsonPreviewField(preview: string, field: string) {
@@ -242,5 +265,12 @@ function readJsonPreviewField(preview: string, field: string) {
 function truncateInline(value: string, maxLength: number) {
   const singleLine = value.replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) return singleLine;
-  return `${singleLine.slice(0, maxLength - 1)}...`;
+  return `${singleLine.slice(0, maxLength - 3)}...`;
+}
+
+function lastCompletedAssistantContent(messages: GoatRunMessage[]) {
+  const message = messages
+    .filter((item) => item.role === "assistant" && item.status === "completed" && item.content)
+    .at(-1);
+  return message?.content.trim() ?? "";
 }

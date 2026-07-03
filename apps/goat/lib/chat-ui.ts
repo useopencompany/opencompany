@@ -2,6 +2,11 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatChatMessage } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
 
+export const START_TASK_TOOL_NAME = "start_task";
+export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
+export const GOAT_BRAIN_TOOL_NAME = "goat_brain";
+export const GOAT_BRAIN_TOOL_PART_TYPE = `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
+
 export type GoatTaskCardMetadata = {
   id: string;
   displayId: string;
@@ -14,13 +19,13 @@ export type GoatChatMessageMetadata = {
   error?: string;
 };
 
-export type GoatStartTaskToolInput = {
+export type StartTaskToolInput = {
   prompt: string;
   name: string;
   reason?: string;
 };
 
-export type GoatStartTaskToolOutput = {
+export type StartTaskToolOutput = {
   taskId: string;
   taskDisplayId: string;
   taskName: string;
@@ -28,10 +33,26 @@ export type GoatStartTaskToolOutput = {
   prompt: string;
 };
 
+export type GoatBrainToolInput = {
+  args: string;
+};
+
+export type GoatBrainToolOutput = {
+  ok: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  error?: string;
+};
+
 export type GoatChatTools = {
-  start_goat_task: {
-    input: GoatStartTaskToolInput;
-    output: GoatStartTaskToolOutput;
+  start_task: {
+    input: StartTaskToolInput;
+    output: StartTaskToolOutput;
+  };
+  goat_brain: {
+    input: GoatBrainToolInput;
+    output: GoatBrainToolOutput;
   };
 };
 

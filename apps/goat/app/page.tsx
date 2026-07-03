@@ -1,5 +1,4 @@
 import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
-import { TaskAutoRefresh } from "@/components/TaskAutoRefresh";
 import { loadCurrentGoatChatSession } from "@/lib/chat";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
@@ -11,7 +10,6 @@ export default async function GoatHomePage() {
     listCurrentUserGoatTasks(),
     loadCurrentGoatChatSession(),
   ]);
-  const hasActiveTask = tasks.some((task) => task.status === "queued" || task.status === "running");
   const taskViews = tasks.map(
     (task): GoatTaskView => ({
       id: task.id,
@@ -31,7 +29,6 @@ export default async function GoatHomePage() {
 
   return (
     <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <TaskAutoRefresh enabled={hasActiveTask} />
       <GoatSurface tasks={taskViews} defaultModel={DEFAULT_GOAT_MODEL} initialChat={initialChat} />
     </main>
   );

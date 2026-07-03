@@ -3,19 +3,13 @@
 import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import { goatTasks } from "@opencompany/db/goat-schema";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import type { GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
+import { goatTaskEvents, goatTaskMessages, goatTasks } from "@opencompany/db/goat-schema";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { normalizeGoatTaskName } from "@/lib/task-display";
 import { triggerGoatTaskRun } from "@/lib/task-runner";
-import { validateGoatTaskInput } from "@/lib/task-validation";
-
-export type TaskFormState = {
-  ok: boolean;
-  error: string | null;
-};
 
 export type ArchiveTaskResult = {
   ok: boolean;
@@ -49,6 +43,45 @@ export async function getCurrentUserGoatTask(taskId: string) {
   return task ?? null;
 }
 
+export async function getCurrentUserGoatTaskRun(taskId: string) {
+  const { user } = await currentGoatUser();
+  const normalizedTaskId = taskId.trim().toUpperCase();
+  const [task] = await getDb()
+    .select()
+    .from(goatTasks)
+    .where(
+      and(
+        eq(goatTasks.userWorkosId, user.workosUserId),
+        or(eq(goatTasks.id, taskId), eq(goatTasks.displayId, normalizedTaskId)),
+      ),
+    )
+    .limit(1);
+
+  if (!task) return null;
+
+  const [messages, events] = await Promise.all([
+    getDb()
+      .select()
+      .from(goatTaskMessages)
+      .where(
+        and(
+          eq(goatTaskMessages.userWorkosId, user.workosUserId),
+          eq(goatTaskMessages.taskId, task.id),
+        ),
+      )
+      .orderBy(asc(goatTaskMessages.createdAt)),
+    getDb()
+      .select()
+      .from(goatTaskEvents)
+      .where(
+        and(eq(goatTaskEvents.userWorkosId, user.workosUserId), eq(goatTaskEvents.taskId, task.id)),
+      )
+      .orderBy(asc(goatTaskEvents.id)),
+  ]);
+
+  return { task, messages, events };
+}
+
 export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTaskResult> {
   if (!taskId.trim()) {
     return { ok: false, error: "Could not archive task." };
@@ -76,7 +109,6 @@ export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTask
     return { ok: false, error: "Could not archive task." };
   }
 
-  revalidatePath("/");
   return { ok: true, error: null };
 }
 
@@ -87,29 +119,104 @@ export async function createGoatTaskForUser(input: {
   name?: string;
 }) {
   const id = `goat_task_${randomUUID()}`;
+  const userMessageId = `goat_task_msg_${randomUUID()}`;
   const now = new Date();
   const name = normalizeGoatTaskName(input.name, input.prompt);
   const tools = await getGoatAvailableHarnessTools(input.userWorkosId);
-  const [task] = await getDb()
-    .insert(goatTasks)
-    .values({
-      id,
-      name,
-      userWorkosId: input.userWorkosId,
-      prompt: input.prompt,
-      model: input.model,
-      status: "queued",
-      stage: "queued",
-      nextRunAt: now,
-      updatedAt: now,
-      harnessSpec: {
-        prompt: input.prompt,
-        model: input.model,
-        tools,
-        resultMode: "freeform",
-      },
-    })
-    .returning();
+  const harnessSpec: GoatHarnessSpec = {
+    schemaVersion: "goat.harness.v1",
+    model: input.model,
+    systemPrompt: "",
+    initialUserMessage: input.prompt,
+    tools,
+    maxModelSteps: 8,
+    resultMode: "assistant_final",
+  };
+  const modelMessage = { role: "user", content: input.prompt };
+  const task = rowsFromExecute<GoatTaskRow>(
+    await getDb().execute(sql`
+      WITH created_task AS (
+        INSERT INTO goat.tasks (
+          id,
+          name,
+          user_workos_id,
+          prompt,
+          model,
+          status,
+          stage,
+          next_run_at,
+          created_at,
+          updated_at,
+          harness_spec
+        )
+        VALUES (
+          ${id},
+          ${name},
+          ${input.userWorkosId},
+          ${input.prompt},
+          ${input.model},
+          'queued',
+          'queued',
+          ${now},
+          ${now},
+          ${now},
+          ${JSON.stringify(harnessSpec)}::jsonb
+        )
+        RETURNING *
+      ),
+      inserted_user_message AS (
+        INSERT INTO goat.task_messages (
+          id,
+          task_id,
+          user_workos_id,
+          role,
+          status,
+          content,
+          model_message,
+          created_at,
+          updated_at,
+          completed_at
+        )
+        SELECT
+          ${userMessageId},
+          task.id,
+          task.user_workos_id,
+          'user',
+          'completed',
+          task.prompt,
+          ${JSON.stringify(modelMessage)}::jsonb,
+          ${now},
+          ${now},
+          ${now}
+        FROM created_task AS task
+        RETURNING id
+      )
+      SELECT
+        task.id AS "id",
+        task.display_id AS "displayId",
+        task.name AS "name",
+        task.user_workos_id AS "userWorkosId",
+        task.prompt AS "prompt",
+        task.model AS "model",
+        task.status AS "status",
+        task.stage AS "stage",
+        task.result AS "result",
+        task.error AS "error",
+        task.harness_spec AS "harnessSpec",
+        task.debug_trace AS "debugTrace",
+        task.sandbox_id AS "sandboxId",
+        task.attempts AS "attempts",
+        task.next_run_at AS "nextRunAt",
+        task.lease_id AS "leaseId",
+        task.lease_owner AS "leaseOwner",
+        task.lease_expires_at AS "leaseExpiresAt",
+        task.archived_at AS "archivedAt",
+        task.created_at AS "createdAt",
+        task.updated_at AS "updatedAt"
+      FROM created_task AS task
+      WHERE EXISTS (SELECT 1 FROM inserted_user_message)
+    `),
+  ).map(goatTaskFromRow)[0];
 
   if (!task) {
     throw new Error("Unable to create Goat task.");
@@ -131,25 +238,37 @@ export async function createGoatTaskForUser(input: {
   return task;
 }
 
-export async function createGoatTaskAction(
-  _previousState: TaskFormState,
-  formData: FormData,
-): Promise<TaskFormState> {
-  const context = await currentGoatUser();
-  const parsed = validateGoatTaskInput({
-    prompt: formData.get("prompt"),
-    model: formData.get("model"),
-  });
-  if (!parsed.ok) {
-    return { ok: false, error: parsed.error };
+type GoatTaskRow = Omit<
+  GoatTask,
+  "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
+> & {
+  nextRunAt: Date | string;
+  leaseExpiresAt: Date | string | null;
+  archivedAt: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
+
+function goatTaskFromRow(row: GoatTaskRow): GoatTask {
+  return {
+    ...row,
+    nextRunAt: toDate(row.nextRunAt),
+    leaseExpiresAt: row.leaseExpiresAt ? toDate(row.leaseExpiresAt) : null,
+    archivedAt: row.archivedAt ? toDate(row.archivedAt) : null,
+    createdAt: toDate(row.createdAt),
+    updatedAt: toDate(row.updatedAt),
+  };
+}
+
+function toDate(value: Date | string) {
+  return value instanceof Date ? value : new Date(value);
+}
+
+function rowsFromExecute<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in result) {
+    const rows = (result as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows as T[];
   }
-
-  await createGoatTaskForUser({
-    userWorkosId: context.user.workosUserId,
-    prompt: parsed.value.prompt,
-    model: parsed.value.model,
-  });
-
-  revalidatePath("/");
-  return { ok: true, error: null };
+  return [];
 }

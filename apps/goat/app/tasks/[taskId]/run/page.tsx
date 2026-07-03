@@ -1,10 +1,9 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { TaskAutoRefresh } from "@/components/TaskAutoRefresh";
-import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
+import { TaskRunPanel } from "@/components/TaskRunPanel";
 import { buildGoatHarnessRun } from "@/lib/task-harness-run";
-import { getCurrentUserGoatTask } from "@/lib/tasks";
+import { getCurrentUserGoatTaskRun } from "@/lib/tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -16,18 +15,17 @@ type TaskHarnessRunPageProps = {
 
 export default async function TaskHarnessRunPage({ params }: TaskHarnessRunPageProps) {
   const { taskId } = await params;
-  const task = await getCurrentUserGoatTask(taskId);
+  const runData = await getCurrentUserGoatTaskRun(taskId);
 
-  if (!task) {
+  if (!runData) {
     notFound();
   }
 
-  const isActive = task.status === "queued" || task.status === "running";
-  const run = buildGoatHarnessRun(task);
+  const { task, messages, events } = runData;
+  const run = buildGoatHarnessRun({ task, messages, events });
 
   return (
     <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <TaskAutoRefresh enabled={isActive} />
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-5">
         <div className="flex w-full max-w-[880px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
           <nav className="flex flex-wrap items-center gap-2">
@@ -51,11 +49,11 @@ export default async function TaskHarnessRunPage({ params }: TaskHarnessRunPageP
               <h1 className="text-[34px] font-semibold leading-tight tracking-normal text-ink">
                 {task.name}
               </h1>
-              <div className="text-[12.5px] leading-5 text-ink-muted">Harness run</div>
+              <div className="text-[12.5px] leading-5 text-ink-muted">Task run</div>
             </div>
           </header>
 
-          <TaskHarnessRunView run={run} />
+          <TaskRunPanel initialRun={run} />
         </div>
       </div>
     </main>

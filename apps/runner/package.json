@@ -17,6 +17,8 @@
     "@opencompany/billing": "workspace:*",
     "@opencompany/crypto": "workspace:*",
     "@opencompany/db": "workspace:*",
+    "@opencompany/goat-brain": "workspace:*",
+    "@opencompany/goat-observability": "workspace:*",
     "@opencompany/memory": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@sentry/bun": "^10.53.1",

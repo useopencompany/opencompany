@@ -2,8 +2,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
 import { getGoatAppUrl } from "@/lib/workos";
 
+export type GoatGoogleIntegrationProvider = Extract<
+  GoatIntegrationProvider,
+  "gmail" | "google_calendar"
+>;
+
 export type GoatGoogleProviderConfig = {
-  provider: GoatIntegrationProvider;
+  provider: GoatGoogleIntegrationProvider;
   routeSegment: string;
   displayName: string;
   scopes: string[];
@@ -12,7 +17,7 @@ export type GoatGoogleProviderConfig = {
 const OPENID_SCOPES = ["openid", "email", "profile"];
 
 export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
-  GoatIntegrationProvider,
+  GoatGoogleIntegrationProvider,
   GoatGoogleProviderConfig
 > = {
   gmail: {
@@ -62,7 +67,7 @@ export type GoatGoogleUserInfo = {
 };
 
 export type GoatGoogleIntegrationStatePayload = {
-  provider: GoatIntegrationProvider;
+  provider: GoatGoogleIntegrationProvider;
   userWorkosId: string;
   returnTo: string;
   oauthRedirectUri?: string;
@@ -190,7 +195,7 @@ export async function fetchGoatGoogleUserInfo(accessToken: string): Promise<Goat
 
 export function appendGoatGoogleIntegrationStatus(
   returnTo: string,
-  provider: GoatIntegrationProvider,
+  provider: GoatGoogleIntegrationProvider,
   status: "connected" | "error",
 ) {
   const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
@@ -258,7 +263,10 @@ function sanitizeReturnTo(value: string) {
   return value;
 }
 
-function sanitizeGoatGoogleOAuthRedirectUri(value: unknown, provider: GoatIntegrationProvider) {
+function sanitizeGoatGoogleOAuthRedirectUri(
+  value: unknown,
+  provider: GoatGoogleIntegrationProvider,
+) {
   if (typeof value !== "string" || !value.trim()) return undefined;
   try {
     const url = new URL(value.trim());

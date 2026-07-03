@@ -533,6 +533,27 @@
       "when": 1782989354414,
       "tag": "0075_abnormal_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1783086481460,
+      "tag": "0076_nifty_wendell_vaughn",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1783087283825,
+      "tag": "0077_puzzling_toad_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1783090000000,
+      "tag": "0078_goat_linear_mcp",
+      "breakpoints": true
     }
   ]
 }

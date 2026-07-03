@@ -7,6 +7,8 @@ import {
   persistGoatChatAssistantMessage,
   textFromGoatChatUiMessage,
 } from "@/lib/chat";
+import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
+import { START_TASK_TOOL_NAME } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 vi.mock("next/cache", () => ({
@@ -128,10 +130,10 @@ describe("persistGoatChatAssistantMessage", () => {
         content: "I started a task and added it to Results.",
         taskId: "task_1",
         debugTrace: {
-          schemaVersion: "goat.chat.debug.v1",
+          schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
           model: DEFAULT_GOAT_MODEL,
           finishReason: "stop",
-          toolCalls: [{ toolName: "start_goat_task" }],
+          toolCalls: [{ toolName: START_TASK_TOOL_NAME }],
           toolResults: [{ taskId: "task_1" }],
         },
       },
@@ -146,7 +148,7 @@ describe("persistGoatChatAssistantMessage", () => {
       taskDisplayId: "TASK-1",
       taskName: "Market research for x",
       debugTrace: {
-        schemaVersion: "goat.chat.debug.v1",
+        schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
         model: DEFAULT_GOAT_MODEL,
         finishReason: "stop",
       },

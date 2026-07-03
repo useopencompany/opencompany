@@ -3,17 +3,57 @@ const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"]
 const SHAPE_SCOPES = {
   tasks: {
     table: "goat.tasks",
-    where: (userWorkosId: string) => ({
+    where: (userWorkosId: string, _requestUrl: URL) => ({
       clause: `"user_workos_id" = $1`,
       params: [userWorkosId],
     }),
   },
   "goat.tasks": {
     table: "goat.tasks",
-    where: (userWorkosId: string) => ({
+    where: (userWorkosId: string, _requestUrl: URL) => ({
       clause: `"user_workos_id" = $1`,
       params: [userWorkosId],
     }),
+  },
+  task_messages: {
+    table: "goat.task_messages",
+    where: scopedTaskWhere,
+  },
+  "goat.task_messages": {
+    table: "goat.task_messages",
+    where: scopedTaskWhere,
+  },
+  task_events: {
+    table: "goat.task_events",
+    where: scopedTaskWhere,
+  },
+  "goat.task_events": {
+    table: "goat.task_events",
+    where: scopedTaskWhere,
+  },
+  integrations: {
+    table: "goat.integrations",
+    where: scopedUserWhere,
+  },
+  "goat.integrations": {
+    table: "goat.integrations",
+    where: scopedUserWhere,
+  },
+  brain_folders: {
+    table: "goat.brain_folders",
+    where: scopedUserWhere,
+  },
+  "goat.brain_folders": {
+    table: "goat.brain_folders",
+    where: scopedUserWhere,
+  },
+  brain_documents: {
+    table: "goat.brain_documents",
+    where: scopedUserWhere,
+  },
+  "goat.brain_documents": {
+    table: "goat.brain_documents",
+    where: scopedUserWhere,
   },
 } as const;
 
@@ -46,7 +86,7 @@ export function buildGoatElectricOriginUrl(input: {
     if (value !== null) originUrl.searchParams.set(key, value);
   }
 
-  const resolved = scope.where(input.userWorkosId);
+  const resolved = scope.where(input.userWorkosId, input.requestUrl);
   originUrl.searchParams.set("table", scope.table);
   originUrl.searchParams.set("where", resolved.clause);
   resolved.params.forEach((param, index) => {
@@ -61,4 +101,25 @@ export function buildGoatElectricOriginUrl(input: {
   }
 
   return originUrl;
+}
+
+function scopedTaskWhere(userWorkosId: string, requestUrl: URL) {
+  const taskId = requestUrl.searchParams.get("task_id")?.trim();
+  if (!taskId) {
+    return {
+      clause: `"user_workos_id" = $1`,
+      params: [userWorkosId],
+    };
+  }
+  return {
+    clause: `"user_workos_id" = $1 AND "task_id" = $2`,
+    params: [userWorkosId, taskId],
+  };
+}
+
+function scopedUserWhere(userWorkosId: string, _requestUrl: URL) {
+  return {
+    clause: `"user_workos_id" = $1`,
+    params: [userWorkosId],
+  };
 }

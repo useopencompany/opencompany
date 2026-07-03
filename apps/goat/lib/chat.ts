@@ -23,8 +23,8 @@ export type {
   GoatChatMessageMetadata,
   GoatChatSessionView,
   GoatChatUiMessage,
-  GoatStartTaskToolOutput,
   GoatStoredChatMessage,
+  StartTaskToolOutput,
 } from "@/lib/chat-ui";
 export {
   textFromGoatChatUiMessage,

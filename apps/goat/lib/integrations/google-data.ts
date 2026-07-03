@@ -1,24 +1,12 @@
 import { getDb } from "@opencompany/db/client";
-import type { GoatHarnessToolId, GoatIntegrationProvider } from "@opencompany/db/goat-schema";
+import type { GoatIntegrationProvider, GoatTaskToolName } from "@opencompany/db/goat-schema";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, eq, inArray } from "drizzle-orm";
-
-export type GoatGoogleProviderState = {
-  provider: GoatIntegrationProvider;
-  connected: boolean;
-  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
-  accountEmail: string | null;
-  accountName: string | null;
-};
+import type { GoatGoogleProviderState } from "@/lib/integration-state";
+import { goatGoogleIntegrationStateFromRows } from "@/lib/integration-state";
+import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 const GOOGLE_PROVIDERS: GoatIntegrationProvider[] = ["gmail", "google_calendar"];
-
-type GoogleIntegrationRow = {
-  provider: GoatIntegrationProvider;
-  accountEmail: string | null;
-  accountName: string | null;
-  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected";
-};
 
 export async function getGoatGoogleIntegrationState(userWorkosId: string) {
   const rows = await getDb()
@@ -38,48 +26,32 @@ export async function getGoatGoogleIntegrationState(userWorkosId: string) {
     )
     .orderBy(goatIntegrations.provider, goatIntegrations.updatedAt);
 
-  const byProvider = new Map<GoatIntegrationProvider, (typeof rows)[number]>();
-  for (const row of rows) {
-    if (row.status === "disconnected") continue;
-    byProvider.set(row.provider, row);
-  }
-
-  return {
-    gmail: providerState("gmail", byProvider.get("gmail")),
-    google_calendar: providerState("google_calendar", byProvider.get("google_calendar")),
-  };
+  return goatGoogleIntegrationStateFromRows(rows);
 }
 
 export async function getGoatAvailableHarnessTools(
   userWorkosId: string,
-): Promise<GoatHarnessToolId[]> {
-  const state = await getGoatGoogleIntegrationState(userWorkosId);
-  const tools: GoatHarnessToolId[] = ["exa"];
-  if (state.gmail.connected) tools.push("gmail");
-  if (state.google_calendar.connected) tools.push("google_calendar");
-  tools.push("goat_result");
+): Promise<GoatTaskToolName[]> {
+  const [state, linear] = await Promise.all([
+    getGoatGoogleIntegrationState(userWorkosId),
+    getGoatLinearIntegrationState(userWorkosId),
+  ]);
+  const tools: GoatTaskToolName[] = ["exa_search"];
+  if (state.gmail.connected) {
+    tools.push("gmail_search", "gmail_get_message", "gmail_list_threads", "gmail_get_thread");
+  }
+  if (state.google_calendar.connected) {
+    tools.push(
+      "calendar_list_calendars",
+      "calendar_list_events",
+      "calendar_get_event",
+      "calendar_get_freebusy",
+    );
+  }
+  if (linear.connected) {
+    tools.push("linear_search_tools", "linear_use_tool");
+  }
   return tools;
 }
 
-function providerState(
-  provider: GoatIntegrationProvider,
-  row: GoogleIntegrationRow | undefined,
-): GoatGoogleProviderState {
-  if (!row) {
-    return {
-      provider,
-      connected: false,
-      status: "not_connected",
-      accountEmail: null,
-      accountName: null,
-    };
-  }
-
-  return {
-    provider,
-    connected: row.status === "connected",
-    status: row.status,
-    accountEmail: row.accountEmail,
-    accountName: row.accountName,
-  };
-}
+export type { GoatGoogleProviderState };

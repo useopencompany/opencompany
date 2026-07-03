@@ -1,5 +1,4 @@
 import { connectGoatGoogleIntegration } from "@opencompany/db/goat-integrations";
-import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import {
@@ -9,13 +8,14 @@ import {
   exchangeGoatGoogleCode,
   fetchGoatGoogleUserInfo,
   GOAT_GOOGLE_PROVIDER_CONFIG,
+  type GoatGoogleIntegrationProvider,
   goatGoogleOAuthRedirectUri,
   isGoatGoogleIntegrationConfigured,
   verifyGoatGoogleIntegrationState,
 } from "@/lib/integrations/google-oauth";
 
 export async function handleGoatGoogleOAuthStart(
-  provider: GoatIntegrationProvider,
+  provider: GoatGoogleIntegrationProvider,
   request: Request,
 ) {
   const { user } = await currentGoatUser();
@@ -41,7 +41,7 @@ export async function handleGoatGoogleOAuthStart(
 }
 
 export async function handleGoatGoogleOAuthCallback(
-  provider: GoatIntegrationProvider,
+  provider: GoatGoogleIntegrationProvider,
   request: Request,
 ) {
   const current = await currentGoatUser();

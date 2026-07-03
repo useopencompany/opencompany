@@ -1,6 +1,22 @@
 import { randomUUID } from "node:crypto";
-import type { GoatHarnessSpec, GoatTaskDebugTrace } from "@opencompany/db/goat-schema";
+import type {
+  GoatHarnessSpec,
+  GoatTaskDebugTrace,
+  GoatTaskEventType,
+  GoatTaskMessageRole,
+  GoatTaskMessageStatus,
+  GoatTaskToolName,
+} from "@opencompany/db/goat-schema";
 import { goatTasks } from "@opencompany/db/goat-schema";
+import {
+  GOAT_METRICS,
+  GOAT_SPANS,
+  hashGoatUserId,
+  recordGoatHistogram,
+  recordGoatTaskRun,
+  startGoatSpan,
+  withGoatSpan,
+} from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -43,7 +59,62 @@ export type GoatTaskStore = {
     stage: GoatTaskStage;
     harnessSpec?: GoatHarnessSpec;
     debugTrace?: GoatTaskDebugTrace;
-    sandboxId?: string | null;
+  }): Promise<boolean>;
+  ensureUserMessage(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId: string;
+  }): Promise<string | null>;
+  createMessage(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId: string;
+    role: GoatTaskMessageRole;
+    status: GoatTaskMessageStatus;
+    content: string;
+    modelMessage?: unknown;
+    toolName?: GoatTaskToolName | null;
+    toolCallId?: string | null;
+    responseToMessageId?: string | null;
+  }): Promise<boolean>;
+  updateMessageContent(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId: string;
+    content: string;
+  }): Promise<boolean>;
+  completeMessage(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId: string;
+    content: string;
+    modelMessage?: unknown;
+  }): Promise<boolean>;
+  failMessage(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId: string;
+    content?: string;
+    error: string;
+  }): Promise<boolean>;
+  appendEvent(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    messageId?: string | null;
+    type: GoatTaskEventType;
+    payload: Record<string, unknown>;
   }): Promise<boolean>;
   complete(input: {
     id: string;
@@ -53,7 +124,6 @@ export type GoatTaskStore = {
     result: string;
     harnessSpec: GoatHarnessSpec;
     debugTrace: GoatTaskDebugTrace;
-    sandboxId: string;
   }): Promise<boolean>;
   fail(input: {
     id: string;
@@ -115,7 +185,6 @@ export function createDbGoatTaskStore(): GoatTaskStore {
         SET stage = ${input.stage},
             harness_spec = COALESCE(${input.harnessSpec ? JSON.stringify(input.harnessSpec) : null}::jsonb, harness_spec),
             debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
-            sandbox_id = COALESCE(${input.sandboxId ?? null}, sandbox_id),
             updated_at = ${input.now}
         WHERE id = ${input.id}
           AND lease_id = ${input.leaseId}
@@ -124,6 +193,190 @@ export function createDbGoatTaskStore(): GoatTaskStore {
         RETURNING id
       `);
       return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async ensureUserMessage(input) {
+      const result = await getDb().execute(sql`
+        WITH owned_task AS (
+          SELECT id, user_workos_id, prompt, created_at
+          FROM goat.tasks
+          WHERE id = ${input.id}
+            AND lease_id = ${input.leaseId}
+            AND lease_owner = ${input.leaseOwner}
+            AND status = 'running'
+        ),
+        existing AS (
+          SELECT message.id
+          FROM goat.task_messages AS message
+          INNER JOIN owned_task AS task ON task.id = message.task_id
+          WHERE message.role = 'user'
+          ORDER BY message.created_at ASC
+          LIMIT 1
+        ),
+        inserted AS (
+          INSERT INTO goat.task_messages (
+            id,
+            task_id,
+            user_workos_id,
+            role,
+            status,
+            content,
+            model_message,
+            created_at,
+            updated_at,
+            completed_at
+          )
+          SELECT
+            ${input.messageId},
+            task.id,
+            task.user_workos_id,
+            'user',
+            'completed',
+            task.prompt,
+            jsonb_build_object('role', 'user', 'content', task.prompt),
+            task.created_at,
+            ${input.now},
+            ${input.now}
+          FROM owned_task AS task
+          WHERE NOT EXISTS (SELECT 1 FROM existing)
+          RETURNING id
+        )
+        SELECT id FROM inserted
+        UNION ALL
+        SELECT id FROM existing
+        LIMIT 1
+      `);
+      return rowsFromExecute<{ id: string }>(result)[0]?.id ?? null;
+    },
+
+    async createMessage(input) {
+      const modelMessageJson =
+        input.modelMessage === undefined ? null : JSON.stringify(input.modelMessage);
+      const result = await getDb().execute(sql`
+        INSERT INTO goat.task_messages (
+          id,
+          task_id,
+          user_workos_id,
+          role,
+          status,
+          content,
+          model_message,
+          tool_name,
+          tool_call_id,
+          response_to_message_id,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${input.messageId},
+          task.id,
+          task.user_workos_id,
+          ${input.role},
+          ${input.status},
+          ${input.content},
+          ${modelMessageJson}::jsonb,
+          ${input.toolName ?? null},
+          ${input.toolCallId ?? null},
+          ${input.responseToMessageId ?? null},
+          ${input.now},
+          ${input.now}
+        FROM goat.tasks AS task
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async updateMessageContent(input) {
+      const result = await getDb().execute(sql`
+        UPDATE goat.task_messages AS message
+        SET content = ${input.content},
+            updated_at = ${input.now}
+        FROM goat.tasks AS task
+        WHERE message.id = ${input.messageId}
+          AND message.task_id = task.id
+          AND task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING message.id
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async completeMessage(input) {
+      const modelMessageJson =
+        input.modelMessage === undefined ? null : JSON.stringify(input.modelMessage);
+      const result = await getDb().execute(sql`
+        UPDATE goat.task_messages AS message
+        SET status = 'completed',
+            content = ${input.content},
+            model_message = COALESCE(${modelMessageJson}::jsonb, message.model_message),
+            updated_at = ${input.now},
+            completed_at = ${input.now}
+        FROM goat.tasks AS task
+        WHERE message.id = ${input.messageId}
+          AND message.task_id = task.id
+          AND task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING message.id
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async failMessage(input) {
+      const result = await getDb().execute(sql`
+        UPDATE goat.task_messages AS message
+        SET status = 'failed',
+            content = COALESCE(${input.content ?? null}, message.content),
+            model_message = COALESCE(
+              message.model_message,
+              jsonb_build_object('role', message.role, 'content', COALESCE(${input.content ?? null}, message.content), 'error', ${input.error})
+            ),
+            updated_at = ${input.now},
+            completed_at = ${input.now}
+        FROM goat.tasks AS task
+        WHERE message.id = ${input.messageId}
+          AND message.task_id = task.id
+          AND task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING message.id
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async appendEvent(input) {
+      const result = await getDb().execute(sql`
+        INSERT INTO goat.task_events (
+          task_id,
+          user_workos_id,
+          message_id,
+          type,
+          payload,
+          created_at
+        )
+        SELECT
+          task.id,
+          task.user_workos_id,
+          ${input.messageId ?? null},
+          ${input.type},
+          ${JSON.stringify(input.payload)}::jsonb,
+          ${input.now}
+        FROM goat.tasks AS task
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: number }>(result).length > 0;
     },
 
     async complete(input) {
@@ -135,7 +388,6 @@ export function createDbGoatTaskStore(): GoatTaskStore {
             error = NULL,
             harness_spec = ${JSON.stringify(input.harnessSpec)}::jsonb,
             debug_trace = ${JSON.stringify(input.debugTrace)}::jsonb,
-            sandbox_id = ${input.sandboxId},
             lease_id = NULL,
             lease_owner = NULL,
             lease_expires_at = NULL,
@@ -188,12 +440,33 @@ export async function claimNextGoatTask(input: {
 }) {
   const now = new Date();
   const leaseId = newGoatTaskLeaseId();
-  return (input.store ?? createDbGoatTaskStore()).claimNext({
-    leaseId,
-    leaseOwner: input.leaseOwner,
-    now,
-    leaseExpiresAt: goatTaskLeaseExpiresAt(now, input.leaseTtlMs),
+  const span = startGoatSpan(GOAT_SPANS.taskClaim, {
+    "goat.lease_owner": input.leaseOwner,
   });
+  try {
+    const task = await (input.store ?? createDbGoatTaskStore()).claimNext({
+      leaseId,
+      leaseOwner: input.leaseOwner,
+      now,
+      leaseExpiresAt: goatTaskLeaseExpiresAt(now, input.leaseTtlMs),
+    });
+    span.end({
+      "goat.lease_owner": input.leaseOwner,
+      "goat.outcome": task ? "success" : "skipped",
+      "goat.task_id": task?.id,
+      "goat.display_id": task?.displayId,
+      "goat.model": task?.model,
+      "goat.status": task?.status,
+      "goat.stage": task?.stage,
+    });
+    return task;
+  } catch (error) {
+    span.fail(error, {
+      "goat.lease_owner": input.leaseOwner,
+    });
+    span.end();
+    throw error;
+  }
 }
 
 export async function runClaimedGoatTask(input: {
@@ -202,21 +475,78 @@ export async function runClaimedGoatTask(input: {
   store?: GoatTaskStore;
   executor?: GoatTaskExecutor;
 }) {
+  const runStartedAt = performance.now();
   const store = input.store ?? createDbGoatTaskStore();
   const executor = input.executor ?? executeGoatTask;
   const leaseId = requireTaskLease(input.task, "leaseId");
   const leaseOwner = requireTaskLease(input.task, "leaseOwner");
+  const userIdHash = hashGoatUserId(input.task.userWorkosId);
+  const baseAttributes = {
+    ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+    "goat.task_id": input.task.id,
+    "goat.display_id": input.task.displayId,
+    "goat.model": input.task.model,
+    "goat.status": input.task.status,
+    "goat.stage": input.task.stage,
+    "goat.attempt": input.task.attempts,
+    "goat.lease_owner": leaseOwner,
+  };
+  const runSpan = startGoatSpan(GOAT_SPANS.taskRun, baseAttributes);
   const abortController = new AbortController();
   let leaseActive = true;
+  let currentStage = input.task.stage;
+  let stageStartedAt = performance.now();
+  let latestDebugTrace: GoatTaskDebugTrace | undefined =
+    Object.keys(input.task.debugTrace).length > 0 ? input.task.debugTrace : undefined;
+
+  const recordCurrentStageDuration = () => {
+    recordGoatHistogram(
+      GOAT_METRICS.taskStageDurationMs,
+      Math.round(performance.now() - stageStartedAt),
+      {
+        ...baseAttributes,
+        "goat.stage": currentStage,
+      },
+    );
+  };
+
+  const finishAbortedTelemetry = () => {
+    recordCurrentStageDuration();
+    runSpan.end({
+      ...baseAttributes,
+      "goat.outcome": "aborted",
+      "goat.failure_category": "lease_lost",
+    });
+    recordGoatTaskRun({
+      durationMs: Math.round(performance.now() - runStartedAt),
+      outcome: "aborted",
+      attributes: {
+        ...baseAttributes,
+        "goat.failure_category": "lease_lost",
+      },
+    });
+  };
 
   const handleLeaseLost = () => {
     if (!leaseActive) return;
     leaseActive = false;
     abortController.abort();
+    runSpan.setAttributes({
+      ...baseAttributes,
+      "goat.outcome": "aborted",
+      "goat.failure_category": "lease_lost",
+    });
     logger.warn("Goat task lease lost", {
       event: "opencompany.goat_task_lease_lost",
       task_id: input.task.id,
     });
+  };
+
+  const requireLeaseWrite = async (write: Promise<boolean>, action: string) => {
+    const active = await write;
+    if (active) return;
+    handleLeaseLost();
+    throw new Error(`Goat task lease lost while trying to ${action}.`);
   };
 
   const heartbeat = async () => {
@@ -247,48 +577,271 @@ export async function runClaimedGoatTask(input: {
   }, GOAT_TASK_HEARTBEAT_INTERVAL_MS);
 
   try {
-    const result = await executor({
-      task: input.task,
-      env: input.env,
-      signal: abortController.signal,
-      reportStage: async (stage, patch = {}) => {
-        const active = await store.updateStage({
-          id: input.task.id,
-          leaseId,
-          leaseOwner,
-          now: new Date(),
-          stage,
-          ...patch,
-        });
-        if (!active) handleLeaseLost();
-      },
-    });
-    if (!leaseActive) return;
-    await store.complete({
+    const userMessageId = await store.ensureUserMessage({
       id: input.task.id,
       leaseId,
       leaseOwner,
       now: new Date(),
-      result: result.result,
-      harnessSpec: result.harnessSpec,
-      debugTrace: result.debugTrace,
-      sandboxId: result.sandboxId,
+      messageId: newGoatTaskMessageId(),
+    });
+    if (!userMessageId) {
+      handleLeaseLost();
+      finishAbortedTelemetry();
+      return;
+    }
+
+    const result = await runSpan.runInContext(() =>
+      executor({
+        task: input.task,
+        env: input.env,
+        signal: abortController.signal,
+        sink: {
+          createAssistantMessage: async (messageInput) => {
+            const messageId = newGoatTaskMessageId();
+            await requireLeaseWrite(
+              store.createMessage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId,
+                role: "assistant",
+                status: "running",
+                content: messageInput.content,
+                modelMessage: messageInput.modelMessage,
+              }),
+              "create assistant message",
+            );
+            return { id: messageId };
+          },
+          updateMessageContent: async (messageInput) => {
+            await requireLeaseWrite(
+              store.updateMessageContent({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: messageInput.messageId,
+                content: messageInput.content,
+              }),
+              "update message content",
+            );
+          },
+          completeMessage: async (messageInput) => {
+            await requireLeaseWrite(
+              store.completeMessage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: messageInput.messageId,
+                content: messageInput.content,
+                modelMessage: messageInput.modelMessage,
+              }),
+              "complete message",
+            );
+          },
+          failMessage: async (messageInput) => {
+            await requireLeaseWrite(
+              store.failMessage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: messageInput.messageId,
+                error: messageInput.error,
+                ...(messageInput.content ? { content: messageInput.content } : {}),
+              }),
+              "fail message",
+            );
+          },
+          createToolMessage: async (messageInput) => {
+            const messageId = newGoatTaskMessageId();
+            await requireLeaseWrite(
+              store.createMessage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId,
+                role: "tool",
+                status: "running",
+                content: "",
+                modelMessage: {
+                  role: "tool",
+                  toolCallId: messageInput.toolCallId,
+                  content: "",
+                },
+                toolName: messageInput.toolName,
+                toolCallId: messageInput.toolCallId,
+              }),
+              "create tool message",
+            );
+            return { id: messageId };
+          },
+          completeToolMessage: async (messageInput) => {
+            const content = stringifyToolPayload(messageInput.output);
+            await requireLeaseWrite(
+              store.completeMessage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: messageInput.messageId,
+                content,
+                modelMessage: {
+                  role: "tool",
+                  toolCallId: messageInput.toolCallId,
+                  content,
+                },
+              }),
+              "complete tool message",
+            );
+          },
+          failToolMessage: async (messageInput) => {
+            await requireLeaseWrite(
+              store.failMessage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId: messageInput.messageId,
+                content: messageInput.error,
+                error: messageInput.error,
+              }),
+              "fail tool message",
+            );
+          },
+          appendEvent: async (eventInput) => {
+            await requireLeaseWrite(
+              store.appendEvent({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                type: eventInput.type,
+                payload: eventInput.payload ?? {},
+                messageId: eventInput.messageId ?? null,
+              }),
+              "append event",
+            );
+          },
+        },
+        reportStage: async (stage, patch = {}) => {
+          if (patch.debugTrace) {
+            latestDebugTrace = mergeGoatTaskDebugTrace(patch.debugTrace, latestDebugTrace);
+          }
+          const active = await store.updateStage({
+            id: input.task.id,
+            leaseId,
+            leaseOwner,
+            now: new Date(),
+            stage,
+            ...patch,
+          });
+          if (!active) handleLeaseLost();
+          recordCurrentStageDuration();
+          currentStage = stage;
+          stageStartedAt = performance.now();
+          runSpan.setAttributes({
+            ...baseAttributes,
+            "goat.stage": stage,
+          });
+        },
+      }),
+    );
+    if (!leaseActive) {
+      finishAbortedTelemetry();
+      return;
+    }
+    await requireLeaseWrite(
+      runSpan.runInContext(() =>
+        withGoatSpan(GOAT_SPANS.taskComplete, baseAttributes, () =>
+          store.complete({
+            id: input.task.id,
+            leaseId,
+            leaseOwner,
+            now: new Date(),
+            result: result.result,
+            harnessSpec: result.harnessSpec,
+            debugTrace: mergeGoatTaskDebugTrace(result.debugTrace, latestDebugTrace),
+          }),
+        ),
+      ),
+      "complete task",
+    );
+    recordCurrentStageDuration();
+    runSpan.end({
+      ...baseAttributes,
+      "goat.status": "succeeded",
+      "goat.stage": "completed",
+      "goat.outcome": "success",
+    });
+    recordGoatTaskRun({
+      durationMs: Math.round(performance.now() - runStartedAt),
+      outcome: "success",
+      attributes: {
+        ...baseAttributes,
+        "goat.status": "succeeded",
+        "goat.stage": "completed",
+      },
     });
   } catch (error) {
     if (leaseActive) {
-      await store.fail({
-        id: input.task.id,
-        leaseId,
-        leaseOwner,
-        now: new Date(),
-        error: errorMessage(error),
-        ...debugTracePatch(error),
+      const active = await runSpan.runInContext(() =>
+        withGoatSpan(GOAT_SPANS.taskFail, baseAttributes, () =>
+          store.fail({
+            id: input.task.id,
+            leaseId,
+            leaseOwner,
+            now: new Date(),
+            error: errorMessage(error),
+            ...debugTracePatch(error),
+          }),
+        ),
+      );
+      if (!active) handleLeaseLost();
+      recordCurrentStageDuration();
+      const failureCategory = runSpan.fail(error, baseAttributes);
+      runSpan.end({
+        ...baseAttributes,
+        "goat.status": "failed",
+        "goat.stage": "failed",
+        "goat.outcome": "failure",
+        "goat.failure_category": failureCategory,
       });
+      recordGoatTaskRun({
+        durationMs: Math.round(performance.now() - runStartedAt),
+        outcome: "failure",
+        attributes: {
+          ...baseAttributes,
+          "goat.status": "failed",
+          "goat.stage": "failed",
+          "goat.failure_category": failureCategory,
+        },
+      });
+    } else {
+      finishAbortedTelemetry();
     }
     throw error;
   } finally {
     clearInterval(heartbeatTimer);
   }
+}
+
+function mergeGoatTaskDebugTrace(
+  primary: GoatTaskDebugTrace,
+  fallback: GoatTaskDebugTrace | undefined,
+): GoatTaskDebugTrace {
+  if (!fallback) return primary;
+  const merged: GoatTaskDebugTrace = {};
+  const schemaVersion = primary.schemaVersion ?? fallback.schemaVersion;
+  const planner = primary.planner ?? fallback.planner;
+  const harness = primary.harness ?? fallback.harness;
+  if (schemaVersion) merged.schemaVersion = schemaVersion;
+  if (planner) merged.planner = planner;
+  if (harness) merged.harness = harness;
+  return merged;
 }
 
 export function startGoatTaskWorker(
@@ -397,6 +950,10 @@ function newGoatTaskLeaseId() {
   return `goat_task_${randomUUID()}`;
 }
 
+function newGoatTaskMessageId() {
+  return `goat_task_msg_${randomUUID()}`;
+}
+
 function goatTaskLeaseExpiresAt(now: Date, ttlMs: number = GOAT_TASK_LEASE_TTL_MS) {
   return new Date(now.getTime() + ttlMs);
 }
@@ -466,4 +1023,13 @@ function errorDebugTrace(error: unknown) {
 function debugTracePatch(error: unknown) {
   const debugTrace = errorDebugTrace(error);
   return debugTrace ? { debugTrace } : {};
+}
+
+function stringifyToolPayload(value: unknown) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

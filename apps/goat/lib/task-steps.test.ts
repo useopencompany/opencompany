@@ -12,7 +12,7 @@ describe("deriveGoatTaskSteps", () => {
         task({
           status: "running",
           stage: "running",
-          harnessSpec: { prompt: "Research Marseille", tools: ["exa", "goat_result"] },
+          harnessSpec: defaultHarnessSpec(),
           sandboxId: "sbx_123",
         }),
       ),
@@ -129,7 +129,10 @@ describe("deriveGoatTaskSteps", () => {
           } as never,
         }),
       ),
-    ).toEqual(["Ran the research harness.", "Synthesized the findings into the final result."]);
+    ).toEqual([
+      "Prepared the task request for the research harness.",
+      "Synthesized the findings into the final result.",
+    ]);
   });
 
   it("summarizes failed tool calls without exposing raw debug JSON", () => {
@@ -162,10 +165,22 @@ function task(overrides: Partial<GoatTaskStepInput> = {}): GoatTaskStepInput {
     stage: "queued",
     result: null,
     error: null,
-    harnessSpec: {},
+    harnessSpec: defaultHarnessSpec(),
     debugTrace: {},
     sandboxId: null,
     ...overrides,
+  };
+}
+
+function defaultHarnessSpec(): GoatTaskStepInput["harnessSpec"] {
+  return {
+    schemaVersion: "goat.harness.v1",
+    model: "openai/gpt-5.4-mini",
+    systemPrompt: "Run the task.",
+    initialUserMessage: "Research Marseille",
+    tools: ["exa_search"],
+    maxModelSteps: 8,
+    resultMode: "assistant_final",
   };
 }
 

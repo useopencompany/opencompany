@@ -11,11 +11,39 @@ import {
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
+const telemetry = vi.hoisted(() => ({
+  recordGoatTaskRun: vi.fn(),
+  recordGoatHistogram: vi.fn(),
+  startGoatSpan: vi.fn(() => ({
+    setAttributes: vi.fn(),
+    runInContext: vi.fn((run: () => unknown) => run()),
+    fail: vi.fn(() => "unknown"),
+    end: vi.fn(),
+  })),
+  withGoatSpan: vi.fn(async (_name: string, _attributes: unknown, run: () => Promise<unknown>) =>
+    run(),
+  ),
+}));
+
+vi.mock("@opencompany/goat-observability", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
+  return {
+    ...actual,
+    recordGoatTaskRun: telemetry.recordGoatTaskRun,
+    recordGoatHistogram: telemetry.recordGoatHistogram,
+    startGoatSpan: telemetry.startGoatSpan,
+    withGoatSpan: telemetry.withGoatSpan,
+  };
+});
+
 const harnessSpec: GoatHarnessSpec = {
-  prompt: "Research Marseille",
+  schemaVersion: "goat.harness.v1",
   model: "openai/gpt-5.4-mini",
-  tools: ["exa", "goat_result"],
-  resultMode: "freeform",
+  systemPrompt: "Run the task.",
+  initialUserMessage: "Research Marseille",
+  tools: ["exa_search"],
+  maxModelSteps: 8,
+  resultMode: "assistant_final",
 };
 
 const debugTrace: GoatTaskDebugTrace = {
@@ -63,12 +91,11 @@ describe("runClaimedGoatTask", () => {
   it("heartbeats stage updates and stores successful results", async () => {
     const store = createStore();
     const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
-      await input.reportStage("running", { harnessSpec, debugTrace, sandboxId: "sbx_123" });
+      await input.reportStage("running", { harnessSpec, debugTrace });
       return {
         result: "Done.",
         harnessSpec,
         debugTrace,
-        sandboxId: "sbx_123",
       };
     });
 
@@ -84,7 +111,6 @@ describe("runClaimedGoatTask", () => {
         id: "goat_task_1",
         stage: "running",
         debugTrace,
-        sandboxId: "sbx_123",
       }),
     );
     expect(store.complete).toHaveBeenCalledWith(
@@ -92,10 +118,51 @@ describe("runClaimedGoatTask", () => {
         id: "goat_task_1",
         result: "Done.",
         debugTrace,
-        sandboxId: "sbx_123",
+      }),
+    );
+    expect(telemetry.recordGoatTaskRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "success",
+        attributes: expect.objectContaining({
+          "goat.task_id": "goat_task_1",
+          "goat.status": "succeeded",
+        }),
       }),
     );
     expect(store.fail).not.toHaveBeenCalled();
+  });
+
+  it("preserves streamed harness debug when the final result only includes planner debug", async () => {
+    const store = createStore();
+    const plannerOnlyTrace: GoatTaskDebugTrace = {
+      schemaVersion: "goat.debug.v1",
+      planner: {
+        model: "openai/gpt-5.4-mini",
+        response: { content: JSON.stringify(harnessSpec) },
+      },
+    };
+    const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
+      await input.reportStage("running", { harnessSpec, debugTrace });
+      return {
+        result: "Done.",
+        harnessSpec,
+        debugTrace: plannerOnlyTrace,
+      };
+    });
+
+    await runClaimedGoatTask({
+      task: task(),
+      env: env(),
+      store,
+      executor,
+    });
+
+    expect(store.complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: "Done.",
+        debugTrace,
+      }),
+    );
   });
 
   it("aborts without completing when heartbeat loses the lease", async () => {
@@ -111,7 +178,6 @@ describe("runClaimedGoatTask", () => {
           result: "Done.",
           harnessSpec,
           debugTrace,
-          sandboxId: "sbx_123",
         };
       });
 
@@ -156,6 +222,16 @@ describe("runClaimedGoatTask", () => {
         debugTrace,
       }),
     );
+    expect(telemetry.recordGoatTaskRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "failure",
+        attributes: expect.objectContaining({
+          "goat.task_id": "goat_task_1",
+          "goat.status": "failed",
+          "goat.failure_category": "unknown",
+        }),
+      }),
+    );
     expect(store.complete).not.toHaveBeenCalled();
   });
 });
@@ -165,6 +241,12 @@ function createStore(): GoatTaskStore {
     claimNext: vi.fn(async () => null),
     heartbeat: vi.fn(async () => true),
     updateStage: vi.fn(async () => true),
+    ensureUserMessage: vi.fn(async () => "goat_task_msg_user"),
+    createMessage: vi.fn(async () => true),
+    updateMessageContent: vi.fn(async () => true),
+    completeMessage: vi.fn(async () => true),
+    failMessage: vi.fn(async () => true),
+    appendEvent: vi.fn(async () => true),
     complete: vi.fn(async () => true),
     fail: vi.fn(async () => true),
   };

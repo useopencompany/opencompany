@@ -49,7 +49,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel web/Goat envs, Render | Google OAuth client shared by Gmail, Google Calendar, and Google Drive integrations. Web direct redirect URIs are `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback`, `.../api/integrations/google-calendar/callback`, and `.../api/integrations/google-drive/callback`; Goat direct redirect URIs are `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback` and `.../api/integrations/google-calendar/callback`; hosted previews should use `GOOGLE_OAUTH_CALLBACK_URL` instead. The runner also needs these to refresh access tokens. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | Vercel web/Goat envs | Optional stable Google callback broker, e.g. `https://oauth.opencompany.cloud/api/google/callback`. When set, Google authorization and token exchange both use this exact redirect URI. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign Google integration OAuth state. |
-| `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
+| `MCP_OAUTH_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. Goat Linear's direct callback is `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/linear/callback`. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
@@ -179,6 +179,11 @@ Set these in the separate Vercel project for Goat:
 | `ELECTRIC_URL` | Yes | Electric shape service base URL. The Goat proxy exposes only `goat.tasks` scoped to the signed-in WorkOS user. |
 | `ELECTRIC_SOURCE_ID` / `ELECTRIC_SOURCE_SECRET` | Electric Cloud only | Electric Cloud source auth. |
 | `ELECTRIC_SECRET` / `ELECTRIC_TOKEN` | Self-hosted Electric only | Optional self-hosted Electric auth. |
+| `GOAT_OBSERVABILITY_ENABLED` | No | Enables Goat OpenTelemetry traces and metrics when `true`, `1`, `on`, or `yes`. Missing or false disables the package. |
+| `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` | Required with Goat OTel | OTLP HTTP base endpoint for SigNoz, for example `https://ingest.<region>.signoz.cloud:443` or `http://signoz:4318`. |
+| `GOAT_OTEL_EXPORTER_OTLP_HEADERS` | SigNoz Cloud only | Comma-separated OTLP headers, usually `signoz-ingestion-key=<key>`. Leave empty for most self-hosted SigNoz setups. |
+| `GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS` | No | Goat metric export interval. Defaults to `60000`. |
+| `GOAT_OTEL_TRACE_SAMPLE_RATE` | No | Goat trace sample rate from `0` to `1`. Defaults to `1`. |
 
 The runner also needs `EXA_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `E2B_API_KEY`,
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`, and Google OAuth client credentials for Goat tasks that use
@@ -268,7 +273,7 @@ Set these in the Render `opencompany-runner` service.
 | `OPENAI_CODEX_API_KEY` | Codex fallback only | Platform OpenAI key used by the legacy Codex fallback path. Brokered fallback runs use it server-side as the LLM broker's upstream credential for the `openai` provider (`codex_coder`); local-dev fallback maps it to `CODEX_API_KEY` for the Codex CLI. Production/company runs should use the workspace Codex account connected in company settings instead. |
 | `RUNNER_CODEX_MODEL` | No | Fallback Codex CLI model for `codex_coder`, defaults to `gpt-5.5`. Active Codex sessions normally use their persisted session model. |
 | `RUNNER_CODEX_TIMEOUT_MS` | No | Wall-clock ceiling for a single Codex engine turn or `codex_coder` delegation, defaults to `3600000` (1 hour). Timeouts surface partial output and skip PR creation. |
-| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP and Google (Gmail/Calendar/Drive) credentials. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel. |
+| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP, Goat MCP, and Google (Gmail/Calendar/Drive) credentials. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel/Goat. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Used by the runner to refresh Gmail/Calendar/Drive access tokens against Google's token endpoint. Must match Vercel. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
@@ -287,6 +292,11 @@ Set these in the Render `opencompany-runner` service.
 | `OBSERVABILITY_RELEASE` | No | Manual runner release override. Render git SHA wins when available. |
 | `OBSERVABILITY_LOG_LEVEL` | No | Runner log level. |
 | `OBSERVABILITY_TIMING` | No | Verbose timing logs. |
+| `GOAT_OBSERVABILITY_ENABLED` | No | Enables Goat task OpenTelemetry traces and metrics from the runner when `true`, `1`, `on`, or `yes`. |
+| `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` | Required with Goat OTel | OTLP HTTP base endpoint for SigNoz. The package appends `/v1/traces` and `/v1/metrics`. |
+| `GOAT_OTEL_EXPORTER_OTLP_HEADERS` | SigNoz Cloud only | Comma-separated OTLP headers, usually `signoz-ingestion-key=<key>`. |
+| `GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS` | No | Goat metric export interval. Defaults to `60000`. |
+| `GOAT_OTEL_TRACE_SAMPLE_RATE` | No | Goat trace sample rate from `0` to `1`. Defaults to `1`. |
 | `BRAINTRUST_ENABLED` | No | Enables Braintrust runner tracing when set to `true`, `1`, `on`, or `yes`. |
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |

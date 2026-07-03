@@ -1,266 +1,209 @@
-import type { GoatTask } from "@opencompany/db/goat-schema";
+import type {
+  GoatTaskEvent,
+  GoatTaskEventType,
+  GoatTaskMessage,
+  GoatTaskMessageRole,
+  GoatTaskMessageStatus,
+  GoatTaskStage,
+  GoatTaskStatus,
+  GoatTaskToolName,
+} from "@opencompany/db/goat-schema";
 
-export type GoatTaskHarnessRunInput = Pick<
-  GoatTask,
-  "prompt" | "model" | "status" | "stage" | "result" | "error" | "harnessSpec" | "debugTrace"
->;
+export type GoatTaskRunTaskInput =
+  | {
+      id: string;
+      displayId: string;
+      name: string;
+      prompt: string;
+      model: string;
+      status: GoatTaskStatus;
+      stage: GoatTaskStage;
+      result: string | null;
+      error: string | null;
+      createdAt: Date | string;
+      updatedAt: Date | string;
+    }
+  | {
+      id: string;
+      display_id: string;
+      name: string;
+      prompt: string;
+      model: string;
+      status: GoatTaskStatus;
+      stage: GoatTaskStage;
+      result: string | null;
+      error: string | null;
+      created_at: string;
+      updated_at: string;
+    };
+
+export type GoatTaskRunMessageInput =
+  | GoatTaskMessage
+  | {
+      id: string;
+      task_id: string;
+      user_workos_id: string;
+      role: GoatTaskMessageRole;
+      status: GoatTaskMessageStatus;
+      content: string;
+      model_message: unknown | null;
+      tool_name: GoatTaskToolName | null;
+      tool_call_id: string | null;
+      response_to_message_id: string | null;
+      created_at: string;
+      updated_at: string;
+      completed_at: string | null;
+    };
+
+export type GoatTaskRunEventInput =
+  | GoatTaskEvent
+  | {
+      id: number;
+      task_id: string;
+      user_workos_id: string;
+      message_id: string | null;
+      type: GoatTaskEventType;
+      payload: Record<string, unknown>;
+      created_at: string;
+    };
 
 export type GoatHarnessRunViewModel = {
-  hasTrace: boolean;
+  hasDurableRun: boolean;
+  legacyDetailText: string;
   task: {
+    id: string;
+    displayId: string;
+    name: string;
     prompt: string;
     model: string;
-    status: string;
-    stage: string;
-    resultPreview: string;
-    errorPreview: string;
+    status: GoatTaskStatus;
+    stage: GoatTaskStage;
+    result: string;
+    error: string;
+    createdAt: string;
+    updatedAt: string;
   };
-  summary: {
-    plannerModel: string;
-    harnessModel: string;
-    turnCount: number;
-    toolCallCount: number;
-  };
-  planner: GoatHarnessPlannerRun | null;
-  harness: GoatHarnessModelRun | null;
-  harnessSpecJson: string;
-  rawTraceJson: string;
-};
-
-export type GoatHarnessPlannerRun = {
-  model: string;
-  requestMessages: GoatHarnessRunMessage[];
-  responsePreview: string;
-  rawJson: string;
-};
-
-export type GoatHarnessModelRun = {
-  model: string;
-  systemPromptPreview: string;
-  toolChoice: string;
-  toolsSentToModelPreview: string;
-  turns: GoatHarnessRunTurn[];
-  rawJson: string;
-};
-
-export type GoatHarnessRunTurn = {
-  step: number;
-  requestMessages: GoatHarnessRunMessage[];
-  responseMessage: GoatHarnessRunMessage | null;
+  userMessage: GoatRunMessage | null;
+  assistantMessages: GoatRunMessage[];
   toolCalls: GoatHarnessRunToolCall[];
-  rawJson: string;
+  events: GoatRunEvent[];
 };
 
-export type GoatHarnessRunMessage = {
-  role: string;
-  contentPreview: string;
-  toolCalls: GoatHarnessRunToolCall[];
+export type GoatRunMessage = {
+  id: string;
+  role: GoatTaskMessageRole;
+  status: GoatTaskMessageStatus;
+  content: string;
+  toolName: GoatTaskToolName | null;
+  toolCallId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+export type GoatRunEvent = {
+  id: number;
+  messageId: string | null;
+  type: GoatTaskEventType;
+  payload: Record<string, unknown>;
+  createdAt: string;
 };
 
 export type GoatHarnessRunToolCall = {
   id: string;
-  name: string;
+  name: GoatTaskToolName | string;
   label: string;
-  kind: "search" | "gmail" | "calendar" | "result" | "tool";
+  kind: "search" | "gmail" | "calendar" | "linear" | "tool";
   status: "running" | "completed" | "failed";
   inputPreview: string;
   outputPreview: string;
   errorPreview: string;
   rawJson: string;
+  createdAt: string;
 };
 
 const PREVIEW_MAX_LENGTH = 900;
 
-export function buildGoatHarnessRun(input: GoatTaskHarnessRunInput): GoatHarnessRunViewModel {
-  const debugTrace = readRecord(input.debugTrace);
-  const planner = buildPlannerRun(readRecord(debugTrace?.planner));
-  const harness = buildModelRun(readRecord(debugTrace?.harness));
-  const turnCount = harness?.turns.length ?? 0;
-  const toolCallCount =
-    harness?.turns.reduce((total, turn) => total + turn.toolCalls.length, 0) ?? 0;
+export function buildGoatHarnessRun(input: {
+  task: GoatTaskRunTaskInput;
+  messages: readonly GoatTaskRunMessageInput[];
+  events: readonly GoatTaskRunEventInput[];
+}): GoatHarnessRunViewModel {
+  const task = normalizeTask(input.task);
+  const messages = input.messages.map(normalizeMessage).toSorted(compareCreatedAt);
+  const events = input.events.map(normalizeEvent).toSorted((a, b) => a.id - b.id);
+  const userMessage = messages.find((message) => message.role === "user") ?? null;
+  const assistantMessages = messages.filter((message) => message.role === "assistant");
+  const toolCalls = buildToolCalls(events);
 
   return {
-    hasTrace: Boolean(planner || harness),
-    task: {
-      prompt: input.prompt,
-      model: input.model,
-      status: input.status,
-      stage: input.stage,
-      resultPreview: previewValue(input.result),
-      errorPreview: previewValue(input.error),
-    },
-    summary: {
-      plannerModel: planner?.model ?? "",
-      harnessModel: harness?.model ?? "",
-      turnCount,
-      toolCallCount,
-    },
-    planner,
-    harness,
-    harnessSpecJson: prettyJson(input.harnessSpec),
-    rawTraceJson: prettyJson({
-      harnessSpec: input.harnessSpec,
-      debugTrace: input.debugTrace,
-    }),
-  };
-}
-
-function buildPlannerRun(planner: Record<string, unknown> | null): GoatHarnessPlannerRun | null {
-  if (!planner) return null;
-  const request = readRecord(planner.request);
-  const requestMessages = readMessages(request?.messages);
-  const response = readRecord(planner.response);
-  const responsePreview = previewValue(response?.content);
-  const model = readString(planner.model);
-
-  if (!model && requestMessages.length === 0 && !responsePreview) return null;
-
-  return {
-    model,
-    requestMessages,
-    responsePreview,
-    rawJson: prettyJson(planner),
-  };
-}
-
-function buildModelRun(harness: Record<string, unknown> | null): GoatHarnessModelRun | null {
-  if (!harness) return null;
-  const turns = Array.isArray(harness.turns)
-    ? harness.turns.map(buildRunTurn).filter((turn): turn is GoatHarnessRunTurn => Boolean(turn))
-    : [];
-  const model = readString(harness.model);
-  const systemPromptPreview = previewValue(harness.systemPrompt);
-  const toolChoice = readString(harness.toolChoice);
-  const toolsSentToModelPreview = previewValue(harness.toolsSentToModel);
-
-  if (!model && !systemPromptPreview && turns.length === 0) return null;
-
-  return {
-    model,
-    systemPromptPreview,
-    toolChoice,
-    toolsSentToModelPreview,
-    turns,
-    rawJson: prettyJson(harness),
-  };
-}
-
-function buildRunTurn(value: unknown): GoatHarnessRunTurn | null {
-  const turn = readRecord(value);
-  if (!turn) return null;
-  const responseMessage = readMessage(turn.responseMessage);
-  const responseToolCalls = responseMessage?.toolCalls ?? [];
-  const toolResults = readToolResults(turn.toolResults);
-  const toolCalls = mergeToolCalls(responseToolCalls, toolResults);
-  const requestMessages = readMessages(turn.requestMessages);
-
-  if (requestMessages.length === 0 && !responseMessage && toolCalls.length === 0) {
-    return null;
-  }
-
-  return {
-    step: readNumber(turn.step) ?? 0,
-    requestMessages,
-    responseMessage,
+    hasDurableRun: messages.length > 0 || events.length > 0,
+    legacyDetailText: "Detailed run events are available for new tasks only.",
+    task,
+    userMessage,
+    assistantMessages,
     toolCalls,
-    rawJson: prettyJson(turn),
+    events,
   };
 }
 
-function mergeToolCalls(
-  responseToolCalls: GoatHarnessRunToolCall[],
-  toolResults: GoatHarnessRunToolCall[],
-) {
-  const resultById = new Map(toolResults.map((tool) => [tool.id, tool]));
-  const renderedIds = new Set<string>();
-  const merged = responseToolCalls.map((toolCall) => {
-    renderedIds.add(toolCall.id);
-    const result = resultById.get(toolCall.id);
-    return result
-      ? {
-          ...toolCall,
-          status: result.status,
-          outputPreview: result.outputPreview,
-          errorPreview: result.errorPreview,
-          rawJson: result.rawJson,
-        }
-      : toolCall;
-  });
-
-  for (const result of toolResults) {
-    if (!renderedIds.has(result.id)) merged.push(result);
-  }
-
-  return merged;
-}
-
-function readMessages(value: unknown): GoatHarnessRunMessage[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((message) => {
-    const parsed = readMessage(message);
-    return parsed ? [parsed] : [];
-  });
-}
-
-function readMessage(value: unknown): GoatHarnessRunMessage | null {
-  const message = readRecord(value);
-  if (!message) return null;
-  const role = readString(message.role) || "message";
-  const contentPreview = previewValue(message.content);
-  const toolCalls = Array.isArray(message.tool_calls)
-    ? message.tool_calls
-        .map(readToolCall)
-        .filter((tool): tool is GoatHarnessRunToolCall => Boolean(tool))
-    : [];
-
-  if (!contentPreview && toolCalls.length === 0) return null;
-
-  return {
-    role,
-    contentPreview,
-    toolCalls,
-  };
-}
-
-function readToolCall(value: unknown): GoatHarnessRunToolCall | null {
-  const toolCall = readRecord(value);
-  if (!toolCall) return null;
-  const fn = readRecord(toolCall.function);
-  const name = readString(fn?.name) || "tool_call";
-  const id = readString(toolCall.id) || `tool:${name}`;
-  const args = parseToolArguments(fn?.arguments);
-
-  return makeToolCall({
-    id,
-    name,
-    status: "running",
-    input: args,
-    output: null,
-    error: null,
-    raw: toolCall,
-  });
-}
-
-function readToolResults(value: unknown): GoatHarnessRunToolCall[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    const record = readRecord(item);
-    if (!record) return [];
-    const name = readString(record.name) || "tool_call";
-    const id = readString(record.toolCallId) || `tool:${name}`;
-    const error = readString(record.error);
-    return [
+function buildToolCalls(events: readonly GoatRunEvent[]) {
+  const byCallId = new Map<string, GoatHarnessRunToolCall>();
+  for (const event of events) {
+    if (
+      event.type !== "tool.started" &&
+      event.type !== "tool.completed" &&
+      event.type !== "tool.failed"
+    ) {
+      continue;
+    }
+    const toolCallId = readString(event.payload.toolCallId) || `tool-${event.id}`;
+    const toolName = readString(event.payload.toolName) || "tool";
+    const current =
+      byCallId.get(toolCallId) ??
       makeToolCall({
-        id,
-        name,
-        status: error ? "failed" : "completed",
-        input: record.args,
-        output: record.result,
-        error,
-        raw: record,
-      }),
-    ];
-  });
+        id: toolCallId,
+        name: toolName,
+        status: "running",
+        input: event.payload.input,
+        output: null,
+        error: null,
+        raw: event.payload,
+        createdAt: event.createdAt,
+      });
+
+    if (event.type === "tool.completed") {
+      byCallId.set(
+        toolCallId,
+        makeToolCall({
+          ...current,
+          status: "completed",
+          input: event.payload.input ?? parsePreview(current.inputPreview),
+          output: event.payload.output,
+          error: null,
+          raw: event.payload,
+          createdAt: current.createdAt,
+        }),
+      );
+    } else if (event.type === "tool.failed") {
+      byCallId.set(
+        toolCallId,
+        makeToolCall({
+          ...current,
+          status: "failed",
+          input: event.payload.input ?? parsePreview(current.inputPreview),
+          output: null,
+          error: event.payload.error,
+          raw: event.payload,
+          createdAt: current.createdAt,
+        }),
+      );
+    } else {
+      byCallId.set(toolCallId, current);
+    }
+  }
+
+  return Array.from(byCallId.values()).toSorted(compareCreatedAt);
 }
 
 function makeToolCall(input: {
@@ -269,57 +212,149 @@ function makeToolCall(input: {
   status: GoatHarnessRunToolCall["status"];
   input: unknown;
   output: unknown;
-  error: string | null;
+  error: unknown;
   raw: unknown;
+  createdAt: string;
 }): GoatHarnessRunToolCall {
-  const display = describeTool(input.name);
+  const description = describeTool(input.name);
   return {
     id: input.id,
     name: input.name,
-    label: display.label,
-    kind: display.kind,
+    label: description.label,
+    kind: description.kind,
     status: input.status,
     inputPreview: previewValue(input.input),
     outputPreview: previewValue(input.output),
     errorPreview: previewValue(input.error),
     rawJson: prettyJson(input.raw),
+    createdAt: input.createdAt,
   };
 }
 
 function describeTool(name: string): Pick<GoatHarnessRunToolCall, "label" | "kind"> {
   if (name === "exa_search") return { label: "Web search", kind: "search" };
-  if (name === "gmail_search") return { label: "Search Gmail", kind: "gmail" };
-  if (name === "gmail_get_message") return { label: "Read email", kind: "gmail" };
-  if (name === "gmail_list_threads") return { label: "List email threads", kind: "gmail" };
-  if (name === "gmail_get_thread") return { label: "Read email thread", kind: "gmail" };
-  if (name === "calendar_list_calendars") return { label: "List calendars", kind: "calendar" };
-  if (name === "calendar_list_events") return { label: "List calendar events", kind: "calendar" };
-  if (name === "calendar_get_event") return { label: "Read calendar event", kind: "calendar" };
-  if (name === "calendar_get_freebusy") return { label: "Check availability", kind: "calendar" };
-  if (name === "goat_result") return { label: "Final result", kind: "result" };
-  return { label: formatToolName(name), kind: "tool" };
+  if (name.startsWith("gmail_")) {
+    const labels: Record<string, string> = {
+      gmail_search: "Gmail search",
+      gmail_get_message: "Gmail message",
+      gmail_list_threads: "Gmail threads",
+      gmail_get_thread: "Gmail thread",
+    };
+    return { label: labels[name] ?? "Gmail", kind: "gmail" };
+  }
+  if (name.startsWith("calendar_")) {
+    const labels: Record<string, string> = {
+      calendar_list_calendars: "Calendars",
+      calendar_list_events: "Calendar events",
+      calendar_get_event: "Calendar event",
+      calendar_get_freebusy: "Free/busy",
+    };
+    return { label: labels[name] ?? "Calendar", kind: "calendar" };
+  }
+  if (name.startsWith("linear_")) {
+    const labels: Record<string, string> = {
+      linear_search_tools: "Linear tools",
+      linear_use_tool: "Linear",
+    };
+    return { label: labels[name] ?? "Linear", kind: "linear" };
+  }
+  return { label: name, kind: "tool" };
 }
 
-function parseToolArguments(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  if (!value.trim()) return "";
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return value;
+function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["task"] {
+  if ("displayId" in task) {
+    return {
+      id: task.id,
+      displayId: task.displayId,
+      name: task.name,
+      prompt: task.prompt,
+      model: task.model,
+      status: task.status,
+      stage: task.stage,
+      result: task.result ?? "",
+      error: task.error ?? "",
+      createdAt: serializeDate(task.createdAt),
+      updatedAt: serializeDate(task.updatedAt),
+    };
   }
+  return {
+    id: task.id,
+    displayId: task.display_id,
+    name: task.name,
+    prompt: task.prompt,
+    model: task.model,
+    status: task.status,
+    stage: task.stage,
+    result: task.result ?? "",
+    error: task.error ?? "",
+    createdAt: task.created_at,
+    updatedAt: task.updated_at,
+  };
+}
+
+function normalizeMessage(message: GoatTaskRunMessageInput): GoatRunMessage {
+  if ("taskId" in message) {
+    return {
+      id: message.id,
+      role: message.role,
+      status: message.status,
+      content: message.content,
+      toolName: message.toolName,
+      toolCallId: message.toolCallId,
+      createdAt: serializeDate(message.createdAt),
+      updatedAt: serializeDate(message.updatedAt),
+      completedAt: message.completedAt ? serializeDate(message.completedAt) : null,
+    };
+  }
+  return {
+    id: message.id,
+    role: message.role,
+    status: message.status,
+    content: message.content,
+    toolName: message.tool_name,
+    toolCallId: message.tool_call_id,
+    createdAt: message.created_at,
+    updatedAt: message.updated_at,
+    completedAt: message.completed_at,
+  };
+}
+
+function normalizeEvent(event: GoatTaskRunEventInput): GoatRunEvent {
+  if ("taskId" in event) {
+    return {
+      id: event.id,
+      messageId: event.messageId,
+      type: event.type,
+      payload: event.payload,
+      createdAt: serializeDate(event.createdAt),
+    };
+  }
+  return {
+    id: event.id,
+    messageId: event.message_id,
+    type: event.type,
+    payload: event.payload,
+    createdAt: event.created_at,
+  };
+}
+
+function compareCreatedAt(a: { createdAt: string }, b: { createdAt: string }) {
+  return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+}
+
+function serializeDate(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function previewValue(value: unknown) {
+  if (value == null || value === "") return "";
+  const text = typeof value === "string" ? value : prettyJson(value);
+  const compact = text.trim();
+  if (compact.length <= PREVIEW_MAX_LENGTH) return compact;
+  return `${compact.slice(0, PREVIEW_MAX_LENGTH - 3)}...`;
 }
 
 function prettyJson(value: unknown) {
-  if (value == null) return "";
-  if (Array.isArray(value) && value.length === 0) return "";
-  if (
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.keys(value as Record<string, unknown>).length === 0
-  ) {
-    return "";
-  }
   try {
     return JSON.stringify(value, null, 2);
   } catch {
@@ -327,34 +362,15 @@ function prettyJson(value: unknown) {
   }
 }
 
-function previewValue(value: unknown) {
-  const text = typeof value === "string" ? value.trim() : prettyJson(value).trim();
-  return truncatePreview(text);
-}
-
-function truncatePreview(value: string) {
-  if (value.length <= PREVIEW_MAX_LENGTH) return value;
-  return `${value.slice(0, PREVIEW_MAX_LENGTH - 3).trimEnd()}...`;
-}
-
-function formatToolName(name: string) {
-  return name
-    .replace(/_/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\w/, (char) => char.toUpperCase());
-}
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+function parsePreview(preview: string) {
+  if (!preview) return null;
+  try {
+    return JSON.parse(preview) as unknown;
+  } catch {
+    return preview;
+  }
 }
 
 function readString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-function readNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return typeof value === "string" ? value : "";
 }

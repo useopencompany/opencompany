@@ -1,17 +1,20 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeft, CalendarDays, CircleUserRound, Mail, UserRound } from "lucide-react";
+import { ArrowLeft, CircleUserRound, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
+import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { currentGoatUser } from "@/lib/auth";
-import {
-  type GoatGoogleProviderState,
-  getGoatGoogleIntegrationState,
-} from "@/lib/integrations/google-data";
+import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
+import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const { authUser, user } = await currentGoatUser();
-  const integrations = await getGoatGoogleIntegrationState(user.workosUserId);
+  const [googleIntegrations, linear] = await Promise.all([
+    getGoatGoogleIntegrationState(user.workosUserId),
+    getGoatLinearIntegrationState(user.workosUserId),
+  ]);
+  const integrations = { ...googleIntegrations, linear };
   const name = [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
   const initials = getInitials(authUser.firstName, authUser.lastName, user.email);
@@ -73,12 +76,7 @@ export default async function SettingsPage() {
             <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
               Personal integrations
             </h2>
-            <IntegrationRow icon={Mail} label="Gmail" integration={integrations.gmail} />
-            <IntegrationRow
-              icon={CalendarDays}
-              label="Google Calendar"
-              integration={integrations.google_calendar}
-            />
+            <SettingsIntegrationsPanel initialIntegrations={integrations} />
           </section>
         </div>
       </div>
@@ -104,54 +102,6 @@ function AccountRow({
       </div>
     </div>
   );
-}
-
-function IntegrationRow({
-  icon: Icon,
-  label,
-  integration,
-}: {
-  icon: LucideIcon;
-  label: string;
-  integration: GoatGoogleProviderState;
-}) {
-  const status = integrationStatus(integration);
-  const connectHref =
-    integration.provider === "gmail"
-      ? "/api/integrations/gmail/start?returnTo=/settings"
-      : "/api/integrations/google-calendar/start?returnTo=/settings";
-
-  return (
-    <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-      <Icon size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="min-w-0">
-          <span className="block truncate text-[14px] font-medium leading-tight text-ink">
-            {label}
-          </span>
-          {integration.accountEmail || integration.accountName ? (
-            <span className="block truncate text-[12px] leading-4 text-ink-subtle">
-              {integration.accountEmail ?? integration.accountName}
-            </span>
-          ) : null}
-        </div>
-        <Link
-          href={connectHref}
-          className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          {status}
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-function integrationStatus(integration: GoatGoogleProviderState) {
-  if (integration.status === "connected") return "Connected";
-  if (integration.status === "needs_reauth" || integration.status === "sync_failed") {
-    return "Reconnect";
-  }
-  return "Connect";
 }
 
 function getInitials(firstName: string | null, lastName: string | null, email: string) {

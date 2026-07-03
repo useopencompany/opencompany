@@ -17,19 +17,9 @@ const MARKDOWN_COMPONENTS: Components = {
     ),
 };
 
-export function Markdown({
-  content,
-  className,
-}: {
-  content: string;
-  className?: string;
-}) {
+export function Markdown({ content, className }: { content: string; className?: string }) {
   return (
-    <div
-      className={
-        className ? `session-markdown ${className}` : "session-markdown"
-      }
-    >
+    <div className={className ? `session-markdown ${className}` : "session-markdown"}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={MARKDOWN_COMPONENTS}

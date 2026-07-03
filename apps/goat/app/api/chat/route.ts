@@ -1,6 +1,15 @@
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
+import {
+  GOAT_METRICS,
+  GOAT_SPANS,
+  hashGoatUserId,
+  recordGoatChatTurn,
+  recordGoatCounter,
+  startGoatSpan,
+} from "@opencompany/goat-observability";
 import { convertToModelMessages, createGateway, stepCountIs, streamText } from "ai";
 import { currentGoatUser } from "@/lib/auth";
+import { runGoatBrainCliForUser } from "@/lib/brain-cli";
 import {
   createDbGoatChatStore,
   createGoatChatUserTurn,
@@ -8,11 +17,11 @@ import {
   persistGoatChatAssistantMessage,
 } from "@/lib/chat";
 import {
-  createGoatChatDebugTrace,
-  createGoatChatToolContext,
-  GOAT_DEFAULT_AGENT_SYSTEM,
+  createOpenCompanyChatDebugTrace,
+  createOpenCompanyChatToolContext,
   normalizeAgentText,
-  type StartedGoatTask,
+  OPENCOMPANY_CHAT_SYSTEM_PROMPT,
+  type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
 import {
@@ -24,6 +33,7 @@ import { validateGoatChatInput } from "@/lib/chat-validation";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
 export const maxDuration = 30;
+export const runtime = "nodejs";
 
 type ChatRequestBody = {
   sessionId?: unknown;
@@ -56,19 +66,72 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const store = createDbGoatChatStore();
-  const turn = await createGoatChatUserTurn(
-    {
-      userWorkosId: context.user.workosUserId,
-      prompt: parsed.value.prompt,
-      model: parsed.value.model,
-      sessionId: parsed.value.sessionId,
-      messageId: safeClientMessageId(message.id),
-    },
-    store,
-  );
+  const startedAt = performance.now();
+  const userIdHash = hashGoatUserId(context.user.workosUserId);
+  const chatSpan = startGoatSpan(GOAT_SPANS.chatTurn, {
+    ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+    "goat.model": parsed.value.model,
+    "goat.task_started": false,
+  });
+  let chatFinished = false;
+  const finishChatTelemetry = (
+    outcome: "success" | "failure" | "aborted",
+    attributes: Record<string, string | number | boolean | null | undefined> = {},
+    error?: unknown,
+  ) => {
+    if (chatFinished) return;
+    chatFinished = true;
+    const durationMs = Math.round(performance.now() - startedAt);
+    const failureCategory =
+      outcome === "failure" && error
+        ? chatSpan.fail(error, attributes)
+        : (attributes["goat.failure_category"] as string | undefined);
+    const finalAttributes = {
+      ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+      "goat.model": parsed.value.model,
+      "goat.outcome": outcome,
+      ...(failureCategory ? { "goat.failure_category": failureCategory } : {}),
+      ...attributes,
+    };
+    chatSpan.end(finalAttributes);
+    recordGoatChatTurn({
+      durationMs,
+      outcome,
+      attributes: finalAttributes,
+    });
+  };
 
-  const toolContext = createGoatChatToolContext({
+  let turn: Awaited<ReturnType<typeof createGoatChatUserTurn>>;
+  try {
+    turn = await createGoatChatUserTurn(
+      {
+        userWorkosId: context.user.workosUserId,
+        prompt: parsed.value.prompt,
+        model: parsed.value.model,
+        sessionId: parsed.value.sessionId,
+        messageId: safeClientMessageId(message.id),
+      },
+      store,
+    );
+    chatSpan.setAttributes({
+      "goat.chat_session_id": turn.session.id,
+      "goat.chat_message_id": turn.userMessage.id,
+      "goat.model": turn.session.model,
+    });
+  } catch (error) {
+    finishChatTelemetry("failure", {}, error);
+    throw error;
+  }
+
+  const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
+    runBrainCli: (toolInput) =>
+      runGoatBrainCliForUser({
+        userWorkosId: context.user.workosUserId,
+        args: toolInput.args,
+        gatewayApiKey,
+        signal: request.signal,
+      }),
     startTask: async (task) => {
       const created = await createGoatTaskForUser({
         userWorkosId: context.user.workosUserId,
@@ -76,6 +139,18 @@ export async function POST(request: Request): Promise<Response> {
         prompt: task.prompt,
         model: task.model,
       });
+      const attributes = {
+        ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+        "goat.chat_session_id": turn.session.id,
+        "goat.chat_message_id": turn.userMessage.id,
+        "goat.model": turn.session.model,
+        "goat.task_id": created.id,
+      };
+      chatSpan.setAttributes({
+        ...attributes,
+        "goat.task_started": true,
+      });
+      recordGoatCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
       return {
         id: created.id,
         displayId: created.displayId,
@@ -85,29 +160,39 @@ export async function POST(request: Request): Promise<Response> {
     },
   });
 
-  let debugTrace: GoatChatMessageDebugTrace = createGoatChatDebugTrace({
+  let debugTrace: GoatChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
     model: turn.session.model,
   });
   const gateway = createGateway({ apiKey: gatewayApiKey });
   const result = streamText({
     model: gateway(turn.session.model),
-    system: GOAT_DEFAULT_AGENT_SYSTEM,
+    system: OPENCOMPANY_CHAT_SYSTEM_PROMPT,
     messages: await convertToModelMessages(turn.messages),
-    temperature: 0.2,
     maxOutputTokens: 900,
     stopWhen: stepCountIs(3),
     abortSignal: request.signal,
     tools: toolContext.tools,
     onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
-      debugTrace = createGoatChatDebugTrace({
+      debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
         steps: event.steps,
         ...(finishReason ? { finishReason } : {}),
       });
     },
     onError(event) {
-      debugTrace = createGoatChatDebugTrace({
+      finishChatTelemetry(
+        "failure",
+        {
+          "goat.chat_session_id": turn.session.id,
+          "goat.chat_message_id": turn.userMessage.id,
+          "goat.model": turn.session.model,
+          "goat.task_started": Boolean(toolContext.getStartedTask()),
+          "goat.task_id": toolContext.getStartedTask()?.id,
+        },
+        event.error,
+      );
+      debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
         error: event.error instanceof Error ? event.error.message : "Goat chat failed.",
       });
@@ -129,7 +214,15 @@ export async function POST(request: Request): Promise<Response> {
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
       const startedTask = toolContext.getStartedTask();
       const rawContent = textFromGoatChatUiMessage(responseMessage);
-      if (isAborted && !rawContent && !startedTask) return;
+      if (isAborted && !rawContent && !startedTask) {
+        finishChatTelemetry("aborted", {
+          "goat.chat_session_id": turn.session.id,
+          "goat.chat_message_id": turn.userMessage.id,
+          "goat.model": turn.session.model,
+          "goat.task_started": false,
+        });
+        return;
+      }
 
       const finishReasonText = stringifyFinishReason(finishReason);
       const responseMessageId = safeClientMessageId(responseMessage.id);
@@ -147,13 +240,20 @@ export async function POST(request: Request): Promise<Response> {
         },
         store,
       );
+      finishChatTelemetry(isAborted ? "aborted" : "success", {
+        "goat.chat_session_id": turn.session.id,
+        "goat.chat_message_id": turn.userMessage.id,
+        "goat.model": turn.session.model,
+        "goat.task_started": Boolean(startedTask),
+        "goat.task_id": startedTask?.id,
+      });
     },
   });
 }
 
 function toStreamMessageMetadata(
   sessionId: string,
-  task: StartedGoatTask | null,
+  task: StartedTask | null,
 ): GoatChatMessageMetadata {
   return {
     sessionId,

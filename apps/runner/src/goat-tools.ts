@@ -1,0 +1,474 @@
+import type { GoatTaskToolName } from "@opencompany/db/goat-schema";
+import { GOAT_SPANS, recordGoatToolCall, startGoatSpan } from "@opencompany/goat-observability";
+import { jsonSchema, type ToolSet, tool } from "ai";
+import type { RunnerEnv } from "./env";
+import {
+  executeGoatGoogleTool,
+  type GoatGoogleToolName,
+  isGoatGoogleToolName,
+} from "./goat-google-tools";
+import {
+  executeGoatLinearMcpTool,
+  type GoatLinearMcpToolName,
+  isGoatLinearMcpToolName,
+} from "./goat-linear-mcp-tools";
+
+export const GOAT_TASK_TOOL_NAMES = [
+  "exa_search",
+  "gmail_search",
+  "gmail_get_message",
+  "gmail_list_threads",
+  "gmail_get_thread",
+  "calendar_list_calendars",
+  "calendar_list_events",
+  "calendar_get_event",
+  "calendar_get_freebusy",
+  "linear_search_tools",
+  "linear_use_tool",
+] as const satisfies readonly GoatTaskToolName[];
+
+const GOAT_TASK_TOOL_SET = new Set<GoatTaskToolName>(GOAT_TASK_TOOL_NAMES);
+const EXA_SEARCH_URL = "https://api.exa.ai/search";
+
+export type GoatToolLifecycleInput = {
+  toolCallId: string;
+  toolName: GoatTaskToolName;
+  input: unknown;
+};
+
+export type GoatToolLifecycleCompletion = GoatToolLifecycleInput & {
+  output: unknown;
+};
+
+export type GoatToolLifecycleFailure = GoatToolLifecycleInput & {
+  error: string;
+};
+
+export type GoatToolLifecycle = {
+  onToolStarted?: (input: GoatToolLifecycleInput) => Promise<{ messageId: string } | void>;
+  onToolCompleted?: (input: GoatToolLifecycleCompletion & { messageId?: string }) => Promise<void>;
+  onToolFailed?: (input: GoatToolLifecycleFailure & { messageId?: string }) => Promise<void>;
+};
+
+export function normalizeGoatTaskToolNames(value: unknown): GoatTaskToolName[] {
+  const selected = new Set<GoatTaskToolName>();
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "string" && GOAT_TASK_TOOL_SET.has(item as GoatTaskToolName)) {
+        selected.add(item as GoatTaskToolName);
+      }
+    }
+  }
+  if (selected.size === 0) {
+    selected.add("exa_search");
+  }
+  return GOAT_TASK_TOOL_NAMES.filter((name) => selected.has(name));
+}
+
+export function buildGoatTaskTools(input: {
+  selectedTools: readonly GoatTaskToolName[];
+  userWorkosId: string;
+  env: RunnerEnv;
+  signal: AbortSignal;
+  lifecycle?: GoatToolLifecycle;
+}): ToolSet {
+  const tools: ToolSet = {};
+  const selected = new Set(normalizeGoatTaskToolNames(input.selectedTools));
+  const messageIdsByCallId = new Map<string, string>();
+
+  const startTool = async (toolName: GoatTaskToolName, toolInput: unknown, toolCallId: string) => {
+    const result = await input.lifecycle?.onToolStarted?.({
+      toolCallId,
+      toolName,
+      input: toolInput,
+    });
+    if (result?.messageId) messageIdsByCallId.set(toolCallId, result.messageId);
+  };
+
+  const completeTool = async (
+    toolName: GoatTaskToolName,
+    toolInput: unknown,
+    toolCallId: string,
+    output: unknown,
+  ) => {
+    const messageId = messageIdsByCallId.get(toolCallId);
+    await input.lifecycle?.onToolCompleted?.({
+      toolCallId,
+      toolName,
+      input: toolInput,
+      output,
+      ...(messageId ? { messageId } : {}),
+    });
+  };
+
+  const failTool = async (
+    toolName: GoatTaskToolName,
+    toolInput: unknown,
+    toolCallId: string,
+    error: string,
+  ) => {
+    const messageId = messageIdsByCallId.get(toolCallId);
+    await input.lifecycle?.onToolFailed?.({
+      toolCallId,
+      toolName,
+      input: toolInput,
+      error,
+      ...(messageId ? { messageId } : {}),
+    });
+  };
+
+  for (const toolName of selected) {
+    tools[toolName] = tool({
+      description: goatToolDescription(toolName),
+      inputSchema: jsonSchema(goatToolInputSchema(toolName) as never),
+      onInputAvailable: async ({
+        input: toolInput,
+        toolCallId,
+      }: {
+        input: unknown;
+        toolCallId: string;
+      }) => {
+        assertNotAborted(input.signal);
+        await startTool(toolName, toolInput, toolCallId);
+      },
+      execute: async (toolInput: unknown, options: { toolCallId: string }) => {
+        assertNotAborted(input.signal);
+        const startedAt = performance.now();
+        const attributes = {
+          "goat.tool_name": toolName,
+        };
+        const span = startGoatSpan(GOAT_SPANS.taskToolCall, attributes);
+        try {
+          const output = await executeGoatTaskTool({
+            toolName,
+            toolInput,
+            userWorkosId: input.userWorkosId,
+            env: input.env,
+            signal: input.signal,
+          });
+          await completeTool(toolName, toolInput, options.toolCallId, output);
+          span.end({
+            ...attributes,
+            "goat.outcome": "success",
+          });
+          recordGoatToolCall({
+            durationMs: Math.round(performance.now() - startedAt),
+            outcome: "success",
+            attributes,
+          });
+          return output;
+        } catch (error) {
+          if (input.signal.aborted) {
+            span.end({
+              ...attributes,
+              "goat.outcome": "aborted",
+            });
+            recordGoatToolCall({
+              durationMs: Math.round(performance.now() - startedAt),
+              outcome: "aborted",
+              attributes,
+            });
+            throw error;
+          }
+          const message = errorMessage(error);
+          await failTool(toolName, toolInput, options.toolCallId, message);
+          const failureCategory = span.fail(error, attributes);
+          span.end({
+            ...attributes,
+            "goat.outcome": "failure",
+            "goat.failure_category": failureCategory,
+          });
+          recordGoatToolCall({
+            durationMs: Math.round(performance.now() - startedAt),
+            outcome: "failure",
+            attributes: {
+              ...attributes,
+              "goat.failure_category": failureCategory,
+            },
+          });
+          return { ok: false, error: message };
+        }
+      },
+    } as never) as ToolSet[string];
+  }
+
+  return tools;
+}
+
+async function executeGoatTaskTool(input: {
+  toolName: GoatTaskToolName;
+  toolInput: unknown;
+  userWorkosId: string;
+  env: RunnerEnv;
+  signal: AbortSignal;
+}) {
+  if (input.toolName === "exa_search") {
+    return executeExaSearch({
+      args: input.toolInput,
+      ...(input.env.exaApiKey ? { apiKey: input.env.exaApiKey } : {}),
+      signal: input.signal,
+    });
+  }
+  if (isGoatGoogleToolName(input.toolName)) {
+    return executeGoatGoogleTool({
+      name: input.toolName as GoatGoogleToolName,
+      args: input.toolInput,
+      userWorkosId: input.userWorkosId,
+      env: input.env,
+      signal: input.signal,
+    });
+  }
+  if (isGoatLinearMcpToolName(input.toolName)) {
+    return executeGoatLinearMcpTool({
+      name: input.toolName as GoatLinearMcpToolName,
+      args: input.toolInput,
+      userWorkosId: input.userWorkosId,
+      signal: input.signal,
+    });
+  }
+  return { ok: false, error: `Unknown Goat tool "${input.toolName}".` };
+}
+
+async function executeExaSearch(input: { args: unknown; apiKey?: string; signal: AbortSignal }) {
+  if (!input.apiKey) throw new Error("EXA_API_KEY is required for exa_search.");
+  const args = asRecord(input.args);
+  const query = readString(args, "query");
+  if (!query) throw new Error("exa_search requires query.");
+  const numResults = clampNumber(readNumber(args, "numResults") ?? 5, 1, 10);
+  const type = readExaSearchType(args.type);
+
+  const response = await fetch(EXA_SEARCH_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": input.apiKey,
+    },
+    body: JSON.stringify({
+      query,
+      type,
+      numResults,
+      contents: {
+        highlights: true,
+        text: true,
+      },
+    }),
+    signal: input.signal,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `Exa search failed (${response.status}): ${detail.trim().slice(0, 500) || response.statusText}`,
+    );
+  }
+
+  const body = (await response.json()) as { results?: unknown[] };
+  const results = Array.isArray(body.results) ? body.results.map(compactExaResult) : [];
+  return { ok: true, query, results };
+}
+
+function compactExaResult(value: unknown) {
+  const record = asRecord(value);
+  return {
+    title: readString(record, "title"),
+    url: readString(record, "url"),
+    publishedDate: readString(record, "publishedDate"),
+    author: readString(record, "author"),
+    text: truncate(readString(record, "text"), 2_000),
+    highlights: Array.isArray(record.highlights)
+      ? record.highlights
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => truncate(item, 600))
+          .slice(0, 5)
+      : [],
+  };
+}
+
+function goatToolDescription(toolName: GoatTaskToolName) {
+  switch (toolName) {
+    case "exa_search":
+      return "Search the web with Exa and return concise source results.";
+    case "gmail_search":
+      return "Search connected Gmail with Gmail query syntax and return message ids, snippets, and headers. Read-only.";
+    case "gmail_get_message":
+      return "Fetch one connected Gmail message by id, including headers, snippet, labels, and decoded plain text. Read-only.";
+    case "gmail_list_threads":
+      return "List connected Gmail threads, optionally filtered by Gmail query syntax. Read-only.";
+    case "gmail_get_thread":
+      return "Fetch a connected Gmail thread by id, including each message's headers and decoded plain text. Read-only.";
+    case "calendar_list_calendars":
+      return "List calendars visible to the connected Google Calendar account. Read-only.";
+    case "calendar_list_events":
+      return "List Google Calendar events for a calendar and optional time range. Read-only.";
+    case "calendar_get_event":
+      return "Fetch one Google Calendar event by calendar id and event id. Read-only.";
+    case "calendar_get_freebusy":
+      return "Check free/busy blocks for connected Google calendars. Read-only.";
+    case "linear_search_tools":
+      return "List available Linear MCP tools, including names, descriptions, and input schemas. Call this before linear_use_tool.";
+    case "linear_use_tool":
+      return "Run one Linear MCP tool by exact name from linear_search_tools. Only create or update Linear records when the user explicitly asked for that action.";
+  }
+}
+
+function goatToolInputSchema(toolName: GoatTaskToolName) {
+  switch (toolName) {
+    case "exa_search":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: { type: "string" },
+          numResults: { type: "number", minimum: 1, maximum: 10 },
+          type: {
+            type: "string",
+            enum: ["auto", "fast", "instant", "deep-lite", "deep", "deep-reasoning"],
+          },
+        },
+        required: ["query"],
+      } as const;
+    case "gmail_search":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: { type: "string" },
+          maxResults: { type: "number", minimum: 1, maximum: 50 },
+          account: { type: "string" },
+        },
+        required: ["query"],
+      } as const;
+    case "gmail_get_message":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          messageId: { type: "string" },
+          account: { type: "string" },
+        },
+        required: ["messageId"],
+      } as const;
+    case "gmail_list_threads":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: { type: "string" },
+          maxResults: { type: "number", minimum: 1, maximum: 50 },
+          account: { type: "string" },
+        },
+      } as const;
+    case "gmail_get_thread":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          threadId: { type: "string" },
+          account: { type: "string" },
+        },
+        required: ["threadId"],
+      } as const;
+    case "calendar_list_calendars":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          account: { type: "string" },
+        },
+      } as const;
+    case "calendar_list_events":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          calendarId: { type: "string" },
+          timeMin: { type: "string" },
+          timeMax: { type: "string" },
+          query: { type: "string" },
+          maxResults: { type: "number", minimum: 1, maximum: 50 },
+          account: { type: "string" },
+        },
+      } as const;
+    case "calendar_get_event":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          calendarId: { type: "string" },
+          eventId: { type: "string" },
+          account: { type: "string" },
+        },
+        required: ["eventId"],
+      } as const;
+    case "calendar_get_freebusy":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          timeMin: { type: "string" },
+          timeMax: { type: "string" },
+          calendarIds: { type: "array", items: { type: "string" } },
+          account: { type: "string" },
+        },
+        required: ["timeMin", "timeMax"],
+      } as const;
+    case "linear_search_tools":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: { type: "string" },
+        },
+      } as const;
+    case "linear_use_tool":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          tool: { type: "string" },
+          arguments: {
+            type: "object",
+            additionalProperties: true,
+          },
+        },
+        required: ["tool"],
+      } as const;
+  }
+}
+
+function readExaSearchType(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "auto";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function truncate(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function assertNotAborted(signal: AbortSignal) {
+  if (signal.aborted) throw new Error("Goat task was aborted.");
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown Goat tool error.";
+}

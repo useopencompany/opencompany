@@ -1,28 +1,27 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type {
-  GoatTaskStage,
-  GoatTaskStatus,
-} from "@opencompany/db/goat-schema";
+import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { toast } from "@opencompany/ui/components/sonner";
+import { useLiveQuery } from "@tanstack/react-db";
 import { DefaultChatTransport } from "ai";
 import {
   AlertCircle,
   Archive,
   ArrowUp,
+  BookOpen,
   CheckCircle2,
   CircleDotDashed,
   Clock,
   FileText,
   Settings,
-  Sparkles,
   Square,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -31,14 +30,21 @@ import {
   useTransition,
 } from "react";
 import { Markdown } from "@/components/Markdown";
+import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
-  type GoatChatMessageMetadata,
+  GOAT_BRAIN_TOOL_NAME,
+  GOAT_BRAIN_TOOL_PART_TYPE,
+  type GoatBrainToolOutput,
   type GoatChatSessionView,
   type GoatChatUiMessage,
-  type GoatStartTaskToolOutput,
+  type GoatTaskCardMetadata,
+  START_TASK_TOOL_NAME,
+  START_TASK_TOOL_PART_TYPE,
+  type StartTaskToolOutput,
   textFromGoatChatUiMessage,
 } from "@/lib/chat-ui";
+import { createGoatCollections, type GoatTaskRow } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import { archiveGoatTaskAction } from "@/lib/tasks";
 
@@ -77,22 +83,14 @@ export function GoatSurface({
   const locallyClosedSessionIdsRef = useRef<Set<string>>(new Set());
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
-  const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<"home" | "chat">(() =>
-    initialChat ? "chat" : "home",
+  const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
+  const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
+  const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
+  const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
   );
-  const [chatSessionId, setChatSessionId] = useState<string | null>(
-    initialChat?.id ?? null,
-  );
-  const [chatModel, setChatModel] = useState(
-    initialChat?.model ?? defaultModel,
-  );
-  const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const [, startArchiveTransition] = useTransition();
   const [, startCloseTransition] = useTransition();
   const transport = useMemo(
@@ -139,8 +137,7 @@ export function GoatSurface({
     if (isGenerating) return;
     // router.refresh() can lag one render behind local useChat state. Keep local
     // turns visible until the server props catch up for both new and existing chats.
-    const localHasChat =
-      mode === "chat" && (messages.length > 0 || Boolean(chatSessionId));
+    const localHasChat = mode === "chat" && (messages.length > 0 || Boolean(chatSessionId));
     const serverMessageCount = initialChat?.messages.length ?? 0;
     const serverIsSameChat = Boolean(
       initialChat && chatSessionId && initialChat.id === chatSessionId,
@@ -161,15 +158,7 @@ export function GoatSurface({
       setMode(initialChat ? "chat" : "home");
     });
     return () => cancelAnimationFrame(frame);
-  }, [
-    chatSessionId,
-    defaultModel,
-    initialChat,
-    isGenerating,
-    messages.length,
-    mode,
-    setMessages,
-  ]);
+  }, [chatSessionId, defaultModel, initialChat, isGenerating, messages.length, mode, setMessages]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -192,12 +181,7 @@ export function GoatSurface({
 
   useEffect(() => {
     if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
-    if (
-      messages.length === 0 &&
-      status !== "submitted" &&
-      status !== "streaming"
-    )
-      return;
+    if (messages.length === 0 && status !== "submitted" && status !== "streaming") return;
     const thread = threadRef.current;
     if (!thread || typeof thread.scrollTo !== "function") return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
@@ -211,21 +195,9 @@ export function GoatSurface({
 
   useEffect(
     () => () => {
-      if (userScrollIntentTimerRef.current)
-        clearTimeout(userScrollIntentTimerRef.current);
+      if (userScrollIntentTimerRef.current) clearTimeout(userScrollIntentTimerRef.current);
     },
     [],
-  );
-
-  const sortedTasks = useMemo(
-    () =>
-      tasks
-        .filter((task) => !optimisticallyArchivedIds.has(task.id))
-        .toSorted(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        ),
-    [optimisticallyArchivedIds, tasks],
   );
 
   const archiveTask = (task: GoatTaskView) => {
@@ -233,7 +205,6 @@ export function GoatSurface({
     startArchiveTransition(async () => {
       const result = await archiveGoatTaskAction(task.id);
       if (result.ok) {
-        router.refresh();
         return;
       }
 
@@ -259,19 +230,14 @@ export function GoatSurface({
     setInput("");
     void sendMessage({ text: prompt }).catch((error) => {
       setInput(prompt);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Goat could not answer that right now.",
-      );
+      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
     });
   };
 
-  const closeChat = () => {
+  const closeChat = useCallback(() => {
     const closingSessionId = chatSessionId;
     if (isGenerating) void stop();
-    if (closingSessionId)
-      locallyClosedSessionIdsRef.current.add(closingSessionId);
+    if (closingSessionId) locallyClosedSessionIdsRef.current.add(closingSessionId);
     setMode("home");
     setMessages([]);
     setChatSessionId(null);
@@ -287,23 +253,31 @@ export function GoatSurface({
       }
       router.refresh();
     });
-  };
+  }, [chatSessionId, clearError, isGenerating, router, setMessages, startCloseTransition, stop]);
+
+  useEffect(() => {
+    if (mode !== "chat") return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeChat();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeChat, mode]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       formRef.current?.requestSubmit();
     }
-    if (event.key === "Escape" && mode === "chat") {
-      event.preventDefault();
-      closeChat();
-    }
   };
 
   const markUserScrollIntent = () => {
     userScrollIntentRef.current = true;
-    if (userScrollIntentTimerRef.current)
-      clearTimeout(userScrollIntentTimerRef.current);
+    if (userScrollIntentTimerRef.current) clearTimeout(userScrollIntentTimerRef.current);
     userScrollIntentTimerRef.current = setTimeout(() => {
       userScrollIntentRef.current = false;
     }, 250);
@@ -312,14 +286,24 @@ export function GoatSurface({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
       {mode === "home" ? (
-        <Link
-          href="/settings"
-          aria-label="Settings"
-          title="Settings"
-          className="absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-lg text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <Settings size={16} strokeWidth={2} />
-        </Link>
+        <div className="absolute right-4 top-4 z-20 flex items-center gap-1">
+          <Link
+            href="/brain"
+            aria-label="Brain"
+            title="Brain"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <BookOpen size={16} strokeWidth={2} />
+          </Link>
+          <Link
+            href="/settings"
+            aria-label="Settings"
+            title="Settings"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <Settings size={16} strokeWidth={2} />
+          </Link>
+        </div>
       ) : null}
 
       {mode === "home" ? (
@@ -335,40 +319,28 @@ export function GoatSurface({
               <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
                 Results
               </h2>
-              {sortedTasks.length > 0 ? (
-                sortedTasks.map((task) => (
-                  <ResultRow
-                    key={task.id}
-                    task={task}
-                    onArchive={archiveTask}
-                  />
-                ))
-              ) : (
-                <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">
-                  No results yet.
-                </p>
-              )}
+              <LiveResultsList
+                tasks={tasks}
+                optimisticallyArchivedIds={optimisticallyArchivedIds}
+                onArchive={archiveTask}
+              />
             </section>
           </div>
         </div>
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
-          <div className="flex w-full max-w-[560px] items-center gap-2 px-6 pb-2 pt-5">
-            <Sparkles
-              size={14}
-              strokeWidth={2}
-              className="shrink-0 text-ink-subtle"
-            />
-            <span className="text-[13px] font-medium text-ink">Chat</span>
-            <button
-              type="button"
-              aria-label="Close chat"
-              onClick={closeChat}
-              className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none"
-            >
-              Close
-              <X size={14} strokeWidth={2} />
-            </button>
+          <div className="w-full px-6 pb-2 pt-5">
+            <div className="mx-auto flex w-full max-w-[560px] items-center justify-end">
+              <button
+                type="button"
+                aria-label="Close chat"
+                onClick={closeChat}
+                className="flex items-center gap-1 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:border-ink/15 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                Close
+                <X size={14} strokeWidth={2} />
+              </button>
+            </div>
           </div>
 
           <div
@@ -379,10 +351,8 @@ export function GoatSurface({
             onScroll={(event) => {
               if (!userScrollIntentRef.current) return;
               const el = event.currentTarget;
-              const distanceFromBottom =
-                el.scrollHeight - el.scrollTop - el.clientHeight;
-              isPinnedAtBottomRef.current =
-                distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+              const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+              isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
             }}
           >
             <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 pb-40 pt-2">
@@ -416,11 +386,7 @@ export function GoatSurface({
               id="prompt"
               name="prompt"
               value={input}
-              placeholder={
-                mode === "chat"
-                  ? "Reply..."
-                  : "Ask a question or describe a task..."
-              }
+              placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onKeyDown}
               disabled={isGenerating}
@@ -439,6 +405,94 @@ export function GoatSurface({
       </form>
     </div>
   );
+}
+
+function LiveResultsList({
+  tasks,
+  optimisticallyArchivedIds,
+  onArchive,
+}: {
+  tasks: readonly GoatTaskView[];
+  optimisticallyArchivedIds: ReadonlySet<string>;
+  onArchive: (task: GoatTaskView) => void;
+}) {
+  const hydrated = useHydrated();
+  if (!hydrated) {
+    return (
+      <ResultRows
+        tasks={tasks}
+        optimisticallyArchivedIds={optimisticallyArchivedIds}
+        onArchive={onArchive}
+      />
+    );
+  }
+  return (
+    <LiveResultsSubscriber
+      initialTasks={tasks}
+      optimisticallyArchivedIds={optimisticallyArchivedIds}
+      onArchive={onArchive}
+    />
+  );
+}
+
+function LiveResultsSubscriber({
+  initialTasks,
+  optimisticallyArchivedIds,
+  onArchive,
+}: {
+  initialTasks: readonly GoatTaskView[];
+  optimisticallyArchivedIds: ReadonlySet<string>;
+  onArchive: (task: GoatTaskView) => void;
+}) {
+  const collections = useMemo(() => createGoatCollections(), []);
+  const { data: rows, isLoading } = useLiveQuery((q) => q.from({ task: collections.tasks }));
+  const liveTasks = useMemo(() => (rows ?? []).map(taskRowToView), [rows]);
+  const tasks = isLoading && initialTasks.length > 0 ? initialTasks : liveTasks;
+
+  return (
+    <ResultRows
+      tasks={tasks}
+      optimisticallyArchivedIds={optimisticallyArchivedIds}
+      onArchive={onArchive}
+    />
+  );
+}
+
+function ResultRows({
+  tasks,
+  optimisticallyArchivedIds,
+  onArchive,
+}: {
+  tasks: readonly GoatTaskView[];
+  optimisticallyArchivedIds: ReadonlySet<string>;
+  onArchive: (task: GoatTaskView) => void;
+}) {
+  const sortedTasks = tasks
+    .filter((task) => !optimisticallyArchivedIds.has(task.id) && !task.archivedAt)
+    .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  if (sortedTasks.length === 0) {
+    return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No results yet.</p>;
+  }
+
+  return sortedTasks.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchive} />);
+}
+
+function taskRowToView(row: GoatTaskRow): GoatTaskView {
+  return {
+    id: row.id,
+    displayId: row.display_id,
+    name: row.name,
+    prompt: row.prompt,
+    model: row.model,
+    status: row.status,
+    stage: row.stage,
+    result: row.result,
+    error: row.error,
+    archivedAt: row.archived_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function ResultRow({
@@ -465,9 +519,7 @@ function ResultRow({
         />
 
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="truncate text-[14px] font-medium leading-tight text-ink">
-            {title}
-          </span>
+          <span className="truncate text-[14px] font-medium leading-tight text-ink">{title}</span>
           <span className="hidden truncate text-[12.5px] leading-tight text-ink-subtle sm:inline">
             {task.displayId} · {meta.detail}
           </span>
@@ -475,9 +527,7 @@ function ResultRow({
 
         <span
           className={`shrink-0 text-[12px] text-ink-subtle transition-opacity duration-150 ${
-            canArchive
-              ? "group-hover/result:opacity-0 group-focus-within/result:opacity-0"
-              : ""
+            canArchive ? "group-hover/result:opacity-0 group-focus-within/result:opacity-0" : ""
           }`}
         >
           {formatRelativeTime(task.createdAt)}
@@ -501,40 +551,22 @@ function ResultRow({
 function Bubble({ message }: { message: GoatChatUiMessage }) {
   const isUser = message.role === "user";
   const text = textFromGoatChatUiMessage(message);
-  const task = taskFromMessage(message);
   const error = message.metadata?.error;
 
-  if (task) {
+  if (!isUser) {
+    const items = getOrderedAssistantItems(message);
+
     return (
       <div className="flex flex-col gap-2">
-        {text ? (
-          <div className="flex justify-start">
-            <div className="max-w-[80%] rounded-2xl rounded-bl-md bg-surface-muted px-3 py-2 text-[13px] leading-5 text-ink">
-              <Markdown content={text} />
-            </div>
-          </div>
-        ) : null}
-        <Link
-          href={`/tasks/${encodeURIComponent(task.displayId)}`}
-          className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <CircleDotDashed
-            size={16}
-            strokeWidth={2}
-            className="shrink-0 animate-[spin_3s_linear_infinite] text-amber-500"
-          />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-[13.5px] font-medium leading-tight text-ink">
-              {task.title}
-            </span>
-            <span className="text-[12px] leading-tight text-ink-subtle">
-              {task.displayId} · Task running - added to Results
-            </span>
-          </div>
-          <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-ink-muted">
-            {task.displayId}
-          </span>
-        </Link>
+        {items.map((item) => {
+          if (item.type === "text") {
+            return (
+              <AssistantTextBubble key={item.key} text={item.text} {...(error ? { error } : {})} />
+            );
+          }
+          if (item.type === "task") return <TaskCard key={item.key} task={item.task} />;
+          return <ToolCallRow key={item.key} tool={item.tool} />;
+        })}
       </div>
     );
   }
@@ -551,6 +583,72 @@ function Bubble({ message }: { message: GoatChatUiMessage }) {
         }`}
       >
         {isUser ? text : <Markdown content={text} />}
+      </div>
+    </div>
+  );
+}
+
+function AssistantTextBubble({ text, error }: { text: string; error?: string | undefined }) {
+  return (
+    <div className="flex justify-start">
+      <div
+        className={`max-w-[80%] rounded-2xl rounded-bl-md px-3 py-2 text-[13px] leading-5 ${
+          error ? "bg-danger-bg text-danger" : "bg-surface-muted text-ink"
+        }`}
+      >
+        <Markdown content={text} />
+      </div>
+    </div>
+  );
+}
+
+function TaskCard({ task }: { task: GoatTaskCardMetadata }) {
+  return (
+    <Link
+      href={`/tasks/${encodeURIComponent(task.displayId)}`}
+      className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <CircleDotDashed
+        size={16}
+        strokeWidth={2}
+        className="shrink-0 animate-[spin_3s_linear_infinite] text-amber-500"
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[13.5px] font-medium leading-tight text-ink">
+          {task.title}
+        </span>
+        <span className="text-[12px] leading-tight text-ink-subtle">
+          {task.displayId} · Task running - added to Results
+        </span>
+      </div>
+      <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-ink-muted">
+        {task.displayId}
+      </span>
+    </Link>
+  );
+}
+
+function ToolCallRow({ tool }: { tool: ToolCallView }) {
+  const meta = getToolCallMeta(tool);
+  const Icon = meta.icon;
+  return (
+    <div
+      data-testid={`chat-tool-call-${tool.name}`}
+      className="flex max-w-[80%] items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 text-[12px] shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <Icon
+        size={14}
+        strokeWidth={2}
+        className={`shrink-0 ${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <span className="truncate font-medium leading-4 text-ink">{tool.label}</span>
+          <span className={`${meta.className} shrink-0 text-[11px] leading-4`}>
+            {tool.statusText}
+          </span>
+        </div>
+        {tool.detail ? <p className="truncate leading-4 text-ink-subtle">{tool.detail}</p> : null}
       </div>
     </div>
   );
@@ -601,31 +699,248 @@ function SubmitButton({
   );
 }
 
-function taskFromMessage(message: GoatChatUiMessage) {
-  const metadataTask = message.metadata?.task;
-  if (metadataTask) return metadataTask;
+type AssistantRenderItem =
+  | { type: "text"; key: string; text: string }
+  | { type: "task"; key: string; task: GoatTaskCardMetadata }
+  | { type: "tool"; key: string; tool: ToolCallView };
 
-  for (const part of message.parts) {
-    if (
-      part.type !== "tool-start_goat_task" ||
-      part.state !== "output-available"
-    )
+type ToolCallView = {
+  name: string;
+  label: string;
+  status: "running" | "completed" | "failed" | "waiting";
+  statusText: string;
+  detail: string | null;
+};
+
+function getOrderedAssistantItems(message: GoatChatUiMessage) {
+  const items: AssistantRenderItem[] = [];
+  let textBuffer = "";
+
+  const flushText = (key: string) => {
+    const text = textBuffer.trim();
+    textBuffer = "";
+    if (!text) return;
+    items.push({ type: "text", key, text });
+  };
+
+  for (const [index, part] of message.parts.entries()) {
+    if (part.type === "text") {
+      textBuffer += part.text;
       continue;
-    const output = part.output;
-    if (!isStartTaskToolOutput(output)) continue;
-    return {
-      id: output.taskId,
-      displayId: output.taskDisplayId,
-      title: output.taskName,
-    } satisfies NonNullable<GoatChatMessageMetadata["task"]>;
+    }
+    if (!isToolPartRecord(part)) continue;
+    const tool = toolCallViewFromPart(part);
+    if (!tool) continue;
+    flushText(`text-${index}`);
+    if (
+      part.type === START_TASK_TOOL_PART_TYPE &&
+      part.state === "output-available" &&
+      isStartTaskToolOutput(part.output)
+    ) {
+      items.push({
+        type: "task",
+        key: `task-${index}`,
+        task: taskFromOutput(part.output),
+      });
+      continue;
+    }
+    items.push({
+      type: "tool",
+      key: `tool-${index}`,
+      tool,
+    });
   }
 
+  flushText("text-end");
+
+  if (!items.some((item) => item.type === "task") && message.metadata?.task) {
+    items.push({
+      type: "task",
+      key: "task-metadata",
+      task: message.metadata.task,
+    });
+  }
+
+  return items;
+}
+
+function toolCallViewFromPart(
+  part: Record<string, unknown> & { type: string },
+): ToolCallView | null {
+  const name = toolNameFromPart(part);
+  if (!name) return null;
+  const state = typeof part.state === "string" ? part.state : "";
+  const output = part.output;
+  const failedGoatBrain =
+    name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
+      ? !output.ok
+      : false;
+  const status = failedGoatBrain ? "failed" : toolStatusFromState(state);
+  return {
+    name,
+    label: toolLabel(name),
+    status,
+    statusText: toolStatusText(status, state),
+    detail: toolDetail(name, part, status),
+  };
+}
+
+function isToolPartRecord(value: unknown): value is Record<string, unknown> & { type: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const type = (value as { type?: unknown }).type;
+  return typeof type === "string" && (type.startsWith("tool-") || type === "dynamic-tool");
+}
+
+function toolNameFromPart(part: Record<string, unknown> & { type: string }) {
+  if (part.type === "dynamic-tool") {
+    return typeof part.toolName === "string" ? part.toolName : null;
+  }
+  return part.type.slice("tool-".length);
+}
+
+function toolStatusFromState(state: string): ToolCallView["status"] {
+  if (state === "output-error" || state === "output-denied") return "failed";
+  if (state === "output-available") return "completed";
+  if (state === "approval-requested" || state === "approval-responded") return "waiting";
+  return "running";
+}
+
+function toolStatusText(status: ToolCallView["status"], state: string) {
+  if (state === "output-denied") return "Denied";
+  if (state === "approval-requested") return "Waiting";
+  if (state === "approval-responded") return "Approved";
+  if (status === "completed") return "Done";
+  if (status === "failed") return "Failed";
+  return "Running";
+}
+
+function toolLabel(name: string) {
+  if (name === GOAT_BRAIN_TOOL_NAME) return "Brain";
+  if (name === START_TASK_TOOL_NAME) return "Task";
+  return name
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function toolDetail(
+  name: string,
+  part: Record<string, unknown> & { type: string },
+  status: ToolCallView["status"],
+) {
+  if (part.state === "output-error" && typeof part.errorText === "string") {
+    return truncateToolPreview(part.errorText);
+  }
+
+  if (name === GOAT_BRAIN_TOOL_NAME) {
+    return goatBrainToolDetail(part, status);
+  }
+
+  if (name === START_TASK_TOOL_NAME) {
+    return startTaskToolDetail(part);
+  }
+
+  return formatToolInput(part.input);
+}
+
+function goatBrainToolDetail(
+  part: Record<string, unknown> & { type: string },
+  status: ToolCallView["status"],
+) {
+  if (part.state === "output-available" && isGoatBrainToolOutput(part.output)) {
+    if (!part.output.ok) {
+      return truncateToolPreview(
+        firstNonEmptyLine(part.output.error, part.output.stderr, part.output.stdout) ??
+          formatToolInput(part.input),
+      );
+    }
+    return truncateToolPreview(
+      firstNonEmptyLine(part.output.stdout, part.output.stderr) ?? formatToolInput(part.input),
+    );
+  }
+
+  const inputPreview = formatToolInput(part.input);
+  if (inputPreview) return inputPreview;
+  return status === "running" ? "Running goat_brain" : null;
+}
+
+function startTaskToolDetail(part: Record<string, unknown>) {
+  if (isRecord(part.input)) {
+    const name = typeof part.input.name === "string" ? part.input.name : null;
+    const prompt = typeof part.input.prompt === "string" ? part.input.prompt : null;
+    return truncateToolPreview(name ?? prompt);
+  }
+  return formatToolInput(part.input);
+}
+
+function formatToolInput(value: unknown) {
+  if (typeof value === "string") return truncateToolPreview(value);
+  if (!isRecord(value)) return null;
+  if (typeof value.args === "string") return truncateToolPreview(`goat_brain ${value.args}`);
+  if (typeof value.query === "string") return truncateToolPreview(`query: ${value.query}`);
+  if (typeof value.prompt === "string") return truncateToolPreview(value.prompt);
+  try {
+    return truncateToolPreview(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOutput {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.ok === "boolean" &&
+    (typeof value.stdout === "string" || value.stdout === undefined) &&
+    (typeof value.stderr === "string" || value.stderr === undefined) &&
+    (typeof value.error === "string" || value.error === undefined)
+  );
+}
+
+function firstNonEmptyLine(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const line = value?.trim().split(/\r?\n/, 1)[0]?.trim();
+    if (line) return line;
+  }
   return null;
 }
 
-function isStartTaskToolOutput(
-  value: unknown,
-): value is GoatStartTaskToolOutput {
+function truncateToolPreview(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 160 ? `${trimmed.slice(0, 157).trimEnd()}...` : trimmed;
+}
+
+function getToolCallMeta(tool: ToolCallView): {
+  icon: typeof FileText;
+  className: string;
+  spin: boolean;
+} {
+  if (tool.status === "failed") {
+    return { icon: AlertCircle, className: "text-danger", spin: false };
+  }
+  if (tool.status === "completed") {
+    return { icon: CheckCircle2, className: "text-emerald-600", spin: false };
+  }
+  if (tool.status === "waiting") {
+    return { icon: Clock, className: "text-ink-subtle", spin: false };
+  }
+  return {
+    icon: tool.name === GOAT_BRAIN_TOOL_NAME ? BookOpen : CircleDotDashed,
+    className: "text-amber-500",
+    spin: tool.name !== GOAT_BRAIN_TOOL_NAME,
+  };
+}
+
+function taskFromOutput(output: StartTaskToolOutput): GoatTaskCardMetadata {
+  return {
+    id: output.taskId,
+    displayId: output.taskDisplayId,
+    title: output.taskName,
+  };
+}
+
+function isStartTaskToolOutput(value: unknown): value is StartTaskToolOutput {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const output = value as Record<string, unknown>;
   return (
@@ -633,6 +948,10 @@ function isStartTaskToolOutput(
     typeof output.taskDisplayId === "string" &&
     typeof output.taskName === "string"
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function getTaskMeta(task: GoatTaskView): {

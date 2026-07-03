@@ -3,20 +3,15 @@ import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
 const mocks = vi.hoisted(() => {
-  const returning = vi.fn();
-  const values = vi.fn(() => ({ returning }));
-  const insert = vi.fn(() => ({ values }));
   return {
-    returning,
-    values,
-    insert,
+    execute: vi.fn(),
     triggerGoatTaskRun: vi.fn(),
   };
 });
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
-    insert: mocks.insert,
+    execute: mocks.execute,
   }),
 }));
 
@@ -25,7 +20,7 @@ vi.mock("@/lib/task-runner", () => ({
 }));
 
 vi.mock("@/lib/integrations/google-data", () => ({
-  getGoatAvailableHarnessTools: vi.fn(async () => ["exa", "goat_result"]),
+  getGoatAvailableHarnessTools: vi.fn(async () => ["exa_search", "gmail_search"]),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -41,17 +36,37 @@ describe("createGoatTaskForUser", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.values.mockReturnValue({ returning: mocks.returning });
-    mocks.insert.mockReturnValue({ values: mocks.values });
-    mocks.returning.mockResolvedValue([
+    mocks.execute.mockResolvedValue([
       {
         id: "task_1",
+        displayId: "TASK-1",
         userWorkosId: "user_1",
         name: "Research x",
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
         status: "queued",
         stage: "queued",
+        result: null,
+        error: null,
+        harnessSpec: {
+          schemaVersion: "goat.harness.v1",
+          model: DEFAULT_GOAT_MODEL,
+          systemPrompt: "",
+          initialUserMessage: "Research x",
+          tools: ["exa_search", "gmail_search"],
+          maxModelSteps: 8,
+          resultMode: "assistant_final",
+        },
+        debugTrace: {},
+        sandboxId: null,
+        attempts: 0,
+        nextRunAt: "2026-01-01T00:00:00.000Z",
+        leaseId: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        archivedAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
       },
     ]);
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -71,21 +86,7 @@ describe("createGoatTaskForUser", () => {
     });
 
     expect(task).toMatchObject({ id: "task_1", status: "queued", stage: "queued" });
-    expect(mocks.values).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userWorkosId: "user_1",
-        prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
-        status: "queued",
-        stage: "queued",
-        harnessSpec: {
-          prompt: "Research x",
-          model: DEFAULT_GOAT_MODEL,
-          tools: ["exa", "goat_result"],
-          resultMode: "freeform",
-        },
-      }),
-    );
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.triggerGoatTaskRun).toHaveBeenCalledWith(
       expect.stringMatching(/^goat_task_/),
       expect.objectContaining({ event: "goat.runner_task_created_dispatch" }),
