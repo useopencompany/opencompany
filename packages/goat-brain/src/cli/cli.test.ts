@@ -108,7 +108,11 @@ describe("goat-brain cli", () => {
       exitCode: 0,
       stdout: expect.stringContaining('Created "bundle-entry"'),
     });
-    await expect(readdir(path.join(root, "inbox"))).resolves.toEqual(["bundle-entry.md"]);
+    const inboxEntries = await readdir(path.join(root, "inbox"));
+    expect(inboxEntries.toSorted()).toEqual([".brain", "bundle-entry.md"]);
+    await expect(readdir(path.join(root, "inbox", ".brain"))).resolves.toEqual([
+      "bundle-entry.json",
+    ]);
   });
 });
 

@@ -14,6 +14,7 @@ export const DEFAULT_GOAT_BRAIN_FOLDERS = [
 ] as const;
 
 export type GoatBrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number];
+export type GoatBrainDocumentKind = "markdown" | "pdf" | "docx";
 
 export const GOAT_BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 export const GOAT_BRAIN_FOLDER_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*){0,5}$/;

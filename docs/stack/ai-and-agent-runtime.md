@@ -97,15 +97,18 @@ runtime customization requirements outgrow hosted E2B.
 
 **What it is:** Web search API.
 
-**What it does for us:** Powers the optional `@exa` hosted agent tool. Agents use Exa search for
-source discovery and vertical people/company/news/research lookups, Exa contents for clean
-LLM-ready extraction from known URLs, and Exa answer for short cited web-backed answers. The runner
-also keeps a direct HTTP `web_fetch` fallback for simple HTML/text pages.
+**What it does for us:** Powers the optional `@exa` hosted agent tool and Goat main chat's
+lightweight `web_search` tool. Agents use Exa search for source discovery and vertical
+people/company/news/research lookups, Exa contents for clean LLM-ready extraction from known URLs,
+and Exa answer for short cited web-backed answers. Goat chat uses one cheap Exa search for simple
+current public-web questions. The runner also keeps a direct HTTP `web_fetch` fallback for simple
+HTML/text pages.
 
 **Where it is used:**
 
 - `packages/agent-runtime/src/tools.ts`.
 - `apps/runner/src/hosted-tools.ts`.
+- `apps/goat/app/api/chat/route.ts`.
 - `apps/web/components/agent-editor/tools.ts`.
 - `EXA_API_KEY` in `.env.example`.
 

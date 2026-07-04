@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   type AgentToolDefinition,
   buildCapabilityDiscovery,
+  executeExaSearchRequest,
   getRuntimeToolHelp,
   type RuntimeToolName,
   searchRuntimeTools,
@@ -590,52 +591,15 @@ async function executeExaSearch(
     throw new MissingEnvError("EXA_API_KEY", "EXA_API_KEY is required for exa_search.");
   }
 
-  const request = buildExaSearchRequest(args);
-  const response = await fetch("https://api.exa.ai/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": env.exaApiKey,
-    },
-    body: JSON.stringify(request),
+  const result = await executeExaSearchRequest({
+    apiKey: env.exaApiKey,
+    args,
     signal,
   });
 
-  const body = await readJsonResponse(response, "search");
-  if (!response.ok) {
-    const message =
-      isRecord(body) && typeof body.error === "string" ? body.error : response.statusText;
-    throw new Error(`Exa search failed (${response.status}): ${message}`);
-  }
-  if (!isRecord(body) || !Array.isArray(body.results)) {
-    throw new Error("Exa search returned an unexpected response shape.");
-  }
-
-  const requestId = typeof body.requestId === "string" ? body.requestId : undefined;
-  const searchType = typeof body.searchType === "string" ? body.searchType : request.type;
-  const costDollars = readCostDollars(body.costDollars);
-  const costUsdMicros = Math.round(costDollars * 1_000_000);
-
   return {
-    output: {
-      requestId,
-      searchType,
-      costDollars,
-      results: body.results
-        .map((result) => normalizeExaResult(result))
-        .slice(0, request.numResults),
-    },
-    usage: {
-      provider: "exa",
-      operation: "search",
-      ...(requestId ? { providerRequestId: requestId } : {}),
-      costUsdMicros,
-      rawUsage: {
-        requestId,
-        searchType,
-        costDollars: isRecord(body.costDollars) ? body.costDollars : {},
-      },
-    },
+    output: result.output,
+    usage: result.usage,
   };
 }
 
@@ -1004,62 +968,6 @@ async function executeWebFetch(args: unknown, signal: AbortSignal): Promise<Host
       },
     },
   };
-}
-
-function buildExaSearchRequest(args: unknown) {
-  const record = asRecord(args);
-  const query = readString(record, "query").trim();
-  if (!query) throw new Error("exa_search query must not be empty.");
-
-  const category = readOptionalEnum(record, "category", [
-    "company",
-    "people",
-    "research paper",
-    "news",
-    "personal site",
-    "financial report",
-  ]);
-  const startPublishedDate = readOptionalString(record, "startPublishedDate");
-  const endPublishedDate = readOptionalString(record, "endPublishedDate");
-  const includeDomains = readOptionalStringArray(record, "includeDomains");
-  const excludeDomains = readOptionalStringArray(record, "excludeDomains");
-
-  if (
-    (category === "company" || category === "people") &&
-    (excludeDomains.length > 0 || startPublishedDate || endPublishedDate)
-  ) {
-    throw new Error(
-      "Exa company and people category searches do not support excludeDomains or published date filters.",
-    );
-  }
-  if (category === "people" && includeDomains.some((domain) => !isLinkedInDomain(domain))) {
-    throw new Error("Exa people category searches only support LinkedIn includeDomains.");
-  }
-
-  const numResults = Math.min(Math.max(readOptionalNumber(record, "numResults") ?? 5, 1), 10);
-  const fresh = readOptionalBoolean(record, "fresh") ?? false;
-  const contents: Record<string, unknown> = { highlights: true };
-  if (fresh) contents.maxAgeHours = 0;
-
-  return omitUndefined({
-    query,
-    type:
-      readOptionalEnum(record, "type", [
-        "auto",
-        "fast",
-        "instant",
-        "deep-lite",
-        "deep",
-        "deep-reasoning",
-      ]) ?? "auto",
-    numResults,
-    category,
-    includeDomains: nonEmptyArray(includeDomains),
-    excludeDomains: nonEmptyArray(excludeDomains),
-    startPublishedDate,
-    endPublishedDate,
-    contents,
-  });
 }
 
 function buildExaContentsRequest(args: unknown) {

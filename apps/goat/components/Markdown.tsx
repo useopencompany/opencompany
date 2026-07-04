@@ -23,12 +23,7 @@ const MARKDOWN_COMPONENTS: Components = {
       );
     }
     return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer noopener"
-        className={LINK_CLASS}
-      >
+      <a href={href} target="_blank" rel="noreferrer noopener" className={LINK_CLASS}>
         {children}
       </a>
     );

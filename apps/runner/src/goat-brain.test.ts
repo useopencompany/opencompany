@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { serializeGoatBrainDocument } from "@opencompany/goat-brain";
+import {
+  goatBrainEntryFromLegacyMarkdown,
+  goatBrainSidecarRelativePath,
+  serializeGoatBrainDocument,
+  serializeGoatBrainPayload,
+  serializeGoatBrainSidecar,
+} from "@opencompany/goat-brain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const dbMocks = vi.hoisted(() => ({
@@ -24,7 +30,7 @@ afterEach(() => {
 });
 
 describe("materializeGoatBrainToLocalRoot", () => {
-  it("writes the bundled CLI and current markdown docs to a local root", async () => {
+  it("writes the bundled CLI and payload/sidecar docs to a local root", async () => {
     const root = await tempRoot();
     const content = brainDoc({
       id: "market-map",
@@ -53,8 +59,19 @@ describe("materializeGoatBrainToLocalRoot", () => {
       });
 
       await expect(readFile(path.join(root, "research/market-map.md"), "utf8")).resolves.toBe(
-        content,
+        "Known market context.",
       );
+      const sidecar = JSON.parse(
+        await readFile(path.join(root, "research/.brain/market-map.json"), "utf8"),
+      );
+      expect(sidecar).toMatchObject({
+        schemaVersion: "goat.brain.entry.v1",
+        id: "market-map",
+        folder: "research",
+        payload: {
+          path: "research/market-map.md",
+        },
+      });
       await expect(readFile(snapshot.cliPath, "utf8")).resolves.toContain("goat-brain");
       expect(snapshot.files).toEqual([
         expect.objectContaining({
@@ -105,6 +122,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
             folderPath: "meetings",
             title: "Customer call",
             content,
+            body: "Customer wants a faster onboarding path.",
             contentHash: hash(content),
           }),
         ]),
@@ -163,6 +181,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
             brainId: "pricing-decision",
             folderPath: "decisions",
             content: newContent,
+            body: "New pricing truth.",
             contentHash: hash(newContent),
           }),
         ]),
@@ -281,6 +300,95 @@ describe("syncGoatBrainFromLocalRoot", () => {
           }),
         ]),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("syncs body and timeline changes from payload/sidecar pairs", async () => {
+    const root = await tempRoot();
+    const baseContent = brainDoc({
+      id: "research-note",
+      folder: "research",
+      title: "Research note",
+      truth: "Original body.",
+    });
+    const base = brainRow({
+      documentId: "doc_1",
+      brainId: "research-note",
+      folderPath: "research",
+      content: baseContent,
+    });
+    const entry = {
+      ...goatBrainEntryFromLegacyMarkdown(baseContent),
+      body: "Edited body.",
+      timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Sidecar update." }],
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    };
+    const db = createGoatBrainDb({ selectResults: [[base]] });
+    dbMocks.getDb.mockReturnValue(db);
+
+    try {
+      await writeBrainFile(root, "research/research-note.md", serializeGoatBrainPayload(entry));
+      await writeBrainFile(
+        root,
+        goatBrainSidecarRelativePath("research", "research-note"),
+        serializeGoatBrainSidecar(entry),
+      );
+      await syncGoatBrainFromLocalRoot({
+        root,
+        userWorkosId: "user_1",
+        taskId: "task_1",
+        baseSnapshot: snapshotFor(base),
+      });
+
+      expect(db.updatedValues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            brainId: "research-note",
+            body: "Edited body.",
+            timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Sidecar update." }],
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores an invalid sidecar without deleting the current DB doc", async () => {
+    const root = await tempRoot();
+    const content = brainDoc({
+      id: "research-note",
+      folder: "research",
+      title: "Research note",
+      truth: "Original body.",
+    });
+    const current = brainRow({
+      documentId: "doc_1",
+      brainId: "research-note",
+      folderPath: "research",
+      content,
+    });
+    const db = createGoatBrainDb({ selectResults: [[current]] });
+    dbMocks.getDb.mockReturnValue(db);
+
+    try {
+      await writeBrainFile(root, "research/research-note.md", "Edited body.");
+      await writeBrainFile(
+        root,
+        goatBrainSidecarRelativePath("research", "research-note"),
+        JSON.stringify({ schemaVersion: "goat.brain.entry.v1", id: "research-note" }),
+      );
+      await syncGoatBrainFromLocalRoot({
+        root,
+        userWorkosId: "user_1",
+        taskId: "task_1",
+        baseSnapshot: snapshotFor(current),
+      });
+
+      expect(db.updatedValues).toEqual([]);
+      expect(db.deleteWhereCalls).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

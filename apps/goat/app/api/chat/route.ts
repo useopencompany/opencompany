@@ -1,3 +1,4 @@
+import { executeExaSearchRequest } from "@opencompany/agent-runtime";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import {
   GOAT_METRICS,
@@ -18,9 +19,9 @@ import {
 } from "@/lib/chat";
 import {
   createOpenCompanyChatDebugTrace,
+  createOpenCompanyChatSystemPrompt,
   createOpenCompanyChatToolContext,
   normalizeAgentText,
-  OPENCOMPANY_CHAT_SYSTEM_PROMPT,
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
@@ -28,6 +29,8 @@ import {
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
   textFromGoatChatUiMessage,
+  type WebSearchToolInput,
+  type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import { validateGoatChatInput } from "@/lib/chat-validation";
 import { createGoatTaskForUser } from "@/lib/tasks";
@@ -64,9 +67,11 @@ export async function POST(request: Request): Promise<Response> {
   if (!gatewayApiKey) {
     return new Response("Goat chat is not configured.", { status: 503 });
   }
+  const exaApiKey = process.env.EXA_API_KEY?.trim();
 
   const store = createDbGoatChatStore();
   const startedAt = performance.now();
+  const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
   const chatSpan = startGoatSpan(GOAT_SPANS.chatTurn, {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
@@ -132,6 +137,24 @@ export async function POST(request: Request): Promise<Response> {
         gatewayApiKey,
         signal: request.signal,
       }),
+    ...(exaApiKey
+      ? {
+          webSearch: (toolInput) =>
+            executeChatWebSearch({
+              toolInput,
+              apiKey: exaApiKey,
+              signal: request.signal,
+              currentDate,
+              attributes: {
+                ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+                "goat.chat_session_id": turn.session.id,
+                "goat.chat_message_id": turn.userMessage.id,
+                "goat.model": turn.session.model,
+              },
+              chatSpan,
+            }),
+        }
+      : {}),
     startTask: async (task) => {
       const created = await createGoatTaskForUser({
         userWorkosId: context.user.workosUserId,
@@ -166,9 +189,11 @@ export async function POST(request: Request): Promise<Response> {
   const gateway = createGateway({ apiKey: gatewayApiKey });
   const result = streamText({
     model: gateway(turn.session.model),
-    system: OPENCOMPANY_CHAT_SYSTEM_PROMPT,
+    system: createOpenCompanyChatSystemPrompt({
+      currentDate,
+      webSearchEnabled: Boolean(exaApiKey),
+    }),
     messages: await convertToModelMessages(turn.messages),
-    maxOutputTokens: 900,
     stopWhen: stepCountIs(3),
     abortSignal: request.signal,
     tools: toolContext.tools,
@@ -250,6 +275,97 @@ export async function POST(request: Request): Promise<Response> {
       });
     },
   });
+}
+
+async function executeChatWebSearch(input: {
+  toolInput: WebSearchToolInput;
+  apiKey: string;
+  signal: AbortSignal;
+  currentDate: Date;
+  attributes: Record<string, string | number | boolean | null | undefined>;
+  chatSpan: ReturnType<typeof startGoatSpan>;
+}): Promise<WebSearchToolOutput> {
+  const baseAttributes = {
+    ...input.attributes,
+    "goat.web_search_provider": "exa",
+    "goat.web_search_operation": "search",
+  };
+  try {
+    const output = await executeGoatChatExaSearch(input);
+    const attributes = {
+      ...baseAttributes,
+      "goat.outcome": "success",
+      "goat.web_search_cost_usd_micros": output.costUsdMicros ?? 0,
+      "goat.web_search_result_count": output.results.length,
+    };
+    input.chatSpan.setAttributes({
+      "goat.web_search_used": true,
+      "goat.web_search_cost_usd_micros": output.costUsdMicros ?? 0,
+      "goat.web_search_result_count": output.results.length,
+    });
+    recordGoatCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
+    if (output.costUsdMicros) {
+      recordGoatCounter(GOAT_METRICS.chatWebSearchCostUsdMicros, output.costUsdMicros, attributes);
+    }
+    return output;
+  } catch (error) {
+    const attributes = {
+      ...baseAttributes,
+      "goat.outcome": "failure",
+    };
+    input.chatSpan.setAttributes({
+      "goat.web_search_used": true,
+      "goat.web_search_failed": true,
+    });
+    recordGoatCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Web search failed.",
+    };
+  }
+}
+
+async function executeGoatChatExaSearch(input: {
+  toolInput: WebSearchToolInput;
+  apiKey: string;
+  signal: AbortSignal;
+  currentDate: Date;
+}): Promise<Extract<WebSearchToolOutput, { ok: true }>> {
+  const startPublishedDate = recencyStartPublishedDate(
+    input.toolInput.recencyDays,
+    input.currentDate,
+  );
+  const search = await executeExaSearchRequest({
+    apiKey: input.apiKey,
+    args: {
+      query: input.toolInput.query,
+      type: "fast",
+      numResults: 5,
+      ...(startPublishedDate ? { startPublishedDate } : {}),
+    },
+    signal: input.signal,
+    defaults: { type: "fast", numResults: 5 },
+  });
+
+  return {
+    ok: true,
+    query: input.toolInput.query,
+    searchedAt: input.currentDate.toISOString(),
+    results: search.output.results.map((result) => ({
+      ...(result.title ? { title: result.title } : {}),
+      ...(result.url ? { url: result.url } : {}),
+      ...(result.publishedDate ? { publishedDate: result.publishedDate } : {}),
+      ...(result.author ? { author: result.author } : {}),
+      highlights: result.highlights ?? [],
+    })),
+    ...(search.output.requestId ? { requestId: search.output.requestId } : {}),
+    costUsdMicros: search.usage.costUsdMicros,
+  };
+}
+
+function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
+  if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
+  return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function toStreamMessageMetadata(

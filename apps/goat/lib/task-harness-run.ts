@@ -1,3 +1,4 @@
+import { getAgentModelDefinition } from "@opencompany/agent-runtime";
 import type {
   GoatTaskEvent,
   GoatTaskEventType,
@@ -12,7 +13,6 @@ import type {
   GoatTaskToolName,
   GoatTaskToolUsage,
 } from "@opencompany/db/goat-schema";
-import { getAgentModelDefinition } from "@opencompany/agent-runtime";
 
 export type GoatTaskRunTaskInput =
   | {

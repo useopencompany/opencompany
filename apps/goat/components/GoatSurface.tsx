@@ -31,17 +31,18 @@ import {
 } from "react";
 import { Markdown } from "@/components/Markdown";
 import { useHydrated } from "@/components/useHydrated";
-import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolOutput,
   type GoatChatSessionView,
+  type GoatChatSummaryView,
   type GoatChatUiMessage,
   type GoatTaskCardMetadata,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   type StartTaskToolOutput,
   textFromGoatChatUiMessage,
+  WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { createGoatCollections, type GoatTaskRow } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
@@ -69,17 +70,19 @@ export function GoatSurface({
   tasks,
   defaultModel,
   initialChat,
+  recentChats = [],
 }: {
   tasks: readonly GoatTaskView[];
   defaultModel: string;
   initialChat: GoatChatSessionView | null;
+  recentChats?: readonly GoatChatSummaryView[];
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const lastError = useRef<string | null>(null);
-  const locallyClosedSessionIdsRef = useRef<Set<string>>(new Set());
+  const locallyHiddenSessionIdsRef = useRef<Set<string>>(new Set());
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,7 +94,6 @@ export function GoatSurface({
     () => new Set(),
   );
   const [, startArchiveTransition] = useTransition();
-  const [, startCloseTransition] = useTransition();
   const transport = useMemo(
     () =>
       new DefaultChatTransport<GoatChatUiMessage>({
@@ -121,7 +123,9 @@ export function GoatSurface({
     onFinish: ({ message }) => {
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
+        locallyHiddenSessionIdsRef.current.delete(sessionId);
         setChatSessionId(sessionId);
+        router.replace(`/?chat=${encodeURIComponent(sessionId)}`);
       }
       router.refresh();
     },
@@ -131,6 +135,7 @@ export function GoatSurface({
   });
   const isGenerating = status === "submitted" || status === "streaming";
   const hasMessages = messages.length > 0;
+  const showThinkingBubble = isGenerating && shouldShowThinkingBubble(messages);
 
   useEffect(() => {
     if (isGenerating) return;
@@ -146,7 +151,7 @@ export function GoatSurface({
       ((!initialChat && messages.length > 0) ||
         (serverIsSameChat && messages.length > serverMessageCount));
     if (serverIsBehindLocal) return;
-    if (initialChat && locallyClosedSessionIdsRef.current.has(initialChat.id)) {
+    if (initialChat && locallyHiddenSessionIdsRef.current.has(initialChat.id)) {
       return;
     }
 
@@ -234,25 +239,16 @@ export function GoatSurface({
   };
 
   const closeChat = useCallback(() => {
-    const closingSessionId = chatSessionId;
+    const hidingSessionId = chatSessionId;
     if (isGenerating) void stop();
-    if (closingSessionId) locallyClosedSessionIdsRef.current.add(closingSessionId);
+    if (hidingSessionId) locallyHiddenSessionIdsRef.current.add(hidingSessionId);
     setMode("home");
     setMessages([]);
     setChatSessionId(null);
     clearError();
+    router.replace("/");
     requestAnimationFrame(() => inputRef.current?.focus());
-    if (!closingSessionId) return;
-
-    startCloseTransition(async () => {
-      const result = await closeGoatChatSessionAction(closingSessionId);
-      if (!result.ok) {
-        locallyClosedSessionIdsRef.current.delete(closingSessionId);
-        toast.error(result.error ?? "Could not close chat.");
-      }
-      router.refresh();
-    });
-  }, [chatSessionId, clearError, isGenerating, router, setMessages, startCloseTransition, stop]);
+  }, [chatSessionId, clearError, isGenerating, router, setMessages, stop]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -316,6 +312,16 @@ export function GoatSurface({
 
             <section className="flex flex-col gap-1">
               <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                Chats
+              </h2>
+              <ChatHistoryList
+                chats={recentChats}
+                onSelect={(chatId) => locallyHiddenSessionIdsRef.current.delete(chatId)}
+              />
+            </section>
+
+            <section className="flex flex-col gap-1">
+              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
                 Results
               </h2>
               <LiveResultsList
@@ -358,7 +364,7 @@ export function GoatSurface({
               {messages.map((message) => (
                 <Bubble key={message.id} message={message} />
               ))}
-              {status === "submitted" ? <ThinkingBubble /> : null}
+              {showThinkingBubble ? <ThinkingBubble /> : null}
             </div>
           </div>
         </div>
@@ -402,6 +408,48 @@ export function GoatSurface({
           </div>
         </div>
       </form>
+    </div>
+  );
+}
+
+function ChatHistoryList({
+  chats,
+  onSelect,
+}: {
+  chats: readonly GoatChatSummaryView[];
+  onSelect: (chatId: string) => void;
+}) {
+  if (chats.length === 0) {
+    return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No chats yet.</p>;
+  }
+
+  return (
+    <div className="flex flex-col">
+      {chats.map((chat) => (
+        <Link
+          key={chat.id}
+          href={`/?chat=${encodeURIComponent(chat.id)}`}
+          onClick={() => onSelect(chat.id)}
+          className="group/chat flex min-h-11 items-center gap-3 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <Clock
+            size={15}
+            strokeWidth={2}
+            className="shrink-0 text-ink-subtle group-hover/chat:text-ink-muted"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-[14px] font-medium leading-tight text-ink">
+                {chat.title}
+              </span>
+              <span className="shrink-0 text-[12px] leading-tight text-ink-subtle">
+                {formatRelativeTime(chat.updatedAt)}
+              </span>
+            </div>
+            <p className="truncate text-[12.5px] leading-4 text-ink-subtle">{chat.preview}</p>
+          </div>
+        </Link>
+      ))}
     </div>
   );
 }
@@ -656,11 +704,24 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
 function ThinkingBubble() {
   return (
     <div className="flex justify-start">
-      <div className="rounded-2xl rounded-bl-md bg-surface-muted px-3 py-2 text-[13px] leading-5 text-ink-subtle">
-        Thinking...
+      <div
+        role="status"
+        aria-live="polite"
+        aria-label="Goat is thinking"
+        className="rounded-2xl rounded-bl-md bg-surface-muted px-3 py-2"
+      >
+        <span className="inline-block animate-[goat-thinking-shimmer_1.45s_ease-in-out_infinite] bg-[linear-gradient(100deg,var(--color-ink-subtle)_0%,var(--color-ink)_45%,var(--color-ink-subtle)_90%)] bg-[length:220%_100%] bg-clip-text text-[13px] font-medium leading-5 text-transparent">
+          Thinking
+        </span>
       </div>
     </div>
   );
+}
+
+function shouldShowThinkingBubble(messages: readonly GoatChatUiMessage[]) {
+  const lastMessage = messages.at(-1);
+  if (!lastMessage || lastMessage.role === "user") return true;
+  return getOrderedAssistantItems(lastMessage).length === 0;
 }
 
 function SubmitButton({
@@ -816,6 +877,7 @@ function toolStatusText(status: ToolCallView["status"], state: string) {
 function toolLabel(name: string) {
   if (name === GOAT_BRAIN_TOOL_NAME) return "Brain";
   if (name === START_TASK_TOOL_NAME) return "Task";
+  if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   return name
     .split(/[_-]+/)
     .filter(Boolean)

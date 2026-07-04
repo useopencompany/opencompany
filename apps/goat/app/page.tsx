@@ -1,14 +1,21 @@
 import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
-import { loadCurrentGoatChatSession } from "@/lib/chat";
+import { listCurrentUserRecentGoatChats, loadCurrentGoatChatSessionById } from "@/lib/chat";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export const dynamic = "force-dynamic";
 
-export default async function GoatHomePage() {
-  const [tasks, initialChat] = await Promise.all([
+type GoatHomePageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function GoatHomePage({ searchParams }: GoatHomePageProps) {
+  const params = await searchParams;
+  const chatParam = Array.isArray(params.chat) ? params.chat[0] : params.chat;
+  const [tasks, initialChat, recentChats] = await Promise.all([
     listCurrentUserGoatTasks(),
-    loadCurrentGoatChatSession(),
+    loadCurrentGoatChatSessionById(chatParam),
+    listCurrentUserRecentGoatChats(),
   ]);
   const taskViews = tasks.map(
     (task): GoatTaskView => ({
@@ -29,7 +36,12 @@ export default async function GoatHomePage() {
 
   return (
     <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <GoatSurface tasks={taskViews} defaultModel={DEFAULT_GOAT_MODEL} initialChat={initialChat} />
+      <GoatSurface
+        tasks={taskViews}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={initialChat}
+        recentChats={recentChats}
+      />
     </main>
   );
 }

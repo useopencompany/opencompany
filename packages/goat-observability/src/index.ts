@@ -27,6 +27,8 @@ export const GOAT_METRICS = {
   chatTurnsTotal: "goat.chat.turns_total",
   chatTurnDurationMs: "goat.chat.turn_duration_ms",
   chatTasksStartedTotal: "goat.chat.tasks_started_total",
+  chatWebSearchesTotal: "goat.chat.web_searches_total",
+  chatWebSearchCostUsdMicros: "goat.chat.web_search_cost_usd_micros",
   taskDispatchesTotal: "goat.task_dispatches_total",
   taskDispatchDurationMs: "goat.task_dispatch_duration_ms",
   taskRunsTotal: "goat.task_runs_total",

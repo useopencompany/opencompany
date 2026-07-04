@@ -167,6 +167,12 @@ export type GoatBrainDocumentRow = {
   folder_path: string;
   title: string | null;
   content: string;
+  body: string;
+  timeline: unknown[];
+  kind: string;
+  mime_type: string | null;
+  original_file_name: string | null;
+  asset_storage_key: string | null;
   related: unknown[];
   sources: unknown[];
   content_hash: string;

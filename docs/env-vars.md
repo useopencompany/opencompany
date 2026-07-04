@@ -183,7 +183,8 @@ Set these in the separate Vercel project for Goat:
 | `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` | Required with Goat OTel | OTLP HTTP base endpoint for SigNoz, for example `https://ingest.<region>.signoz.cloud:443` or `http://signoz:4318`. |
 | `GOAT_OTEL_EXPORTER_OTLP_HEADERS` | SigNoz Cloud only | Comma-separated OTLP headers, usually `signoz-ingestion-key=<key>`. Leave empty for most self-hosted SigNoz setups. |
 
-The runner also needs `EXA_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `E2B_API_KEY`,
+Goat main chat uses `EXA_API_KEY` for optional lightweight public-web search. The runner also needs
+`EXA_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `E2B_API_KEY`,
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`, and Google OAuth client credentials for Goat tasks that use
 Gmail or Google Calendar. Goat does not introduce a separate chat model key.
 
@@ -257,7 +258,7 @@ Set these in the Render `opencompany-runner` service.
 | `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Downloads attachment bytes (images/PDFs) to inline into model calls. Must match Vercel. |
 | `E2B_API_KEY` | Yes | Creates/connects E2B sandboxes. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
-| `EXA_API_KEY` | Goat/Exa only | Required for Goat tasks and for agents that enable Exa. |
+| `EXA_API_KEY` | Goat/Exa only | Required for Goat main chat web search, Goat tasks, and agents that enable Exa. |
 | `X_API_BEARER_TOKEN` | No | Required only for agents that enable the X read-only hosted tool. |
 | `APIFY_API_TOKEN` | No | Required only for agents that enable Apify-backed Instagram or TikTok profile/feed/comment/search tools. |
 | `SUPADATA_API_KEY` | No | Required only for agents that enable Supadata-backed YouTube tools or TikTok/Instagram direct-media transcript/metadata tools. |

@@ -1,0 +1,92 @@
+import { describe, expect, it } from "vitest";
+import {
+  type GoatBrainEntry,
+  goatBrainEntryFromLegacyMarkdown,
+  goatBrainPayloadRelativePath,
+  goatBrainSidecarRelativePath,
+  parseGoatBrainSidecar,
+  serializeGoatBrainPayload,
+  serializeGoatBrainSidecar,
+  serializeLegacyGoatBrainEntry,
+  validateGoatBrainSidecar,
+} from "./entry";
+
+const entry: GoatBrainEntry = {
+  id: "launch-plan",
+  folder: "ideas",
+  title: "Launch plan",
+  kind: "markdown",
+  mimeType: "text/markdown",
+  body: "Launch should start with founder-led beta.",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-02T00:00:00.000Z",
+  related: [{ type: "owner", target: "jane" }],
+  sources: [{ ref: "meeting:launch", title: "Launch meeting" }],
+  tags: ["launch"],
+  timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Discussed launch sequencing." }],
+};
+
+describe("goat brain canonical entries", () => {
+  it("parses legacy embedded markdown into canonical body and timeline fields", () => {
+    const legacy = serializeLegacyGoatBrainEntry(entry);
+    const parsed = goatBrainEntryFromLegacyMarkdown(legacy);
+
+    expect(parsed).toMatchObject({
+      id: "launch-plan",
+      folder: "ideas",
+      title: "Launch plan",
+      kind: "markdown",
+      mimeType: "text/markdown",
+      body: "Launch should start with founder-led beta.",
+      related: [{ type: "owner", target: "jane" }],
+      sources: [{ ref: "meeting:launch", title: "Launch meeting" }],
+      tags: ["launch"],
+      timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Discussed launch sequencing." }],
+    });
+  });
+
+  it("serializes body-only payloads with hidden sidecar metadata", () => {
+    const payload = serializeGoatBrainPayload(entry);
+    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+
+    expect(payload).toBe("Launch should start with founder-led beta.");
+    expect(goatBrainPayloadRelativePath(entry.folder, entry.id)).toBe("ideas/launch-plan.md");
+    expect(goatBrainSidecarRelativePath(entry.folder, entry.id)).toBe(
+      "ideas/.brain/launch-plan.json",
+    );
+    expect(sidecar).toMatchObject({
+      schemaVersion: "goat.brain.entry.v1",
+      id: "launch-plan",
+      folder: "ideas",
+      payload: {
+        path: "ideas/launch-plan.md",
+        sizeBytes: entry.body.length,
+      },
+    });
+  });
+
+  it("validates sidecar payload path, size, and hash", () => {
+    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    const valid = validateGoatBrainSidecar({
+      sidecar,
+      payloadContent: entry.body,
+      payloadRelativePath: "ideas/launch-plan.md",
+    });
+
+    expect(valid).toMatchObject({ ok: true, entry: { body: entry.body } });
+    expect(
+      validateGoatBrainSidecar({
+        sidecar,
+        payloadContent: `${entry.body}\nChanged.`,
+        payloadRelativePath: "ideas/launch-plan.md",
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      validateGoatBrainSidecar({
+        sidecar,
+        payloadContent: entry.body,
+        payloadRelativePath: "ideas/other.md",
+      }),
+    ).toMatchObject({ ok: false });
+  });
+});

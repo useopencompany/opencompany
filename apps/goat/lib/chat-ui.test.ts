@@ -1,8 +1,8 @@
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import { describe, expect, it } from "vitest";
 import {
-  START_TASK_TOOL_PART_TYPE,
   type GoatStoredChatMessage,
+  START_TASK_TOOL_PART_TYPE,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";

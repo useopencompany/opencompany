@@ -6,6 +6,8 @@ export const START_TASK_TOOL_NAME = "start_task";
 export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
 export const GOAT_BRAIN_TOOL_NAME = "goat_brain";
 export const GOAT_BRAIN_TOOL_PART_TYPE = `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
+export const WEB_SEARCH_TOOL_NAME = "web_search";
+export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -45,6 +47,33 @@ export type GoatBrainToolOutput = {
   error?: string;
 };
 
+export type WebSearchToolInput = {
+  query: string;
+  recencyDays?: 7 | 30 | 90;
+};
+
+export type WebSearchToolResult = {
+  title?: string;
+  url?: string;
+  publishedDate?: string;
+  author?: string;
+  highlights: string[];
+};
+
+export type WebSearchToolOutput =
+  | {
+      ok: true;
+      query: string;
+      searchedAt: string;
+      results: WebSearchToolResult[];
+      requestId?: string;
+      costUsdMicros?: number;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 export type GoatChatTools = {
   start_task: {
     input: StartTaskToolInput;
@@ -53,6 +82,10 @@ export type GoatChatTools = {
   goat_brain: {
     input: GoatBrainToolInput;
     output: GoatBrainToolOutput;
+  };
+  web_search: {
+    input: WebSearchToolInput;
+    output: WebSearchToolOutput;
   };
 };
 
@@ -67,6 +100,14 @@ export type GoatChatSessionView = {
   title: string;
   model: AgentModelId;
   messages: GoatChatUiMessage[];
+};
+
+export type GoatChatSummaryView = {
+  id: string;
+  title: string;
+  model: AgentModelId;
+  preview: string;
+  updatedAt: string;
 };
 
 export type GoatStoredChatMessage = Pick<

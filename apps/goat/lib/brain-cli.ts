@@ -13,18 +13,31 @@ import {
 } from "@opencompany/db/goat-schema";
 import {
   DEFAULT_GOAT_BRAIN_FOLDERS,
+  DEFAULT_GOAT_BRAIN_RELATION_TYPE,
+  GOAT_BRAIN_MARKDOWN_MIME_TYPE,
   type GoatBrainDocument as GoatBrainContractDocument,
+  type GoatBrainDocumentKind,
+  type GoatBrainEntry,
   type GoatBrainFrontmatter,
+  type GoatBrainTimelineEntry,
+  goatBrainEntryFromLegacyMarkdown,
   goatBrainFolderFromRelativePath,
   goatBrainIdFromRelativePath,
+  goatBrainPayloadRelativePath,
   goatBrainRelativePath,
+  goatBrainSidecarRelativePath,
   isSafeGoatBrainRelativePath,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   normalizeGoatBrainId,
   parseGoatBrainDocument,
+  parseGoatBrainSidecar,
   serializeGoatBrainDocument,
+  serializeGoatBrainPayload,
+  serializeGoatBrainSidecar,
+  serializeLegacyGoatBrainEntry,
   validateGoatBrainDocument,
+  validateGoatBrainSidecar,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { eq, sql } from "drizzle-orm";
@@ -34,6 +47,11 @@ const MAX_GOAT_BRAIN_CHAT_FILE_BYTES = 256 * 1024;
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 20_000;
 
 type GoatBrainDocumentRow = typeof goatBrainDocuments.$inferSelect;
+type LocalBrainFile = {
+  relativePath: string;
+  content: string;
+  sidecarContent?: string;
+};
 
 type MaterializedGoatBrainSnapshot = {
   files: MaterializedGoatBrainFile[];
@@ -121,10 +139,20 @@ async function materializeGoatBrainToLocalRoot(input: {
 
   const files: MaterializedGoatBrainFile[] = [];
   for (const document of documents) {
-    const relativePath = goatBrainRelativePath(document.folderPath, document.brainId);
+    const entry = entryFromDocumentRow(document);
+    const relativePath = goatBrainPayloadRelativePath(
+      entry.folder,
+      entry.id,
+      entry.kind,
+      entry.originalFileName,
+    );
+    const sidecarPath = goatBrainSidecarRelativePath(entry.folder, entry.id);
     const fullPath = path.join(input.root, relativePath);
+    const sidecarFullPath = path.join(input.root, sidecarPath);
     await mkdir(path.dirname(fullPath), { recursive: true });
-    await writeFile(fullPath, document.content, "utf8");
+    await mkdir(path.dirname(sidecarFullPath), { recursive: true });
+    await writeFile(fullPath, serializeGoatBrainPayload(entry), "utf8");
+    await writeFile(sidecarFullPath, serializeGoatBrainSidecar(entry), "utf8");
     files.push({
       documentId: document.id,
       brainId: document.brainId,
@@ -248,9 +276,18 @@ async function syncGoatBrainFromLocalRoot(input: {
   const seenBasePaths = new Set<string>();
 
   for (const file of files) {
+    const pathId = goatBrainIdFromRelativePath(file.relativePath);
+    const baseForPath =
+      baseByPath.get(file.relativePath) ?? (pathId ? baseByBrainId.get(pathId) : undefined);
     const validated = validateLocalBrainFile(file);
-    if (!validated.ok) continue;
-    const base = baseByPath.get(file.relativePath) ?? baseByBrainId.get(validated.brainId);
+    if (!validated.ok) {
+      if (baseForPath) {
+        seenBasePaths.add(baseForPath.relativePath);
+        seenBrainIds.add(baseForPath.brainId);
+      }
+      continue;
+    }
+    const base = baseForPath ?? baseByBrainId.get(validated.brainId);
     if (base) {
       seenBasePaths.add(base.relativePath);
       seenBrainIds.add(base.brainId);
@@ -314,14 +351,29 @@ async function syncGoatBrainFromLocalRoot(input: {
 
 async function readLocalBrainFiles(root: string) {
   const relativePaths = await walkLocalMarkdown(root, "");
-  const files: { relativePath: string; content: string }[] = [];
+  const files: LocalBrainFile[] = [];
   for (const relativePath of relativePaths) {
     if (!isSafeGoatBrainRelativePath(relativePath)) continue;
     const content = await readFile(path.join(root, relativePath), "utf8");
     if (Buffer.byteLength(content, "utf8") > MAX_GOAT_BRAIN_CHAT_FILE_BYTES) continue;
-    files.push({ relativePath, content });
+    const sidecarContent = await readLocalSidecar(root, relativePath);
+    files.push({ relativePath, content, ...(sidecarContent ? { sidecarContent } : {}) });
   }
   return files;
+}
+
+async function readLocalSidecar(root: string, relativePath: string) {
+  const id = goatBrainIdFromRelativePath(relativePath);
+  const folder = goatBrainFolderFromRelativePath(relativePath);
+  if (!id || !folder) return null;
+  try {
+    return await readFile(path.join(root, goatBrainSidecarRelativePath(folder, id)), "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && (error as { code?: string }).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function walkLocalMarkdown(root: string, relDir: string): Promise<string[]> {
@@ -343,6 +395,7 @@ async function walkLocalMarkdown(root: string, relDir: string): Promise<string[]
   for (const entry of entries) {
     const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
+      if (entry.name === ".brain") continue;
       found.push(...(await walkLocalMarkdown(root, childRel)));
     } else if (entry.isFile() && entry.name.endsWith(".md")) {
       found.push(childRel);
@@ -351,13 +404,19 @@ async function walkLocalMarkdown(root: string, relDir: string): Promise<string[]
   return found.sort();
 }
 
-function validateLocalBrainFile(file: { relativePath: string; content: string }):
+function validateLocalBrainFile(file: LocalBrainFile):
   | {
       ok: true;
       brainId: string;
       folderPath: string;
       title: string;
       content: string;
+      body: string;
+      timeline: GoatBrainTimelineEntry[];
+      kind: GoatBrainDocumentKind;
+      mimeType: string;
+      originalFileName: string | null;
+      assetStorageKey: string | null;
       contentHash: string;
       sizeBytes: number;
       related: GoatBrainRelation[];
@@ -368,6 +427,44 @@ function validateLocalBrainFile(file: { relativePath: string; content: string })
   const pathId = goatBrainIdFromRelativePath(file.relativePath);
   const pathFolder = goatBrainFolderFromRelativePath(file.relativePath);
   if (!pathId || !pathFolder) return { ok: false };
+
+  if (file.sidecarContent) {
+    const sidecarValidation = validateGoatBrainSidecar({
+      sidecar: parseGoatBrainSidecar(file.sidecarContent),
+      payloadContent: file.content,
+      payloadRelativePath: file.relativePath,
+    });
+    if (!sidecarValidation.ok) return { ok: false };
+    const entry = sidecarValidation.entry;
+    const content = serializeLegacyGoatBrainEntry(entry);
+    const parsed = parseGoatBrainDocument(content);
+    const validation = validateGoatBrainDocument(parsed, pathId, content);
+    if (!validation.ok || entry.folder !== pathFolder || entry.id !== pathId) return { ok: false };
+    const sizeBytes = Buffer.byteLength(content, "utf8");
+    return {
+      ok: true,
+      brainId: entry.id,
+      folderPath: entry.folder,
+      title: entry.title,
+      content,
+      body: entry.body,
+      timeline: entry.kind === "markdown" ? entry.timeline : [],
+      kind: entry.kind,
+      mimeType: entry.mimeType,
+      originalFileName: entry.originalFileName ?? null,
+      assetStorageKey: entry.assetStorageKey ?? null,
+      contentHash: hashContent(content),
+      sizeBytes,
+      related: entry.related,
+      sources: entry.sources,
+      document: {
+        frontmatter: parsed.frontmatter as GoatBrainFrontmatter,
+        title: entry.title,
+        compiledTruth: entry.body,
+        timeline: entry.kind === "markdown" ? entry.timeline : [],
+      },
+    };
+  }
 
   const parsed = parseGoatBrainDocument(file.content);
   const validation = validateGoatBrainDocument(parsed, pathId, file.content);
@@ -380,12 +477,19 @@ function validateLocalBrainFile(file: { relativePath: string; content: string })
 
   const sizeBytes = Buffer.byteLength(file.content, "utf8");
   const title = (frontmatter.title ?? parsed.title).trim() || frontmatter.id;
+  const entry = goatBrainEntryFromLegacyMarkdown(file.content);
   return {
     ok: true,
     brainId: frontmatter.id,
     folderPath: frontmatter.folder,
     title,
     content: file.content,
+    body: entry.body,
+    timeline: entry.timeline,
+    kind: entry.kind,
+    mimeType: entry.mimeType,
+    originalFileName: entry.originalFileName ?? null,
+    assetStorageKey: entry.assetStorageKey ?? null,
     contentHash: hashContent(file.content),
     sizeBytes,
     related: frontmatter.related.map((relation) => ({
@@ -460,6 +564,12 @@ async function updateBrainDocument(input: {
         folder_path = ${input.validated.folderPath},
         title = ${input.validated.title},
         content = ${input.validated.content},
+        body = ${input.validated.body},
+        timeline = ${JSON.stringify(input.validated.timeline)}::jsonb,
+        kind = ${input.validated.kind},
+        mime_type = ${input.validated.mimeType},
+        original_file_name = ${input.validated.originalFileName},
+        asset_storage_key = ${input.validated.assetStorageKey},
         related = ${JSON.stringify(input.validated.related)}::jsonb,
         sources = ${JSON.stringify(input.validated.sources)}::jsonb,
         content_hash = ${input.validated.contentHash},
@@ -486,6 +596,12 @@ async function insertBrainDocument(input: {
       folderPath: input.validated.folderPath,
       title: input.validated.title,
       content: input.validated.content,
+      body: input.validated.body,
+      timeline: input.validated.timeline,
+      kind: input.validated.kind,
+      mimeType: input.validated.mimeType,
+      originalFileName: input.validated.originalFileName,
+      assetStorageKey: input.validated.assetStorageKey,
       related: input.validated.related,
       sources: input.validated.sources,
       contentHash: input.validated.contentHash,
@@ -682,6 +798,77 @@ function truncate(value: string, maxLength: number) {
 
 function hashContent(content: string) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function entryFromDocumentRow(row: GoatBrainDocumentRow): GoatBrainEntry {
+  const legacyEntry = safeLegacyEntry(row.content);
+  const kind = isGoatBrainDocumentKind(row.kind) ? row.kind : "markdown";
+  return {
+    id: row.brainId,
+    folder: row.folderPath,
+    title: row.title?.trim() || legacyEntry?.title || row.brainId,
+    kind,
+    mimeType: row.mimeType?.trim() || mimeTypeForKind(kind),
+    body: row.body || legacyEntry?.body || "",
+    createdAt: toIsoString(row.createdAt),
+    updatedAt: toIsoString(row.updatedAt),
+    related: normalizeEntryRelations(row.related ?? legacyEntry?.related ?? []),
+    sources: row.sources ?? legacyEntry?.sources ?? [],
+    tags: legacyEntry?.tags ?? [],
+    timeline:
+      kind === "markdown" ? normalizeTimeline(row.timeline, legacyEntry?.timeline ?? []) : [],
+    ...(row.originalFileName ? { originalFileName: row.originalFileName } : {}),
+    ...(row.assetStorageKey ? { assetStorageKey: row.assetStorageKey } : {}),
+  };
+}
+
+function safeLegacyEntry(content: string): GoatBrainEntry | null {
+  try {
+    return goatBrainEntryFromLegacyMarkdown(content);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTimeline(value: unknown, fallback: GoatBrainTimelineEntry[]) {
+  if (!Array.isArray(value)) return fallback;
+  return value.flatMap((entry): GoatBrainTimelineEntry[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.at !== "string" || typeof record.body !== "string") return [];
+    return [{ at: record.at, body: record.body }];
+  });
+}
+
+function normalizeEntryRelations(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((relation): GoatBrainEntry["related"] => {
+    if (!relation || typeof relation !== "object") return [];
+    const record = relation as Record<string, unknown>;
+    if (typeof record.target !== "string") return [];
+    return [
+      {
+        type: typeof record.type === "string" ? record.type : DEFAULT_GOAT_BRAIN_RELATION_TYPE,
+        target: record.target,
+      },
+    ];
+  });
+}
+
+function isGoatBrainDocumentKind(value: unknown): value is GoatBrainDocumentKind {
+  return value === "markdown" || value === "pdf" || value === "docx";
+}
+
+function mimeTypeForKind(kind: GoatBrainDocumentKind) {
+  if (kind === "pdf") return "application/pdf";
+  if (kind === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  return GOAT_BRAIN_MARKDOWN_MIME_TYPE;
+}
+
+function toIsoString(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 type ValidatedLocalBrainFile = Extract<ReturnType<typeof validateLocalBrainFile>, { ok: true }>;

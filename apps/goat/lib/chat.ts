@@ -14,14 +14,19 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   type GoatChatSessionView,
+  type GoatChatSummaryView,
   type GoatStoredChatMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { toGoatTaskTitle } from "@/lib/task-display";
 
+const GOAT_RECENT_CHAT_LIMIT = 8;
+const GOAT_CHAT_PREVIEW_MAX_LENGTH = 96;
+
 export type {
   GoatChatMessageMetadata,
   GoatChatSessionView,
+  GoatChatSummaryView,
   GoatChatUiMessage,
   GoatStoredChatMessage,
   StartTaskToolOutput,
@@ -37,6 +42,7 @@ export type GoatChatStore = {
     userWorkosId: string;
     sessionId?: string | null;
   }): Promise<GoatChatSession | null>;
+  listOpenSessions(input: { userWorkosId: string; limit: number }): Promise<GoatChatSession[]>;
   createSession(input: {
     userWorkosId: string;
     model: AgentModelId;
@@ -63,6 +69,59 @@ export async function loadCurrentGoatChatSession(): Promise<GoatChatSessionView 
 
   const messages = await store.listMessages(session.id);
   return toChatSessionView(session, messages);
+}
+
+export async function loadCurrentGoatChatSessionById(
+  sessionId: string | null | undefined,
+): Promise<GoatChatSessionView | null> {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return null;
+
+  const { user } = await currentGoatUser();
+  return loadGoatChatSessionByIdForUser({
+    userWorkosId: user.workosUserId,
+    sessionId: trimmed,
+  });
+}
+
+export async function loadGoatChatSessionByIdForUser(
+  input: { userWorkosId: string; sessionId: string },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<GoatChatSessionView | null> {
+  const session = await store.findOpenSession({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.sessionId,
+  });
+  if (!session) return null;
+
+  const messages = await store.listMessages(session.id);
+  return toChatSessionView(session, messages);
+}
+
+export async function listCurrentUserRecentGoatChats(
+  limit = GOAT_RECENT_CHAT_LIMIT,
+): Promise<GoatChatSummaryView[]> {
+  const { user } = await currentGoatUser();
+  const store = createDbGoatChatStore();
+  return listRecentGoatChatsForUser({ userWorkosId: user.workosUserId, limit }, store);
+}
+
+export async function listRecentGoatChatsForUser(
+  input: { userWorkosId: string; limit?: number },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<GoatChatSummaryView[]> {
+  const limit = Math.max(
+    1,
+    Math.min(input.limit ?? GOAT_RECENT_CHAT_LIMIT, GOAT_RECENT_CHAT_LIMIT),
+  );
+  const sessions = await store.listOpenSessions({ userWorkosId: input.userWorkosId, limit });
+  const summaries = await Promise.all(
+    sessions.map(async (session) => {
+      const messages = await store.listMessages(session.id);
+      return toChatSummaryView(session, messages);
+    }),
+  );
+  return summaries;
 }
 
 export async function createGoatChatUserTurn(
@@ -157,6 +216,20 @@ export function createDbGoatChatStore(): GoatChatStore {
         .limit(1);
 
       return session ?? null;
+    },
+
+    async listOpenSessions(input) {
+      return getDb()
+        .select()
+        .from(goatChatSessions)
+        .where(
+          and(
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            isNull(goatChatSessions.closedAt),
+          ),
+        )
+        .orderBy(desc(goatChatSessions.updatedAt))
+        .limit(input.limit);
     },
 
     async createSession(input) {
@@ -256,6 +329,30 @@ function toChatSessionView(
   };
 }
 
+function toChatSummaryView(
+  session: GoatChatSession,
+  messages: readonly GoatStoredChatMessage[],
+): GoatChatSummaryView {
+  return {
+    id: session.id,
+    title: session.title,
+    model: session.model,
+    preview: previewFromMessages(messages),
+    updatedAt: session.updatedAt.toISOString(),
+  };
+}
+
+function previewFromMessages(messages: readonly Pick<GoatStoredChatMessage, "content">[]) {
+  const content =
+    messages
+      .toReversed()
+      .map((message) => message.content.replace(/\s+/g, " ").trim())
+      .find(Boolean) ?? "No messages yet.";
+
+  if (content.length <= GOAT_CHAT_PREVIEW_MAX_LENGTH) return content;
+  return `${content.slice(0, GOAT_CHAT_PREVIEW_MAX_LENGTH - 1).trimEnd()}...`;
+}
+
 async function findOrCreateOpenSession(input: {
   store: GoatChatStore;
   userWorkosId: string;
@@ -263,11 +360,13 @@ async function findOrCreateOpenSession(input: {
   model: AgentModelId;
   prompt: string;
 }) {
-  const existing = await input.store.findOpenSession({
-    userWorkosId: input.userWorkosId,
-    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-  });
-  if (existing) return existing;
+  if (input.sessionId) {
+    const existing = await input.store.findOpenSession({
+      userWorkosId: input.userWorkosId,
+      sessionId: input.sessionId,
+    });
+    if (existing) return existing;
+  }
 
   return input.store.createSession({
     userWorkosId: input.userWorkosId,

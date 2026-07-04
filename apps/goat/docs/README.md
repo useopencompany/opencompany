@@ -131,7 +131,7 @@ Entry points:
 - Inserts the durable initial `goat.task_messages` user row in the same transaction.
 - Best-effort dispatches the runner through `triggerGoatTaskRun`.
 
-Available harness tools are user-specific:
+Available task harness tools are user-specific:
 
 - `exa_search` is always available.
 - Gmail operation tools are included only when the user has a connected Gmail integration.
@@ -249,7 +249,7 @@ process. The runner:
 
 If the final assistant content is empty, the task fails. There is no `goat_result` tool.
 
-Available harness tools:
+Available task harness tools:
 
 - `exa_search`: runs in the runner process against Exa.
 - `gmail_search`
@@ -376,6 +376,8 @@ Common changes and where they belong:
 - Change when chat starts a task: `OPENCOMPANY_CHAT_SYSTEM_PROMPT` and
   `createOpenCompanyChatToolContext` in `apps/goat/lib/chat-agent.ts`; prompt blocks live in
   `apps/goat/lib/prompts/main-chat.ts`.
+- Change lightweight chat web search: `web_search` in `apps/goat/lib/chat-agent.ts` and the Exa
+  callback in `apps/goat/app/api/chat/route.ts`.
 - Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
   `apps/goat/components/GoatSurface.tsx`.
 - Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.
@@ -397,7 +399,8 @@ Common changes and where they belong:
 
 - Direct chat is not durable beyond persisted messages. It does not use runner leases.
 - Goat tasks are text-result only. They do not persist files or artifacts from task tools.
-- Gateway and Exa keys are used in the runner process. Google credentials stay server-side.
+- Gateway and Exa keys are used in the Goat route and runner process. Google credentials stay
+  server-side.
 - Debug traces can contain prompts, tool arguments, snippets, and truncated private Google results.
   Treat them as sensitive application data.
 - The task worker reclaims expired running work, but failed tasks are terminal unless a future

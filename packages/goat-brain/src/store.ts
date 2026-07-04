@@ -2,7 +2,22 @@ import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseGoatBrainDocument } from "./document";
-import { goatBrainIdFromRelativePath, goatBrainRelativePath } from "./paths";
+import {
+  type GoatBrainEntry,
+  goatBrainEntryFromLegacyDocument,
+  goatBrainPayloadRelativePath,
+  goatBrainSidecarRelativePath,
+  parseGoatBrainSidecar,
+  serializeGoatBrainPayload,
+  serializeGoatBrainSidecar,
+  serializeLegacyGoatBrainEntry,
+  validateGoatBrainSidecar,
+} from "./entry";
+import {
+  goatBrainFolderFromRelativePath,
+  goatBrainIdFromRelativePath,
+  goatBrainRelativePath,
+} from "./paths";
 import type { GoatBrainDocument } from "./schema";
 import { type GoatBrainValidationResult, validateGoatBrainDocument } from "./validate";
 
@@ -25,7 +40,8 @@ export async function listGoatBrainFiles(root: string): Promise<StoredGoatBrainF
   for (const relativePath of relativePaths) {
     const id = goatBrainIdFromRelativePath(relativePath);
     if (!id) continue;
-    const source = await readFile(path.join(root, relativePath), "utf8");
+    const payload = await readFile(path.join(root, relativePath), "utf8");
+    const source = await sourceFromSidecarOrPayload(root, relativePath, payload);
     files.push({ relativePath, id, source });
   }
   return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
@@ -65,12 +81,30 @@ export async function writeGoatBrainDocumentText(
   await rename(tmp, target);
 }
 
+export async function writeGoatBrainEntry(root: string, entry: GoatBrainEntry): Promise<string> {
+  const payloadPath = goatBrainPayloadRelativePath(
+    entry.folder,
+    entry.id,
+    entry.kind,
+    entry.originalFileName,
+  );
+  const sidecarPath = goatBrainSidecarRelativePath(entry.folder, entry.id);
+  await writeGoatBrainDocumentText(root, payloadPath, serializeGoatBrainPayload(entry));
+  await writeGoatBrainDocumentText(root, sidecarPath, serializeGoatBrainSidecar(entry));
+  return payloadPath;
+}
+
 export function pathForGoatBrainDocument(doc: GoatBrainDocument): string {
   return goatBrainRelativePath(doc.frontmatter.folder, doc.frontmatter.id);
 }
 
 export async function removeGoatBrainFile(root: string, relativePath: string): Promise<void> {
   await rm(path.join(root, relativePath), { force: true });
+  const id = goatBrainIdFromRelativePath(relativePath);
+  const folder = goatBrainFolderFromRelativePath(relativePath);
+  if (id && folder) {
+    await rm(path.join(root, goatBrainSidecarRelativePath(folder, id)), { force: true });
+  }
 }
 
 async function walkMarkdown(root: string, relDir: string): Promise<string[]> {
@@ -85,6 +119,7 @@ async function walkMarkdown(root: string, relDir: string): Promise<string[]> {
   for (const entry of entries) {
     const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
+      if (entry.name === ".brain") continue;
       found.push(...(await walkMarkdown(root, childRel)));
     } else if (entry.isFile() && entry.name.endsWith(".md")) {
       found.push(childRel.split(path.sep).join("/"));
@@ -97,4 +132,31 @@ function isNotFound(error: unknown): boolean {
   return Boolean(
     error && typeof error === "object" && (error as { code?: string }).code === "ENOENT",
   );
+}
+
+async function sourceFromSidecarOrPayload(root: string, relativePath: string, payload: string) {
+  const id = goatBrainIdFromRelativePath(relativePath);
+  const folder = goatBrainFolderFromRelativePath(relativePath);
+  if (!id || !folder) return payload;
+  let sidecarSource: string;
+  try {
+    sidecarSource = await readFile(
+      path.join(root, goatBrainSidecarRelativePath(folder, id)),
+      "utf8",
+    );
+  } catch (error) {
+    if (isNotFound(error)) return payload;
+    throw error;
+  }
+  const validation = validateGoatBrainSidecar({
+    sidecar: parseGoatBrainSidecar(sidecarSource),
+    payloadContent: payload,
+    payloadRelativePath: relativePath,
+  });
+  if (!validation.ok) return payload;
+  return serializeLegacyGoatBrainEntry(validation.entry);
+}
+
+export function entryFromWritableGoatBrainDocument(doc: GoatBrainDocument): GoatBrainEntry {
+  return goatBrainEntryFromLegacyDocument(doc);
 }

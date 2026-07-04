@@ -2,10 +2,12 @@ import "@testing-library/jest-dom/vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatUiMessage,
   START_TASK_TOOL_PART_TYPE,
+  WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
@@ -14,12 +16,16 @@ const chatMock = vi.hoisted(() => ({
   status: "ready" as "ready" | "submitted" | "streaming" | "error",
   sendMessage: vi.fn(),
   stop: vi.fn(),
+  finishSessionId: null as string | null,
+}));
+
+const routerMock = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  replace: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    refresh: vi.fn(),
-  }),
+  useRouter: () => routerMock,
 }));
 
 vi.mock("@/lib/chat-actions", () => ({
@@ -33,7 +39,10 @@ vi.mock("@/lib/tasks", () => ({
 vi.mock("@ai-sdk/react", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {
-    useChat: (options: { messages?: GoatChatUiMessage[] }) => {
+    useChat: (options: {
+      messages?: GoatChatUiMessage[];
+      onFinish?: (event: { message: GoatChatUiMessage }) => void;
+    }) => {
       const [messages, setMessages] = React.useState<GoatChatUiMessage[]>(
         () => options.messages ?? [],
       );
@@ -58,6 +67,16 @@ vi.mock("@ai-sdk/react", async () => {
               parts: [{ type: "text", text: message.text }],
             },
           ]);
+          if (chatMock.finishSessionId) {
+            options.onFinish?.({
+              message: {
+                id: "assistant_1",
+                role: "assistant",
+                metadata: { sessionId: chatMock.finishSessionId },
+                parts: [{ type: "text", text: "Done." }],
+              },
+            });
+          }
         },
       };
     },
@@ -67,8 +86,12 @@ vi.mock("@ai-sdk/react", async () => {
 describe("GoatSurface chat streaming UI", () => {
   beforeEach(() => {
     chatMock.status = "ready";
+    chatMock.finishSessionId = null;
     chatMock.sendMessage.mockReset();
     chatMock.stop.mockReset();
+    routerMock.refresh.mockReset();
+    routerMock.replace.mockReset();
+    vi.mocked(closeGoatChatSessionAction).mockClear();
   });
 
   it("clears the composer and paints the user message immediately", async () => {
@@ -99,6 +122,42 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(screen.getByText("Hello Goat")).toBeInTheDocument();
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
+  });
+
+  it("renders recent chat history with links to each chat", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Market research",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Compare the latest pricing.",
+            updatedAt: "2026-07-02T17:44:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    const chatLink = screen.getByRole("link", { name: /Market research/ });
+    expect(chatLink).toHaveAttribute("href", "/?chat=chat_1");
+    expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
+  });
+
+  it("updates the URL when a new chat returns a session id", async () => {
+    const user = userEvent.setup();
+    chatMock.finishSessionId = "goat_chat_123";
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(routerMock.replace).toHaveBeenCalledWith("/?chat=goat_chat_123");
+    expect(routerMock.refresh).toHaveBeenCalled();
   });
 
   it("keeps a completed existing chat turn visible while server props refresh", async () => {
@@ -160,6 +219,8 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
     expect(screen.getByText("No results yet.")).toBeInTheDocument();
+    expect(routerMock.replace).toHaveBeenCalledWith("/");
+    expect(closeGoatChatSessionAction).not.toHaveBeenCalled();
   });
 
   it("closes the open chat when Escape is pressed", async () => {
@@ -202,6 +263,66 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Stop response" }));
 
     expect(chatMock.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a thinking indicator while streaming before assistant output arrives", () => {
+    chatMock.status = "streaming";
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "user_1",
+              role: "user",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "Hello Goat" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Goat is thinking" })).toBeInTheDocument();
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
+  });
+
+  it("hides the thinking indicator once assistant output is visible", () => {
+    chatMock.status = "streaming";
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "user_1",
+              role: "user",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "Hello Goat" }],
+            },
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "Streaming answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Streaming answer")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Goat is thinking" })).not.toBeInTheDocument();
   });
 
   it("renders assistant text from UI message parts", () => {
@@ -418,6 +539,52 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("No issues found.")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("Document was not found.")).toBeInTheDocument();
+  });
+
+  it("renders persisted web search tool calls with a generic tool row", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                {
+                  type: WEB_SEARCH_TOOL_PART_TYPE,
+                  toolCallId: "tool_web_1",
+                  state: "output-available",
+                  input: { query: "latest Google updates" },
+                  output: {
+                    ok: true,
+                    query: "latest Google updates",
+                    searchedAt: "2026-07-04T12:00:00.000Z",
+                    results: [
+                      {
+                        title: "Google Blog",
+                        url: "https://blog.google",
+                        highlights: ["Google shared a current product update."],
+                      },
+                    ],
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("chat-tool-call-web_search")).toBeInTheDocument();
+    expect(screen.getByText("Web Search")).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText("query: latest Google updates")).toBeInTheDocument();
   });
 
   it("labels freshly created result rows as just now", () => {

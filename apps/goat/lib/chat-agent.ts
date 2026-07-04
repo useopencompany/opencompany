@@ -1,5 +1,5 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { createGateway, generateText, jsonSchema, stepCountIs, tool } from "ai";
+import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
 import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolInput,
@@ -7,18 +7,24 @@ import {
   START_TASK_TOOL_NAME,
   type StartTaskToolInput,
   type StartTaskToolOutput,
+  WEB_SEARCH_TOOL_NAME,
+  type WebSearchToolInput,
+  type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import {
+  createOpenCompanyChatSystemPrompt,
   GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
-  OPENCOMPANY_CHAT_SYSTEM_PROMPT,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
   START_TASK_REASON_DESCRIPTION,
   START_TASK_TOOL_DESCRIPTION,
+  WEB_SEARCH_QUERY_DESCRIPTION,
+  WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
+  WEB_SEARCH_TOOL_DESCRIPTION,
 } from "@/lib/prompts";
 
-export { OPENCOMPANY_CHAT_SYSTEM_PROMPT } from "@/lib/prompts";
+export { createOpenCompanyChatSystemPrompt, OPENCOMPANY_CHAT_SYSTEM_PROMPT } from "@/lib/prompts";
 
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 
@@ -36,6 +42,7 @@ export type StartedTask = {
 
 type GenerateTextLike = typeof generateText;
 type GoatBrainCliRunner = (input: GoatBrainToolInput) => Promise<GoatBrainToolOutput>;
+type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 
 export type OpenCompanyChatAgentDebugTrace = {
   schemaVersion: typeof OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION;
@@ -59,6 +66,8 @@ export async function runOpenCompanyChatAgent(input: {
   gatewayApiKey: string;
   startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
   runBrainCli?: GoatBrainCliRunner;
+  webSearch?: WebSearchRunner;
+  currentDate?: Date | string;
   generateTextImpl?: GenerateTextLike;
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
@@ -72,16 +81,21 @@ export async function runOpenCompanyChatAgent(input: {
     model: input.model,
     startTask: input.startTask,
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
+    ...(input.webSearch ? { webSearch: input.webSearch } : {}),
   });
+
+  const systemPromptInput = {
+    webSearchEnabled: Boolean(input.webSearch),
+    ...(input.currentDate ? { currentDate: input.currentDate } : {}),
+  };
 
   const result = await generate({
     model: gateway(input.model),
-    system: OPENCOMPANY_CHAT_SYSTEM_PROMPT,
+    system: createOpenCompanyChatSystemPrompt(systemPromptInput),
     messages: input.messages.map((message) => ({
       role: message.role,
       content: message.content,
     })),
-    maxOutputTokens: 900,
     stopWhen: stepCountIs(3),
     tools: toolContext.tools,
   });
@@ -105,73 +119,122 @@ export function createOpenCompanyChatToolContext(input: {
   model: AgentModelId;
   startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
   runBrainCli?: GoatBrainCliRunner;
+  webSearch?: WebSearchRunner;
 }) {
   let startedTask: StartedTask | null = null;
+  let webSearchCallCount = 0;
+
+  const tools: ToolSet = {
+    [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
+      description: GOAT_BRAIN_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<GoatBrainToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          args: {
+            type: "string",
+            description: GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
+          },
+        },
+        required: ["args"],
+      }),
+      execute: async (args) => {
+        if (!input.runBrainCli) {
+          throw new Error("goat_brain is not configured for this chat.");
+        }
+        const rawArgs = typeof args.args === "string" ? args.args.trim() : "";
+        if (!rawArgs) throw new Error("goat_brain args are required.");
+        return input.runBrainCli({ args: rawArgs });
+      },
+    }),
+    [START_TASK_TOOL_NAME]: tool<StartTaskToolInput, StartTaskToolOutput>({
+      description: START_TASK_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<StartTaskToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          prompt: {
+            type: "string",
+            description: START_TASK_PROMPT_DESCRIPTION,
+          },
+          name: {
+            type: "string",
+            description: START_TASK_NAME_DESCRIPTION,
+          },
+          reason: {
+            type: "string",
+            description: START_TASK_REASON_DESCRIPTION,
+          },
+        },
+        required: ["prompt", "name"],
+      }),
+      execute: async (args) => {
+        if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
+
+        const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+        if (!prompt) {
+          throw new Error("start_task prompt is required.");
+        }
+        const name = typeof args.name === "string" ? args.name.trim() : "";
+
+        startedTask = await input.startTask({
+          prompt,
+          ...(name ? { name } : {}),
+          model: input.model,
+        });
+        return toStartTaskToolOutput(startedTask, "queued");
+      },
+    }),
+  };
+
+  const webSearch = input.webSearch;
+  if (webSearch) {
+    tools[WEB_SEARCH_TOOL_NAME] = tool<WebSearchToolInput, WebSearchToolOutput>({
+      description: WEB_SEARCH_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<WebSearchToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            description: WEB_SEARCH_QUERY_DESCRIPTION,
+          },
+          recencyDays: {
+            type: "number",
+            enum: [7, 30, 90],
+            description: WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
+          },
+        },
+        required: ["query"],
+      }),
+      execute: async (args) => {
+        if (webSearchCallCount >= 1) {
+          return {
+            ok: false,
+            error:
+              "web_search is limited to one search per chat turn. Start a task for deeper research.",
+          };
+        }
+        webSearchCallCount += 1;
+
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        if (!query) return { ok: false, error: "web_search query must not be empty." };
+        const recencyDays =
+          args.recencyDays === 7 || args.recencyDays === 30 || args.recencyDays === 90
+            ? args.recencyDays
+            : undefined;
+
+        return webSearch({
+          query,
+          ...(recencyDays ? { recencyDays } : {}),
+        });
+      },
+    });
+  }
 
   return {
     getStartedTask: () => startedTask,
-    tools: {
-      [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
-        description: GOAT_BRAIN_TOOL_DESCRIPTION,
-        inputSchema: jsonSchema<GoatBrainToolInput>({
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            args: {
-              type: "string",
-              description: GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
-            },
-          },
-          required: ["args"],
-        }),
-        execute: async (args) => {
-          if (!input.runBrainCli) {
-            throw new Error("goat_brain is not configured for this chat.");
-          }
-          const rawArgs = typeof args.args === "string" ? args.args.trim() : "";
-          if (!rawArgs) throw new Error("goat_brain args are required.");
-          return input.runBrainCli({ args: rawArgs });
-        },
-      }),
-      [START_TASK_TOOL_NAME]: tool<StartTaskToolInput, StartTaskToolOutput>({
-        description: START_TASK_TOOL_DESCRIPTION,
-        inputSchema: jsonSchema<StartTaskToolInput>({
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            prompt: {
-              type: "string",
-              description: START_TASK_PROMPT_DESCRIPTION,
-            },
-            name: {
-              type: "string",
-              description: START_TASK_NAME_DESCRIPTION,
-            },
-            reason: {
-              type: "string",
-              description: START_TASK_REASON_DESCRIPTION,
-            },
-          },
-          required: ["prompt", "name"],
-        }),
-        execute: async (args) => {
-          if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
-
-          const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
-          if (!prompt) {
-            throw new Error("start_task prompt is required.");
-          }
-          const name = typeof args.name === "string" ? args.name.trim() : "";
-
-          startedTask = await input.startTask({
-            prompt,
-            ...(name ? { name } : {}),
-            model: input.model,
-          });
-          return toStartTaskToolOutput(startedTask, "queued");
-        },
-      }),
-    },
+    tools,
   };
 }
 

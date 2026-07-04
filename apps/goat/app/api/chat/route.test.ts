@@ -36,6 +36,8 @@ vi.mock("ai", () => ({
 
 describe("POST /api/chat", () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
   });
@@ -115,6 +117,138 @@ describe("POST /api/chat", () => {
       gatewayApiKey: "test-key",
       signal: request.signal,
     });
+  });
+
+  it("wires Exa-backed web_search into the model stream when configured", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:00:00.000Z"));
+    vi.stubEnv("EXA_API_KEY", "exa_test");
+    mockAuth();
+    mockCreateTurn();
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      void url;
+      void init;
+      return new Response(
+        JSON.stringify({
+          requestId: "exa_req_123",
+          searchType: "fast",
+          costDollars: { total: 0.007 },
+          results: [
+            {
+              title: "Google Blog",
+              url: "https://blog.google",
+              publishedDate: "2026-07-04",
+              author: "Google",
+              highlights: ["Google shared a current product update."],
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let webSearchToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        tools?: { web_search?: { execute?: unknown } };
+      };
+      expect(typedOptions.system).toContain("Current date: 2026-07-04.");
+      expect(typedOptions.system).toContain("Use the web_search tool inside chat");
+      const tool = typedOptions.tools?.web_search;
+      if (typeof tool?.execute !== "function") {
+        throw new Error("web_search execute function was not configured.");
+      }
+      webSearchToolPromise = tool.execute({
+        query: "latest Google updates",
+        recencyDays: 30,
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    try {
+      const request = jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "What are the latest updates on Google?" }],
+        },
+      });
+      const response = await POST(request);
+      const output = await webSearchToolPromise;
+      const [, fetchInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const fetchBody = JSON.parse(String(fetchInit.body)) as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(output).toEqual({
+        ok: true,
+        query: "latest Google updates",
+        searchedAt: "2026-07-04T12:00:00.000Z",
+        results: [
+          {
+            title: "Google Blog",
+            url: "https://blog.google",
+            publishedDate: "2026-07-04",
+            author: "Google",
+            highlights: ["Google shared a current product update."],
+          },
+        ],
+        requestId: "exa_req_123",
+        costUsdMicros: 7000,
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.exa.ai/search",
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": "exa_test",
+          },
+        }),
+      );
+      expect(fetchBody).toEqual({
+        query: "latest Google updates",
+        type: "fast",
+        numResults: 5,
+        startPublishedDate: "2026-06-04T12:00:00.000Z",
+        contents: { highlights: true },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("omits web_search when EXA_API_KEY is absent", async () => {
+    vi.stubEnv("EXA_API_KEY", "");
+    mockAuth();
+    mockCreateTurn();
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        tools?: { web_search?: unknown };
+      };
+      expect(typedOptions.tools?.web_search).toBeUndefined();
+      expect(typedOptions.system).not.toContain("Use the web_search tool inside chat");
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "What are the latest updates on Google?" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
   });
 });
 

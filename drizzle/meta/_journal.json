@@ -568,6 +568,13 @@
       "when": 1783168558111,
       "tag": "0080_vengeful_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1783178646047,
+      "tag": "0081_unusual_riptide",
+      "breakpoints": true
     }
   ]
 }

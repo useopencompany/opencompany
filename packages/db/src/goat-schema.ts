@@ -72,6 +72,11 @@ export type GoatBrainSource = {
   title?: string;
   capturedAt?: string;
 };
+export type GoatBrainDocumentKind = "markdown" | "pdf" | "docx";
+export type GoatBrainTimelineEntry = {
+  at: string;
+  body: string;
+};
 export type GoatBrainDocumentVersionOperation = "overwrite" | "delete";
 
 export type GoatTaskMessageRole = "user" | "assistant" | "tool";
@@ -175,6 +180,15 @@ export const goatBrainDocuments = goat.table(
     folderPath: text("folder_path").notNull(),
     title: text("title"),
     content: text("content").notNull().default(""),
+    body: text("body").notNull().default(""),
+    timeline: jsonb("timeline")
+      .$type<GoatBrainTimelineEntry[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    kind: text("kind").$type<GoatBrainDocumentKind>().notNull().default("markdown"),
+    mimeType: text("mime_type"),
+    originalFileName: text("original_file_name"),
+    assetStorageKey: text("asset_storage_key"),
     related: jsonb("related").$type<GoatBrainRelation[]>().notNull().default(sql`'[]'::jsonb`),
     sources: jsonb("sources").$type<GoatBrainSource[]>().notNull().default(sql`'[]'::jsonb`),
     contentHash: text("content_hash").notNull(),
@@ -200,6 +214,10 @@ export const goatBrainDocuments = goat.table(
     userUpdatedIdx: index("goat_brain_documents_user_updated_idx").on(
       table.userWorkosId,
       table.updatedAt,
+    ),
+    kindCheck: check(
+      "goat_brain_documents_kind_check",
+      sql`${table.kind} IN ('markdown', 'pdf', 'docx')`,
     ),
   }),
 );

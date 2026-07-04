@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_GOAT_BRAIN_FOLDERS,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-  GOAT_BRAIN_TIMELINE_SENTINEL,
   type GoatBrainDocument,
   type GoatBrainRelation,
   type GoatBrainSource,
+  goatBrainEntryFromLegacyDocument,
   goatBrainRelativePath,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
@@ -17,13 +17,12 @@ import {
   normalizeGoatBrainId,
   nowIso,
   parseGoatBrainDocument,
-  pathForGoatBrainDocument,
   queryGoatBrain,
   removeGoatBrainFile,
   resolveGoatBrainRoot,
   serializeGoatBrainDocument,
   validateGoatBrainDocument,
-  writeGoatBrainDocumentText,
+  writeGoatBrainEntry,
 } from "../index";
 import { loadProviders } from "../retrieval/providers";
 import { findGoatBrainFile, listGoatBrainFiles, type StoredGoatBrainFile } from "../store";
@@ -419,9 +418,7 @@ async function persist(
     source,
   );
   if (!validation.ok) throw new Error(validation.errors.join(" "));
-  const relativePath = pathForGoatBrainDocument(normalized);
-  await writeGoatBrainDocumentText(root, relativePath, source);
-  return relativePath;
+  return writeGoatBrainEntry(root, goatBrainEntryFromLegacyDocument(normalized));
 }
 
 function toWritableDocument(
