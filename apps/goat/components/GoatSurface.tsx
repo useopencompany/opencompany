@@ -34,7 +34,6 @@ import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   GOAT_BRAIN_TOOL_NAME,
-  GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatBrainToolOutput,
   type GoatChatSessionView,
   type GoatChatUiMessage,
@@ -592,8 +591,8 @@ function AssistantTextBubble({ text, error }: { text: string; error?: string | u
   return (
     <div className="flex justify-start">
       <div
-        className={`max-w-[80%] rounded-2xl rounded-bl-md px-3 py-2 text-[13px] leading-5 ${
-          error ? "bg-danger-bg text-danger" : "bg-surface-muted text-ink"
+        className={`max-w-[80%] text-[13px] leading-5 ${
+          error ? "rounded-2xl rounded-bl-md bg-danger-bg px-3 py-2 text-danger" : "text-ink"
         }`}
       >
         <Markdown content={text} />

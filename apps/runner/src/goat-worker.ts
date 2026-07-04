@@ -244,6 +244,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
       const result = await getDb().execute(sql`
         UPDATE goat.tasks
         SET stage = ${input.stage},
+            model = COALESCE(${input.harnessSpec?.model ?? null}, model),
             harness_spec = COALESCE(${input.harnessSpec ? JSON.stringify(input.harnessSpec) : null}::jsonb, harness_spec),
             debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
             updated_at = ${input.now}
@@ -608,6 +609,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
         UPDATE goat.tasks
         SET status = 'succeeded',
             stage = 'completed',
+            model = ${input.harnessSpec.model},
             result = ${input.result},
             error = NULL,
             harness_spec = ${JSON.stringify(input.harnessSpec)}::jsonb,
@@ -719,6 +721,7 @@ export async function runClaimedGoatTask(input: {
   const abortController = new AbortController();
   let leaseActive = true;
   let currentStage = input.task.stage;
+  let currentModel = input.task.model;
   let stageStartedAt = performance.now();
   let latestDebugTrace: GoatTaskDebugTrace | undefined =
     Object.keys(input.task.debugTrace).length > 0 ? input.task.debugTrace : undefined;
@@ -1054,6 +1057,9 @@ export async function runClaimedGoatTask(input: {
           if (patch.debugTrace) {
             latestDebugTrace = mergeGoatTaskDebugTrace(patch.debugTrace, latestDebugTrace);
           }
+          if (patch.harnessSpec) {
+            currentModel = patch.harnessSpec.model;
+          }
           const active = await store.updateStage({
             id: input.task.id,
             leaseId,
@@ -1068,6 +1074,7 @@ export async function runClaimedGoatTask(input: {
           stageStartedAt = performance.now();
           runSpan.setAttributes({
             ...baseAttributes,
+            "goat.model": currentModel,
             "goat.stage": stage,
           });
         },
@@ -1077,9 +1084,13 @@ export async function runClaimedGoatTask(input: {
       finishAbortedTelemetry();
       return;
     }
+    const finalAttributes = {
+      ...baseAttributes,
+      "goat.model": result.harnessSpec.model,
+    };
     await requireLeaseWrite(
       runSpan.runInContext(() =>
-        withGoatSpan(GOAT_SPANS.taskComplete, baseAttributes, () =>
+        withGoatSpan(GOAT_SPANS.taskComplete, finalAttributes, () =>
           store.complete({
             id: input.task.id,
             leaseId,
@@ -1095,7 +1106,7 @@ export async function runClaimedGoatTask(input: {
     );
     recordCurrentStageDuration();
     runSpan.end({
-      ...baseAttributes,
+      ...finalAttributes,
       "goat.status": "succeeded",
       "goat.stage": "completed",
       "goat.outcome": "success",
@@ -1104,7 +1115,7 @@ export async function runClaimedGoatTask(input: {
       durationMs: Math.round(performance.now() - runStartedAt),
       outcome: "success",
       attributes: {
-        ...baseAttributes,
+        ...finalAttributes,
         "goat.status": "succeeded",
         "goat.stage": "completed",
       },
@@ -1125,9 +1136,13 @@ export async function runClaimedGoatTask(input: {
       );
       if (!active) handleLeaseLost();
       recordCurrentStageDuration();
-      const failureCategory = runSpan.fail(error, baseAttributes);
-      runSpan.end({
+      const failureAttributes = {
         ...baseAttributes,
+        "goat.model": currentModel,
+      };
+      const failureCategory = runSpan.fail(error, failureAttributes);
+      runSpan.end({
+        ...failureAttributes,
         "goat.status": "failed",
         "goat.stage": "failed",
         "goat.outcome": "failure",
@@ -1137,7 +1152,7 @@ export async function runClaimedGoatTask(input: {
         durationMs: Math.round(performance.now() - runStartedAt),
         outcome: "failure",
         attributes: {
-          ...baseAttributes,
+          ...failureAttributes,
           "goat.status": "failed",
           "goat.stage": "failed",
           "goat.failure_category": failureCategory,

@@ -35,9 +35,10 @@ describe("TaskDetailPanel cost summary", () => {
 
     render(<TaskDetailPanel initialRun={run} />);
 
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByText("GPT 5.4 Mini")).toBeInTheDocument();
     expect(screen.getByText("Cost")).toBeInTheDocument();
     expect(screen.getByText("$0.0019")).toBeInTheDocument();
-    expect(screen.queryByText("Model")).not.toBeInTheDocument();
     expect(screen.queryByText("Tools")).not.toBeInTheDocument();
     expect(screen.queryByText("Sandbox")).not.toBeInTheDocument();
     expect(
@@ -58,9 +59,34 @@ describe("TaskDetailPanel cost summary", () => {
     expect(screen.getAllByText("$0.0000").length).toBeGreaterThan(0);
     expect(screen.queryByText("Costs are recorded for new runs.")).not.toBeInTheDocument();
   });
+
+  it("renders only the execution model when planner and execution models differ", () => {
+    const run = buildGoatHarnessRun({
+      task: task({ model: "anthropic/claude-sonnet-5" }),
+      messages: [],
+      events: [],
+      modelUsage: [
+        modelUsage({
+          phase: "planner",
+          model_name: "anthropic/claude-sonnet-4.6",
+        }),
+        modelUsage({
+          id: 2,
+          phase: "execution",
+          model_name: "anthropic/claude-sonnet-5",
+        }),
+      ],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByText("Claude Sonnet 5")).toBeInTheDocument();
+    expect(screen.queryByText(/Claude Sonnet 4\.6/)).not.toBeInTheDocument();
+  });
 });
 
-function task() {
+function task(overrides: Record<string, unknown> = {}) {
   return {
     id: "goat_task_1",
     displayId: "TASK-1",
@@ -73,6 +99,7 @@ function task() {
     error: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    ...overrides,
   };
 }
 

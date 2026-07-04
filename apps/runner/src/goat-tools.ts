@@ -4,6 +4,12 @@ import { GOAT_SPANS, recordGoatToolCall, startGoatSpan } from "@opencompany/goat
 import { jsonSchema, type ToolSet, tool } from "ai";
 import type { RunnerEnv } from "./env";
 import {
+  createGoatGitHubToolSession,
+  type GoatGitHubSandboxUsage,
+  type GoatGitHubToolName,
+  isGoatGitHubToolName,
+} from "./goat-github-tools";
+import {
   executeGoatGoogleTool,
   type GoatGoogleToolName,
   isGoatGoogleToolName,
@@ -27,6 +33,10 @@ export const GOAT_TASK_TOOL_NAMES = [
   "calendar_get_freebusy",
   "linear_search_tools",
   "linear_use_tool",
+  "github_clone_repository",
+  "github_shell",
+  "github_status",
+  "github_open_pull_request",
 ] as const satisfies readonly GoatTaskToolName[];
 
 const GOAT_TASK_TOOL_SET = new Set<GoatTaskToolName>(GOAT_TASK_TOOL_NAMES);
@@ -52,6 +62,20 @@ export type GoatToolLifecycle = {
   onToolFailed?: (input: GoatToolLifecycleFailure & { messageId?: string }) => Promise<void>;
 };
 
+export type GoatTaskToolsInput = {
+  selectedTools: readonly GoatTaskToolName[];
+  userWorkosId: string;
+  env: RunnerEnv;
+  signal: AbortSignal;
+  lifecycle?: GoatToolLifecycle;
+  recordSandboxUsage?: (usage: GoatGitHubSandboxUsage) => Promise<void>;
+};
+
+export type GoatTaskToolRuntime = {
+  tools: ToolSet;
+  cleanup: () => Promise<void>;
+};
+
 export function normalizeGoatTaskToolNames(value: unknown): GoatTaskToolName[] {
   const selected = new Set<GoatTaskToolName>();
   if (Array.isArray(value)) {
@@ -67,13 +91,27 @@ export function normalizeGoatTaskToolNames(value: unknown): GoatTaskToolName[] {
   return GOAT_TASK_TOOL_NAMES.filter((name) => selected.has(name));
 }
 
-export function buildGoatTaskTools(input: {
-  selectedTools: readonly GoatTaskToolName[];
-  userWorkosId: string;
-  env: RunnerEnv;
-  signal: AbortSignal;
-  lifecycle?: GoatToolLifecycle;
-}): ToolSet {
+export function buildGoatTaskTools(input: GoatTaskToolsInput): ToolSet {
+  return buildGoatTaskToolRuntime(input).tools;
+}
+
+export function buildGoatTaskToolRuntime(input: GoatTaskToolsInput): GoatTaskToolRuntime {
+  const githubSession = createGoatGitHubToolSession({
+    userWorkosId: input.userWorkosId,
+    env: input.env,
+    signal: input.signal,
+    ...(input.recordSandboxUsage ? { recordSandboxUsage: input.recordSandboxUsage } : {}),
+  });
+  return {
+    tools: buildGoatTaskToolsForSession(input, githubSession),
+    cleanup: () => githubSession.cleanup(),
+  };
+}
+
+function buildGoatTaskToolsForSession(
+  input: GoatTaskToolsInput,
+  githubSession: ReturnType<typeof createGoatGitHubToolSession>,
+): ToolSet {
   const tools: ToolSet = {};
   const selected = new Set(normalizeGoatTaskToolNames(input.selectedTools));
   const messageIdsByCallId = new Map<string, string>();
@@ -149,6 +187,9 @@ export function buildGoatTaskTools(input: {
             userWorkosId: input.userWorkosId,
             env: input.env,
             signal: input.signal,
+            toolCallId: options.toolCallId,
+            messageId: messageIdsByCallId.get(options.toolCallId) ?? null,
+            githubSession,
           });
           await completeTool(toolName, toolInput, options.toolCallId, result.output, result.usage);
           span.end({
@@ -205,6 +246,9 @@ async function executeGoatTaskTool(input: {
   userWorkosId: string;
   env: RunnerEnv;
   signal: AbortSignal;
+  toolCallId: string;
+  messageId?: string | null;
+  githubSession: ReturnType<typeof createGoatGitHubToolSession>;
 }): Promise<{ output: unknown; usage?: HostedToolUsage }> {
   if (input.toolName === "exa_search") {
     return executeExaSearch({
@@ -233,6 +277,18 @@ async function executeGoatTaskTool(input: {
     return {
       output,
       usage: zeroCostToolUsage(input.toolName, linearOperation(input.toolName, input.toolInput)),
+    };
+  }
+  if (isGoatGitHubToolName(input.toolName)) {
+    const output = await input.githubSession.execute({
+      name: input.toolName as GoatGitHubToolName,
+      toolInput: input.toolInput,
+      toolCallId: input.toolCallId,
+      messageId: input.messageId ?? null,
+    });
+    return {
+      output,
+      usage: zeroCostToolUsage(input.toolName, githubOperation(input.toolName)),
     };
   }
   return {
@@ -308,6 +364,14 @@ function goatToolDescription(toolName: GoatTaskToolName) {
       return "List available Linear MCP tools, including names, descriptions, and input schemas. Call this before linear_use_tool.";
     case "linear_use_tool":
       return "Run one Linear MCP tool by exact name from linear_search_tools. Only create or update Linear records when the user explicitly asked for that action.";
+    case "github_clone_repository":
+      return "Clone one connected GitHub repository into an ephemeral task sandbox. Call this before github_shell, github_status, or github_open_pull_request.";
+    case "github_shell":
+      return "Run a broad noninteractive shell command from the cloned GitHub repository directory. Use this for git, gh, package managers, tests, and project scripts.";
+    case "github_status":
+      return "Inspect the cloned GitHub repository branch, status, diff stat, and diff preview.";
+    case "github_open_pull_request":
+      return "Commit current repository changes, push a branch, and open a GitHub pull request. Use only when the user explicitly asked to publish or open a PR.";
   }
 }
 
@@ -433,6 +497,45 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
         },
         required: ["tool"],
       } as const;
+    case "github_clone_repository":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          repository: { type: "string" },
+          ref: { type: "string" },
+        },
+        required: ["repository"],
+      } as const;
+    case "github_shell":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          command: { type: "string" },
+          timeoutMs: { type: "number", minimum: 1000, maximum: 600000 },
+        },
+        required: ["command"],
+      } as const;
+    case "github_status":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+      } as const;
+    case "github_open_pull_request":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          body: { type: "string" },
+          branchName: { type: "string" },
+          commitMessage: { type: "string" },
+          draft: { type: "boolean" },
+        },
+        required: ["title"],
+      } as const;
   }
 }
 
@@ -454,6 +557,7 @@ function goatToolProvider(toolName: GoatTaskToolName) {
   if (toolName.startsWith("gmail_")) return "gmail";
   if (toolName.startsWith("calendar_")) return "google_calendar";
   if (toolName.startsWith("linear_")) return "linear";
+  if (toolName.startsWith("github_")) return "github";
   if (toolName === "exa_search") return "exa";
   return "goat";
 }
@@ -461,6 +565,10 @@ function goatToolProvider(toolName: GoatTaskToolName) {
 function linearOperation(toolName: GoatTaskToolName, toolInput: unknown) {
   if (toolName !== "linear_use_tool") return toolName;
   return readString(asRecord(toolInput), "tool") || toolName;
+}
+
+function githubOperation(toolName: GoatTaskToolName) {
+  return toolName.replace(/^github_/, "");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

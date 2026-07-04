@@ -225,7 +225,9 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByText("Streaming answer")).toBeInTheDocument();
+    const assistantText = screen.getByText("Streaming answer");
+    expect(assistantText).toBeInTheDocument();
+    expect(assistantText.closest(".bg-surface-muted")).toBeNull();
   });
 
   it("renders a task card from start_task tool output", () => {

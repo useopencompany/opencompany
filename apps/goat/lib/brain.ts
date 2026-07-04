@@ -4,7 +4,6 @@ import {
   type GoatBrainRelation,
   type GoatBrainSource,
   goatBrainDocuments,
-  goatBrainDocumentVersions,
   goatBrainFolders,
 } from "@opencompany/db/goat-schema";
 import {

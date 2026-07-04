@@ -16,10 +16,19 @@ export type GoatLinearProviderState = {
   statusReason: string | null;
 };
 
+export type GoatGitHubProviderState = {
+  provider: "github";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  accountName: string | null;
+  statusReason: string | null;
+};
+
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
   google_calendar: GoatGoogleProviderState;
   linear: GoatLinearProviderState;
+  github: GoatGitHubProviderState;
 };
 
 type IntegrationStateRow = {
@@ -44,6 +53,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     gmail: googleProviderState("gmail", byProvider.get("gmail")),
     google_calendar: googleProviderState("google_calendar", byProvider.get("google_calendar")),
     linear: linearProviderState(byProvider.get("linear")),
+    github: githubProviderState(byProvider.get("github")),
   };
 }
 
@@ -85,6 +95,26 @@ function linearProviderState(row: IntegrationStateRow | undefined): GoatLinearPr
 
   return {
     provider: "linear",
+    connected: row.status === "connected",
+    status: row.status,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function githubProviderState(row: IntegrationStateRow | undefined): GoatGitHubProviderState {
+  if (!row) {
+    return {
+      provider: "github",
+      connected: false,
+      status: "not_connected",
+      accountName: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "github",
     connected: row.status === "connected",
     status: row.status,
     accountName: row.accountName ?? row.account_name ?? null,

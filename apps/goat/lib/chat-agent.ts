@@ -41,6 +41,7 @@ export type OpenCompanyChatAgentDebugTrace = {
   schemaVersion: typeof OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION;
   model: string;
   finishReason?: string;
+  uiMessageParts?: unknown[];
   toolCalls?: unknown[];
   toolResults?: unknown[];
   error?: string;
@@ -177,6 +178,7 @@ export function createOpenCompanyChatToolContext(input: {
 export function createOpenCompanyChatDebugTrace(input: {
   model: string;
   finishReason?: string;
+  uiMessageParts?: unknown[];
   steps?: unknown;
   error?: string;
 }): OpenCompanyChatAgentDebugTrace {
@@ -184,6 +186,7 @@ export function createOpenCompanyChatDebugTrace(input: {
     schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
     model: input.model,
     ...(input.finishReason ? { finishReason: input.finishReason } : {}),
+    ...(input.uiMessageParts?.length ? { uiMessageParts: input.uiMessageParts } : {}),
     toolCalls: compactStepValues(input.steps, "toolCalls"),
     toolResults: compactStepValues(input.steps, "toolResults"),
     ...(input.error ? { error: input.error } : {}),

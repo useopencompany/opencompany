@@ -6,7 +6,7 @@ import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import { formatUsdMicros } from "@/lib/cost-format";
 import { formatGoatStartedAt, GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
-import type { GoatHarnessRunViewModel } from "@/lib/task-harness-run";
+import type { GoatHarnessRunViewModel, GoatRunModelSummary } from "@/lib/task-harness-run";
 
 export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
   return (
@@ -19,6 +19,7 @@ export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunView
 function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
   const task = run.task;
   const isActive = task.status === "queued" || task.status === "running";
+  const visibleModels = executionRunModels(run.models);
 
   return (
     <>
@@ -34,6 +35,10 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
         </h2>
         <DetailRow label="ID" value={task.displayId} />
         <DetailRow label="Started" value={formatGoatStartedAt(task.createdAt)} />
+        <DetailRow
+          label={visibleModels.length === 1 ? "Model" : "Models"}
+          value={formatRunModels(visibleModels)}
+        />
         <DetailRow
           label="Status"
           value={`${GOAT_STATUS_COPY[task.status]} - ${GOAT_STAGE_COPY[task.stage]}`}
@@ -59,6 +64,16 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
       </section>
     </>
   );
+}
+
+function executionRunModels(models: GoatRunModelSummary[]) {
+  const executionModels = models.filter((model) => model.phases.includes("execution"));
+  return executionModels.length > 0 ? executionModels : models;
+}
+
+function formatRunModels(models: GoatRunModelSummary[]) {
+  if (models.length === 0) return "Unknown";
+  return models.map((model) => model.label || model.id).join(", ");
 }
 
 function DetailRow({

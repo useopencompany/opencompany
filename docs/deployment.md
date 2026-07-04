@@ -223,8 +223,9 @@ Create or switch to the production WorkOS environment.
 
 Create a separate production GitHub App for user-facing work repository integrations.
 
-- Set the callback URL to:
+- Set callback URLs to:
   `https://<production-web-domain>/api/integrations/github/callback`
+  `https://<production-goat-domain>/api/integrations/github/callback`
 - Grant repository contents read/write and pull request read/write permissions.
 - Leave webhooks inactive until a GitHub webhook ingestion route is deployed. When enabled, subscribe
   to pull request events used by `.agent` triggers: `opened`, `reopened`, `synchronize`, and

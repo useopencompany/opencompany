@@ -228,6 +228,7 @@ export async function POST(request: Request): Promise<Response> {
       const responseMessageId = safeClientMessageId(responseMessage.id);
       const finalTrace = {
         ...debugTrace,
+        ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
       };
       await persistGoatChatAssistantMessage(

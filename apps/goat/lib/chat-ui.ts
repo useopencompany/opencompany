@@ -91,7 +91,7 @@ export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiM
     id: message.id,
     role: message.role === "user" ? "user" : "assistant",
     ...(metadata ? { metadata } : {}),
-    parts: message.content ? [{ type: "text", text: message.content }] : [],
+    parts: toGoatChatUiMessageParts(message, metadata),
   };
 }
 
@@ -117,4 +117,155 @@ export function toGoatChatMessageMetadata(
     ...(task ? { task } : {}),
     ...(error ? { error } : {}),
   };
+}
+
+function toGoatChatUiMessageParts(
+  message: GoatStoredChatMessage,
+  metadata: GoatChatMessageMetadata | undefined,
+): GoatChatUiMessage["parts"] {
+  if (message.role !== "assistant") return textParts(message.content);
+
+  const persistedParts = parseDebugTraceUiMessageParts(message.debugTrace?.uiMessageParts);
+  if (persistedParts) return withStoredContentFallback(persistedParts, message.content);
+
+  const legacyTaskParts = legacyTaskOrderedParts(message, metadata?.task ?? null);
+  if (legacyTaskParts) return legacyTaskParts;
+
+  return textParts(message.content);
+}
+
+function textParts(content: string): GoatChatUiMessage["parts"] {
+  return content ? [{ type: "text", text: content }] : [];
+}
+
+function withStoredContentFallback(
+  parts: GoatChatUiMessage["parts"],
+  content: string,
+): GoatChatUiMessage["parts"] {
+  if (!content || parts.some((part) => part.type === "text" && part.text.trim())) return parts;
+  return [...parts, { type: "text", text: content }];
+}
+
+function parseDebugTraceUiMessageParts(value: unknown): GoatChatUiMessage["parts"] | null {
+  if (!Array.isArray(value)) return null;
+
+  const parts: GoatChatUiMessage["parts"] = [];
+  for (const part of value) {
+    if (!isRecord(part)) continue;
+    if (part.type === "text" && typeof part.text === "string") {
+      parts.push({ type: "text", text: part.text });
+      continue;
+    }
+    if (isPersistedToolPart(part)) {
+      parts.push(part as GoatChatUiMessage["parts"][number]);
+    }
+  }
+
+  return parts.length > 0 ? parts : null;
+}
+
+function isPersistedToolPart(value: Record<string, unknown>) {
+  return (
+    typeof value.type === "string" &&
+    (value.type === "dynamic-tool" || value.type.startsWith("tool-"))
+  );
+}
+
+function legacyTaskOrderedParts(
+  message: GoatStoredChatMessage,
+  task: GoatTaskCardMetadata | null,
+): GoatChatUiMessage["parts"] | null {
+  const output = legacyStartTaskOutput(message, task);
+  if (!output) return null;
+
+  const part = {
+    type: START_TASK_TOOL_PART_TYPE,
+    toolCallId: `persisted-${output.taskId}`,
+    state: "output-available",
+    input: legacyStartTaskInput(message, output),
+    output,
+  } as GoatChatUiMessage["parts"][number];
+
+  const split = splitTaskContentAroundResults(message.content);
+  if (!split) return [...textParts(message.content), part];
+
+  const parts: GoatChatUiMessage["parts"] = [];
+  if (split.before) parts.push({ type: "text", text: split.before });
+  parts.push(part);
+  if (split.after) parts.push({ type: "text", text: split.after });
+  return parts;
+}
+
+function legacyStartTaskOutput(
+  message: GoatStoredChatMessage,
+  task: GoatTaskCardMetadata | null,
+): StartTaskToolOutput | null {
+  const toolResults = message.debugTrace?.toolResults;
+  if (Array.isArray(toolResults)) {
+    for (const result of toolResults) {
+      const output = isRecord(result) && isRecord(result.output) ? result.output : result;
+      if (isStartTaskToolOutput(output)) return output;
+    }
+  }
+
+  if (!task) return null;
+  return {
+    taskId: task.id,
+    taskDisplayId: task.displayId,
+    taskName: task.title,
+    status: "queued",
+    prompt: message.taskPrompt ?? "",
+  };
+}
+
+function legacyStartTaskInput(
+  message: GoatStoredChatMessage,
+  output: StartTaskToolOutput,
+): StartTaskToolInput {
+  const toolCalls = message.debugTrace?.toolCalls;
+  if (Array.isArray(toolCalls)) {
+    for (const call of toolCalls) {
+      if (!isRecord(call)) continue;
+      const input = isRecord(call.input) ? call.input : isRecord(call.args) ? call.args : null;
+      if (!input) continue;
+      const prompt = typeof input.prompt === "string" ? input.prompt : output.prompt;
+      const name = typeof input.name === "string" ? input.name : output.taskName;
+      const reason = typeof input.reason === "string" ? input.reason : undefined;
+      return {
+        prompt,
+        name,
+        ...(reason ? { reason } : {}),
+      };
+    }
+  }
+
+  return {
+    prompt: output.prompt || message.taskPrompt || "",
+    name: output.taskName,
+  };
+}
+
+function splitTaskContentAroundResults(content: string) {
+  const match = /\s*added to Results\b/i.exec(content);
+  if (!match) return null;
+
+  return {
+    before: content.slice(0, match.index).trim(),
+    after: content.slice(match.index).trim(),
+  };
+}
+
+function isStartTaskToolOutput(value: unknown): value is StartTaskToolOutput {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.taskId === "string" &&
+    typeof value.taskDisplayId === "string" &&
+    typeof value.taskName === "string" &&
+    (value.status === "queued" || value.status === "already_started") &&
+    typeof value.prompt === "string"
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

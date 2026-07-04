@@ -5,7 +5,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { ArrowLeft, FilePlus2, FolderPlus, Save, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
@@ -104,46 +104,30 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
       documents[0];
     return selected?.id ?? null;
   });
-  const selectedDocument = useMemo(
-    () => documents.find((document) => document.id === selectedDocumentId) ?? null,
-    [documents, selectedDocumentId],
-  );
-  const [editorValue, setEditorValue] = useState(selectedDocument?.content ?? "");
   const [newFolderPath, setNewFolderPath] = useState("");
   const [newDocumentTitle, setNewDocumentTitle] = useState("");
   const [isPending, startTransition] = useTransition();
-
-  useEffect(() => {
-    if (selectedDocumentId && documents.some((document) => document.id === selectedDocumentId)) {
-      return;
-    }
-    const next =
-      documents.find((document) => document.folderPath === selectedFolder) ?? documents[0] ?? null;
-    setSelectedDocumentId(next?.id ?? null);
-    if (next && next.folderPath !== selectedFolder) setSelectedFolder(next.folderPath);
-  }, [documents, selectedDocumentId, selectedFolder]);
-
-  useEffect(() => {
-    setEditorValue(selectedDocument?.content ?? "");
-  }, [selectedDocument?.content]);
 
   const folderDocuments = useMemo(
     () => documents.filter((document) => document.folderPath === selectedFolder),
     [documents, selectedFolder],
   );
-  const dirty = Boolean(selectedDocument && editorValue !== selectedDocument.content);
+  const selectedDocument = useMemo(() => {
+    const requestedDocument = selectedDocumentId
+      ? documents.find((document) => document.id === selectedDocumentId)
+      : null;
+    return requestedDocument ?? folderDocuments[0] ?? null;
+  }, [documents, folderDocuments, selectedDocumentId]);
 
   const selectFolder = (folderPath: string) => {
     setSelectedFolder(folderPath);
     const firstDoc = documents.find((document) => document.folderPath === folderPath);
     setSelectedDocumentId(firstDoc?.id ?? null);
-    router.replace(`/brain/${folderUrlSegments(folderPath)}`);
   };
 
   const selectDocument = (document: GoatBrainDocumentView) => {
     setSelectedFolder(document.folderPath);
     setSelectedDocumentId(document.id);
-    router.replace(brainDocumentUrl(document));
   };
 
   const createFolder = () => {
@@ -175,81 +159,15 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
       if (document) {
         setSelectedFolder(document.folderPath);
         setSelectedDocumentId(document.id);
-        setEditorValue(document.content);
       }
       setNewDocumentTitle("");
       if (result.path) router.replace(result.path);
     });
   };
 
-  const saveDocument = () => {
-    if (!selectedDocument || !dirty) return;
-    startTransition(async () => {
-      const result = await updateGoatBrainDocumentAction({
-        documentId: selectedDocument.id,
-        content: editorValue,
-      });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      const document = result.document;
-      if (document) {
-        setSelectedFolder(document.folderPath);
-        setSelectedDocumentId(document.id);
-        setEditorValue(document.content);
-      }
-      toast.success("Saved");
-      if (result.path) router.replace(result.path);
-    });
-  };
-
-  const moveDocument = (folderPath: string) => {
-    if (!selectedDocument || folderPath === selectedDocument.folderPath) return;
-    startTransition(async () => {
-      const result = await moveGoatBrainDocumentAction({
-        documentId: selectedDocument.id,
-        folderPath,
-      });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      const document = result.document;
-      if (document) {
-        setSelectedFolder(document.folderPath);
-        setSelectedDocumentId(document.id);
-        setEditorValue(document.content);
-      }
-      if (result.path) router.replace(result.path);
-    });
-  };
-
-  const deleteDocument = () => {
-    if (!selectedDocument) return;
-    if (!confirm(`Delete "${selectedDocument.title ?? selectedDocument.brainId}"?`)) return;
-    startTransition(async () => {
-      const deletedId = selectedDocument.id;
-      const result = await deleteGoatBrainDocumentAction(deletedId);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      const remaining = documents.filter((document) => document.id !== deletedId);
-      const next =
-        remaining.find((document) => document.folderPath === selectedFolder) ??
-        remaining[0] ??
-        null;
-      setSelectedDocumentId(next?.id ?? null);
-      setEditorValue(next?.content ?? "");
-      if (next) router.replace(brainDocumentUrl(next));
-      else router.replace(`/brain/${folderUrlSegments(selectedFolder)}`);
-    });
-  };
-
   return (
     <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-surface-subtle px-4">
+      <header className="flex h-14 shrink-0 items-center border-b border-surface-subtle px-4">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"
@@ -266,24 +184,17 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={saveDocument}
-          disabled={!dirty || isPending}
-          className="flex h-8 items-center gap-2 rounded-lg border border-surface-subtle bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          <Save size={14} strokeWidth={2} />
-          Save
-        </button>
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[180px_260px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-b border-surface-subtle bg-surface-muted md:border-b-0 md:border-r">
           <div className="flex min-h-0 flex-1 flex-row gap-1 overflow-x-auto p-2 md:flex-col md:overflow-y-auto">
             {folders.map((folder) => (
-              <button
+              <Link
                 key={folder.path}
-                type="button"
+                href={`/brain/${folderUrlSegments(folder.path)}`}
+                replace
+                aria-current={selectedFolder === folder.path ? "page" : undefined}
                 onClick={() => selectFolder(folder.path)}
                 className={`flex h-8 shrink-0 items-center justify-between rounded-md px-2 text-left text-[13px] leading-none transition-colors duration-150 md:w-full ${
                   selectedFolder === folder.path
@@ -295,7 +206,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
                 {folder.source === "system" ? null : (
                   <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-ink-subtle" />
                 )}
-              </button>
+              </Link>
             ))}
           </div>
           <div className="flex shrink-0 gap-1 border-t border-surface-subtle p-2">
@@ -347,12 +258,14 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
             {folderDocuments.length > 0 ? (
               <div className="flex flex-col gap-1">
                 {folderDocuments.map((document) => (
-                  <button
+                  <Link
                     key={document.id}
-                    type="button"
+                    href={brainDocumentUrl(document)}
+                    replace
+                    aria-current={selectedDocument?.id === document.id ? "page" : undefined}
                     onClick={() => selectDocument(document)}
                     className={`rounded-md px-2 py-2 text-left transition-colors duration-150 ${
-                      selectedDocumentId === document.id
+                      selectedDocument?.id === document.id
                         ? "bg-surface-hover text-ink"
                         : "hover:bg-surface-hover"
                     }`}
@@ -363,7 +276,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
                     <span className="mt-1 block truncate text-[12px] leading-tight text-ink-subtle">
                       {document.brainId}
                     </span>
-                  </button>
+                  </Link>
                 ))}
               </div>
             ) : (
@@ -374,58 +287,168 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
           </div>
         </aside>
 
-        <section className="flex min-h-0 flex-col bg-surface">
-          {selectedDocument ? (
-            <>
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-surface-subtle px-3 py-2">
-                <div className="min-w-0">
-                  <h2 className="truncate text-[14px] font-semibold leading-tight">
-                    {selectedDocument.title ?? selectedDocument.brainId}
-                  </h2>
-                  <p className="truncate text-[12px] leading-tight text-ink-subtle">
-                    {selectedDocument.folderPath}/{selectedDocument.brainId}.md
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={selectedDocument.folderPath}
-                    onChange={(event) => moveDocument(event.target.value)}
-                    disabled={isPending}
-                    className="h-8 max-w-[180px] rounded-md border border-surface-subtle bg-canvas px-2 text-[13px] outline-none focus:border-ink/25"
-                  >
-                    {folders.map((folder) => (
-                      <option key={folder.path} value={folder.path}>
-                        {folder.path}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    aria-label="Delete document"
-                    title="Delete document"
-                    onClick={deleteDocument}
-                    disabled={isPending}
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-danger transition-colors duration-150 hover:bg-danger-bg disabled:opacity-45"
-                  >
-                    <Trash2 size={15} strokeWidth={2} />
-                  </button>
-                </div>
-              </div>
-              <textarea
-                value={editorValue}
-                onChange={(event) => setEditorValue(event.target.value)}
-                spellCheck={false}
-                className="min-h-0 flex-1 resize-none bg-surface px-4 py-3 font-mono text-[13px] leading-6 text-ink outline-none"
-              />
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center px-6 text-center text-[14px] leading-6 text-ink-subtle">
-              No document selected
-            </div>
-          )}
-        </section>
+        <BrainDocumentPanel
+          key={selectedDocument?.id ?? "empty"}
+          selectedDocument={selectedDocument}
+          documents={documents}
+          folders={folders}
+          selectedFolder={selectedFolder}
+          onSelectFolder={setSelectedFolder}
+          onSelectDocumentId={setSelectedDocumentId}
+        />
       </div>
     </main>
+  );
+}
+
+function BrainDocumentPanel({
+  selectedDocument,
+  documents,
+  folders,
+  selectedFolder,
+  onSelectFolder,
+  onSelectDocumentId,
+}: {
+  selectedDocument: GoatBrainDocumentView | null;
+  documents: GoatBrainDocumentView[];
+  folders: GoatBrainFolderView[];
+  selectedFolder: string;
+  onSelectFolder: (folderPath: string) => void;
+  onSelectDocumentId: (documentId: string | null) => void;
+}) {
+  const router = useRouter();
+  const [editorValue, setEditorValue] = useState(selectedDocument?.content ?? "");
+  const [isPending, startTransition] = useTransition();
+  const dirty = Boolean(selectedDocument && editorValue !== selectedDocument.content);
+
+  const saveDocument = () => {
+    if (!selectedDocument || !dirty) return;
+    startTransition(async () => {
+      const result = await updateGoatBrainDocumentAction({
+        documentId: selectedDocument.id,
+        content: editorValue,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const document = result.document;
+      if (document) {
+        onSelectFolder(document.folderPath);
+        onSelectDocumentId(document.id);
+        setEditorValue(document.content);
+      }
+      toast.success("Saved");
+      if (result.path) router.replace(result.path);
+    });
+  };
+
+  const moveDocument = (folderPath: string) => {
+    if (!selectedDocument || folderPath === selectedDocument.folderPath) return;
+    startTransition(async () => {
+      const result = await moveGoatBrainDocumentAction({
+        documentId: selectedDocument.id,
+        folderPath,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const document = result.document;
+      if (document) {
+        onSelectFolder(document.folderPath);
+        onSelectDocumentId(document.id);
+        setEditorValue(document.content);
+      }
+      if (result.path) router.replace(result.path);
+    });
+  };
+
+  const deleteDocument = () => {
+    if (!selectedDocument) return;
+    if (!confirm(`Delete "${selectedDocument.title ?? selectedDocument.brainId}"?`)) return;
+    startTransition(async () => {
+      const deletedId = selectedDocument.id;
+      const result = await deleteGoatBrainDocumentAction(deletedId);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const remaining = documents.filter((document) => document.id !== deletedId);
+      const next =
+        remaining.find((document) => document.folderPath === selectedFolder) ??
+        remaining[0] ??
+        null;
+      onSelectDocumentId(next?.id ?? null);
+      if (next) {
+        onSelectFolder(next.folderPath);
+        router.replace(brainDocumentUrl(next));
+      } else {
+        router.replace(`/brain/${folderUrlSegments(selectedFolder)}`);
+      }
+    });
+  };
+
+  return (
+    <section className="flex min-h-0 flex-col bg-surface">
+      {selectedDocument ? (
+        <>
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-surface-subtle px-3 py-2">
+            <div className="min-w-0">
+              <h2 className="truncate text-[14px] font-semibold leading-tight">
+                {selectedDocument.title ?? selectedDocument.brainId}
+              </h2>
+              <p className="truncate text-[12px] leading-tight text-ink-subtle">
+                {selectedDocument.folderPath}/{selectedDocument.brainId}.md
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={saveDocument}
+                disabled={!dirty || isPending}
+                className="flex h-8 items-center gap-2 rounded-lg border border-surface-subtle bg-canvas px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Save size={14} strokeWidth={2} />
+                Save
+              </button>
+              <select
+                value={selectedDocument.folderPath}
+                onChange={(event) => moveDocument(event.target.value)}
+                disabled={isPending}
+                className="h-8 max-w-[180px] rounded-md border border-surface-subtle bg-canvas px-2 text-[13px] outline-none focus:border-ink/25"
+              >
+                {folders.map((folder) => (
+                  <option key={folder.path} value={folder.path}>
+                    {folder.path}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                aria-label="Delete document"
+                title="Delete document"
+                onClick={deleteDocument}
+                disabled={isPending}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-danger transition-colors duration-150 hover:bg-danger-bg disabled:opacity-45"
+              >
+                <Trash2 size={15} strokeWidth={2} />
+              </button>
+            </div>
+          </div>
+          <textarea
+            value={editorValue}
+            onChange={(event) => setEditorValue(event.target.value)}
+            spellCheck={false}
+            className="min-h-0 flex-1 resize-none bg-surface px-4 py-3 font-mono text-[13px] leading-6 text-ink outline-none"
+          />
+        </>
+      ) : (
+        <div className="flex h-full items-center justify-center px-6 text-center text-[14px] leading-6 text-ink-subtle">
+          No document selected
+        </div>
+      )}
+    </section>
   );
 }
 

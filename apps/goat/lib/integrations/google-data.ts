@@ -4,6 +4,7 @@ import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, eq, inArray } from "drizzle-orm";
 import type { GoatGoogleProviderState } from "@/lib/integration-state";
 import { goatGoogleIntegrationStateFromRows } from "@/lib/integration-state";
+import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 const GOOGLE_PROVIDERS: GoatIntegrationProvider[] = ["gmail", "google_calendar"];
@@ -32,9 +33,10 @@ export async function getGoatGoogleIntegrationState(userWorkosId: string) {
 export async function getGoatAvailableHarnessTools(
   userWorkosId: string,
 ): Promise<GoatTaskToolName[]> {
-  const [state, linear] = await Promise.all([
+  const [state, linear, github] = await Promise.all([
     getGoatGoogleIntegrationState(userWorkosId),
     getGoatLinearIntegrationState(userWorkosId),
+    getGoatGitHubIntegrationState(userWorkosId),
   ]);
   const tools: GoatTaskToolName[] = ["exa_search"];
   if (state.gmail.connected) {
@@ -50,6 +52,14 @@ export async function getGoatAvailableHarnessTools(
   }
   if (linear.connected) {
     tools.push("linear_search_tools", "linear_use_tool");
+  }
+  if (github.connected) {
+    tools.push(
+      "github_clone_repository",
+      "github_shell",
+      "github_status",
+      "github_open_pull_request",
+    );
   }
   return tools;
 }

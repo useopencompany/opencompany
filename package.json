@@ -35,6 +35,7 @@
     "secrets:check": "trufflehog filesystem . --results=verified,unknown --fail",
     "infisical:dev": "infisical run --env=dev --path=/web --path=/runner -- bun run dev",
     "infisical:dev:web": "infisical run --env=dev --path=/web -- bun run dev:web",
+    "infisical:dev:goat": "infisical run --env=dev --path=/web --path=/runner -- bun run dev:goat",
     "infisical:dev:runner": "infisical run --env=dev --path=/runner -- bun run dev:runner",
     "infisical:export": "node scripts/infisical-export-local.mjs",
     "infisical:release:preflight": "infisical run --env=prod --path=/release -- bun run release:preflight -- --release",

@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import { executeGoatTask, type GoatTaskRunSink, planGoatHarness } from "./goat-harness";
 import { GOAT_HARNESS_CREATION_SYSTEM_PROMPT } from "./prompts/goat-harness-creation";
-import { GOAT_TASK_HARNESS_SYSTEM_PROMPT } from "./prompts/goat-task-harness";
 
 const aiMock = vi.hoisted(() => ({
   generateObject: vi.fn(),
@@ -30,7 +29,9 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
-const model = "openai/gpt-5.4-mini" as AgentModelId;
+const model = "moonshotai/kimi-k2.6" as AgentModelId;
+const claudeModel = "anthropic/claude-sonnet-5" as AgentModelId;
+const gptModel = "openai/gpt-5.5" as AgentModelId;
 const harnessSpec: GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1",
   model,
@@ -46,11 +47,11 @@ beforeEach(() => {
 });
 
 describe("planGoatHarness", () => {
-  it("produces goat.harness.v1 with operation-level tools and keeps the selected model", async () => {
+  it("produces goat.harness.v1 with operation-level tools and a planned execution model", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
         schemaVersion: "goat.harness.v1",
-        model: "some-other-model",
+        model: claudeModel,
         systemPrompt: "Use Gmail.",
         initialUserMessage: "Use Gmail to summarize the latest emails.",
         tools: ["gmail_search", "shell", "goat_result"],
@@ -69,7 +70,7 @@ describe("planGoatHarness", () => {
       }),
     ).resolves.toEqual({
       schemaVersion: "goat.harness.v1",
-      model,
+      model: claudeModel,
       systemPrompt: "Use Gmail.",
       initialUserMessage: "Use Gmail to summarize the latest emails.",
       tools: ["gmail_search"],
@@ -84,10 +85,23 @@ describe("planGoatHarness", () => {
       prompt: string;
     };
     expect(request.system).toBe(GOAT_HARNESS_CREATION_SYSTEM_PROMPT);
+    expect(request.system).toContain("<goat_harness_planner>");
     expect(request.system).toContain("<tool_policy>");
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
-    expect(request.prompt).toContain("Available operation tools: exa_search, gmail_search");
+    expect(request.system).toContain("<prompt_contract>");
+    expect(request.system).toContain("Always return a non-empty systemPrompt");
+    expect(request.prompt).toContain("<planner_inputs>");
+    expect(request.prompt).toContain("<execution_model_options>");
+    expect(request.prompt).toContain("<id>\nmoonshotai/kimi-k2.6\n</id>");
+    expect(request.prompt).toContain("<selection_guidance>\nDefault.");
+    expect(request.prompt).toContain("<id>\nanthropic/claude-sonnet-5\n</id>");
+    expect(request.prompt).toContain("<id>\nopenai/gpt-5.5\n</id>");
+    expect(request.prompt).toContain("<available_operation_tools>");
+    expect(request.prompt).toContain("<tool>\nexa_search\n</tool>");
+    expect(request.prompt).toContain("<tool>\ngmail_search\n</tool>");
+    expect(request.prompt).toContain("<default_max_model_steps>\n8\n</default_max_model_steps>");
+    expect(request.prompt).toContain("<task_prompt>");
     expect(request.prompt).toContain("no inbox access is available in chat");
   });
 
@@ -96,7 +110,7 @@ describe("planGoatHarness", () => {
       object: {
         schemaVersion: "goat.harness.v1",
         model,
-        systemPrompt: "",
+        systemPrompt: "Run the research task with the selected tools.",
         initialUserMessage: "",
         tools: ["goat_result"],
         resultMode: "assistant_final",
@@ -118,7 +132,30 @@ describe("planGoatHarness", () => {
       maxModelSteps: 8,
       resultMode: "assistant_final",
     });
-    expect(result.systemPrompt).toBe(GOAT_TASK_HARNESS_SYSTEM_PROMPT);
+    expect(result.systemPrompt).toBe("Run the research task with the selected tools.");
+  });
+
+  it("rejects planner responses without a system prompt", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        model,
+        systemPrompt: "",
+        initialUserMessage: "Research Marseille.",
+        tools: ["exa_search"],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Research Marseille.",
+        model,
+        availableTools: ["exa_search"],
+        gatewayApiKey: "gateway",
+      }),
+    ).rejects.toThrow("Goat harness planner must return a non-empty systemPrompt.");
   });
 
   it("keeps Linear MCP meta-tools when they are available", async () => {
@@ -144,6 +181,56 @@ describe("planGoatHarness", () => {
     ).resolves.toMatchObject({
       tools: ["linear_search_tools", "linear_use_tool"],
     });
+  });
+
+  it("keeps GitHub repo tools when they are available", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        model: gptModel,
+        systemPrompt: "Clone the requested repo, run tests, and open a PR only if requested.",
+        initialUserMessage: "Change octo/private-repo and open a PR.",
+        tools: [
+          "github_clone_repository",
+          "github_shell",
+          "github_status",
+          "github_open_pull_request",
+        ],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Change octo/private-repo and open a PR.",
+        model,
+        availableTools: [
+          "exa_search",
+          "github_clone_repository",
+          "github_shell",
+          "github_status",
+          "github_open_pull_request",
+        ],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      model: gptModel,
+      tools: [
+        "github_clone_repository",
+        "github_shell",
+        "github_status",
+        "github_open_pull_request",
+      ],
+    });
+
+    const request = aiMock.generateObject.mock.calls[0]?.[0] as {
+      system: string;
+      prompt: string;
+    };
+    expect(request.system).toContain("github_clone_repository");
+    expect(request.system).toContain("explicitly asked to publish");
+    expect(request.prompt).toContain("github_open_pull_request");
   });
 });
 

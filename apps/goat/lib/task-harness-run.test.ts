@@ -109,6 +109,14 @@ describe("buildGoatHarnessRun", () => {
     expect(run.hasDurableRun).toBe(false);
     expect(run.task.result).toBe("Stored result.");
     expect(run.legacyDetailText).toBe("Detailed run events are available for new tasks only.");
+    expect(run.models).toEqual([
+      {
+        id: "openai/gpt-5.4-mini",
+        label: "GPT 5.4 Mini",
+        usageCount: 0,
+        phases: [],
+      },
+    ]);
     expect(run.cost).toMatchObject({
       hasRecordedCosts: false,
       totalCostUsdMicros: 0,
@@ -116,6 +124,42 @@ describe("buildGoatHarnessRun", () => {
       toolCostUsdMicros: 0,
       sandboxCostUsdMicros: 0,
     });
+  });
+
+  it("summarizes the models used by model usage rows", () => {
+    const run = buildGoatHarnessRun({
+      task: task({ model: "openai/gpt-5.4-mini" }),
+      messages: [],
+      events: [],
+      modelUsage: [
+        modelUsage({ phase: "planner", model_name: "openai/gpt-5.4-mini" }),
+        modelUsage({
+          id: 2,
+          phase: "execution",
+          model_name: "anthropic/claude-sonnet-5",
+        }),
+        modelUsage({
+          id: 3,
+          phase: "execution",
+          model_name: "anthropic/claude-sonnet-5",
+        }),
+      ],
+    });
+
+    expect(run.models).toEqual([
+      {
+        id: "openai/gpt-5.4-mini",
+        label: "GPT 5.4 Mini",
+        usageCount: 1,
+        phases: ["planner"],
+      },
+      {
+        id: "anthropic/claude-sonnet-5",
+        label: "Claude Sonnet 5",
+        usageCount: 2,
+        phases: ["execution"],
+      },
+    ]);
   });
 
   it("aggregates model tool and sandbox costs", () => {

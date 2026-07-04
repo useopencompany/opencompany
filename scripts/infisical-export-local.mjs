@@ -18,9 +18,20 @@ const preserveLocalKeys = new Set([
   "NEON_BRANCH",
   "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
+  "GOAT_PORT",
+  "GOAT_NEXT_PUBLIC_APP_URL",
+  "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+  "RUNNER_LLM_BROKER_PUBLIC_URL",
 ]);
 const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
-const localDefaultLines = ['OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="louis@acta.so"'];
+const LOCAL_GOAT_APP_URL = "http://localhost:3002";
+const localDefaultLines = [
+  'OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="louis@acta.so"',
+  'GOAT_PORT="3002"',
+  `GOAT_NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_GOAT_APP_URL)}`,
+  `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_GOAT_APP_URL}/auth/callback`)}`,
+  'RUNNER_LLM_BROKER_PUBLIC_URL=""',
+];
 const chunks = [];
 for (const path of paths) {
   const result = spawnSync(

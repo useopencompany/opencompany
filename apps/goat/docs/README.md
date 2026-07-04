@@ -100,8 +100,9 @@ answer directly for small or ambiguous work, use `goat_brain` for durable person
 start a task for research, monitoring, comparison, connected-account work, or durable work that
 belongs in Results.
 
-The default chat model is `anthropic/claude-sonnet-5`. The user-selected chat model is also copied
-into new tasks as their execution model.
+The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
+creation time, then the runner planner chooses the task execution model from its allowed model
+catalog and writes that planned model back to the task row.
 
 Important runtime settings:
 
@@ -200,6 +201,8 @@ The planner is a separate AI SDK `generateObject` Gateway call using:
 - Model: `anthropic/claude-sonnet-4.6`
 - strict JSON schema
 - Structured prompt blocks from `apps/runner/src/prompts/goat-harness-creation.ts`
+- Execution model options: `moonshotai/kimi-k2.6` by default, `anthropic/claude-sonnet-5` for more
+  complex execution or writing, and `openai/gpt-5.5` for coding or sharper analysis.
 
 The planner returns a `GoatHarnessSpec`:
 
@@ -220,7 +223,8 @@ Normalization is intentionally conservative:
 - Tool names are operation-level only.
 - Gmail, Calendar, and Linear operations are selected only if both available to the user and chosen
   by the planner.
-- The execution model is forced back to the task's selected model.
+- The execution model must be one of the planner's allowed model options.
+- `systemPrompt` must be non-empty; there is no fallback task system prompt.
 - `resultMode` is currently always `assistant_final`.
 
 The planner request and response content are stored in `debugTrace.planner`.

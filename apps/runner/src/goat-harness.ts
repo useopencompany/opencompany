@@ -16,7 +16,7 @@ import * as ai from "ai";
 import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
 import type { RunnerEnv } from "./env";
 import {
-  buildGoatTaskTools,
+  buildGoatTaskToolRuntime,
   type GoatToolLifecycleInput,
   normalizeGoatTaskToolNames,
 } from "./goat-tools";
@@ -24,8 +24,8 @@ import type { HostedToolUsage } from "./hosted-tools";
 import {
   buildGoatHarnessCreationPrompt,
   GOAT_HARNESS_CREATION_SYSTEM_PROMPT,
+  GOAT_HARNESS_MODEL_OPTIONS,
 } from "./prompts/goat-harness-creation";
-import { GOAT_TASK_HARNESS_SYSTEM_PROMPT } from "./prompts/goat-task-harness";
 
 const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_GOAT_MAX_MODEL_STEPS = 8;
@@ -255,11 +255,23 @@ async function runGoatTaskModelStreamInner(input: {
   const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
   const { streamText } = getBraintrustAISDK(ai);
   const toolMessagesByCallId = new Map<string, string>();
-  const tools = buildGoatTaskTools({
+  const toolRuntime = buildGoatTaskToolRuntime({
     selectedTools: input.harnessSpec.tools,
     userWorkosId: input.userWorkosId,
     env: input.env,
     signal: input.signal,
+    recordSandboxUsage: (usageInput) =>
+      input.sink.recordSandboxUsage({
+        messageId: usageInput.messageId ?? input.assistantMessageId,
+        sandboxId: usageInput.sandboxId,
+        template: usageInput.template,
+        vcpu: usageInput.vcpu,
+        ramMib: usageInput.ramMib,
+        startedAt: usageInput.startedAt,
+        endedAt: usageInput.endedAt,
+        activeMs: usageInput.activeMs,
+        ...(usageInput.rawMetrics ? { rawMetrics: usageInput.rawMetrics } : {}),
+      }),
     lifecycle: {
       onToolStarted: async (event) => {
         const message = await input.sink.createToolMessage(event);
@@ -309,76 +321,81 @@ async function runGoatTaskModelStreamInner(input: {
       },
     },
   });
+  const tools = toolRuntime.tools;
 
-  const stream = streamText({
-    model: gateway(input.harnessSpec.model),
-    system: input.harnessSpec.systemPrompt,
-    messages: [{ role: "user", content: input.harnessSpec.initialUserMessage }],
-    tools,
-    stopWhen: [ai.stepCountIs(input.harnessSpec.maxModelSteps)],
-    abortSignal: input.signal,
-  });
-
-  let assistantContent = "";
-  let usage: LanguageModelUsage | undefined;
-  let lastFlushAt = 0;
-  let stepIndex = 0;
-
-  const flushContent = async (force = false) => {
-    const now = Date.now();
-    if (!force && now - lastFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) return;
-    lastFlushAt = now;
-    await input.sink.updateMessageContent({
-      messageId: input.assistantMessageId,
-      content: assistantContent,
+  try {
+    const stream = streamText({
+      model: gateway(input.harnessSpec.model),
+      system: input.harnessSpec.systemPrompt,
+      messages: [{ role: "user", content: input.harnessSpec.initialUserMessage }],
+      tools,
+      stopWhen: [ai.stepCountIs(input.harnessSpec.maxModelSteps)],
+      abortSignal: input.signal,
     });
-  };
 
-  for await (const part of stream.fullStream) {
-    assertNotAborted(input.signal);
-    if (part.type === "text-delta") {
-      assistantContent += part.text;
-      await flushContent(false);
-    } else if (part.type === "finish-step") {
-      const finishPart = part as {
-        usage?: LanguageModelUsage;
-        response?: {
-          id?: string | null;
-          modelId?: string | null;
-          timestamp?: Date | null;
+    let assistantContent = "";
+    let usage: LanguageModelUsage | undefined;
+    let lastFlushAt = 0;
+    let stepIndex = 0;
+
+    const flushContent = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) return;
+      lastFlushAt = now;
+      await input.sink.updateMessageContent({
+        messageId: input.assistantMessageId,
+        content: assistantContent,
+      });
+    };
+
+    for await (const part of stream.fullStream) {
+      assertNotAborted(input.signal);
+      if (part.type === "text-delta") {
+        assistantContent += part.text;
+        await flushContent(false);
+      } else if (part.type === "finish-step") {
+        const finishPart = part as {
+          usage?: LanguageModelUsage;
+          response?: {
+            id?: string | null;
+            modelId?: string | null;
+            timestamp?: Date | null;
+          };
+          finishReason?: string | null;
+          rawFinishReason?: string | null;
         };
-        finishReason?: string | null;
-        rawFinishReason?: string | null;
-      };
-      usage = finishPart.usage;
-      if (finishPart.usage) {
-        await input.sink.recordModelUsage({
-          messageId: input.assistantMessageId,
-          phase: "execution",
-          stepIndex,
-          modelProvider: "vercel-ai-gateway",
-          modelName: input.harnessSpec.model,
-          usage: finishPart.usage,
-          responseId: finishPart.response?.id ?? null,
-          responseModelId: finishPart.response?.modelId ?? null,
-          finishReason: finishPart.finishReason ?? null,
-          rawFinishReason: finishPart.rawFinishReason ?? null,
-          providerCreatedAt: finishPart.response?.timestamp ?? null,
-        });
+        usage = finishPart.usage;
+        if (finishPart.usage) {
+          await input.sink.recordModelUsage({
+            messageId: input.assistantMessageId,
+            phase: "execution",
+            stepIndex,
+            modelProvider: "vercel-ai-gateway",
+            modelName: input.harnessSpec.model,
+            usage: finishPart.usage,
+            responseId: finishPart.response?.id ?? null,
+            responseModelId: finishPart.response?.modelId ?? null,
+            finishReason: finishPart.finishReason ?? null,
+            rawFinishReason: finishPart.rawFinishReason ?? null,
+            providerCreatedAt: finishPart.response?.timestamp ?? null,
+          });
+        }
+        stepIndex += 1;
+        await flushContent(true);
+      } else if (part.type === "error") {
+        throw part.error instanceof Error ? part.error : new Error("Goat model stream failed.");
       }
-      stepIndex += 1;
-      await flushContent(true);
-    } else if (part.type === "error") {
-      throw part.error instanceof Error ? part.error : new Error("Goat model stream failed.");
     }
+
+    const finalText = (await stream.text).trim();
+    if (finalText) assistantContent = finalText;
+    await flushContent(true);
+    recordUsageMetrics(usage, { "goat.model": input.harnessSpec.model });
+
+    return { assistantContent, ...(usage ? { usage } : {}) };
+  } finally {
+    await toolRuntime.cleanup();
   }
-
-  const finalText = (await stream.text).trim();
-  if (finalText) assistantContent = finalText;
-  await flushContent(true);
-  recordUsageMetrics(usage, { "goat.model": input.harnessSpec.model });
-
-  return { assistantContent, ...(usage ? { usage } : {}) };
 }
 
 export async function planGoatHarness(input: {
@@ -408,14 +425,15 @@ async function planGoatHarnessForTask(input: {
   usage?: LanguageModelUsage;
 }> {
   const availableTools = normalizeGoatTaskToolNames(input.availableTools);
+  const availableModels = GOAT_HARNESS_MODEL_OPTIONS.map((option) => option.id);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
-  const schema = goatHarnessSpecResponseSchema(availableTools, input.model);
+  const schema = goatHarnessSpecResponseSchema(availableTools, availableModels);
   const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
   const userPrompt = buildGoatHarnessCreationPrompt({
-    prompt: input.prompt,
-    model: input.model,
-    availableTools,
+    taskPrompt: input.prompt,
+    executionModelOptions: GOAT_HARNESS_MODEL_OPTIONS,
+    availableOperationTools: availableTools,
     defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
   });
 
@@ -424,6 +442,7 @@ async function planGoatHarnessForTask(input: {
     {
       "goat.model": input.model,
       "goat.planner_model": GOAT_PLANNER_MODEL,
+      "goat.queued_model": input.model,
       "goat.tool_count": availableTools.length,
     },
     () =>
@@ -435,7 +454,7 @@ async function planGoatHarnessForTask(input: {
         ...(input.signal ? { abortSignal: input.signal } : {}),
       }),
   );
-  const harnessSpec = normalizeHarnessSpec(result.object, input, availableTools);
+  const harnessSpec = normalizeHarnessSpec(result.object, input, availableTools, availableModels);
 
   return {
     harnessSpec,
@@ -463,16 +482,16 @@ async function planGoatHarnessForTask(input: {
 
 function goatHarnessSpecResponseSchema(
   availableTools: readonly GoatTaskToolName[],
-  selectedModel: string,
+  availableModels: readonly GoatHarnessSpec["model"][],
 ) {
   return {
     type: "object",
     additionalProperties: false,
     properties: {
       schemaVersion: { type: "string", enum: ["goat.harness.v1"] },
-      model: { type: "string", enum: [selectedModel] },
-      systemPrompt: { type: "string" },
-      initialUserMessage: { type: "string" },
+      model: { type: "string", enum: availableModels },
+      systemPrompt: { type: "string", minLength: 1 },
+      initialUserMessage: { type: "string", minLength: 1 },
       tools: {
         type: "array",
         items: { type: "string", enum: availableTools },
@@ -498,12 +517,19 @@ function normalizeHarnessSpec(
   value: unknown,
   fallback: {
     prompt: string;
-    model: GoatHarnessSpec["model"];
   },
   availableTools: readonly GoatTaskToolName[],
+  availableModels: readonly GoatHarnessSpec["model"][],
 ): GoatHarnessSpec {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  const systemPrompt = readNonEmptyString(record.systemPrompt) ?? defaultTaskSystemPrompt();
+  const model = readHarnessModel(record.model, availableModels);
+  if (!model) {
+    throw new Error("Goat harness planner must choose a supported execution model.");
+  }
+  const systemPrompt = readNonEmptyString(record.systemPrompt);
+  if (!systemPrompt) {
+    throw new Error("Goat harness planner must return a non-empty systemPrompt.");
+  }
   const initialUserMessage = readNonEmptyString(record.initialUserMessage) ?? fallback.prompt;
   const selectedTools = normalizeGoatTaskToolNames(record.tools).filter((toolName) =>
     availableTools.includes(toolName),
@@ -515,7 +541,7 @@ function normalizeHarnessSpec(
 
   return {
     schemaVersion: "goat.harness.v1",
-    model: fallback.model,
+    model,
     systemPrompt,
     initialUserMessage,
     tools: selectedTools.length > 0 ? selectedTools : normalizeGoatTaskToolNames(availableTools),
@@ -524,8 +550,14 @@ function normalizeHarnessSpec(
   };
 }
 
-function defaultTaskSystemPrompt() {
-  return GOAT_TASK_HARNESS_SYSTEM_PROMPT;
+function readHarnessModel(
+  value: unknown,
+  availableModels: readonly GoatHarnessSpec["model"][],
+): GoatHarnessSpec["model"] | null {
+  const model = readNonEmptyString(value);
+  return model && availableModels.includes(model as GoatHarnessSpec["model"])
+    ? (model as GoatHarnessSpec["model"])
+    : null;
 }
 
 function toolEventPayload(event: GoatToolLifecycleInput) {

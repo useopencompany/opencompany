@@ -1,21 +1,43 @@
+import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+const LINK_CLASS =
+  "font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70";
+
 const MARKDOWN_COMPONENTS: Components = {
-  a: ({ children, href }) =>
-    href ? (
+  a: ({ children, href }) => {
+    if (!href) return <span>{children}</span>;
+    if (isInternalHref(href)) {
+      return (
+        <Link href={href} className={LINK_CLASS}>
+          {children}
+        </Link>
+      );
+    }
+    if (href.startsWith("#")) {
+      return (
+        <a href={href} className={LINK_CLASS}>
+          {children}
+        </a>
+      );
+    }
+    return (
       <a
         href={href}
         target="_blank"
         rel="noreferrer noopener"
-        className="font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70"
+        className={LINK_CLASS}
       >
         {children}
       </a>
-    ) : (
-      <span>{children}</span>
-    ),
+    );
+  },
 };
+
+function isInternalHref(href: string) {
+  return href.startsWith("/") && !href.startsWith("//");
+}
 
 export function Markdown({ content, className }: { content: string; className?: string }) {
   return (

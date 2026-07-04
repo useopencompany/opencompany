@@ -5,12 +5,14 @@ import type {
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
   GoatTaskModelUsage,
+  GoatTaskModelUsagePhase,
   GoatTaskSandboxUsage,
   GoatTaskStage,
   GoatTaskStatus,
   GoatTaskToolName,
   GoatTaskToolUsage,
 } from "@opencompany/db/goat-schema";
+import { getAgentModelDefinition } from "@opencompany/agent-runtime";
 
 export type GoatTaskRunTaskInput =
   | {
@@ -167,7 +169,15 @@ export type GoatHarnessRunViewModel = {
   assistantMessages: GoatRunMessage[];
   toolCalls: GoatHarnessRunToolCall[];
   events: GoatRunEvent[];
+  models: GoatRunModelSummary[];
   cost: GoatRunCostSummary;
+};
+
+export type GoatRunModelSummary = {
+  id: string;
+  label: string;
+  usageCount: number;
+  phases: GoatTaskModelUsagePhase[];
 };
 
 export type GoatRunCostSummary = {
@@ -254,6 +264,7 @@ export function buildGoatHarnessRun(input: {
   const userMessage = messages.find((message) => message.role === "user") ?? null;
   const assistantMessages = messages.filter((message) => message.role === "assistant");
   const toolCalls = buildToolCalls(events);
+  const models = buildModelSummary(task.model, input.modelUsage ?? []);
 
   return {
     hasDurableRun: messages.length > 0 || events.length > 0,
@@ -263,6 +274,7 @@ export function buildGoatHarnessRun(input: {
     assistantMessages,
     toolCalls,
     events,
+    models,
     cost:
       input.cost ??
       buildCostSummary({
@@ -271,6 +283,40 @@ export function buildGoatHarnessRun(input: {
         sandboxUsage: input.sandboxUsage ?? [],
       }),
   };
+}
+
+function buildModelSummary(
+  fallbackModel: string,
+  modelUsage: readonly GoatTaskRunModelUsageInput[],
+): GoatRunModelSummary[] {
+  const byModel = new Map<
+    string,
+    { id: string; usageCount: number; phases: Set<GoatTaskModelUsagePhase> }
+  >();
+
+  for (const usage of modelUsage) {
+    const modelId = readUsageString(usage, "modelName", "model_name") || fallbackModel;
+    const phase = readModelUsagePhase(usage);
+    const current = byModel.get(modelId) ?? { id: modelId, usageCount: 0, phases: new Set() };
+    current.usageCount += 1;
+    if (phase) current.phases.add(phase);
+    byModel.set(modelId, current);
+  }
+
+  if (byModel.size === 0) {
+    byModel.set(fallbackModel, { id: fallbackModel, usageCount: 0, phases: new Set() });
+  }
+
+  return Array.from(byModel.values()).map((model) => ({
+    id: model.id,
+    label: modelLabel(model.id),
+    usageCount: model.usageCount,
+    phases: Array.from(model.phases),
+  }));
+}
+
+function modelLabel(modelId: string) {
+  return getAgentModelDefinition(modelId)?.label ?? modelId;
 }
 
 function buildCostSummary(input: {
@@ -651,4 +697,9 @@ function readUsageString(value: unknown, camelKey: string, snakeKey: string) {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const raw = record[camelKey] ?? record[snakeKey];
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+function readModelUsagePhase(value: unknown): GoatTaskModelUsagePhase | null {
+  const phase = readUsageString(value, "phase", "phase");
+  return phase === "planner" || phase === "execution" ? phase : null;
 }

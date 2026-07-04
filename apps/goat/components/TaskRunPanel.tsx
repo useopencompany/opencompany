@@ -99,7 +99,7 @@ function LiveTaskRunProvider({
     ) {
       return initialRun;
     }
-    return buildGoatHarnessRun({
+    const liveRun = buildGoatHarnessRun({
       task: (liveTask ?? taskFromInitialRun(initialRun)) as GoatTaskRow,
       messages: liveMessages,
       events: liveEvents,
@@ -108,6 +108,7 @@ function LiveTaskRunProvider({
       sandboxUsage: costRowsLoading ? [] : liveSandboxUsage,
       ...(costRowsLoading || !hasLiveCostRows ? { cost: initialRun.cost } : {}),
     });
+    return applyInitialCostFloor(liveRun, initialRun);
   }, [
     eventRows,
     eventsLoading,
@@ -125,6 +126,20 @@ function LiveTaskRunProvider({
   ]);
 
   return children(run);
+}
+
+export function applyInitialCostFloor(
+  liveRun: GoatHarnessRunViewModel,
+  initialRun: GoatHarnessRunViewModel,
+): GoatHarnessRunViewModel {
+  if (liveRun.cost.totalCostUsdMicros >= initialRun.cost.totalCostUsdMicros) {
+    return liveRun;
+  }
+
+  return {
+    ...liveRun,
+    cost: initialRun.cost,
+  };
 }
 
 function taskFromInitialRun(run: GoatHarnessRunViewModel): GoatTaskRow {

@@ -394,6 +394,7 @@ export async function createDraftPullRequest(input: {
   head: string;
   base: string;
   body: string;
+  draft?: boolean;
 }) {
   const token = input.installationId
     ? await getGitHubWorkInstallationToken({
@@ -414,7 +415,7 @@ export async function createDraftPullRequest(input: {
       head: input.head,
       base: input.base,
       body: input.body,
-      draft: true,
+      draft: input.draft ?? true,
     },
   });
 }

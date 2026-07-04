@@ -3,6 +3,7 @@ import { ArrowLeft, CircleUserRound, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { currentGoatUser } from "@/lib/auth";
+import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
@@ -10,11 +11,12 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const { authUser, user } = await currentGoatUser();
-  const [googleIntegrations, linear] = await Promise.all([
+  const [googleIntegrations, linear, github] = await Promise.all([
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
+    getGoatGitHubIntegrationState(user.workosUserId),
   ]);
-  const integrations = { ...googleIntegrations, linear };
+  const integrations = { ...googleIntegrations, linear, github };
   const name = [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
   const initials = getInitials(authUser.firstName, authUser.lastName, user.email);

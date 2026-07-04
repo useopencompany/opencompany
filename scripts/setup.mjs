@@ -166,6 +166,10 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
   "NEON_BRANCH",
   "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
+  "GOAT_PORT",
+  "GOAT_NEXT_PUBLIC_APP_URL",
+  "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+  "RUNNER_LLM_BROKER_PUBLIC_URL",
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
@@ -183,6 +187,8 @@ const GOAT_LOCAL_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
   "RUNNER_INTERNAL_TOKEN",
+  ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
+  ...INTEGRATION_CREDENTIAL_ENV_KEYS,
   "ELECTRIC_URL",
   "ELECTRIC_SOURCE_ID",
   "ELECTRIC_SOURCE_SECRET",
@@ -324,6 +330,9 @@ function inspectState() {
   const env = readEffectiveLocalEnv();
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
+  const githubIntegrationMissing = GITHUB_WORK_INTEGRATION_ENV_KEYS.filter((k) =>
+    isPlaceholder(env[k]),
+  );
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -334,6 +343,8 @@ function inspectState() {
     workosMissingKeys: workosMissing,
     runner: runnerMissing.length === 0 ? "ready" : "placeholder",
     runnerMissingKeys: runnerMissing,
+    githubIntegration: githubIntegrationMissing.length === 0 ? "ready" : "placeholder",
+    githubIntegrationMissingKeys: githubIntegrationMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
@@ -500,7 +511,7 @@ async function ensureGoatEnvFile() {
   }
 
   writeEnvValues(GOAT_ENV_PATH, values);
-  ok(`Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/Electric/observability env`);
+  ok(`Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability env`);
 }
 
 async function ensurePersonalEnvFile() {
@@ -673,6 +684,33 @@ async function ensureLocalRunnerEnv(state) {
     );
   }
   ok(`Runner credentials configured from ${source}`);
+}
+
+async function ensureGitHubIntegrationEnv(state) {
+  step("GitHub integration app credentials");
+  if (state.githubIntegration === "ready") {
+    ok("GitHub integration app env vars look set");
+    return;
+  }
+
+  warn(
+    `GitHub integration app env vars are missing (${state.githubIntegrationMissingKeys.join(
+      ", ",
+    )}). Pulling the shared main app credentials from Infisical.`,
+  );
+  const source = pullSharedDevEnv({
+    requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
+  });
+
+  const after = inspectState();
+  if (after.githubIntegration !== "ready") {
+    throw new Error(
+      `${source} env pull finished but GitHub integration app values are still placeholders: ${after.githubIntegrationMissingKeys.join(
+        ", ",
+      )}. Add them in Infisical dev /web, then run \`bun run env:pull\` again.`,
+    );
+  }
+  ok(`GitHub integration app credentials configured from ${source}`);
 }
 
 async function ensureSharedDatabaseUrl(state) {
@@ -904,12 +942,14 @@ async function main() {
     if (
       state.workos === "placeholder" ||
       state.runner === "placeholder" ||
+      state.githubIntegration === "placeholder" ||
       (!SHARED_DATABASE_MODE && state.neonProject === "placeholder") ||
       (SHARED_DATABASE_MODE && state.databaseUrl === "placeholder")
     ) {
       const missingShared = [
         ...state.workosMissingKeys,
         ...state.runnerMissingKeys,
+        ...state.githubIntegrationMissingKeys,
         ...(!SHARED_DATABASE_MODE && state.neonProject === "placeholder"
           ? ["NEON_PROJECT_ID"]
           : []),
@@ -992,6 +1032,7 @@ async function main() {
   await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
   await ensureLocalRunnerEnv(inspectState());
+  await ensureGitHubIntegrationEnv(inspectState());
   if (SHARED_DATABASE_MODE) {
     await ensureSharedDatabaseUrl(inspectState());
   } else {

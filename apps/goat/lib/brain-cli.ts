@@ -27,7 +27,7 @@ import {
   validateGoatBrainDocument,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { GoatBrainToolOutput } from "@/lib/chat-ui";
 
 const MAX_GOAT_BRAIN_CHAT_FILE_BYTES = 256 * 1024;

@@ -35,6 +35,8 @@ For the current integration flow:
 - Set **Setup URL** to `https://your-static-domain.ngrok.app/api/integrations/github/callback`.
 - Enable **Redirect on update** if you want repository access changes to return to the local app.
 - Add **Callback URL** `https://your-static-domain.ngrok.app/api/integrations/github/callback`.
+- For Goat local integration testing, add the equivalent Goat callback URL for its public origin:
+  `https://your-goat-static-domain.ngrok.app/api/integrations/github/callback`.
 - Do not enable **Request user authorization (OAuth) during installation** for local development.
   The app callback receives `installation_id`, then the local app starts the OAuth flow with an
   explicit `redirect_uri`.
@@ -100,6 +102,37 @@ through WorkOS with the localhost callback, and start the GitHub integration fro
 `/company/integrations`.
 
 Set `OPENCOMPANY_NGROK_DISABLED=1` to skip ngrok for a dev session.
+
+## Goat Local Flow
+
+`bun run setup` and `bun run env:pull` reuse the main app's existing
+`GITHUB_INTEGRATION_APP_*` and `GITHUB_INTEGRATION_STATE_SECRET` values from Infisical. Setup also
+mirrors those values into `apps/goat/.env.local` so direct Goat app commands use the same GitHub App
+credentials as the main app.
+
+Run Goat with the local runner and ngrok proxy:
+
+```bash
+bun run dev:goat
+```
+
+When ngrok is available, `dev:goat` injects the public ngrok origin as
+`GOAT_NEXT_PUBLIC_APP_URL`, `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI`,
+`NEXT_PUBLIC_APP_URL`, and `NEXT_PUBLIC_WORKOS_REDIRECT_URI` for that dev process. It also exposes
+runner callback routes through the same public origin and sets `RUNNER_LLM_BROKER_PUBLIC_URL`.
+
+Add these URLs to the development GitHub App and WorkOS environment for the ngrok domain you use:
+
+```text
+https://your-goat-static-domain.ngrok.app/api/integrations/github/callback
+https://your-goat-static-domain.ngrok.app/auth/callback
+```
+
+If you prefer to run directly from Infisical instead of `.env.local`, use:
+
+```bash
+bun run infisical:dev:goat
+```
 
 ## Worktrees
 

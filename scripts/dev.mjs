@@ -114,16 +114,24 @@ function parseArgs(args) {
 function envForAppMode() {
   if (appMode !== "goat") return {};
 
-  const goatAppUrl = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() || `http://localhost:${port}`;
+  const goatAppUrl =
+    tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
+    tunnelEnv.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
+    `http://localhost:${port}`;
   const goatRedirectUri =
-    process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() || `${goatAppUrl}/auth/callback`;
+    tunnelEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() ||
+    process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() ||
+    `${goatAppUrl}/auth/callback`;
 
   return {
     GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
     GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       process.env.RUNNER_ALLOWED_ORIGINS,
-      [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL].filter(Boolean),
+      [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL].filter(
+        Boolean,
+      ),
     ),
   };
 }
@@ -278,15 +286,26 @@ async function startDefaultTunnel(
   try {
     tunnelEnv = envForTunnel(publicUrl, process.env, { localPort: appPort });
     if (exposesRunnerCallbacks) {
-      tunnelEnv.RUNNER_LLM_BROKER_PUBLIC_URL = publicUrl;
+      const goatRedirectUri = `${publicUrl}/auth/callback`;
+      tunnelEnv = {
+        ...tunnelEnv,
+        GOAT_NEXT_PUBLIC_APP_URL: publicUrl,
+        GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+        NEXT_PUBLIC_APP_URL: publicUrl,
+        NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+        WORKOS_REDIRECT_URI: goatRedirectUri,
+        RUNNER_LLM_BROKER_PUBLIC_URL: publicUrl,
+      };
     }
     console.log(`\nngrok tunnel ready: ${publicUrl}`);
     if (exposesRunnerCallbacks) {
       console.log(`Goat public URL: ${publicUrl}`);
+      console.log(`Goat GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
+      console.log(`Goat WorkOS redirect URI: ${tunnelEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
     } else {
       console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
+      console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
     }
-    console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
     if (exposesRunnerCallbacks) {
       console.log(`Runner sandbox callback URL: ${publicUrl}`);
     }

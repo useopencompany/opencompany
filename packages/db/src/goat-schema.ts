@@ -25,10 +25,15 @@ export type GoatTaskStage =
   | "completed"
   | "failed";
 
-export type GoatIntegrationProvider = "gmail" | "google_calendar" | "linear";
+export type GoatIntegrationProvider = "gmail" | "google_calendar" | "linear" | "github";
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
 export type GoatIntegrationCredentialKind = "oauth_token";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
+export type GoatIntegrationResourceStatus =
+  | "available"
+  | "permission_lost"
+  | "archived"
+  | "sync_failed";
 
 export type GoatTaskToolName =
   | "exa_search"
@@ -41,7 +46,11 @@ export type GoatTaskToolName =
   | "calendar_get_event"
   | "calendar_get_freebusy"
   | "linear_search_tools"
-  | "linear_use_tool";
+  | "linear_use_tool"
+  | "github_clone_repository"
+  | "github_shell"
+  | "github_status"
+  | "github_open_pull_request";
 
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
@@ -114,6 +123,7 @@ export type GoatChatMessageDebugTrace = {
   schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1";
   model?: string;
   finishReason?: string;
+  uiMessageParts?: unknown[];
   toolCalls?: unknown[];
   toolResults?: unknown[];
   error?: string;
@@ -268,7 +278,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -317,11 +327,65 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
       sql`${table.kind} IN ('oauth_token')`,
+    ),
+  }),
+);
+
+export const goatIntegrationResources = goat.table(
+  "integration_resources",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    integrationId: text("integration_id").notNull(),
+    provider: text("provider").$type<GoatIntegrationProvider>().notNull(),
+    resourceType: text("resource_type").notNull(),
+    externalId: text("external_id").notNull(),
+    name: text("name").notNull(),
+    displayName: text("display_name"),
+    status: text("status").$type<GoatIntegrationResourceStatus>().notNull().default("available"),
+    statusReason: text("status_reason"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    selectedAt: timestamp("selected_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userProviderTypeIdx: index("goat_integration_resources_user_provider_type_idx").on(
+      table.userWorkosId,
+      table.provider,
+      table.resourceType,
+    ),
+    integrationIdx: index("goat_integration_resources_integration_idx").on(table.integrationId),
+    integrationTypeExternalIdx: uniqueIndex(
+      "goat_integration_resources_integration_type_external_idx",
+    ).on(table.integrationId, table.resourceType, table.externalId),
+    integrationUserProviderFk: foreignKey({
+      name: "goat_integration_resources_integration_user_provider_fk",
+      columns: [table.integrationId, table.userWorkosId, table.provider],
+      foreignColumns: [
+        goatIntegrations.id,
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+      ],
+    }).onDelete("cascade"),
+    providerCheck: check(
+      "goat_integration_resources_provider_check",
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github')`,
+    ),
+    statusCheck: check(
+      "goat_integration_resources_status_check",
+      sql`${table.status} IN ('available', 'permission_lost', 'archived', 'sync_failed')`,
     ),
   }),
 );
@@ -685,6 +749,7 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   chatSessions: many(goatChatSessions),
   integrations: many(goatIntegrations),
   integrationCredentials: many(goatIntegrationCredentials),
+  integrationResources: many(goatIntegrationResources),
 }));
 
 export const goatBrainFoldersRelations = relations(goatBrainFolders, ({ one }) => ({
@@ -722,6 +787,7 @@ export const goatIntegrationsRelations = relations(goatIntegrations, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   credentials: many(goatIntegrationCredentials),
+  resources: many(goatIntegrationResources),
 }));
 
 export const goatIntegrationCredentialsRelations = relations(
@@ -737,6 +803,17 @@ export const goatIntegrationCredentialsRelations = relations(
     }),
   }),
 );
+
+export const goatIntegrationResourcesRelations = relations(goatIntegrationResources, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatIntegrationResources.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  integration: one(goatIntegrations, {
+    fields: [goatIntegrationResources.integrationId],
+    references: [goatIntegrations.id],
+  }),
+}));
 
 export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
   user: one(goatUsers, {
