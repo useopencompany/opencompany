@@ -27,6 +27,8 @@ import {
   stringifyFinishReason,
 } from "@/lib/chat-agent";
 import {
+  type DeleteTaskScheduleToolOutput,
+  type EditTaskScheduleToolOutput,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
   textFromGoatChatUiMessage,
@@ -34,6 +36,13 @@ import {
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import { validateGoatChatInput } from "@/lib/chat-validation";
+import {
+  createGoatTaskScheduleForUser,
+  deleteGoatTaskScheduleAction,
+  type GoatTaskScheduleView,
+  listCurrentUserGoatTaskSchedules,
+  updateGoatTaskScheduleAction,
+} from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
 export const maxDuration = 60;
@@ -71,6 +80,7 @@ export async function POST(request: Request): Promise<Response> {
   const exaApiKey = process.env.EXA_API_KEY?.trim();
 
   const store = createDbGoatChatStore();
+  const recurringSchedules = await listCurrentUserGoatTaskSchedules();
   const startedAt = performance.now();
   const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
@@ -188,6 +198,86 @@ export async function POST(request: Request): Promise<Response> {
         prompt: created.prompt,
       };
     },
+    scheduleTask: async (schedule) => {
+      const created = await createGoatTaskScheduleForUser({
+        userWorkosId: context.user.workosUserId,
+        name: schedule.name,
+        sourceDescription: schedule.sourceDescription ?? schedule.reason ?? "",
+        cron: schedule.cron,
+        timezone: schedule.timezone ?? context.user.timezone,
+        prompt: schedule.prompt,
+      });
+      return {
+        scheduleId: created.id,
+        scheduleName: created.name,
+        cron: created.cron,
+        timezone: created.timezone,
+        nextRunAt: created.nextRunAt.toISOString(),
+        prompt: created.prompt,
+        status: "scheduled",
+      };
+    },
+    editTaskSchedule: async (edit) => {
+      const target = resolveChatScheduleTarget(recurringSchedules, {
+        ...(edit.scheduleId ? { scheduleId: edit.scheduleId } : {}),
+        ...(edit.scheduleName ? { scheduleName: edit.scheduleName } : {}),
+      });
+      if (!target.ok) return target;
+
+      const name = edit.name?.trim() || target.schedule.name;
+      const cron = edit.cron?.trim() || target.schedule.cron;
+      const timezone = edit.timezone?.trim() || target.schedule.timezone;
+      const prompt = edit.prompt?.trim() || target.schedule.prompt;
+      const scheduleTimingChanged = Boolean(edit.cron?.trim() || edit.timezone?.trim());
+      const sourceDescription =
+        edit.sourceDescription?.trim() ||
+        (!scheduleTimingChanged ? target.schedule.sourceDescription : "") ||
+        `${cron} - ${timezone}`;
+
+      const result = await updateGoatTaskScheduleAction(target.schedule.id, {
+        name,
+        sourceDescription,
+        cron,
+        timezone,
+        prompt,
+      });
+      if (!result.ok) {
+        return {
+          ok: false,
+          status: "invalid",
+          error: result.error,
+        } satisfies EditTaskScheduleToolOutput;
+      }
+
+      return {
+        ok: true,
+        scheduleId: result.schedule.id,
+        scheduleName: result.schedule.name,
+        cron: result.schedule.cron,
+        timezone: result.schedule.timezone,
+        nextRunAt: result.schedule.nextRunAt.toISOString(),
+        status: "updated",
+      };
+    },
+    deleteTaskSchedule: async (input) => {
+      const target = resolveChatScheduleTarget(recurringSchedules, input);
+      if (!target.ok) return target;
+
+      const result = await deleteGoatTaskScheduleAction(target.schedule.id);
+      if (!result.ok) {
+        return {
+          ok: false,
+          status: "invalid",
+          error: result.error,
+        } satisfies DeleteTaskScheduleToolOutput;
+      }
+      return {
+        ok: true,
+        scheduleId: target.schedule.id,
+        scheduleName: target.schedule.name,
+        status: "deleted",
+      };
+    },
   });
 
   let debugTrace: GoatChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
@@ -199,6 +289,7 @@ export async function POST(request: Request): Promise<Response> {
     system: createOpenCompanyChatSystemPrompt({
       currentDate,
       webSearchEnabled: Boolean(exaApiKey),
+      recurringSchedules,
     }),
     messages: await convertToModelMessages(turn.messages),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
@@ -378,6 +469,48 @@ async function executeGoatChatExaSearch(input: {
 function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
   if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
   return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function resolveChatScheduleTarget(
+  schedules: readonly GoatTaskScheduleView[],
+  input: { scheduleId?: string; scheduleName?: string },
+):
+  | { ok: true; schedule: GoatTaskScheduleView }
+  | { ok: false; error: string; status: "not_found" | "ambiguous" | "invalid" } {
+  const scheduleId = input.scheduleId?.trim();
+  if (scheduleId) {
+    const schedule = schedules.find((candidate) => candidate.id === scheduleId);
+    return schedule
+      ? { ok: true, schedule }
+      : { ok: false, status: "not_found", error: "Recurring task not found." };
+  }
+
+  const scheduleName = input.scheduleName?.trim();
+  if (!scheduleName) {
+    return {
+      ok: false,
+      status: "invalid",
+      error: "Specify which recurring task to change.",
+    };
+  }
+
+  const normalizedName = normalizeScheduleLookupText(scheduleName);
+  const matches = schedules.filter(
+    (schedule) => normalizeScheduleLookupText(schedule.name) === normalizedName,
+  );
+  if (matches.length === 1 && matches[0]) return { ok: true, schedule: matches[0] };
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      status: "ambiguous",
+      error: "Multiple recurring tasks matched that name. Ask which one to change.",
+    };
+  }
+  return { ok: false, status: "not_found", error: "Recurring task not found." };
+}
+
+function normalizeScheduleLookupText(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function toStreamMessageMetadata(

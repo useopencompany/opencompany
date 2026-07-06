@@ -1,6 +1,7 @@
 import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
 import { listCurrentUserRecentGoatChats, loadCurrentGoatChatSessionById } from "@/lib/chat";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export const dynamic = "force-dynamic";
@@ -12,8 +13,9 @@ type GoatHomePageProps = {
 export default async function GoatHomePage({ searchParams }: GoatHomePageProps) {
   const params = await searchParams;
   const chatParam = Array.isArray(params.chat) ? params.chat[0] : params.chat;
-  const [tasks, initialChat, recentChats] = await Promise.all([
+  const [tasks, schedules, initialChat, recentChats] = await Promise.all([
     listCurrentUserGoatTasks(),
+    listCurrentUserGoatTaskSchedules(),
     loadCurrentGoatChatSessionById(chatParam),
     listCurrentUserRecentGoatChats(),
   ]);
@@ -24,6 +26,8 @@ export default async function GoatHomePage({ searchParams }: GoatHomePageProps) 
       name: task.name,
       prompt: task.prompt,
       model: task.model,
+      scheduleId: task.scheduleId,
+      scheduledFor: task.scheduledFor?.toISOString() ?? null,
       status: task.status,
       stage: task.stage,
       result: task.result,
@@ -38,6 +42,7 @@ export default async function GoatHomePage({ searchParams }: GoatHomePageProps) 
     <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <GoatSurface
         tasks={taskViews}
+        schedules={schedules}
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={initialChat}
         recentChats={recentChats}

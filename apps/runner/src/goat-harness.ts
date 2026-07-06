@@ -136,13 +136,23 @@ export async function executeGoatTask(
     payload: { status: "running", stage: "planning" },
   });
 
-  const planned = await planGoatHarnessForTask({
-    prompt: input.task.prompt,
-    model: input.task.model,
-    availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
-    gatewayApiKey: input.env.vercelAiGatewayApiKey,
-    signal: input.signal,
-  });
+  const planned =
+    input.task.scheduleId && hasPreplannedHarnessSpec(input.task.harnessSpec)
+      ? {
+          harnessSpec: input.task.harnessSpec,
+          debugTrace:
+            Object.keys(input.task.debugTrace).length > 0
+              ? input.task.debugTrace
+              : ({ schemaVersion: "goat.debug.v1" } satisfies GoatTaskDebugTrace),
+          usage: undefined,
+        }
+      : await planGoatHarnessForTask({
+          prompt: input.task.prompt,
+          model: input.task.model,
+          availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
+          gatewayApiKey: input.env.vercelAiGatewayApiKey,
+          signal: input.signal,
+        });
   const harnessSpec = planned.harnessSpec;
   if (planned.usage) {
     await input.sink.recordModelUsage({
@@ -250,6 +260,15 @@ export async function executeGoatTask(
     });
     throw error;
   }
+}
+
+function hasPreplannedHarnessSpec(value: GoatHarnessSpec) {
+  return (
+    value.schemaVersion === "goat.harness.v1" &&
+    value.systemPrompt.trim().length > 0 &&
+    value.initialUserMessage.trim().length > 0 &&
+    value.tools.length > 0
+  );
 }
 
 async function runGoatTaskModelStream(input: {
@@ -446,7 +465,7 @@ export async function planGoatHarness(input: {
   ).harnessSpec;
 }
 
-async function planGoatHarnessForTask(input: {
+export async function planGoatHarnessForTask(input: {
   prompt: string;
   model: GoatHarnessSpec["model"];
   gatewayApiKey: string;
