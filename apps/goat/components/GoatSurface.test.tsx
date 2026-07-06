@@ -36,6 +36,20 @@ vi.mock("@/lib/tasks", () => ({
   archiveGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
 }));
 
+vi.mock("@/lib/task-schedules", () => ({
+  deleteGoatTaskScheduleAction: vi.fn(async () => ({ ok: true })),
+  runGoatTaskScheduleNowAction: vi.fn(async () => ({
+    ok: true,
+    task: { id: "goat_task_1", displayId: "TASK-1" },
+  })),
+  setGoatTaskScheduleEnabledAction: vi.fn(async () => ({ ok: true })),
+  updateGoatTaskScheduleAction: vi.fn(async () => ({ ok: true })),
+}));
+
+vi.mock("@/lib/user-preferences", () => ({
+  updateGoatTimezoneAction: vi.fn(async () => ({ ok: true, timezone: "UTC" })),
+}));
+
 vi.mock("@ai-sdk/react", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {

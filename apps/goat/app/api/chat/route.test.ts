@@ -6,6 +6,11 @@ import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/c
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
 import { GOAT_BRAIN_TOOL_PART_TYPE } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
+import {
+  deleteGoatTaskScheduleAction,
+  listCurrentUserGoatTaskSchedules,
+  updateGoatTaskScheduleAction,
+} from "@/lib/task-schedules";
 import { POST } from "./route";
 
 vi.mock("@/lib/auth", () => ({
@@ -27,6 +32,13 @@ vi.mock("@/lib/tasks", () => ({
   createGoatTaskForUser: vi.fn(),
 }));
 
+vi.mock("@/lib/task-schedules", () => ({
+  createGoatTaskScheduleForUser: vi.fn(),
+  deleteGoatTaskScheduleAction: vi.fn(),
+  listCurrentUserGoatTaskSchedules: vi.fn(),
+  updateGoatTaskScheduleAction: vi.fn(),
+}));
+
 vi.mock("ai", () => ({
   convertToModelMessages: vi.fn(async () => []),
   createGateway: vi.fn(() => (model: string) => ({ model })),
@@ -42,6 +54,7 @@ describe("POST /api/chat", () => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
+    mockListCurrentUserGoatTaskSchedules().mockResolvedValue([]);
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -351,6 +364,139 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(200);
   });
 
+  it("wires recurring schedule edits into the model stream", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockListCurrentUserGoatTaskSchedules().mockResolvedValue([
+      {
+        id: "goat_task_schedule_1",
+        name: "Daily briefing",
+        sourceDescription: "every day at 9",
+        cron: "0 9 * * *",
+        timezone: "UTC",
+        prompt: "Send a daily briefing.",
+        enabled: true,
+        lastRunAt: null,
+        nextRunAt: "2026-07-07T09:00:00.000Z",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+      },
+    ]);
+    mockUpdateGoatTaskScheduleAction().mockResolvedValue({
+      ok: true,
+      schedule: {
+        id: "goat_task_schedule_1",
+        name: "Daily briefing",
+        cron: "0 10 * * *",
+        timezone: "UTC",
+        nextRunAt: new Date("2026-07-07T10:00:00.000Z"),
+      },
+    });
+    let editToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        tools?: { edit_task_schedule?: { execute?: unknown } };
+      };
+      expect(typedOptions.system).toContain('name="Daily briefing"');
+      const tool = typedOptions.tools?.edit_task_schedule;
+      if (typeof tool?.execute !== "function") {
+        throw new Error("edit_task_schedule execute function was not configured.");
+      }
+      editToolPromise = tool.execute({
+        scheduleName: "Daily briefing",
+        cron: "0 10 * * *",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "move my daily briefing to 10am" }],
+        },
+      }),
+    );
+    const output = await editToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(updateGoatTaskScheduleAction).toHaveBeenCalledWith("goat_task_schedule_1", {
+      name: "Daily briefing",
+      sourceDescription: "0 10 * * * - UTC",
+      cron: "0 10 * * *",
+      timezone: "UTC",
+      prompt: "Send a daily briefing.",
+    });
+    expect(output).toEqual({
+      ok: true,
+      scheduleId: "goat_task_schedule_1",
+      scheduleName: "Daily briefing",
+      cron: "0 10 * * *",
+      timezone: "UTC",
+      nextRunAt: "2026-07-07T10:00:00.000Z",
+      status: "updated",
+    });
+  });
+
+  it("wires recurring schedule deletion into the model stream", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockListCurrentUserGoatTaskSchedules().mockResolvedValue([
+      {
+        id: "goat_task_schedule_1",
+        name: "Daily briefing",
+        sourceDescription: "every day at 9",
+        cron: "0 9 * * *",
+        timezone: "UTC",
+        prompt: "Send a daily briefing.",
+        enabled: true,
+        lastRunAt: null,
+        nextRunAt: "2026-07-07T09:00:00.000Z",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+      },
+    ]);
+    mockDeleteGoatTaskScheduleAction().mockResolvedValue({ ok: true });
+    let deleteToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { delete_task_schedule?: { execute?: unknown } } }).tools
+        ?.delete_task_schedule;
+      if (typeof tool?.execute !== "function") {
+        throw new Error("delete_task_schedule execute function was not configured.");
+      }
+      deleteToolPromise = tool.execute({ scheduleName: "Daily briefing" }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "delete my daily briefing routine" }],
+        },
+      }),
+    );
+    const output = await deleteToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(deleteGoatTaskScheduleAction).toHaveBeenCalledWith("goat_task_schedule_1");
+    expect(output).toEqual({
+      ok: true,
+      scheduleId: "goat_task_schedule_1",
+      scheduleName: "Daily briefing",
+      status: "deleted",
+    });
+  });
+
   it("persists streamed tool parts when the chat stream is stopped before final text", async () => {
     mockAuth();
     mockCreateTurn();
@@ -438,6 +584,7 @@ function mockAuth() {
       firstName: null,
       lastName: null,
       avatarUrl: null,
+      timezone: "UTC",
       createdAt: new Date(),
       updatedAt: new Date(),
     },
@@ -467,6 +614,18 @@ function mockCreateGoatChatUserTurn() {
 
 function mockRunGoatBrainToolForUser() {
   return vi.mocked(runGoatBrainToolForUser);
+}
+
+function mockListCurrentUserGoatTaskSchedules() {
+  return vi.mocked(listCurrentUserGoatTaskSchedules);
+}
+
+function mockUpdateGoatTaskScheduleAction() {
+  return vi.mocked(updateGoatTaskScheduleAction);
+}
+
+function mockDeleteGoatTaskScheduleAction() {
+  return vi.mocked(deleteGoatTaskScheduleAction);
 }
 
 function mockStreamText() {

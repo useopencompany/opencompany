@@ -1,3 +1,4 @@
+import { CronExpressionParser } from "cron-parser";
 import type { AgentScheduleTriggerConfig } from "./types";
 
 export const AGENT_SCHEDULE_TRIGGER_TYPE = "agent.schedule";
@@ -161,6 +162,45 @@ export function scheduleNextRunAt(
 export function normalizeScheduleTimezone(value: string | null | undefined) {
   const timezone = value?.trim() || "UTC";
   return isValidTimezone(timezone) ? timezone : "UTC";
+}
+
+export function isValidFiveFieldCron(cron: string, timezone = "UTC") {
+  try {
+    parseFiveFieldCron(cron, timezone, new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function nextCronRunAt(cron: string, timezone: string, from = new Date()): Date | null {
+  try {
+    return parseFiveFieldCron(cron, timezone, from).next().toDate();
+  } catch {
+    return null;
+  }
+}
+
+export function latestCronRunAt(cron: string, timezone: string, from = new Date()): Date | null {
+  try {
+    return parseFiveFieldCron(cron, timezone, new Date(from.getTime() + 1))
+      .prev()
+      .toDate();
+  } catch {
+    return null;
+  }
+}
+
+function parseFiveFieldCron(cron: string, timezone: string, currentDate: Date) {
+  const normalizedCron = cron.trim().replace(/\s+/g, " ");
+  if (normalizedCron.split(" ").length !== 5) {
+    throw new Error("Expected a 5-field cron expression.");
+  }
+  const normalizedTimezone = normalizeScheduleTimezone(timezone);
+  return CronExpressionParser.parse(normalizedCron, {
+    currentDate,
+    tz: normalizedTimezone,
+  });
 }
 
 function zonedDateParts(date: Date, timezone: string) {

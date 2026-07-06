@@ -19,6 +19,8 @@ export type GoatTaskRow = {
   user_workos_id: string;
   prompt: string;
   model: string;
+  schedule_id: string | null;
+  scheduled_for: string | null;
   status: GoatTaskStatus;
   stage: GoatTaskStage;
   result: string | null;
@@ -32,6 +34,23 @@ export type GoatTaskRow = {
   lease_owner: string | null;
   lease_expires_at: string | null;
   archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatTaskScheduleRow = {
+  id: string;
+  user_workos_id: string;
+  name: string;
+  source_description: string;
+  cron: string;
+  timezone: string;
+  prompt: string;
+  planned_harness_spec: unknown;
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -287,6 +306,12 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
+  const taskSchedules = createGoatElectricCollection<GoatTaskScheduleRow>({
+    id: "goat:task_schedules",
+    table: "goat.task_schedules",
+    getKey: (row) => row.id,
+  });
+
   const integrations = createGoatElectricCollection<GoatIntegrationRow>({
     id: "goat:integrations",
     table: "goat.integrations",
@@ -313,6 +338,7 @@ function buildGoatCollections() {
 
   return {
     tasks,
+    taskSchedules,
     taskRunCollections: getTaskRunCollections,
     chatMessages: getChatMessageCollection,
     integrations,
