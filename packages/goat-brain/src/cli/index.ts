@@ -7,6 +7,7 @@ import {
   DEFAULT_GOAT_BRAIN_FOLDERS,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
   deterministicEvidenceId,
+  formatGoatBrainEvidenceLink,
   GOAT_BRAIN_ENTITY_TYPES,
   GOAT_BRAIN_EVIDENCE_KINDS,
   type GoatBrainDocument,
@@ -868,21 +869,11 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
     timeline: [],
   };
 
-  const subjectRelations = new Map(
-    (subject.doc.frontmatter.relations ?? []).map((relation) => [relationKey(relation), relation]),
-  );
-  subjectRelations.set(relationKey({ type: "evidenced_by", to: evidenceId }), {
-    type: "evidenced_by",
-    to: evidenceId,
-  });
-  subject.doc.frontmatter.relations = [...subjectRelations.values()].sort((a, b) =>
-    relationKey(a).localeCompare(relationKey(b)),
-  );
   subject.doc.frontmatter.updatedAt = nowIso();
   const timelineEntry = goatBrainTimelineEntryFromParts({
     evidenceId,
     at: capturedAt,
-    summary: `[[${evidenceId}|${title}]]: ${summary}`,
+    summary: `${formatGoatBrainEvidenceLink(evidenceId, title)}: ${summary}`,
     detail,
     sourceRef,
     sourceTitle: sourceTitle ?? "",

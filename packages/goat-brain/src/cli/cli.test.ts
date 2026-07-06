@@ -521,14 +521,11 @@ describe("goat-brain cli", () => {
         timeline: Array<{ evidenceId: string; body: string }>;
       };
     };
-    expect(acme.doc.frontmatter.relations).toContainEqual({
-      type: "evidenced_by",
-      to: result.evidenceId,
-    });
+    expect(acme.doc.frontmatter.relations).toEqual([]);
     expect(acme.doc.timeline).toEqual([
       expect.objectContaining({
         evidenceId: result.evidenceId,
-        body: expect.stringContaining(`[[${result.evidenceId}|Acme pricing thread]]`),
+        body: expect.stringContaining(`[[evidence:${result.evidenceId}|Acme pricing thread]]`),
       }),
     ]);
   });

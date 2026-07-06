@@ -3,12 +3,12 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseGoatBrainDocument } from "../document";
 import { goatBrainPayloadHash } from "../entry";
+import { evidenceLinkTargets, pageLinkTargets } from "../inline-links";
 import { goatBrainFolderFromRelativePath } from "../paths";
 import type { GoatBrainEntityType, GoatBrainRelation, GoatBrainStatus } from "../schema";
 import { inferGoatBrainEntityTypeFromFolder } from "../schemas";
 import { listGoatBrainFiles } from "../store";
 import { validateGoatBrainDocument } from "../validate";
-import { wikiLinkTargets } from "../wiki-links";
 
 export type IndexRecord = {
   id: string;
@@ -27,6 +27,7 @@ export type IndexRecord = {
   updatedAt: string;
   relations: GoatBrainRelation[];
   wikiLinks: string[];
+  evidenceLinks: string[];
   valid: boolean;
 };
 
@@ -38,6 +39,8 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
     const id = doc.frontmatter.id ?? file.id;
     if (!folder) return [];
     const title = doc.title || doc.frontmatter.title || id;
+    const timelineText = doc.timeline.map((entry) => entry.body).join("\n");
+    const inlineLinkText = [doc.compiledTruth, timelineText].join("\n\n");
     const embeddingText = `${title}\n${doc.compiledTruth}`.trim() || id;
     return [
       {
@@ -55,10 +58,11 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
         compiledTruth: doc.compiledTruth,
         contentHash: goatBrainPayloadHash(embeddingText),
         embeddingText,
-        timelineText: doc.timeline.map((entry) => entry.body).join("\n"),
+        timelineText,
         updatedAt: doc.frontmatter.updatedAt ?? "",
         relations: doc.frontmatter.relations ?? [],
-        wikiLinks: wikiLinkTargets(doc.compiledTruth),
+        wikiLinks: pageLinkTargets(inlineLinkText),
+        evidenceLinks: evidenceLinkTargets(inlineLinkText),
         valid: validateGoatBrainDocument(doc, file.id, file.source).ok,
       },
     ];
