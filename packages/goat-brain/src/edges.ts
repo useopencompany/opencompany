@@ -1,3 +1,4 @@
+import { evidenceLinkTargets, pageLinkTargets } from "./inline-links";
 import {
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
   type GoatBrainDerivedEdge,
@@ -5,7 +6,6 @@ import {
   isValidGoatBrainId,
   isValidGoatBrainRelationType,
 } from "./schema";
-import { wikiLinkTargets } from "./wiki-links";
 
 export function deriveGoatBrainEdges(input: {
   id: string;
@@ -30,11 +30,20 @@ export function deriveGoatBrainEdges(input: {
     });
   }
 
-  for (const target of wikiLinkTargets(input.body ?? "")) {
+  for (const target of pageLinkTargets(input.body ?? "")) {
     add({
       from: input.id,
       to: target,
       type: "wiki_link",
+      sourceKind: "wiki_link",
+    });
+  }
+
+  for (const target of evidenceLinkTargets(input.body ?? "")) {
+    add({
+      from: input.id,
+      to: target,
+      type: "cites",
       sourceKind: "wiki_link",
     });
   }

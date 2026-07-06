@@ -4,6 +4,7 @@ export * from "./entry";
 export * from "./frontmatter";
 export * from "./health";
 export * from "./ingest";
+export * from "./inline-links";
 export * from "./paths";
 export * from "./retrieval";
 export * from "./schema";

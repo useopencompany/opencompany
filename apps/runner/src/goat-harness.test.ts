@@ -48,6 +48,7 @@ const harnessSpec: GoatHarnessSpec = {
   systemPrompt: "Use read-only tools and answer directly.",
   initialUserMessage: "Research Marseille.",
   tools: ["exa_search"],
+  skills: [],
   maxModelSteps: 8,
   resultMode: "assistant_final",
 };
@@ -89,6 +90,7 @@ describe("planGoatHarness", () => {
         systemPrompt: "Use Gmail.",
         initialUserMessage: "Use Gmail to summarize the latest emails.",
         tools: ["gmail_search", "shell", "goat_result"],
+        skills: [],
         maxModelSteps: 12,
         resultMode: "assistant_final",
       },
@@ -109,6 +111,7 @@ describe("planGoatHarness", () => {
       systemPrompt: "Use Gmail.",
       initialUserMessage: "Use Gmail to summarize the latest emails.",
       tools: ["gmail_search"],
+      skills: [],
       maxModelSteps: 12,
       resultMode: "assistant_final",
     });
@@ -122,6 +125,7 @@ describe("planGoatHarness", () => {
     expect(request.system).toBe(GOAT_HARNESS_CREATION_SYSTEM_PROMPT);
     expect(request.system).toContain("<goat_harness_planner>");
     expect(request.system).toContain("<tool_policy>");
+    expect(request.system).toContain("<skill_policy>");
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
     expect(request.system).toContain('resultMode "brain_markdown_report"');
@@ -140,6 +144,9 @@ describe("planGoatHarness", () => {
     expect(request.prompt).toContain("<available_operation_tools>");
     expect(request.prompt).toContain("<tool>\nexa_search\n</tool>");
     expect(request.prompt).toContain("<tool>\ngmail_search\n</tool>");
+    expect(request.prompt).toContain("<available_skills>");
+    expect(request.prompt).toContain("<id>\nfirst-principles\n</id>");
+    expect(request.prompt).toContain("<id>\nyc-office-hours\n</id>");
     expect(request.prompt).toContain("<default_max_model_steps>\n8\n</default_max_model_steps>");
     expect(request.prompt).toContain("<task_prompt>");
     expect(request.prompt).toContain("no inbox access is available in chat");
@@ -153,6 +160,7 @@ describe("planGoatHarness", () => {
         systemPrompt: "Run the research task with the selected tools.",
         initialUserMessage: "",
         tools: ["goat_result"],
+        skills: ["unknown-skill"],
         resultMode: "assistant_final",
       },
     });
@@ -169,6 +177,7 @@ describe("planGoatHarness", () => {
       model,
       initialUserMessage: "Research Marseille.",
       tools: ["exa_search"],
+      skills: [],
       maxModelSteps: 8,
       resultMode: "assistant_final",
     });
@@ -183,6 +192,7 @@ describe("planGoatHarness", () => {
         systemPrompt: "",
         initialUserMessage: "Research Marseille.",
         tools: ["exa_search"],
+        skills: [],
         maxModelSteps: 8,
         resultMode: "assistant_final",
       },
@@ -206,6 +216,7 @@ describe("planGoatHarness", () => {
         systemPrompt: "Use Linear MCP when relevant.",
         initialUserMessage: "Find my Linear issues about onboarding.",
         tools: ["linear_search_tools", "linear_use_tool"],
+        skills: [],
         maxModelSteps: 8,
         resultMode: "assistant_final",
       },
@@ -237,6 +248,7 @@ describe("planGoatHarness", () => {
           "github_status",
           "github_open_pull_request",
         ],
+        skills: [],
         maxModelSteps: 8,
         resultMode: "assistant_final",
       },
@@ -283,6 +295,7 @@ describe("planGoatHarness", () => {
         systemPrompt: "Research the market deeply.",
         initialUserMessage: "Deep research the Marseille AI market.",
         tools: ["exa_search"],
+        skills: [],
         maxModelSteps: 10,
         resultMode: "brain_markdown_report",
       },
@@ -302,6 +315,7 @@ describe("planGoatHarness", () => {
       systemPrompt: expect.stringContaining("<brain_markdown_report_result_contract>"),
       initialUserMessage: "Deep research the Marseille AI market.",
       tools: ["exa_search"],
+      skills: [],
       maxModelSteps: 10,
       resultMode: "brain_markdown_report",
     });
@@ -316,6 +330,7 @@ describe("planGoatHarness", () => {
         systemPrompt: "Use Codex to edit the repository and summarize the diff.",
         initialUserMessage: "Use Codex to fix the failing tests in octo/repo.",
         tools: ["exa_search"],
+        skills: [],
         maxModelSteps: 8,
         resultMode: "assistant_final",
         codex: {
@@ -342,6 +357,34 @@ describe("planGoatHarness", () => {
         reasoningEffort: "high",
       },
     });
+  });
+
+  it("keeps selected skills and injects their execution guidance into the system prompt", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        model: claudeModel,
+        systemPrompt: "Help the founder decide what to build next.",
+        initialUserMessage: "Run YC-style office hours and reason from first principles.",
+        tools: ["exa_search"],
+        skills: ["yc-office-hours", "first-principles", "unknown-skill", "yc-office-hours"],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+      },
+    });
+
+    const result = await planGoatHarness({
+      prompt: "Run YC-style office hours and reason from first principles.",
+      model,
+      availableTools: ["exa_search"],
+      gatewayApiKey: "gateway",
+    });
+
+    expect(result.skills).toEqual(["yc-office-hours", "first-principles"]);
+    expect(result.systemPrompt).toContain("<skill:yc-office-hours>");
+    expect(result.systemPrompt).toContain("YC-style office-hours loop");
+    expect(result.systemPrompt).toContain("<skill:first-principles>");
+    expect(result.systemPrompt).toContain("bedrock facts");
   });
 });
 
@@ -391,6 +434,7 @@ describe("executeGoatTask", () => {
         payload: expect.objectContaining({
           model,
           tools: ["exa_search"],
+          skills: [],
           resultMode: "assistant_final",
         }),
       }),

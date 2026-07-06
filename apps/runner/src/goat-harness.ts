@@ -2,6 +2,7 @@ import type {
   GoatHarnessSpec,
   GoatTaskDebugTrace,
   GoatTaskEventType,
+  GoatTaskSkillId,
   GoatTaskToolName,
   goatTasks,
 } from "@opencompany/db/goat-schema";
@@ -28,9 +29,11 @@ import {
 import type { HostedToolUsage } from "./hosted-tools";
 import {
   buildGoatHarnessCreationPrompt,
+  buildGoatHarnessSkillSystemPrompt,
   GOAT_HARNESS_CREATION_SYSTEM_PROMPT,
   GOAT_HARNESS_ENGINE_OPTIONS,
   GOAT_HARNESS_MODEL_OPTIONS,
+  GOAT_HARNESS_SKILL_OPTIONS,
 } from "./prompts/goat-harness-creation";
 
 const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
@@ -168,6 +171,7 @@ export async function executeGoatTask(
       engine: harnessSpec.engine,
       model: harnessSpec.model,
       tools: harnessSpec.tools,
+      skills: harnessSpec.skills,
       maxModelSteps: harnessSpec.maxModelSteps,
       resultMode: harnessSpec.resultMode,
       codex: harnessSpec.codex ?? null,
@@ -553,15 +557,22 @@ async function planGoatHarnessForTask(input: {
   const availableTools = normalizeGoatTaskToolNames(input.availableTools);
   const availableEngines = GOAT_HARNESS_ENGINE_OPTIONS.map((option) => option.id);
   const availableModels = GOAT_HARNESS_MODEL_OPTIONS.map((option) => option.id);
+  const availableSkills = GOAT_HARNESS_SKILL_OPTIONS.map((option) => option.id);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
-  const schema = goatHarnessSpecResponseSchema(availableTools, availableEngines, availableModels);
+  const schema = goatHarnessSpecResponseSchema(
+    availableTools,
+    availableEngines,
+    availableModels,
+    availableSkills,
+  );
   const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
   const userPrompt = buildGoatHarnessCreationPrompt({
     taskPrompt: input.prompt,
     executionEngineOptions: GOAT_HARNESS_ENGINE_OPTIONS,
     executionModelOptions: GOAT_HARNESS_MODEL_OPTIONS,
     availableOperationTools: availableTools,
+    availableSkills: GOAT_HARNESS_SKILL_OPTIONS,
     defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
   });
 
@@ -572,6 +583,7 @@ async function planGoatHarnessForTask(input: {
       "goat.planner_model": GOAT_PLANNER_MODEL,
       "goat.queued_model": input.model,
       "goat.tool_count": availableTools.length,
+      "goat.skill_count": availableSkills.length,
     },
     () =>
       generateObject({
@@ -588,6 +600,7 @@ async function planGoatHarnessForTask(input: {
     availableTools,
     availableEngines,
     availableModels,
+    availableSkills,
   );
 
   return {
@@ -618,6 +631,7 @@ function goatHarnessSpecResponseSchema(
   availableTools: readonly GoatTaskToolName[],
   availableEngines: readonly GoatHarnessSpec["engine"][],
   availableModels: readonly GoatHarnessSpec["model"][],
+  availableSkills: readonly GoatTaskSkillId[],
 ) {
   return {
     type: "object",
@@ -633,6 +647,13 @@ function goatHarnessSpecResponseSchema(
         items: { type: "string", enum: availableTools },
         minItems: 1,
         maxItems: availableTools.length,
+      },
+      skills: {
+        type: "array",
+        items: { type: "string", enum: availableSkills },
+        minItems: 0,
+        maxItems: availableSkills.length,
+        uniqueItems: true,
       },
       maxModelSteps: { type: "integer", minimum: 1, maximum: MAX_GOAT_MODEL_STEPS },
       resultMode: { type: "string", enum: ["assistant_final", "brain_markdown_report"] },
@@ -653,6 +674,7 @@ function goatHarnessSpecResponseSchema(
       "systemPrompt",
       "initialUserMessage",
       "tools",
+      "skills",
       "maxModelSteps",
       "resultMode",
     ],
@@ -667,6 +689,7 @@ function normalizeHarnessSpec(
   availableTools: readonly GoatTaskToolName[],
   availableEngines: readonly GoatHarnessSpec["engine"][],
   availableModels: readonly GoatHarnessSpec["model"][],
+  availableSkills: readonly GoatTaskSkillId[],
 ): GoatHarnessSpec {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const engine = readHarnessEngine(record.engine, availableEngines);
@@ -682,6 +705,9 @@ function normalizeHarnessSpec(
   const selectedTools = normalizeGoatTaskToolNames(record.tools).filter((toolName) =>
     availableTools.includes(toolName),
   );
+  const selectedSkills = normalizeGoatTaskSkillIds(record.skills).filter((skillId) =>
+    availableSkills.includes(skillId),
+  );
   const maxModelSteps =
     typeof record.maxModelSteps === "number" && Number.isFinite(record.maxModelSteps)
       ? clampInteger(record.maxModelSteps, 1, MAX_GOAT_MODEL_STEPS)
@@ -694,9 +720,10 @@ function normalizeHarnessSpec(
     schemaVersion: "goat.harness.v1",
     engine,
     model,
-    systemPrompt: augmentSystemPromptForResultMode(systemPrompt, resultMode),
+    systemPrompt: augmentSystemPrompt(systemPrompt, resultMode, selectedSkills),
     initialUserMessage,
     tools: selectedTools.length > 0 ? selectedTools : normalizeGoatTaskToolNames(availableTools),
+    skills: selectedSkills,
     maxModelSteps,
     resultMode,
     ...(engine === "codex" ? { codex: readCodexHarnessConfig(record.codex) } : {}),
@@ -711,6 +738,14 @@ function readHarnessEngine(
   return engine && availableEngines.includes(engine as GoatHarnessSpec["engine"])
     ? (engine as GoatHarnessSpec["engine"])
     : "opencompany";
+}
+
+function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
+  if (!Array.isArray(value)) return [];
+  const ids = value.filter((item): item is GoatTaskSkillId =>
+    GOAT_HARNESS_SKILL_OPTIONS.some((option) => option.id === item),
+  );
+  return [...new Set(ids)];
 }
 
 function readHarnessModel(
@@ -746,22 +781,27 @@ function toolEventPayload(event: GoatToolLifecycleInput) {
   };
 }
 
-function augmentSystemPromptForResultMode(
+function augmentSystemPrompt(
   systemPrompt: string,
   resultMode: GoatHarnessSpec["resultMode"],
+  skillIds: readonly GoatTaskSkillId[],
 ) {
-  if (resultMode !== "brain_markdown_report") return systemPrompt;
-  return [
-    systemPrompt,
-    [
-      "<brain_markdown_report_result_contract>",
-      "Finish with only the complete Markdown report body.",
-      "Do not include conversational framing, delivery notes, or a separate summary outside the report.",
-      "Use a clear H1 title, concise executive summary, sourced findings, uncertainty, and practical next steps when relevant.",
-      "The harness will save this final Markdown as a .md file in the user's Brain and return the file link as the task result.",
-      "</brain_markdown_report_result_contract>",
-    ].join("\n"),
-  ].join("\n\n");
+  const sections = [systemPrompt];
+  const skillPrompt = buildGoatHarnessSkillSystemPrompt(skillIds);
+  if (skillPrompt) sections.push(skillPrompt);
+  if (resultMode === "brain_markdown_report") {
+    sections.push(
+      [
+        "<brain_markdown_report_result_contract>",
+        "Finish with only the complete Markdown report body.",
+        "Do not include conversational framing, delivery notes, or a separate summary outside the report.",
+        "Use a clear H1 title, concise executive summary, sourced findings, uncertainty, and practical next steps when relevant.",
+        "The harness will save this final Markdown as a .md file in the user's Brain and return the file link as the task result.",
+        "</brain_markdown_report_result_contract>",
+      ].join("\n"),
+    );
+  }
+  return sections.join("\n\n");
 }
 
 function formatBrainReportResult(artifact: GoatBrainMarkdownReportArtifact) {

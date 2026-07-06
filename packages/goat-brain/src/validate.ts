@@ -4,6 +4,7 @@ import {
   GOAT_BRAIN_TRUTH_HEADING,
   type ParsedGoatBrainDocument,
 } from "./document";
+import { parseGoatBrainInlineLinks } from "./inline-links";
 import {
   isValidGoatBrainEntityType,
   isValidGoatBrainEvidenceId,
@@ -15,7 +16,6 @@ import {
 } from "./schema";
 import { goatBrainFolderTypeError } from "./schemas";
 import { isIsoDate } from "./time";
-import { parseGoatBrainWikiLinks } from "./wiki-links";
 
 export type GoatBrainValidationResult = { ok: true } | { ok: false; errors: string[] };
 export type GoatBrainValidationSubject = "frontmatter" | "sidecar";
@@ -128,8 +128,12 @@ export function validateGoatBrainDocument(
   ) {
     errors.push("document must include ## Compiled truth and ## Timeline sections.");
   }
-  for (const link of parseGoatBrainWikiLinks(doc.compiledTruth)) {
-    if (!link.valid) errors.push(`wiki link target "${link.target}" is invalid.`);
+  for (const link of parseGoatBrainInlineLinks(doc.compiledTruth)) {
+    if (link.valid) continue;
+    if (link.kind === "page") errors.push(`wiki link target "${link.target}" is invalid.`);
+    else if (link.kind === "evidence")
+      errors.push(`evidence link target "${link.target}" is invalid.`);
+    else errors.push(`source link target "${link.target}" is invalid.`);
   }
   const evidenceIds = new Set<string>();
   for (const entry of doc.timeline) {
@@ -151,7 +155,7 @@ export function validateGoatBrainDocument(
     hasCompiledTruth(doc.compiledTruth) &&
     citations.length === 0
   ) {
-    errors.push("active compiled truth must cite evidence with [^ev:<evidence-id>].");
+    errors.push("active compiled truth must cite evidence with [[evidence:<evidence-id>]].");
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true };
 }

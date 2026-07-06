@@ -1,6 +1,7 @@
 import type {
   GoatHarnessEngine,
   GoatHarnessSpec,
+  GoatTaskSkillId,
   GoatTaskToolName,
 } from "@opencompany/db/goat-schema";
 
@@ -33,6 +34,12 @@ export const GOAT_HARNESS_ENGINE_OPTIONS = [
   },
 ] as const satisfies readonly GoatHarnessEngineOption[];
 
+export type GoatHarnessSkillOption = {
+  id: GoatTaskSkillId;
+  label: string;
+  guidance: string;
+};
+
 export const GOAT_HARNESS_MODEL_OPTIONS = [
   {
     id: "moonshotai/kimi-k2.6",
@@ -52,6 +59,21 @@ export const GOAT_HARNESS_MODEL_OPTIONS = [
     guidance: "Use for coding-related work, sharper analysis, and deeper thinking.",
   },
 ] as const satisfies readonly GoatHarnessModelOption[];
+
+export const GOAT_HARNESS_SKILL_OPTIONS = [
+  {
+    id: "first-principles",
+    label: "First-principles thinking",
+    guidance:
+      "Use for hard, high-stakes, or stuck decisions where assumptions need to be stripped down and rebuilt from fundamentals.",
+  },
+  {
+    id: "yc-office-hours",
+    label: "YC office hours",
+    guidance:
+      "Use for founder, startup strategy, product, MVP, users, growth, fundraising, hiring, or prioritization tasks that benefit from a YC-style office-hours loop.",
+  },
+] as const satisfies readonly GoatHarnessSkillOption[];
 
 function promptBlock(name: string, lines: readonly string[]) {
   return [`<${name}>`, ...lines, `</${name}>`].join("\n");
@@ -95,6 +117,19 @@ function promptEngineOptions(values: readonly GoatHarnessEngineOption[]) {
   );
 }
 
+function promptSkillOptions(values: readonly GoatHarnessSkillOption[]) {
+  return promptBlock(
+    "available_skills",
+    values.map((option) =>
+      promptBlock("skill", [
+        promptValue("id", option.id),
+        promptValue("label", option.label),
+        promptValue("selection_guidance", option.guidance),
+      ]),
+    ),
+  );
+}
+
 function escapeXmlText(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
@@ -128,6 +163,14 @@ export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Include github_open_pull_request only when the user explicitly asked to publish, push, or open a pull request.",
 ]);
 
+export const GOAT_HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
+  "Select zero or more skills from available_skills when they materially improve execution.",
+  "Skills are reasoning and operating guidance, not operation-level tools. They do not grant external access.",
+  "Use first-principles for hard decisions, shaky assumptions, or cases where conventional answers may be wrong.",
+  "Use yc-office-hours for startup, founder, product, growth, fundraising, hiring, or prioritization tasks that should feel like office hours.",
+  "Do not select a skill just because it sounds generally useful; leave skills empty for routine execution.",
+]);
+
 export const GOAT_HARNESS_CREATION_RESULT_CONTRACT = promptBlock("result_contract", [
   "The task result comes from the final assistant message; there is no final-result tool.",
   'Use resultMode "brain_markdown_report" for deep research, market research, competitor or landscape research, literature research, multi-source web research, or any task where the durable deliverable should be a named Markdown report.',
@@ -140,6 +183,7 @@ export const GOAT_HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_pla
   GOAT_HARNESS_CREATION_MODEL_SELECTION,
   GOAT_HARNESS_CREATION_PROMPT_CONTRACT,
   GOAT_HARNESS_CREATION_TOOL_POLICY,
+  GOAT_HARNESS_CREATION_SKILL_POLICY,
   GOAT_HARNESS_CREATION_RESULT_CONTRACT,
 ]);
 
@@ -148,13 +192,44 @@ export function buildGoatHarnessCreationPrompt(input: {
   executionEngineOptions: readonly GoatHarnessEngineOption[];
   executionModelOptions: readonly GoatHarnessModelOption[];
   availableOperationTools: readonly GoatTaskToolName[];
+  availableSkills: readonly GoatHarnessSkillOption[];
   defaultMaxModelSteps: number;
 }) {
   return promptBlock("planner_inputs", [
     promptEngineOptions(input.executionEngineOptions),
     promptModelOptions(input.executionModelOptions),
     promptList("available_operation_tools", "tool", input.availableOperationTools),
+    promptSkillOptions(input.availableSkills),
     promptValue("default_max_model_steps", input.defaultMaxModelSteps),
     promptValue("task_prompt", input.taskPrompt),
   ]);
+}
+
+export function buildGoatHarnessSkillSystemPrompt(skillIds: readonly GoatTaskSkillId[]) {
+  const blocks = skillIds.flatMap((skillId) => {
+    switch (skillId) {
+      case "first-principles":
+        return [
+          promptBlock("skill:first-principles", [
+            "Use first-principles thinking for the core reasoning in this task.",
+            "State the real outcome before choosing a solution.",
+            "Separate bedrock facts from inherited convention, then test whether each constraint is actually necessary.",
+            "Rebuild the answer from the fundamentals and choose the simplest mechanism that satisfies them.",
+            "Stress-test the result with a pre-mortem and name the single most important truth the recommendation rests on.",
+          ]),
+        ];
+      case "yc-office-hours":
+        return [
+          promptBlock("skill:yc-office-hours", [
+            "Use a YC-style office-hours loop for this task. Do not claim YC affiliation or imitate specific partners.",
+            "Stage the company or product in one sentence: customer, problem, product, traction, team, and runway when known.",
+            "Identify the live bottleneck: idea, users, activation, retention, revenue, distribution, hiring, fundraising, or focus.",
+            "Prefer customer evidence and weekly numbers over opinions. Separate signal from founder narrative.",
+            "End with one priority, a concrete experiment, success criteria, owner/deadline when relevant, and founder homework.",
+          ]),
+        ];
+    }
+  });
+
+  return blocks.join("\n\n");
 }

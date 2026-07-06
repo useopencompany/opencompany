@@ -63,6 +63,8 @@ export type GoatTaskToolName =
   | "github_status"
   | "github_open_pull_request";
 
+export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
+
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
   engine: GoatHarnessEngine;
@@ -70,6 +72,7 @@ export type GoatHarnessSpec = {
   systemPrompt: string;
   initialUserMessage: string;
   tools: GoatTaskToolName[];
+  skills: GoatTaskSkillId[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
   codex?: {

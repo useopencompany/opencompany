@@ -792,7 +792,7 @@ async function replaceDerivedRows(
   for (const edge of deriveGoatBrainEdges({
     id: row.brainId,
     relations: projection.relations,
-    body: projection.body,
+    body: [projection.body, ...projection.timeline.map((entry) => entry.body)].join("\n\n"),
   })) {
     await db.insert(goatBrainEdges).values({
       id: `goat_brain_edge_${hashGoatBrainContent(

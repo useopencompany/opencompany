@@ -87,6 +87,26 @@ describe("GoatBrainView", () => {
     );
   });
 
+  it("shows derived evidence backlinks from timeline inline links", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline, evidenceDocument]}
+        initialFolderPath="evidence/chat"
+        initialBrainId="ev-platform-planning-chat"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Toggle file details" }));
+
+    expect(screen.getByRole("link", { name: /Ada Lovelace.*cites/ })).toHaveAttribute(
+      "href",
+      "/brain/people/ada-lovelace",
+    );
+  });
+
   it("passes the selected content hash when saving a document", async () => {
     const user = userEvent.setup();
     vi.mocked(updateGoatBrainDocumentAction).mockResolvedValueOnce({
@@ -142,7 +162,7 @@ const documentWithTimeline: GoatBrainDocumentView = {
     {
       evidenceId: "ev-platform-planning-chat",
       at: "2026-07-06T12:00:00.000Z",
-      body: "Met Ada during the platform planning chat.\n\nSource: goat-chat:goat_chat_msg_1",
+      body: "[[evidence:ev-platform-planning-chat|Platform planning chat]]: Met Ada during the platform planning chat.\n\nSource: goat-chat:goat_chat_msg_1",
     },
   ],
   kind: "markdown",
@@ -168,7 +188,7 @@ const documentLinkingToAda: GoatBrainDocumentView = {
   path: "projects/roadmap.md",
   title: "Roadmap",
   content: "",
-  body: "Coordinate with [[ada-lovelace|Ada]].",
+  body: "Coordinate with [[page:ada-lovelace|Ada]].",
   timeline: [],
   kind: "markdown",
   mimeType: "text/markdown",
@@ -178,6 +198,32 @@ const documentLinkingToAda: GoatBrainDocumentView = {
   sources: [],
   type: "project",
   status: "draft",
+  aliases: [],
+  tags: [],
+  contentHash: "hash",
+  sizeBytes: 128,
+  createdAt: "2026-07-06T12:00:00.000Z",
+  updatedAt: "2026-07-06T12:00:00.000Z",
+};
+
+const evidenceDocument: GoatBrainDocumentView = {
+  id: "doc_evidence_platform_planning_chat",
+  brainId: "ev-platform-planning-chat",
+  folderPath: "evidence/chat",
+  path: "evidence/chat/ev-platform-planning-chat.md",
+  title: "Platform planning chat",
+  content: "",
+  body: "Met Ada during the platform planning chat.",
+  timeline: [],
+  kind: "markdown",
+  mimeType: "text/markdown",
+  originalFileName: null,
+  assetStorageKey: null,
+  relations: [],
+  sources: [],
+  type: "evidence",
+  evidenceKind: "chat",
+  status: "active",
   aliases: [],
   tags: [],
   contentHash: "hash",

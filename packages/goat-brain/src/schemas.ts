@@ -112,7 +112,6 @@ export const GOAT_DEFAULT_SCHEMA_PACK: GoatBrainSchemaPack = {
     "invested_in",
     "advises",
     "attended",
-    "evidenced_by",
     "supports",
     "owns",
     "depends_on",
