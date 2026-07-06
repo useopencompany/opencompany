@@ -139,7 +139,7 @@ describe("createGoatBrainMarkdownReportForTask", () => {
           brainId: "market-report",
           folderPath: "research",
           title: "Market Report",
-          body: "# Market Report\n\nFindings.\n\nEvidence: [^ev:ev-created-from-goat-task-1]",
+          body: "# Market Report\n\nFindings.\n\nEvidence: [[evidence:ev-created-from-goat-task-1|Task goat_task_1]]",
           kind: "markdown",
           mimeType: "text/markdown",
           sources: [
@@ -149,6 +149,13 @@ describe("createGoatBrainMarkdownReportForTask", () => {
             }),
           ],
           contentHash: expect.any(String),
+        }),
+        expect.objectContaining({
+          userWorkosId: "user_1",
+          fromBrainId: "market-report",
+          toBrainId: "ev-created-from-goat-task-1",
+          relationType: "cites",
+          sourceKind: "wiki_link",
         }),
       ]),
     );

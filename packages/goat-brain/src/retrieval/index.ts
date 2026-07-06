@@ -52,7 +52,9 @@ export async function queryGoatBrain(
   now: number = Date.now(),
 ): Promise<GoatBrainQueryHit[]> {
   const all = await buildCorpus(root);
-  const candidates = applyFilters(all, options);
+  const candidates = applyFilters(all, options).filter(
+    (record) => (options.hops ?? 0) <= 0 || record.type !== "evidence",
+  );
   if (candidates.length === 0) return [];
   const byId = new Map(candidates.map((record) => [record.id, record]));
   const useModel = !options.lexicalOnly;
@@ -233,6 +235,7 @@ function buildAdjacency(
     for (const relation of record.relations as GoatBrainRelation[])
       link(record.id, relation.type, relation.to);
     for (const target of record.wikiLinks) link(record.id, "wiki_link", target);
+    for (const target of record.evidenceLinks) link(record.id, "cites", target);
   }
   return adjacency;
 }

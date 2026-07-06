@@ -55,6 +55,14 @@ const SHAPE_SCOPES = {
     table: "goat.task_sandbox_usage",
     where: scopedTaskWhere,
   },
+  chat_messages: {
+    table: "goat.chat_messages",
+    where: scopedChatMessageWhere,
+  },
+  "goat.chat_messages": {
+    table: "goat.chat_messages",
+    where: scopedChatMessageWhere,
+  },
   integrations: {
     table: "goat.integrations",
     where: scopedUserWhere,
@@ -154,6 +162,20 @@ function scopedTaskWhere(userWorkosId: string, requestUrl: URL) {
   return {
     clause: `"user_workos_id" = $1 AND "task_id" = $2`,
     params: [userWorkosId, taskId],
+  };
+}
+
+function scopedChatMessageWhere(userWorkosId: string, requestUrl: URL) {
+  const sessionId = requestUrl.searchParams.get("session_id")?.trim();
+  if (!sessionId) {
+    return {
+      clause: `"session_id" IN (SELECT "id" FROM "goat"."chat_sessions" WHERE "user_workos_id" = $1 AND "closed_at" IS NULL)`,
+      params: [userWorkosId],
+    };
+  }
+  return {
+    clause: `"session_id" = $1 AND "session_id" IN (SELECT "id" FROM "goat"."chat_sessions" WHERE "user_workos_id" = $2 AND "closed_at" IS NULL)`,
+    params: [sessionId, userWorkosId],
   };
 }
 

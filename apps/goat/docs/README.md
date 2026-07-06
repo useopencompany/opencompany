@@ -93,6 +93,12 @@ optionally stops the active stream, and marks the chat session closed through
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
 
+When a background task that was started from chat succeeds or fails, the runner appends a synthetic
+assistant message to the originating chat session if that session is still open. The message includes
+the task link and final result or error so the next user reply has the completed task in context.
+This is only a persisted notification; Goat does not automatically spend another foreground chat
+model turn when the task finishes.
+
 The chat agent's system prompt is `OPENCOMPANY_CHAT_SYSTEM_PROMPT`, assembled from structured
 blocks in `apps/goat/lib/prompts/main-chat.ts`. Its tools are `start_task`, `goat_brain`, and
 optional `web_search`; tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`. The
@@ -309,7 +315,8 @@ Important tables:
 - `goat.users`: WorkOS-backed Goat user profile.
 - `goat.chat_sessions`: one open or closed chat thread per user.
 - `goat.chat_messages`: persisted user and assistant chat messages. Assistant messages can point
-  at a `taskId` so the UI can render a task card.
+  at a `taskId` so the UI can render a task card. Task completion notifications are also persisted
+  here as synthetic assistant messages.
 - `goat.tasks`: durable background task queue, status, stage, result, error, lease, harness spec,
   debug trace, and sandbox id.
 - `goat.task_messages`: durable task transcript rows for user, assistant, and tool messages.
@@ -328,7 +335,9 @@ queued -> running/planning -> running/running
 
 The UI maps this to Results rows and task detail pages. Goat task pages subscribe to TanStack DB
 collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
-`goat.task_events`, scoped by `user_workos_id`.
+`goat.task_events`, scoped by `user_workos_id`. The active chat also subscribes to scoped
+`goat.chat_messages` rows so persisted task completion notifications appear without a manual
+refresh.
 
 Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric
