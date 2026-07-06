@@ -227,6 +227,7 @@ type GoatHarnessSpec = {
   systemPrompt: string;
   initialUserMessage: string;
   tools: GoatTaskToolName[];
+  skills: GoatTaskSkillId[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
 };
@@ -235,6 +236,8 @@ type GoatHarnessSpec = {
 Normalization is intentionally conservative:
 
 - Tool names are operation-level only.
+- Skills are reasoning/operating guidance only, selected from the planner's available skill list
+  (`first-principles`, `yc-office-hours`) and injected into the execution system prompt.
 - Gmail, Calendar, and Linear operations are selected only if both available to the user and chosen
   by the planner.
 - The execution model must be one of the planner's allowed model options.
