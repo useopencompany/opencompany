@@ -50,6 +50,7 @@ describe("Braintrust tracing", () => {
   it("initializes once and wraps the AI SDK when enabled", async () => {
     vi.stubEnv("BRAINTRUST_ENABLED", "true");
     vi.stubEnv("BRAINTRUST_API_KEY", "bt_test");
+    vi.stubEnv("BRAINTRUST_PROJECT_ID", "");
     vi.stubEnv("BRAINTRUST_PROJECT_NAME", "Runner Tests");
     const { getBraintrustAISDK, getBraintrustLogger } = await import("./braintrust");
     const aiSDK = { streamText: vi.fn() };

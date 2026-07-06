@@ -3,6 +3,14 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { argv, exit, versions } from "node:process";
 import {
+  caddyState,
+  goatHttpsDisabled,
+  goatHttpsOrigin,
+  goatHttpsPort,
+  homebrewAvailable,
+  installCaddyWithHomebrew,
+} from "./lib/caddy-dev.mjs";
+import {
   directDatabaseUrl,
   dockerRunArgs,
   ELECTRIC_CONTAINER,
@@ -70,6 +78,7 @@ const GOOGLE_INTEGRATION_ENV_KEYS = [
 const RUNNER_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
+  "RUNNER_LLM_BROKER_PUBLIC_URL",
   "RUNNER_INTERNAL_TOKEN",
   "RUNNER_STREAM_TOKEN_SECRET",
   "RUNNER_ALLOWED_ORIGINS",
@@ -120,6 +129,11 @@ const OBSERVABILITY_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
 ];
+const GOAT_OBSERVABILITY_ENV_KEYS = [
+  "GOAT_OBSERVABILITY_ENABLED",
+  "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
+  "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+];
 const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "NEON_PARENT_BRANCH",
   "NEON_API_KEY",
@@ -139,6 +153,7 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   ...LINEAR_ENV_KEYS,
   ...RUNNER_ENV_KEYS,
   ...OBSERVABILITY_ENV_KEYS,
+  ...GOAT_OBSERVABILITY_ENV_KEYS,
 ];
 const SHARED_DEV_ENV_KEYS = [
   ...WORKOS_ENV_KEYS,
@@ -151,15 +166,53 @@ const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
 const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
+const LEGACY_LOCAL_GOAT_APP_URL = "http://localhost:3002";
+const LOCAL_GOAT_APP_URL = goatHttpsOrigin(process.env);
+const LOCAL_GOAT_WORKOS_REDIRECT_URI = `${LOCAL_GOAT_APP_URL}/auth/callback`;
+const GOAT_ENV_PATH = "apps/goat/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
   "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
+  "GOAT_PORT",
+  "GOAT_HTTPS_PORT",
+  "GOAT_NEXT_PUBLIC_APP_URL",
+  "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+  "RUNNER_LLM_BROKER_PUBLIC_URL",
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
+  GOAT_PORT: "3002",
+  GOAT_HTTPS_PORT: goatHttpsPort(process.env),
+  GOAT_NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
+  GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
+  RUNNER_LLM_BROKER_PUBLIC_URL: "",
 };
+const GOAT_LOCAL_ENV_KEYS = [
+  "GOAT_PORT",
+  "GOAT_HTTPS_PORT",
+  "DATABASE_URL",
+  "WORKOS_CLIENT_ID",
+  "WORKOS_API_KEY",
+  "WORKOS_COOKIE_PASSWORD",
+  "RUNNER_PUBLIC_URL",
+  "RUNNER_INTERNAL_URL",
+  "RUNNER_INTERNAL_TOKEN",
+  ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
+  ...INTEGRATION_CREDENTIAL_ENV_KEYS,
+  "ELECTRIC_URL",
+  "ELECTRIC_SOURCE_ID",
+  "ELECTRIC_SOURCE_SECRET",
+  "ELECTRIC_SECRET",
+  "ELECTRIC_TOKEN",
+  "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
+  "NEXT_PUBLIC_OBSERVABILITY_ENV",
+  "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
+  "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
+  "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
+  ...GOAT_OBSERVABILITY_ENV_KEYS,
+];
 
 function assertNodeVersion() {
   const current = versions.node.split(".").map(Number);
@@ -289,6 +342,9 @@ function inspectState() {
   const env = readEffectiveLocalEnv();
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
+  const githubIntegrationMissing = GITHUB_WORK_INTEGRATION_ENV_KEYS.filter((k) =>
+    isPlaceholder(env[k]),
+  );
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -299,6 +355,8 @@ function inspectState() {
     workosMissingKeys: workosMissing,
     runner: runnerMissing.length === 0 ? "ready" : "placeholder",
     runnerMissingKeys: runnerMissing,
+    githubIntegration: githubIntegrationMissing.length === 0 ? "ready" : "placeholder",
+    githubIntegrationMissingKeys: githubIntegrationMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
@@ -435,13 +493,49 @@ async function ensureEnvFile(state) {
 async function ensureLocalDevDefaults() {
   const env = parseEnv(".env.local");
   const missingDefaults = Object.fromEntries(
-    Object.entries(LOCAL_DEV_DEFAULT_ENV_VALUES).filter(([key]) => !(key in env)),
+    Object.entries(LOCAL_DEV_DEFAULT_ENV_VALUES).filter(
+      ([key, value]) => !(key in env) || shouldReplaceLocalDefault(key, env[key], value),
+    ),
   );
 
   if (Object.keys(missingDefaults).length === 0) return;
 
   writeEnvValues(".env.local", missingDefaults);
   ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
+}
+
+function shouldReplaceLocalDefault(key, current, next) {
+  if (key === "GOAT_NEXT_PUBLIC_APP_URL") {
+    return current === LEGACY_LOCAL_GOAT_APP_URL && next !== current;
+  }
+  if (key === "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
+    return current === `${LEGACY_LOCAL_GOAT_APP_URL}/auth/callback` && next !== current;
+  }
+  return false;
+}
+
+async function ensureGoatEnvFile() {
+  step("Goat app env file");
+
+  const env = readEffectiveLocalEnv();
+  const goatAppUrl = env.GOAT_NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
+  const goatRedirectUri = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${goatAppUrl}/auth/callback`;
+  const values = {
+    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
+    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_APP_URL: goatAppUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    WORKOS_REDIRECT_URI: goatRedirectUri,
+  };
+
+  for (const key of GOAT_LOCAL_ENV_KEYS) {
+    if (!isPlaceholder(env[key])) {
+      values[key] = env[key];
+    }
+  }
+
+  writeEnvValues(GOAT_ENV_PATH, values);
+  ok(`Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability env`);
 }
 
 async function ensurePersonalEnvFile() {
@@ -614,6 +708,33 @@ async function ensureLocalRunnerEnv(state) {
     );
   }
   ok(`Runner credentials configured from ${source}`);
+}
+
+async function ensureGitHubIntegrationEnv(state) {
+  step("GitHub integration app credentials");
+  if (state.githubIntegration === "ready") {
+    ok("GitHub integration app env vars look set");
+    return;
+  }
+
+  warn(
+    `GitHub integration app env vars are missing (${state.githubIntegrationMissingKeys.join(
+      ", ",
+    )}). Pulling the shared main app credentials from Infisical.`,
+  );
+  const source = pullSharedDevEnv({
+    requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
+  });
+
+  const after = inspectState();
+  if (after.githubIntegration !== "ready") {
+    throw new Error(
+      `${source} env pull finished but GitHub integration app values are still placeholders: ${after.githubIntegrationMissingKeys.join(
+        ", ",
+      )}. Add them in Infisical dev /web, then run \`bun run env:pull\` again.`,
+    );
+  }
+  ok(`GitHub integration app credentials configured from ${source}`);
 }
 
 async function ensureSharedDatabaseUrl(state) {
@@ -804,6 +925,37 @@ async function ensureElectric() {
   }
 }
 
+async function ensureGoatLocalHttps() {
+  step("Goat local HTTPS");
+
+  if (goatHttpsDisabled(process.env)) {
+    warn("OPENCOMPANY_GOAT_HTTPS_DISABLED is set; Goat local dev will use HTTP.");
+    return;
+  }
+
+  let state = caddyState();
+  if (!state.available && process.platform === "darwin" && homebrewAvailable()) {
+    warn("Caddy is not installed. Installing it with Homebrew for Goat local HTTPS/HTTP2.");
+    const install = installCaddyWithHomebrew();
+    if (install.status === 0) {
+      state = caddyState();
+    } else {
+      warn("Homebrew could not install Caddy. `bun run dev:goat` will fall back to HTTP.");
+      return;
+    }
+  }
+
+  if (!state.available) {
+    warn(
+      "Caddy is not installed. Install it with `brew install caddy` " +
+        "to enable Goat local HTTPS/HTTP2.",
+    );
+    return;
+  }
+
+  ok(`Caddy is installed; dev:goat will serve Goat at ${goatHttpsOrigin(process.env)}`);
+}
+
 async function main() {
   if (PERSONAL_ENV_MODE) {
     console.log("\n\x1b[1mPersonal env override\x1b[0m");
@@ -823,6 +975,7 @@ async function main() {
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
     await ensureLocalDevDefaults();
+    await ensureGoatEnvFile();
     ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
@@ -844,12 +997,14 @@ async function main() {
     if (
       state.workos === "placeholder" ||
       state.runner === "placeholder" ||
+      state.githubIntegration === "placeholder" ||
       (!SHARED_DATABASE_MODE && state.neonProject === "placeholder") ||
       (SHARED_DATABASE_MODE && state.databaseUrl === "placeholder")
     ) {
       const missingShared = [
         ...state.workosMissingKeys,
         ...state.runnerMissingKeys,
+        ...state.githubIntegrationMissingKeys,
         ...(!SHARED_DATABASE_MODE && state.neonProject === "placeholder"
           ? ["NEON_PROJECT_ID"]
           : []),
@@ -886,6 +1041,7 @@ async function main() {
       });
     }
     const electric = dockerState();
+    const caddy = caddyState();
     const electricUrlSet = !isPlaceholder(readEffectiveLocalEnv().ELECTRIC_URL);
     if (electric === "missing") {
       nextSteps.push({
@@ -904,9 +1060,30 @@ async function main() {
         reason: "start local Electric and set ELECTRIC_URL for live agents/sessions sync",
       });
     }
+    if (!existsSync(GOAT_ENV_PATH)) {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `write ${GOAT_ENV_PATH} for direct Goat app local tooling`,
+      });
+    }
+    if (!goatHttpsDisabled(process.env) && !caddy.available) {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: "install/check Caddy so `bun run dev:goat` serves local Goat over HTTPS/HTTP2",
+      });
+    }
     console.log(
       JSON.stringify(
-        { ...state, electric, electricUrl: electricUrlSet ? "set" : "placeholder", nextSteps },
+        {
+          ...state,
+          electric,
+          electricUrl: electricUrlSet ? "set" : "placeholder",
+          caddy: caddy.available ? "ready" : "missing",
+          goatLocalHttps: goatHttpsDisabled(process.env)
+            ? "disabled"
+            : goatHttpsOrigin(process.env),
+          nextSteps,
+        },
         null,
         2,
       ),
@@ -926,6 +1103,7 @@ async function main() {
   await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
   await ensureLocalRunnerEnv(inspectState());
+  await ensureGitHubIntegrationEnv(inspectState());
   if (SHARED_DATABASE_MODE) {
     await ensureSharedDatabaseUrl(inspectState());
   } else {
@@ -935,9 +1113,13 @@ async function main() {
   await ensureStripe(inspectState());
   await runMigrations();
   await ensureElectric();
+  await ensureGoatLocalHttps();
+  await ensureGoatEnvFile();
 
   if (!START_DEV_MODE) {
-    console.log("\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m when ready.\n");
+    console.log(
+      "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m or \x1b[1mbun run dev:goat\x1b[0m when ready.\n",
+    );
     return;
   }
 

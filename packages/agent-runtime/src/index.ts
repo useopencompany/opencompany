@@ -4,6 +4,7 @@ export * from "./attachments";
 export * from "./brain";
 export * from "./config";
 export * from "./events";
+export * from "./exa-search";
 export * from "./github-cli";
 export * from "./ids";
 export * from "./memory-keeper";

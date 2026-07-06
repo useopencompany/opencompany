@@ -1,0 +1,2 @@
+ALTER TABLE "goat"."tasks" ADD COLUMN "archived_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "goat_tasks_user_archived_created_at_idx" ON "goat"."tasks" USING btree ("user_workos_id","archived_at","created_at");

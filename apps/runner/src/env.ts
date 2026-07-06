@@ -15,11 +15,11 @@ export type RunnerEnv = {
   // the sandbox.
   openaiCodexApiKey: string | undefined;
   // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
-  // RUNNER_LLM_BROKER_PUBLIC_URL to override). Sandboxed CLIs reach the LLM broker
-  // through it. Unset (local dev, where E2B cloud sandboxes cannot reach a laptop)
-  // disables the broker and falls back to direct provider-key injection. Deliberately
-  // NOT the web-side RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that
-  // var points at localhost in local dev and would wrongly activate the broker.
+  // RUNNER_LLM_BROKER_PUBLIC_URL to override). E2B cloud sandboxes use it to call back
+  // into runner-hosted routes: the LLM broker and Goat's Google tool bridge. Unset
+  // local dev disables those callback-only features. Deliberately NOT the web-side
+  // RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that var points at
+  // localhost in local dev and would wrongly activate sandbox callbacks.
   publicUrl: string | undefined;
   // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
   // direct key injection without a deploy.
@@ -60,6 +60,9 @@ export type RunnerEnv = {
   // elsewhere. Lease-busy re-claims are normally deferred indefinitely; this caps the runaway case
   // (one job hit 17) by giving up once the in-flight run clearly owns the message.
   jobMaxLeaseBusyAttempts: number;
+  // Explicit opt-in for the experimental Goat task worker. Defaults off so normal runner
+  // deployments keep serving existing agent work without polling Goat tables or exposing Goat tools.
+  goatTaskWorkerEnabled: boolean;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -95,6 +98,7 @@ export function loadEnv(): RunnerEnv {
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),
+    goatTaskWorkerEnabled: optionalBooleanEnv("RUNNER_GOAT_TASK_WORKER_ENABLED", false),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

@@ -3,6 +3,9 @@ import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
 import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
 import type { RunnerEnv } from "./env";
+import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
+import { verifyGoatToolToken } from "./goat-tool-auth";
+import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 
@@ -78,6 +81,63 @@ export function createServer(
     });
     wakeWorker();
     reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/goat/tasks/:taskId/run", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat task worker is disabled." });
+      return;
+    }
+    const { taskId } = request.params as { taskId: string };
+    logger.info("Goat task run accepted", {
+      event: "opencompany.goat_task_run_accepted",
+      task_id: taskId,
+    });
+    wakeGoatTaskWorker();
+    reply.status(202).send({ ok: true });
+  });
+
+  app.post("/goat/tools/:taskId", async (request, reply) => {
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(404).send({ error: "Not found." });
+      return;
+    }
+    const { taskId } = request.params as { taskId: string };
+    let payload;
+    try {
+      payload = verifyGoatToolToken({
+        taskId,
+        secret: env.internalToken,
+        token: readBearerToken(request.headers.authorization),
+      });
+    } catch {
+      reply.status(401).send({ error: "Unauthorized Goat tool request." });
+      return;
+    }
+
+    const body = request.body as { name?: unknown; args?: unknown } | undefined;
+    const name = typeof body?.name === "string" ? body.name : "";
+    if (!isGoatGoogleToolName(name)) {
+      reply.status(400).send({ error: "Unknown Goat tool." });
+      return;
+    }
+
+    try {
+      const output = await executeGoatGoogleTool({
+        name,
+        args: body?.args ?? {},
+        userWorkosId: payload.userWorkosId,
+        env,
+        signal: new AbortController().signal,
+      });
+      reply.send({ ok: true, output });
+    } catch (error) {
+      reply.status(400).send({
+        ok: false,
+        error: error instanceof Error ? error.message : "Goat tool failed.",
+      });
+    }
   });
 
   app.post("/internal/codex-auth/device/start", async (request, reply) => {
@@ -266,4 +326,9 @@ function requireInternalAuth(header: string | undefined, token: string) {
   if (header !== `Bearer ${token}`) {
     throw new Error("Unauthorized runner request.");
   }
+}
+
+function readBearerToken(header: string | undefined) {
+  if (!header?.startsWith("Bearer ")) return "";
+  return header.slice("Bearer ".length).trim();
 }
