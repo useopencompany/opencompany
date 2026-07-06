@@ -133,11 +133,7 @@ export function goatBrainFolderForEntityType(type: string | undefined): string {
 }
 
 export function goatBrainEntityTypeForFolder(folder: string): GoatBrainEntityType | null {
-  const rootFolder = normalizeGoatBrainFolder(folder).split("/")[0] ?? "";
-  for (const entry of GOAT_DEFAULT_SCHEMA_PACK.types) {
-    if (entry.pathPrefixes.includes(rootFolder)) return entry.name;
-  }
-  return null;
+  return lookupGoatBrainEntityTypeForFolder(folder);
 }
 
 export function goatBrainFolderMatchesEntityType(folder: string, type: string): boolean {
@@ -169,11 +165,15 @@ export function goatBrainFolderTypeError(folder: string, type: string): string |
 }
 
 export function inferGoatBrainEntityTypeFromFolder(folder: string): GoatBrainEntityType {
+  return lookupGoatBrainEntityTypeForFolder(folder) ?? "note";
+}
+
+function lookupGoatBrainEntityTypeForFolder(folder: string): GoatBrainEntityType | null {
   const rootFolder = normalizeGoatBrainFolder(folder).split("/")[0] ?? "";
   for (const entry of GOAT_DEFAULT_SCHEMA_PACK.types) {
     if (entry.pathPrefixes.includes(rootFolder)) return entry.name;
   }
-  return "note";
+  return null;
 }
 
 export function normalizeGoatBrainFolderForV1(folder: string): string {

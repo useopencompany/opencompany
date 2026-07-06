@@ -301,9 +301,9 @@ export function goatCredentialAad(
 }
 
 function newGoatIntegrationId() {
-  return `gint_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  return `gint_${randomUUID().replace(/-/g, "")}`;
 }
 
 function newGoatIntegrationCredentialId() {
-  return `gcred_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  return `gcred_${randomUUID().replace(/-/g, "")}`;
 }

@@ -53,7 +53,18 @@ describe("goat brain usage reports", () => {
   it("ignores malformed and invalid marker payloads", () => {
     const stdout = [
       `${GOAT_BRAIN_USAGE_MARKER} not json`,
-      `${GOAT_BRAIN_USAGE_MARKER} ${JSON.stringify({ entries: [{ model: "missing-fields" }] })}`,
+      `${GOAT_BRAIN_USAGE_MARKER} ${JSON.stringify({
+        entries: [
+          { model: "missing-fields" },
+          {
+            operation: "chat",
+            model: "openai/gpt-5.5",
+            inputTokens: 1,
+            outputTokens: 1,
+            totalTokens: 2,
+          },
+        ],
+      })}`,
       "kept",
     ].join("\n");
 

@@ -146,6 +146,57 @@ describe("goat brain file sync", () => {
     ).resolves.toEqual({ upserted: 0, deleted: 0, conflicts: [] });
   });
 
+  it("keeps a moved brain file by matching on stable brain id", async () => {
+    const oldContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Acme is an existing account.",
+    });
+    const newContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies/customers",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Acme is now a customer.",
+    });
+    const current = {
+      id: "doc_1",
+      userWorkosId: "user_1",
+      brainId: "acme",
+      folderPath: "companies",
+      content: oldContent,
+      contentHash: hashGoatBrainContent(oldContent),
+      sizeBytes: Buffer.byteLength(oldContent, "utf8"),
+      title: "Acme",
+      entityType: "company",
+      status: "draft",
+    };
+    const db = syncMutableDb([current]);
+
+    const result = await syncGoatBrainFilesForUser({
+      userWorkosId: "user_1",
+      files: [{ path: "companies/customers/acme.md", content: newContent }],
+      baseSnapshot: [
+        {
+          id: "doc_1",
+          brainId: "acme",
+          folderPath: "companies",
+          path: "companies/acme.md",
+          contentHash: hashGoatBrainContent(oldContent),
+        },
+      ],
+      db,
+    });
+
+    expect(result).toEqual({ upserted: 1, deleted: 0, conflicts: [] });
+
+    expect(db.transactionCount()).toBe(1);
+  });
+
   it("materializes invalid stored markdown as a raw file that can be deleted", async () => {
     const content = "---\n---\n";
     const db = materializeSelectDb([
@@ -198,6 +249,48 @@ function syncSelectOnlyDb(rows: unknown[]) {
       }),
     }),
   } as never;
+}
+
+function syncMutableDb(rows: Record<string, unknown>[]) {
+  let transactions = 0;
+  const tx = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => rows.slice(0, 1),
+        }),
+      }),
+    }),
+    insert: () => ({
+      values: (values: Record<string, unknown>) => ({
+        onConflictDoUpdate: () => ({
+          returning: async () => {
+            const existing = rows.find((row) => row.brainId === values.brainId);
+            const next = { ...existing, ...values };
+            if (existing) Object.assign(existing, next);
+            else rows.push(next);
+            return [next];
+          },
+        }),
+        onConflictDoNothing: async () => undefined,
+      }),
+    }),
+    delete: () => ({
+      where: async () => undefined,
+    }),
+  };
+  return {
+    select: () => ({
+      from: () => ({
+        where: async () => rows,
+      }),
+    }),
+    transaction: async (run: (transaction: unknown) => Promise<unknown>) => {
+      transactions += 1;
+      return run(tx);
+    },
+    transactionCount: () => transactions,
+  };
 }
 
 function materializeSelectDb(rows: unknown[]) {

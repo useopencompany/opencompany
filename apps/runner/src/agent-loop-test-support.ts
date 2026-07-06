@@ -576,6 +576,7 @@ export function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     toolArgRepairEnabled: false,
     jobLeaseTtlMs: 300_000,
     jobMaxLeaseBusyAttempts: 10,
+    goatTaskWorkerEnabled: false,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

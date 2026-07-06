@@ -6,7 +6,9 @@ type RunnerContext = {
 };
 
 function runnerInternalBaseUrl() {
-  return (process.env.RUNNER_INTERNAL_URL ?? process.env.RUNNER_PUBLIC_URL)?.replace(/\/+$/, "");
+  const internalUrl = process.env.RUNNER_INTERNAL_URL?.trim();
+  const publicUrl = process.env.RUNNER_PUBLIC_URL?.trim();
+  return (internalUrl || publicUrl)?.replace(/\/+$/, "");
 }
 
 function runnerToken() {

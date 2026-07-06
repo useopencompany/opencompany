@@ -85,6 +85,10 @@ export function createServer(
 
   app.post("/internal/goat/tasks/:taskId/run", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat task worker is disabled." });
+      return;
+    }
     const { taskId } = request.params as { taskId: string };
     logger.info("Goat task run accepted", {
       event: "opencompany.goat_task_run_accepted",
@@ -95,6 +99,10 @@ export function createServer(
   });
 
   app.post("/goat/tools/:taskId", async (request, reply) => {
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(404).send({ error: "Not found." });
+      return;
+    }
     const { taskId } = request.params as { taskId: string };
     let payload;
     try {

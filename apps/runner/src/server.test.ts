@@ -50,10 +50,15 @@ const env = {
   toolArgRepairEnabled: false,
   jobLeaseTtlMs: 300_000,
   jobMaxLeaseBusyAttempts: 10,
+  goatTaskWorkerEnabled: false,
   workerConcurrency: 2,
   port: 3040,
   allowedOrigins: ["https://app.example.com"],
   instanceId: "runner-test",
+};
+const goatEnv = {
+  ...env,
+  goatTaskWorkerEnabled: true,
 };
 
 const servers: Array<ReturnType<typeof createServer>> = [];
@@ -116,7 +121,7 @@ describe("internal session start endpoint", () => {
 });
 
 describe("internal Goat task run endpoint", () => {
-  it("wakes the Goat worker for authenticated task requests", async () => {
+  it("rejects task wake requests when the Goat worker is disabled", async () => {
     const server = createServer(env);
     servers.push(server);
 
@@ -126,6 +131,21 @@ describe("internal Goat task run endpoint", () => {
       headers: { authorization: `Bearer ${env.internalToken}` },
     });
 
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: "Goat task worker is disabled." });
+    expect(wakeGoatTaskWorker).not.toHaveBeenCalled();
+  });
+
+  it("wakes the Goat worker for authenticated task requests", async () => {
+    const server = createServer(goatEnv);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/tasks/goat_task_123/run",
+      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+    });
+
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ ok: true });
     expect(wakeGoatTaskWorker).toHaveBeenCalledTimes(1);
@@ -133,13 +153,34 @@ describe("internal Goat task run endpoint", () => {
 });
 
 describe("Goat tool endpoint", () => {
-  it("executes authenticated task-scoped tool requests", async () => {
+  it("does not expose Goat tool execution when the Goat worker is disabled", async () => {
     const server = createServer(env);
     servers.push(server);
     const token = createGoatToolToken({
       taskId: "goat_task_123",
       userWorkosId: "user_123",
       secret: env.internalToken,
+      expiresInMs: 60_000,
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/goat/tools/goat_task_123",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: "gmail_search", args: { query: "is:unread" } },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(executeGoatGoogleTool).not.toHaveBeenCalled();
+  });
+
+  it("executes authenticated task-scoped tool requests", async () => {
+    const server = createServer(goatEnv);
+    servers.push(server);
+    const token = createGoatToolToken({
+      taskId: "goat_task_123",
+      userWorkosId: "user_123",
+      secret: goatEnv.internalToken,
       expiresInMs: 60_000,
     });
 
@@ -165,7 +206,7 @@ describe("Goat tool endpoint", () => {
   });
 
   it("rejects Goat tool requests without a valid task token", async () => {
-    const server = createServer(env);
+    const server = createServer(goatEnv);
     servers.push(server);
 
     const response = await server.inject({

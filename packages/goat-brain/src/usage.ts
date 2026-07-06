@@ -51,6 +51,7 @@ export function isUsageEntry(value: unknown): value is GoatBrainUsageEntry {
     (entry.operation === "embeddings" || entry.operation === "chat") &&
     typeof entry.inputTokens === "number" &&
     typeof entry.outputTokens === "number" &&
-    typeof entry.totalTokens === "number"
+    typeof entry.totalTokens === "number" &&
+    (entry.costUsd === null || typeof entry.costUsd === "number")
   );
 }

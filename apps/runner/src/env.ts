@@ -60,6 +60,9 @@ export type RunnerEnv = {
   // elsewhere. Lease-busy re-claims are normally deferred indefinitely; this caps the runaway case
   // (one job hit 17) by giving up once the in-flight run clearly owns the message.
   jobMaxLeaseBusyAttempts: number;
+  // Explicit opt-in for the experimental Goat task worker. Defaults off so normal runner
+  // deployments keep serving existing agent work without polling Goat tables or exposing Goat tools.
+  goatTaskWorkerEnabled: boolean;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -95,6 +98,7 @@ export function loadEnv(): RunnerEnv {
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),
+    goatTaskWorkerEnabled: optionalBooleanEnv("RUNNER_GOAT_TASK_WORKER_ENABLED", false),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

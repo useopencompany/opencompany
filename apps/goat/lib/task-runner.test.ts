@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { triggerGoatTaskRun } from "@/lib/task-runner";
+import { goatRunnerConfigured, triggerGoatTaskRun } from "@/lib/task-runner";
 
 const telemetry = vi.hoisted(() => ({
   startGoatSpan: vi.fn(() => ({
@@ -42,6 +42,22 @@ describe("triggerGoatTaskRun", () => {
         }),
       }),
     );
+  });
+
+  it("reports runner configuration when the public URL fallback is available", () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "");
+    vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner-public.example.com");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
+
+    expect(goatRunnerConfigured()).toBe(true);
+  });
+
+  it("reports missing runner configuration when URL and token are empty", () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "");
+    vi.stubEnv("RUNNER_PUBLIC_URL", "");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "");
+
+    expect(goatRunnerConfigured()).toBe(false);
   });
 
   it("records accepted dispatches", async () => {

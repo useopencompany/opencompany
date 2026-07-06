@@ -133,6 +133,41 @@ describe("goat brain canonical entries", () => {
     });
   });
 
+  it("rejects malformed evidence sidecar folders without throwing", () => {
+    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    if (!sidecar) throw new Error("Expected serialized sidecar to parse.");
+
+    expect(() =>
+      validateGoatBrainSidecar({
+        sidecar: {
+          ...sidecar,
+          type: "evidence",
+          evidenceKind: "email",
+          folder: 42,
+        } as never,
+        payloadContent: entry.body,
+        payloadRelativePath: "evidence/email/launch-plan.md",
+      }),
+    ).not.toThrow();
+    expect(
+      validateGoatBrainSidecar({
+        sidecar: {
+          ...sidecar,
+          type: "evidence",
+          evidenceKind: "email",
+          folder: 42,
+        } as never,
+        payloadContent: entry.body,
+        payloadRelativePath: "evidence/email/launch-plan.md",
+      }),
+    ).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        "sidecar.evidenceKind must match the evidence folder subtype.",
+      ]),
+    });
+  });
+
   it("rejects malformed legacy markdown at the entry boundary", () => {
     expect(() => goatBrainEntryFromLegacyMarkdown("# Missing frontmatter")).toThrow(
       "Legacy brain document is missing a valid frontmatter.id.",

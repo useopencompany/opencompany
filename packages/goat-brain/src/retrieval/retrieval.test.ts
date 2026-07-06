@@ -135,6 +135,25 @@ describe("goat brain retrieval", () => {
     ).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: "legacy-roadmap" })]));
   });
 
+  it("rejects invalid since filters", async () => {
+    await writeDoc("companies/acme.md", {
+      id: "acme",
+      folder: "companies",
+      type: "company",
+      title: "Acme",
+      truth: "Acme is evaluating enterprise search.",
+      relations: [],
+    });
+
+    await expect(
+      queryGoatBrain(root, {
+        text: "enterprise search",
+        since: "not-a-date",
+        lexicalOnly: true,
+      }),
+    ).rejects.toThrow('Invalid "since" value: not-a-date');
+  });
+
   it("does not fall back to the full corpus for non-empty no-match queries", async () => {
     await writeDoc("companies/acme.md", {
       id: "acme",

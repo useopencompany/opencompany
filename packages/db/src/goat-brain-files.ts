@@ -539,6 +539,7 @@ export async function syncGoatBrainFilesForUser(input: {
       row,
     ]),
   );
+  const currentByBrainId = new Map(currentRows.map((row: GoatBrainDocument) => [row.brainId, row]));
   const baseByPath = new Map(input.baseSnapshot.map((file) => [file.path, file]));
   const nextByPath = new Map<string, GoatBrainSyncFile>();
   const skippedPaths = new Set<string>();
@@ -609,7 +610,9 @@ export async function syncGoatBrainFilesForUser(input: {
 
   for (const [pathName, file] of nextByPath) {
     if (file.skip || handledConflictPaths.has(pathName)) continue;
-    const existing = currentByPath.get(pathName);
+    const brainId = goatBrainIdFromRelativePath(pathName);
+    const existing =
+      currentByPath.get(pathName) ?? (brainId ? currentByBrainId.get(brainId) : undefined);
     await upsertGoatBrainFileForUser(
       {
         userWorkosId: input.userWorkosId,
@@ -623,10 +626,16 @@ export async function syncGoatBrainFilesForUser(input: {
     upserted += 1;
   }
 
+  const nextBrainIds = new Set(
+    [...nextByPath.keys()]
+      .map((pathName) => goatBrainIdFromRelativePath(pathName))
+      .filter((brainId): brainId is string => Boolean(brainId)),
+  );
   const deleteIds = [...baseByPath.keys()].flatMap((pathName) => {
     if (nextByPath.has(pathName)) return [];
     if (skippedPaths.has(pathName)) return [];
     const current = currentByPath.get(pathName);
+    if (current && nextBrainIds.has(current.brainId)) return [];
     return current ? [current.id] : [];
   });
   for (const id of deleteIds) {

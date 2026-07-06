@@ -88,12 +88,18 @@ function IntegrationRow({
             </span>
           ) : null}
         </div>
-        <a
-          href={connectHref}
-          className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          {status}
-        </a>
+        {status === "Connected" ? (
+          <span className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+            {status}
+          </span>
+        ) : (
+          <a
+            href={connectHref}
+            className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            {status}
+          </a>
+        )}
       </div>
     </div>
   );

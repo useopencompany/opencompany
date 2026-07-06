@@ -152,6 +152,7 @@ export function createOpenCompanyChatToolContext(input: {
   webSearch?: WebSearchRunner;
 }) {
   let startedTask: StartedTask | null = null;
+  let startTaskInFlight: Promise<StartedTask> | null = null;
   let webSearchCallCount = 0;
 
   const tools: ToolSet = {
@@ -220,6 +221,10 @@ export function createOpenCompanyChatToolContext(input: {
       }),
       execute: async (args) => {
         if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
+        if (startTaskInFlight) {
+          startedTask = await startTaskInFlight;
+          return toStartTaskToolOutput(startedTask, "already_started");
+        }
 
         const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
         if (!prompt) {
@@ -227,11 +232,16 @@ export function createOpenCompanyChatToolContext(input: {
         }
         const name = typeof args.name === "string" ? args.name.trim() : "";
 
-        startedTask = await input.startTask({
-          prompt,
-          ...(name ? { name } : {}),
-          model: input.model,
-        });
+        try {
+          startTaskInFlight = input.startTask({
+            prompt,
+            ...(name ? { name } : {}),
+            model: input.model,
+          });
+          startedTask = await startTaskInFlight;
+        } finally {
+          startTaskInFlight = null;
+        }
         return toStartTaskToolOutput(startedTask, "queued");
       },
     }),

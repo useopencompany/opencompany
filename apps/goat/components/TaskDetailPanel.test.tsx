@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildGoatHarnessRun } from "@/lib/task-harness-run";
@@ -123,6 +123,40 @@ describe("TaskDetailPanel stop action", () => {
 
     expect(mocks.cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
     expect(screen.getByRole("button", { name: "Stopping" })).toBeDisabled();
+  });
+
+  it("resets the stop button when the cancel action fails", async () => {
+    mocks.cancelGoatTaskAction.mockResolvedValue({ ok: false, error: "Nope." });
+    const user = userEvent.setup();
+    const run = buildGoatHarnessRun({
+      task: task({ status: "running", stage: "running", result: null }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Nope."));
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+  });
+
+  it("resets the stop button when the cancel action throws", async () => {
+    mocks.cancelGoatTaskAction.mockRejectedValue(new Error("network"));
+    const user = userEvent.setup();
+    const run = buildGoatHarnessRun({
+      task: task({ status: "running", stage: "running", result: null }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not stop task."));
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
   });
 
   it.each([

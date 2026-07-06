@@ -614,7 +614,13 @@ async function runCliProcess(input: {
     env: childBrainCliEnv(input),
     stdio: [input.stdin ? "pipe" : "ignore", "pipe", "pipe"],
   });
-  if (input.stdin && child.stdin) child.stdin.end(input.stdin);
+  if (input.stdin && child.stdin) {
+    child.stdin.on("error", () => {
+      // Child processes may exit before consuming stdin. The exit path below reports the command
+      // result; an EPIPE from this write should not crash the parent process.
+    });
+    child.stdin.end(input.stdin);
+  }
 
   let stdout = "";
   let stderr = "";

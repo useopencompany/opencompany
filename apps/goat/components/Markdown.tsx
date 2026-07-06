@@ -10,10 +10,11 @@ type MarkdownNode = {
 
 const LINK_CLASS =
   "font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70";
+const SAFE_EXTERNAL_URL_PATTERN = /^(https?:|mailto:|tel:)/i;
 
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ children, href }) => {
-    if (!href) return <span>{children}</span>;
+    if (!href || !isSafeHref(href)) return <span>{children}</span>;
     if (isInternalHref(href)) {
       return (
         <Link href={href} className={LINK_CLASS}>
@@ -35,6 +36,10 @@ const MARKDOWN_COMPONENTS: Components = {
     );
   },
 };
+
+function isSafeHref(href: string) {
+  return isInternalHref(href) || href.startsWith("#") || SAFE_EXTERNAL_URL_PATTERN.test(href);
+}
 
 function isInternalHref(href: string) {
   return href.startsWith("/") && !href.startsWith("//");

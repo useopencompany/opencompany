@@ -158,6 +158,9 @@ export async function queryGoatBrain(
 
 function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): IndexRecord[] {
   const sinceMs = options.since ? Date.parse(options.since) : Number.NaN;
+  if (options.since && Number.isNaN(sinceMs)) {
+    throw new Error(`Invalid "since" value: ${options.since}`);
+  }
   return records.filter((record) => {
     if (!options.includeInvalid && !record.valid) return false;
     if (!options.includeMerged && record.status === "merged") return false;

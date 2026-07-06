@@ -94,10 +94,15 @@ function StopTaskButton({ taskId }: { taskId: string }) {
       onClick={() => {
         setStopRequested(true);
         startTransition(async () => {
-          const result = await cancelGoatTaskAction(taskId);
-          if (result.ok) return;
-          setStopRequested(false);
-          toast.error(result.error ?? "Could not stop task.");
+          try {
+            const result = await cancelGoatTaskAction(taskId);
+            if (result.ok) return;
+            setStopRequested(false);
+            toast.error(result.error ?? "Could not stop task.");
+          } catch {
+            setStopRequested(false);
+            toast.error("Could not stop task.");
+          }
         });
       }}
       className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"

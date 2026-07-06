@@ -86,11 +86,16 @@ const jobWorker = startRunnerJobWorker(env, {
     return interrupted;
   },
 });
-const goatTaskWorker = startGoatTaskWorker(env);
+const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
+if (!goatTaskWorker) {
+  logger.info("Goat task worker disabled", {
+    event: "opencompany.goat_task_worker_disabled",
+  });
+}
 // Let any in-process enqueue (delegation spawn, child-finish parent-wake) nudge the worker
 // immediately instead of waiting out the poll interval — the same wake the HTTP server uses.
 setRunnerJobWakeup(jobWorker.notify);
-setGoatTaskWakeup(goatTaskWorker.notify);
+setGoatTaskWakeup(goatTaskWorker?.notify ?? null);
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -99,7 +104,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       event: "opencompany.runner_shutdown_started",
       signal,
       active_job_count: jobWorker.activeCount(),
-      active_goat_task_count: goatTaskWorker.activeCount(),
+      active_goat_task_count: goatTaskWorker?.activeCount() ?? 0,
       active_run_count: listActiveRuns().length,
     });
     // Stop accepting work and drain in-flight jobs/requests first, flush any pending
@@ -123,7 +128,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           });
         },
       }),
-      goatTaskWorker.stop(),
+      goatTaskWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])
       .then(() => Promise.allSettled([flushAllSessionStreams()]))

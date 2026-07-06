@@ -118,6 +118,71 @@ describe("runOpenCompanyChatAgent", () => {
     expect(result.content).toBe("I started a task and added it to Results.");
   });
 
+  it("deduplicates concurrent start_task tool calls", async () => {
+    type TestStartedTask = {
+      id: string;
+      displayId: string;
+      name: string;
+      prompt: string;
+    };
+    let resolveTask: ((task: TestStartedTask) => void) | null = null;
+    const startTask = vi.fn(
+      (async () =>
+        new Promise<TestStartedTask>((resolve) => {
+          resolveTask = resolve;
+        })) as never,
+    );
+
+    const resultPromise = runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "research the market for x" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      generateTextImpl: (async (options: unknown) => {
+        const first = executeStartTaskTool(options, {
+          name: "Market research for x",
+          prompt: "Research the market for x and summarize the strongest signals.",
+          reason: "Requires research and should be tracked.",
+        });
+        const second = executeStartTaskTool(options, {
+          name: "Duplicate market research for x",
+          prompt: "Do the same research again.",
+          reason: "Parallel duplicate.",
+        });
+        expect(startTask).toHaveBeenCalledTimes(1);
+        resolveTask?.({
+          id: "task_1",
+          displayId: "TASK-1",
+          name: "Market research for x",
+          prompt: "Research the market for x and summarize the strongest signals.",
+        });
+        const toolResults = await Promise.all([first, second]);
+
+        return {
+          text: "I started a task and added it to Results.",
+          finishReason: "stop",
+          steps: [
+            {
+              toolCalls: [{ toolName: START_TASK_TOOL_NAME }, { toolName: START_TASK_TOOL_NAME }],
+              toolResults,
+            },
+          ],
+        };
+      }) as never,
+    });
+
+    const result = await resultPromise;
+
+    expect(startTask).toHaveBeenCalledTimes(1);
+    expect(result.task?.id).toBe("task_1");
+    expect(result.debugTrace.toolResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: "queued" }),
+        expect.objectContaining({ status: "already_started" }),
+      ]),
+    );
+  });
+
   it("can call the personal brain CLI inside the chat loop", async () => {
     const startTask = vi.fn();
     const runBrainCli = vi.fn(async (input: GoatBrainToolInput) => ({

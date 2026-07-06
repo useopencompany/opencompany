@@ -170,6 +170,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     toolArgRepairEnabled: true,
     jobLeaseTtlMs: 300_000,
     jobMaxLeaseBusyAttempts: 10,
+    goatTaskWorkerEnabled: false,
     workerConcurrency: 1,
     port: 3040,
     allowedOrigins: [],

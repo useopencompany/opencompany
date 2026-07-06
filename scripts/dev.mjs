@@ -147,6 +147,7 @@ function envForAppMode() {
     NEXT_PUBLIC_APP_URL: goatAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
     WORKOS_REDIRECT_URI: goatRedirectUri,
+    RUNNER_GOAT_TASK_WORKER_ENABLED: "true",
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       process.env.RUNNER_ALLOWED_ORIGINS,
       [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL].filter(

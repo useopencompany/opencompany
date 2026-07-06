@@ -12,7 +12,9 @@ const GOAT_MODEL_IDS = [
 
 const GOAT_MODEL_ID_SET = new Set<string>(GOAT_MODEL_IDS);
 
-export const GOAT_MODELS = AGENT_MODEL_CATALOG.filter((model) => GOAT_MODEL_ID_SET.has(model.id));
+export const GOAT_MODELS = GOAT_MODEL_IDS.map((id) =>
+  AGENT_MODEL_CATALOG.find((model) => model.id === id),
+).filter((model): model is NonNullable<typeof model> => model !== undefined);
 
 export type GoatModelOption = (typeof GOAT_MODELS)[number];
 

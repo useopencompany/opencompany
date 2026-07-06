@@ -131,6 +131,7 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
     }
 
     if (
+      doc.frontmatter.type !== "evidence" &&
       doc.compiledTruth.trim() &&
       doc.timeline.length === 0 &&
       !(doc.frontmatter.sources ?? []).length

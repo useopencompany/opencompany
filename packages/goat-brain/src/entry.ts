@@ -17,6 +17,7 @@ import {
   isValidGoatBrainEvidenceKind,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
+  isValidGoatBrainStatus,
   normalizeGoatBrainFolder,
 } from "./schema";
 import { inferGoatBrainEntityTypeFromFolder } from "./schemas";
@@ -288,19 +289,16 @@ function validateGoatBrainSidecarMetadata(input: {
   if (typeof sidecar.title !== "string" || !sidecar.title.trim()) {
     errors.push("sidecar.title must not be empty.");
   }
-  if (
-    sidecar.status !== undefined &&
-    sidecar.status !== "draft" &&
-    sidecar.status !== "active" &&
-    sidecar.status !== "archived" &&
-    sidecar.status !== "merged"
-  ) {
+  if (sidecar.status !== undefined && !isValidGoatBrainStatus(sidecar.status)) {
     errors.push("sidecar.status is invalid.");
   }
   if (sidecar.type === "evidence") {
     if (!isValidGoatBrainEvidenceKind(sidecar.evidenceKind)) {
       errors.push("sidecar.evidenceKind must be chat, email, correction, or document.");
-    } else if (sidecar.folder.split("/")[1] !== sidecar.evidenceKind) {
+    } else if (
+      typeof sidecar.folder !== "string" ||
+      sidecar.folder.split("/")[1] !== sidecar.evidenceKind
+    ) {
       errors.push("sidecar.evidenceKind must match the evidence folder subtype.");
     }
   } else if (sidecar.evidenceKind !== undefined) {
