@@ -150,6 +150,8 @@ function taskFromInitialRun(run: GoatHarnessRunViewModel): GoatTaskRow {
     user_workos_id: "",
     prompt: run.task.prompt,
     model: run.task.model,
+    schedule_id: null,
+    scheduled_for: null,
     status: run.task.status,
     stage: run.task.stage,
     result: run.task.result || null,

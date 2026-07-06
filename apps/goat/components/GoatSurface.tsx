@@ -10,18 +10,23 @@ import {
   Archive,
   ArrowUp,
   BookOpen,
+  CalendarClock,
   CheckCircle2,
   ChevronRight,
   CircleDotDashed,
   Clock,
   FileText,
+  Pause,
+  Play,
   Settings,
   Square,
+  Trash2,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  type FormEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -33,21 +38,36 @@ import {
 import { Markdown } from "@/components/Markdown";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  DELETE_TASK_SCHEDULE_TOOL_NAME,
+  EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolOutput,
   type GoatChatSessionView,
   type GoatChatSummaryView,
   type GoatChatUiMessage,
   type GoatTaskCardMetadata,
+  SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   type StartTaskToolOutput,
   textFromGoatChatUiMessage,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
-import { createGoatCollections, type GoatTaskRow } from "@/lib/task-collections";
+import {
+  createGoatCollections,
+  type GoatTaskRow,
+  type GoatTaskScheduleRow,
+} from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
+import {
+  deleteGoatTaskScheduleAction,
+  type GoatTaskScheduleView,
+  runGoatTaskScheduleNowAction,
+  setGoatTaskScheduleEnabledAction,
+  updateGoatTaskScheduleAction,
+} from "@/lib/task-schedules";
 import { archiveGoatTaskAction } from "@/lib/tasks";
+import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -58,6 +78,8 @@ export type GoatTaskView = {
   name: string;
   prompt: string;
   model: string;
+  scheduleId?: string | null;
+  scheduledFor?: string | null;
   status: GoatTaskStatus;
   stage: GoatTaskStage;
   result: string | null;
@@ -69,11 +91,13 @@ export type GoatTaskView = {
 
 export function GoatSurface({
   tasks,
+  schedules = [],
   defaultModel,
   initialChat,
   recentChats = [],
 }: {
   tasks: readonly GoatTaskView[];
+  schedules?: readonly GoatTaskScheduleView[];
   defaultModel: string;
   initialChat: GoatChatSessionView | null;
   recentChats?: readonly GoatChatSummaryView[];
@@ -208,6 +232,12 @@ export function GoatSurface({
     [],
   );
 
+  useEffect(() => {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!timezone) return;
+    void updateGoatTimezoneAction(timezone).catch(() => undefined);
+  }, []);
+
   const archiveTask = (task: GoatTaskView) => {
     setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
     startArchiveTransition(async () => {
@@ -333,6 +363,13 @@ export function GoatSurface({
                 chats={recentChats}
                 onSelect={(chatId) => locallyHiddenSessionIdsRef.current.delete(chatId)}
               />
+            </section>
+
+            <section className="flex flex-col gap-1">
+              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                Routines
+              </h2>
+              <LiveSchedulesList schedules={schedules} />
             </section>
 
             <section className="flex flex-col gap-1">
@@ -473,6 +510,259 @@ function ChatHistoryList({
   );
 }
 
+function LiveSchedulesList({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
+  const hydrated = useHydrated();
+  if (!hydrated) return <ScheduleRows schedules={schedules} />;
+  return <LiveSchedulesSubscriber initialSchedules={schedules} />;
+}
+
+function LiveSchedulesSubscriber({
+  initialSchedules,
+}: {
+  initialSchedules: readonly GoatTaskScheduleView[];
+}) {
+  const collections = useMemo(() => createGoatCollections(), []);
+  const { data: rows, isLoading } = useLiveQuery((q) =>
+    q.from({ schedule: collections.taskSchedules }),
+  );
+  const liveSchedules = useMemo(
+    () => (rows ?? []).filter((row) => !row.deleted_at).map(taskScheduleRowToView),
+    [rows],
+  );
+  const schedules = isLoading && initialSchedules.length > 0 ? initialSchedules : liveSchedules;
+  return <ScheduleRows schedules={schedules} />;
+}
+
+function ScheduleRows({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
+  const visible = schedules
+    .filter((schedule) => schedule.id)
+    .toSorted((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime());
+
+  if (visible.length === 0) {
+    return (
+      <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No recurring tasks yet.</p>
+    );
+  }
+
+  return visible.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} />);
+}
+
+function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(schedule.name);
+  const [editCron, setEditCron] = useState(schedule.cron);
+  const [editTimezone, setEditTimezone] = useState(schedule.timezone);
+  const [editPrompt, setEditPrompt] = useState(schedule.prompt);
+
+  const openEdit = () => {
+    setEditName(schedule.name);
+    setEditCron(schedule.cron);
+    setEditTimezone(schedule.timezone);
+    setEditPrompt(schedule.prompt);
+    setIsEditing(true);
+  };
+
+  const saveEdit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    startTransition(async () => {
+      const result = await updateGoatTaskScheduleAction(schedule.id, {
+        name: editName,
+        sourceDescription: `${editCron.trim()} - ${editTimezone.trim()}`,
+        cron: editCron,
+        timezone: editTimezone,
+        prompt: editPrompt,
+      });
+      if (result.ok) {
+        setIsEditing(false);
+      } else {
+        toast.error(result.error);
+      }
+    });
+  };
+
+  return (
+    <div className="group/routine rounded-lg transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
+      <div className="flex min-h-12 items-center gap-3 px-2 py-1.5">
+        <CalendarClock
+          size={16}
+          strokeWidth={2}
+          className={schedule.enabled ? "shrink-0 text-emerald-600" : "shrink-0 text-ink-subtle"}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-[14px] font-medium leading-tight text-ink">
+              {schedule.name}
+            </span>
+            <span className="shrink-0 text-[12px] leading-tight text-ink-subtle">
+              {schedule.enabled ? formatScheduleNextRun(schedule.nextRunAt) : "Paused"}
+            </span>
+          </div>
+          <p className="truncate text-[12.5px] leading-4 text-ink-subtle">
+            {schedule.sourceDescription || `${schedule.cron} - ${schedule.timezone}`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/routine:opacity-100 group-focus-within/routine:opacity-100">
+          <button
+            type="button"
+            aria-label={`Run ${schedule.name} now`}
+            title="Run now"
+            disabled={isPending}
+            onClick={() => {
+              startTransition(async () => {
+                const result = await runGoatTaskScheduleNowAction(schedule.id);
+                if (result.ok) {
+                  router.push(`/tasks/${encodeURIComponent(result.task.displayId)}`);
+                } else {
+                  toast.error(result.error);
+                }
+              });
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
+          >
+            <Play size={13} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            aria-label={`Edit ${schedule.name}`}
+            title="Edit"
+            disabled={isPending}
+            onClick={() => {
+              if (isEditing) {
+                setIsEditing(false);
+              } else {
+                openEdit();
+              }
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
+          >
+            <Settings size={13} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            aria-label={schedule.enabled ? `Pause ${schedule.name}` : `Resume ${schedule.name}`}
+            title={schedule.enabled ? "Pause" : "Resume"}
+            disabled={isPending}
+            onClick={() => {
+              startTransition(async () => {
+                const result = await setGoatTaskScheduleEnabledAction(
+                  schedule.id,
+                  !schedule.enabled,
+                );
+                if (!result.ok) toast.error(result.error);
+              });
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
+          >
+            {schedule.enabled ? (
+              <Pause size={13} strokeWidth={2} />
+            ) : (
+              <Play size={13} strokeWidth={2} />
+            )}
+          </button>
+          <button
+            type="button"
+            aria-label={`Delete ${schedule.name}`}
+            title="Delete"
+            disabled={isPending}
+            onClick={() => {
+              startTransition(async () => {
+                const result = await deleteGoatTaskScheduleAction(schedule.id);
+                if (!result.ok) toast.error(result.error);
+              });
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-danger transition-colors hover:bg-danger-bg disabled:opacity-60"
+          >
+            <Trash2 size={13} strokeWidth={2} />
+          </button>
+        </div>
+      </div>
+      {isEditing ? (
+        <form className="flex flex-col gap-2 px-2 pb-2" onSubmit={saveEdit}>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={editName}
+              onChange={(event) => setEditName(event.target.value)}
+              placeholder="Name"
+              disabled={isPending}
+              className="min-w-0 rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
+              required
+            />
+            <input
+              value={editCron}
+              onChange={(event) => setEditCron(event.target.value)}
+              placeholder="0 9 * * 1"
+              disabled={isPending}
+              className="min-w-0 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
+              required
+            />
+          </div>
+          <input
+            value={editTimezone}
+            onChange={(event) => setEditTimezone(event.target.value)}
+            placeholder="Europe/Berlin"
+            disabled={isPending}
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
+            required
+          />
+          <textarea
+            value={editPrompt}
+            onChange={(event) => setEditPrompt(event.target.value)}
+            disabled={isPending}
+            className="min-h-20 resize-y rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
+            required
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => setIsEditing(false)}
+              className="rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className="rounded-md bg-ink px-2 py-1 text-[12px] font-medium text-canvas transition-opacity disabled:opacity-60"
+            >
+              Save
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+function taskScheduleRowToView(row: GoatTaskScheduleRow): GoatTaskScheduleView {
+  return {
+    id: row.id,
+    name: row.name,
+    sourceDescription: row.source_description,
+    cron: row.cron,
+    timezone: row.timezone,
+    prompt: row.prompt,
+    enabled: row.enabled,
+    lastRunAt: row.last_run_at,
+    nextRunAt: row.next_run_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function formatScheduleNextRun(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "Next run unknown";
+  const minutes = Math.max(1, Math.ceil((timestamp - Date.now()) / 60_000));
+  if (minutes < 60) return `Next in ${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return `Next in ${hours}h`;
+  const days = Math.round(minutes / 1440);
+  return `Next in ${days}d`;
+}
+
 function LiveResultsList({
   tasks,
   optimisticallyArchivedIds,
@@ -551,6 +841,8 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     name: row.name,
     prompt: row.prompt,
     model: row.model,
+    scheduleId: row.schedule_id,
+    scheduledFor: row.scheduled_for,
     status: row.status,
     stage: row.stage,
     result: row.result,
@@ -998,6 +1290,9 @@ function toolStatusText(status: ToolCallView["status"], state: string) {
 function toolLabel(name: string) {
   if (name === GOAT_BRAIN_TOOL_NAME) return "Brain";
   if (name === START_TASK_TOOL_NAME) return "Task";
+  if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
+  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
+  if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   return name
     .split(/[_-]+/)
@@ -1021,6 +1316,13 @@ function toolDetail(
 
   if (name === START_TASK_TOOL_NAME) {
     return startTaskToolDetail(part);
+  }
+
+  if (name === SCHEDULE_TASK_TOOL_NAME) {
+    return scheduleTaskToolDetail(part);
+  }
+  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
+    return taskScheduleMutationToolDetail(part);
   }
 
   return formatToolInput(part.input);
@@ -1056,6 +1358,45 @@ function startTaskToolDetail(part: Record<string, unknown>) {
     const name = typeof part.input.name === "string" ? part.input.name : null;
     const prompt = typeof part.input.prompt === "string" ? part.input.prompt : null;
     return truncateToolPreview(name ?? prompt);
+  }
+  return formatToolInput(part.input);
+}
+
+function scheduleTaskToolDetail(part: Record<string, unknown>) {
+  if (isRecord(part.output)) {
+    const name = typeof part.output.scheduleName === "string" ? part.output.scheduleName : null;
+    const cron = typeof part.output.cron === "string" ? part.output.cron : null;
+    const timezone = typeof part.output.timezone === "string" ? part.output.timezone : null;
+    return truncateToolPreview([name, cron, timezone].filter(Boolean).join(" - "));
+  }
+  if (isRecord(part.input)) {
+    const source =
+      typeof part.input.sourceDescription === "string" ? part.input.sourceDescription : null;
+    const cron = typeof part.input.cron === "string" ? part.input.cron : null;
+    return truncateToolPreview([source, cron].filter(Boolean).join(" - "));
+  }
+  return formatToolInput(part.input);
+}
+
+function taskScheduleMutationToolDetail(part: Record<string, unknown>) {
+  if (isRecord(part.output)) {
+    const ok = part.output.ok === true;
+    const name =
+      typeof part.output.scheduleName === "string"
+        ? part.output.scheduleName
+        : typeof part.output.error === "string"
+          ? part.output.error
+          : null;
+    return truncateToolPreview([ok ? "Done" : "Issue", name].filter(Boolean).join(" - "));
+  }
+  if (isRecord(part.input)) {
+    const scheduleName =
+      typeof part.input.scheduleName === "string"
+        ? part.input.scheduleName
+        : typeof part.input.scheduleId === "string"
+          ? part.input.scheduleId
+          : null;
+    return truncateToolPreview(scheduleName ?? formatToolInput(part.input));
   }
   return formatToolInput(part.input);
 }
@@ -1225,9 +1566,20 @@ function getToolCallMeta(tool: ToolCallView): {
     return { icon: Square, className: "text-ink-subtle", spin: false };
   }
   return {
-    icon: tool.name === GOAT_BRAIN_TOOL_NAME ? BookOpen : CircleDotDashed,
+    icon:
+      tool.name === GOAT_BRAIN_TOOL_NAME
+        ? BookOpen
+        : tool.name === SCHEDULE_TASK_TOOL_NAME ||
+            tool.name === EDIT_TASK_SCHEDULE_TOOL_NAME ||
+            tool.name === DELETE_TASK_SCHEDULE_TOOL_NAME
+          ? CalendarClock
+          : CircleDotDashed,
     className: "text-amber-500",
-    spin: tool.name !== GOAT_BRAIN_TOOL_NAME,
+    spin:
+      tool.name !== GOAT_BRAIN_TOOL_NAME &&
+      tool.name !== SCHEDULE_TASK_TOOL_NAME &&
+      tool.name !== EDIT_TASK_SCHEDULE_TOOL_NAME &&
+      tool.name !== DELETE_TASK_SCHEDULE_TOOL_NAME,
   };
 }
 
@@ -1259,11 +1611,12 @@ function getTaskMeta(task: GoatTaskView): {
   detail: string;
   spin: boolean;
 } {
+  const recurringPrefix = task.scheduleId ? "Recurring - " : "";
   if (task.status === "failed") {
     return {
       icon: AlertCircle,
       className: "text-danger",
-      detail: task.error ?? GOAT_STATUS_COPY.failed,
+      detail: `${recurringPrefix}${task.error ?? GOAT_STATUS_COPY.failed}`,
       spin: false,
     };
   }
@@ -1271,7 +1624,7 @@ function getTaskMeta(task: GoatTaskView): {
     return {
       icon: X,
       className: "text-ink-subtle",
-      detail: task.error ?? GOAT_STATUS_COPY.canceled,
+      detail: `${recurringPrefix}${task.error ?? GOAT_STATUS_COPY.canceled}`,
       spin: false,
     };
   }
@@ -1279,7 +1632,7 @@ function getTaskMeta(task: GoatTaskView): {
     return {
       icon: CheckCircle2,
       className: "text-emerald-600",
-      detail: firstLine(task.result) ?? GOAT_STATUS_COPY.succeeded,
+      detail: `${recurringPrefix}${firstLine(task.result) ?? GOAT_STATUS_COPY.succeeded}`,
       spin: false,
     };
   }
@@ -1287,14 +1640,14 @@ function getTaskMeta(task: GoatTaskView): {
     return {
       icon: Clock,
       className: "text-ink-subtle",
-      detail: GOAT_STAGE_COPY[task.stage],
+      detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
       spin: false,
     };
   }
   return {
     icon: CircleDotDashed,
     className: "text-amber-500",
-    detail: GOAT_STAGE_COPY[task.stage],
+    detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
     spin: true,
   };
 }

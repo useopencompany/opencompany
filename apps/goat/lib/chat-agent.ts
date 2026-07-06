@@ -1,11 +1,20 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
 import {
+  DELETE_TASK_SCHEDULE_TOOL_NAME,
+  type DeleteTaskScheduleToolInput,
+  type DeleteTaskScheduleToolOutput,
+  EDIT_TASK_SCHEDULE_TOOL_NAME,
+  type EditTaskScheduleToolInput,
+  type EditTaskScheduleToolOutput,
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainCliCommand,
   type GoatBrainToolFlagValue,
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
+  SCHEDULE_TASK_TOOL_NAME,
+  type ScheduleTaskToolInput,
+  type ScheduleTaskToolOutput,
   START_TASK_TOOL_NAME,
   type StartTaskToolInput,
   type StartTaskToolOutput,
@@ -15,12 +24,22 @@ import {
 } from "@/lib/chat-ui";
 import {
   createOpenCompanyChatSystemPrompt,
+  DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
+  EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
+  SCHEDULE_TASK_CRON_DESCRIPTION,
+  SCHEDULE_TASK_NAME_DESCRIPTION,
+  SCHEDULE_TASK_PROMPT_DESCRIPTION,
+  SCHEDULE_TASK_SOURCE_DESCRIPTION,
+  SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
+  SCHEDULE_TASK_TOOL_DESCRIPTION,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
   START_TASK_REASON_DESCRIPTION,
   START_TASK_TOOL_DESCRIPTION,
+  TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
+  TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
   WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
   WEB_SEARCH_TOOL_DESCRIPTION,
@@ -52,6 +71,13 @@ type GoatBrainCliRunner = (
   executionContext?: unknown,
 ) => Promise<GoatBrainToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
+type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
+type EditTaskScheduleRunner = (
+  input: EditTaskScheduleToolInput,
+) => Promise<EditTaskScheduleToolOutput>;
+type DeleteTaskScheduleRunner = (
+  input: DeleteTaskScheduleToolInput,
+) => Promise<DeleteTaskScheduleToolOutput>;
 
 const GOAT_BRAIN_CLI_COMMANDS = [
   "help",
@@ -90,14 +116,22 @@ export type OpenCompanyChatAgentResult = {
   debugTrace: OpenCompanyChatAgentDebugTrace;
 };
 
+type OpenCompanyChatSystemPromptInput = NonNullable<
+  Parameters<typeof createOpenCompanyChatSystemPrompt>[0]
+>;
+
 export async function runOpenCompanyChatAgent(input: {
   messages: readonly OpenCompanyChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
   startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
+  scheduleTask?: ScheduleTaskRunner;
+  editTaskSchedule?: EditTaskScheduleRunner;
+  deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   webSearch?: WebSearchRunner;
   currentDate?: Date | string;
+  recurringSchedules?: OpenCompanyChatSystemPromptInput["recurringSchedules"];
   generateTextImpl?: GenerateTextLike;
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
@@ -110,6 +144,9 @@ export async function runOpenCompanyChatAgent(input: {
   const toolContext = createOpenCompanyChatToolContext({
     model: input.model,
     startTask: input.startTask,
+    ...(input.scheduleTask ? { scheduleTask: input.scheduleTask } : {}),
+    ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
+    ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
   });
@@ -117,6 +154,7 @@ export async function runOpenCompanyChatAgent(input: {
   const systemPromptInput = {
     webSearchEnabled: Boolean(input.webSearch),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
+    ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
   };
 
   const result = await generate({
@@ -148,11 +186,16 @@ export async function runOpenCompanyChatAgent(input: {
 export function createOpenCompanyChatToolContext(input: {
   model: AgentModelId;
   startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
+  scheduleTask?: ScheduleTaskRunner;
+  editTaskSchedule?: EditTaskScheduleRunner;
+  deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   webSearch?: WebSearchRunner;
 }) {
   let startedTask: StartedTask | null = null;
   let startTaskInFlight: Promise<StartedTask> | null = null;
+  let scheduledTask: ScheduleTaskToolOutput | null = null;
+  let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let webSearchCallCount = 0;
 
   const tools: ToolSet = {
@@ -246,6 +289,136 @@ export function createOpenCompanyChatToolContext(input: {
       },
     }),
   };
+
+  if (input.scheduleTask) {
+    tools[SCHEDULE_TASK_TOOL_NAME] = tool<ScheduleTaskToolInput, ScheduleTaskToolOutput>({
+      description: SCHEDULE_TASK_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<ScheduleTaskToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          prompt: {
+            type: "string",
+            description: SCHEDULE_TASK_PROMPT_DESCRIPTION,
+          },
+          name: {
+            type: "string",
+            description: SCHEDULE_TASK_NAME_DESCRIPTION,
+          },
+          cron: {
+            type: "string",
+            description: SCHEDULE_TASK_CRON_DESCRIPTION,
+          },
+          timezone: {
+            type: "string",
+            description: SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
+          },
+          sourceDescription: {
+            type: "string",
+            description: SCHEDULE_TASK_SOURCE_DESCRIPTION,
+          },
+          reason: {
+            type: "string",
+            description: START_TASK_REASON_DESCRIPTION,
+          },
+        },
+        required: ["prompt", "name", "cron"],
+      }),
+      execute: async (args) => {
+        if (scheduledTask) return scheduledTask;
+        if (scheduleTaskInFlight) {
+          scheduledTask = await scheduleTaskInFlight;
+          return scheduledTask;
+        }
+
+        scheduleTaskInFlight = input.scheduleTask!(args);
+        try {
+          scheduledTask = await scheduleTaskInFlight;
+          return scheduledTask;
+        } finally {
+          scheduleTaskInFlight = null;
+        }
+      },
+    });
+  }
+
+  if (input.editTaskSchedule) {
+    tools[EDIT_TASK_SCHEDULE_TOOL_NAME] = tool<
+      EditTaskScheduleToolInput,
+      EditTaskScheduleToolOutput
+    >({
+      description: EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<EditTaskScheduleToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          scheduleId: {
+            type: "string",
+            description: TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
+          },
+          scheduleName: {
+            type: "string",
+            description: TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
+          },
+          name: {
+            type: "string",
+            description: SCHEDULE_TASK_NAME_DESCRIPTION,
+          },
+          prompt: {
+            type: "string",
+            description: SCHEDULE_TASK_PROMPT_DESCRIPTION,
+          },
+          cron: {
+            type: "string",
+            description: SCHEDULE_TASK_CRON_DESCRIPTION,
+          },
+          timezone: {
+            type: "string",
+            description: SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
+          },
+          sourceDescription: {
+            type: "string",
+            description: SCHEDULE_TASK_SOURCE_DESCRIPTION,
+          },
+          reason: {
+            type: "string",
+            description: START_TASK_REASON_DESCRIPTION,
+          },
+        },
+        required: [],
+      }),
+      execute: input.editTaskSchedule,
+    });
+  }
+
+  if (input.deleteTaskSchedule) {
+    tools[DELETE_TASK_SCHEDULE_TOOL_NAME] = tool<
+      DeleteTaskScheduleToolInput,
+      DeleteTaskScheduleToolOutput
+    >({
+      description: DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<DeleteTaskScheduleToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          scheduleId: {
+            type: "string",
+            description: TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
+          },
+          scheduleName: {
+            type: "string",
+            description: TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
+          },
+          reason: {
+            type: "string",
+            description: START_TASK_REASON_DESCRIPTION,
+          },
+        },
+        required: [],
+      }),
+      execute: input.deleteTaskSchedule,
+    });
+  }
 
   const webSearch = input.webSearch;
   if (webSearch) {

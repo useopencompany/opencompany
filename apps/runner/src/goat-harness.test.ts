@@ -520,6 +520,8 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     userWorkosId: "user_1",
     prompt: "Research Marseille.",
     model,
+    scheduleId: null,
+    scheduledFor: null,
     status: "running",
     stage: "planning",
     result: null,

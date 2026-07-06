@@ -15,6 +15,36 @@ export const START_TASK_NAME_DESCRIPTION = "A short 2-7 word task name for the R
 export const START_TASK_REASON_DESCRIPTION =
   "Short reason this should run as a task instead of a chat answer.";
 
+export const SCHEDULE_TASK_TOOL_DESCRIPTION =
+  "Create a recurring Goat task schedule from the user's request. Use only when the user clearly asks for repeated, recurring, scheduled, or cron-like work. Convert the recurrence to a valid 5-field cron expression and save directly; if the recurrence is ambiguous or not cron-expressible, ask a short follow-up instead of calling this tool.";
+
+export const SCHEDULE_TASK_PROMPT_DESCRIPTION =
+  "A self-contained prompt for every generated task run. Preserve the recurring goal, relevant context, success criteria, and constraints.";
+
+export const SCHEDULE_TASK_NAME_DESCRIPTION =
+  "A short 2-7 word recurring task name for the Routines list and generated Results.";
+
+export const SCHEDULE_TASK_CRON_DESCRIPTION =
+  "A valid 5-field cron expression: minute hour day-of-month month day-of-week. Do not include seconds.";
+
+export const SCHEDULE_TASK_TIMEZONE_DESCRIPTION =
+  "Optional IANA timezone for the cron expression. Omit when the user did not specify a timezone so Goat uses the user's saved timezone.";
+
+export const SCHEDULE_TASK_SOURCE_DESCRIPTION =
+  "Short natural-language description of the recurrence, for example 'every weekday at 9 AM'.";
+
+export const EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION =
+  "Edit an existing recurring Goat task schedule. Use this when the user asks to change a recurrence name, cadence, cron, timezone, or repeated task prompt. Identify the schedule by id when known, otherwise by its unique visible name from runtime context. If the target is unclear, ask a short follow-up instead of calling this tool.";
+
+export const TASK_SCHEDULE_IDENTIFIER_DESCRIPTION =
+  "The existing recurring task schedule id. Prefer this when it is available in runtime context.";
+
+export const TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION =
+  "The existing visible recurring task name to find. Use only when the schedule id is unavailable, and only when the name is unique.";
+
+export const DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION =
+  "Delete an existing recurring Goat task schedule so it no longer creates future task runs. Already-created queued or running task runs continue.";
+
 export const WEB_SEARCH_TOOL_DESCRIPTION =
   "Search the public web once for simple freshness-sensitive questions. Use this for one-shot current facts, recent updates, or latest docs. Do not use it for deep research, monitoring, multi-source reports, connected-account work, or anything that should become a tracked Result.";
 

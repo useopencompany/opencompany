@@ -15,6 +15,14 @@ const SHAPE_SCOPES = {
       params: [userWorkosId],
     }),
   },
+  task_schedules: {
+    table: "goat.task_schedules",
+    where: scopedUserWhere,
+  },
+  "goat.task_schedules": {
+    table: "goat.task_schedules",
+    where: scopedUserWhere,
+  },
   task_messages: {
     table: "goat.task_messages",
     where: scopedTaskWhere,
