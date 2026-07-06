@@ -15,7 +15,12 @@ const nextConfig = {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
     ...(release ? { NEXT_PUBLIC_BUILD_TIMESTAMP: new Date().toISOString() } : {}),
   },
-  transpilePackages: ["@opencompany/agent-runtime", "@opencompany/db", "@opencompany/ui"],
+  transpilePackages: [
+    "@opencompany/agent-runtime",
+    "@opencompany/db",
+    "@opencompany/goat-brain",
+    "@opencompany/ui",
+  ],
 };
 
 export default nextConfig;

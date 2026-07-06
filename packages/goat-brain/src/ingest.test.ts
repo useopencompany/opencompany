@@ -31,7 +31,7 @@ describe("goat brain entity types and wiki links", () => {
   });
 
   it("parses wiki links with optional labels", () => {
-    expect(parseGoatBrainWikiLinks("Talk to [[jane-doe|Jane]] about [[acme]].")).toEqual([
+    expect(parseGoatBrainWikiLinks("Talk to [[page:jane-doe|Jane]] about [[acme]].")).toEqual([
       expect.objectContaining({ target: "jane-doe", label: "Jane", valid: true }),
       expect.objectContaining({ target: "acme", label: "acme", valid: true }),
     ]);
@@ -42,9 +42,10 @@ describe("goat brain entity types and wiki links", () => {
       deriveGoatBrainEdges({
         id: "acme",
         relations: [{ type: "employs", to: "jane-doe" }],
-        body: "Talk to [[jane-doe|Jane]] and [[roadmap]].",
+        body: "Talk to [[page:jane-doe|Jane]], [[roadmap]], and [[evidence:ev-seed]].",
       }),
     ).toEqual([
+      { from: "acme", to: "ev-seed", type: "cites", sourceKind: "wiki_link" },
       { from: "acme", to: "jane-doe", type: "employs", sourceKind: "relation" },
       { from: "acme", to: "jane-doe", type: "wiki_link", sourceKind: "wiki_link" },
       { from: "acme", to: "roadmap", type: "wiki_link", sourceKind: "wiki_link" },

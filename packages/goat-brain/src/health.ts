@@ -1,10 +1,10 @@
 import { extractGoatBrainCitations, parseGoatBrainDocument } from "./document";
 import { deriveGoatBrainEdges } from "./edges";
+import { parseGoatBrainInlineLinks } from "./inline-links";
 import { goatBrainRelativePath } from "./paths";
 import { isValidGoatBrainFolder, isValidGoatBrainId } from "./schema";
 import { listGoatBrainFiles, type StoredGoatBrainFile } from "./store";
 import { validateGoatBrainDocument } from "./validate";
-import { parseGoatBrainWikiLinks } from "./wiki-links";
 
 export type GoatBrainHealthFinding = {
   severity: "error" | "warn";
@@ -107,17 +107,20 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
       }
     }
 
-    checkWikiLinks({
+    const inlineLinkText = [doc.compiledTruth, ...doc.timeline.map((entry) => entry.body)].join(
+      "\n\n",
+    );
+    checkInlineLinks({
       id: file.id,
       byId,
-      text: doc.compiledTruth,
+      text: inlineLinkText,
       findings,
     });
     checkCitations({
       id: file.id,
       localEvidenceIds: new Set(doc.timeline.map((entry) => entry.evidenceId)),
       evidenceRecordIds,
-      text: doc.compiledTruth,
+      text: inlineLinkText,
       findings,
     });
 
@@ -176,7 +179,7 @@ function graphDegreeById(
     for (const edge of deriveGoatBrainEdges({
       id,
       relations: doc.frontmatter.relations ?? [],
-      body: doc.compiledTruth,
+      body: [doc.compiledTruth, ...doc.timeline.map((entry) => entry.body)].join("\n\n"),
     })) {
       if (!byId.has(edge.to)) continue;
       degreeById.set(edge.from, (degreeById.get(edge.from) ?? 0) + 1);
@@ -204,23 +207,23 @@ function checkRelations(input: {
   }
 }
 
-function checkWikiLinks(input: {
+function checkInlineLinks(input: {
   id: string;
   byId: Map<string, unknown>;
   text: string;
   findings: GoatBrainHealthFinding[];
 }) {
-  for (const link of parseGoatBrainWikiLinks(input.text)) {
+  for (const link of parseGoatBrainInlineLinks(input.text)) {
     if (!link.valid) {
       input.findings.push({
         severity: "error",
-        code: "invalid_wiki_link",
+        code: link.kind === "page" ? "invalid_wiki_link" : `invalid_${link.kind}_link`,
         id: input.id,
-        message: `Wiki link target "${link.target}" is not a valid brain id.`,
+        message: `${link.kind} link target "${link.target}" is invalid.`,
       });
       continue;
     }
-    if (!input.byId.has(link.target)) {
+    if (link.kind === "page" && !input.byId.has(link.target)) {
       input.findings.push({
         severity: "error",
         code: "broken_wiki_link",
