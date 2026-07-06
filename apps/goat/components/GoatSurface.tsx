@@ -461,10 +461,10 @@ function LiveChatMessageSubscriber({
   setMessages: React.Dispatch<React.SetStateAction<GoatChatUiMessage[]>>;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
-  const messagesCollection = useMemo(() => collections.chatMessages(sessionId), [
-    collections,
-    sessionId,
-  ]);
+  const messagesCollection = useMemo(
+    () => collections.chatMessages(sessionId),
+    [collections, sessionId],
+  );
   const { data: rows } = useLiveQuery((q) => q.from({ message: messagesCollection }));
   const liveMessages = useMemo(() => {
     return ((rows ?? []) as GoatChatMessageRow[])
