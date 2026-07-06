@@ -41,7 +41,10 @@ export type StartedTask = {
 };
 
 type GenerateTextLike = typeof generateText;
-type GoatBrainCliRunner = (input: GoatBrainToolInput) => Promise<GoatBrainToolOutput>;
+type GoatBrainCliRunner = (
+  input: GoatBrainToolInput,
+  executionContext?: unknown,
+) => Promise<GoatBrainToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 
 export type OpenCompanyChatAgentDebugTrace = {
@@ -131,20 +134,44 @@ export function createOpenCompanyChatToolContext(input: {
         type: "object",
         additionalProperties: false,
         properties: {
-          args: {
+          action: {
             type: "string",
+            enum: ["ingest", "query", "get"],
             description: GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
           },
+          text: {
+            type: "string",
+            description: "Text to ingest or query.",
+          },
+          sourceTitle: {
+            type: "string",
+            description: "Optional human-readable title for the source being ingested.",
+          },
+          id: {
+            type: "string",
+            description: "Brain id for get actions.",
+          },
+          section: {
+            type: "string",
+            enum: ["truth", "timeline", "frontmatter", "all"],
+          },
+          limit: {
+            type: "number",
+          },
+          hops: {
+            type: "number",
+          },
         },
-        required: ["args"],
+        required: ["action"],
       }),
-      execute: async (args) => {
+      execute: async (args, executionContext?: unknown) => {
         if (!input.runBrainCli) {
           throw new Error("goat_brain is not configured for this chat.");
         }
-        const rawArgs = typeof args.args === "string" ? args.args.trim() : "";
-        if (!rawArgs) throw new Error("goat_brain args are required.");
-        return input.runBrainCli({ args: rawArgs });
+        const normalized = normalizeGoatBrainToolInput(args);
+        return executionContext === undefined
+          ? input.runBrainCli(normalized)
+          : input.runBrainCli(normalized, executionContext);
       },
     }),
     [START_TASK_TOOL_NAME]: tool<StartTaskToolInput, StartTaskToolOutput>({
@@ -267,6 +294,47 @@ export function normalizeAgentText(text: string, startedTask: StartedTask | null
 
 export function stringifyFinishReason(value: unknown) {
   return typeof value === "string" ? value : undefined;
+}
+
+export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput {
+  if (!input || typeof input !== "object") {
+    throw new Error("goat_brain action is required.");
+  }
+  const record = input as Record<string, unknown>;
+  if (typeof record.args === "string" && record.args.trim()) {
+    return { args: record.args.trim() };
+  }
+  if (record.action === "ingest") {
+    const text = typeof record.text === "string" ? record.text.trim() : "";
+    if (!text) throw new Error("goat_brain ingest text is required.");
+    const sourceTitle = typeof record.sourceTitle === "string" ? record.sourceTitle.trim() : "";
+    return { action: "ingest", text, ...(sourceTitle ? { sourceTitle } : {}) };
+  }
+  if (record.action === "query") {
+    const text = typeof record.text === "string" ? record.text.trim() : "";
+    if (!text) throw new Error("goat_brain query text is required.");
+    return {
+      action: "query",
+      text,
+      ...(typeof record.limit === "number"
+        ? { limit: Math.max(1, Math.min(20, record.limit)) }
+        : {}),
+      ...(typeof record.hops === "number" ? { hops: Math.max(0, Math.min(3, record.hops)) } : {}),
+    };
+  }
+  if (record.action === "get") {
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    if (!id) throw new Error("goat_brain get id is required.");
+    const section =
+      record.section === "truth" ||
+      record.section === "timeline" ||
+      record.section === "frontmatter" ||
+      record.section === "all"
+        ? record.section
+        : undefined;
+    return { action: "get", id, ...(section ? { section } : {}) };
+  }
+  throw new Error("goat_brain action is invalid.");
 }
 
 function toStartTaskToolOutput(

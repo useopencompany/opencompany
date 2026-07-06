@@ -351,6 +351,32 @@ describe("GoatSurface chat streaming UI", () => {
     expect(assistantText.closest(".bg-surface-muted")).toBeNull();
   });
 
+  it("renders assistant soft line breaks as visible line breaks", () => {
+    const { container } = render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "First line\nSecond line\nThird line" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const paragraph = container.querySelector(".session-markdown p");
+    expect(paragraph?.textContent).toBe("First line\nSecond line\nThird line");
+    expect(paragraph?.querySelectorAll("br")).toHaveLength(2);
+  });
+
   it("renders a task card from start_task tool output", () => {
     render(
       <GoatSurface
@@ -506,11 +532,14 @@ describe("GoatSurface chat streaming UI", () => {
                   type: GOAT_BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_1",
                   state: "output-available",
-                  input: { args: "doctor" },
+                  input: { action: "ingest", text: "Louis Morgner is a person." },
                   output: {
-                    ok: true,
-                    exitCode: 0,
-                    stdout: "No issues found.\nAll folders are valid.",
+                    ok: false,
+                    exitCode: 1,
+                    stdout: JSON.stringify({
+                      ok: true,
+                      applied: [{ id: "louis-morgner" }],
+                    }),
                     stderr: "",
                   },
                 },
@@ -536,7 +565,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(screen.getAllByTestId("chat-tool-call-goat_brain")).toHaveLength(2);
     expect(screen.getByText("Done")).toBeInTheDocument();
-    expect(screen.getByText("No issues found.")).toBeInTheDocument();
+    expect(screen.getByText("Ingested 1 brain change.")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("Document was not found.")).toBeInTheDocument();
   });

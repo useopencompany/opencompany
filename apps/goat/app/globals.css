@@ -280,3 +280,17 @@ body {
 .tiptap-brain .ProseMirror-selectednode {
   outline: 2px solid var(--color-border-strong);
 }
+.tiptap-brain .wiki-brain-link {
+  cursor: pointer;
+  color: var(--color-ink);
+  font-weight: 560;
+  text-decoration-line: underline;
+  text-decoration-color: var(--color-border-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.tiptap-brain .wiki-brain-link-unresolved {
+  color: var(--color-ink-muted);
+  text-decoration-style: dashed;
+  text-decoration-color: var(--color-border);
+}

@@ -15,6 +15,17 @@ describe("TaskHarnessRunView", () => {
     expect(screen.queryByText("Harness spec JSON")).not.toBeInTheDocument();
   });
 
+  it("renders brain report results as artifact links", () => {
+    render(<TaskHarnessRunView run={runWithArtifact()} />);
+
+    expect(screen.getAllByText("Market report").length).toBeGreaterThan(0);
+    expect(screen.getByText("research/market-report.md")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open/i })).toHaveAttribute(
+      "href",
+      "/brain/research/market-report",
+    );
+  });
+
   it("keeps tool input and output details collapsed until expanded", async () => {
     const user = userEvent.setup();
     render(<TaskHarnessRunView run={runWithEvents()} />);
@@ -72,6 +83,38 @@ function runWithEvents() {
   });
 }
 
+function runWithArtifact() {
+  return buildGoatHarnessRun({
+    task: task({
+      status: "succeeded",
+      stage: "completed",
+      result: "Research report saved to Brain: [Market report](/brain/research/market-report).",
+    }),
+    messages: [
+      message({ id: "user_msg", role: "user", content: "Research the market" }),
+      message({
+        id: "assistant_msg",
+        role: "assistant",
+        content: "Research report saved to Brain: [Market report](/brain/research/market-report).",
+      }),
+    ],
+    events: [
+      event(1, "artifact.created", {
+        artifact: {
+          type: "brain_markdown_report",
+          title: "Market report",
+          documentId: "goat_brain_doc_1",
+          brainId: "market-report",
+          folderPath: "research",
+          brainPath: "research/market-report.md",
+          url: "/brain/research/market-report",
+          mimeType: "text/markdown",
+        },
+      }),
+    ],
+  });
+}
+
 function task(overrides: Record<string, unknown> = {}) {
   return {
     id: "goat_task_1",
@@ -109,7 +152,7 @@ function message(overrides: { id: string; role: "user" | "assistant" | "tool"; c
 
 function event(
   id: number,
-  type: "tool.started" | "tool.completed",
+  type: "tool.started" | "tool.completed" | "artifact.created",
   payload: Record<string, unknown>,
 ) {
   return {

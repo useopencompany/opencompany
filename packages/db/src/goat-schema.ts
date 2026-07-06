@@ -3,6 +3,7 @@ import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   foreignKey,
   index,
@@ -15,7 +16,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed";
+export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
 export type GoatTaskStage =
   | "queued"
@@ -23,7 +24,8 @@ export type GoatTaskStage =
   | "sandboxing"
   | "running"
   | "completed"
-  | "failed";
+  | "failed"
+  | "canceled";
 
 export type GoatIntegrationProvider = "gmail" | "google_calendar" | "linear" | "github";
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
@@ -59,13 +61,22 @@ export type GoatHarnessSpec = {
   initialUserMessage: string;
   tools: GoatTaskToolName[];
   maxModelSteps: number;
-  resultMode: "assistant_final";
+  resultMode: "assistant_final" | "brain_markdown_report";
 };
 
 export type GoatBrainFolderSource = "system" | "custom";
+export type GoatBrainEntityType =
+  | "person"
+  | "company"
+  | "project"
+  | "meeting"
+  | "decision"
+  | "research"
+  | "source"
+  | "note";
 export type GoatBrainRelation = {
-  type?: string;
-  target: string;
+  type: string;
+  to: string;
 };
 export type GoatBrainSource = {
   ref: string;
@@ -86,6 +97,7 @@ export type GoatTaskModelUsagePhase = "planner" | "execution";
 export type GoatTaskEventType =
   | "task.status"
   | "harness.planned"
+  | "artifact.created"
   | "assistant.delta"
   | "message.created"
   | "message.completed"
@@ -133,6 +145,8 @@ export type GoatChatMessageDebugTrace = {
   toolResults?: unknown[];
   error?: string;
 };
+
+export type GoatBrainToolRunTrace = Record<string, unknown>;
 
 export const goat = pgSchema("goat");
 export const goatTaskDisplayIdSequence = goat.sequence("task_display_id_seq");
@@ -189,8 +203,10 @@ export const goatBrainDocuments = goat.table(
     mimeType: text("mime_type"),
     originalFileName: text("original_file_name"),
     assetStorageKey: text("asset_storage_key"),
-    related: jsonb("related").$type<GoatBrainRelation[]>().notNull().default(sql`'[]'::jsonb`),
+    relations: jsonb("relations").$type<GoatBrainRelation[]>().notNull().default(sql`'[]'::jsonb`),
     sources: jsonb("sources").$type<GoatBrainSource[]>().notNull().default(sql`'[]'::jsonb`),
+    entityType: text("entity_type").$type<GoatBrainEntityType>().notNull().default("note"),
+    aliases: jsonb("aliases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     contentHash: text("content_hash").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -458,11 +474,11 @@ export const goatTasks = goat.table(
     leaseExpiresAtIdx: index("goat_tasks_lease_expires_at_idx").on(table.leaseExpiresAt),
     statusCheck: check(
       "goat_tasks_status_check",
-      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed')`,
+      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'canceled')`,
     ),
     stageCheck: check(
       "goat_tasks_stage_check",
-      sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed')`,
+      sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed', 'canceled')`,
     ),
   }),
 );
@@ -754,10 +770,52 @@ export const goatChatMessages = goat.table(
   }),
 );
 
+export const goatBrainToolRuns = goat.table(
+  "brain_tool_runs",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id").references(() => goatChatSessions.id, {
+      onDelete: "set null",
+    }),
+    userMessageId: text("user_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    assistantMessageId: text("assistant_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    toolCallId: text("tool_call_id"),
+    sourceRef: text("source_ref"),
+    action: text("action"),
+    ok: boolean("ok").notNull().default(false),
+    exitCode: integer("exit_code"),
+    durationMs: integer("duration_ms"),
+    tracePath: text("trace_path"),
+    trace: jsonb("trace").$type<GoatBrainToolRunTrace>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userCreatedAtIdx: index("goat_brain_tool_runs_user_created_at_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    chatSessionCreatedAtIdx: index("goat_brain_tool_runs_chat_session_created_at_idx").on(
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    userMessageIdx: index("goat_brain_tool_runs_user_message_idx").on(table.userMessageId),
+    toolCallIdx: index("goat_brain_tool_runs_tool_call_idx").on(table.toolCallId),
+    sourceRefIdx: index("goat_brain_tool_runs_source_ref_idx").on(table.sourceRef),
+  }),
+);
+
 export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   brainFolders: many(goatBrainFolders),
   brainDocuments: many(goatBrainDocuments),
   brainDocumentVersions: many(goatBrainDocumentVersions),
+  brainToolRuns: many(goatBrainToolRuns),
   tasks: many(goatTasks),
   taskMessages: many(goatTaskMessages),
   taskEvents: many(goatTaskEvents),
@@ -798,6 +856,27 @@ export const goatBrainDocumentVersionsRelations = relations(
     }),
   }),
 );
+
+export const goatBrainToolRunsRelations = relations(goatBrainToolRuns, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatBrainToolRuns.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  chatSession: one(goatChatSessions, {
+    fields: [goatBrainToolRuns.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  userMessage: one(goatChatMessages, {
+    fields: [goatBrainToolRuns.userMessageId],
+    references: [goatChatMessages.id],
+    relationName: "goat_brain_tool_runs_user_message",
+  }),
+  assistantMessage: one(goatChatMessages, {
+    fields: [goatBrainToolRuns.assistantMessageId],
+    references: [goatChatMessages.id],
+    relationName: "goat_brain_tool_runs_assistant_message",
+  }),
+}));
 
 export const goatIntegrationsRelations = relations(goatIntegrations, ({ one, many }) => ({
   user: one(goatUsers, {
@@ -927,6 +1006,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   messages: many(goatChatMessages),
+  brainToolRuns: many(goatBrainToolRuns),
 }));
 
 export const goatChatMessagesRelations = relations(goatChatMessages, ({ one }) => ({
@@ -944,6 +1024,7 @@ export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatBrainFolder = typeof goatBrainFolders.$inferSelect;
 export type GoatBrainDocument = typeof goatBrainDocuments.$inferSelect;
 export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSelect;
+export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;
 export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;

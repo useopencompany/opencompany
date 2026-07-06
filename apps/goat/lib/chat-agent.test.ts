@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
 import {
   GOAT_BRAIN_TOOL_NAME,
+  type GoatBrainToolInput,
   START_TASK_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchToolInput,
@@ -119,12 +120,12 @@ describe("runOpenCompanyChatAgent", () => {
 
   it("can call the personal brain CLI inside the chat loop", async () => {
     const startTask = vi.fn();
-    const runBrainCli = vi.fn(async (input: { args: string }) => ({
+    const runBrainCli = vi.fn(async (input: GoatBrainToolInput) => ({
       ok: true,
       exitCode: 0,
       stdout: "1. [inbox] Hiring note (hiring-note, score 1, updated 2026-01-01T00:00:00.000Z)",
       stderr: "",
-      args: input.args,
+      input,
     }));
 
     const result = await runOpenCompanyChatAgent({
@@ -134,11 +135,13 @@ describe("runOpenCompanyChatAgent", () => {
       startTask,
       runBrainCli,
       generateTextImpl: (async (options: unknown) => {
-        expect(extractGoatBrainToolDescription(options)).toContain("personal Goat brain CLI");
-        expect(extractGoatBrainToolDescription(options)).toContain("references");
-        expect(extractGoatBrainToolDescription(options)).toContain("docs");
+        expect(extractGoatBrainToolDescription(options)).toContain("personal Goat Brain");
+        expect(extractGoatBrainToolDescription(options)).toContain("ingest");
         const toolResult = await executeGoatBrainTool(options, {
-          args: 'query --text "hiring" --hops 1 --limit 5',
+          action: "query",
+          text: "hiring",
+          hops: 1,
+          limit: 5,
         });
 
         return {
@@ -156,7 +159,10 @@ describe("runOpenCompanyChatAgent", () => {
 
     expect(startTask).not.toHaveBeenCalled();
     expect(runBrainCli).toHaveBeenCalledWith({
-      args: 'query --text "hiring" --hops 1 --limit 5',
+      action: "query",
+      text: "hiring",
+      hops: 1,
+      limit: 5,
     });
     expect(result.task).toBeNull();
     expect(result.content).toBe("Your Brain has a hiring note in inbox.");
@@ -271,7 +277,7 @@ async function executeStartTaskTool(
   return tool.execute(input);
 }
 
-async function executeGoatBrainTool(options: unknown, input: { args: string }) {
+async function executeGoatBrainTool(options: unknown, input: Record<string, unknown>) {
   type ToolOptions = { tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { execute?: unknown }> };
   const tool = (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME];
   if (typeof tool?.execute !== "function") {

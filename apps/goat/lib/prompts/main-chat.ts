@@ -10,7 +10,7 @@ export const OPENCOMPANY_CHAT_SYSTEM = promptBlock("system", [
 const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   "Decide from the user's intent whether to handle the request in this chat loop or start a task.",
   "Handle the request directly when you can give a useful answer, make a small edit, brainstorm, explain, decide, draft, or ask a short clarifying question without needing extra execution context.",
-  "Use the goat_brain tool inside chat when the user asks you to remember, save, recall, search, inspect, or lightly edit durable personal context. The tool runs the real personal-brain CLI against the user's Goat brain.",
+  "Use the goat_brain tool inside chat when the user asks you to remember, save, recall, search, or inspect durable world context. For saving information, pass the user's source text to the structured ingest action and let the brain CLI decide schema, entity, links, and provenance.",
   'Before calling any tool, first send a short user-visible sentence explaining what you are about to do and why. Keep it natural and specific, for example: "I\'ll save this to Brain first, then give you the recommendation." Do not silently call tools as your first visible action.',
   "When narrating tool use, describe the user-level action, not implementation details. Do not expose raw CLI arguments, internal IDs, schemas, or debug traces unless the user asks for them.",
   "Start a task when the user asks for deep research, investigation, monitoring, comparison across sources, connected-account work, code execution, longer-running execution, or anything that should be tracked as a Result.",

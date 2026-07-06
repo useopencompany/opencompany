@@ -23,6 +23,11 @@ export type ArchiveTaskResult = {
   error: string | null;
 };
 
+export type CancelTaskResult = {
+  ok: boolean;
+  error: string | null;
+};
+
 export async function listCurrentUserGoatTasks() {
   const { user } = await currentGoatUser();
   return getDb()
@@ -137,13 +142,69 @@ export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTask
         eq(goatTasks.id, taskId),
         eq(goatTasks.userWorkosId, user.workosUserId),
         isNull(goatTasks.archivedAt),
-        inArray(goatTasks.status, ["succeeded", "failed"]),
+        inArray(goatTasks.status, ["succeeded", "failed", "canceled"]),
       ),
     )
     .returning({ id: goatTasks.id });
 
   if (!task) {
     return { ok: false, error: "Could not archive task." };
+  }
+
+  return { ok: true, error: null };
+}
+
+export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskResult> {
+  if (!taskId.trim()) {
+    return { ok: false, error: "Could not stop task." };
+  }
+
+  const { user } = await currentGoatUser();
+  const now = new Date();
+  const result = await getDb().execute(sql`
+    WITH canceled_task AS (
+      UPDATE goat.tasks AS task
+      SET status = 'canceled',
+          stage = 'canceled',
+          error = 'Stopped by user.',
+          lease_id = NULL,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          updated_at = ${now}
+      WHERE task.id = ${taskId}
+        AND task.user_workos_id = ${user.workosUserId}
+        AND task.status IN ('queued', 'running')
+      RETURNING task.id, task.user_workos_id
+    ),
+    inserted_event AS (
+      INSERT INTO goat.task_events (
+        task_id,
+        user_workos_id,
+        message_id,
+        type,
+        payload,
+        created_at
+      )
+      SELECT
+        task.id,
+        task.user_workos_id,
+        NULL,
+        'task.status',
+        ${JSON.stringify({
+          status: "canceled",
+          stage: "canceled",
+          error: "Stopped by user.",
+        })}::jsonb,
+        ${now}
+      FROM canceled_task AS task
+      RETURNING id
+    )
+    SELECT id FROM canceled_task
+    WHERE EXISTS (SELECT 1 FROM inserted_event)
+  `);
+
+  if (rowsFromExecute<{ id: string }>(result).length === 0) {
+    return { ok: false, error: "Could not stop task." };
   }
 
   return { ok: true, error: null };

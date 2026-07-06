@@ -13,6 +13,9 @@ const aiMock = vi.hoisted(() => ({
   stepCountIs: vi.fn((steps: number) => ({ steps })),
   tool: vi.fn((definition: unknown) => definition),
 }));
+const goatBrainMock = vi.hoisted(() => ({
+  createGoatBrainMarkdownReportForTask: vi.fn(),
+}));
 
 vi.mock("ai", () => ({
   generateObject: aiMock.generateObject,
@@ -26,6 +29,8 @@ vi.mock("ai", () => ({
 vi.mock("@opencompany/observability/braintrust", () => ({
   getBraintrustAISDK: <T>(sdk: T) => sdk,
 }));
+
+vi.mock("./goat-brain", () => goatBrainMock);
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
@@ -41,9 +46,24 @@ const harnessSpec: GoatHarnessSpec = {
   maxModelSteps: 8,
   resultMode: "assistant_final",
 };
+const reportHarnessSpec: GoatHarnessSpec = {
+  ...harnessSpec,
+  systemPrompt: "Write a sourced research report.",
+  resultMode: "brain_markdown_report",
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
+  goatBrainMock.createGoatBrainMarkdownReportForTask.mockResolvedValue({
+    type: "brain_markdown_report",
+    title: "Marseille Market Research",
+    documentId: "goat_brain_doc_1",
+    brainId: "marseille-market-research",
+    folderPath: "research",
+    brainPath: "research/marseille-market-research.md",
+    url: "/brain/research/marseille-market-research",
+    mimeType: "text/markdown",
+  });
 });
 
 describe("planGoatHarness", () => {
@@ -89,6 +109,7 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("<tool_policy>");
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
+    expect(request.system).toContain('resultMode "brain_markdown_report"');
     expect(request.system).toContain("<prompt_contract>");
     expect(request.system).toContain("Always return a non-empty systemPrompt");
     expect(request.prompt).toContain("<planner_inputs>");
@@ -232,6 +253,37 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("explicitly asked to publish");
     expect(request.prompt).toContain("github_open_pull_request");
   });
+
+  it("keeps brain markdown report mode and augments the execution contract", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        model: claudeModel,
+        systemPrompt: "Research the market deeply.",
+        initialUserMessage: "Deep research the Marseille AI market.",
+        tools: ["exa_search"],
+        maxModelSteps: 10,
+        resultMode: "brain_markdown_report",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Deep research the Marseille AI market.",
+        model,
+        availableTools: ["exa_search"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toEqual({
+      schemaVersion: "goat.harness.v1",
+      model: claudeModel,
+      systemPrompt: expect.stringContaining("<brain_markdown_report_result_contract>"),
+      initialUserMessage: "Deep research the Marseille AI market.",
+      tools: ["exa_search"],
+      maxModelSteps: 10,
+      resultMode: "brain_markdown_report",
+    });
+  });
 });
 
 describe("executeGoatTask", () => {
@@ -347,6 +399,65 @@ describe("executeGoatTask", () => {
         usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 },
       }),
     );
+  });
+
+  it("saves brain markdown reports as artifacts and returns the brain link", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({ object: reportHarnessSpec });
+    aiMock.streamText.mockReturnValueOnce({
+      fullStream: streamParts(
+        { type: "text-delta", text: "# Marseille Market Research\n\nFindings." },
+        { type: "finish-step", usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 } },
+      ),
+      text: Promise.resolve("# Marseille Market Research\n\nFindings."),
+    });
+    const sink = createSink();
+
+    await expect(
+      executeGoatTask({
+        task: task({ name: "Marseille market research" }),
+        env: env(),
+        signal: new AbortController().signal,
+        sink,
+        reportStage: vi.fn(async () => {}),
+      }),
+    ).resolves.toEqual({
+      result:
+        "Research report saved to Brain: [Marseille Market Research](/brain/research/marseille-market-research).\n\nArtifact: `research/marseille-market-research.md`",
+      harnessSpec: expect.objectContaining({ resultMode: "brain_markdown_report" }),
+      debugTrace: expect.objectContaining({ schemaVersion: "goat.debug.v1" }),
+      artifact: expect.objectContaining({
+        type: "brain_markdown_report",
+        brainPath: "research/marseille-market-research.md",
+      }),
+    });
+
+    expect(goatBrainMock.createGoatBrainMarkdownReportForTask).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      taskId: "goat_task_1",
+      title: "Marseille market research",
+      markdown: "# Marseille Market Research\n\nFindings.",
+    });
+    expect(sink.updateMessageContent).not.toHaveBeenCalled();
+    expect(sink.completeMessage).toHaveBeenCalledWith({
+      messageId: "assistant_msg_1",
+      content:
+        "Research report saved to Brain: [Marseille Market Research](/brain/research/marseille-market-research).\n\nArtifact: `research/marseille-market-research.md`",
+      modelMessage: {
+        role: "assistant",
+        content:
+          "Research report saved to Brain: [Marseille Market Research](/brain/research/marseille-market-research).\n\nArtifact: `research/marseille-market-research.md`",
+      },
+    });
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "artifact.created",
+      messageId: "assistant_msg_1",
+      payload: {
+        artifact: expect.objectContaining({
+          type: "brain_markdown_report",
+          url: "/brain/research/marseille-market-research",
+        }),
+      },
+    });
   });
 
   it("fails the assistant message when final assistant content is empty", async () => {

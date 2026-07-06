@@ -1,22 +1,16 @@
 import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
-import type { NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
+import { isInitialDocumentRequest, localGoatHttpsRedirectUrl } from "@/lib/local-https-redirect";
 import { getGoatWorkOSRedirectUri } from "@/lib/workos";
 
 const UNAUTHENTICATED_PATHS = new Set(["/auth/callback", "/auth/sign-in", "/api/healthz"]);
 
-function isInitialDocumentRequest(request: NextRequest) {
-  const accept = request.headers.get("accept") ?? "";
-  const isDocumentRequest = accept.includes("text/html");
-  const isRscRequest = request.headers.has("RSC") || request.headers.has("Next-Router-State-Tree");
-  const isPrefetch =
-    request.headers.get("Purpose") === "prefetch" ||
-    request.headers.get("Sec-Purpose") === "prefetch" ||
-    request.headers.has("Next-Router-Prefetch");
-
-  return isDocumentRequest && !isRscRequest && !isPrefetch;
-}
-
 export default async function proxy(request: NextRequest) {
+  const localHttpsRedirect = localGoatHttpsRedirectUrl(request);
+  if (localHttpsRedirect) {
+    return NextResponse.redirect(localHttpsRedirect);
+  }
+
   const { session, headers, authorizationUrl } = await authkit(request, {
     redirectUri: getGoatWorkOSRedirectUri(),
   });

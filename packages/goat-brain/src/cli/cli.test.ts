@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getGoatBrainCliSource } from "../generated/cli-bundle";
 import { DEFAULT_GOAT_BRAIN_FOLDERS } from "../schema";
 import { parseArgs } from "./args";
-import { HELP, validateCommandArgs } from "./index";
+import { HELP, ingestCommandExitCode, validateCommandArgs } from "./index";
 import { execaNode } from "./test-support";
 
 const require = createRequire(import.meta.url);
@@ -24,8 +24,10 @@ afterEach(async () => {
 
 describe("goat-brain cli", () => {
   it("validates unknown options", () => {
+    expect(validateCommandArgs("ingest", parseArgs(["--nope"]))).toBe('Unknown option "--nope".');
     expect(validateCommandArgs("create", parseArgs(["--nope"]))).toBe('Unknown option "--nope".');
     expect(HELP).toContain("goat-brain <command>");
+    expect(HELP).toContain("doctor");
   });
 
   it("lists the system default folders", async () => {
@@ -88,6 +90,35 @@ describe("goat-brain cli", () => {
     expect(query.stdout).toContain("launch-plan");
 
     await expect(run(["doctor", "--root", root])).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it("does not fail ingest for pre-existing health errors outside applied docs", () => {
+    expect(
+      ingestCommandExitCode({
+        applied: [{ id: "new-person" }],
+        health: {
+          findings: [
+            {
+              severity: "error",
+              id: "old-research",
+            },
+          ],
+        },
+      }),
+    ).toBe(0);
+    expect(
+      ingestCommandExitCode({
+        applied: [{ id: "new-person" }],
+        health: {
+          findings: [
+            {
+              severity: "error",
+              id: "new-person",
+            },
+          ],
+        },
+      }),
+    ).toBe(1);
   });
 
   it("runs the generated bundle under node from a temp brain root", async () => {

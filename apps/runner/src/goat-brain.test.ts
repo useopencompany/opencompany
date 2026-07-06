@@ -20,6 +20,7 @@ vi.mock("./db", () => ({
 }));
 
 import {
+  createGoatBrainMarkdownReportForTask,
   type MaterializedGoatBrainSnapshot,
   materializeGoatBrainToLocalRoot,
   syncGoatBrainFromLocalRoot,
@@ -85,6 +86,55 @@ describe("materializeGoatBrainToLocalRoot", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("createGoatBrainMarkdownReportForTask", () => {
+  it("creates a markdown report artifact in the research brain folder", async () => {
+    const db = createGoatBrainDb({ selectResults: [[]] });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const artifact = await createGoatBrainMarkdownReportForTask({
+      userWorkosId: "user_1",
+      taskId: "goat_task_1",
+      title: "Fallback title",
+      markdown: "# Market Report\n\nFindings.",
+    });
+
+    expect(artifact).toMatchObject({
+      type: "brain_markdown_report",
+      title: "Market Report",
+      brainId: "market-report",
+      folderPath: "research",
+      brainPath: "research/market-report.md",
+      url: "/brain/research/market-report",
+      mimeType: "text/markdown",
+    });
+    expect(db.insertedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userWorkosId: "user_1",
+          path: "research",
+          source: "system",
+        }),
+        expect.objectContaining({
+          userWorkosId: "user_1",
+          brainId: "market-report",
+          folderPath: "research",
+          title: "Market Report",
+          body: "# Market Report\n\nFindings.",
+          kind: "markdown",
+          mimeType: "text/markdown",
+          sources: [
+            expect.objectContaining({
+              ref: "goat-task:goat_task_1",
+              title: "Task goat_task_1",
+            }),
+          ],
+          contentHash: expect.any(String),
+        }),
+      ]),
+    );
   });
 });
 
@@ -441,10 +491,11 @@ function brainDoc(input: { id: string; folder: string; title: string; truth: str
     frontmatter: {
       id: input.id,
       folder: input.folder,
+      type: "note",
       title: input.title,
       createdAt: at,
       updatedAt: at,
-      related: [],
+      relations: [],
     },
     title: input.title,
     compiledTruth: input.truth,
@@ -466,8 +517,9 @@ function brainRow(input: {
     folderPath: input.folderPath,
     title: input.brainId,
     content: input.content,
-    related: [],
+    relations: [],
     sources: [],
+    entityType: "note",
     contentHash: hash(input.content),
     sizeBytes: Buffer.byteLength(input.content, "utf8"),
     createdAt: now,

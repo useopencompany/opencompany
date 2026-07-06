@@ -168,9 +168,23 @@ export type GoatHarnessRunViewModel = {
   userMessage: GoatRunMessage | null;
   assistantMessages: GoatRunMessage[];
   toolCalls: GoatHarnessRunToolCall[];
+  artifacts: GoatRunArtifact[];
+  resultArtifact: GoatRunArtifact | null;
   events: GoatRunEvent[];
   models: GoatRunModelSummary[];
   cost: GoatRunCostSummary;
+};
+
+export type GoatRunArtifact = {
+  type: "brain_markdown_report";
+  title: string;
+  url: string;
+  brainPath: string;
+  documentId: string;
+  brainId: string;
+  folderPath: string;
+  mimeType: string;
+  createdAt: string;
 };
 
 export type GoatRunModelSummary = {
@@ -264,6 +278,7 @@ export function buildGoatHarnessRun(input: {
   const userMessage = messages.find((message) => message.role === "user") ?? null;
   const assistantMessages = messages.filter((message) => message.role === "assistant");
   const toolCalls = buildToolCalls(events);
+  const artifacts = buildArtifacts(events);
   const models = buildModelSummary(task.model, input.modelUsage ?? []);
 
   return {
@@ -273,6 +288,8 @@ export function buildGoatHarnessRun(input: {
     userMessage,
     assistantMessages,
     toolCalls,
+    artifacts,
+    resultArtifact: artifacts.at(-1) ?? null,
     events,
     models,
     cost:
@@ -510,6 +527,46 @@ function buildToolCalls(events: readonly GoatRunEvent[]) {
   }
 
   return Array.from(byCallId.values()).toSorted(compareCreatedAt);
+}
+
+function buildArtifacts(events: readonly GoatRunEvent[]): GoatRunArtifact[] {
+  return events
+    .flatMap((event): GoatRunArtifact[] => {
+      if (event.type !== "artifact.created") return [];
+      const artifact = parseArtifact(event.payload.artifact);
+      return artifact ? [{ ...artifact, createdAt: event.createdAt }] : [];
+    })
+    .toSorted(compareCreatedAt);
+}
+
+function parseArtifact(value: unknown): Omit<GoatRunArtifact, "createdAt"> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.type !== "brain_markdown_report") return null;
+  const title = readString(record.title).trim();
+  const url = readString(record.url).trim();
+  const brainPath = readString(record.brainPath).trim();
+  const documentId = readString(record.documentId).trim();
+  const brainId = readString(record.brainId).trim();
+  const folderPath = readString(record.folderPath).trim();
+  const mimeType = readString(record.mimeType).trim() || "text/markdown";
+  if (!title || !isInternalBrainUrl(url) || !brainPath || !documentId || !brainId || !folderPath) {
+    return null;
+  }
+  return {
+    type: "brain_markdown_report",
+    title,
+    url,
+    brainPath,
+    documentId,
+    brainId,
+    folderPath,
+    mimeType,
+  };
+}
+
+function isInternalBrainUrl(url: string) {
+  return url.startsWith("/brain/") && !url.startsWith("//");
 }
 
 function makeToolCall(input: {

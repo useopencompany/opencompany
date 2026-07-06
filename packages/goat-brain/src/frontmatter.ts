@@ -5,6 +5,7 @@ import {
   type GoatBrainRelation,
   type GoatBrainSource,
 } from "./schema";
+import { normalizeBuiltInGoatBrainEntityType } from "./schemas";
 
 export function splitFrontmatter(source: string): { yaml: string; body: string } {
   const normalized = source.replace(/\r\n/g, "\n");
@@ -33,11 +34,17 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   if (folder) out.folder = folder;
   const title = readString(raw.title);
   if (title) out.title = title;
+  const type = normalizeBuiltInGoatBrainEntityType(readString(raw.type) ?? undefined);
+  if (type) out.type = type;
+  const aliases = readStringArray(raw.aliases);
+  if (aliases.length > 0) out.aliases = aliases;
   const createdAt = readString(raw.created_at);
   if (createdAt) out.createdAt = createdAt;
   const updatedAt = readString(raw.updated_at);
   if (updatedAt) out.updatedAt = updatedAt;
-  out.related = readRelations(raw.related);
+  out.relations = readRelations(raw.relations);
+  const legacyKeys = ["schema_type", "metadata", "related"].filter((key) => key in raw);
+  if (legacyKeys.length > 0) out.legacyKeys = legacyKeys;
   const tags = readStringArray(raw.tags);
   if (tags.length > 0) out.tags = tags;
   const sources = readSources(raw.sources);
@@ -49,14 +56,16 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
   const record: Record<string, unknown> = {
     id: frontmatter.id,
     folder: frontmatter.folder,
+    type: frontmatter.type,
     created_at: frontmatter.createdAt,
     updated_at: frontmatter.updatedAt,
-    related: (frontmatter.related ?? []).map((relation) => ({
+    relations: (frontmatter.relations ?? []).map((relation) => ({
       type: relation.type,
-      target: relation.target,
+      to: relation.to,
     })),
   };
   if (frontmatter.title) record.title = frontmatter.title;
+  if (frontmatter.aliases && frontmatter.aliases.length > 0) record.aliases = frontmatter.aliases;
   if (frontmatter.tags && frontmatter.tags.length > 0) record.tags = frontmatter.tags;
   if (frontmatter.sources && frontmatter.sources.length > 0) {
     record.sources = frontmatter.sources.map((source) => ({
@@ -76,14 +85,14 @@ function readRelations(value: unknown): GoatBrainRelation[] {
     let relation: GoatBrainRelation | null = null;
     if (typeof item === "string") {
       const target = readString(item);
-      if (target) relation = { type: DEFAULT_GOAT_BRAIN_RELATION_TYPE, target };
+      if (target) relation = { type: DEFAULT_GOAT_BRAIN_RELATION_TYPE, to: target };
     } else if (isRecord(item)) {
-      const target = readString(item.target);
+      const target = readString(item.to);
       if (target)
-        relation = { type: readString(item.type) ?? DEFAULT_GOAT_BRAIN_RELATION_TYPE, target };
+        relation = { type: readString(item.type) ?? DEFAULT_GOAT_BRAIN_RELATION_TYPE, to: target };
     }
-    if (relation && !seen.has(relation.target)) {
-      seen.add(relation.target);
+    if (relation && !seen.has(relation.to)) {
+      seen.add(relation.to);
       out.push(relation);
     }
   }

@@ -3,13 +3,16 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  checkGoatBrainHealth,
   DEFAULT_GOAT_BRAIN_FOLDERS,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
   type GoatBrainDocument,
   type GoatBrainRelation,
   type GoatBrainSource,
   goatBrainEntryFromLegacyDocument,
-  goatBrainRelativePath,
+  inferGoatBrainEntityTypeFromFolder,
+  ingestGoatBrain,
+  isBuiltInGoatBrainEntityType,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainRelationType,
@@ -24,8 +27,9 @@ import {
   validateGoatBrainDocument,
   writeGoatBrainEntry,
 } from "../index";
+import { createGateway } from "../retrieval/gateway";
 import { loadProviders } from "../retrieval/providers";
-import { findGoatBrainFile, listGoatBrainFiles, type StoredGoatBrainFile } from "../store";
+import { findGoatBrainFile, listGoatBrainFiles } from "../store";
 import { formatGoatBrainUsageReport, type GoatBrainUsageEntry } from "../usage";
 import { parseArgs, readStdin } from "./args";
 import { type CommandContext, type CommandResult, fail, notFound, ok, render } from "./io";
@@ -36,6 +40,7 @@ const COMMANDS: Record<string, Handler> = {
   create,
   get,
   query,
+  ingest,
   rewrite,
   "append-timeline": appendTimeline,
   link,
@@ -47,9 +52,18 @@ const COMMANDS: Record<string, Handler> = {
 
 const GLOBAL_FLAGS = ["root", "json", "report-usage"] as const;
 const COMMAND_FLAGS: Record<string, readonly string[]> = {
-  create: ["folder", "id", "title", "truth", "truth-stdin", "tag", "related", "source-ref"],
-  get: ["id", "section"],
-  query: ["text", "folder", "since", "limit", "hops", "lexical-only", "include-invalid"],
+  create: [
+    "folder",
+    "id",
+    "title",
+    "type",
+    "truth",
+    "truth-stdin",
+    "alias",
+    "tag",
+    "relation",
+    "source-ref",
+  ],
   rewrite: ["id", "truth", "truth-stdin"],
   "append-timeline": ["id", "at", "body", "body-stdin", "source-ref", "source-title"],
   link: ["id", "to", "as", "remove"],
@@ -57,6 +71,9 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   delete: ["id", "force", "dry-run"],
   folder: ["path"],
   doctor: [],
+  get: ["id", "section"],
+  ingest: ["text", "text-stdin", "source-ref", "source-title", "at", "dry-run", "model"],
+  query: ["text", "folder", "since", "limit", "hops", "lexical-only", "include-invalid"],
 };
 
 export const HELP = `goat-brain - folder-first personal brain CLI
@@ -65,6 +82,7 @@ Usage: goat-brain <command> [options]
 
 Commands:
   create            Create a markdown brain doc in a folder.
+  ingest            Graph-first LLM ingest from source text.
   get               Read a doc by id (--section truth|timeline|frontmatter|all).
   query             Hybrid retrieval over docs (--folder, --since, --hops, --limit).
   rewrite           Replace compiled truth for a doc.
@@ -80,8 +98,8 @@ Global options:
   --json            Machine-readable output.
 `;
 
-export function helpResult(message: string): CommandResult {
-  return fail(`${message}\n\n${HELP}`);
+export function helpResult(message: string, help = HELP): CommandResult {
+  return fail(`${message}\n\n${help}`);
 }
 
 export function validateCommandArgs(commandName: string, args: ReturnType<typeof parseArgs>) {
@@ -103,19 +121,24 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
 
   const now = nowIso();
   const title = ctx.args.get("title")?.trim() || titleFromId(id);
+  const type = ctx.args.get("type")?.trim() || inferGoatBrainEntityTypeFromFolder(folder);
+  if (!isBuiltInGoatBrainEntityType(type)) return fail("`--type` must be a built-in entity type.");
   const truth = (
     ctx.args.has("truth-stdin") ? await readStdin() : (ctx.args.get("truth") ?? "")
   ).trim();
-  const related = readRelated(ctx.args.getAll("related"));
+  const relations = readRelations(ctx.args.getAll("relation"));
+  if (!relations.ok) return fail(relations.error);
   const sourceRef = ctx.args.get("source-ref")?.trim();
   const doc: GoatBrainDocument = {
     frontmatter: {
       id,
       folder,
+      type,
       title,
       createdAt: now,
       updatedAt: now,
-      related,
+      relations: relations.value,
+      ...(ctx.args.getAll("alias").length > 0 ? { aliases: ctx.args.getAll("alias") } : {}),
       ...(ctx.args.getAll("tag").length > 0 ? { tags: ctx.args.getAll("tag") } : {}),
       ...(sourceRef ? { sources: [{ ref: sourceRef, capturedAt: now }] } : {}),
     },
@@ -196,6 +219,63 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
   return { ...ok(rendered, { count: hits.length, hits }), usage };
 }
 
+async function ingest(ctx: CommandContext): Promise<CommandResult> {
+  const text = (
+    ctx.args.has("text-stdin") ? await readStdin() : (ctx.args.get("text") ?? "")
+  ).trim();
+  if (!text) return fail("`--text` or `--text-stdin` is required.");
+  const sourceRef = ctx.args.get("source-ref")?.trim();
+  if (!sourceRef) return fail("`--source-ref` is required.");
+  const apiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
+  if (!apiKey) return fail("VERCEL_AI_GATEWAY_API_KEY is required for ingest.");
+  const usage: GoatBrainUsageEntry[] = [];
+  const gateway = createGateway({
+    apiKey,
+    ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
+      ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
+      : {}),
+    chatModel:
+      ctx.args.get("model")?.trim() ||
+      process.env.GOAT_BRAIN_INGEST_MODEL?.trim() ||
+      "openai/gpt-5.5",
+    onUsage: (entry) => usage.push(entry),
+  });
+  const sourceTitle = ctx.args.get("source-title")?.trim();
+  const at = ctx.args.get("at")?.trim();
+  const result = await ingestGoatBrain(
+    ctx.root,
+    {
+      text,
+      sourceRef,
+      ...(sourceTitle ? { sourceTitle } : {}),
+      ...(at ? { at } : {}),
+      ...(ctx.args.has("dry-run") ? { dryRun: true } : {}),
+    },
+    gateway,
+  );
+  const rendered = result.dryRun
+    ? `Dry run planned ${result.plan.length} brain change(s).`
+    : `Ingested ${result.applied.length} brain change(s).`;
+  return {
+    ...ok(rendered, result),
+    usage,
+    code: ingestCommandExitCode(result),
+  };
+}
+
+export function ingestCommandExitCode(result: {
+  applied: Array<{ id: string }>;
+  health: { findings: Array<{ severity: "error" | "warn"; id: string }> } | null;
+}): number {
+  if (!result.health) return 0;
+  const appliedIds = new Set(result.applied.map((change) => change.id));
+  return result.health.findings.some(
+    (finding) => finding.severity === "error" && appliedIds.has(finding.id),
+  )
+    ? 1
+    : 0;
+}
+
 async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   const id = ctx.args.positionals[0] ?? ctx.args.get("id");
   if (!id) return fail("Provide a brain id.");
@@ -252,22 +332,22 @@ async function link(ctx: CommandContext): Promise<CommandResult> {
   if (!isValidGoatBrainRelationType(relationType))
     return fail("`--as` must be a lowercase relation type.");
   const byTarget = new Map(
-    (loaded.doc.frontmatter.related ?? []).map((relation) => [relation.target, relation]),
+    (loaded.doc.frontmatter.relations ?? []).map((relation) => [relation.to, relation]),
   );
   for (const target of remove) byTarget.delete(target);
   for (const target of ctx.args.getAll("to")) {
     if (!isValidGoatBrainId(target)) return fail(`Invalid related id "${target}".`);
-    byTarget.set(target, { type: relationType, target });
+    byTarget.set(target, { type: relationType, to: target });
   }
-  loaded.doc.frontmatter.related = [...byTarget.values()].sort((a, b) =>
-    a.target.localeCompare(b.target),
+  loaded.doc.frontmatter.relations = [...byTarget.values()].sort((a, b) =>
+    a.to.localeCompare(b.to),
   );
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
   return ok(`Updated related links for "${id}".`, {
     id,
     path: relativePath,
-    related: loaded.doc.frontmatter.related,
+    relations: loaded.doc.frontmatter.relations,
   });
 }
 
@@ -319,90 +399,23 @@ async function folder(ctx: CommandContext): Promise<CommandResult> {
 }
 
 async function doctor(ctx: CommandContext): Promise<CommandResult> {
-  const files = await listGoatBrainFiles(ctx.root);
-  const findings: Array<{ severity: "error" | "warn"; code: string; id: string; message: string }> =
-    [];
-  const idCounts = new Map<string, number>();
-  const byId = new Map<
-    string,
-    { file: StoredGoatBrainFile; doc: ReturnType<typeof parseGoatBrainDocument> }
-  >();
-  for (const file of files) {
-    idCounts.set(file.id, (idCounts.get(file.id) ?? 0) + 1);
-    if (!byId.has(file.id)) byId.set(file.id, { file, doc: parseGoatBrainDocument(file.source) });
-  }
-  for (const [id, count] of idCounts) {
-    if (count > 1)
-      findings.push({
-        severity: "error",
-        code: "duplicate_id",
-        id,
-        message: `Id "${id}" is used by ${count} files.`,
-      });
-  }
-  for (const file of files) {
-    const doc = parseGoatBrainDocument(file.source);
-    const validation = validateGoatBrainDocument(doc, file.id, file.source);
-    if (!validation.ok) {
-      for (const message of validation.errors)
-        findings.push({ severity: "error", code: "invalid", id: file.id, message });
-    }
-    const expectedPath =
-      doc.frontmatter.folder &&
-      doc.frontmatter.id &&
-      isValidGoatBrainFolder(doc.frontmatter.folder) &&
-      isValidGoatBrainId(doc.frontmatter.id)
-        ? goatBrainRelativePath(doc.frontmatter.folder, doc.frontmatter.id)
-        : null;
-    if (expectedPath && expectedPath !== file.relativePath) {
-      findings.push({
-        severity: "error",
-        code: "path_mismatch",
-        id: file.id,
-        message: `File path "${file.relativePath}" should be "${expectedPath}".`,
-      });
-    }
-    for (const relation of doc.frontmatter.related ?? []) {
-      if (!byId.has(relation.target)) {
-        findings.push({
-          severity: "error",
-          code: "broken_related",
-          id: file.id,
-          message: `Related id "${relation.target}" does not exist.`,
-        });
-      }
-    }
-    if (
-      doc.compiledTruth.trim() &&
-      doc.timeline.length === 0 &&
-      !(doc.frontmatter.sources ?? []).length
-    ) {
-      findings.push({
-        severity: "warn",
-        code: "weak_provenance",
-        id: file.id,
-        message: "Compiled truth has no timeline entries or sources.",
-      });
-    }
-  }
-  const errors = findings.filter((finding) => finding.severity === "error");
-  const warnings = findings.filter((finding) => finding.severity === "warn");
-  const summary = `${files.length} files checked - ${errors.length} error(s), ${warnings.length} warning(s).`;
+  const report = await checkGoatBrainHealth(ctx.root);
+  const summary = `${report.files} files checked - ${report.errors} error(s), ${report.warnings} warning(s).`;
   const text = [
     summary,
-    ...findings.map(
+    ...report.findings.map(
       (finding) =>
         `${finding.severity.toUpperCase()} ${finding.code} ${finding.id}: ${finding.message}`,
     ),
   ].join("\n");
   return {
     ...ok(text, {
-      files: files.length,
-      errors: errors.length,
-      warnings: warnings.length,
-      findings,
+      files: report.files,
+      errors: report.errors,
+      warnings: report.warnings,
+      findings: report.findings,
     }),
-    code: errors.length > 0 ? 1 : 0,
+    code: report.errors > 0 ? 1 : 0,
   };
 }
 
@@ -435,10 +448,12 @@ function toWritableDocument(
     frontmatter: {
       id: fm.id,
       folder: fm.folder,
+      type: fm.type ?? inferGoatBrainEntityTypeFromFolder(fm.folder),
       createdAt: fm.createdAt,
       updatedAt: fm.updatedAt,
-      related: fm.related ?? [],
+      relations: fm.relations ?? [],
       ...(fm.title ? { title: fm.title } : {}),
+      ...(fm.aliases ? { aliases: fm.aliases } : {}),
       ...(fm.tags ? { tags: fm.tags } : {}),
       ...(fm.sources ? { sources: fm.sources } : {}),
     },
@@ -452,11 +467,28 @@ async function loadDoc(root: string, id: string) {
   return { file, doc };
 }
 
-function readRelated(values: string[]): GoatBrainRelation[] {
-  return [...new Set(values.filter(isValidGoatBrainId))].map((target) => ({
-    type: DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-    target,
-  }));
+function readRelations(
+  values: string[],
+): { ok: true; value: GoatBrainRelation[] } | { ok: false; error: string } {
+  const out: GoatBrainRelation[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const [rawType, rawTo, ...rest] = value.split(":");
+    if (!rawType || !rawTo || rest.length > 0) {
+      return { ok: false, error: '`--relation` must use "type:brain-id".' };
+    }
+    const type = rawType.trim() || DEFAULT_GOAT_BRAIN_RELATION_TYPE;
+    const to = rawTo.trim();
+    if (!isValidGoatBrainRelationType(type))
+      return { ok: false, error: `Invalid relation type "${type}".` };
+    if (!isValidGoatBrainId(to)) return { ok: false, error: `Invalid relation target "${to}".` };
+    const key = `${type}:${to}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ type, to });
+    }
+  }
+  return { ok: true, value: out };
 }
 
 function titleFromId(id: string): string {

@@ -5,17 +5,21 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronRight,
+  ExternalLink,
+  FileText,
   ListTodo,
   LoaderCircle,
   Mail,
   Search,
   Wrench,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { Markdown } from "@/components/Markdown";
 import type {
   GoatHarnessRunToolCall,
   GoatHarnessRunViewModel,
+  GoatRunArtifact,
   GoatRunMessage,
 } from "@/lib/task-harness-run";
 
@@ -72,7 +76,14 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
         </div>
       ) : null}
 
-      {finalResult ? (
+      {run.resultArtifact ? (
+        <section className="mt-2 flex flex-col gap-2 border-border border-t pt-5">
+          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Result
+          </h2>
+          <ArtifactCard artifact={run.resultArtifact} />
+        </section>
+      ) : finalResult ? (
         <section className="mt-2 flex flex-col gap-2 border-border border-t pt-5">
           <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
             Result
@@ -83,6 +94,33 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
           />
         </section>
       ) : null}
+    </div>
+  );
+}
+
+function ArtifactCard({ artifact }: { artifact: GoatRunArtifact }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface px-3.5 py-3 text-[13px] leading-5 shadow-sm">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-muted text-ink/70">
+          <FileText size={16} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-ink" title={artifact.title}>
+            {artifact.title}
+          </div>
+          <div className="mt-0.5 truncate font-mono text-[11.5px] text-ink-muted">
+            {artifact.brainPath}
+          </div>
+        </div>
+        <Link
+          href={artifact.url}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface-muted px-2 py-1 text-[11.5px] font-medium text-ink/80 transition-colors hover:border-border-strong hover:text-ink"
+        >
+          Open
+          <ExternalLink size={12} strokeWidth={1.8} />
+        </Link>
+      </div>
     </div>
   );
 }

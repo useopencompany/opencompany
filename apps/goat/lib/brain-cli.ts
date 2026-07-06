@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { getDb } from "@opencompany/db/client";
@@ -10,6 +10,7 @@ import {
   goatBrainDocuments,
   goatBrainDocumentVersions,
   goatBrainFolders,
+  goatBrainToolRuns,
 } from "@opencompany/db/goat-schema";
 import {
   DEFAULT_GOAT_BRAIN_FOLDERS,
@@ -17,6 +18,7 @@ import {
   GOAT_BRAIN_MARKDOWN_MIME_TYPE,
   type GoatBrainDocument as GoatBrainContractDocument,
   type GoatBrainDocumentKind,
+  type GoatBrainEntityType,
   type GoatBrainEntry,
   type GoatBrainFrontmatter,
   type GoatBrainTimelineEntry,
@@ -26,6 +28,7 @@ import {
   goatBrainPayloadRelativePath,
   goatBrainRelativePath,
   goatBrainSidecarRelativePath,
+  inferGoatBrainEntityTypeFromFolder,
   isSafeGoatBrainRelativePath,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
@@ -41,10 +44,11 @@ import {
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { eq, sql } from "drizzle-orm";
-import type { GoatBrainToolOutput } from "@/lib/chat-ui";
+import type { GoatBrainToolInput, GoatBrainToolOutput } from "@/lib/chat-ui";
 
 const MAX_GOAT_BRAIN_CHAT_FILE_BYTES = 256 * 1024;
-const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 20_000;
+const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
+const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v1";
 
 type GoatBrainDocumentRow = typeof goatBrainDocuments.$inferSelect;
 type LocalBrainFile = {
@@ -69,6 +73,8 @@ export async function runGoatBrainCliForUser(input: {
   userWorkosId: string;
   args: string;
   gatewayApiKey: string;
+  stdin?: string;
+  trace?: GoatBrainCliTraceContext;
   signal?: AbortSignal;
 }): Promise<GoatBrainToolOutput> {
   const rawArgs = input.args.trim();
@@ -87,41 +93,206 @@ export async function runGoatBrainCliForUser(input: {
     root,
     userWorkosId: input.userWorkosId,
   });
+  const traceId = `goat_brain_run_${randomUUID()}`;
+  const startedAt = new Date();
+  const startedAtMs = Date.now();
+  let argv: string[] = [];
+  let processResult: GoatBrainCliProcessResult | null = null;
+  let syncResult: { ok: true } | { ok: false; error: string } | null = null;
+  let output: GoatBrainToolOutput;
 
   try {
-    const argv = splitCliArgs(rawArgs);
-    const result = await runCliProcess({
+    argv = splitCliArgs(rawArgs);
+    processResult = await runCliProcess({
       cliPath: materialized.cliPath,
       argv,
       root,
       gatewayApiKey: input.gatewayApiKey,
+      ...(input.stdin ? { stdin: input.stdin } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    await syncGoatBrainFromLocalRoot({
-      root,
-      userWorkosId: input.userWorkosId,
-      taskId: null,
-      baseSnapshot: materialized,
-    });
-    return result;
+    try {
+      await syncGoatBrainFromLocalRoot({
+        root,
+        userWorkosId: input.userWorkosId,
+        taskId: null,
+        baseSnapshot: materialized,
+      });
+      syncResult = { ok: true };
+    } catch (syncError) {
+      syncResult = { ok: false, error: errorMessage(syncError) };
+      throw syncError;
+    }
+    output = publicGoatBrainCliOutput(processResult);
   } catch (error) {
-    await syncGoatBrainFromLocalRoot({
-      root,
-      userWorkosId: input.userWorkosId,
-      taskId: null,
-      baseSnapshot: materialized,
-    });
-    return {
+    if (!syncResult) {
+      try {
+        await syncGoatBrainFromLocalRoot({
+          root,
+          userWorkosId: input.userWorkosId,
+          taskId: null,
+          baseSnapshot: materialized,
+        });
+        syncResult = { ok: true };
+      } catch (syncError) {
+        syncResult = { ok: false, error: errorMessage(syncError) };
+      }
+    }
+    output = {
       ok: false,
       exitCode: null,
       stdout: "",
       stderr: "",
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     };
-  } finally {
-    await rm(root, { recursive: true, force: true });
   }
+
+  const finishedAt = new Date();
+  const durationMs = Date.now() - startedAtMs;
+  const traceInput: GoatBrainCliTraceInput = {
+    traceId,
+    startedAt,
+    finishedAt,
+    durationMs,
+    root,
+    userWorkosId: input.userWorkosId,
+    rawArgs,
+    argv,
+    stdin: input.stdin ?? null,
+    traceContext: input.trace ?? null,
+    timeoutMs: GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS,
+    materialized,
+    processResult,
+    output,
+    syncResult,
+  };
+  const trace = goatBrainCliTrace(traceInput);
+  const traceRef = await writeGoatBrainCliTrace(traceId, startedAt, trace);
+  await persistGoatBrainToolRunTrace({
+    traceId,
+    userWorkosId: input.userWorkosId,
+    traceContext: input.trace ?? null,
+    output,
+    durationMs,
+    tracePath: traceRef?.tracePath ?? null,
+    trace,
+    createdAt: startedAt,
+  });
+  await rm(root, { recursive: true, force: true });
+  return {
+    ...output,
+    durationMs,
+    ...(traceRef ? traceRef : {}),
+  };
 }
+
+export async function runGoatBrainToolForUser(input: {
+  userWorkosId: string;
+  toolInput: GoatBrainToolInput;
+  gatewayApiKey: string;
+  sourceRef: string;
+  chatSessionId?: string;
+  userMessageId?: string;
+  assistantMessageId?: string;
+  toolCallId?: string;
+  signal?: AbortSignal;
+}): Promise<GoatBrainToolOutput> {
+  const invocation = goatBrainToolInvocation(input.toolInput, input.sourceRef);
+  return runGoatBrainCliForUser({
+    userWorkosId: input.userWorkosId,
+    args: invocation.args,
+    gatewayApiKey: input.gatewayApiKey,
+    ...(invocation.stdin ? { stdin: invocation.stdin } : {}),
+    trace: {
+      sourceRef: input.sourceRef,
+      toolInput: input.toolInput,
+      ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
+      ...(input.userMessageId ? { userMessageId: input.userMessageId } : {}),
+      ...(input.assistantMessageId ? { assistantMessageId: input.assistantMessageId } : {}),
+      ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+    },
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+}
+
+function goatBrainToolInvocation(
+  input: GoatBrainToolInput,
+  sourceRef: string,
+): { args: string; stdin?: string } {
+  if ("args" in input) return { args: input.args };
+  if (input.action === "ingest") {
+    return {
+      args: [
+        "ingest",
+        "--text-stdin",
+        "--source-ref",
+        quoteCliArg(sourceRef),
+        ...(input.sourceTitle ? ["--source-title", quoteCliArg(input.sourceTitle)] : []),
+        "--json",
+      ].join(" "),
+      stdin: input.text,
+    };
+  }
+  if (input.action === "query") {
+    return {
+      args: [
+        "query",
+        "--text",
+        quoteCliArg(input.text),
+        ...(input.limit ? ["--limit", String(input.limit)] : []),
+        ...(input.hops !== undefined ? ["--hops", String(input.hops)] : []),
+      ].join(" "),
+    };
+  }
+  if (input.action === "get") {
+    return {
+      args: [
+        "get",
+        quoteCliArg(input.id),
+        ...(input.section ? ["--section", input.section] : []),
+      ].join(" "),
+    };
+  }
+  throw new Error("Unsupported goat_brain action.");
+}
+
+function quoteCliArg(value: string): string {
+  return `"${value.replace(/["\\]/g, "\\$&")}"`;
+}
+
+type GoatBrainCliTraceContext = {
+  sourceRef: string;
+  toolInput: GoatBrainToolInput;
+  chatSessionId?: string;
+  userMessageId?: string;
+  assistantMessageId?: string;
+  toolCallId?: string;
+};
+
+type GoatBrainCliProcessResult = GoatBrainToolOutput & {
+  rawStdout: string;
+  rawStderr: string;
+  timedOut?: boolean;
+  aborted?: boolean;
+};
+
+type GoatBrainCliTraceInput = {
+  traceId: string;
+  startedAt: Date;
+  finishedAt: Date;
+  durationMs: number;
+  root: string;
+  userWorkosId: string;
+  rawArgs: string;
+  argv: string[];
+  stdin: string | null;
+  traceContext: GoatBrainCliTraceContext | null;
+  timeoutMs: number;
+  materialized: MaterializedGoatBrainSnapshot;
+  processResult: GoatBrainCliProcessResult | null;
+  output: GoatBrainToolOutput;
+  syncResult: { ok: true } | { ok: false; error: string } | null;
+};
 
 async function materializeGoatBrainToLocalRoot(input: {
   root: string;
@@ -170,22 +341,24 @@ async function runCliProcess(input: {
   argv: string[];
   root: string;
   gatewayApiKey: string;
+  stdin?: string;
   signal?: AbortSignal;
-}): Promise<GoatBrainToolOutput> {
+}): Promise<GoatBrainCliProcessResult> {
   const child = spawn(process.execPath, [input.cliPath, ...input.argv, "--report-usage"], {
     env: childBrainCliEnv(input),
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [input.stdin ? "pipe" : "ignore", "pipe", "pipe"],
   });
+  if (input.stdin && child.stdin) {
+    child.stdin.end(input.stdin);
+  }
 
   let stdout = "";
   let stderr = "";
-  const append = (current: string, chunk: Buffer) =>
-    truncate(`${current}${chunk.toString("utf8")}`, 24_000);
-  child.stdout.on("data", (chunk: Buffer) => {
-    stdout = append(stdout, chunk);
+  child.stdout?.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString("utf8");
   });
-  child.stderr.on("data", (chunk: Buffer) => {
-    stderr = append(stderr, chunk);
+  child.stderr?.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
   });
 
   return new Promise((resolve) => {
@@ -201,6 +374,9 @@ async function runCliProcess(input: {
         stdout: truncate(stdout, 20_000),
         stderr: cleanCliStderr(stderr),
         error: "goat_brain timed out.",
+        rawStdout: stdout,
+        rawStderr: stderr,
+        timedOut: true,
       });
     }, GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS);
 
@@ -215,6 +391,9 @@ async function runCliProcess(input: {
         stdout: truncate(stdout, 20_000),
         stderr: cleanCliStderr(stderr),
         error: "goat_brain was aborted.",
+        rawStdout: stdout,
+        rawStderr: stderr,
+        aborted: true,
       });
     };
     input.signal?.addEventListener("abort", abort, { once: true });
@@ -230,6 +409,8 @@ async function runCliProcess(input: {
         stdout: truncate(stdout, 20_000),
         stderr: cleanCliStderr(stderr),
         error: error.message,
+        rawStdout: stdout,
+        rawStderr: stderr,
       });
     });
     child.on("close", (code) => {
@@ -238,13 +419,183 @@ async function runCliProcess(input: {
       clearTimeout(timeout);
       input.signal?.removeEventListener("abort", abort);
       resolve({
-        ok: code === 0,
+        ok: goatBrainCliSucceeded(code, stdout),
         exitCode: code,
         stdout: truncate(stdout, 20_000),
         stderr: cleanCliStderr(stderr),
+        rawStdout: stdout,
+        rawStderr: stderr,
       });
     });
   });
+}
+
+function goatBrainCliSucceeded(exitCode: number | null, stdout: string): boolean {
+  if (exitCode === 0) return true;
+  return parseGoatBrainCliJson(stdout)?.ok === true;
+}
+
+function parseGoatBrainCliJson(stdout: string): { ok?: unknown } | null {
+  try {
+    const parsed = JSON.parse(stdout.trim());
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as { ok?: unknown })
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function publicGoatBrainCliOutput(result: GoatBrainCliProcessResult): GoatBrainToolOutput {
+  return {
+    ok: result.ok,
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    ...(result.error ? { error: result.error } : {}),
+  };
+}
+
+async function writeGoatBrainCliTrace(
+  traceId: string,
+  startedAt: Date,
+  trace: Record<string, unknown>,
+): Promise<{ traceId: string; tracePath: string } | null> {
+  if (!shouldWriteLocalGoatBrainTrace()) return null;
+
+  try {
+    const dir = await goatBrainTraceDir();
+    await mkdir(dir, { recursive: true });
+    const tracePath = path.join(
+      dir,
+      `${startedAt.toISOString().replace(/[:.]/g, "-")}-${traceId}.json`,
+    );
+    await writeFile(tracePath, `${JSON.stringify(trace, null, 2)}\n`, "utf8");
+    return { traceId, tracePath };
+  } catch {
+    return null;
+  }
+}
+
+async function persistGoatBrainToolRunTrace(input: {
+  traceId: string;
+  userWorkosId: string;
+  traceContext: GoatBrainCliTraceContext | null;
+  output: GoatBrainToolOutput;
+  durationMs: number;
+  tracePath: string | null;
+  trace: Record<string, unknown>;
+  createdAt: Date;
+}) {
+  try {
+    await getDb()
+      .insert(goatBrainToolRuns)
+      .values({
+        id: input.traceId,
+        userWorkosId: input.userWorkosId,
+        chatSessionId: input.traceContext?.chatSessionId ?? null,
+        userMessageId: input.traceContext?.userMessageId ?? null,
+        assistantMessageId: input.traceContext?.assistantMessageId ?? null,
+        toolCallId: input.traceContext?.toolCallId ?? null,
+        sourceRef: input.traceContext?.sourceRef ?? null,
+        action: goatBrainToolAction(input.traceContext?.toolInput ?? null),
+        ok: input.output.ok,
+        exitCode: input.output.exitCode,
+        durationMs: input.durationMs,
+        tracePath: input.tracePath,
+        trace: input.trace,
+        createdAt: input.createdAt,
+      });
+  } catch (error) {
+    console.warn("Failed to persist goat brain tool trace.", error);
+  }
+}
+
+function goatBrainToolAction(input: GoatBrainToolInput | null) {
+  if (!input) return null;
+  if ("args" in input) return "raw";
+  return input.action;
+}
+
+function goatBrainCliTrace(input: GoatBrainCliTraceInput): Record<string, unknown> {
+  return {
+    schemaVersion: GOAT_BRAIN_TRACE_SCHEMA_VERSION,
+    traceId: input.traceId,
+    startedAt: input.startedAt.toISOString(),
+    finishedAt: input.finishedAt.toISOString(),
+    durationMs: input.durationMs,
+    timeoutMs: input.timeoutMs,
+    userWorkosId: input.userWorkosId,
+    sourceRef: input.traceContext?.sourceRef ?? null,
+    chatSessionId: input.traceContext?.chatSessionId ?? null,
+    userMessageId: input.traceContext?.userMessageId ?? null,
+    assistantMessageId: input.traceContext?.assistantMessageId ?? null,
+    toolCallId: input.traceContext?.toolCallId ?? null,
+    toolInput: input.traceContext?.toolInput ?? null,
+    command: {
+      rawArgs: input.rawArgs,
+      argv: input.argv,
+      stdin: input.stdin,
+    },
+    materialized: {
+      tempRoot: input.root,
+      documentCount: input.materialized.files.length,
+      documents: input.materialized.files.map((file) => ({
+        brainId: file.brainId,
+        folderPath: file.folderPath,
+        relativePath: file.relativePath,
+        contentHash: file.contentHash,
+      })),
+    },
+    process: input.processResult
+      ? {
+          ok: input.processResult.ok,
+          exitCode: input.processResult.exitCode,
+          error: input.processResult.error ?? null,
+          timedOut: Boolean(input.processResult.timedOut),
+          aborted: Boolean(input.processResult.aborted),
+          stdout: input.processResult.rawStdout,
+          stderr: input.processResult.rawStderr,
+          cleanStderr: input.processResult.stderr,
+        }
+      : null,
+    sync: input.syncResult,
+    output: input.output,
+    env: {
+      goatBrainGatewayBaseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL ?? null,
+      goatBrainIngestModel: process.env.GOAT_BRAIN_INGEST_MODEL ?? null,
+      goatBrainRetrievalModel: process.env.GOAT_BRAIN_RETRIEVAL_MODEL ?? null,
+      goatBrainEmbeddingModel: process.env.GOAT_BRAIN_EMBEDDING_MODEL ?? null,
+    },
+  };
+}
+
+function shouldWriteLocalGoatBrainTrace() {
+  return process.env.NODE_ENV !== "production";
+}
+
+async function goatBrainTraceDir() {
+  const root = await findWorkspaceRoot(process.cwd());
+  return path.join(root, ".context", "goat-brain-runs");
+}
+
+async function findWorkspaceRoot(start: string) {
+  let current = path.resolve(start);
+  while (true) {
+    try {
+      const turbo = await stat(path.join(current, "turbo.json"));
+      if (turbo.isFile()) return current;
+    } catch {
+      // Walk upward until the monorepo root is found.
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(start);
+    current = parent;
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function childBrainCliEnv(input: { root: string; gatewayApiKey: string }): NodeJS.ProcessEnv {
@@ -254,6 +605,18 @@ function childBrainCliEnv(input: { root: string; gatewayApiKey: string }): NodeJ
     NODE_ENV: process.env.NODE_ENV ?? "production",
     ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
     ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
+      ? { GOAT_BRAIN_GATEWAY_BASE_URL: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
+      : {}),
+    ...(process.env.GOAT_BRAIN_INGEST_MODEL
+      ? { GOAT_BRAIN_INGEST_MODEL: process.env.GOAT_BRAIN_INGEST_MODEL }
+      : {}),
+    ...(process.env.GOAT_BRAIN_RETRIEVAL_MODEL
+      ? { GOAT_BRAIN_RETRIEVAL_MODEL: process.env.GOAT_BRAIN_RETRIEVAL_MODEL }
+      : {}),
+    ...(process.env.GOAT_BRAIN_EMBEDDING_MODEL
+      ? { GOAT_BRAIN_EMBEDDING_MODEL: process.env.GOAT_BRAIN_EMBEDDING_MODEL }
+      : {}),
   };
 }
 
@@ -419,8 +782,10 @@ function validateLocalBrainFile(file: LocalBrainFile):
       assetStorageKey: string | null;
       contentHash: string;
       sizeBytes: number;
-      related: GoatBrainRelation[];
+      relations: GoatBrainRelation[];
       sources: GoatBrainSource[];
+      entityType: GoatBrainEntityType;
+      aliases: string[];
       document: GoatBrainContractDocument;
     }
   | { ok: false } {
@@ -455,8 +820,10 @@ function validateLocalBrainFile(file: LocalBrainFile):
       assetStorageKey: entry.assetStorageKey ?? null,
       contentHash: hashContent(content),
       sizeBytes,
-      related: entry.related,
+      relations: entry.relations,
       sources: entry.sources,
+      entityType: entry.type,
+      aliases: entry.aliases,
       document: {
         frontmatter: parsed.frontmatter as GoatBrainFrontmatter,
         title: entry.title,
@@ -492,15 +859,17 @@ function validateLocalBrainFile(file: LocalBrainFile):
     assetStorageKey: entry.assetStorageKey ?? null,
     contentHash: hashContent(file.content),
     sizeBytes,
-    related: frontmatter.related.map((relation) => ({
-      ...(relation.type ? { type: relation.type } : {}),
-      target: relation.target,
+    relations: frontmatter.relations.map((relation) => ({
+      type: relation.type,
+      to: relation.to,
     })),
     sources: (frontmatter.sources ?? []).map((source) => ({
       ref: source.ref,
       ...(source.title ? { title: source.title } : {}),
       ...(source.capturedAt ? { capturedAt: source.capturedAt } : {}),
     })),
+    entityType: entry.type,
+    aliases: entry.aliases,
     document: {
       frontmatter,
       title,
@@ -570,8 +939,10 @@ async function updateBrainDocument(input: {
         mime_type = ${input.validated.mimeType},
         original_file_name = ${input.validated.originalFileName},
         asset_storage_key = ${input.validated.assetStorageKey},
-        related = ${JSON.stringify(input.validated.related)}::jsonb,
+        relations = ${JSON.stringify(input.validated.relations)}::jsonb,
         sources = ${JSON.stringify(input.validated.sources)}::jsonb,
+        entity_type = ${input.validated.entityType},
+        aliases = ${JSON.stringify(input.validated.aliases)}::jsonb,
         content_hash = ${input.validated.contentHash},
         size_bytes = ${input.validated.sizeBytes},
         updated_at = ${now}
@@ -602,8 +973,10 @@ async function insertBrainDocument(input: {
       mimeType: input.validated.mimeType,
       originalFileName: input.validated.originalFileName,
       assetStorageKey: input.validated.assetStorageKey,
-      related: input.validated.related,
+      relations: input.validated.relations,
       sources: input.validated.sources,
+      entityType: input.validated.entityType,
+      aliases: input.validated.aliases,
       contentHash: input.validated.contentHash,
       sizeBytes: input.validated.sizeBytes,
       createdAt: now,
@@ -624,9 +997,9 @@ async function insertConflictBrainDocument(input: {
       id: conflictId,
       title: `${input.validated.title} conflict`,
       updatedAt: new Date().toISOString(),
-      related: [
-        ...input.validated.document.frontmatter.related,
-        { type: "conflicts_with", target: input.validated.brainId },
+      relations: [
+        ...input.validated.document.frontmatter.relations,
+        { type: "conflicts_with", to: input.validated.brainId },
       ],
     },
     title: `${input.validated.title} conflict`,
@@ -812,8 +1185,13 @@ function entryFromDocumentRow(row: GoatBrainDocumentRow): GoatBrainEntry {
     body: row.body || legacyEntry?.body || "",
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
-    related: normalizeEntryRelations(row.related ?? legacyEntry?.related ?? []),
+    relations: normalizeEntryRelations(row.relations ?? legacyEntry?.relations ?? []),
     sources: row.sources ?? legacyEntry?.sources ?? [],
+    type:
+      normalizeEntityType(row.entityType) ??
+      legacyEntry?.type ??
+      inferGoatBrainEntityTypeFromFolder(row.folderPath),
+    aliases: normalizeStringArray(row.aliases, legacyEntry?.aliases ?? []),
     tags: legacyEntry?.tags ?? [],
     timeline:
       kind === "markdown" ? normalizeTimeline(row.timeline, legacyEntry?.timeline ?? []) : [],
@@ -842,17 +1220,38 @@ function normalizeTimeline(value: unknown, fallback: GoatBrainTimelineEntry[]) {
 
 function normalizeEntryRelations(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((relation): GoatBrainEntry["related"] => {
+  return value.flatMap((relation): GoatBrainEntry["relations"] => {
     if (!relation || typeof relation !== "object") return [];
     const record = relation as Record<string, unknown>;
-    if (typeof record.target !== "string") return [];
+    if (typeof record.to !== "string") return [];
     return [
       {
         type: typeof record.type === "string" ? record.type : DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-        target: record.target,
+        to: record.to,
       },
     ];
   });
+}
+
+function normalizeStringArray(value: unknown, fallback: string[]) {
+  if (!Array.isArray(value)) return fallback;
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function normalizeEntityType(value: unknown): GoatBrainEntityType | null {
+  if (
+    value === "person" ||
+    value === "company" ||
+    value === "project" ||
+    value === "meeting" ||
+    value === "decision" ||
+    value === "research" ||
+    value === "source" ||
+    value === "note"
+  ) {
+    return value;
+  }
+  return null;
 }
 
 function isGoatBrainDocumentKind(value: unknown): value is GoatBrainDocumentKind {

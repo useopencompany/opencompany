@@ -575,6 +575,34 @@
       "when": 1783178646047,
       "tag": "0081_unusual_riptide",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1783353600000,
+      "tag": "0082_stopped_goat",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1783353900000,
+      "tag": "0083_goat_brain_schema_ingest",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1783354200000,
+      "tag": "0084_goat_brain_minimal_graph",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1783354500000,
+      "tag": "0085_goat_brain_tool_runs",
+      "breakpoints": true
     }
   ]
 }

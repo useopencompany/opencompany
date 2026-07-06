@@ -7,14 +7,18 @@ import {
 import { goatBrainRelativePath } from "./paths";
 import {
   type GoatBrainDocument,
+  type GoatBrainEntityType,
   type GoatBrainFrontmatter,
   type GoatBrainRelation,
   type GoatBrainSource,
   type GoatBrainTimelineEntry,
+  isValidGoatBrainEntityType,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
+  isValidGoatBrainRelationType,
   normalizeGoatBrainFolder,
 } from "./schema";
+import { inferGoatBrainEntityTypeFromFolder } from "./schemas";
 import { isIsoDate } from "./time";
 
 export const GOAT_BRAIN_ENTRY_SCHEMA_VERSION = "goat.brain.entry.v1";
@@ -31,8 +35,10 @@ export type GoatBrainEntry = {
   body: string;
   createdAt: string;
   updatedAt: string;
-  related: GoatBrainRelation[];
+  relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
+  type: GoatBrainEntityType;
+  aliases: string[];
   tags: string[];
   timeline: GoatBrainTimelineEntry[];
   originalFileName?: string;
@@ -55,8 +61,10 @@ export type GoatBrainSidecar = {
   mimeType: string;
   createdAt: string;
   updatedAt: string;
-  related: GoatBrainRelation[];
+  relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
+  type: GoatBrainEntityType;
+  aliases?: string[];
   tags: string[];
   timeline?: GoatBrainTimelineEntry[];
   assetStorageKey?: string;
@@ -110,8 +118,10 @@ export function goatBrainEntryFromLegacyDocument(doc: GoatBrainDocument): GoatBr
     body: doc.compiledTruth,
     createdAt: doc.frontmatter.createdAt,
     updatedAt: doc.frontmatter.updatedAt,
-    related: doc.frontmatter.related ?? [],
+    relations: doc.frontmatter.relations ?? [],
     sources: doc.frontmatter.sources ?? [],
+    type: doc.frontmatter.type ?? inferGoatBrainEntityTypeFromFolder(doc.frontmatter.folder),
+    aliases: doc.frontmatter.aliases ?? [],
     tags: doc.frontmatter.tags ?? [],
     timeline: doc.timeline,
   };
@@ -131,8 +141,10 @@ export function goatBrainEntryFromParsedLegacy(parsed: ParsedGoatBrainDocument):
     body: parsed.compiledTruth,
     createdAt: frontmatter.createdAt ?? "",
     updatedAt: frontmatter.updatedAt ?? "",
-    related: frontmatter.related ?? [],
+    relations: frontmatter.relations ?? [],
     sources: frontmatter.sources ?? [],
+    type: frontmatter.type ?? inferGoatBrainEntityTypeFromFolder(folder),
+    aliases: frontmatter.aliases ?? [],
     tags: frontmatter.tags ?? [],
     timeline: parsed.timeline,
   };
@@ -144,9 +156,11 @@ export function legacyGoatBrainDocumentFromEntry(entry: GoatBrainEntry): GoatBra
       id: entry.id,
       folder: entry.folder,
       title: entry.title,
+      type: entry.type,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
-      related: entry.related,
+      relations: entry.relations,
+      ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
       ...(entry.tags.length > 0 ? { tags: entry.tags } : {}),
       ...(entry.sources.length > 0 ? { sources: entry.sources } : {}),
     },
@@ -181,8 +195,10 @@ export function serializeGoatBrainSidecar(entry: GoatBrainEntry): string {
     mimeType: entry.mimeType,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
-    related: entry.related,
+    relations: entry.relations,
     sources: entry.sources,
+    type: entry.type,
+    ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
     tags: entry.tags,
     ...(entry.kind === "markdown" ? { timeline: entry.timeline } : {}),
     ...(entry.assetStorageKey ? { assetStorageKey: entry.assetStorageKey } : {}),
@@ -222,6 +238,10 @@ export function validateGoatBrainSidecar(input: {
     errors.push("sidecar.folder must be a safe lowercase folder path.");
   }
   if (!sidecar.title?.trim()) errors.push("sidecar.title must not be empty.");
+  if (!isValidGoatBrainEntityType(sidecar.type)) errors.push("sidecar.type is invalid.");
+  if (sidecar.aliases && !validStringArray(sidecar.aliases)) {
+    errors.push("sidecar.aliases must be an array of non-empty strings.");
+  }
   if (sidecar.kind !== "markdown" && sidecar.kind !== "pdf" && sidecar.kind !== "docx") {
     errors.push("sidecar.kind is invalid.");
   }
@@ -236,9 +256,12 @@ export function validateGoatBrainSidecar(input: {
   if (sidecar.payload?.sha256 !== actualHash) errors.push("sidecar.payload.sha256 mismatch.");
   const actualSize = goatBrainPayloadSizeBytes(input.payloadContent);
   if (sidecar.payload?.sizeBytes !== actualSize) errors.push("sidecar.payload.sizeBytes mismatch.");
-  for (const relation of sidecar.related ?? []) {
-    if (!isValidGoatBrainId(relation.target)) {
-      errors.push(`related target "${relation.target}" is invalid.`);
+  for (const relation of sidecar.relations ?? []) {
+    if (!isValidGoatBrainRelationType(relation.type)) {
+      errors.push(`relation type "${relation.type}" is invalid.`);
+    }
+    if (!isValidGoatBrainId(relation.to)) {
+      errors.push(`relation target "${relation.to}" is invalid.`);
     }
   }
   if (errors.length > 0) return { ok: false, errors };
@@ -253,8 +276,10 @@ export function validateGoatBrainSidecar(input: {
       body: input.payloadContent,
       createdAt: sidecar.createdAt,
       updatedAt: sidecar.updatedAt,
-      related: sidecar.related ?? [],
+      relations: sidecar.relations ?? [],
       sources: sidecar.sources ?? [],
+      type: sidecar.type,
+      aliases: sidecar.aliases ?? [],
       tags: sidecar.tags ?? [],
       timeline: sidecar.kind === "markdown" ? (sidecar.timeline ?? []) : [],
       ...(sidecar.payload.originalFileName
@@ -271,6 +296,13 @@ function extensionForKind(kind: GoatBrainEntryKind, originalFileName?: string) {
   if (kind === "pdf") return "pdf";
   if (kind === "docx") return "docx";
   return "md";
+}
+
+function validStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === "string" && item.trim().length > 0)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

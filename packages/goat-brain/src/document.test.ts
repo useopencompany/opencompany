@@ -8,10 +8,11 @@ describe("goat brain document", () => {
       frontmatter: {
         id: "acme",
         folder: "companies",
+        type: "company",
         title: "Acme",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
-        related: [{ type: "employs", target: "jane-doe" }],
+        relations: [{ type: "employs", to: "jane-doe" }],
         tags: ["customer"],
         sources: [{ ref: "gmail://message/1", capturedAt: "2026-01-01T00:00:00.000Z" }],
       },

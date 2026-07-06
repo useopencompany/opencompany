@@ -41,6 +41,8 @@ export function deriveGoatTaskSteps(task: GoatTaskStepInput): string[] {
   if (task.status === "failed") {
     const error = stripTrailingPeriods(sanitizeText(firstToolError ?? task.error));
     pushStep(steps, error ? `Stopped after an error: ${error}.` : "Stopped after the task failed.");
+  } else if (task.status === "canceled") {
+    pushStep(steps, "Stopped by user request.");
   }
 
   if (steps.length === 0) {
@@ -203,6 +205,8 @@ function fallbackStepForStage(stage: GoatTaskStepInput["stage"]) {
       return "Ran the research harness.";
     case "failed":
       return "Stopped after the task failed.";
+    case "canceled":
+      return "Stopped by user request.";
   }
 }
 

@@ -1,8 +1,29 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildGoatHarnessRun } from "@/lib/task-harness-run";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+
+const mocks = vi.hoisted(() => ({
+  cancelGoatTaskAction: vi.fn(),
+  toastError: vi.fn(),
+}));
+
+vi.mock("@/lib/tasks", () => ({
+  cancelGoatTaskAction: mocks.cancelGoatTaskAction,
+}));
+
+vi.mock("@opencompany/ui/components/sonner", () => ({
+  toast: {
+    error: mocks.toastError,
+  },
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.cancelGoatTaskAction.mockResolvedValue({ ok: true, error: null });
+});
 
 describe("TaskDetailPanel cost summary", () => {
   it("renders a single total cost entry", () => {
@@ -83,6 +104,41 @@ describe("TaskDetailPanel cost summary", () => {
     expect(screen.getByText("Model")).toBeInTheDocument();
     expect(screen.getByText("Claude Sonnet 5")).toBeInTheDocument();
     expect(screen.queryByText(/Claude Sonnet 4\.6/)).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailPanel stop action", () => {
+  it("renders a stop button for active tasks and calls the cancel action", async () => {
+    const user = userEvent.setup();
+    const run = buildGoatHarnessRun({
+      task: task({ status: "running", stage: "running", result: null }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    const stopButton = screen.getByRole("button", { name: "Stop" });
+    await user.click(stopButton);
+
+    expect(mocks.cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
+    expect(screen.getByRole("button", { name: "Stopping" })).toBeDisabled();
+  });
+
+  it.each([
+    ["succeeded", "completed"],
+    ["failed", "failed"],
+    ["canceled", "canceled"],
+  ] as const)("does not render a stop button for %s tasks", (status, stage) => {
+    const run = buildGoatHarnessRun({
+      task: task({ status, stage }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 });
 

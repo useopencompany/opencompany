@@ -43,7 +43,7 @@ Runner
     streamText with Gateway, Exa, Gmail, Calendar, and Linear MCP tools
       append durable message and tool events
     use final assistant message as the task result
-    mark task succeeded or failed
+    mark task succeeded, failed, or canceled
 
 Goat UI
   subscribes to Electric task, task message, and task event shapes
@@ -187,10 +187,17 @@ On failure it writes:
 - `error`
 - optional debug trace from the harness error
 
+On user stop it writes:
+
+- `status: "canceled"`
+- `stage: "canceled"`
+- `error: "Stopped by user."`
+- clears the active lease
+
 During the run it also writes lease-owned rows in `goat.task_messages` and `goat.task_events` for
 assistant content, tool starts/completions/failures, and task status milestones.
 
-Failed tasks are not automatically retried by this worker. Only stale `running` tasks are reclaimed.
+Failed and canceled tasks are not automatically retried by this worker. Only stale `running` tasks are reclaimed.
 
 ## Harness Planning
 
@@ -214,7 +221,7 @@ type GoatHarnessSpec = {
   initialUserMessage: string;
   tools: GoatTaskToolName[];
   maxModelSteps: number;
-  resultMode: "assistant_final";
+  resultMode: "assistant_final" | "brain_markdown_report";
 };
 ```
 
@@ -225,7 +232,8 @@ Normalization is intentionally conservative:
   by the planner.
 - The execution model must be one of the planner's allowed model options.
 - `systemPrompt` must be non-empty; there is no fallback task system prompt.
-- `resultMode` is currently always `assistant_final`.
+- `resultMode` is `assistant_final` for ordinary tasks and `brain_markdown_report` for deep
+  research/report deliverables that should be saved as Brain artifacts.
 
 The planner request and response content are stored in `debugTrace.planner`.
 
@@ -242,10 +250,12 @@ process. The runner:
 
 1. Creates a running assistant `goat.task_messages` row.
 2. Builds AI SDK tools from the planned operation names.
-3. Streams model text into the assistant row on a short throttle and at step boundaries.
+3. Streams model text into the assistant row on a short throttle and at step boundaries for
+   `assistant_final` runs. For `brain_markdown_report`, the report body is buffered instead.
 4. Appends `tool.started`, `tool.completed`, and `tool.failed` events durably.
 5. Returns recoverable tool failures to the model as tool results.
-6. Completes with the trimmed final assistant message content.
+6. Completes with the trimmed final assistant message content, or saves the final Markdown report
+   into the `research/` Brain folder and completes with an artifact link.
 
 If the final assistant content is empty, the task fails. There is no `goat_result` tool.
 

@@ -27,6 +27,14 @@ export type GoatBrainQueryHit = {
   score: number;
   snippet: string;
   updatedAt: string;
+  matchedBy: "text" | "graph" | "both";
+  via?: GoatBrainGraphHop[];
+};
+
+export type GoatBrainGraphHop = {
+  from: string;
+  type: string;
+  to: string;
 };
 
 export async function queryGoatBrain(
@@ -65,7 +73,9 @@ export async function queryGoatBrain(
       ? new Map(candidates.map((record) => [record.id, 1]))
       : reciprocalRankFusion(lists);
 
-  if ((options.hops ?? 0) > 0) expandAlongGraph(relevanceById, byId, options.hops ?? 0);
+  const textMatchIds = new Set(relevanceById.keys());
+  const graphPaths = new Map<string, GoatBrainGraphHop[]>();
+  if ((options.hops ?? 0) > 0) expandAlongGraph(relevanceById, graphPaths, byId, options.hops ?? 0);
   applyNameBoost(relevanceById, byId, options.text);
 
   let ordered = [...relevanceById.entries()]
@@ -95,14 +105,24 @@ export async function queryGoatBrain(
 
   return blend(scored, now)
     .slice(0, options.limit ?? 10)
-    .map(({ record, score }) => ({
-      id: record.id,
-      folder: record.folder,
-      title: record.title,
-      score: Number(score.toFixed(4)),
-      snippet: snippetFor(record),
-      updatedAt: record.updatedAt,
-    }));
+    .map(({ record, score }) => {
+      const via = graphPaths.get(record.id);
+      return {
+        id: record.id,
+        folder: record.folder,
+        title: record.title,
+        score: Number(score.toFixed(4)),
+        snippet: snippetFor(record),
+        updatedAt: record.updatedAt,
+        matchedBy:
+          graphPaths.has(record.id) && textMatchIds.has(record.id)
+            ? "both"
+            : graphPaths.has(record.id)
+              ? "graph"
+              : "text",
+        ...(via ? { via } : {}),
+      };
+    });
 }
 
 function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): IndexRecord[] {
@@ -129,6 +149,7 @@ const GRAPH_SEED_LIMIT = 20;
 
 function expandAlongGraph(
   relevance: Map<string, number>,
+  graphPaths: Map<string, GoatBrainGraphHop[]>,
   byId: Map<string, IndexRecord>,
   hops: number,
 ): void {
@@ -136,17 +157,19 @@ function expandAlongGraph(
   let frontier = [...relevance.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, GRAPH_SEED_LIMIT)
-    .map(([id, score]) => ({ id, score }));
+    .map(([id, score]) => ({ id, score, path: [] as GoatBrainGraphHop[] }));
 
   for (let hop = 0; hop < hops && frontier.length > 0; hop++) {
-    const next: Array<{ id: string; score: number }> = [];
-    for (const { id, score } of frontier) {
+    const next: Array<{ id: string; score: number; path: GoatBrainGraphHop[] }> = [];
+    for (const { id, score, path } of frontier) {
       const boosted = score * HOP_DECAY;
-      for (const neighbor of adjacency.get(id) ?? []) {
-        if (!byId.has(neighbor)) continue;
-        if (boosted > (relevance.get(neighbor) ?? 0)) {
-          relevance.set(neighbor, boosted);
-          next.push({ id: neighbor, score: boosted });
+      for (const edge of adjacency.get(id) ?? []) {
+        if (!byId.has(edge.to)) continue;
+        if (boosted > (relevance.get(edge.to) ?? 0)) {
+          const nextPath = [...path, edge];
+          relevance.set(edge.to, boosted);
+          graphPaths.set(edge.to, nextPath);
+          next.push({ id: edge.to, score: boosted, path: nextPath });
         }
       }
     }
@@ -154,15 +177,19 @@ function expandAlongGraph(
   }
 }
 
-function buildAdjacency(byId: Map<string, IndexRecord>): Map<string, Set<string>> {
-  const adjacency = new Map<string, Set<string>>();
-  const link = (a: string, b: string) => {
+function buildAdjacency(byId: Map<string, IndexRecord>): Map<string, GoatBrainGraphHop[]> {
+  const adjacency = new Map<string, GoatBrainGraphHop[]>();
+  const link = (a: string, type: string, b: string) => {
     if (a === b) return;
-    (adjacency.get(a) ?? adjacency.set(a, new Set()).get(a))?.add(b);
-    (adjacency.get(b) ?? adjacency.set(b, new Set()).get(b))?.add(a);
+    const forward = { from: a, type, to: b };
+    const reverse = { from: b, type, to: a };
+    (adjacency.get(a) ?? adjacency.set(a, []).get(a))?.push(forward);
+    (adjacency.get(b) ?? adjacency.set(b, []).get(b))?.push(reverse);
   };
   for (const record of byId.values()) {
-    for (const relation of record.related as GoatBrainRelation[]) link(record.id, relation.target);
+    for (const relation of record.relations as GoatBrainRelation[])
+      link(record.id, relation.type, relation.to);
+    for (const target of record.wikiLinks) link(record.id, "wiki_link", target);
   }
   return adjacency;
 }
@@ -217,6 +244,9 @@ function rerankTextFor(record: IndexRecord | undefined): string {
   if (!record) return "";
   return [
     `Title: ${record.title}`,
+    record.aliases.length ? `Aliases: ${record.aliases.join(", ")}` : "",
+    `Type: ${record.type}`,
+    record.relationText ? `Relations:\n${truncate(record.relationText, 500)}` : "",
     record.compiledTruth ? `Compiled truth:\n${truncate(record.compiledTruth, 1200)}` : "",
   ]
     .filter(Boolean)

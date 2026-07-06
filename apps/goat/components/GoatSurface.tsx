@@ -552,7 +552,8 @@ function ResultRow({
   const meta = getTaskMeta(task);
   const Icon = meta.icon;
   const title = task.name;
-  const canArchive = task.status === "succeeded" || task.status === "failed";
+  const canArchive =
+    task.status === "succeeded" || task.status === "failed" || task.status === "canceled";
   return (
     <div className="group/result relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
       <Link
@@ -833,7 +834,7 @@ function toolCallViewFromPart(
   const output = part.output;
   const failedGoatBrain =
     name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
-      ? !output.ok
+      ? !goatBrainToolOutputSucceeded(output)
       : false;
   const status = failedGoatBrain ? "failed" : toolStatusFromState(state);
   return {
@@ -910,14 +911,18 @@ function goatBrainToolDetail(
   status: ToolCallView["status"],
 ) {
   if (part.state === "output-available" && isGoatBrainToolOutput(part.output)) {
-    if (!part.output.ok) {
+    if (!goatBrainToolOutputSucceeded(part.output)) {
       return truncateToolPreview(
         firstNonEmptyLine(part.output.error, part.output.stderr, part.output.stdout) ??
           formatToolInput(part.input),
       );
     }
     return truncateToolPreview(
-      firstNonEmptyLine(part.output.stdout, part.output.stderr) ?? formatToolInput(part.input),
+      firstNonEmptyLine(
+        goatBrainCliSuccessSummary(part.output.stdout),
+        part.output.stdout,
+        part.output.stderr,
+      ) ?? formatToolInput(part.input),
     );
   }
 
@@ -939,6 +944,15 @@ function formatToolInput(value: unknown) {
   if (typeof value === "string") return truncateToolPreview(value);
   if (!isRecord(value)) return null;
   if (typeof value.args === "string") return truncateToolPreview(`goat_brain ${value.args}`);
+  if (typeof value.action === "string") {
+    const detail =
+      typeof value.text === "string"
+        ? value.text
+        : typeof value.id === "string"
+          ? value.id
+          : undefined;
+    return truncateToolPreview(detail ? `${value.action}: ${detail}` : value.action);
+  }
   if (typeof value.query === "string") return truncateToolPreview(`query: ${value.query}`);
   if (typeof value.prompt === "string") return truncateToolPreview(value.prompt);
   try {
@@ -956,6 +970,35 @@ function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOutput {
     (typeof value.stderr === "string" || value.stderr === undefined) &&
     (typeof value.error === "string" || value.error === undefined)
   );
+}
+
+function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput) {
+  if (output.ok) return true;
+  return parseGoatBrainCliJson(output.stdout)?.ok === true;
+}
+
+function goatBrainCliSuccessSummary(stdout: string | undefined) {
+  const parsed = parseGoatBrainCliJson(stdout);
+  if (!parsed || parsed.ok !== true) return null;
+  const appliedCount = Array.isArray(parsed.applied) ? parsed.applied.length : null;
+  if (typeof appliedCount === "number" && appliedCount > 0) {
+    return `Ingested ${appliedCount} brain change${appliedCount === 1 ? "" : "s"}.`;
+  }
+  const planCount = Array.isArray(parsed.plan) ? parsed.plan.length : null;
+  if (parsed.dryRun === true && typeof planCount === "number") {
+    return `Dry run planned ${planCount} brain change${planCount === 1 ? "" : "s"}.`;
+  }
+  return null;
+}
+
+function parseGoatBrainCliJson(stdout: string | undefined): Record<string, unknown> | null {
+  if (!stdout?.trim()) return null;
+  try {
+    const parsed = JSON.parse(stdout.trim());
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function firstNonEmptyLine(...values: Array<string | null | undefined>) {
@@ -1026,6 +1069,14 @@ function getTaskMeta(task: GoatTaskView): {
       icon: AlertCircle,
       className: "text-danger",
       detail: task.error ?? GOAT_STATUS_COPY.failed,
+      spin: false,
+    };
+  }
+  if (task.status === "canceled") {
+    return {
+      icon: X,
+      className: "text-ink-subtle",
+      detail: task.error ?? GOAT_STATUS_COPY.canceled,
       spin: false,
     };
   }

@@ -19,11 +19,25 @@ export type GoatBrainDocumentKind = "markdown" | "pdf" | "docx";
 export const GOAT_BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 export const GOAT_BRAIN_FOLDER_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*){0,5}$/;
 export const GOAT_BRAIN_RELATION_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/;
+export const GOAT_BRAIN_ENTITY_TYPE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 export const DEFAULT_GOAT_BRAIN_RELATION_TYPE = "related";
+
+export const GOAT_BRAIN_ENTITY_TYPES = [
+  "person",
+  "company",
+  "project",
+  "meeting",
+  "decision",
+  "research",
+  "source",
+  "note",
+] as const;
+
+export type GoatBrainEntityType = (typeof GOAT_BRAIN_ENTITY_TYPES)[number];
 
 export type GoatBrainRelation = {
   type: string;
-  target: string;
+  to: string;
 };
 
 export type GoatBrainSource = {
@@ -35,12 +49,15 @@ export type GoatBrainSource = {
 export type GoatBrainFrontmatter = {
   id: string;
   folder: string;
+  type: GoatBrainEntityType;
   createdAt: string;
   updatedAt: string;
-  related: GoatBrainRelation[];
+  relations: GoatBrainRelation[];
   title?: string;
+  aliases?: string[];
   tags?: string[];
   sources?: GoatBrainSource[];
+  legacyKeys?: string[];
 };
 
 export type GoatBrainTimelineEntry = {
@@ -67,6 +84,12 @@ export function isValidGoatBrainRelationType(value: unknown): value is string {
   return typeof value === "string" && GOAT_BRAIN_RELATION_TYPE_PATTERN.test(value);
 }
 
+export function isValidGoatBrainEntityType(value: unknown): value is GoatBrainEntityType {
+  return (
+    typeof value === "string" && GOAT_BRAIN_ENTITY_TYPES.includes(value as GoatBrainEntityType)
+  );
+}
+
 export function normalizeGoatBrainFolder(value: string): string {
   return value
     .trim()
@@ -84,4 +107,14 @@ export function normalizeGoatBrainId(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80)
     .replace(/-+$/g, "");
+}
+
+export function normalizeGoatBrainEntityType(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64)
+    .replace(/_+$/g, "");
 }

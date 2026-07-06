@@ -12,10 +12,12 @@ import {
   GOAT_BRAIN_MARKDOWN_MIME_TYPE,
   type GoatBrainDocument as GoatBrainContractDocument,
   type GoatBrainDocumentKind,
+  type GoatBrainEntityType,
   type GoatBrainEntry,
   type GoatBrainFrontmatter,
   type GoatBrainTimelineEntry,
   goatBrainEntryFromLegacyMarkdown,
+  inferGoatBrainEntityTypeFromFolder,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   normalizeGoatBrainFolder,
@@ -47,8 +49,10 @@ export type GoatBrainDocumentView = {
   mimeType: string | null;
   originalFileName: string | null;
   assetStorageKey: string | null;
-  related: GoatBrainRelation[];
+  relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
+  type: GoatBrainEntityType;
+  aliases: string[];
   contentHash: string;
   sizeBytes: number;
   updatedAt: string;
@@ -181,8 +185,10 @@ export async function createGoatBrainDocumentForUser(input: {
     body: input.truth?.trim() || "",
     createdAt: nowIso,
     updatedAt: nowIso,
-    related: [],
+    relations: [],
     sources: [],
+    type: inferGoatBrainEntityTypeFromFolder(folderPath),
+    aliases: [],
     tags: [],
     timeline: [],
   };
@@ -204,8 +210,10 @@ export async function createGoatBrainDocumentForUser(input: {
       timeline: entry.timeline,
       kind: entry.kind,
       mimeType: entry.mimeType,
-      related: normalized.related,
+      relations: normalized.relations,
       sources: normalized.sources,
+      entityType: entry.type,
+      aliases: entry.aliases,
       contentHash: normalized.contentHash,
       sizeBytes: normalized.sizeBytes,
       createdAt: now,
@@ -307,8 +315,10 @@ export async function updateGoatBrainDocumentForUser(input: {
             mime_type = ${nextEntry.mimeType},
             original_file_name = ${nextEntry.originalFileName ?? null},
             asset_storage_key = ${nextEntry.assetStorageKey ?? null},
-            related = ${JSON.stringify(normalized.related)}::jsonb,
+            relations = ${JSON.stringify(normalized.relations)}::jsonb,
             sources = ${JSON.stringify(normalized.sources)}::jsonb,
+            entity_type = ${nextEntry.type},
+            aliases = ${JSON.stringify(nextEntry.aliases)}::jsonb,
             content_hash = ${normalized.contentHash},
             size_bytes = ${normalized.sizeBytes},
             updated_at = ${now}
@@ -330,8 +340,10 @@ export async function updateGoatBrainDocumentForUser(input: {
         mime_type AS "mimeType",
         original_file_name AS "originalFileName",
         asset_storage_key AS "assetStorageKey",
-        related,
+        relations,
         sources,
+        entity_type AS "entityType",
+        aliases,
         content_hash AS "contentHash",
         size_bytes AS "sizeBytes",
         created_at AS "createdAt",
@@ -464,8 +476,10 @@ async function updateGoatBrainDocumentContentForUser(input: {
             mime_type = ${entry.mimeType},
             original_file_name = ${entry.originalFileName ?? null},
             asset_storage_key = ${entry.assetStorageKey ?? null},
-            related = ${JSON.stringify(normalized.related)}::jsonb,
+            relations = ${JSON.stringify(normalized.relations)}::jsonb,
             sources = ${JSON.stringify(normalized.sources)}::jsonb,
+            entity_type = ${entry.type},
+            aliases = ${JSON.stringify(entry.aliases)}::jsonb,
             content_hash = ${normalized.contentHash},
             size_bytes = ${normalized.sizeBytes},
             updated_at = ${now}
@@ -487,8 +501,10 @@ async function updateGoatBrainDocumentContentForUser(input: {
         mime_type AS "mimeType",
         original_file_name AS "originalFileName",
         asset_storage_key AS "assetStorageKey",
-        related,
+        relations,
         sources,
+        entity_type AS "entityType",
+        aliases,
         content_hash AS "contentHash",
         size_bytes AS "sizeBytes",
         created_at AS "createdAt",
@@ -575,7 +591,7 @@ export type ValidatedGoatBrainContent =
       ok: true;
       document: GoatBrainContractDocument;
       title: string;
-      related: GoatBrainRelation[];
+      relations: GoatBrainRelation[];
       sources: GoatBrainSource[];
       contentHash: string;
       sizeBytes: number;
@@ -607,9 +623,9 @@ export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoa
       timeline: parsed.timeline,
     },
     title,
-    related: frontmatter.related.map((relation) => ({
-      ...(relation.type ? { type: relation.type } : {}),
-      target: relation.target,
+    relations: frontmatter.relations.map((relation) => ({
+      type: relation.type,
+      to: relation.to,
     })),
     sources: (frontmatter.sources ?? []).map((sourceEntry) => ({
       ref: sourceEntry.ref,
@@ -662,8 +678,10 @@ function documentViewFromRow(row: GoatBrainDocumentRow): GoatBrainDocumentView {
     mimeType: entry.mimeType,
     originalFileName: entry.originalFileName ?? null,
     assetStorageKey: entry.assetStorageKey ?? null,
-    related: entry.related,
+    relations: entry.relations,
     sources: entry.sources,
+    type: entry.type,
+    aliases: entry.aliases,
     contentHash: row.contentHash,
     sizeBytes: row.sizeBytes,
     createdAt: toIsoString(row.createdAt),
@@ -685,8 +703,10 @@ function entryFromDocumentRow(row: GoatBrainDocumentRow): GoatBrainEntry {
     body,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
-    related: normalizeEntryRelations(row.related ?? legacyEntry?.related ?? []),
+    relations: normalizeEntryRelations(row.relations ?? legacyEntry?.relations ?? []),
     sources: row.sources ?? legacyEntry?.sources ?? [],
+    type: row.entityType || legacyEntry?.type || inferGoatBrainEntityTypeFromFolder(row.folderPath),
+    aliases: normalizeStringArray(row.aliases, legacyEntry?.aliases ?? []),
     tags: legacyEntry?.tags ?? [],
     timeline: kind === "markdown" ? timeline : [],
     ...(row.originalFileName ? { originalFileName: row.originalFileName } : {}),
@@ -715,17 +735,22 @@ function normalizeTimeline(value: unknown, fallback: GoatBrainTimelineEntry[]) {
 
 function normalizeEntryRelations(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((relation): GoatBrainEntry["related"] => {
+  return value.flatMap((relation): GoatBrainEntry["relations"] => {
     if (!relation || typeof relation !== "object") return [];
     const record = relation as Record<string, unknown>;
-    if (typeof record.target !== "string") return [];
+    if (typeof record.to !== "string") return [];
     return [
       {
         type: typeof record.type === "string" ? record.type : DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-        target: record.target,
+        to: record.to,
       },
     ];
   });
+}
+
+function normalizeStringArray(value: unknown, fallback: string[]) {
+  if (!Array.isArray(value)) return fallback;
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
 function isGoatBrainDocumentKind(value: unknown): value is GoatBrainDocumentKind {

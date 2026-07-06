@@ -10,7 +10,7 @@ import {
 } from "@opencompany/goat-observability";
 import { convertToModelMessages, createGateway, stepCountIs, streamText } from "ai";
 import { currentGoatUser } from "@/lib/auth";
-import { runGoatBrainCliForUser } from "@/lib/brain-cli";
+import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
   createDbGoatChatStore,
   createGoatChatUserTurn,
@@ -35,7 +35,7 @@ import {
 import { validateGoatChatInput } from "@/lib/chat-validation";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 export const runtime = "nodejs";
 
 type ChatRequestBody = {
@@ -130,13 +130,19 @@ export async function POST(request: Request): Promise<Response> {
 
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
-    runBrainCli: (toolInput) =>
-      runGoatBrainCliForUser({
+    runBrainCli: (toolInput, toolExecutionContext) => {
+      const toolCallId = goatBrainToolCallId(toolExecutionContext);
+      return runGoatBrainToolForUser({
         userWorkosId: context.user.workosUserId,
-        args: toolInput.args,
+        toolInput,
         gatewayApiKey,
+        sourceRef: `goat-chat:${turn.userMessage.id}`,
+        chatSessionId: turn.session.id,
+        userMessageId: turn.userMessage.id,
+        ...(toolCallId ? { toolCallId } : {}),
         signal: request.signal,
-      }),
+      });
+    },
     ...(exaApiKey
       ? {
           webSearch: (toolInput) =>
@@ -409,6 +415,23 @@ function safeClientMessageId(value: unknown) {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 160) return null;
   return trimmed;
+}
+
+function goatBrainToolCallId(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const direct = normalizedOptionalString(value.toolCallId);
+  if (direct) return direct;
+  if (!isRecord(value.toolCall)) return undefined;
+  return (
+    normalizedOptionalString(value.toolCall.toolCallId) ??
+    normalizedOptionalString(value.toolCall.id)
+  );
+}
+
+function normalizedOptionalString(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

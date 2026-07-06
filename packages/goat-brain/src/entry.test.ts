@@ -20,8 +20,10 @@ const entry: GoatBrainEntry = {
   body: "Launch should start with founder-led beta.",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-02T00:00:00.000Z",
-  related: [{ type: "owner", target: "jane" }],
+  relations: [{ type: "owner", to: "jane" }],
   sources: [{ ref: "meeting:launch", title: "Launch meeting" }],
+  type: "note",
+  aliases: ["Founder beta"],
   tags: ["launch"],
   timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Discussed launch sequencing." }],
 };
@@ -38,14 +40,16 @@ describe("goat brain canonical entries", () => {
       kind: "markdown",
       mimeType: "text/markdown",
       body: "Launch should start with founder-led beta.",
-      related: [{ type: "owner", target: "jane" }],
+      relations: [{ type: "owner", to: "jane" }],
       sources: [{ ref: "meeting:launch", title: "Launch meeting" }],
+      type: "note",
+      aliases: ["Founder beta"],
       tags: ["launch"],
       timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Discussed launch sequencing." }],
     });
   });
 
-  it("serializes body-only payloads with hidden sidecar metadata", () => {
+  it("serializes body-only payloads with hidden sidecar details", () => {
     const payload = serializeGoatBrainPayload(entry);
     const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
 
@@ -58,6 +62,8 @@ describe("goat brain canonical entries", () => {
       schemaVersion: "goat.brain.entry.v1",
       id: "launch-plan",
       folder: "ideas",
+      type: "note",
+      aliases: ["Founder beta"],
       payload: {
         path: "ideas/launch-plan.md",
         sizeBytes: entry.body.length,

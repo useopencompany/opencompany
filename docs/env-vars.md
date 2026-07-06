@@ -86,9 +86,10 @@ Set these in Vercel Production.
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Production callback URL. Must match WorkOS dashboard. |
 | `WORKOS_REDIRECT_URI` | No | Server-only fallback. Usually leave unset. |
-| `GOAT_NEXT_PUBLIC_APP_URL` | Goat only | Canonical Goat app origin. Local default is `http://localhost:3002`; hosted value is the separate Goat domain. |
+| `GOAT_NEXT_PUBLIC_APP_URL` | Goat only | Canonical Goat app origin. Local default is `https://localhost:3443` through Caddy; hosted value is the separate Goat domain. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Goat only | Goat AuthKit callback URL. Must be registered in the same WorkOS environment as the core app. |
-| `GOAT_PORT` | Local Goat only | Optional local port override for `bun run dev:goat`; defaults to `3002`. |
+| `GOAT_PORT` | Local Goat only | Internal Next.js port for `bun run dev:goat`; defaults to `3002`. |
+| `GOAT_HTTPS_PORT` | Local Goat only | Browser-facing Caddy HTTPS port for `bun run dev:goat`; defaults to `3443`. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
 | `GITHUB_APP_ID` | Yes | GitHub App id. |
 | `GITHUB_APP_INSTALLATION_ID` | Yes | Managed workspace-state GitHub App installation id. Do not use this as the user-facing work integration installation. |
@@ -463,14 +464,17 @@ Useful local-only vars:
 | `NGROK_AUTHTOKEN` | Optional ngrok auth token for local dev. Prefer the local ngrok config unless sharing through Infisical. |
 | `OPENCOMPANY_NGROK_REQUIRED` | Set to `1` to fail `bun run dev` when ngrok cannot start. Fixed ngrok URLs are treated as required. |
 | `OPENCOMPANY_NGROK_DISABLED` | Set to `1` to skip automatic ngrok startup in `bun run dev`. |
+| `OPENCOMPANY_GOAT_HTTPS_DISABLED` | Set to `1` to skip automatic Caddy HTTPS for `bun run dev:goat`; Goat falls back to HTTP on `GOAT_PORT`. |
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
 
 For local integration testing, `bun run dev` starts ngrok automatically when the local ngrok CLI is
 authenticated. It injects `NEXT_PUBLIC_APP_URL` and `RUNNER_ALLOWED_ORIGINS` into the dev process
-without changing `.env.local`. `bun run dev:goat` additionally exposes a local proxy through ngrok
-and injects `RUNNER_LLM_BROKER_PUBLIC_URL` so E2B Goat tasks can call runner `/goat/tools/*` and
-`/broker/*` routes. Local WorkOS redirects stay on `http://localhost:3000/auth/callback`; use
-`bun run github:tunnel` when you need to persist a tunnel origin to `.env.local`.
+without changing `.env.local`. `bun run dev:goat` additionally starts Caddy when available and
+injects `https://localhost:3443` as the local Goat app URL so Electric shape requests use HTTP/2.
+It also exposes a local proxy through ngrok and injects `RUNNER_LLM_BROKER_PUBLIC_URL` so E2B Goat
+tasks can call runner `/goat/tools/*` and `/broker/*` routes. Local web WorkOS redirects stay on
+`http://localhost:3000/auth/callback`; local Goat redirects use
+`https://localhost:3443/auth/callback`.
 
 ## Checks
 

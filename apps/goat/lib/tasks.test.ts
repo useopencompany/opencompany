@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { currentGoatUser } from "@/lib/auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { createGoatTaskForUser } from "@/lib/tasks";
+import { cancelGoatTaskAction, createGoatTaskForUser } from "@/lib/tasks";
 
 const mocks = vi.hoisted(() => {
   return {
@@ -97,5 +98,46 @@ describe("createGoatTaskForUser", () => {
         event: "goat.runner_task_created_dispatch_failed",
       }),
     );
+  });
+});
+
+describe("cancelGoatTaskAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      authUser: {
+        id: "user_1",
+        email: "ada@example.com",
+      } as never,
+      user: {
+        workosUserId: "user_1",
+        email: "ada@example.com",
+        firstName: null,
+        lastName: null,
+        avatarUrl: null,
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    });
+  });
+
+  it("cancels an active task for the current user", async () => {
+    mocks.execute.mockResolvedValueOnce([{ id: "goat_task_1" }]);
+
+    await expect(cancelGoatTaskAction("goat_task_1")).resolves.toEqual({
+      ok: true,
+      error: null,
+    });
+
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects terminal or inaccessible tasks", async () => {
+    mocks.execute.mockResolvedValueOnce([]);
+
+    await expect(cancelGoatTaskAction("goat_task_done")).resolves.toEqual({
+      ok: false,
+      error: "Could not stop task.",
+    });
   });
 });

@@ -9,6 +9,8 @@ Goal: get a local dev environment running with auth and an isolated Neon branch 
   Desktop. **Required:** `bun run setup` uses it to start local Electric, which the
   agents/sessions UI syncs through, and fails fast if it's missing. Also enable logical
   replication on the Neon project (Neon console → Settings) so Electric can replicate.
+- Caddy for Goat local HTTPS/HTTP2. `bun run setup` installs it with Homebrew on macOS when
+  possible; without it, `bun run dev:goat` still works but falls back to plain HTTP.
 - Access to this project's Infisical project for shared development environment variables.
 - (optional) A WorkOS account — https://dashboard.workos.com. Most local development should use the shared WorkOS staging/local environment from Infisical.
 
@@ -83,7 +85,9 @@ bun run dev
 6. Start a local Electric sync container against that database and set `ELECTRIC_URL`. A
    container runtime is required — setup fails fast with install instructions if OrbStack/Docker
    is missing or not running. See [docs/stack/electric-sync.md](stack/electric-sync.md).
-7. Mirror the DB/Auth/runner/Electric values Goat needs into `apps/goat/.env.local`.
+7. Install/check Caddy when available so Goat local dev can serve `https://localhost:3443` over
+   HTTP/2. This avoids browser HTTP/1.1 connection starvation from many Electric shape streams.
+8. Mirror the DB/Auth/runner/Electric values Goat needs into `apps/goat/.env.local`.
 
 Re-running it is safe.
 
@@ -99,7 +103,7 @@ These are the root commands a contributor is expected to run directly:
 | `bun run setup:stripe` | Fill only missing local Stripe values after the main setup already ran. |
 | `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
 | `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, a local Durable Streams server (auto-sets `DURABLE_STREAMS_URL`), and ngrok when available. |
-| `bun run dev:goat` | Start the Goat experiment app plus the runner with the same local Durable Streams/ngrok wrapper. Goat runs on port 3002 by default. When ngrok is available, it exposes one public URL through a local proxy so E2B Goat tasks can reach runner `/goat/tools/*` and `/broker/*` callbacks. Run `bun run setup` first so Electric and `apps/goat/.env.local` are ready. |
+| `bun run dev:goat` | Start the Goat experiment app plus the runner with the same local Durable Streams/ngrok wrapper. Goat runs internally on port 3002 by default and is exposed locally through Caddy at `https://localhost:3443` when Caddy is installed. When ngrok is available, it also exposes one public URL through a local proxy so E2B Goat tasks can reach runner `/goat/tools/*` and `/broker/*` callbacks. Run `bun run setup` first so Electric, Caddy, and `apps/goat/.env.local` are ready. |
 | `bun run dev:stream` | Start the same full local stack with streaming logs instead of the Turbo TUI. |
 | `bun run dev:logs` | Read the latest local dev logs from `.context/logs/dev-turbo.json`; use `-- --source runner`, `-- --source web`, `-- --errors`, `-- --grep <text>`, or `-- --follow`. |
 | `bun run dev:web` | Start only the Next.js web app. |
@@ -146,7 +150,10 @@ If you want setup to launch the dev server after migrations, run `bun run setup:
 That gives integrations such as GitHub a public callback URL without a separate command. In Goat
 mode, the wrapper exposes a local proxy through ngrok and injects `RUNNER_LLM_BROKER_PUBLIC_URL`
 into the runner process so sandboxed Goat Gmail/Calendar tools can call back to `/goat/tools/*`.
-Set `OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel. WorkOS still redirects to localhost for local
+`bun run dev:goat` also starts Caddy when available and injects `https://localhost:3443` as the
+local Goat app URL; open that URL for local browsing so Electric shape requests use HTTP/2. Set
+`OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel, or `OPENCOMPANY_GOAT_HTTPS_DISABLED=1` to skip
+Caddy and use HTTP. Register `https://localhost:3443/auth/callback` in WorkOS for local Goat
 sign-in.
 
 `bun run dev` and `bun run dev:stream` also write Turbo's structured task output to

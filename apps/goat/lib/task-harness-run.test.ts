@@ -99,6 +99,67 @@ describe("buildGoatHarnessRun", () => {
     ]);
   });
 
+  it("extracts brain report artifacts from durable events", () => {
+    const run = buildGoatHarnessRun({
+      task: task({
+        status: "succeeded",
+        stage: "completed",
+        result: "Research report saved to Brain: [Market report](/brain/research/market-report).",
+      }),
+      messages: [],
+      events: [
+        event(1, "artifact.created", {
+          artifact: {
+            type: "brain_markdown_report",
+            title: "Market report",
+            documentId: "goat_brain_doc_1",
+            brainId: "market-report",
+            folderPath: "research",
+            brainPath: "research/market-report.md",
+            url: "/brain/research/market-report",
+            mimeType: "text/markdown",
+          },
+        }),
+      ],
+    });
+
+    expect(run.resultArtifact).toEqual({
+      type: "brain_markdown_report",
+      title: "Market report",
+      documentId: "goat_brain_doc_1",
+      brainId: "market-report",
+      folderPath: "research",
+      brainPath: "research/market-report.md",
+      url: "/brain/research/market-report",
+      mimeType: "text/markdown",
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+  });
+
+  it("ignores artifact events with non-brain URLs", () => {
+    const run = buildGoatHarnessRun({
+      task: task(),
+      messages: [],
+      events: [
+        event(1, "artifact.created", {
+          artifact: {
+            type: "brain_markdown_report",
+            title: "Bad report",
+            documentId: "goat_brain_doc_1",
+            brainId: "bad-report",
+            folderPath: "research",
+            brainPath: "research/bad-report.md",
+            url: "https://example.com/bad-report",
+            mimeType: "text/markdown",
+          },
+        }),
+      ],
+    });
+
+    expect(run.artifacts).toEqual([]);
+    expect(run.resultArtifact).toBeNull();
+  });
+
   it("returns a legacy fallback model when no durable rows exist", () => {
     const run = buildGoatHarnessRun({
       task: task({ status: "succeeded", stage: "completed", result: "Stored result." }),

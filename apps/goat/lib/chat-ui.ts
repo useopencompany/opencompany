@@ -35,9 +35,26 @@ export type StartTaskToolOutput = {
   prompt: string;
 };
 
-export type GoatBrainToolInput = {
-  args: string;
-};
+export type GoatBrainToolInput =
+  | {
+      action: "ingest";
+      text: string;
+      sourceTitle?: string;
+    }
+  | {
+      action: "query";
+      text: string;
+      limit?: number;
+      hops?: number;
+    }
+  | {
+      action: "get";
+      id: string;
+      section?: "truth" | "timeline" | "frontmatter" | "all";
+    }
+  | {
+      args: string;
+    };
 
 export type GoatBrainToolOutput = {
   ok: boolean;
@@ -45,6 +62,9 @@ export type GoatBrainToolOutput = {
   stdout: string;
   stderr: string;
   error?: string;
+  traceId?: string;
+  tracePath?: string;
+  durationMs?: number;
 };
 
 export type WebSearchToolInput = {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import { buildGoatTaskTools } from "./goat-tools";
 
@@ -22,6 +22,10 @@ vi.mock("./goat-linear-mcp-tools", () => ({
   isGoatLinearMcpToolName: (name: string) =>
     name === "linear_search_tools" || name === "linear_use_tool",
 }));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("buildGoatTaskTools usage metadata", () => {
   it("passes Exa provider usage through lifecycle completion", async () => {
@@ -132,6 +136,73 @@ describe("buildGoatTaskTools usage metadata", () => {
         }),
       }),
     );
+  });
+});
+
+describe("buildGoatTaskTools Exa query guard", () => {
+  it("warns once on the fifth Exa search and continues through the tenth", async () => {
+    toolMocks.executeHostedTool.mockResolvedValue({
+      output: {
+        results: [{ title: "Result", url: "https://example.com", text: "Summary" }],
+      },
+    });
+    const tools = buildGoatTaskTools({
+      selectedTools: ["exa_search"],
+      userWorkosId: "user_1",
+      env: env(),
+      signal: new AbortController().signal,
+      lifecycle: lifecycleMocks(),
+    });
+    const exa = toExecutableTool(tools.exa_search);
+
+    const outputs: Record<string, unknown>[] = [];
+    for (let index = 1; index <= 10; index += 1) {
+      outputs.push(
+        (await callTool(exa, {
+          input: { query: `query ${index}` },
+          toolCallId: `call_exa_${index}`,
+        })) as Record<string, unknown>,
+      );
+    }
+
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(10);
+    expect(outputs[4]).toMatchObject({
+      ok: true,
+      warning: "Exa tool calls can be expensive. Avoid more than 10 Exa searches for this task.",
+    });
+    expect(outputs.filter((output) => typeof output.warning === "string")).toHaveLength(1);
+  });
+
+  it("blocks Exa searches after the tenth without calling the hosted tool", async () => {
+    toolMocks.executeHostedTool.mockResolvedValue({
+      output: {
+        results: [{ title: "Result", url: "https://example.com", text: "Summary" }],
+      },
+    });
+    const tools = buildGoatTaskTools({
+      selectedTools: ["exa_search"],
+      userWorkosId: "user_1",
+      env: env(),
+      signal: new AbortController().signal,
+      lifecycle: lifecycleMocks(),
+    });
+    const exa = toExecutableTool(tools.exa_search);
+
+    let output: unknown;
+    for (let index = 1; index <= 11; index += 1) {
+      output = await callTool(exa, {
+        input: { query: `query ${index}` },
+        toolCallId: `call_exa_${index}`,
+      });
+    }
+
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(10);
+    expect(output).toMatchObject({
+      ok: false,
+      blocked: true,
+      error:
+        "Exa search limit reached for this task. Report the result before doing more search work.",
+    });
   });
 });
 

@@ -1,12 +1,15 @@
 "use client";
 
-import { CircleDollarSign, CircleDotDashed, TerminalSquare } from "lucide-react";
+import { toast } from "@opencompany/ui/components/sonner";
+import { CircleDollarSign, CircleDotDashed, Square, TerminalSquare } from "lucide-react";
 import Link from "next/link";
+import { useState, useTransition } from "react";
 import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import { formatUsdMicros } from "@/lib/cost-format";
 import { formatGoatStartedAt, GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import type { GoatHarnessRunViewModel, GoatRunModelSummary } from "@/lib/task-harness-run";
+import { cancelGoatTaskAction } from "@/lib/tasks";
 
 export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
   return (
@@ -24,9 +27,12 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
   return (
     <>
       <header className="flex flex-col gap-3">
-        <h1 className="text-[34px] font-semibold leading-tight tracking-normal text-ink">
-          {task.name}
-        </h1>
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="min-w-0 flex-1 text-[34px] font-semibold leading-tight tracking-normal text-ink">
+            {task.name}
+          </h1>
+          {isActive ? <StopTaskButton taskId={task.id} /> : null}
+        </div>
       </header>
 
       <section className="flex flex-col gap-1">
@@ -74,6 +80,32 @@ function executionRunModels(models: GoatRunModelSummary[]) {
 function formatRunModels(models: GoatRunModelSummary[]) {
   if (models.length === 0) return "Unknown";
   return models.map((model) => model.label || model.id).join(", ");
+}
+
+function StopTaskButton({ taskId }: { taskId: string }) {
+  const [isPending, startTransition] = useTransition();
+  const [stopRequested, setStopRequested] = useState(false);
+  const disabled = isPending || stopRequested;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => {
+        setStopRequested(true);
+        startTransition(async () => {
+          const result = await cancelGoatTaskAction(taskId);
+          if (result.ok) return;
+          setStopRequested(false);
+          toast.error(result.error ?? "Could not stop task.");
+        });
+      }}
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      <Square size={12} strokeWidth={2} />
+      {disabled ? "Stopping" : "Stop"}
+    </button>
+  );
 }
 
 function DetailRow({

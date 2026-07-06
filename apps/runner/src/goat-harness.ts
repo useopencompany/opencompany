@@ -16,6 +16,10 @@ import * as ai from "ai";
 import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
 import type { RunnerEnv } from "./env";
 import {
+  createGoatBrainMarkdownReportForTask,
+  type GoatBrainMarkdownReportArtifact,
+} from "./goat-brain";
+import {
   buildGoatTaskToolRuntime,
   type GoatToolLifecycleInput,
   normalizeGoatTaskToolNames,
@@ -117,6 +121,7 @@ export type GoatTaskExecutorResult = {
   result: string;
   harnessSpec: GoatHarnessSpec;
   debugTrace: GoatTaskDebugTrace;
+  artifact?: GoatBrainMarkdownReportArtifact;
 };
 
 export async function executeGoatTask(
@@ -191,11 +196,29 @@ export async function executeGoatTask(
       );
     }
 
+    const artifact =
+      harnessSpec.resultMode === "brain_markdown_report"
+        ? await createGoatBrainMarkdownReportForTask({
+            userWorkosId: input.task.userWorkosId,
+            taskId: input.task.id,
+            title: input.task.name,
+            markdown: finalContent,
+          })
+        : null;
+    const taskResult = artifact ? formatBrainReportResult(artifact) : finalContent;
+
     await input.sink.completeMessage({
       messageId: assistant.id,
-      content: finalContent,
-      modelMessage: { role: "assistant", content: finalContent },
+      content: taskResult,
+      modelMessage: { role: "assistant", content: taskResult },
     });
+    if (artifact) {
+      await input.sink.appendEvent({
+        type: "artifact.created",
+        messageId: assistant.id,
+        payload: { artifact },
+      });
+    }
     await input.sink.appendEvent({
       type: "message.completed",
       messageId: assistant.id,
@@ -206,9 +229,10 @@ export async function executeGoatTask(
     });
 
     return {
-      result: finalContent,
+      result: taskResult,
       harnessSpec,
       debugTrace: planned.debugTrace,
+      ...(artifact ? { artifact } : {}),
     };
   } catch (error) {
     await input.sink.failMessage({
@@ -255,6 +279,7 @@ async function runGoatTaskModelStreamInner(input: {
   const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
   const { streamText } = getBraintrustAISDK(ai);
   const toolMessagesByCallId = new Map<string, string>();
+  const streamAssistantContent = input.harnessSpec.resultMode === "assistant_final";
   const toolRuntime = buildGoatTaskToolRuntime({
     selectedTools: input.harnessSpec.tools,
     userWorkosId: input.userWorkosId,
@@ -339,6 +364,7 @@ async function runGoatTaskModelStreamInner(input: {
     let stepIndex = 0;
 
     const flushContent = async (force = false) => {
+      if (!streamAssistantContent) return;
       const now = Date.now();
       if (!force && now - lastFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) return;
       lastFlushAt = now;
@@ -499,7 +525,7 @@ function goatHarnessSpecResponseSchema(
         maxItems: availableTools.length,
       },
       maxModelSteps: { type: "integer", minimum: 1, maximum: MAX_GOAT_MODEL_STEPS },
-      resultMode: { type: "string", enum: ["assistant_final"] },
+      resultMode: { type: "string", enum: ["assistant_final", "brain_markdown_report"] },
     },
     required: [
       "schemaVersion",
@@ -539,14 +565,17 @@ function normalizeHarnessSpec(
       ? clampInteger(record.maxModelSteps, 1, MAX_GOAT_MODEL_STEPS)
       : DEFAULT_GOAT_MAX_MODEL_STEPS;
 
+  const resultMode =
+    record.resultMode === "brain_markdown_report" ? "brain_markdown_report" : "assistant_final";
+
   return {
     schemaVersion: "goat.harness.v1",
     model,
-    systemPrompt,
+    systemPrompt: augmentSystemPromptForResultMode(systemPrompt, resultMode),
     initialUserMessage,
     tools: selectedTools.length > 0 ? selectedTools : normalizeGoatTaskToolNames(availableTools),
     maxModelSteps,
-    resultMode: "assistant_final",
+    resultMode,
   };
 }
 
@@ -566,6 +595,32 @@ function toolEventPayload(event: GoatToolLifecycleInput) {
     toolName: event.toolName,
     input: event.input,
   };
+}
+
+function augmentSystemPromptForResultMode(
+  systemPrompt: string,
+  resultMode: GoatHarnessSpec["resultMode"],
+) {
+  if (resultMode !== "brain_markdown_report") return systemPrompt;
+  return [
+    systemPrompt,
+    [
+      "<brain_markdown_report_result_contract>",
+      "Finish with only the complete Markdown report body.",
+      "Do not include conversational framing, delivery notes, or a separate summary outside the report.",
+      "Use a clear H1 title, concise executive summary, sourced findings, uncertainty, and practical next steps when relevant.",
+      "The harness will save this final Markdown as a .md file in the user's Brain and return the file link as the task result.",
+      "</brain_markdown_report_result_contract>",
+    ].join("\n"),
+  ].join("\n\n");
+}
+
+function formatBrainReportResult(artifact: GoatBrainMarkdownReportArtifact) {
+  return [
+    `Research report saved to Brain: [${artifact.title}](${artifact.url}).`,
+    "",
+    `Artifact: \`${artifact.brainPath}\``,
+  ].join("\n");
 }
 
 function recordUsageMetrics(

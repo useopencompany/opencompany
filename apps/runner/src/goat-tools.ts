@@ -115,6 +115,7 @@ function buildGoatTaskToolsForSession(
   const tools: ToolSet = {};
   const selected = new Set(normalizeGoatTaskToolNames(input.selectedTools));
   const messageIdsByCallId = new Map<string, string>();
+  let exaSearchCount = 0;
 
   const startTool = async (toolName: GoatTaskToolName, toolInput: unknown, toolCallId: string) => {
     const result = await input.lifecycle?.onToolStarted?.({
@@ -190,6 +191,10 @@ function buildGoatTaskToolsForSession(
             toolCallId: options.toolCallId,
             messageId: messageIdsByCallId.get(options.toolCallId) ?? null,
             githubSession,
+            nextExaSearchCount: () => {
+              exaSearchCount += 1;
+              return exaSearchCount;
+            },
           });
           await completeTool(toolName, toolInput, options.toolCallId, result.output, result.usage);
           span.end({
@@ -249,12 +254,14 @@ async function executeGoatTaskTool(input: {
   toolCallId: string;
   messageId?: string | null;
   githubSession: ReturnType<typeof createGoatGitHubToolSession>;
+  nextExaSearchCount: () => number;
 }): Promise<{ output: unknown; usage?: HostedToolUsage }> {
   if (input.toolName === "exa_search") {
     return executeExaSearch({
       args: input.toolInput,
       env: input.env,
       signal: input.signal,
+      searchCount: input.nextExaSearchCount(),
     });
   }
   if (isGoatGoogleToolName(input.toolName)) {
@@ -297,9 +304,25 @@ async function executeGoatTaskTool(input: {
   };
 }
 
-async function executeExaSearch(input: { args: unknown; env: RunnerEnv; signal: AbortSignal }) {
+async function executeExaSearch(input: {
+  args: unknown;
+  env: RunnerEnv;
+  signal: AbortSignal;
+  searchCount: number;
+}) {
   const args = asRecord(input.args);
   const query = readString(args, "query");
+  if (input.searchCount > 10) {
+    return {
+      output: {
+        ok: false,
+        blocked: true,
+        query,
+        error:
+          "Exa search limit reached for this task. Report the result before doing more search work.",
+      },
+    };
+  }
   const hosted = await executeHostedTool({
     name: "exa_search" as RuntimeToolName,
     args: input.args,
@@ -312,6 +335,12 @@ async function executeExaSearch(input: { args: unknown; env: RunnerEnv; signal: 
       ok: true,
       query,
       results: compactHostedExaResults(hosted.output),
+      ...(input.searchCount === 5
+        ? {
+            warning:
+              "Exa tool calls can be expensive. Avoid more than 10 Exa searches for this task.",
+          }
+        : {}),
     },
     ...(hosted.usage ? { usage: hosted.usage } : {}),
   };

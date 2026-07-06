@@ -2,6 +2,12 @@ import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+type MarkdownNode = {
+  type: string;
+  value?: string;
+  children?: MarkdownNode[];
+};
+
 const LINK_CLASS =
   "font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70";
 
@@ -38,7 +44,7 @@ export function Markdown({ content, className }: { content: string; className?: 
   return (
     <div className={className ? `session-markdown ${className}` : "session-markdown"}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkSoftLineBreaks]}
         components={MARKDOWN_COMPONENTS}
         skipHtml
         disallowedElements={["img"]}
@@ -47,4 +53,31 @@ export function Markdown({ content, className }: { content: string; className?: 
       </ReactMarkdown>
     </div>
   );
+}
+
+function remarkSoftLineBreaks() {
+  return (tree: MarkdownNode) => {
+    visitMarkdownNode(tree);
+  };
+}
+
+function visitMarkdownNode(node: MarkdownNode) {
+  if (!node.children) return;
+
+  node.children = node.children.flatMap((child) => {
+    if (child.type === "text" && child.value?.includes("\n")) {
+      return splitTextNodeAtLineBreaks(child.value);
+    }
+
+    visitMarkdownNode(child);
+    return [child];
+  });
+}
+
+function splitTextNodeAtLineBreaks(value: string): MarkdownNode[] {
+  return value.split("\n").flatMap((text, index) => {
+    const nodes: MarkdownNode[] = index === 0 ? [] : [{ type: "break" }];
+    if (text) nodes.push({ type: "text", value: text });
+    return nodes;
+  });
 }

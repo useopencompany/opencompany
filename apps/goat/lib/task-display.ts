@@ -7,6 +7,7 @@ export const GOAT_STAGE_COPY: Record<GoatTaskStage, string> = {
   running: "Running task",
   completed: "Completed",
   failed: "Failed",
+  canceled: "Canceled",
 };
 
 export const GOAT_STATUS_COPY: Record<GoatTaskStatus, string> = {
@@ -14,6 +15,7 @@ export const GOAT_STATUS_COPY: Record<GoatTaskStatus, string> = {
   running: "Running",
   succeeded: "Done",
   failed: "Failed",
+  canceled: "Canceled",
 };
 
 export function toGoatTaskTitle(text: string): string {

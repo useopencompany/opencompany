@@ -20,16 +20,18 @@ describe("goat brain retrieval", () => {
     await writeDoc("companies/acme.md", {
       id: "acme",
       folder: "companies",
+      type: "company",
       title: "Acme",
       truth: "Acme is evaluating enterprise search.",
-      related: [{ type: "employs", target: "jane-doe" }],
+      relations: [{ type: "employs", to: "jane-doe" }],
     });
     await writeDoc("people/jane-doe.md", {
       id: "jane-doe",
       folder: "people",
+      type: "person",
       title: "Jane Doe",
       truth: "Jane owns procurement.",
-      related: [],
+      relations: [],
     });
 
     await expect(
@@ -48,9 +50,18 @@ async function writeDoc(
   input: {
     id: string;
     folder: string;
+    type:
+      | "person"
+      | "company"
+      | "project"
+      | "meeting"
+      | "decision"
+      | "research"
+      | "source"
+      | "note";
     title: string;
     truth: string;
-    related: Array<{ type: string; target: string }>;
+    relations: Array<{ type: string; to: string }>;
   },
 ) {
   await mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
@@ -60,10 +71,11 @@ async function writeDoc(
       frontmatter: {
         id: input.id,
         folder: input.folder,
+        type: input.type,
         title: input.title,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
-        related: input.related,
+        relations: input.relations,
       },
       title: input.title,
       compiledTruth: input.truth,

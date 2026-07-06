@@ -84,7 +84,9 @@ export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
 
 export const GOAT_HARNESS_CREATION_RESULT_CONTRACT = promptBlock("result_contract", [
   "The task result comes from the final assistant message; there is no final-result tool.",
-  'resultMode must be "assistant_final".',
+  'Use resultMode "brain_markdown_report" for deep research, market research, competitor or landscape research, literature research, multi-source web research, or any task where the durable deliverable should be a named Markdown report.',
+  'Use resultMode "assistant_final" for ordinary answers, quick summaries, and action-oriented tasks where the final assistant message is the deliverable.',
+  'When resultMode is "brain_markdown_report", the execution systemPrompt must tell the model to finish with only a complete, self-contained Markdown report suitable for saving as a .md file in the user Brain.',
 ]);
 
 export const GOAT_HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_planner", [

@@ -14,6 +14,7 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  History,
   Inbox,
   Info,
   Lightbulb,
@@ -151,6 +152,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
     () => buildBrainTree(folders, documents, query),
     [documents, folders, query],
   );
+  const brainLinks = useMemo(() => brainLinkMap(documents), [documents]);
   const rootGroups = useMemo(() => groupRootNodes(tree.children), [tree.children]);
   const hasRootNodes = rootGroups.some((group) => group.length > 0);
   const isSearching = Boolean(query.trim());
@@ -327,6 +329,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
           selectedDocument={selectedDocument}
           documents={documents}
           folders={folders}
+          brainLinks={brainLinks}
           selectedFolder={activeFolder}
           onSelectFolder={setSelectedFolder}
           onSelectDocumentId={setSelectedDocumentId}
@@ -410,6 +413,7 @@ function BrainDocumentPanel({
   selectedDocument,
   documents,
   folders,
+  brainLinks,
   selectedFolder,
   onSelectFolder,
   onSelectDocumentId,
@@ -418,6 +422,7 @@ function BrainDocumentPanel({
   selectedDocument: GoatBrainDocumentView | null;
   documents: GoatBrainDocumentView[];
   folders: GoatBrainFolderView[];
+  brainLinks: Record<string, string>;
   selectedFolder: string;
   onSelectFolder: (folderPath: string) => void;
   onSelectDocumentId: (documentId: string | null) => void;
@@ -427,6 +432,7 @@ function BrainDocumentPanel({
   const initialBody = useMemo(() => selectedDocument?.body ?? "", [selectedDocument]);
   const [editorValue, setEditorValue] = useState(initialBody);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const dirty = Boolean(selectedDocument && editorValue !== initialBody);
 
@@ -547,6 +553,22 @@ function BrainDocumentPanel({
               </button>
               <button
                 type="button"
+                aria-pressed={timelineOpen}
+                aria-label="Toggle timeline"
+                title="Toggle timeline"
+                onClick={() => setTimelineOpen((open) => !open)}
+                className={`flex h-8 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium transition-colors duration-150 ${
+                  timelineOpen
+                    ? "bg-surface-active text-ink"
+                    : "text-ink-muted hover:bg-surface-subtle hover:text-ink"
+                }`}
+              >
+                <History size={14} strokeWidth={2} />
+                <span>Timeline</span>
+                <span className="text-ink-subtle">{selectedDocument.timeline.length}</span>
+              </button>
+              <button
+                type="button"
                 onClick={saveDocument}
                 disabled={!dirty || isPending}
                 className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45"
@@ -573,11 +595,18 @@ function BrainDocumentPanel({
       {selectedDocument && detailsOpen ? (
         <BrainDocumentDetails document={selectedDocument} />
       ) : null}
+      {selectedDocument && timelineOpen ? (
+        <BrainDocumentTimeline document={selectedDocument} />
+      ) : null}
 
       {selectedDocument ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[860px] px-8 pb-16 pt-6">
-            <MarkdownGoatBrainEditor content={editorValue} onChange={setEditorValue} />
+            <MarkdownGoatBrainEditor
+              content={editorValue}
+              onChange={setEditorValue}
+              brainLinks={brainLinks}
+            />
           </div>
         </div>
       ) : (
@@ -592,9 +621,10 @@ function BrainDocumentPanel({
 function BrainDocumentDetails({ document }: { document: GoatBrainDocumentView }) {
   return (
     <aside className="shrink-0 border-b border-border-subtle bg-surface-muted px-5 py-3">
-      <div className="grid gap-4 text-[12px] leading-5 text-ink-muted md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
+      <div className="grid gap-4 text-[12px] leading-5 text-ink-muted md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-1">
           <DetailsRow label="Kind" value={document.kind} />
+          <DetailsRow label="Type" value={document.type} />
           <DetailsRow label="MIME" value={document.mimeType ?? "text/markdown"} />
           <DetailsRow label="Created" value={formatDateTime(document.createdAt)} />
           <DetailsRow label="Updated" value={formatDateTime(document.updatedAt)} />
@@ -602,32 +632,55 @@ function BrainDocumentDetails({ document }: { document: GoatBrainDocumentView })
         <div className="min-w-0 space-y-1">
           <DetailsRow label="ID" value={document.brainId} />
           <DetailsRow label="Folder" value={document.folderPath} />
+          <DetailsRow label="Aliases" value={document.aliases.join(", ") || "-"} />
           <DetailsRow
-            label="Related"
-            value={document.related?.map((item) => item.target).join(", ") || "-"}
+            label="Relations"
+            value={document.relations?.map((item) => `${item.type}:${item.to}`).join(", ") || "-"}
           />
           <DetailsRow
             label="Sources"
             value={document.sources?.map((item) => item.ref).join(", ") || "-"}
           />
+          <DetailsRow label="Timeline" value={`${document.timeline.length} entries`} />
         </div>
-        <div className="min-w-0">
-          <div className="mb-1 font-medium text-ink">Timeline</div>
-          {document.kind !== "markdown" ? (
-            <div>No timeline for this asset type.</div>
-          ) : document.timeline.length > 0 ? (
-            <div className="max-h-28 space-y-2 overflow-y-auto pr-2">
-              {document.timeline.slice(0, 5).map((entry) => (
-                <div key={`${entry.at}:${entry.body.slice(0, 24)}`} className="min-w-0">
-                  <div className="font-medium text-ink">{entry.at}</div>
-                  <div className="truncate">{entry.body}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div>No timeline entries.</div>
-          )}
+      </div>
+    </aside>
+  );
+}
+
+function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }) {
+  const entries = [...document.timeline].reverse();
+  return (
+    <aside className="shrink-0 border-b border-border-subtle bg-surface-muted px-5 py-3">
+      <div className="mx-auto flex w-full max-w-[860px] flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <History size={14} strokeWidth={2} className="shrink-0 text-ink-muted" />
+            <h2 className="truncate text-[12.5px] font-semibold text-ink">Timeline</h2>
+          </div>
+          <span className="shrink-0 text-[12px] text-ink-subtle">
+            {entries.length} {entries.length === 1 ? "entry" : "entries"}
+          </span>
         </div>
+        {document.kind !== "markdown" ? (
+          <p className="text-[12.5px] text-ink-muted">No timeline for this asset type.</p>
+        ) : entries.length > 0 ? (
+          <ol className="max-h-56 space-y-3 overflow-y-auto pr-2">
+            {entries.map((entry, index) => (
+              <li
+                key={`${entry.at}:${index}:${entry.body.slice(0, 24)}`}
+                className="grid grid-cols-[96px_minmax(0,1fr)] gap-3 text-[12.5px] leading-5"
+              >
+                <time dateTime={entry.at} className="text-ink-subtle">
+                  {formatDateTime(entry.at)}
+                </time>
+                <p className="min-w-0 whitespace-pre-wrap text-ink-muted">{entry.body}</p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-[12.5px] text-ink-muted">No timeline entries.</p>
+        )}
       </div>
     </aside>
   );
@@ -795,6 +848,12 @@ function brainDocumentTreePath(document: GoatBrainDocumentView) {
   return `${document.folderPath}/${document.brainId}.md`;
 }
 
+function brainLinkMap(documents: GoatBrainDocumentView[]) {
+  return Object.fromEntries(
+    documents.map((document) => [document.brainId, brainDocumentUrl(document)]),
+  );
+}
+
 function folderUrlSegments(folderPath: string) {
   return folderPath
     .split("/")
@@ -838,8 +897,10 @@ function documentViewFromRow(row: GoatBrainDocumentRow): GoatBrainDocumentView {
     mimeType: row.mime_type,
     originalFileName: row.original_file_name,
     assetStorageKey: row.asset_storage_key,
-    related: normalizeRelations(row.related),
+    relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
+    type: normalizeEntityType(row.entity_type),
+    aliases: normalizeStringArray(row.aliases),
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
     createdAt: row.created_at,
@@ -868,16 +929,37 @@ function normalizeKind(value: string): GoatBrainDocumentView["kind"] {
   return "markdown";
 }
 
+function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
+  if (
+    value === "person" ||
+    value === "company" ||
+    value === "project" ||
+    value === "meeting" ||
+    value === "decision" ||
+    value === "research" ||
+    value === "source" ||
+    value === "note"
+  ) {
+    return value;
+  }
+  return "note";
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
 function normalizeRelations(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((item): GoatBrainDocumentView["related"] => {
+  return value.flatMap((item): GoatBrainDocumentView["relations"] => {
     if (!item || typeof item !== "object") return [];
     const record = item as Record<string, unknown>;
-    if (typeof record.target !== "string") return [];
+    if (typeof record.to !== "string") return [];
     return [
       {
-        target: record.target,
-        ...(typeof record.type === "string" ? { type: record.type } : {}),
+        type: typeof record.type === "string" ? record.type : "related",
+        to: record.to,
       },
     ];
   });

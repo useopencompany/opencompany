@@ -15,6 +15,7 @@ import {
   GOAT_BRAIN_MARKDOWN_MIME_TYPE,
   type GoatBrainDocument as GoatBrainContractDocument,
   type GoatBrainDocumentKind,
+  type GoatBrainEntityType,
   type GoatBrainEntry,
   type GoatBrainFrontmatter,
   type GoatBrainTimelineEntry,
@@ -24,6 +25,7 @@ import {
   goatBrainPayloadRelativePath,
   goatBrainRelativePath,
   goatBrainSidecarRelativePath,
+  inferGoatBrainEntityTypeFromFolder,
   isSafeGoatBrainRelativePath,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
@@ -44,7 +46,9 @@ import type { SandboxHandle } from "./sandbox";
 
 export const GOAT_BRAIN_ROOT = "/home/user/goat-brain";
 export const GOAT_BRAIN_CLI_PATH = "/tmp/goat-brain.mjs";
-export const MAX_GOAT_BRAIN_SANDBOX_FILE_BYTES = 256 * 1024;
+export const MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES = 256 * 1024;
+export const MAX_GOAT_BRAIN_SANDBOX_FILE_BYTES = MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES;
+export const GOAT_BRAIN_REPORT_FOLDER = "research";
 
 type GoatBrainDocumentRow = typeof goatBrainDocuments.$inferSelect;
 type SandboxBrainFile = {
@@ -64,6 +68,102 @@ export type MaterializedGoatBrainFile = {
   relativePath: string;
   contentHash: string;
 };
+
+export type GoatBrainMarkdownReportArtifact = {
+  type: "brain_markdown_report";
+  title: string;
+  documentId: string;
+  brainId: string;
+  folderPath: string;
+  brainPath: string;
+  url: string;
+  mimeType: typeof GOAT_BRAIN_MARKDOWN_MIME_TYPE;
+};
+
+export async function createGoatBrainMarkdownReportForTask(input: {
+  userWorkosId: string;
+  taskId: string;
+  title: string;
+  markdown: string;
+}): Promise<GoatBrainMarkdownReportArtifact> {
+  const body = input.markdown.trim();
+  if (!body) {
+    throw new Error("Cannot save an empty Goat research report.");
+  }
+  if (Buffer.byteLength(body, "utf8") > MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
+    throw new Error("Goat research report is too large to save to the Brain.");
+  }
+
+  const title = firstMarkdownHeading(body) || input.title.trim() || "Research report";
+  const brainId = await nextAvailableBrainId(input.userWorkosId, title);
+  const folderPath = GOAT_BRAIN_REPORT_FOLDER;
+  const documentId = `goat_brain_doc_${randomUUID()}`;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const entry: GoatBrainEntry = {
+    id: brainId,
+    folder: folderPath,
+    title,
+    kind: "markdown",
+    mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
+    body,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    relations: [],
+    sources: [
+      {
+        ref: `goat-task:${input.taskId}`,
+        title: `Task ${input.taskId}`,
+        capturedAt: nowIso,
+      },
+    ],
+    type: "research",
+    aliases: [],
+    tags: ["research-report"],
+    timeline: [{ at: nowIso, body: `Created from Goat task ${input.taskId}.` }],
+  };
+  const content = serializeLegacyGoatBrainEntry(entry);
+  if (Buffer.byteLength(content, "utf8") > MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
+    throw new Error("Goat research report is too large to save to the Brain.");
+  }
+  const contentHash = hashContent(content);
+
+  await ensureBrainFolder(input.userWorkosId, folderPath);
+  await getDb()
+    .insert(goatBrainDocuments)
+    .values({
+      id: documentId,
+      userWorkosId: input.userWorkosId,
+      brainId,
+      folderPath,
+      title,
+      content,
+      body,
+      timeline: entry.timeline,
+      kind: entry.kind,
+      mimeType: entry.mimeType,
+      relations: entry.relations,
+      sources: entry.sources,
+      entityType: entry.type,
+      aliases: entry.aliases,
+      contentHash,
+      sizeBytes: Buffer.byteLength(content, "utf8"),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+  const brainPath = goatBrainRelativePath(folderPath, brainId);
+  return {
+    type: "brain_markdown_report",
+    title,
+    documentId,
+    brainId,
+    folderPath,
+    brainPath,
+    url: brainDocumentUrl(folderPath, brainId),
+    mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
+  };
+}
 
 export async function materializeGoatBrainForTask(input: {
   sandbox: SandboxHandle;
@@ -391,8 +491,10 @@ function validateSandboxBrainFile(file: SandboxBrainFile):
       assetStorageKey: string | null;
       contentHash: string;
       sizeBytes: number;
-      related: GoatBrainRelation[];
+      relations: GoatBrainRelation[];
       sources: GoatBrainSource[];
+      entityType: GoatBrainEntityType;
+      aliases: string[];
       document: GoatBrainContractDocument;
     }
   | { ok: false } {
@@ -427,8 +529,10 @@ function validateSandboxBrainFile(file: SandboxBrainFile):
       assetStorageKey: entry.assetStorageKey ?? null,
       contentHash: hashContent(content),
       sizeBytes,
-      related: entry.related,
+      relations: entry.relations,
       sources: entry.sources,
+      entityType: entry.type,
+      aliases: entry.aliases,
       document: {
         frontmatter: parsed.frontmatter as GoatBrainFrontmatter,
         title: entry.title,
@@ -463,15 +567,17 @@ function validateSandboxBrainFile(file: SandboxBrainFile):
     assetStorageKey: entry.assetStorageKey ?? null,
     contentHash: hashContent(file.content),
     sizeBytes,
-    related: frontmatter.related.map((relation) => ({
+    relations: frontmatter.relations.map((relation) => ({
       type: relation.type,
-      target: relation.target,
+      to: relation.to,
     })),
     sources: (frontmatter.sources ?? []).map((source) => ({
       ref: source.ref,
       ...(source.title ? { title: source.title } : {}),
       ...(source.capturedAt ? { capturedAt: source.capturedAt } : {}),
     })),
+    entityType: entry.type,
+    aliases: entry.aliases,
     document: {
       frontmatter,
       title: (frontmatter.title ?? parsed.title).trim() || frontmatter.id,
@@ -521,8 +627,10 @@ async function updateBrainDocumentFromSandbox(input: {
         mimeType: input.validated.mimeType,
         originalFileName: input.validated.originalFileName,
         assetStorageKey: input.validated.assetStorageKey,
-        related: input.validated.related,
+        relations: input.validated.relations,
         sources: input.validated.sources,
+        entityType: input.validated.entityType,
+        aliases: input.validated.aliases,
         contentHash: input.validated.contentHash,
         sizeBytes: input.validated.sizeBytes,
         updatedAt: now,
@@ -557,8 +665,10 @@ async function insertBrainDocumentFromSandbox(input: {
       mimeType: input.validated.mimeType,
       originalFileName: input.validated.originalFileName,
       assetStorageKey: input.validated.assetStorageKey,
-      related: input.validated.related,
+      relations: input.validated.relations,
       sources: input.validated.sources,
+      entityType: input.validated.entityType,
+      aliases: input.validated.aliases,
       contentHash: input.validated.contentHash,
       sizeBytes: input.validated.sizeBytes,
       createdAt: now,
@@ -579,9 +689,9 @@ async function insertConflictBrainDocumentFromSandbox(input: {
       id: conflictId,
       title: `${input.validated.title} conflict`,
       updatedAt: new Date().toISOString(),
-      related: [
-        ...input.validated.document.frontmatter.related,
-        { type: "conflicts_with", target: input.validated.brainId },
+      relations: [
+        ...input.validated.document.frontmatter.relations,
+        { type: "conflicts_with", to: input.validated.brainId },
       ],
     },
     title: `${input.validated.title} conflict`,
@@ -663,16 +773,29 @@ async function ensureBrainFolder(userWorkosId: string, path: string) {
 
 async function nextConflictBrainId(userWorkosId: string, brainId: string) {
   const base = normalizeGoatBrainId(`${brainId}-conflict`) || "conflict";
+  return nextAvailableBrainId(userWorkosId, base, "conflict", { requireSuffix: true });
+}
+
+async function nextAvailableBrainId(
+  userWorkosId: string,
+  base: string,
+  fallbackPrefix = "note",
+  options: { requireSuffix?: boolean } = {},
+) {
+  const normalizedBase = normalizeGoatBrainId(base) || fallbackPrefix;
   const existing = await getDb()
     .select({ brainId: goatBrainDocuments.brainId })
     .from(goatBrainDocuments)
     .where(eq(goatBrainDocuments.userWorkosId, userWorkosId));
   const taken = new Set(existing.map((document) => document.brainId));
+  if (!options.requireSuffix && !taken.has(normalizedBase) && isValidGoatBrainId(normalizedBase)) {
+    return normalizedBase;
+  }
   for (let suffix = 1; suffix < 10_000; suffix += 1) {
-    const candidate = normalizeGoatBrainId(`${base}-${suffix}`);
+    const candidate = normalizeGoatBrainId(`${normalizedBase}-${suffix}`);
     if (candidate && isValidGoatBrainId(candidate) && !taken.has(candidate)) return candidate;
   }
-  return normalizeGoatBrainId(`conflict-${randomUUID().slice(0, 8)}`) || "conflict";
+  return normalizeGoatBrainId(`${fallbackPrefix}-${randomUUID().slice(0, 8)}`) || fallbackPrefix;
 }
 
 function stripRootPrefix(absolutePath: string) {
@@ -682,6 +805,19 @@ function stripRootPrefix(absolutePath: string) {
 
 function hashContent(content: string) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function firstMarkdownHeading(markdown: string) {
+  for (const line of markdown.split("\n")) {
+    const match = /^#\s+(.+?)\s*$/.exec(line);
+    if (match?.[1]) return match[1].trim();
+  }
+  return "";
+}
+
+function brainDocumentUrl(folderPath: string, brainId: string) {
+  const folderSegments = folderPath.split("/").map((segment) => encodeURIComponent(segment));
+  return `/brain/${folderSegments.join("/")}/${encodeURIComponent(brainId)}`;
 }
 
 function entryFromDocumentRow(row: GoatBrainDocumentRow): GoatBrainEntry {
@@ -696,8 +832,13 @@ function entryFromDocumentRow(row: GoatBrainDocumentRow): GoatBrainEntry {
     body: row.body || legacyEntry?.body || "",
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
-    related: normalizeEntryRelations(row.related ?? legacyEntry?.related ?? []),
+    relations: normalizeEntryRelations(row.relations ?? legacyEntry?.relations ?? []),
     sources: row.sources ?? legacyEntry?.sources ?? [],
+    type:
+      normalizeEntityType(row.entityType) ??
+      legacyEntry?.type ??
+      inferGoatBrainEntityTypeFromFolder(row.folderPath),
+    aliases: normalizeStringArray(row.aliases, legacyEntry?.aliases ?? []),
     tags: legacyEntry?.tags ?? [],
     timeline:
       kind === "markdown" ? normalizeTimeline(row.timeline, legacyEntry?.timeline ?? []) : [],
@@ -726,17 +867,38 @@ function normalizeTimeline(value: unknown, fallback: GoatBrainTimelineEntry[]) {
 
 function normalizeEntryRelations(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((relation): GoatBrainEntry["related"] => {
+  return value.flatMap((relation): GoatBrainEntry["relations"] => {
     if (!relation || typeof relation !== "object") return [];
     const record = relation as Record<string, unknown>;
-    if (typeof record.target !== "string") return [];
+    if (typeof record.to !== "string") return [];
     return [
       {
         type: typeof record.type === "string" ? record.type : DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-        target: record.target,
+        to: record.to,
       },
     ];
   });
+}
+
+function normalizeStringArray(value: unknown, fallback: string[]) {
+  if (!Array.isArray(value)) return fallback;
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function normalizeEntityType(value: unknown): GoatBrainEntityType | null {
+  if (
+    value === "person" ||
+    value === "company" ||
+    value === "project" ||
+    value === "meeting" ||
+    value === "decision" ||
+    value === "research" ||
+    value === "source" ||
+    value === "note"
+  ) {
+    return value;
+  }
+  return null;
 }
 
 function isGoatBrainDocumentKind(value: unknown): value is GoatBrainDocumentKind {

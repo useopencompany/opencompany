@@ -1,6 +1,9 @@
 "use client";
 
+import { Extension } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
+import { Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -11,9 +14,11 @@ import { useState } from "react";
 export function MarkdownGoatBrainEditor({
   content,
   onChange,
+  brainLinks = {},
 }: {
   content: string;
   onChange: (content: string) => void;
+  brainLinks?: Record<string, string>;
 }) {
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
@@ -27,6 +32,7 @@ export function MarkdownGoatBrainEditor({
           indentation: { style: "space", size: 2 },
           markedOptions: { gfm: true, breaks: false },
         }),
+        WikiLinkDecoration.configure({ brainLinks }),
       ],
       content: initialContent,
       contentType: "markdown",
@@ -108,6 +114,58 @@ export function MarkdownGoatBrainEditor({
     </div>
   );
 }
+
+const WIKI_LINK_PATTERN = /\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g;
+
+const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string> }>({
+  name: "wikiLinkDecoration",
+  addOptions() {
+    return { brainLinks: {} };
+  },
+  addProseMirrorPlugins() {
+    const links = this.options.brainLinks;
+    return [
+      new Plugin({
+        props: {
+          decorations(state) {
+            const decorations: Decoration[] = [];
+            state.doc.descendants((node, pos) => {
+              if (!node.isText || !node.text) return;
+              for (const match of node.text.matchAll(WIKI_LINK_PATTERN)) {
+                const raw = match[0];
+                const target = (match[1] ?? "").trim();
+                const href = links[target];
+                decorations.push(
+                  Decoration.inline(
+                    pos + (match.index ?? 0),
+                    pos + (match.index ?? 0) + raw.length,
+                    {
+                      class: href
+                        ? "wiki-brain-link"
+                        : "wiki-brain-link wiki-brain-link-unresolved",
+                      title: href ? "Command-click to open brain link" : "Unresolved brain link",
+                      ...(href ? { "data-brain-href": href } : {}),
+                    },
+                  ),
+                );
+              }
+            });
+            return DecorationSet.create(state.doc, decorations);
+          },
+          handleClick(_view, _pos, event) {
+            if (!(event.metaKey || event.ctrlKey)) return false;
+            const target = event.target instanceof Element ? event.target : null;
+            const href = target?.closest("[data-brain-href]")?.getAttribute("data-brain-href");
+            if (!href) return false;
+            event.preventDefault();
+            window.location.href = href;
+            return true;
+          },
+        },
+      }),
+    ];
+  },
+});
 
 function FormatButton({
   label,

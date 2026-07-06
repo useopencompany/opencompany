@@ -1,7 +1,7 @@
 import { streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
-import { runGoatBrainCliForUser } from "@/lib/brain-cli";
+import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import { createGoatChatUserTurn } from "@/lib/chat";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { POST } from "./route";
@@ -11,7 +11,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/brain-cli", () => ({
-  runGoatBrainCliForUser: vi.fn(),
+  runGoatBrainToolForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/chat", () => ({
@@ -80,10 +80,10 @@ describe("POST /api/chat", () => {
   it("wires the personal brain CLI tool into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockRunGoatBrainCliForUser().mockResolvedValue({
+    mockRunGoatBrainToolForUser().mockResolvedValue({
       ok: true,
       exitCode: 0,
-      stdout: "No issues found.",
+      stdout: "1. [inbox] Hiring note (hiring-note, score 1, updated 2026-01-01T00:00:00.000Z)",
       stderr: "",
     });
     let brainToolPromise: Promise<unknown> | null = null;
@@ -93,7 +93,14 @@ describe("POST /api/chat", () => {
       if (typeof tool?.execute !== "function") {
         throw new Error("goat_brain execute function was not configured.");
       }
-      brainToolPromise = tool.execute({ args: "doctor" }) as Promise<unknown>;
+      brainToolPromise = tool.execute(
+        {
+          action: "query",
+          text: "hiring",
+          limit: 5,
+        },
+        { toolCallId: "tool_call_1" },
+      ) as Promise<unknown>;
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;
@@ -104,17 +111,21 @@ describe("POST /api/chat", () => {
       message: {
         id: "ui_user_1",
         role: "user",
-        parts: [{ type: "text", text: "check my brain health" }],
+        parts: [{ type: "text", text: "what did I say about hiring?" }],
       },
     });
     const response = await POST(request);
     await brainToolPromise;
 
     expect(response.status).toBe(200);
-    expect(runGoatBrainCliForUser).toHaveBeenCalledWith({
+    expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
-      args: "doctor",
+      toolInput: { action: "query", text: "hiring", limit: 5 },
       gatewayApiKey: "test-key",
+      sourceRef: "goat-chat:user_message_1",
+      chatSessionId: "session_1",
+      userMessageId: "user_message_1",
+      toolCallId: "tool_call_1",
       signal: request.signal,
     });
   });
@@ -298,8 +309,8 @@ function mockCreateGoatChatUserTurn() {
   return vi.mocked(createGoatChatUserTurn as unknown as () => Promise<unknown>);
 }
 
-function mockRunGoatBrainCliForUser() {
-  return vi.mocked(runGoatBrainCliForUser);
+function mockRunGoatBrainToolForUser() {
+  return vi.mocked(runGoatBrainToolForUser);
 }
 
 function mockStreamText() {

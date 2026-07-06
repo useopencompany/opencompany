@@ -173,22 +173,18 @@ export type GoatBrainDocumentRow = {
   mime_type: string | null;
   original_file_name: string | null;
   asset_storage_key: string | null;
-  related: unknown[];
+  relations: unknown[];
   sources: unknown[];
+  entity_type: string;
+  aliases: unknown[];
   content_hash: string;
   size_bytes: number;
   created_at: string;
   updated_at: string;
 };
 
-export function createGoatCollections() {
-  const tasks = createGoatElectricCollection<GoatTaskRow>({
-    id: "goat:tasks",
-    table: "goat.tasks",
-    getKey: (row) => row.id,
-  });
-
-  const taskRunCollections = (taskId: string) => ({
+function createTaskRunCollections(taskId: string) {
+  return {
     messages: createGoatElectricCollection<GoatTaskMessageRow>({
       id: `goat:task_messages:${taskId}`,
       table: "goat.task_messages",
@@ -219,6 +215,25 @@ export function createGoatCollections() {
       params: { task_id: taskId },
       getKey: (row) => row.id,
     }),
+  };
+}
+
+const taskRunCollectionsByTaskId = new Map<string, ReturnType<typeof createTaskRunCollections>>();
+
+function getTaskRunCollections(taskId: string) {
+  const cached = taskRunCollectionsByTaskId.get(taskId);
+  if (cached) return cached;
+
+  const collections = createTaskRunCollections(taskId);
+  taskRunCollectionsByTaskId.set(taskId, collections);
+  return collections;
+}
+
+function buildGoatCollections() {
+  const tasks = createGoatElectricCollection<GoatTaskRow>({
+    id: "goat:tasks",
+    table: "goat.tasks",
+    getKey: (row) => row.id,
   });
 
   const integrations = createGoatElectricCollection<GoatIntegrationRow>({
@@ -239,7 +254,20 @@ export function createGoatCollections() {
     getKey: (row) => row.id,
   });
 
-  return { tasks, taskRunCollections, integrations, brainFolders, brainDocuments };
+  return {
+    tasks,
+    taskRunCollections: getTaskRunCollections,
+    integrations,
+    brainFolders,
+    brainDocuments,
+  };
+}
+
+let cachedGoatCollections: ReturnType<typeof buildGoatCollections> | null = null;
+
+export function createGoatCollections() {
+  cachedGoatCollections ??= buildGoatCollections();
+  return cachedGoatCollections;
 }
 
 export const createGoatTaskCollections = createGoatCollections;
