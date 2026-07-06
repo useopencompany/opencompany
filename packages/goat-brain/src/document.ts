@@ -1,4 +1,5 @@
 import { parseFrontmatter, serializeFrontmatter, splitFrontmatter } from "./frontmatter";
+import { parseGoatBrainInlineLinks } from "./inline-links";
 import type { GoatBrainDocument, GoatBrainFrontmatter, GoatBrainTimelineEntry } from "./schema";
 import { deterministicEvidenceId, normalizeEvidenceId, normalizeTimelineAt } from "./timeline";
 
@@ -188,7 +189,6 @@ function parseTimeline(text: string): GoatBrainTimelineEntry[] {
 }
 
 const TIMELINE_EVIDENCE_HEADING = /^(ev-[a-z0-9][a-z0-9-]{0,76})\s+-\s+(.+)$/;
-const CITATION_RE = /(?<!\\)\[\^ev:([a-z0-9][a-z0-9-]{0,79})\]/g;
 
 function parseTimelineHeading(heading: string, body: string): GoatBrainTimelineEntry | null {
   const evidenceHeading = TIMELINE_EVIDENCE_HEADING.exec(heading);
@@ -208,9 +208,10 @@ function parseTimelineHeading(heading: string, body: string): GoatBrainTimelineE
 
 export function extractGoatBrainCitations(text: string): string[] {
   const ids = new Set<string>();
-  for (const match of text.matchAll(CITATION_RE)) {
-    const id = normalizeEvidenceId(match[1]);
-    if (id) ids.add(id);
+  for (const link of parseGoatBrainInlineLinks(text)) {
+    if (link.kind !== "evidence") continue;
+    const id = normalizeEvidenceId(link.target);
+    if (id && link.valid) ids.add(id);
   }
   return [...ids];
 }

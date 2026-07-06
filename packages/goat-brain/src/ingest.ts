@@ -174,7 +174,7 @@ function buildIngestPrompt(input: {
     "Use existing ids when information belongs to an existing entity. Create a new entry only when no existing entry is the primary home.",
     "Use only these types: person, company, project, decision, meeting, research, concept, evidence, note.",
     "Prefer relations over extra structured fields. People, companies, projects, meetings, decisions, and evidence should connect through relations.",
-    "Use wiki links like [[brain-id]] or [[brain-id|Label]] only for existing or planned ids.",
+    "Use inline links like [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence, and [[source:ref|Label]] for source refs. Legacy [[brain-id|Label]] page links are accepted but new content should use typed links.",
     "Compiled truth is the current synthesis for the entity. Rewrite it as the durable state of play, not as a chronological log.",
     "Timeline entries are append-only evidence. `timelineBody` must be a concise factual event from this source, not a restatement of the full source text.",
     "Every timeline entry must preserve source context; the system will attach the source ref, so make `timelineBody` say what happened and why it matters.",

@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  evidenceLinkTargets,
+  formatGoatBrainEvidenceLink,
+  pageLinkTargets,
+} from "@opencompany/goat-brain/inline-links";
 import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
@@ -808,7 +813,7 @@ function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }
                     {formatDateTime(entry.at)}
                   </time>
                   <code className="mt-1 block truncate rounded-sm bg-surface px-1 py-0.5 text-[11px] text-ink-muted">
-                    [^ev:{entry.evidenceId}]
+                    {formatGoatBrainEvidenceLink(entry.evidenceId)}
                   </code>
                 </div>
                 <p className="min-w-0 whitespace-pre-wrap text-ink-muted">{entry.body}</p>
@@ -997,9 +1002,14 @@ function brainDocumentTreePath(document: GoatBrainDocumentView) {
 }
 
 function brainLinkMap(documents: GoatBrainDocumentView[]) {
-  return Object.fromEntries(
-    documents.map((document) => [document.brainId, brainDocumentUrl(document)]),
-  );
+  const links: Record<string, string> = {};
+  for (const document of documents) {
+    const href = brainDocumentUrl(document);
+    links[document.brainId] = href;
+    links[`page:${document.brainId}`] = href;
+    if (document.type === "evidence") links[`evidence:${document.brainId}`] = href;
+  }
+  return links;
 }
 
 function buildGraphLinks(
@@ -1029,11 +1039,20 @@ function buildGraphLinks(
         sourceKind: "relation",
       });
     }
-    for (const target of wikiLinkTargetsFromBody(document.body)) {
+    const inlineLinkText = documentInlineLinkText(document);
+    for (const target of pageLinkTargets(inlineLinkText)) {
       add({
         from: document.brainId,
         to: target,
         type: "wiki_link",
+        sourceKind: "wiki_link",
+      });
+    }
+    for (const target of evidenceLinkTargets(inlineLinkText)) {
+      add({
+        from: document.brainId,
+        to: target,
+        type: "cites",
         sourceKind: "wiki_link",
       });
     }
@@ -1046,19 +1065,8 @@ function buildGraphLinks(
   );
 }
 
-const BRAIN_WIKI_LINK_PATTERN = /\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g;
-const BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
-
-function wikiLinkTargetsFromBody(body: string) {
-  const seen = new Set<string>();
-  const targets: string[] = [];
-  for (const match of body.matchAll(BRAIN_WIKI_LINK_PATTERN)) {
-    const target = (match[1] ?? "").trim();
-    if (!BRAIN_ID_PATTERN.test(target) || seen.has(target)) continue;
-    seen.add(target);
-    targets.push(target);
-  }
-  return targets;
+function documentInlineLinkText(document: GoatBrainDocumentView) {
+  return [document.body, ...document.timeline.map((entry) => entry.body)].join("\n\n");
 }
 
 function folderUrlSegments(folderPath: string) {

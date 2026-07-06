@@ -2,7 +2,7 @@
 // Purpose: starts ngrok when available, then runs the local Turbo dev stack.
 
 import "./load-env.mjs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
 import { startGoatLocalHttpsProxy } from "./lib/caddy-dev.mjs";
@@ -180,15 +180,65 @@ function appendCsvValues(raw, values) {
   return existing.join(",");
 }
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
+for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     shuttingDown = true;
-    if (ngrok && !ngrok.killed) ngrok.kill(signal);
+    const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
+    if (ngrok && !ngrok.killed) ngrok.kill(childSignal);
     stopDurableStreams();
     stopGoatLocalHttps();
     stopGoatDevProxy();
-    if (!dev.killed) dev.kill(signal);
+    stopDevProcess(childSignal);
   });
+}
+
+function stopDevProcess(signal = "SIGTERM") {
+  killProcessTree(dev, signal);
+}
+
+function killProcessTree(child, signal = "SIGTERM") {
+  if (!child.pid) return;
+
+  for (const pid of descendantPids(child.pid)) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // The process may have already exited while we were walking the tree.
+    }
+  }
+
+  if (!child.killed) {
+    child.kill(signal);
+  }
+}
+
+function descendantPids(rootPid) {
+  const result = spawnSync("ps", ["-axo", "pid=,ppid="], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) return [];
+
+  const childrenByParent = new Map();
+  for (const line of result.stdout.split("\n")) {
+    const [pidText, parentPidText] = line.trim().split(/\s+/);
+    const pid = Number(pidText);
+    const parentPid = Number(parentPidText);
+    if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) continue;
+    const children = childrenByParent.get(parentPid) ?? [];
+    children.push(pid);
+    childrenByParent.set(parentPid, children);
+  }
+
+  const pids = [];
+  const visit = (pid) => {
+    for (const childPid of childrenByParent.get(pid) ?? []) {
+      visit(childPid);
+      pids.push(childPid);
+    }
+  };
+  visit(rootPid);
+  return pids;
 }
 
 dev.on("exit", (code, signal) => {

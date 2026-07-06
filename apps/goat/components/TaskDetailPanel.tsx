@@ -1,14 +1,25 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { CircleDollarSign, CircleDotDashed, Square, TerminalSquare } from "lucide-react";
+import {
+  CircleDollarSign,
+  CircleDotDashed,
+  SlidersHorizontal,
+  Square,
+  TerminalSquare,
+  Wrench,
+} from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import { formatUsdMicros } from "@/lib/cost-format";
 import { formatGoatStartedAt, GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
-import type { GoatHarnessRunViewModel, GoatRunModelSummary } from "@/lib/task-harness-run";
+import type {
+  GoatHarnessRunViewModel,
+  GoatRunHarnessConfig,
+  GoatRunModelSummary,
+} from "@/lib/task-harness-run";
 import { cancelGoatTaskAction } from "@/lib/tasks";
 
 export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
@@ -53,6 +64,8 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
         <DetailRow label="Cost" value={formatUsdMicros(run.cost.totalCostUsdMicros)} icon="cost" />
       </section>
 
+      <HarnessConfigSection config={run.harnessConfig} />
+
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
@@ -70,6 +83,65 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
       </section>
     </>
   );
+}
+
+function HarnessConfigSection({ config }: { config: GoatRunHarnessConfig | null }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="mb-0.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+        Harness
+      </h2>
+      {config ? (
+        <>
+          <DetailRow label="Config" value={formatHarnessConfig(config)} icon="config" />
+          <div className="flex items-start gap-3 rounded-lg px-2 py-2">
+            <Wrench size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <span className="text-[12.5px] leading-tight text-ink-subtle">Tools</span>
+              {config.tools.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {config.tools.map((tool) => (
+                    <span
+                      key={tool.id}
+                      title={tool.id}
+                      className="inline-flex min-h-6 max-w-full items-center rounded-md border border-border bg-surface px-2 py-1 text-[12px] font-medium leading-tight text-ink"
+                    >
+                      {tool.label}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-[13px] leading-tight text-ink-subtle">No tools selected</span>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+          <SlidersHorizontal size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+          <span className="text-[13px] leading-tight text-ink-subtle">
+            No harness config recorded.
+          </span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatHarnessConfig(config: GoatRunHarnessConfig) {
+  const parts = [config.modelLabel];
+  if (config.maxModelSteps) parts.push(`${config.maxModelSteps} max steps`);
+  if (config.resultMode) parts.push(formatResultMode(config.resultMode));
+  if (config.skills.length > 0) {
+    parts.push(`${config.skills.length} ${config.skills.length === 1 ? "skill" : "skills"}`);
+  }
+  return parts.join(" - ");
+}
+
+function formatResultMode(resultMode: string) {
+  if (resultMode === "assistant_final") return "Assistant final";
+  if (resultMode === "brain_markdown_report") return "Brain report";
+  return resultMode;
 }
 
 function executionRunModels(models: GoatRunModelSummary[]) {
@@ -122,9 +194,10 @@ function DetailRow({
   label: string;
   value: string;
   active?: boolean;
-  icon?: "status" | "cost";
+  icon?: "status" | "cost" | "config";
 }) {
-  const Icon = icon === "cost" ? CircleDollarSign : CircleDotDashed;
+  const Icon =
+    icon === "cost" ? CircleDollarSign : icon === "config" ? SlidersHorizontal : CircleDotDashed;
   return (
     <div className="flex items-center gap-3 rounded-lg px-2 py-2">
       <Icon

@@ -14,6 +14,7 @@ import {
   upsertGoatBrainFileForUser,
 } from "@opencompany/db/goat-brain-files";
 import {
+  formatGoatBrainEvidenceLink,
   type GoatBrainDocument,
   goatBrainTimelineEntryFromParts,
   normalizeEvidenceId,
@@ -70,7 +71,7 @@ export async function createGoatBrainMarkdownReportForTask(input: {
   const folderPath = GOAT_BRAIN_REPORT_FOLDER;
   const now = new Date().toISOString();
   const evidenceId = normalizeEvidenceId(`ev-created-from-${input.taskId}`) ?? "ev-task-created";
-  const citedBody = `${body}\n\nEvidence: [^ev:${evidenceId}]`;
+  const citedBody = `${body}\n\nEvidence: ${formatGoatBrainEvidenceLink(evidenceId, `Task ${input.taskId}`)}`;
   const doc: GoatBrainDocument = {
     frontmatter: {
       id: brainId,

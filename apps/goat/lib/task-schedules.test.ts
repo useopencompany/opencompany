@@ -27,6 +27,7 @@ const harnessSpec: GoatHarnessSpec = {
   systemPrompt: "Run this recurring task.",
   initialUserMessage: "Send a daily briefing.",
   tools: ["exa_search"],
+  skills: [],
   maxModelSteps: 8,
   resultMode: "assistant_final",
 };
