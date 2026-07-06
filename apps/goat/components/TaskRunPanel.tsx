@@ -154,7 +154,7 @@ function taskFromInitialRun(run: GoatHarnessRunViewModel): GoatTaskRow {
     stage: run.task.stage,
     result: run.task.result || null,
     error: run.task.error || null,
-    harness_spec: {},
+    harness_spec: run.harnessConfig?.rawSpec ?? {},
     debug_trace: {},
     sandbox_id: null,
     attempts: 0,

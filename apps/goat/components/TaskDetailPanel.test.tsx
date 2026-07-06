@@ -107,6 +107,38 @@ describe("TaskDetailPanel cost summary", () => {
   });
 });
 
+describe("TaskDetailPanel harness config", () => {
+  it("renders the selected harness tools and config summary", () => {
+    const run = buildGoatHarnessRun({
+      task: task({
+        harnessSpec: {
+          schemaVersion: "goat.harness.v1",
+          model: "openai/gpt-5.4-mini",
+          systemPrompt: "",
+          initialUserMessage: "Research Marseille",
+          tools: ["exa_search", "gmail_search", "linear_search_tools"],
+          skills: ["first-principles"],
+          maxModelSteps: 6,
+          resultMode: "brain_markdown_report",
+        },
+      }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.getByText("Harness")).toBeInTheDocument();
+    expect(screen.getByText("Tools")).toBeInTheDocument();
+    expect(screen.getByText("Web search")).toBeInTheDocument();
+    expect(screen.getByText("Gmail search")).toBeInTheDocument();
+    expect(screen.getByText("Linear tools")).toBeInTheDocument();
+    expect(
+      screen.getByText("GPT 5.4 Mini - 6 max steps - Brain report - 1 skill"),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("TaskDetailPanel stop action", () => {
   it("renders a stop button for active tasks and calls the cancel action", async () => {
     const user = userEvent.setup();
