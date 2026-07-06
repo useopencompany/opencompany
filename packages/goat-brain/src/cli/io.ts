@@ -15,11 +15,11 @@ export type CommandContext = {
 };
 
 export function ok(text: string, data: unknown = {}): CommandResult {
-  return { code: 0, data: { ok: true, ...asObject(data) }, text };
+  return { code: 0, data: { ...asObject(data), ok: true }, text };
 }
 
 export function fail(text: string, code = 1, data: unknown = {}): CommandResult {
-  return { code, data: { ok: false, error: text, ...asObject(data) }, text: `Error: ${text}` };
+  return { code, data: { ...asObject(data), ok: false, error: text }, text: `Error: ${text}` };
 }
 
 export function notFound(text: string): CommandResult {

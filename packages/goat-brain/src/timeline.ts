@@ -20,16 +20,18 @@ export function goatBrainTimelineEntryFromParts(input: {
   sourceRef?: string | null;
   sourceTitle?: string | null;
 }): GoatBrainTimelineEntry {
+  const at = normalizeTimelineAt(input.at);
+  if (!at) throw new Error(`Invalid timeline "at" value: ${input.at}`);
   const evidenceId =
     normalizeEvidenceId(input.evidenceId) ??
     deterministicEvidenceId({
-      at: input.at,
+      at,
       summary: input.summary,
       sourceRef: input.sourceRef ?? "",
     });
   return {
     evidenceId,
-    at: input.at,
+    at,
     body: goatBrainTimelineBody({
       summary: input.summary,
       detail: input.detail ?? "",

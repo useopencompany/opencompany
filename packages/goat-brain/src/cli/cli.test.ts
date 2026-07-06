@@ -8,6 +8,7 @@ import { getGoatBrainCliSource } from "../generated/cli-bundle";
 import { DEFAULT_GOAT_BRAIN_FOLDERS } from "../schema";
 import { parseArgs } from "./args";
 import { commandHelp, HELP, ingestCommandExitCode, validateCommandArgs } from "./index";
+import { fail, ok } from "./io";
 import { execaNode } from "./test-support";
 
 const require = createRequire(import.meta.url);
@@ -26,10 +27,19 @@ describe("goat-brain cli", () => {
   it("validates unknown options", () => {
     expect(validateCommandArgs("ingest", parseArgs(["--nope"]))).toBe('Unknown option "--nope".');
     expect(validateCommandArgs("create", parseArgs(["--nope"]))).toBe('Unknown option "--nope".');
+    expect(validateCommandArgs("toString", parseArgs(["--nope"]))).toBeNull();
     expect(HELP).toContain("goat-brain <command>");
     expect(HELP).toContain("help");
     expect(HELP).toContain("doctor");
     expect(commandHelp("create")).toContain("Usage: goat-brain create");
+  });
+
+  it("protects reserved JSON result fields", () => {
+    expect(ok("done", { ok: false, error: "bad" }).data).toMatchObject({ ok: true });
+    expect(fail("failed", 1, { ok: true, error: "bad" }).data).toMatchObject({
+      ok: false,
+      error: "failed",
+    });
   });
 
   it("prints global and command-specific help", async () => {
@@ -299,6 +309,12 @@ describe("goat-brain cli", () => {
 
     const get = await run(["get", "--root", root, "launch-plan", "--section", "truth"]);
     expect(get.stdout).toContain("founder-led beta");
+    await expect(
+      run(["get", "--root", root, "launch-plan", "--section", "unknown"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("`--section` must be all, frontmatter, truth, or timeline."),
+    });
 
     const query = await run(["query", "--root", root, "founder beta", "--lexical-only"]);
     expect(query.stdout).toContain("launch-plan");
@@ -540,6 +556,13 @@ describe("goat-brain cli", () => {
     expect(
       ingestCommandExitCode({
         applied: [{ id: "new-person" }],
+        failed: [{ id: "failed-person" }],
+        health: null,
+      }),
+    ).toBe(1);
+    expect(
+      ingestCommandExitCode({
+        applied: [{ id: "new-person" }],
         health: {
           findings: [
             {
@@ -566,10 +589,10 @@ describe("goat-brain cli", () => {
   });
 
   it("runs the generated bundle under node from a temp brain root", async () => {
-    const cliPath = path.join(root, "goat-brain.mjs");
-    await writeFile(cliPath, getGoatBrainCliSource(), "utf8");
+    const bundlePath = path.join(root, "goat-brain.mjs");
+    await writeFile(bundlePath, getGoatBrainCliSource(), "utf8");
 
-    const created = await spawnNode(cliPath, [
+    const created = await spawnNode(bundlePath, [
       "create",
       "--folder",
       "inbox",
@@ -598,7 +621,7 @@ function spawnNode(
   script: string,
   args: string[],
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const child = spawn("node", [script, ...args], {
       env: { ...process.env, GOAT_BRAIN_ROOT: root },
       stdio: ["ignore", "pipe", "pipe"],
@@ -611,6 +634,7 @@ function spawnNode(
     child.stderr.on("data", (chunk) => {
       stderr += String(chunk);
     });
+    child.on("error", reject);
     child.on("close", (exitCode) => resolve({ stdout, stderr, exitCode }));
   });
 }

@@ -108,4 +108,34 @@ describe("goat brain canonical entries", () => {
       }),
     ).toMatchObject({ ok: false });
   });
+
+  it("returns validation errors for malformed sidecar field types", () => {
+    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    if (!sidecar) throw new Error("Expected serialized sidecar to parse.");
+    expect(
+      validateGoatBrainSidecar({
+        sidecar: {
+          ...sidecar,
+          title: 42,
+          mimeType: false,
+          relations: "owner:jane",
+        } as never,
+        payloadContent: entry.body,
+        payloadRelativePath: "concepts/launch-plan.md",
+      }),
+    ).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        "sidecar.title must not be empty.",
+        "sidecar.mimeType must not be empty.",
+        "sidecar.relations must be an array.",
+      ]),
+    });
+  });
+
+  it("rejects malformed legacy markdown at the entry boundary", () => {
+    expect(() => goatBrainEntryFromLegacyMarkdown("# Missing frontmatter")).toThrow(
+      "Legacy brain document is missing a valid frontmatter.id.",
+    );
+  });
 });

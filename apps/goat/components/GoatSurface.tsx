@@ -350,7 +350,7 @@ export function GoatSurface({
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
           <div className="w-full px-6 pb-2 pt-5">
-            <div className="mx-auto flex w-full max-w-[560px] items-center justify-end">
+            <div className="mx-auto flex w-full max-w-[720px] items-center justify-end">
               <button
                 type="button"
                 aria-label="Close chat"
@@ -375,7 +375,7 @@ export function GoatSurface({
               isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
             }}
           >
-            <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 pb-40 pt-2">
+            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
               {messages.map((message) => (
                 <Bubble
                   key={message.id}
@@ -394,7 +394,7 @@ export function GoatSurface({
         onSubmit={onSubmit}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
       >
-        <div className="pointer-events-auto flex w-full max-w-[560px] flex-col gap-2">
+        <div className="pointer-events-auto flex w-full max-w-[720px] flex-col gap-2">
           {chatError ? (
             <p
               className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"

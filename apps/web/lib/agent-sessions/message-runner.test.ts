@@ -30,6 +30,10 @@ describe("triggerAgentMessageRun", () => {
   });
 
   it("dispatches the shared event when the runner cannot be called directly", async () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "");
+    vi.stubEnv("RUNNER_PUBLIC_URL", "");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "");
+
     await triggerAgentMessageRun(input);
 
     expect(dispatchAgentMessageSubmittedMock).toHaveBeenCalledWith({

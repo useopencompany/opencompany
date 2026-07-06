@@ -17,6 +17,52 @@ import { isIsoDate } from "./time";
 import { parseGoatBrainWikiLinks } from "./wiki-links";
 
 export type GoatBrainValidationResult = { ok: true } | { ok: false; errors: string[] };
+export type GoatBrainValidationSubject = "frontmatter" | "sidecar";
+
+export function validateGoatBrainFolderType(input: {
+  folder: unknown;
+  type: unknown;
+  subject: GoatBrainValidationSubject;
+}): string[] {
+  const errors: string[] = [];
+  if (!isValidGoatBrainFolder(input.folder)) {
+    errors.push(`${input.subject}.folder must be a safe lowercase folder path.`);
+  }
+  if (!isValidGoatBrainEntityType(input.type)) {
+    errors.push(
+      input.subject === "frontmatter"
+        ? "frontmatter.type must be a built-in brain entity type."
+        : "sidecar.type is invalid.",
+    );
+  }
+  if (typeof input.folder === "string" && typeof input.type === "string") {
+    const folderTypeError = goatBrainFolderTypeError(input.folder, input.type);
+    if (folderTypeError) errors.push(`${input.subject}.folder/type mismatch: ${folderTypeError}`);
+  }
+  return errors;
+}
+
+export function validateGoatBrainRelations(
+  relations: unknown,
+  options: { fieldName: string } = { fieldName: "relations" },
+): string[] {
+  if (relations === undefined) return [];
+  if (!Array.isArray(relations)) return [`${options.fieldName} must be an array.`];
+  const errors: string[] = [];
+  for (const relation of relations) {
+    if (!isRecord(relation)) {
+      errors.push("relation must have type and to fields.");
+      continue;
+    }
+    if (!isValidGoatBrainRelationType(relation.type)) {
+      errors.push(`relation type "${String(relation.type)}" is invalid.`);
+    }
+    if (!isValidGoatBrainId(relation.to)) {
+      errors.push(`relation target "${String(relation.to)}" is invalid.`);
+    }
+  }
+  return errors;
+}
 
 export function validateGoatBrainDocument(
   doc: ParsedGoatBrainDocument,
@@ -29,16 +75,9 @@ export function validateGoatBrainDocument(
   if (expectedId && fm.id && fm.id !== expectedId) {
     errors.push(`frontmatter.id "${fm.id}" does not match file id "${expectedId}".`);
   }
-  if (!isValidGoatBrainFolder(fm.folder)) {
-    errors.push("frontmatter.folder must be a safe lowercase folder path.");
-  }
-  if (!isValidGoatBrainEntityType(fm.type)) {
-    errors.push("frontmatter.type must be a built-in brain entity type.");
-  }
-  if (typeof fm.folder === "string" && typeof fm.type === "string") {
-    const folderTypeError = goatBrainFolderTypeError(fm.folder, fm.type);
-    if (folderTypeError) errors.push(`frontmatter.folder/type mismatch: ${folderTypeError}`);
-  }
+  errors.push(
+    ...validateGoatBrainFolderType({ folder: fm.folder, type: fm.type, subject: "frontmatter" }),
+  );
   if (!isValidGoatBrainStatus(fm.status)) {
     errors.push("frontmatter.status must be draft, active, archived, or merged.");
   }
@@ -51,14 +90,9 @@ export function validateGoatBrainDocument(
   for (const legacyKey of fm.legacyKeys ?? []) {
     errors.push(`frontmatter.${legacyKey} is not supported by the v2 brain contract.`);
   }
-  for (const relation of fm.relations ?? []) {
-    if (!isValidGoatBrainRelationType(relation.type)) {
-      errors.push(`relation type "${relation.type}" is invalid.`);
-    }
-    if (!isValidGoatBrainId(relation.to)) {
-      errors.push(`relation target "${relation.to}" is invalid.`);
-    }
-  }
+  errors.push(
+    ...validateGoatBrainRelations(fm.relations ?? [], { fieldName: "frontmatter.relations" }),
+  );
   if (fm.mergedInto && !isValidGoatBrainId(fm.mergedInto)) {
     errors.push(`mergedInto target "${fm.mergedInto}" is invalid.`);
   }
@@ -112,4 +146,8 @@ export function validateGoatBrainDocument(
 function hasCompiledTruth(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.length > 0 && trimmed !== "_No compiled truth yet._";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

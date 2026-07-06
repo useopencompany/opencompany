@@ -8,17 +8,16 @@ export function goatBrainRelativePath(folder: string, id: string): string {
 }
 
 export function goatBrainIdFromRelativePath(relativePath: string): string | null {
-  const match = /^(.+)\/([^/]+)\.md$/.exec(relativePath);
-  if (!match) return null;
-  const [, folder, id] = match;
-  if (!folder || !id || !isValidGoatBrainFolder(folder) || !isValidGoatBrainId(id)) return null;
-  return id;
+  const split = splitGoatBrainRelativePath(relativePath);
+  if (!split || !isValidGoatBrainFolder(split.folder) || !isValidGoatBrainId(split.id)) {
+    return null;
+  }
+  return split.id;
 }
 
 export function goatBrainFolderFromRelativePath(relativePath: string): string | null {
-  const match = /^(.+)\/([^/]+)\.md$/.exec(relativePath);
-  const folder = match?.[1];
-  return folder && isValidGoatBrainFolder(folder) ? folder : null;
+  const split = splitGoatBrainRelativePath(relativePath);
+  return split && isValidGoatBrainFolder(split.folder) ? split.folder : null;
 }
 
 export function isSafeGoatBrainRelativePath(relativePath: string): boolean {
@@ -27,4 +26,11 @@ export function isSafeGoatBrainRelativePath(relativePath: string): boolean {
   return parts.every(
     (part) => part.length > 0 && part !== "." && part !== ".." && !part.startsWith("."),
   );
+}
+
+function splitGoatBrainRelativePath(relativePath: string): { folder: string; id: string } | null {
+  const match = /^(.+)\/([^/]+)\.md$/.exec(relativePath);
+  if (!match) return null;
+  const [, folder, id] = match;
+  return folder && id ? { folder, id } : null;
 }

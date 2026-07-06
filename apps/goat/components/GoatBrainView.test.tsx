@@ -1,8 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
+import { updateGoatBrainDocumentAction } from "@/lib/brain-actions";
 import { GoatBrainView } from "./GoatBrainView";
 
 const routerMock = vi.hoisted(() => ({
@@ -15,6 +16,22 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/useHydrated", () => ({
   useHydrated: () => false,
+}));
+
+vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
+  MarkdownGoatBrainEditor: ({
+    content,
+    onChange,
+  }: {
+    content: string;
+    onChange: (content: string) => void;
+  }) => (
+    <textarea
+      aria-label="Brain body"
+      value={content}
+      onChange={(event) => onChange(event.currentTarget.value)}
+    />
+  ),
 }));
 
 vi.mock("@/lib/brain-actions", () => ({
@@ -68,6 +85,37 @@ describe("GoatBrainView", () => {
       "href",
       "/brain/projects/roadmap",
     );
+  });
+
+  it("passes the selected content hash when saving a document", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoatBrainDocumentAction).mockResolvedValueOnce({
+      ok: true,
+      path: "people/ada-lovelace.md",
+      document: { ...documentWithTimeline, body: "Updated truth.", contentHash: "hash-next" },
+    });
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    await user.clear(screen.getByRole("textbox", { name: "Brain body" }));
+    await user.type(screen.getByRole("textbox", { name: "Brain body" }), "Updated truth.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
+        documentId: "doc_ada",
+        body: "Updated truth.",
+        expectedContentHash: "hash",
+      });
+    });
+    expect(routerMock.replace).toHaveBeenCalledWith("/brain/people/ada-lovelace");
   });
 });
 

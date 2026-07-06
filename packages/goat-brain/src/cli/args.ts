@@ -48,7 +48,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 export async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  try {
+    for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  } catch (error) {
+    const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
+    throw new Error(`Failed to read stdin${detail}`);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 

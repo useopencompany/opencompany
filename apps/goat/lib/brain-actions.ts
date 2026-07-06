@@ -30,12 +30,14 @@ export async function createGoatBrainDocumentAction(input: {
 export async function updateGoatBrainDocumentAction(input: {
   documentId: string;
   body: string;
+  expectedContentHash?: string;
 }): Promise<BrainMutationResult> {
   const { user } = await currentGoatUser();
   return updateGoatBrainDocumentForUser({
     userWorkosId: user.workosUserId,
     documentId: input.documentId,
     body: input.body,
+    ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
   });
 }
 

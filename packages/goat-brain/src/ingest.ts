@@ -8,13 +8,14 @@ import type { Gateway } from "./retrieval/gateway";
 import {
   type GoatBrainEntityType,
   type GoatBrainRelation,
+  type GoatBrainTimelineEntry,
   isValidGoatBrainRelationType,
   normalizeGoatBrainId,
 } from "./schema";
 import { goatBrainFolderForEntityType, normalizeBuiltInGoatBrainEntityType } from "./schemas";
 import { findGoatBrainFile, listGoatBrainFiles, writeGoatBrainEntry } from "./store";
 import { nowIso } from "./time";
-import { goatBrainTimelineEntryFromParts } from "./timeline";
+import { goatBrainTimelineEntryFromParts, goatBrainTimelinePartsFromEntry } from "./timeline";
 import { parseGoatBrainWikiLinks } from "./wiki-links";
 
 type IngestGateway = Pick<Gateway, "chat">;
@@ -34,9 +35,17 @@ export type GoatBrainIngestAppliedChange = {
   type: GoatBrainEntityType;
 };
 
+export type GoatBrainIngestFailedChange = {
+  action: "create" | "update";
+  id: string;
+  type: GoatBrainEntityType;
+  error: string;
+};
+
 export type GoatBrainIngestResult = {
   dryRun: boolean;
   applied: GoatBrainIngestAppliedChange[];
+  failed: GoatBrainIngestFailedChange[];
   schemaSuggestion: null;
   health: GoatBrainHealthReport | null;
   plan: NormalizedIngestOperation[];
@@ -101,15 +110,25 @@ export async function ingestGoatBrain(
   if (!plan.ok) throw new Error(`Brain ingest plan was invalid: ${plan.errors.join(" ")}`);
 
   const applied: GoatBrainIngestAppliedChange[] = [];
+  const failed: GoatBrainIngestFailedChange[] = [];
   if (!options.dryRun) {
     for (const operation of plan.operations) {
-      applied.push(
-        await applyIngestOperation(root, operation, {
-          at,
-          sourceRef,
-          ...(options.sourceTitle ? { sourceTitle: options.sourceTitle } : {}),
-        }),
-      );
+      try {
+        applied.push(
+          await applyIngestOperation(root, operation, {
+            at,
+            sourceRef,
+            ...(options.sourceTitle ? { sourceTitle: options.sourceTitle } : {}),
+          }),
+        );
+      } catch (error) {
+        failed.push({
+          action: operation.action,
+          id: operation.id,
+          type: operation.type,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -117,6 +136,7 @@ export async function ingestGoatBrain(
   return {
     dryRun: Boolean(options.dryRun),
     applied,
+    failed,
     schemaSuggestion: null,
     health,
     plan: plan.operations,
@@ -207,9 +227,8 @@ function normalizePlan(
     const item = isRecord(operation) ? (operation as RawIngestOperation) : {};
     const title = stringValue(item.title) || "Brain note";
     const type = normalizeBuiltInGoatBrainEntityType(stringValue(item.type)) ?? "note";
-    const action =
-      item.action === "update" && knownIds.has(stringValue(item.id)) ? "update" : "create";
     const id = normalizeGoatBrainId(stringValue(item.id) || title) || "brain-note";
+    const action = item.action === "update" && knownIds.has(id) ? "update" : "create";
     const body = stringValue(item.body) || input.fallbackText;
     const relations = normalizeRelations(item.relations);
     plannedIds.add(id);
@@ -283,17 +302,28 @@ async function applyIngestOperation(
     ...(source.sourceTitle ? { title: source.sourceTitle } : {}),
   });
   entry.tags = mergeStrings(entry.tags, operation.tags);
-  entry.timeline = [
-    ...entry.timeline,
-    goatBrainTimelineEntryFromParts({
-      at: source.at,
-      summary: operation.timelineBody,
-      sourceRef: source.sourceRef,
-      sourceTitle: source.sourceTitle ?? "",
-    }),
-  ];
+  const timelineEntry = goatBrainTimelineEntryFromParts({
+    at: source.at,
+    summary: operation.timelineBody,
+    sourceRef: source.sourceRef,
+    sourceTitle: source.sourceTitle ?? "",
+  });
+  if (!entry.timeline.some((entry) => isDuplicateTimelineEntry(entry, timelineEntry))) {
+    entry.timeline = [...entry.timeline, timelineEntry];
+  }
   const path = await writeGoatBrainEntry(root, entry);
   return { action: existingEntry ? "update" : "create", id: entry.id, path, type: entry.type };
+}
+
+function isDuplicateTimelineEntry(
+  current: GoatBrainTimelineEntry,
+  next: GoatBrainTimelineEntry,
+): boolean {
+  if (current.evidenceId === next.evidenceId) return true;
+  const currentParts = goatBrainTimelinePartsFromEntry(current);
+  const nextParts = goatBrainTimelinePartsFromEntry(next);
+  if (!currentParts || !nextParts || !currentParts.sourceRef) return false;
+  return currentParts.sourceRef === nextParts.sourceRef && currentParts.at === nextParts.at;
 }
 
 function parseJsonObject(text: string): Record<string, unknown> | null {

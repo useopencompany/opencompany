@@ -1,7 +1,7 @@
 import type { GoatBrainGraphDirection, GoatBrainRelation } from "../schema";
 import { blend } from "./blend";
-import { lexicalSearch, titleTagMatch } from "./bm25";
-import { buildCorpus, type IndexRecord } from "./corpus";
+import { createLexicalIndex, lexicalSearch, titleTagMatch } from "./bm25";
+import { buildCorpus, type IndexRecord, loadCachedDocumentEmbeddings } from "./corpus";
 import { reciprocalRankFusion } from "./fuse";
 
 export type GoatBrainQueryOptions = {
@@ -19,6 +19,7 @@ export type GoatBrainQueryOptions = {
 export type RetrievalProviders = {
   expand?: (query: string) => Promise<string[]>;
   embedTexts?: (texts: string[]) => Promise<number[][]>;
+  embeddingCacheKey?: string;
   rerank?: (query: string, candidates: Array<{ id: string; text: string }>) => Promise<string[]>;
 };
 
@@ -63,21 +64,31 @@ export async function queryGoatBrain(
     } catch {}
   }
 
+  const lexicalIndex = createLexicalIndex(candidates);
   const lexicalLists = queries
-    .map((text) => lexicalSearch(candidates, text).map((hit) => hit.id))
+    .map((text) => lexicalSearch(lexicalIndex, text).map((hit) => hit.id))
     .filter((list) => list.length > 0);
 
   let vectorList: string[] = [];
   if (useModel && providers.embedTexts && options.text.trim()) {
     try {
-      vectorList = await vectorSearch(options.text, candidates, providers.embedTexts);
+      vectorList = await vectorSearch(
+        root,
+        options.text,
+        candidates,
+        providers.embedTexts,
+        providers.embeddingCacheKey ?? "default",
+      );
     } catch {}
   }
 
   const lists = [...lexicalLists, ...(vectorList.length > 0 ? [vectorList] : [])];
+  const hasQueryText = options.text.trim().length > 0;
   const relevanceById =
     lists.length === 0
-      ? new Map(candidates.map((record) => [record.id, 1]))
+      ? hasQueryText
+        ? new Map<string, number>()
+        : new Map(candidates.map((record) => [record.id, 1]))
       : reciprocalRankFusion(lists);
 
   const textMatchIds = new Set(relevanceById.keys());
@@ -229,7 +240,9 @@ function applyNameBoost(
   text: string,
 ): void {
   if (!text.trim()) return;
-  const maxRelevance = Math.max(0, ...relevance.values()) || 1;
+  let maxRelevance = 0;
+  for (const value of relevance.values()) maxRelevance = Math.max(maxRelevance, value);
+  maxRelevance = maxRelevance || 1;
   for (const record of byId.values()) {
     const match = titleTagMatch(record, text);
     if (match > 0) relevance.set(record.id, (relevance.get(record.id) ?? 0) + match * maxRelevance);
@@ -237,18 +250,25 @@ function applyNameBoost(
 }
 
 async function vectorSearch(
+  root: string,
   text: string,
   records: IndexRecord[],
   embedTexts: (texts: string[]) => Promise<number[][]>,
+  embeddingCacheKey: string,
 ): Promise<string[]> {
-  const vectors = await embedTexts([
-    text,
-    ...records.map((record) => `${record.title}\n${record.compiledTruth}`.trim() || record.id),
-  ]);
-  const queryVector = vectors[0];
+  const [queryVector] = await embedTexts([text]);
   if (!queryVector) return [];
+  const documentVectors = await loadCachedDocumentEmbeddings(
+    root,
+    embeddingCacheKey,
+    records,
+    embedTexts,
+  );
   return records
-    .map((record, i) => ({ id: record.id, score: cosine(queryVector, vectors[i + 1] ?? []) }))
+    .map((record) => ({
+      id: record.id,
+      score: cosine(queryVector, documentVectors.get(record.id) ?? []),
+    }))
     .sort((a, b) => b.score - a.score)
     .map((item) => item.id);
 }

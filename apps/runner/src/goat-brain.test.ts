@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   goatBrainEntryFromLegacyMarkdown,
   goatBrainSidecarRelativePath,
+  inferGoatBrainEntityTypeFromFolder,
   serializeGoatBrainDocument,
   serializeGoatBrainPayload,
   serializeGoatBrainSidecar,
@@ -183,6 +184,45 @@ describe("syncGoatBrainFromLocalRoot", () => {
             content,
             body: "Customer wants a faster onboarding path.",
             contentHash: hash(content),
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("canonicalizes alias folders before persisting sandbox docs", async () => {
+    const root = await tempRoot();
+    const content = brainDoc({
+      id: "launch-idea",
+      folder: "ideas",
+      title: "Launch idea",
+      truth: "Launch should start with founder-led beta.",
+    });
+    const db = createGoatBrainDb({ selectResults: [[]] });
+    dbMocks.getDb.mockReturnValue(db);
+
+    try {
+      await writeBrainFile(root, "ideas/launch-idea.md", content);
+      await syncGoatBrainFromLocalRoot({
+        root,
+        userWorkosId: "user_1",
+        taskId: "task_1",
+        baseSnapshot: { files: [] },
+      });
+
+      expect(db.insertedValues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            userWorkosId: "user_1",
+            path: "concepts",
+            source: "system",
+          }),
+          expect.objectContaining({
+            brainId: "launch-idea",
+            folderPath: "concepts",
+            content: expect.stringContaining("folder: concepts"),
           }),
         ]),
       );
@@ -436,7 +476,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
     }
   });
 
-  it("ignores an invalid sidecar without deleting the current DB doc", async () => {
+  it("fails closed on an invalid sidecar without deleting the current DB doc", async () => {
     const root = await tempRoot();
     const content = brainDoc({
       id: "research-note",
@@ -460,15 +500,18 @@ describe("syncGoatBrainFromLocalRoot", () => {
         goatBrainSidecarRelativePath("research", "research-note"),
         JSON.stringify({ schemaVersion: "goat.brain.entry.v1", id: "research-note" }),
       );
-      await syncGoatBrainFromLocalRoot({
-        root,
-        userWorkosId: "user_1",
-        taskId: "task_1",
-        baseSnapshot: snapshotFor(current),
-      });
+      await expect(
+        syncGoatBrainFromLocalRoot({
+          root,
+          userWorkosId: "user_1",
+          taskId: "task_1",
+          baseSnapshot: snapshotFor(current),
+        }),
+      ).rejects.toThrow("Brain sidecar");
 
       expect(db.updatedValues).toEqual([]);
       expect(db.deleteWhereCalls).toEqual([]);
+      expect(db.insertedValues).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -553,7 +596,7 @@ function brainDoc(input: { id: string; folder: string; title: string; truth: str
     frontmatter: {
       id: input.id,
       folder: input.folder,
-      type: "note",
+      type: inferGoatBrainEntityTypeFromFolder(input.folder),
       status: "draft",
       title: input.title,
       createdAt: at,
@@ -588,7 +631,7 @@ function brainRow(input: {
     assetStorageKey: null,
     relations: [],
     sources: [],
-    entityType: "note",
+    entityType: inferGoatBrainEntityTypeFromFolder(input.folderPath),
     status: "draft",
     aliases: [],
     contentHash: hash(input.content),

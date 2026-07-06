@@ -13,14 +13,13 @@ import {
   type GoatBrainSource,
   type GoatBrainStatus,
   type GoatBrainTimelineEntry,
-  isValidGoatBrainEntityType,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
-  isValidGoatBrainRelationType,
   normalizeGoatBrainFolder,
 } from "./schema";
-import { goatBrainFolderTypeError, inferGoatBrainEntityTypeFromFolder } from "./schemas";
+import { inferGoatBrainEntityTypeFromFolder } from "./schemas";
 import { isIsoDate } from "./time";
+import { validateGoatBrainFolderType, validateGoatBrainRelations } from "./validate";
 
 export const GOAT_BRAIN_ENTRY_SCHEMA_VERSION = "goat.brain.entry.v1";
 export const GOAT_BRAIN_MARKDOWN_MIME_TYPE = "text/markdown";
@@ -135,6 +134,12 @@ export function goatBrainEntryFromParsedLegacy(parsed: ParsedGoatBrainDocument):
   const frontmatter = parsed.frontmatter as Partial<GoatBrainFrontmatter>;
   const id = frontmatter.id ?? "";
   const folder = frontmatter.folder ?? "";
+  if (!isValidGoatBrainId(id)) {
+    throw new Error("Legacy brain document is missing a valid frontmatter.id.");
+  }
+  if (!isValidGoatBrainFolder(folder)) {
+    throw new Error("Legacy brain document is missing a valid frontmatter.folder.");
+  }
   const title = (frontmatter.title ?? parsed.title ?? id).trim();
   return {
     id,
@@ -241,14 +246,15 @@ export function validateGoatBrainSidecar(input: {
     errors.push("sidecar.schemaVersion is invalid.");
   }
   if (!isValidGoatBrainId(sidecar.id)) errors.push("sidecar.id must be a lowercase slug.");
-  if (!isValidGoatBrainFolder(sidecar.folder)) {
-    errors.push("sidecar.folder must be a safe lowercase folder path.");
-  }
-  if (!sidecar.title?.trim()) errors.push("sidecar.title must not be empty.");
-  if (!isValidGoatBrainEntityType(sidecar.type)) errors.push("sidecar.type is invalid.");
-  if (typeof sidecar.folder === "string" && typeof sidecar.type === "string") {
-    const folderTypeError = goatBrainFolderTypeError(sidecar.folder, sidecar.type);
-    if (folderTypeError) errors.push(`sidecar.folder/type mismatch: ${folderTypeError}`);
+  errors.push(
+    ...validateGoatBrainFolderType({
+      folder: sidecar.folder,
+      type: sidecar.type,
+      subject: "sidecar",
+    }),
+  );
+  if (typeof sidecar.title !== "string" || !sidecar.title.trim()) {
+    errors.push("sidecar.title must not be empty.");
   }
   if (
     sidecar.status !== undefined &&
@@ -262,10 +268,21 @@ export function validateGoatBrainSidecar(input: {
   if (sidecar.aliases && !validStringArray(sidecar.aliases)) {
     errors.push("sidecar.aliases must be an array of non-empty strings.");
   }
+  if (sidecar.tags !== undefined && !validStringArray(sidecar.tags)) {
+    errors.push("sidecar.tags must be an array of non-empty strings.");
+  }
+  if (sidecar.sources !== undefined && !Array.isArray(sidecar.sources)) {
+    errors.push("sidecar.sources must be an array.");
+  }
+  if (sidecar.timeline !== undefined && !Array.isArray(sidecar.timeline)) {
+    errors.push("sidecar.timeline must be an array.");
+  }
   if (sidecar.kind !== "markdown" && sidecar.kind !== "pdf" && sidecar.kind !== "docx") {
     errors.push("sidecar.kind is invalid.");
   }
-  if (!sidecar.mimeType?.trim()) errors.push("sidecar.mimeType must not be empty.");
+  if (typeof sidecar.mimeType !== "string" || !sidecar.mimeType.trim()) {
+    errors.push("sidecar.mimeType must not be empty.");
+  }
   if (!isIsoDate(sidecar.createdAt)) errors.push("sidecar.createdAt must be ISO-8601 UTC.");
   if (!isIsoDate(sidecar.updatedAt)) errors.push("sidecar.updatedAt must be ISO-8601 UTC.");
   if (!sidecar.payload || !isRecord(sidecar.payload)) errors.push("sidecar.payload is required.");
@@ -276,14 +293,7 @@ export function validateGoatBrainSidecar(input: {
   if (sidecar.payload?.sha256 !== actualHash) errors.push("sidecar.payload.sha256 mismatch.");
   const actualSize = goatBrainPayloadSizeBytes(input.payloadContent);
   if (sidecar.payload?.sizeBytes !== actualSize) errors.push("sidecar.payload.sizeBytes mismatch.");
-  for (const relation of sidecar.relations ?? []) {
-    if (!isValidGoatBrainRelationType(relation.type)) {
-      errors.push(`relation type "${relation.type}" is invalid.`);
-    }
-    if (!isValidGoatBrainId(relation.to)) {
-      errors.push(`relation target "${relation.to}" is invalid.`);
-    }
-  }
+  errors.push(...validateGoatBrainRelations(sidecar.relations, { fieldName: "sidecar.relations" }));
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
@@ -296,13 +306,14 @@ export function validateGoatBrainSidecar(input: {
       body: input.payloadContent,
       createdAt: sidecar.createdAt,
       updatedAt: sidecar.updatedAt,
-      relations: sidecar.relations ?? [],
-      sources: sidecar.sources ?? [],
+      relations: Array.isArray(sidecar.relations) ? sidecar.relations : [],
+      sources: Array.isArray(sidecar.sources) ? sidecar.sources : [],
       type: sidecar.type,
       status: sidecar.status ?? "draft",
       aliases: sidecar.aliases ?? [],
-      tags: sidecar.tags ?? [],
-      timeline: sidecar.kind === "markdown" ? (sidecar.timeline ?? []) : [],
+      tags: Array.isArray(sidecar.tags) ? sidecar.tags : [],
+      timeline:
+        sidecar.kind === "markdown" && Array.isArray(sidecar.timeline) ? sidecar.timeline : [],
       ...(sidecar.payload.originalFileName
         ? { originalFileName: sidecar.payload.originalFileName }
         : {}),

@@ -28,11 +28,26 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
     string,
     { file: StoredGoatBrainFile; doc: ReturnType<typeof parseGoatBrainDocument> }
   >();
+  const parsedFiles: Array<{
+    file: StoredGoatBrainFile;
+    doc: ReturnType<typeof parseGoatBrainDocument>;
+  }> = [];
   const aliasOwners = new Map<string, string>();
 
   for (const file of files) {
     idCounts.set(file.id, (idCounts.get(file.id) ?? 0) + 1);
-    if (!byId.has(file.id)) byId.set(file.id, { file, doc: parseGoatBrainDocument(file.source) });
+    try {
+      const doc = parseGoatBrainDocument(file.source);
+      parsedFiles.push({ file, doc });
+      if (!byId.has(file.id)) byId.set(file.id, { file, doc });
+    } catch (error) {
+      findings.push({
+        severity: "error",
+        code: "parse_error",
+        id: file.id,
+        message: error instanceof Error ? error.message : "Failed to parse brain document.",
+      });
+    }
   }
 
   for (const [id, count] of idCounts) {
@@ -48,8 +63,7 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
 
   const degreeById = graphDegreeById(byId);
 
-  for (const file of files) {
-    const doc = parseGoatBrainDocument(file.source);
+  for (const { file, doc } of parsedFiles) {
     const validation = validateGoatBrainDocument(doc, file.id, file.source);
     if (!validation.ok) {
       for (const message of validation.errors) {

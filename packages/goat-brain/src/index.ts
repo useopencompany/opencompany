@@ -11,5 +11,6 @@ export * from "./schemas";
 export * from "./store";
 export { nowIso } from "./time";
 export * from "./timeline";
+export * from "./usage";
 export * from "./validate";
 export * from "./wiki-links";

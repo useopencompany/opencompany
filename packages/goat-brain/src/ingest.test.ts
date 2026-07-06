@@ -6,7 +6,8 @@ import { serializeGoatBrainDocument } from "./document";
 import { deriveGoatBrainEdges } from "./edges";
 import { checkGoatBrainHealth } from "./health";
 import { ingestGoatBrain } from "./ingest";
-import { inferGoatBrainEntityTypeFromFolder } from "./schemas";
+import { goatBrainEntityTypeForFolder, inferGoatBrainEntityTypeFromFolder } from "./schemas";
+import { findGoatBrainFile } from "./store";
 import { parseGoatBrainWikiLinks } from "./wiki-links";
 
 let root: string;
@@ -25,6 +26,8 @@ describe("goat brain entity types and wiki links", () => {
     expect(inferGoatBrainEntityTypeFromFolder("companies")).toBe("company");
     expect(inferGoatBrainEntityTypeFromFolder("docs/api")).toBe("document");
     expect(inferGoatBrainEntityTypeFromFolder("ideas")).toBe("concept");
+    expect(goatBrainEntityTypeForFolder("ideas")).toBe("concept");
+    expect(goatBrainEntityTypeForFolder("sources")).toBe("reference");
   });
 
   it("parses wiki links with optional labels", () => {
@@ -119,6 +122,120 @@ describe("goat brain ingest", () => {
       expect.objectContaining({ action: "create", id: "jane-doe", type: "person" }),
     ]);
     await expect(checkGoatBrainHealth(root)).resolves.toMatchObject({ errors: 0 });
+  });
+
+  it("uses normalized ids when deciding whether a plan updates an existing entry", async () => {
+    await writeDoc("companies/acme.md", {
+      id: "acme",
+      folder: "companies",
+      type: "company",
+      title: "Acme",
+      truth: "Acme is an existing customer.",
+    });
+    const gateway = fakeGateway(
+      JSON.stringify({
+        operations: [
+          {
+            action: "update",
+            id: "Acme",
+            title: "Acme",
+            type: "company",
+            aliases: [],
+            body: "Acme is evaluating Goat Brain.",
+            timelineBody: "User mentioned Acme.",
+            relations: [],
+            tags: [],
+          },
+        ],
+      }),
+    );
+
+    const result = await ingestGoatBrain(
+      root,
+      { text: "Remember Acme is evaluating Goat Brain.", sourceRef: "goat-chat:3", dryRun: true },
+      gateway,
+    );
+
+    expect(result.plan).toEqual([expect.objectContaining({ action: "update", id: "acme" })]);
+  });
+
+  it("does not append duplicate timeline evidence for the same source and timestamp", async () => {
+    const response = JSON.stringify({
+      operations: [
+        {
+          action: "create",
+          id: "acme",
+          title: "Acme",
+          type: "company",
+          aliases: [],
+          body: "Acme is evaluating Goat Brain.",
+          timelineBody: "User mentioned Acme.",
+          relations: [],
+          tags: [],
+        },
+      ],
+    });
+    const options = {
+      text: "Remember Acme is evaluating Goat Brain.",
+      sourceRef: "goat-chat:4",
+      at: "2026-07-06T12:00:00.000Z",
+    };
+
+    await ingestGoatBrain(root, options, fakeGateway(response));
+    await ingestGoatBrain(root, options, fakeGateway(response));
+
+    const file = await findGoatBrainFile(root, "acme");
+    expect(file?.source.match(/^### ev-/gm)).toHaveLength(1);
+  });
+
+  it("returns partial ingest failures after preserving earlier successful writes", async () => {
+    await mkdir(path.join(root, "people"), { recursive: true });
+    await writeFile(path.join(root, "people/bad-entry.md"), "# Missing frontmatter", "utf8");
+    const gateway = fakeGateway(
+      JSON.stringify({
+        operations: [
+          {
+            action: "create",
+            id: "acme",
+            title: "Acme",
+            type: "company",
+            aliases: [],
+            body: "Acme is evaluating Goat Brain.",
+            timelineBody: "User mentioned Acme.",
+            relations: [],
+            tags: [],
+          },
+          {
+            action: "create",
+            id: "bad-entry",
+            title: "Bad Entry",
+            type: "person",
+            aliases: [],
+            body: "This should fail when the existing malformed file is loaded.",
+            timelineBody: "User mentioned a bad entry.",
+            relations: [],
+            tags: [],
+          },
+        ],
+      }),
+    );
+
+    const result = await ingestGoatBrain(
+      root,
+      { text: "Remember Acme and Bad Entry.", sourceRef: "goat-chat:5" },
+      gateway,
+    );
+
+    expect(result.applied).toEqual([expect.objectContaining({ id: "acme" })]);
+    expect(result.failed).toEqual([
+      expect.objectContaining({
+        id: "bad-entry",
+        error: "Legacy brain document is missing a valid frontmatter.id.",
+      }),
+    ]);
+    await expect(findGoatBrainFile(root, "acme")).resolves.toMatchObject({
+      relativePath: "companies/acme.md",
+    });
   });
 
   it("reports broken wiki links in doctor findings unless marked unresolved", async () => {

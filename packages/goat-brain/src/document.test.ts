@@ -5,6 +5,7 @@ import {
   serializeGoatBrainDocument,
 } from "./document";
 import type { GoatBrainDocument } from "./schema";
+import { goatBrainTimelineEntryFromParts } from "./timeline";
 import { validateGoatBrainDocument } from "./validate";
 
 describe("goat brain document", () => {
@@ -84,6 +85,27 @@ Original timeline body.
     ]);
   });
 
+  it("preserves timeline when adding a missing compiled truth section", () => {
+    const source = `# Acme
+
+## Timeline
+### 2026-01-01T00:00:00.000Z
+Original timeline body.
+`;
+
+    const updated = replaceGoatBrainCompiledTruth(source, "New truth.");
+    const parsed = parseGoatBrainDocument(updated);
+
+    expect(parsed.compiledTruth).toBe("New truth.");
+    expect(parsed.timeline).toEqual([
+      {
+        evidenceId: expect.stringMatching(/^ev-20260101-original-timeline-body-[a-f0-9]{8}$/),
+        at: "2026-01-01T00:00:00.000Z",
+        body: "Original timeline body.",
+      },
+    ]);
+  });
+
   it("rejects documents whose folder root does not match the type", () => {
     const source = serializeGoatBrainDocument({
       frontmatter: {
@@ -107,5 +129,20 @@ Original timeline body.
         expect.stringContaining('folder "people" maps to type "person", not "company"'),
       ]),
     });
+  });
+
+  it("normalizes and validates generated timeline timestamps", () => {
+    expect(
+      goatBrainTimelineEntryFromParts({
+        at: "2026-01-01T00:00:00Z",
+        summary: "Captured source information.",
+      }),
+    ).toMatchObject({ at: "2026-01-01T00:00:00.000Z" });
+    expect(() =>
+      goatBrainTimelineEntryFromParts({
+        at: "not-a-date",
+        summary: "Captured source information.",
+      }),
+    ).toThrow('Invalid timeline "at" value');
   });
 });

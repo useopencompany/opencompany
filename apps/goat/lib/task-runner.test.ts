@@ -27,6 +27,10 @@ describe("triggerGoatTaskRun", () => {
   });
 
   it("records a skipped dispatch when the runner is not configured", async () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "");
+    vi.stubEnv("RUNNER_PUBLIC_URL", "");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "");
+
     await triggerGoatTaskRun("goat_task_1");
 
     expect(telemetry.recordGoatTaskDispatch).toHaveBeenCalledWith(

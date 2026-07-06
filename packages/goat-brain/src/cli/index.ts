@@ -19,7 +19,7 @@ import {
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainRelationType,
-  normalizeGoatBrainFolder,
+  normalizeGoatBrainFolderForV1,
   normalizeGoatBrainId,
   nowIso,
   parseGoatBrainDocument,
@@ -351,7 +351,9 @@ export function helpResult(message: string, commandName?: string): CommandResult
 }
 
 export function validateCommandArgs(commandName: string, args: ReturnType<typeof parseArgs>) {
-  const allowed = COMMAND_FLAGS[commandName];
+  const allowed = Object.hasOwn(COMMAND_FLAGS, commandName)
+    ? COMMAND_FLAGS[commandName]
+    : undefined;
   if (!allowed) return null;
   const allowedSet = new Set([...GLOBAL_FLAGS, ...allowed]);
   const unknown = args.names().find((name) => !allowedSet.has(name));
@@ -381,7 +383,7 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
     );
   }
   const expectedFolder = goatBrainFolderForEntityType(typeInput);
-  const folder = normalizeGoatBrainFolder(ctx.args.get("folder") ?? expectedFolder);
+  const folder = normalizeGoatBrainFolderForV1(ctx.args.get("folder") ?? expectedFolder);
   if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
   const folderTypeError = goatBrainFolderTypeError(folder, typeInput);
   if (folderTypeError) {
@@ -470,6 +472,9 @@ async function get(ctx: CommandContext): Promise<CommandResult> {
   if (!loaded) return notFound(`No brain doc found with id "${id}".`);
   const { file, doc } = loaded;
   const section = ctx.args.get("section") ?? "all";
+  if (!["all", "frontmatter", "truth", "timeline"].includes(section)) {
+    return fail("`--section` must be all, frontmatter, truth, or timeline.");
+  }
   if (section === "frontmatter") {
     return ok(JSON.stringify(doc.frontmatter, null, 2), {
       id: file.id,
@@ -499,7 +504,7 @@ async function get(ctx: CommandContext): Promise<CommandResult> {
 
 async function list(ctx: CommandContext): Promise<CommandResult> {
   const folderInput = ctx.args.get("folder");
-  const folder = folderInput ? normalizeGoatBrainFolder(folderInput) : null;
+  const folder = folderInput ? normalizeGoatBrainFolderForV1(folderInput) : null;
   if (folderInput && !isValidGoatBrainFolder(folder ?? "")) {
     return fail("`--folder` must be a safe folder path.");
   }
@@ -601,7 +606,7 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
     {
       text,
       ...(ctx.args.get("folder")
-        ? { folder: normalizeGoatBrainFolder(ctx.args.get("folder") ?? "") }
+        ? { folder: normalizeGoatBrainFolderForV1(ctx.args.get("folder") ?? "") }
         : {}),
       ...(since ? { since } : {}),
       ...(ctx.args.number("hops") !== undefined
@@ -662,7 +667,9 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
   );
   const rendered = result.dryRun
     ? `Dry run planned ${result.plan.length} brain change(s).`
-    : `Ingested ${result.applied.length} brain change(s).`;
+    : result.failed.length > 0
+      ? `Ingested ${result.applied.length} brain change(s); ${result.failed.length} failed.`
+      : `Ingested ${result.applied.length} brain change(s).`;
   return {
     ...ok(rendered, result),
     usage,
@@ -672,10 +679,12 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
 
 export function ingestCommandExitCode(result: {
   applied: Array<{ id: string }>;
+  failed?: unknown[];
   health: {
     findings: Array<{ severity: "error" | "warn"; id: string }>;
   } | null;
 }): number {
+  if (result.failed && result.failed.length > 0) return 1;
   if (!result.health) return 0;
   const appliedIds = new Set(result.applied.map((change) => change.id));
   return result.health.findings.some(
@@ -859,7 +868,7 @@ async function merge(ctx: CommandContext): Promise<CommandResult> {
 
 async function move(ctx: CommandContext): Promise<CommandResult> {
   const id = ctx.args.positionals[0] ?? ctx.args.get("id");
-  const folder = normalizeGoatBrainFolder(ctx.args.get("folder") ?? "");
+  const folder = normalizeGoatBrainFolderForV1(ctx.args.get("folder") ?? "");
   if (!id) return fail("Provide a brain id.");
   if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
   const loaded = await loadDoc(ctx.root, id);
@@ -911,7 +920,7 @@ async function folder(ctx: CommandContext): Promise<CommandResult> {
     return ok(values.join("\n"), { folders: values });
   }
   if (subcommand === "create") {
-    const folderPath = normalizeGoatBrainFolder(ctx.args.get("path") ?? "");
+    const folderPath = normalizeGoatBrainFolderForV1(ctx.args.get("path") ?? "");
     if (!isValidGoatBrainFolder(folderPath)) return fail("`--path` must be a safe folder path.");
     if (!goatBrainEntityTypeForFolder(folderPath)) {
       return fail(
@@ -1132,7 +1141,7 @@ async function main(): Promise<void> {
 
   const args = parseArgs(argv.slice(1));
   const json = args.has("json");
-  const handler = COMMANDS[commandName];
+  const handler = Object.hasOwn(COMMANDS, commandName) ? COMMANDS[commandName] : undefined;
   if (!handler) {
     render(helpResult(`Unknown command "${commandName}".`), json);
     process.exit(1);

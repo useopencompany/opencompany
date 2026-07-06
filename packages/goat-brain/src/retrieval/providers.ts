@@ -12,15 +12,20 @@ export async function loadProviders(
 ): Promise<RetrievalProviders> {
   const apiKey = env.VERCEL_AI_GATEWAY_API_KEY;
   if (!apiKey) return {};
+  const baseUrl = env.GOAT_BRAIN_GATEWAY_BASE_URL;
+  const embeddingModel = env.GOAT_BRAIN_EMBEDDING_MODEL ?? "openai/text-embedding-3-small";
 
   const gateway = createGateway({
     apiKey,
-    ...(env.GOAT_BRAIN_GATEWAY_BASE_URL ? { baseUrl: env.GOAT_BRAIN_GATEWAY_BASE_URL } : {}),
-    ...(env.GOAT_BRAIN_EMBEDDING_MODEL ? { embeddingModel: env.GOAT_BRAIN_EMBEDDING_MODEL } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
+    embeddingModel,
     ...(env.GOAT_BRAIN_RETRIEVAL_MODEL ? { chatModel: env.GOAT_BRAIN_RETRIEVAL_MODEL } : {}),
     ...(onUsage ? { onUsage } : {}),
   });
-  return buildProviders(gateway);
+  return {
+    ...buildProviders(gateway),
+    embeddingCacheKey: `${baseUrl ?? "vercel-ai-gateway"}:${embeddingModel}`,
+  };
 }
 
 export function buildProviders(gateway: Gateway): RetrievalProviders {

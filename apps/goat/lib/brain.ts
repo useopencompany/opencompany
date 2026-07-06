@@ -26,7 +26,7 @@ import {
   isBuiltInGoatBrainEntityType,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
-  normalizeGoatBrainFolder,
+  normalizeGoatBrainFolderForV1,
   normalizeGoatBrainId,
   nowIso,
   parseGoatBrainDocument,
@@ -112,7 +112,7 @@ export async function createGoatBrainFolderForUser(
   _userWorkosId: string,
   folderPath: string,
 ): Promise<BrainMutationResult> {
-  const normalized = normalizeGoatBrainFolder(folderPath);
+  const normalized = normalizeGoatBrainFolderForV1(folderPath);
   if (!isValidGoatBrainFolder(normalized)) {
     return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
@@ -130,7 +130,7 @@ export async function createGoatBrainDocumentForUser(input: {
   folderPath: string;
   title?: string;
 }): Promise<BrainMutationResult> {
-  const folderPath = normalizeGoatBrainFolder(input.folderPath || "inbox");
+  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath || "inbox");
   if (!isValidGoatBrainFolder(folderPath)) {
     return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
@@ -196,7 +196,7 @@ export async function moveGoatBrainDocumentForUser(input: {
   documentId: string;
   folderPath: string;
 }): Promise<BrainMutationResult> {
-  const folderPath = normalizeGoatBrainFolder(input.folderPath);
+  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
   if (!isValidGoatBrainFolder(folderPath)) {
     return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }

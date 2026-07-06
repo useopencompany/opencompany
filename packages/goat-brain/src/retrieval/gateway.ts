@@ -16,6 +16,7 @@ export type GatewayConfig = {
   baseUrl?: string;
   embeddingModel?: string;
   chatModel?: string;
+  timeoutMs?: number;
   fetch?: FetchLike;
   onUsage?: (entry: GoatBrainUsageEntry) => void;
 };
@@ -29,6 +30,7 @@ export function createGateway(config: GatewayConfig): Gateway {
   const baseUrl = config.baseUrl ?? GATEWAY_BASE_URL;
   const embeddingModel = config.embeddingModel ?? "openai/text-embedding-3-small";
   const chatModel = config.chatModel ?? "openai/gpt-5.4-nano";
+  const timeoutMs = config.timeoutMs ?? 30_000;
   const doFetch = config.fetch ?? fetch;
   const headers = {
     "content-type": "application/json",
@@ -47,11 +49,17 @@ export function createGateway(config: GatewayConfig): Gateway {
   return {
     async embed(texts) {
       if (texts.length === 0) return [];
-      const response = await doFetch(`${baseUrl}/embeddings`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ model: embeddingModel, input: texts }),
-      });
+      const response = await fetchWithTimeout(
+        doFetch,
+        `${baseUrl}/embeddings`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ model: embeddingModel, input: texts }),
+        },
+        timeoutMs,
+        "embeddings",
+      );
       if (!response.ok) throw new Error(`Gateway embeddings failed: ${response.status}`);
       const json = (await response.json()) as {
         data?: Array<{ embedding: number[] }>;
@@ -62,15 +70,21 @@ export function createGateway(config: GatewayConfig): Gateway {
       return (json.data ?? []).map((item) => item.embedding);
     },
     async chat(prompt) {
-      const response = await doFetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model: chatModel,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0,
-        }),
-      });
+      const response = await fetchWithTimeout(
+        doFetch,
+        `${baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: chatModel,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0,
+          }),
+        },
+        timeoutMs,
+        "chat",
+      );
       if (!response.ok) throw new Error(`Gateway chat failed: ${response.status}`);
       const json = (await response.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
@@ -81,6 +95,27 @@ export function createGateway(config: GatewayConfig): Gateway {
       return json.choices?.[0]?.message?.content ?? "";
     },
   };
+}
+
+async function fetchWithTimeout(
+  doFetch: FetchLike,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  operation: GoatBrainUsageEntry["operation"],
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await doFetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(`Gateway ${operation} timed out after ${timeoutMs}ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function parseJsonStringArray(text: string): string[] {
@@ -123,4 +158,12 @@ function firstNumber(...values: unknown[]): number | null {
     if (typeof value === "number" && Number.isFinite(value)) return value;
   }
   return null;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : Boolean(
+        error && typeof error === "object" && (error as { name?: string }).name === "AbortError",
+      );
 }

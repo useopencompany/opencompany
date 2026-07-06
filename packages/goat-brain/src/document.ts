@@ -129,6 +129,11 @@ function replaceCompiledTruthInBody(body: string, compiledTruth: string): string
   const truthStart = sectionStart(normalized, GOAT_BRAIN_TRUTH_HEADING);
   if (truthStart === -1) {
     const title = readTitle(normalized) || "Untitled";
+    const timelineStart = sectionStart(normalized, GOAT_BRAIN_TIMELINE_HEADING);
+    const timelineTail =
+      timelineStart !== -1
+        ? normalized.slice(timelineStart).trimEnd()
+        : GOAT_BRAIN_TIMELINE_HEADING;
     return [
       `# ${title}`,
       "",
@@ -137,8 +142,7 @@ function replaceCompiledTruthInBody(body: string, compiledTruth: string): string
       "",
       GOAT_BRAIN_TIMELINE_SENTINEL,
       "",
-      GOAT_BRAIN_TIMELINE_HEADING,
-      "",
+      timelineTail,
     ].join("\n");
   }
 

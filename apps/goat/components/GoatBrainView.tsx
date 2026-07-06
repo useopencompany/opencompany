@@ -245,7 +245,8 @@ function GoatBrainEditor({
         setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
       }
       setNewDocumentTitle("");
-      if (result.path) router.replace(result.path);
+      if (document) router.replace(brainDocumentUrl(document));
+      else if (result.path) router.replace(brainFilePathUrl(result.path));
     });
   };
 
@@ -477,6 +478,7 @@ function BrainDocumentPanel({
       const result = await updateGoatBrainDocumentAction({
         documentId: selectedDocument.id,
         body: editorValue,
+        expectedContentHash: selectedDocument.contentHash,
       });
       if (!result.ok) {
         toast.error(result.message);
@@ -490,7 +492,8 @@ function BrainDocumentPanel({
         setEditorValue(document.body);
       }
       toast.success("Saved");
-      if (result.path) router.replace(result.path);
+      if (document) router.replace(brainDocumentUrl(document));
+      else if (result.path) router.replace(brainFilePathUrl(result.path));
     });
   };
 
@@ -512,7 +515,8 @@ function BrainDocumentPanel({
         onExpandFolder(document.folderPath);
         setEditorValue(document.body);
       }
-      if (result.path) router.replace(result.path);
+      if (document) router.replace(brainDocumentUrl(document));
+      else if (result.path) router.replace(brainFilePathUrl(result.path));
     });
   };
 
@@ -973,6 +977,16 @@ function resolveInitialDocument(
 
 function brainDocumentUrl(document: GoatBrainDocumentView) {
   return `/brain/${folderUrlSegments(document.folderPath)}/${encodeURIComponent(document.brainId)}`;
+}
+
+function brainFilePathUrl(path: string) {
+  if (path.startsWith("/brain/")) return path;
+  const withoutExtension = path.replace(/\.md$/i, "");
+  return `/brain/${withoutExtension
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`;
 }
 
 function brainDocumentTreePath(document: GoatBrainDocumentView) {

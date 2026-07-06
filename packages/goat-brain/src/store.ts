@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -51,8 +52,14 @@ export async function findGoatBrainFile(
   root: string,
   id: string,
 ): Promise<StoredGoatBrainFile | null> {
-  const files = await listGoatBrainFiles(root);
-  return files.find((file) => file.id === id) ?? null;
+  const relativePaths = (await walkMarkdown(root, "")).sort((a, b) => a.localeCompare(b));
+  const relativePath = relativePaths.find(
+    (filePath) => goatBrainIdFromRelativePath(filePath) === id,
+  );
+  if (!relativePath) return null;
+  const payload = await readFile(path.join(root, relativePath), "utf8");
+  const source = await sourceFromSidecarOrPayload(root, relativePath, payload);
+  return { relativePath, id, source };
 }
 
 export async function loadGoatBrainDocument(
@@ -76,7 +83,7 @@ export async function writeGoatBrainDocumentText(
 ): Promise<void> {
   const target = path.join(root, relativePath);
   await mkdir(path.dirname(target), { recursive: true });
-  const tmp = `${target}.tmp-${process.pid}`;
+  const tmp = `${target}.tmp-${randomUUID()}`;
   await writeFile(tmp, text, "utf8");
   await rename(tmp, target);
 }

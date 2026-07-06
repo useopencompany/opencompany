@@ -155,7 +155,7 @@ export function goatBrainFolderForEntityType(type: string | undefined): string {
 export function goatBrainEntityTypeForFolder(folder: string): GoatBrainEntityType | null {
   const rootFolder = normalizeGoatBrainFolder(folder).split("/")[0] ?? "";
   for (const entry of GOAT_DEFAULT_SCHEMA_PACK.types) {
-    if (entry.pathPrefixes[0] === rootFolder) return entry.name;
+    if (entry.pathPrefixes.includes(rootFolder)) return entry.name;
   }
   return null;
 }

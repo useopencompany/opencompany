@@ -19,8 +19,11 @@ export function parseGoatBrainUsageReport(stdout: string): {
   const entries: GoatBrainUsageEntry[] = [];
   const kept: string[] = [];
   for (const line of stdout.split("\n")) {
-    if (line.startsWith(GOAT_BRAIN_USAGE_MARKER)) {
-      entries.push(...parseEntries(line.slice(GOAT_BRAIN_USAGE_MARKER.length).trim()));
+    const markerIndex = line.indexOf(GOAT_BRAIN_USAGE_MARKER);
+    if (markerIndex !== -1) {
+      entries.push(
+        ...parseEntries(line.slice(markerIndex + GOAT_BRAIN_USAGE_MARKER.length).trim()),
+      );
       continue;
     }
     kept.push(line);
@@ -40,7 +43,7 @@ function parseEntries(payload: string): GoatBrainUsageEntry[] {
   }
 }
 
-function isUsageEntry(value: unknown): value is GoatBrainUsageEntry {
+export function isUsageEntry(value: unknown): value is GoatBrainUsageEntry {
   if (!value || typeof value !== "object") return false;
   const entry = value as Record<string, unknown>;
   return (

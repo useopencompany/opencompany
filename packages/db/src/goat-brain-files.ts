@@ -20,6 +20,7 @@ import {
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainStatus,
+  normalizeGoatBrainFolderForV1,
   type GoatBrainDocument as ParsedGoatBrainDocument,
   parseGoatBrainDocument,
   parseGoatBrainSidecar,
@@ -156,10 +157,6 @@ export function deriveGoatBrainFileProjection(input: {
 }): GoatBrainFileProjection {
   const normalizedPath = normalizeBrainFilePath(input.path);
   const source = sourceFromSidecarOrPayloadSync(normalizedPath, input.content);
-  const sizeBytes = Buffer.byteLength(source, "utf8");
-  if (sizeBytes > MAX_GOAT_BRAIN_FILE_BYTES) {
-    throw new Error(`Brain file "${normalizedPath}" exceeds ${MAX_GOAT_BRAIN_FILE_BYTES} bytes.`);
-  }
 
   const pathBrainId = goatBrainIdFromRelativePath(normalizedPath);
   const pathFolder = goatBrainFolderFromRelativePath(normalizedPath);
@@ -172,16 +169,17 @@ export function deriveGoatBrainFileProjection(input: {
     parsed.frontmatter.id && isValidGoatBrainId(parsed.frontmatter.id)
       ? parsed.frontmatter.id
       : pathBrainId;
-  const folderPath =
+  const rawFolderPath =
     parsed.frontmatter.folder && isValidGoatBrainFolder(parsed.frontmatter.folder)
       ? parsed.frontmatter.folder
       : pathFolder;
+  const folderPath = normalizeGoatBrainFolderForV1(rawFolderPath);
   if (brainId !== pathBrainId) {
     throw new Error(`frontmatter.id "${brainId}" does not match path id "${pathBrainId}".`);
   }
   if (folderPath !== pathFolder) {
     throw new Error(
-      `frontmatter.folder "${folderPath}" does not match path folder "${pathFolder}".`,
+      `frontmatter.folder "${rawFolderPath}" does not match path folder "${pathFolder}".`,
     );
   }
   const entityType =
@@ -195,6 +193,19 @@ export function deriveGoatBrainFileProjection(input: {
   const validation = validateGoatBrainDocument(parsed, brainId, source);
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
   if (!entityType) throw new Error("frontmatter.type must be a built-in brain entity type.");
+  const content = canonicalGoatBrainContent({
+    parsed,
+    brainId,
+    folderPath,
+    title,
+    entityType,
+    status,
+    source,
+  });
+  const sizeBytes = Buffer.byteLength(content, "utf8");
+  if (sizeBytes > MAX_GOAT_BRAIN_FILE_BYTES) {
+    throw new Error(`Brain file "${normalizedPath}" exceeds ${MAX_GOAT_BRAIN_FILE_BYTES} bytes.`);
+  }
 
   return {
     path: normalizedPath,
@@ -202,10 +213,10 @@ export function deriveGoatBrainFileProjection(input: {
     folderPath,
     kind: GOAT_BRAIN_FILE_KIND,
     mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
-    content: source,
+    content,
     body: parsed.compiledTruth,
     timeline: parsed.timeline,
-    contentHash: hashGoatBrainContent(source),
+    contentHash: hashGoatBrainContent(content),
     sizeBytes,
     title,
     entityType,
@@ -215,6 +226,46 @@ export function deriveGoatBrainFileProjection(input: {
     aliases: parsed.frontmatter.aliases ?? [],
     tags: parsed.frontmatter.tags ?? [],
   };
+}
+
+function canonicalGoatBrainContent(input: {
+  parsed: ReturnType<typeof parseGoatBrainDocument>;
+  brainId: string;
+  folderPath: string;
+  title: string;
+  entityType: GoatBrainEntityType;
+  status: GoatBrainStatus;
+  source: string;
+}): string {
+  const fm = input.parsed.frontmatter;
+  if (
+    fm.id === input.brainId &&
+    fm.folder === input.folderPath &&
+    fm.type === input.entityType &&
+    fm.status === input.status &&
+    fm.title === input.title
+  ) {
+    return input.source;
+  }
+  return serializeGoatBrainDocument({
+    title: input.title,
+    compiledTruth: input.parsed.compiledTruth,
+    timeline: input.parsed.timeline,
+    frontmatter: {
+      id: input.brainId,
+      folder: input.folderPath,
+      type: input.entityType,
+      status: input.status,
+      title: input.title,
+      createdAt: fm.createdAt ?? new Date().toISOString(),
+      updatedAt: fm.updatedAt ?? new Date().toISOString(),
+      relations: fm.relations ?? [],
+      ...(fm.aliases ? { aliases: fm.aliases } : {}),
+      ...(fm.tags ? { tags: fm.tags } : {}),
+      ...(fm.sources ? { sources: fm.sources } : {}),
+      ...(fm.mergedInto ? { mergedInto: fm.mergedInto } : {}),
+    },
+  });
 }
 
 export async function listGoatBrainFilesForUser(
@@ -760,7 +811,10 @@ function normalizeBrainFilePath(value: string): string {
   if (!normalized.endsWith(".md") || !isSafeGoatBrainRelativePath(normalized)) {
     throw new Error(`Invalid brain file path "${value}".`);
   }
-  return normalized;
+  const brainId = goatBrainIdFromRelativePath(normalized);
+  const folder = goatBrainFolderFromRelativePath(normalized);
+  if (!brainId || !folder) throw new Error(`Invalid brain file path "${value}".`);
+  return goatBrainFilePathFor(normalizeGoatBrainFolderForV1(folder), brainId);
 }
 
 async function walkMarkdown(root: string, relDir: string): Promise<string[]> {
