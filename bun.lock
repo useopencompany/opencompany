@@ -257,6 +257,7 @@
         "@neondatabase/serverless": "^1.1.0",
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/crypto": "workspace:*",
+        "@opencompany/goat-brain": "workspace:*",
         "drizzle-orm": "^0.45.2",
         "pg": "^8.13.1",
       },

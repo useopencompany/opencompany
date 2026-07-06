@@ -38,14 +38,20 @@ import {
   type GoatChatSessionView,
   type GoatChatSummaryView,
   type GoatChatUiMessage,
+  type GoatStoredChatMessage,
   type GoatTaskCardMetadata,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   type StartTaskToolOutput,
   textFromGoatChatUiMessage,
+  toGoatChatUiMessage,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
-import { createGoatCollections, type GoatTaskRow } from "@/lib/task-collections";
+import {
+  createGoatCollections,
+  type GoatChatMessageRow,
+  type GoatTaskRow,
+} from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import { archiveGoatTaskAction } from "@/lib/tasks";
 
@@ -389,6 +395,10 @@ export function GoatSurface({
         </div>
       )}
 
+      {mode === "chat" && chatSessionId ? (
+        <LiveChatMessages sessionId={chatSessionId} setMessages={setMessages} />
+      ) : null}
+
       <form
         ref={formRef}
         onSubmit={onSubmit}
@@ -429,6 +439,50 @@ export function GoatSurface({
       </form>
     </div>
   );
+}
+
+function LiveChatMessages({
+  sessionId,
+  setMessages,
+}: {
+  sessionId: string;
+  setMessages: React.Dispatch<React.SetStateAction<GoatChatUiMessage[]>>;
+}) {
+  const hydrated = useHydrated();
+  if (!hydrated) return null;
+  return <LiveChatMessageSubscriber sessionId={sessionId} setMessages={setMessages} />;
+}
+
+function LiveChatMessageSubscriber({
+  sessionId,
+  setMessages,
+}: {
+  sessionId: string;
+  setMessages: React.Dispatch<React.SetStateAction<GoatChatUiMessage[]>>;
+}) {
+  const collections = useMemo(() => createGoatCollections(), []);
+  const messagesCollection = useMemo(() => collections.chatMessages(sessionId), [
+    collections,
+    sessionId,
+  ]);
+  const { data: rows } = useLiveQuery((q) => q.from({ message: messagesCollection }));
+  const liveMessages = useMemo(() => {
+    return ((rows ?? []) as GoatChatMessageRow[])
+      .toSorted((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .map(chatMessageRowToUiMessage);
+  }, [rows]);
+
+  useEffect(() => {
+    if (liveMessages.length === 0) return;
+    setMessages((current) => {
+      const currentIds = new Set(current.map((message) => message.id));
+      const missingMessages = liveMessages.filter((message) => !currentIds.has(message.id));
+      if (missingMessages.length === 0) return current;
+      return [...current, ...missingMessages];
+    });
+  }, [liveMessages, setMessages]);
+
+  return null;
 }
 
 function ChatHistoryList({
@@ -559,6 +613,22 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function chatMessageRowToUiMessage(row: GoatChatMessageRow): GoatChatUiMessage {
+  return toGoatChatUiMessage({
+    id: row.id,
+    sessionId: row.session_id,
+    role: row.role,
+    content: row.content,
+    taskId: row.task_id,
+    debugTrace: row.debug_trace as GoatStoredChatMessage["debugTrace"],
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    taskDisplayId: null,
+    taskName: null,
+    taskPrompt: null,
+  });
 }
 
 function ResultRow({
