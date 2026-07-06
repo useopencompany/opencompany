@@ -42,6 +42,7 @@ const harnessSpec: GoatHarnessSpec = {
   systemPrompt: "Run the task.",
   initialUserMessage: "Research Marseille",
   tools: ["exa_search"],
+  skills: [],
   maxModelSteps: 8,
   resultMode: "assistant_final",
 };
