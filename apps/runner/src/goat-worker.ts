@@ -179,6 +179,7 @@ export type GoatTaskStore = {
   }): Promise<boolean>;
   complete(input: {
     id: string;
+    displayId: string;
     leaseId: string;
     leaseOwner: string;
     now: Date;
@@ -188,6 +189,7 @@ export type GoatTaskStore = {
   }): Promise<boolean>;
   fail(input: {
     id: string;
+    displayId: string;
     leaseId: string;
     leaseOwner: string;
     now: Date;
@@ -605,44 +607,163 @@ export function createDbGoatTaskStore(): GoatTaskStore {
     },
 
     async complete(input) {
+      const notificationContent = goatTaskSucceededChatNotification({
+        displayId: input.displayId,
+        result: input.result,
+      });
       const result = await getDb().execute(sql`
-        UPDATE goat.tasks
-        SET status = 'succeeded',
-            stage = 'completed',
-            model = ${input.harnessSpec.model},
-            result = ${input.result},
-            error = NULL,
-            harness_spec = ${JSON.stringify(input.harnessSpec)}::jsonb,
-            debug_trace = ${JSON.stringify(input.debugTrace)}::jsonb,
-            lease_id = NULL,
-            lease_owner = NULL,
-            lease_expires_at = NULL,
-            updated_at = ${input.now}
-        WHERE id = ${input.id}
-          AND lease_id = ${input.leaseId}
-          AND lease_owner = ${input.leaseOwner}
-          AND status = 'running'
-        RETURNING id
+        WITH completed_task AS (
+          UPDATE goat.tasks
+          SET status = 'succeeded',
+              stage = 'completed',
+              model = ${input.harnessSpec.model},
+              result = ${input.result},
+              error = NULL,
+              harness_spec = ${JSON.stringify(input.harnessSpec)}::jsonb,
+              debug_trace = ${JSON.stringify(input.debugTrace)}::jsonb,
+              lease_id = NULL,
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              updated_at = ${input.now}
+          WHERE id = ${input.id}
+            AND lease_id = ${input.leaseId}
+            AND lease_owner = ${input.leaseOwner}
+            AND status = 'running'
+          RETURNING id, display_id, name
+        ),
+        origin_chat AS (
+          SELECT message.session_id
+          FROM goat.chat_messages AS message
+          INNER JOIN goat.chat_sessions AS session ON session.id = message.session_id
+          INNER JOIN completed_task AS task ON task.id = message.task_id
+          WHERE session.closed_at IS NULL
+          ORDER BY message.created_at ASC
+          LIMIT 1
+        ),
+        inserted_notification AS (
+          INSERT INTO goat.chat_messages (
+            id,
+            session_id,
+            role,
+            content,
+            debug_trace,
+            created_at,
+            updated_at
+          )
+          SELECT
+            ${newGoatChatMessageId()},
+            origin.session_id,
+            'assistant',
+            ${notificationContent},
+            jsonb_build_object(
+              'schemaVersion', 'goat.chat.debug.v1',
+              'taskNotification', jsonb_build_object(
+                'taskId', task.id,
+                'taskDisplayId', task.display_id,
+                'taskName', task.name,
+                'status', 'succeeded'
+              )
+            ),
+            ${input.now},
+            ${input.now}
+          FROM completed_task AS task
+          CROSS JOIN origin_chat AS origin
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM goat.chat_messages AS existing
+            WHERE existing.session_id = origin.session_id
+              AND existing.debug_trace->'taskNotification'->>'taskId' = task.id
+          )
+          RETURNING session_id
+        ),
+        touched_chat AS (
+          UPDATE goat.chat_sessions AS session
+          SET updated_at = ${input.now}
+          FROM inserted_notification AS notification
+          WHERE session.id = notification.session_id
+          RETURNING session.id
+        )
+        SELECT id FROM completed_task
       `);
       return rowsFromExecute<{ id: string }>(result).length > 0;
     },
 
     async fail(input) {
+      const notificationContent = goatTaskFailedChatNotification({
+        displayId: input.displayId,
+        error: input.error,
+      });
       const result = await getDb().execute(sql`
-        UPDATE goat.tasks
-        SET status = 'failed',
-            stage = 'failed',
-            error = ${input.error},
-            debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
-            lease_id = NULL,
-            lease_owner = NULL,
-            lease_expires_at = NULL,
-            updated_at = ${input.now}
-        WHERE id = ${input.id}
-          AND lease_id = ${input.leaseId}
-          AND lease_owner = ${input.leaseOwner}
-          AND status = 'running'
-        RETURNING id
+        WITH failed_task AS (
+          UPDATE goat.tasks
+          SET status = 'failed',
+              stage = 'failed',
+              error = ${input.error},
+              debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
+              lease_id = NULL,
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              updated_at = ${input.now}
+          WHERE id = ${input.id}
+            AND lease_id = ${input.leaseId}
+            AND lease_owner = ${input.leaseOwner}
+            AND status = 'running'
+          RETURNING id, display_id, name
+        ),
+        origin_chat AS (
+          SELECT message.session_id
+          FROM goat.chat_messages AS message
+          INNER JOIN goat.chat_sessions AS session ON session.id = message.session_id
+          INNER JOIN failed_task AS task ON task.id = message.task_id
+          WHERE session.closed_at IS NULL
+          ORDER BY message.created_at ASC
+          LIMIT 1
+        ),
+        inserted_notification AS (
+          INSERT INTO goat.chat_messages (
+            id,
+            session_id,
+            role,
+            content,
+            debug_trace,
+            created_at,
+            updated_at
+          )
+          SELECT
+            ${newGoatChatMessageId()},
+            origin.session_id,
+            'assistant',
+            ${notificationContent},
+            jsonb_build_object(
+              'schemaVersion', 'goat.chat.debug.v1',
+              'taskNotification', jsonb_build_object(
+                'taskId', task.id,
+                'taskDisplayId', task.display_id,
+                'taskName', task.name,
+                'status', 'failed'
+              ),
+              'error', ${input.error}
+            ),
+            ${input.now},
+            ${input.now}
+          FROM failed_task AS task
+          CROSS JOIN origin_chat AS origin
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM goat.chat_messages AS existing
+            WHERE existing.session_id = origin.session_id
+              AND existing.debug_trace->'taskNotification'->>'taskId' = task.id
+          )
+          RETURNING session_id
+        ),
+        touched_chat AS (
+          UPDATE goat.chat_sessions AS session
+          SET updated_at = ${input.now}
+          FROM inserted_notification AS notification
+          WHERE session.id = notification.session_id
+          RETURNING session.id
+        )
+        SELECT id FROM failed_task
       `);
       return rowsFromExecute<{ id: string }>(result).length > 0;
     },
@@ -1093,6 +1214,7 @@ export async function runClaimedGoatTask(input: {
         withGoatSpan(GOAT_SPANS.taskComplete, finalAttributes, () =>
           store.complete({
             id: input.task.id,
+            displayId: input.task.displayId,
             leaseId,
             leaseOwner,
             now: new Date(),
@@ -1126,6 +1248,7 @@ export async function runClaimedGoatTask(input: {
         withGoatSpan(GOAT_SPANS.taskFail, baseAttributes, () =>
           store.fail({
             id: input.task.id,
+            displayId: input.task.displayId,
             leaseId,
             leaseOwner,
             now: new Date(),
@@ -1290,6 +1413,24 @@ function newGoatTaskLeaseId() {
 
 function newGoatTaskMessageId() {
   return `goat_task_msg_${randomUUID()}`;
+}
+
+function newGoatChatMessageId() {
+  return `goat_chat_msg_${randomUUID()}`;
+}
+
+function goatTaskSucceededChatNotification(input: { displayId: string; result: string }) {
+  const taskLink = `[${input.displayId}](/tasks/${encodeURIComponent(input.displayId)})`;
+  const trimmed = input.result.trim();
+  if (!trimmed) return `Task ${taskLink} finished.`;
+  return `Task ${taskLink} finished.\n\n${trimmed}`;
+}
+
+function goatTaskFailedChatNotification(input: { displayId: string; error: string }) {
+  const taskLink = `[${input.displayId}](/tasks/${encodeURIComponent(input.displayId)})`;
+  const trimmed = input.error.trim();
+  if (!trimmed) return `Task ${taskLink} failed.`;
+  return `Task ${taskLink} failed.\n\n${trimmed}`;
 }
 
 function goatTaskLeaseExpiresAt(now: Date, ttlMs: number = GOAT_TASK_LEASE_TTL_MS) {

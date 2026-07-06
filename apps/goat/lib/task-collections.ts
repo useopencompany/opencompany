@@ -36,6 +36,17 @@ export type GoatTaskRow = {
   updated_at: string;
 };
 
+export type GoatChatMessageRow = {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant";
+  content: string;
+  task_id: string | null;
+  debug_trace: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type GoatTaskMessageRow = {
   id: string;
   task_id: string;
@@ -236,7 +247,20 @@ function createTaskRunCollections(taskId: string) {
   };
 }
 
+function createChatMessageCollection(sessionId: string) {
+  return createGoatElectricCollection<GoatChatMessageRow>({
+    id: `goat:chat_messages:${sessionId}`,
+    table: "goat.chat_messages",
+    params: { session_id: sessionId },
+    getKey: (row) => row.id,
+  });
+}
+
 const taskRunCollectionsByTaskId = new Map<string, ReturnType<typeof createTaskRunCollections>>();
+const chatMessageCollectionsBySessionId = new Map<
+  string,
+  ReturnType<typeof createChatMessageCollection>
+>();
 
 function getTaskRunCollections(taskId: string) {
   const cached = taskRunCollectionsByTaskId.get(taskId);
@@ -245,6 +269,15 @@ function getTaskRunCollections(taskId: string) {
   const collections = createTaskRunCollections(taskId);
   taskRunCollectionsByTaskId.set(taskId, collections);
   return collections;
+}
+
+function getChatMessageCollection(sessionId: string) {
+  const cached = chatMessageCollectionsBySessionId.get(sessionId);
+  if (cached) return cached;
+
+  const collection = createChatMessageCollection(sessionId);
+  chatMessageCollectionsBySessionId.set(sessionId, collection);
+  return collection;
 }
 
 function buildGoatCollections() {
@@ -281,6 +314,7 @@ function buildGoatCollections() {
   return {
     tasks,
     taskRunCollections: getTaskRunCollections,
+    chatMessages: getChatMessageCollection,
     integrations,
     brainDocuments,
     brainTimelineEntries,
