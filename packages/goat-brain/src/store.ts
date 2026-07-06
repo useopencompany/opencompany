@@ -9,6 +9,7 @@ import {
   goatBrainPayloadRelativePath,
   goatBrainSidecarRelativePath,
   parseGoatBrainSidecar,
+  recoverLegacyGoatBrainEntryFromSidecar,
   serializeGoatBrainPayload,
   serializeGoatBrainSidecar,
   serializeLegacyGoatBrainEntry,
@@ -155,13 +156,20 @@ async function sourceFromSidecarOrPayload(root: string, relativePath: string, pa
     if (isNotFound(error)) return payload;
     throw error;
   }
+  const sidecar = parseGoatBrainSidecar(sidecarSource);
   const validation = validateGoatBrainSidecar({
-    sidecar: parseGoatBrainSidecar(sidecarSource),
+    sidecar,
     payloadContent: payload,
     payloadRelativePath: relativePath,
   });
-  if (!validation.ok) return payload;
-  return serializeLegacyGoatBrainEntry(validation.entry);
+  if (validation.ok) return serializeLegacyGoatBrainEntry(validation.entry);
+  return (
+    recoverLegacyGoatBrainEntryFromSidecar({
+      sidecar,
+      payloadContent: payload,
+      payloadRelativePath: relativePath,
+    }) ?? payload
+  );
 }
 
 export function entryFromWritableGoatBrainDocument(doc: GoatBrainDocument): GoatBrainEntry {

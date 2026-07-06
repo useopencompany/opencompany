@@ -21,6 +21,7 @@ import {
   serializeGoatBrainDocument,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
+import { getDb } from "./db";
 import type { SandboxHandle } from "./sandbox";
 
 export const GOAT_BRAIN_ROOT = "/home/user/goat-brain";
@@ -105,12 +106,15 @@ export async function createGoatBrainMarkdownReportForTask(input: {
   if (Buffer.byteLength(content, "utf8") > MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
     throw new Error("Goat research report is too large to save to the Brain.");
   }
-  const row = await upsertGoatBrainFileForUser({
-    userWorkosId: input.userWorkosId,
-    path: goatBrainFilePathFor(folderPath, brainId),
-    content,
-    id: `goat_brain_file_${randomUUID()}`,
-  });
+  const row = await upsertGoatBrainFileForUser(
+    {
+      userWorkosId: input.userWorkosId,
+      path: goatBrainFilePathFor(folderPath, brainId),
+      content,
+      id: `goat_brain_file_${randomUUID()}`,
+    },
+    { db: getDb() },
+  );
 
   return {
     type: "brain_markdown_report",
@@ -128,7 +132,10 @@ export async function materializeGoatBrainForTask(input: {
   sandbox: SandboxHandle;
   userWorkosId: string;
 }): Promise<MaterializedGoatBrainSnapshot> {
-  const rows = await listGoatBrainFilesForUser(input.userWorkosId, { includeInvalid: true });
+  const rows = await listGoatBrainFilesForUser(input.userWorkosId, {
+    includeInvalid: true,
+    db: getDb(),
+  });
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(GOAT_BRAIN_ROOT)} && mkdir -p ${shellQuote(GOAT_BRAIN_ROOT)}`,
     { timeoutMs: 30_000 },
@@ -159,6 +166,7 @@ export async function materializeGoatBrainToLocalRoot(input: {
     userWorkosId: input.userWorkosId,
     root: input.root,
     cliSource: getGoatBrainCliSource(),
+    db: getDb(),
   });
   return {
     files: files.map(materializedFileFromDb),
@@ -225,6 +233,7 @@ async function syncFiles(input: {
     files: input.files,
     baseSnapshot: input.baseSnapshot.files.map(dbMaterializedFileFromRunner),
     taskId: input.taskId ?? null,
+    db: getDb(),
   });
   if (result.conflicts.length > 0) {
     throw new Error(
@@ -273,7 +282,10 @@ function dbMaterializedFileFromRunner(
 
 async function nextAvailableBrainId(userWorkosId: string, title: string): Promise<string> {
   const base = normalizeGoatBrainId(title) || "research-report";
-  const rows = await listGoatBrainFilesForUser(userWorkosId, { includeInvalid: true });
+  const rows = await listGoatBrainFilesForUser(userWorkosId, {
+    includeInvalid: true,
+    db: getDb(),
+  });
   const used = new Set(rows.map((row) => row.brainId));
   if (!used.has(base)) return base;
   for (let index = 2; index < 1000; index++) {

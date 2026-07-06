@@ -1,6 +1,7 @@
 import {
   GOAT_BRAIN_ENTITY_TYPES,
   type GoatBrainEntityType,
+  isValidGoatBrainEvidenceKind,
   normalizeGoatBrainEntityType,
   normalizeGoatBrainFolder,
 } from "./schema";
@@ -16,9 +17,6 @@ export function normalizeBuiltInGoatBrainEntityType(
 ): GoatBrainEntityType | null {
   if (!value) return null;
   const normalized = normalizeGoatBrainEntityType(value);
-  if (normalized === "source") return "reference";
-  if (normalized === "doc") return "document";
-  if (normalized === "insight" || normalized === "idea" || normalized === "theme") return "concept";
   return isBuiltInGoatBrainEntityType(normalized) ? normalized : null;
 }
 
@@ -77,13 +75,6 @@ export const GOAT_DEFAULT_SCHEMA_PACK: GoatBrainSchemaPack = {
       expertRouting: false,
     },
     {
-      name: "conversation",
-      primitive: "temporal",
-      pathPrefixes: ["conversations"],
-      extractable: true,
-      expertRouting: false,
-    },
-    {
       name: "research",
       primitive: "artifact",
       pathPrefixes: ["research"],
@@ -91,30 +82,16 @@ export const GOAT_DEFAULT_SCHEMA_PACK: GoatBrainSchemaPack = {
       expertRouting: false,
     },
     {
-      name: "document",
-      primitive: "artifact",
-      pathPrefixes: ["docs"],
-      extractable: true,
-      expertRouting: false,
-    },
-    {
       name: "concept",
       primitive: "concept",
-      pathPrefixes: ["concepts", "ideas", "insights"],
+      pathPrefixes: ["concepts"],
       extractable: true,
       expertRouting: true,
     },
     {
-      name: "reference",
+      name: "evidence",
       primitive: "artifact",
-      pathPrefixes: ["references", "sources"],
-      extractable: true,
-      expertRouting: false,
-    },
-    {
-      name: "daily",
-      primitive: "temporal",
-      pathPrefixes: ["daily"],
+      pathPrefixes: ["evidence"],
       extractable: true,
       expertRouting: false,
     },
@@ -135,6 +112,8 @@ export const GOAT_DEFAULT_SCHEMA_PACK: GoatBrainSchemaPack = {
     "invested_in",
     "advises",
     "attended",
+    "evidenced_by",
+    "supports",
     "owns",
     "depends_on",
     "decided_by",
@@ -146,6 +125,7 @@ export const GOAT_DEFAULT_SCHEMA_PACK: GoatBrainSchemaPack = {
 
 export function goatBrainFolderForEntityType(type: string | undefined): string {
   const normalized = normalizeBuiltInGoatBrainEntityType(type);
+  if (normalized === "evidence") return "evidence/chat";
   return (
     GOAT_DEFAULT_SCHEMA_PACK.types.find((entry) => entry.name === normalized)?.pathPrefixes[0] ??
     "inbox"
@@ -169,7 +149,8 @@ export function goatBrainFolderMatchesEntityType(folder: string, type: string): 
 export function goatBrainFolderTypeError(folder: string, type: string): string | null {
   const normalized = normalizeBuiltInGoatBrainEntityType(type);
   if (!normalized) return `type "${type}" is not a built-in brain entity type.`;
-  const actual = goatBrainEntityTypeForFolder(folder);
+  const normalizedFolder = normalizeGoatBrainFolder(folder);
+  const actual = goatBrainEntityTypeForFolder(normalizedFolder);
   if (!actual) {
     return `folder "${folder}" must be under a known type folder: ${GOAT_DEFAULT_SCHEMA_PACK.types
       .map((entry) => entry.pathPrefixes[0])
@@ -177,6 +158,12 @@ export function goatBrainFolderTypeError(folder: string, type: string): string |
   }
   if (actual !== normalized) {
     return `folder "${folder}" maps to type "${actual}", not "${normalized}".`;
+  }
+  if (normalized === "evidence") {
+    const subtype = normalizedFolder.split("/")[1];
+    if (!isValidGoatBrainEvidenceKind(subtype)) {
+      return 'evidence records must be under "evidence/chat", "evidence/email", "evidence/correction", or "evidence/document".';
+    }
   }
   return null;
 }
@@ -190,9 +177,5 @@ export function inferGoatBrainEntityTypeFromFolder(folder: string): GoatBrainEnt
 }
 
 export function normalizeGoatBrainFolderForV1(folder: string): string {
-  const normalized = normalizeGoatBrainFolder(folder);
-  const [root, ...rest] = normalized.split("/");
-  const replacement =
-    root === "ideas" || root === "insights" ? "concepts" : root === "sources" ? "references" : root;
-  return [replacement, ...rest].filter(Boolean).join("/");
+  return normalizeGoatBrainFolder(folder);
 }

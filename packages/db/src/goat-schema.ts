@@ -71,13 +71,11 @@ export type GoatBrainEntityType =
   | "project"
   | "decision"
   | "meeting"
-  | "conversation"
   | "research"
-  | "document"
   | "concept"
-  | "reference"
-  | "daily"
+  | "evidence"
   | "note";
+export type GoatBrainEvidenceKind = "chat" | "email" | "correction" | "document";
 export type GoatBrainRelation = {
   type: string;
   to: string;
@@ -223,6 +221,7 @@ export const goatBrainDocuments = goat.table(
     relations: jsonb("relations").$type<GoatBrainRelation[]>().notNull().default(sql`'[]'::jsonb`),
     sources: jsonb("sources").$type<GoatBrainSource[]>().notNull().default(sql`'[]'::jsonb`),
     entityType: text("entity_type").$type<GoatBrainEntityType>().notNull(),
+    evidenceKind: text("evidence_kind").$type<GoatBrainEvidenceKind>(),
     status: text("status").$type<GoatBrainStatus>().notNull().default("draft"),
     aliases: jsonb("aliases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     contentHash: text("content_hash").notNull(),
@@ -259,7 +258,19 @@ export const goatBrainDocuments = goat.table(
     ),
     entityTypeCheck: check(
       "goat_brain_documents_entity_type_check",
-      sql`${table.entityType} IN ('person', 'company', 'project', 'decision', 'meeting', 'conversation', 'research', 'document', 'concept', 'reference', 'daily', 'note')`,
+      sql`${table.entityType} IN ('person', 'company', 'project', 'decision', 'meeting', 'research', 'concept', 'evidence', 'note')`,
+    ),
+    evidenceKindCheck: check(
+      "goat_brain_documents_evidence_kind_check",
+      sql`(
+        (${table.entityType} = 'evidence' AND (
+          (${table.evidenceKind} = 'chat' AND (${table.folderPath} = 'evidence/chat' OR ${table.folderPath} LIKE 'evidence/chat/%')) OR
+          (${table.evidenceKind} = 'email' AND (${table.folderPath} = 'evidence/email' OR ${table.folderPath} LIKE 'evidence/email/%')) OR
+          (${table.evidenceKind} = 'correction' AND (${table.folderPath} = 'evidence/correction' OR ${table.folderPath} LIKE 'evidence/correction/%')) OR
+          (${table.evidenceKind} = 'document' AND (${table.folderPath} = 'evidence/document' OR ${table.folderPath} LIKE 'evidence/document/%'))
+        )) OR
+        (${table.entityType} <> 'evidence' AND ${table.evidenceKind} IS NULL)
+      )`,
     ),
     folderEntityTypeCheck: check(
       "goat_brain_documents_folder_entity_type_check",
@@ -269,12 +280,14 @@ export const goatBrainDocuments = goat.table(
         (${table.entityType} = 'project' AND (${table.folderPath} = 'projects' OR ${table.folderPath} LIKE 'projects/%')) OR
         (${table.entityType} = 'decision' AND (${table.folderPath} = 'decisions' OR ${table.folderPath} LIKE 'decisions/%')) OR
         (${table.entityType} = 'meeting' AND (${table.folderPath} = 'meetings' OR ${table.folderPath} LIKE 'meetings/%')) OR
-        (${table.entityType} = 'conversation' AND (${table.folderPath} = 'conversations' OR ${table.folderPath} LIKE 'conversations/%')) OR
         (${table.entityType} = 'research' AND (${table.folderPath} = 'research' OR ${table.folderPath} LIKE 'research/%')) OR
-        (${table.entityType} = 'document' AND (${table.folderPath} = 'docs' OR ${table.folderPath} LIKE 'docs/%')) OR
         (${table.entityType} = 'concept' AND (${table.folderPath} = 'concepts' OR ${table.folderPath} LIKE 'concepts/%')) OR
-        (${table.entityType} = 'reference' AND (${table.folderPath} = 'references' OR ${table.folderPath} LIKE 'references/%')) OR
-        (${table.entityType} = 'daily' AND (${table.folderPath} = 'daily' OR ${table.folderPath} LIKE 'daily/%')) OR
+        (${table.entityType} = 'evidence' AND (
+          ${table.folderPath} = 'evidence/chat' OR ${table.folderPath} LIKE 'evidence/chat/%' OR
+          ${table.folderPath} = 'evidence/email' OR ${table.folderPath} LIKE 'evidence/email/%' OR
+          ${table.folderPath} = 'evidence/correction' OR ${table.folderPath} LIKE 'evidence/correction/%' OR
+          ${table.folderPath} = 'evidence/document' OR ${table.folderPath} LIKE 'evidence/document/%'
+        )) OR
         (${table.entityType} = 'note' AND (${table.folderPath} = 'inbox' OR ${table.folderPath} LIKE 'inbox/%'))
       )`,
     ),

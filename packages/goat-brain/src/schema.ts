@@ -5,12 +5,13 @@ export const DEFAULT_GOAT_BRAIN_FOLDERS = [
   "projects",
   "decisions",
   "meetings",
-  "conversations",
   "research",
-  "docs",
   "concepts",
-  "references",
-  "daily",
+  "evidence",
+  "evidence/chat",
+  "evidence/email",
+  "evidence/correction",
+  "evidence/document",
 ] as const;
 
 export type GoatBrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number];
@@ -28,16 +29,17 @@ export const GOAT_BRAIN_ENTITY_TYPES = [
   "project",
   "decision",
   "meeting",
-  "conversation",
   "research",
-  "document",
   "concept",
-  "reference",
-  "daily",
+  "evidence",
   "note",
 ] as const;
 
 export type GoatBrainEntityType = (typeof GOAT_BRAIN_ENTITY_TYPES)[number];
+
+export const GOAT_BRAIN_EVIDENCE_KINDS = ["chat", "email", "correction", "document"] as const;
+
+export type GoatBrainEvidenceKind = (typeof GOAT_BRAIN_EVIDENCE_KINDS)[number];
 
 export const GOAT_BRAIN_STATUS_VALUES = ["draft", "active", "archived", "merged"] as const;
 
@@ -74,6 +76,7 @@ export type GoatBrainFrontmatter = {
   createdAt: string;
   updatedAt: string;
   relations: GoatBrainRelation[];
+  evidenceKind?: GoatBrainEvidenceKind;
   title?: string;
   aliases?: string[];
   tags?: string[];
@@ -110,6 +113,12 @@ export function isValidGoatBrainRelationType(value: unknown): value is string {
 export function isValidGoatBrainEntityType(value: unknown): value is GoatBrainEntityType {
   return (
     typeof value === "string" && GOAT_BRAIN_ENTITY_TYPES.includes(value as GoatBrainEntityType)
+  );
+}
+
+export function isValidGoatBrainEvidenceKind(value: unknown): value is GoatBrainEvidenceKind {
+  return (
+    typeof value === "string" && GOAT_BRAIN_EVIDENCE_KINDS.includes(value as GoatBrainEvidenceKind)
   );
 }
 

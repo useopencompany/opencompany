@@ -5,6 +5,7 @@ import {
   type GoatBrainRelation,
   type GoatBrainSource,
   type GoatBrainStatus,
+  isValidGoatBrainEvidenceKind,
 } from "./schema";
 import { normalizeBuiltInGoatBrainEntityType } from "./schemas";
 
@@ -37,6 +38,8 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   if (title) out.title = title;
   const type = normalizeBuiltInGoatBrainEntityType(readString(raw.type) ?? undefined);
   if (type) out.type = type;
+  const evidenceKind = readString(raw.evidenceKind) ?? readString(raw.evidence_kind);
+  if (isValidGoatBrainEvidenceKind(evidenceKind)) out.evidenceKind = evidenceKind;
   const status = readStatus(raw.status);
   if (status) out.status = status;
   const aliases = readStringArray(raw.aliases);
@@ -70,6 +73,7 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
       to: relation.to,
     })),
   };
+  if (frontmatter.evidenceKind) record.evidenceKind = frontmatter.evidenceKind;
   if (frontmatter.title) record.title = frontmatter.title;
   if (frontmatter.aliases && frontmatter.aliases.length > 0) record.aliases = frontmatter.aliases;
   if (frontmatter.tags && frontmatter.tags.length > 0) record.tags = frontmatter.tags;

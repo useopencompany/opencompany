@@ -68,10 +68,10 @@ type BrainGraphLink = {
 const ROOT_FOLDER_GROUPS = [
   ["inbox"],
   ["people", "companies", "projects"],
-  ["meetings", "conversations", "daily"],
-  ["decisions", "concepts", "references", "research", "docs"],
+  ["meetings", "research", "evidence"],
+  ["decisions", "concepts"],
 ];
-const HIDDEN_EMPTY_ROOT_FOLDERS = new Set(["daily"]);
+const HIDDEN_EMPTY_ROOT_FOLDERS = new Set<string>();
 const DEFAULT_BRAIN_FOLDERS = [
   "inbox",
   "people",
@@ -79,12 +79,9 @@ const DEFAULT_BRAIN_FOLDERS = [
   "projects",
   "decisions",
   "meetings",
-  "conversations",
   "research",
-  "docs",
   "concepts",
-  "references",
-  "daily",
+  "evidence",
 ];
 
 export function GoatBrainView({ folders, documents, initialFolderPath, initialBrainId }: Props) {
@@ -684,6 +681,9 @@ function BrainDocumentDetails({
           <div className="min-w-0 space-y-1">
             <DetailsRow label="Kind" value={document.kind} />
             <DetailsRow label="Type" value={document.type} />
+            {document.evidenceKind ? (
+              <DetailsRow label="Evidence" value={document.evidenceKind} />
+            ) : null}
             <DetailsRow label="MIME" value={document.mimeType ?? "text/markdown"} />
             <DetailsRow label="Created" value={formatDateTime(document.createdAt)} />
             <DetailsRow label="Updated" value={formatDateTime(document.updatedAt)} />
@@ -779,7 +779,9 @@ function GraphLinksList({
 }
 
 function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }) {
-  const entries = [...document.timeline].reverse();
+  const entries = [...document.timeline].sort(
+    (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
+  );
   return (
     <aside className="shrink-0 border-b border-border-subtle bg-surface-muted px-5 py-3">
       <div className="mx-auto flex w-full max-w-[860px] flex-col gap-3">
@@ -937,13 +939,14 @@ function FolderIcon({ path }: { path: string }) {
       return <Building2 size={13} strokeWidth={1.75} className={className} />;
     case "decisions":
       return <BookOpen size={13} strokeWidth={1.75} className={className} />;
-    case "ideas":
-    case "insights":
+    case "concepts":
       return <Lightbulb size={13} strokeWidth={1.75} className={className} />;
     case "people":
       return <Users size={13} strokeWidth={1.75} className={className} />;
     case "projects":
       return <BriefcaseBusiness size={13} strokeWidth={1.75} className={className} />;
+    case "evidence":
+      return <History size={13} strokeWidth={1.75} className={className} />;
     default:
       return <Folder size={13} strokeWidth={1.75} className={className} />;
   }
@@ -1102,6 +1105,7 @@ function documentViewFromRow(
     relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
     type: normalizeEntityType(row.entity_type),
+    evidenceKind: normalizeEvidenceKind(row.evidence_kind),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
     tags: normalizeStringArray(parsed.tags),
@@ -1216,17 +1220,23 @@ function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
     value === "project" ||
     value === "decision" ||
     value === "meeting" ||
-    value === "conversation" ||
     value === "research" ||
-    value === "document" ||
     value === "concept" ||
-    value === "reference" ||
-    value === "daily" ||
+    value === "evidence" ||
     value === "note"
   ) {
     return value;
   }
   return "note";
+}
+
+function normalizeEvidenceKind(
+  value: string | null | undefined,
+): "chat" | "email" | "correction" | "document" | null {
+  if (value === "chat" || value === "email" || value === "correction" || value === "document") {
+    return value;
+  }
+  return null;
 }
 
 function normalizeStatus(value: string): GoatBrainDocumentView["status"] {

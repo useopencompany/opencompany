@@ -24,10 +24,10 @@ describe("goat brain entity types and wiki links", () => {
   it("infers built-in entity types from existing folders", () => {
     expect(inferGoatBrainEntityTypeFromFolder("people")).toBe("person");
     expect(inferGoatBrainEntityTypeFromFolder("companies")).toBe("company");
-    expect(inferGoatBrainEntityTypeFromFolder("docs/api")).toBe("document");
-    expect(inferGoatBrainEntityTypeFromFolder("ideas")).toBe("concept");
-    expect(goatBrainEntityTypeForFolder("ideas")).toBe("concept");
-    expect(goatBrainEntityTypeForFolder("sources")).toBe("reference");
+    expect(inferGoatBrainEntityTypeFromFolder("evidence/email")).toBe("evidence");
+    expect(inferGoatBrainEntityTypeFromFolder("ideas")).toBe("note");
+    expect(goatBrainEntityTypeForFolder("evidence/document")).toBe("evidence");
+    expect(goatBrainEntityTypeForFolder("sources")).toBeNull();
   });
 
   it("parses wiki links with optional labels", () => {
@@ -268,13 +268,10 @@ async function writeDoc(
       | "company"
       | "project"
       | "meeting"
-      | "conversation"
       | "decision"
       | "research"
-      | "document"
       | "concept"
-      | "reference"
-      | "daily"
+      | "evidence"
       | "note";
     title: string;
     truth: string;

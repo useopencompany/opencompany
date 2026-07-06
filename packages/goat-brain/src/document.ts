@@ -94,6 +94,7 @@ export function replaceGoatBrainCompiledTruth(
           folder: frontmatter.folder,
           type: frontmatter.type,
           status: frontmatter.status,
+          ...(frontmatter.evidenceKind ? { evidenceKind: frontmatter.evidenceKind } : {}),
           createdAt: frontmatter.createdAt,
           updatedAt: options.updatedAt ?? frontmatter.updatedAt,
           relations: frontmatter.relations ?? [],

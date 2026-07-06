@@ -15,6 +15,7 @@ import {
   GOAT_BRAIN_ENTITY_TYPES,
   goatBrainFolderForEntityType,
   isBuiltInGoatBrainEntityType,
+  isValidGoatBrainEvidenceKind,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import type {
@@ -27,7 +28,7 @@ import type {
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
 const GOAT_BRAIN_TOOL_HELP =
-  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, rewrite, alias, link, merge, move, delete, folder, doctor. Use includeMerged when you need merged records.';
+  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records.';
 
 const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
   "help",
@@ -267,6 +268,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "source-ref",
     "source-title",
     "evidence-id",
+    "evidence-kind",
     "status",
     "json",
   ],
@@ -312,7 +314,9 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   ],
   "append-evidence": [
     "id",
+    "kind",
     "at",
+    "title",
     "body",
     "body-stdin",
     "detail",
@@ -320,6 +324,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "source-ref",
     "source-title",
     "evidence-id",
+    "relation",
     "json",
   ],
   alias: ["id", "add", "remove", "json"],
@@ -380,7 +385,6 @@ export function renderGoatBrainToolCommand(
 }
 
 function cliCommandForToolCommand(command: GoatBrainCliCommand): string {
-  if (command === "append-evidence") return "timeline-add";
   return command;
 }
 
@@ -467,6 +471,55 @@ function validateCreateFlags(
     );
   }
   const expectedFolder = goatBrainFolderForEntityType(type);
+  if (type === "evidence") {
+    const evidenceKind =
+      typeof flags["evidence-kind"] === "string" ? flags["evidence-kind"].trim() : "";
+    const folderValue = typeof flags.folder === "string" ? flags.folder.trim() : "";
+    const folderSubtype = folderValue.split("/").filter(Boolean)[1];
+    if (evidenceKind && !isValidGoatBrainEvidenceKind(evidenceKind)) {
+      throw goatBrainToolInputError(
+        "goat_brain create evidenceKind must be chat, email, correction, or document.",
+        "create",
+      );
+    }
+    if (folderValue.startsWith("evidence/") && !isValidGoatBrainEvidenceKind(folderSubtype)) {
+      throw goatBrainToolInputError(
+        'goat_brain create evidence folders must be under "evidence/chat", "evidence/email", "evidence/correction", or "evidence/document".',
+        "create",
+      );
+    }
+    if (
+      evidenceKind &&
+      isValidGoatBrainEvidenceKind(folderSubtype) &&
+      evidenceKind !== folderSubtype
+    ) {
+      throw goatBrainToolInputError(
+        "goat_brain create evidenceKind must match the evidence folder subtype.",
+        "create",
+      );
+    }
+    const resolvedKind = isValidGoatBrainEvidenceKind(evidenceKind)
+      ? evidenceKind
+      : isValidGoatBrainEvidenceKind(folderSubtype)
+        ? folderSubtype
+        : "chat";
+    flags["evidence-kind"] = resolvedKind;
+    if (!folderValue) {
+      flags.folder = `evidence/${resolvedKind}`;
+      return;
+    }
+    if (folderValue === "evidence") {
+      flags.folder = `evidence/${resolvedKind}`;
+      return;
+    }
+    if (!folderValue.startsWith("evidence/")) {
+      throw goatBrainToolInputError(
+        `goat_brain create folder "${folderValue}" does not match type "evidence". Use "evidence/${resolvedKind}".`,
+        "create",
+      );
+    }
+    return;
+  }
   const folder = typeof flags.folder === "string" ? flags.folder.trim() : "";
   if (!folder) {
     flags.folder = expectedFolder;

@@ -168,6 +168,7 @@ export type GoatBrainDocumentRow = {
   content_hash: string;
   size_bytes: number;
   entity_type: string;
+  evidence_kind: string | null;
   status: string;
   aliases: string[];
   created_at: string;

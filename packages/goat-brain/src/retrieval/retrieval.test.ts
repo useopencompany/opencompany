@@ -243,13 +243,10 @@ async function writeDoc(
       | "company"
       | "project"
       | "meeting"
-      | "conversation"
       | "decision"
       | "research"
-      | "document"
       | "concept"
-      | "reference"
-      | "daily"
+      | "evidence"
       | "note";
     title: string;
     truth: string;

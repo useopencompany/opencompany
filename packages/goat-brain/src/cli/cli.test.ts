@@ -126,6 +126,45 @@ describe("goat-brain cli", () => {
       exitCode: 1,
       stderr: expect.stringContaining("`--truth` or `--truth-stdin` is required."),
     });
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "evidence",
+        "--evidence-kind",
+        "slack",
+        "--id",
+        "ev-bad-kind",
+        "--title",
+        "Bad kind",
+        "--truth",
+        "Invalid evidence kind.",
+      ]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining(
+        "`--evidence-kind` must be chat, email, correction, or document.",
+      ),
+    });
+    await expect(
+      run([
+        "append-evidence",
+        "--root",
+        root,
+        "missing-subject",
+        "--kind",
+        "slack",
+        "--body",
+        "Invalid kind.",
+        "--source-ref",
+        "chat:message_1",
+      ]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("`--kind` must be chat, email, correction, or document."),
+    });
   });
 
   it("lists the system default folders", async () => {
@@ -159,6 +198,33 @@ describe("goat-brain cli", () => {
       doc: { frontmatter: { folder: string; type: string } };
     };
     expect(created.doc.frontmatter).toMatchObject({ folder: "companies", type: "company" });
+
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "evidence",
+        "--id",
+        "ev-acme-chat",
+        "--title",
+        "Acme chat",
+        "--truth",
+        "Acme asked about pricing.",
+        "--json",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    const evidence = JSON.parse(
+      (await run(["get", "--root", root, "ev-acme-chat", "--json"])).stdout,
+    ) as {
+      doc: { frontmatter: { folder: string; type: string; evidenceKind: string } };
+    };
+    expect(evidence.doc.frontmatter).toMatchObject({
+      folder: "evidence/chat",
+      type: "evidence",
+      evidenceKind: "chat",
+    });
 
     await expect(
       run(["folder", "--root", root, "create", "--path", "random"]),
@@ -382,6 +448,89 @@ describe("goat-brain cli", () => {
     ]);
     expect(getTimeline.stdout).toContain("Met Ada about launch sequencing.");
     expect(getTimeline.stdout).toContain("Source: Launch chat (goat-chat:message_1)");
+  });
+
+  it("creates first-class evidence records and links them to subject docs", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "companies",
+        "--type",
+        "company",
+        "--id",
+        "acme",
+        "--title",
+        "Acme",
+        "--truth",
+        "Acme is evaluating the product.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const appended = await run([
+      "append-evidence",
+      "--root",
+      root,
+      "acme",
+      "--kind",
+      "email",
+      "--body",
+      "Acme asked for enterprise pricing.",
+      "--source-ref",
+      "gmail:thread_123",
+      "--source-title",
+      "Acme pricing thread",
+      "--json",
+    ]);
+    const result = JSON.parse(appended.stdout) as {
+      evidenceId: string;
+      evidenceKind: string;
+      evidencePath: string;
+    };
+
+    expect(result).toMatchObject({
+      evidenceId: expect.stringMatching(/^ev-/),
+      evidenceKind: "email",
+      evidencePath: expect.stringMatching(/^evidence\/email\/ev-.*\.md$/),
+    });
+
+    const evidence = JSON.parse(
+      (await run(["get", "--root", root, result.evidenceId, "--json"])).stdout,
+    ) as {
+      doc: {
+        frontmatter: {
+          folder: string;
+          type: string;
+          evidenceKind: string;
+          relations: Array<{ type: string; to: string }>;
+        };
+      };
+    };
+    expect(evidence.doc.frontmatter).toMatchObject({
+      folder: "evidence/email",
+      type: "evidence",
+      evidenceKind: "email",
+      relations: [{ type: "about", to: "acme" }],
+    });
+
+    const acme = JSON.parse((await run(["get", "--root", root, "acme", "--json"])).stdout) as {
+      doc: {
+        frontmatter: { relations: Array<{ type: string; to: string }> };
+        timeline: Array<{ evidenceId: string; body: string }>;
+      };
+    };
+    expect(acme.doc.frontmatter.relations).toContainEqual({
+      type: "evidenced_by",
+      to: result.evidenceId,
+    });
+    expect(acme.doc.timeline).toEqual([
+      expect.objectContaining({
+        evidenceId: result.evidenceId,
+        body: expect.stringContaining(`[[${result.evidenceId}|Acme pricing thread]]`),
+      }),
+    ]);
   });
 
   it("generates unique evidence ids for multiple updates from one chat source", async () => {

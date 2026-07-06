@@ -1,4 +1,4 @@
-import { parseGoatBrainDocument } from "./document";
+import { extractGoatBrainCitations, parseGoatBrainDocument } from "./document";
 import { deriveGoatBrainEdges } from "./edges";
 import { goatBrainRelativePath } from "./paths";
 import { isValidGoatBrainFolder, isValidGoatBrainId } from "./schema";
@@ -62,6 +62,9 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
   }
 
   const degreeById = graphDegreeById(byId);
+  const evidenceRecordIds = new Set(
+    parsedFiles.filter(({ doc }) => doc.frontmatter.type === "evidence").map(({ file }) => file.id),
+  );
 
   for (const { file, doc } of parsedFiles) {
     const validation = validateGoatBrainDocument(doc, file.id, file.source);
@@ -110,6 +113,13 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
       text: doc.compiledTruth,
       findings,
     });
+    checkCitations({
+      id: file.id,
+      localEvidenceIds: new Set(doc.timeline.map((entry) => entry.evidenceId)),
+      evidenceRecordIds,
+      text: doc.compiledTruth,
+      findings,
+    });
 
     if (files.length > 1 && (degreeById.get(file.id) ?? 0) === 0) {
       findings.push({
@@ -137,6 +147,24 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
   const errors = findings.filter((finding) => finding.severity === "error").length;
   const warnings = findings.filter((finding) => finding.severity === "warn").length;
   return { files: files.length, errors, warnings, findings };
+}
+
+function checkCitations(input: {
+  id: string;
+  localEvidenceIds: Set<string>;
+  evidenceRecordIds: Set<string>;
+  text: string;
+  findings: GoatBrainHealthFinding[];
+}) {
+  for (const citation of extractGoatBrainCitations(input.text)) {
+    if (input.localEvidenceIds.has(citation) || input.evidenceRecordIds.has(citation)) continue;
+    input.findings.push({
+      severity: "error",
+      code: "broken_citation",
+      id: input.id,
+      message: `Citation "${citation}" does not match a local timeline entry or evidence record.`,
+    });
+  }
 }
 
 function graphDegreeById(

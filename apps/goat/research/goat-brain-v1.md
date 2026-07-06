@@ -1,11 +1,10 @@
 # Goat Brain v1 Best-Practice Scope
 
-Status: research proposal for discussion.
+Status: v1 implementation contract and research notes.
 
-This document defines the ideal Goat Brain v1 target we should discuss before implementation. It is
-not a description of the current code. The goal is to agree on the product and technical contract
-for a durable, trustworthy, agent-readable brain that Goat can use across chat, tasks, research, and
-connected-account workflows.
+This document defines the Goat Brain v1 product and technical contract for a durable, trustworthy,
+agent-readable brain that Goat can use across chat, tasks, research, and connected-account
+workflows.
 
 Reference inputs:
 
@@ -38,8 +37,8 @@ The core promise:
 2. **Evidence before truth.** Important claims need provenance. The system can hold draft knowledge,
    but established compiled truth must cite evidence.
 3. **Compiled truth plus timeline.** Each durable entity has a current synthesis above an append-only
-   evidence trail. Users and agents should not have to reread the whole history to know the current
-   state.
+   evidence trail. Timeline entries are rendered newest first so recent evidence is immediately
+   visible. Users and agents should not have to reread the whole history to know the current state.
 4. **Typed but not overtyped.** The schema should be small, MECE at the directory level, and governed
    against type sprawl. Subtypes usually belong in frontmatter, not in new directories.
 5. **Graph first where cheap.** Wikilinks and typed relationships should create edges without LLM
@@ -57,9 +56,9 @@ Goat should use three explicit information layers.
 
 ### 1. Brain: user-owned knowledge
 
-This is the durable knowledge base. It stores people, companies, projects, decisions, research,
-references, meetings, conversations, docs, and original user ideas. It is user-private by default
-and should be editable through Goat's Brain UI.
+This is the durable knowledge base. It stores canonical records for people, companies, projects,
+decisions, meetings, research, and concepts, plus first-class evidence records under typed evidence
+subfolders. It is user-private by default and should be editable through Goat's Brain UI.
 
 The Brain answers: "What does the user know about the world, their work, and their own artifacts?"
 
@@ -99,14 +98,17 @@ Recommended body shape:
 id: alice-example
 type: person
 status: active
-created_at: 2026-07-06T12:00:00Z
-updated_at: 2026-07-06T12:00:00Z
+createdAt: 2026-07-06T12:00:00.000Z
+updatedAt: 2026-07-06T12:00:00.000Z
 aliases:
   - Alice E.
-source_ids: []
+sources:
+  - ref: gmail:thread_abc123
+    captured_at: 2026-07-06T12:00:00Z
+    title: First customer thread
 related:
   - type: works_at
-    target: acme-ai
+    to: acme-ai
 ---
 
 # Alice Example
@@ -119,18 +121,19 @@ Current, rewritten synthesis. Claims that matter cite evidence.
 
 ## Timeline
 
-### 2026-07-06T12:00:00Z
+### ev-first-customer-thread - 2026-07-06T12:00:00.000Z
 
-- Source: gmail/thread/abc123
-- Summary: First meaningful evidence entry.
+First meaningful evidence entry.
+
+Source: First customer thread (gmail:thread_abc123)
 ```
 
 Important distinctions:
 
 - **Canonical records** are the current view of one thing: person, company, project, decision,
   concept, topic, customer, vendor, place, or similar.
-- **Evidence records** are immutable source artifacts: meeting, conversation, email, document,
-  research run, import, correction, or integration event.
+- **Evidence records** are immutable source artifacts under `evidence/<kind>/`, where `kind` is
+  `chat`, `email`, `correction`, or `document`.
 - **Reports** are authored deliverables. They can cite evidence and link to canonical records, but
   should not silently become canonical truth.
 
@@ -139,7 +142,7 @@ Important distinctions:
 The v1 taxonomy should start smaller than a typical human would want. We should add new first-class
 types only after repeated use proves they deserve schema behavior.
 
-Recommended v1 folders:
+Recommended v1 top-level folders:
 
 - `inbox/` - unresolved or unclassified material. Inbox volume is a schema signal, not a dumping
   ground.
@@ -147,13 +150,17 @@ Recommended v1 folders:
 - `companies/` - companies, organizations, funds, institutions.
 - `projects/` - ongoing initiatives owned or tracked by the user.
 - `decisions/` - durable choices, tradeoffs, reversals, and rationale.
-- `meetings/` - meeting evidence and meeting summaries.
-- `conversations/` - chat, email, DM, and call evidence when not better filed as a meeting.
+- `meetings/` - meetings as first-class temporal records.
 - `research/` - research runs, reports, technical investigations, market scans.
-- `docs/` - imported or authored source documents.
 - `concepts/` - reusable ideas, frameworks, terms, and mental models.
-- `references/` - external sources that are useful primarily as sources.
-- `daily/` - daily notes, periodic summaries, and dated rollups if we decide Goat needs them.
+- `evidence/` - immutable evidence records, always filed under a supported subtype folder.
+
+Supported v1 evidence subtype folders:
+
+- `evidence/chat/` - chat, DM, assistant transcript, and conversational notes.
+- `evidence/email/` - email threads and message excerpts.
+- `evidence/correction/` - user corrections and contradiction-resolution evidence.
+- `evidence/document/` - uploaded, imported, or linked source documents and references.
 
 Potential later folders, not v1 defaults:
 
@@ -282,7 +289,9 @@ Evidence should be first-class. It is how Goat avoids turning model output into 
 
 Evidence records should include:
 
-- source kind: gmail, calendar, linear, github, browser, upload, chat, task, manual, import
+- evidence kind: `chat`, `email`, `correction`, or `document`
+- source kind in the source ref: gmail, calendar, linear, github, browser, upload, chat, task,
+  manual, import
 - source ref: URL, external id, thread id, path, or opaque integration identifier
 - captured timestamp
 - actor or author when known
@@ -291,10 +300,11 @@ Evidence records should include:
 - optional raw sidecar for large or structured payloads
 
 Compiled truth should cite evidence for factual claims that affect future behavior. Draft records can
-hold uncited notes, but an `active` record should pass citation validation.
+hold uncited notes, but an `active` canonical record should pass citation validation. A citation can
+point to a local timeline id or to a first-class evidence record id.
 
 Corrections are evidence. A user saying "that's wrong, Alice no longer works there" should create a
-correction evidence record and trigger a compiled-truth rewrite.
+correction evidence record in `evidence/correction/` and trigger a compiled-truth rewrite.
 
 ## Graph And Links
 
@@ -469,7 +479,7 @@ Likely background jobs:
 - suggest inbox classifications
 - detect duplicate entities
 - synthesize compiled truth after evidence ingest
-- generate daily or project rollups when enabled
+- generate project or periodic rollups when enabled
 - compact raw integration payloads into evidence summaries
 
 Jobs should be idempotent and safe to rerun. Any job that changes canonical truth should either be
@@ -530,10 +540,10 @@ These are the decisions we should make before implementation planning.
    or a hybrid that always exports to Markdown?
 2. Should Brain and Memory share one underlying package with different schemas, or remain separate
    packages with shared primitives?
-3. Which v1 folder list is the smallest useful taxonomy?
+3. Which future folder additions would justify promotion beyond the current v1 taxonomy?
 4. Should canonical compiled truth rewrites require user approval by default?
 5. What evidence sources should be allowed to write automatically in v1?
-6. Is `daily/` a first-class folder, or should daily summaries wait?
+6. Should periodic summaries stay in `research/` or `inbox/`, or become a later subtype?
 7. Do we want schema packs in v1, or just design the contracts so they can arrive cleanly in v2?
 8. How strict should citation validation be for active Brain records?
 9. How visible should Memory be in the Goat UI?

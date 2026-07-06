@@ -14,10 +14,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
+  getWebDb: vi.fn(() => {
+    throw new Error("runner Goat brain code must not use the web DB client");
+  }),
+}));
+
+vi.mock("./db", () => ({
+  getDb: dbMocks.getDb,
 }));
 
 vi.mock("@opencompany/db/client", () => ({
-  getDb: dbMocks.getDb,
+  getDb: dbMocks.getWebDb,
 }));
 
 import {
@@ -192,7 +199,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
     }
   });
 
-  it("canonicalizes alias folders before persisting sandbox docs", async () => {
+  it("rejects removed alias folders instead of silently canonicalizing them", async () => {
     const root = await tempRoot();
     const content = brainDoc({
       id: "launch-idea",
@@ -205,27 +212,15 @@ describe("syncGoatBrainFromLocalRoot", () => {
 
     try {
       await writeBrainFile(root, "ideas/launch-idea.md", content);
-      await syncGoatBrainFromLocalRoot({
-        root,
-        userWorkosId: "user_1",
-        taskId: "task_1",
-        baseSnapshot: { files: [] },
-      });
-
-      expect(db.insertedValues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            userWorkosId: "user_1",
-            path: "concepts",
-            source: "system",
-          }),
-          expect.objectContaining({
-            brainId: "launch-idea",
-            folderPath: "concepts",
-            content: expect.stringContaining("folder: concepts"),
-          }),
-        ]),
-      );
+      await expect(
+        syncGoatBrainFromLocalRoot({
+          root,
+          userWorkosId: "user_1",
+          taskId: "task_1",
+          baseSnapshot: { files: [] },
+        }),
+      ).rejects.toThrow('frontmatter.folder/type mismatch: folder "ideas" must be under');
+      expect(db.insertedValues).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -476,7 +471,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
     }
   });
 
-  it("fails closed on an invalid sidecar without deleting the current DB doc", async () => {
+  it("skips an invalid sidecar without deleting the current DB doc", async () => {
     const root = await tempRoot();
     const content = brainDoc({
       id: "research-note",
@@ -507,7 +502,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
           taskId: "task_1",
           baseSnapshot: snapshotFor(current),
         }),
-      ).rejects.toThrow("Brain sidecar");
+      ).resolves.toBeUndefined();
 
       expect(db.updatedValues).toEqual([]);
       expect(db.deleteWhereCalls).toEqual([]);
@@ -632,6 +627,7 @@ function brainRow(input: {
     relations: [],
     sources: [],
     entityType: inferGoatBrainEntityTypeFromFolder(input.folderPath),
+    evidenceKind: null,
     status: "draft",
     aliases: [],
     contentHash: hash(input.content),

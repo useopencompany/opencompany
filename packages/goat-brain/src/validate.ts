@@ -7,6 +7,7 @@ import {
 import {
   isValidGoatBrainEntityType,
   isValidGoatBrainEvidenceId,
+  isValidGoatBrainEvidenceKind,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainRelationType,
@@ -81,6 +82,18 @@ export function validateGoatBrainDocument(
   if (!isValidGoatBrainStatus(fm.status)) {
     errors.push("frontmatter.status must be draft, active, archived, or merged.");
   }
+  if (fm.type === "evidence") {
+    if (!isValidGoatBrainEvidenceKind(fm.evidenceKind)) {
+      errors.push("frontmatter.evidenceKind must be chat, email, correction, or document.");
+    } else if (typeof fm.folder === "string") {
+      const folderKind = fm.folder.split("/")[1];
+      if (folderKind !== fm.evidenceKind) {
+        errors.push("frontmatter.evidenceKind must match the evidence folder subtype.");
+      }
+    }
+  } else if (fm.evidenceKind !== undefined) {
+    errors.push("frontmatter.evidenceKind is only valid for evidence records.");
+  }
   if (!fm.createdAt || !isIsoDate(fm.createdAt)) {
     errors.push("frontmatter.created_at must be an ISO-8601 UTC timestamp.");
   }
@@ -132,13 +145,13 @@ export function validateGoatBrainDocument(
     }
   }
   const citations = extractGoatBrainCitations(doc.compiledTruth);
-  if (fm.status === "active" && hasCompiledTruth(doc.compiledTruth) && citations.length === 0) {
-    errors.push("active compiled truth must cite timeline evidence with [^ev:<evidence-id>].");
-  }
-  for (const citation of citations) {
-    if (!evidenceIds.has(citation)) {
-      errors.push(`citation "${citation}" does not match a timeline evidence id.`);
-    }
+  if (
+    fm.status === "active" &&
+    fm.type !== "evidence" &&
+    hasCompiledTruth(doc.compiledTruth) &&
+    citations.length === 0
+  ) {
+    errors.push("active compiled truth must cite evidence with [^ev:<evidence-id>].");
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true };
 }

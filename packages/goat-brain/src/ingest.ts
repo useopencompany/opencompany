@@ -172,15 +172,15 @@ function buildIngestPrompt(input: {
     "You are the controlled ingestion loop for Goat Brain, a durable graph of user-owned knowledge.",
     "Return only JSON. Do not include markdown fences.",
     "Use existing ids when information belongs to an existing entity. Create a new entry only when no existing entry is the primary home.",
-    "Use only these types: person, company, project, decision, meeting, conversation, research, document, concept, reference, daily, note.",
-    "Prefer relations over extra structured fields. People, companies, projects, meetings, decisions, and sources should connect through relations.",
+    "Use only these types: person, company, project, decision, meeting, research, concept, evidence, note.",
+    "Prefer relations over extra structured fields. People, companies, projects, meetings, decisions, and evidence should connect through relations.",
     "Use wiki links like [[brain-id]] or [[brain-id|Label]] only for existing or planned ids.",
     "Compiled truth is the current synthesis for the entity. Rewrite it as the durable state of play, not as a chronological log.",
     "Timeline entries are append-only evidence. `timelineBody` must be a concise factual event from this source, not a restatement of the full source text.",
     "Every timeline entry must preserve source context; the system will attach the source ref, so make `timelineBody` say what happened and why it matters.",
     "",
     "JSON shape:",
-    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|project|decision|meeting|conversation|research|document|concept|reference|daily|note","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}],"tags":[]}]}',
+    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|project|decision|meeting|research|concept|evidence|note","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}],"tags":[]}]}',
     "",
     `Existing entries:\n${docs || "(none)"}`,
     "",
@@ -275,10 +275,19 @@ async function applyIngestOperation(
 ): Promise<GoatBrainIngestAppliedChange> {
   const existing = await findGoatBrainFile(root, operation.id);
   const existingEntry = existing ? goatBrainEntryFromLegacyMarkdown(existing.source) : null;
+  const folder =
+    existingEntry?.type === operation.type
+      ? existingEntry.folder
+      : folderForIngestType(operation.type);
+  const evidenceKind =
+    operation.type === "evidence"
+      ? existingEntry?.type === "evidence" && existingEntry.evidenceKind
+        ? existingEntry.evidenceKind
+        : "chat"
+      : undefined;
   const entry: GoatBrainEntry = {
     ...(existingEntry ?? {
       id: operation.id,
-      folder: goatBrainFolderForEntityType(operation.type),
       createdAt: source.at,
       kind: "markdown" as const,
       mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
@@ -289,8 +298,10 @@ async function applyIngestOperation(
       timeline: [],
     }),
     id: operation.id,
+    folder,
     title: operation.title,
     type: operation.type,
+    ...(evidenceKind ? { evidenceKind } : {}),
     aliases: operation.aliases,
     body: operation.body,
     updatedAt: source.at,
@@ -313,6 +324,10 @@ async function applyIngestOperation(
   }
   const path = await writeGoatBrainEntry(root, entry);
   return { action: existingEntry ? "update" : "create", id: entry.id, path, type: entry.type };
+}
+
+function folderForIngestType(type: GoatBrainEntityType): string {
+  return type === "evidence" ? "evidence/chat" : goatBrainFolderForEntityType(type);
 }
 
 function isDuplicateTimelineEntry(

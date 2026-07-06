@@ -106,6 +106,40 @@ describe("runGoatBrainToolForUser", () => {
     ).toThrow('goat_brain create folder "inbox" does not match type "company"');
   });
 
+  it("normalizes and validates evidence subtype folders for create", () => {
+    expect(
+      renderGoatBrainToolCommand(
+        {
+          command: "create",
+          flags: {
+            id: "ev-opencompany-chat",
+            folder: "evidence",
+            title: "OpenCompany chat",
+            type: "evidence",
+            truth: "OpenCompany was discussed in chat.",
+          },
+        },
+        "goat-chat:user_message_1",
+      ).argv,
+    ).toContain("evidence/chat");
+
+    expect(() =>
+      renderGoatBrainToolCommand(
+        {
+          command: "create",
+          flags: {
+            id: "ev-opencompany-slack",
+            folder: "evidence/slack",
+            title: "OpenCompany Slack",
+            type: "evidence",
+            truth: "OpenCompany was discussed in Slack.",
+          },
+        },
+        "goat-chat:user_message_1",
+      ),
+    ).toThrow("goat_brain create evidence folders must be under");
+  });
+
   it("renders goat_brain help invocations", () => {
     expect(
       renderGoatBrainToolCommand(
@@ -142,6 +176,34 @@ describe("runGoatBrainToolForUser", () => {
     ).toEqual(["list", "--folder", "people", "--include-merged", "--json"]);
   });
 
+  it("renders append-evidence as an evidence-record command", () => {
+    expect(
+      renderGoatBrainToolCommand(
+        {
+          command: "append-evidence",
+          flags: {
+            id: "opencompany",
+            kind: "email",
+            body: "Acme asked for pricing.",
+            json: true,
+          },
+        },
+        "goat-chat:user_message_1",
+      ).argv,
+    ).toEqual([
+      "append-evidence",
+      "--id",
+      "opencompany",
+      "--kind",
+      "email",
+      "--body",
+      "Acme asked for pricing.",
+      "--json",
+      "--source-ref",
+      "goat-chat:user_message_1",
+    ]);
+  });
+
   it("returns a helpful error for unsupported create entity types", async () => {
     const output = await runGoatBrainToolForUser({
       ...BASE_INPUT,
@@ -162,7 +224,7 @@ describe("runGoatBrainToolForUser", () => {
       stdout: "",
       stderr: "",
       error: expect.stringContaining(
-        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, project, decision, meeting, conversation, research, document, concept, reference, daily, note.',
+        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, project, decision, meeting, research, concept, evidence, note.',
       ),
     });
     expect(output.error).toContain('Relevant help command: { command: "help"');

@@ -6,19 +6,25 @@ import {
   checkGoatBrainHealth,
   DEFAULT_GOAT_BRAIN_FOLDERS,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
+  deterministicEvidenceId,
   GOAT_BRAIN_ENTITY_TYPES,
+  GOAT_BRAIN_EVIDENCE_KINDS,
   type GoatBrainDocument,
+  type GoatBrainEvidenceKind,
   type GoatBrainRelation,
   type GoatBrainSource,
   goatBrainEntityTypeForFolder,
   goatBrainFolderForEntityType,
   goatBrainFolderTypeError,
+  goatBrainTimelineBody,
   goatBrainTimelineEntryFromParts,
   ingestGoatBrain,
   isBuiltInGoatBrainEntityType,
+  isValidGoatBrainEvidenceKind,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainRelationType,
+  normalizeEvidenceId,
   normalizeGoatBrainFolderForV1,
   normalizeGoatBrainId,
   nowIso,
@@ -51,7 +57,7 @@ const COMMANDS: Record<string, Handler> = {
   rewrite,
   "timeline-add": appendTimeline,
   "append-timeline": appendTimeline,
-  "append-evidence": appendTimeline,
+  "append-evidence": appendEvidence,
   alias,
   link,
   merge,
@@ -77,6 +83,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "source-ref",
     "source-title",
     "evidence-id",
+    "evidence-kind",
     "status",
   ],
   list: ["folder", "limit", "include-merged"],
@@ -106,7 +113,9 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   "append-evidence": [
     "id",
+    "kind",
     "at",
+    "title",
     "body",
     "body-stdin",
     "detail",
@@ -114,6 +123,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "source-ref",
     "source-title",
     "evidence-id",
+    "relation",
   ],
   alias: ["id", "add", "remove"],
   link: ["id", "to", "as", "remove"],
@@ -153,7 +163,7 @@ Commands:
   rewrite           Replace compiled truth for a doc.
   timeline-add      Add a dated evidence entry and optional source ref.
   append-timeline   Compatibility alias for timeline-add.
-  append-evidence   Compatibility alias for timeline-add.
+  append-evidence   Create a first-class evidence record and link it to a subject.
   alias             Add/remove aliases for a doc.
   link              Add/remove related edges.
   merge             Mark one doc as merged into another.
@@ -195,10 +205,13 @@ Common options:
   --tag <text>        Repeatable tag.
   --relation <type:id>
   --source-ref <ref>  Provenance reference for the initial evidence entry.
+  --evidence-kind <kind>
+                      Evidence subtype for --type evidence. Defaults to chat.
   --json
 
 Examples:
   goat-brain create --type company --folder companies --id opencompany --title OpenCompany --truth "OpenCompany builds agent infrastructure."
+  goat-brain create --type evidence --evidence-kind email --id ev-acme-email --title "Acme email" --truth "Acme asked for pricing."
   echo "Ada leads GTM." | goat-brain create --type person --id ada --title Ada --truth-stdin`,
   list: `Usage: goat-brain list [--folder <path>] [--limit <n>] [--include-merged] [--json]
 
@@ -285,12 +298,21 @@ Compatibility alias for timeline-add.
 
 Example:
   goat-brain append-timeline opencompany --body "Updated launch plan."`,
-  "append-evidence": `Usage: goat-brain append-evidence <id> [--at <iso-date>] (--body <text> | --body-stdin) [options]
+  "append-evidence": `Usage: goat-brain append-evidence <subject-id> --source-ref <ref> [--kind <kind>] [--at <iso-date>] (--body <text> | --body-stdin) [options]
 
-Compatibility alias for timeline-add.
+Create an immutable evidence record under evidence/<kind>/ and link it to the subject document.
+
+Options:
+  --kind <kind>        Evidence kind: ${GOAT_BRAIN_EVIDENCE_KINDS.join(", ")}. Defaults to chat.
+  --title <title>
+  --detail <text> or --detail-stdin
+  --source-title <title>
+  --evidence-id <id>   Optional ev-* record id. Generated when omitted.
+  --relation <type>    Relation from evidence to subject. Defaults to about.
+  --json
 
 Example:
-  goat-brain append-evidence opencompany --body "User confirmed the latest fact." --source-ref chat:message_123`,
+  goat-brain append-evidence opencompany --kind email --body "Acme asked for pricing." --source-ref gmail:thread_123`,
   alias: `Usage: goat-brain alias <id> [--add <alias>] [--remove <alias>] [--json]
 
 Add or remove aliases for a document. Repeat --add or --remove as needed.
@@ -382,7 +404,23 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
       )}.`,
     );
   }
-  const expectedFolder = goatBrainFolderForEntityType(typeInput);
+  const evidenceKindInput = ctx.args.get("evidence-kind")?.trim();
+  if (typeInput !== "evidence" && evidenceKindInput) {
+    return fail("`--evidence-kind` is only valid when `--type evidence` is used.");
+  }
+  let evidenceKind: GoatBrainEvidenceKind | undefined;
+  if (typeInput === "evidence") {
+    const evidenceKindResult = resolveEvidenceKindForCreate(
+      evidenceKindInput,
+      ctx.args.get("folder"),
+    );
+    if (!evidenceKindResult.ok) return fail(evidenceKindResult.error);
+    evidenceKind = evidenceKindResult.value;
+  }
+  const expectedFolder =
+    typeInput === "evidence" && evidenceKind
+      ? `evidence/${evidenceKind}`
+      : goatBrainFolderForEntityType(typeInput);
   const folder = normalizeGoatBrainFolderForV1(ctx.args.get("folder") ?? expectedFolder);
   if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
   const folderTypeError = goatBrainFolderTypeError(folder, typeInput);
@@ -432,6 +470,7 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
       id,
       folder,
       type,
+      ...(evidenceKind ? { evidenceKind } : {}),
       status,
       title,
       createdAt: now,
@@ -761,8 +800,175 @@ async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
   });
 }
 
+async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
+  const subjectId = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!subjectId) return fail("Provide a subject brain id.");
+  if (!isValidGoatBrainId(subjectId)) return fail("Subject id must be a lowercase brain slug.");
+  const evidenceKindResult = resolveEvidenceKindFlag(ctx.args.get("kind")?.trim(), "--kind");
+  if (!evidenceKindResult.ok) return fail(evidenceKindResult.error);
+  const evidenceKind = evidenceKindResult.value;
+  const subject = await loadDoc(ctx.root, subjectId);
+  if (!subject) return notFound(`No brain doc found with id "${subjectId}".`);
+  if (ctx.args.has("body-stdin") && ctx.args.has("detail-stdin")) {
+    return fail("Use only one stdin flag: `--body-stdin` or `--detail-stdin`.");
+  }
+
+  const summary = (
+    ctx.args.has("body-stdin")
+      ? await readStdin()
+      : (ctx.args.get("body") ?? ctx.args.positionals.slice(2).join(" "))
+  ).trim();
+  if (!summary) return fail("`--body` or `--body-stdin` is required.");
+  const sourceRef = ctx.args.get("source-ref")?.trim();
+  if (!sourceRef) return fail("`--source-ref` is required for evidence records.");
+  const detail = (
+    ctx.args.has("detail-stdin") ? await readStdin() : (ctx.args.get("detail") ?? "")
+  ).trim();
+  const at = ctx.args.get("at") ?? ctx.args.positionals[1] ?? nowIso();
+  const parsedAt = Date.parse(at);
+  if (Number.isNaN(parsedAt)) return fail("`--at` must be an ISO-8601 timestamp.");
+  const capturedAt = new Date(parsedAt).toISOString();
+  const evidenceIdInput = ctx.args.get("evidence-id")?.trim();
+  const evidenceId = evidenceIdInput
+    ? normalizeEvidenceRecordId(evidenceIdInput)
+    : deterministicEvidenceId({ at: capturedAt, summary, sourceRef });
+  if (!evidenceId) return fail("`--evidence-id` must be a valid ev-* brain id.");
+  if (await findGoatBrainFile(ctx.root, evidenceId)) {
+    return fail(`A brain doc with id "${evidenceId}" already exists.`);
+  }
+  const sourceTitle = ctx.args.get("source-title")?.trim();
+  const title = ctx.args.get("title")?.trim() || evidenceTitle(evidenceKind, sourceTitle, summary);
+  const evidenceBody = goatBrainTimelineBody({
+    summary,
+    detail,
+    sourceRef,
+    sourceTitle: sourceTitle ?? "",
+  });
+  const evidenceDoc: GoatBrainDocument = {
+    frontmatter: {
+      id: evidenceId,
+      folder: `evidence/${evidenceKind}`,
+      type: "evidence",
+      evidenceKind,
+      status: "active",
+      title,
+      createdAt: capturedAt,
+      updatedAt: capturedAt,
+      relations: [{ type: ctx.args.get("relation")?.trim() || "about", to: subjectId }],
+      sources: [
+        {
+          ref: sourceRef,
+          capturedAt,
+          ...(sourceTitle ? { title: sourceTitle } : {}),
+        },
+      ],
+    },
+    title,
+    compiledTruth: evidenceBody,
+    timeline: [],
+  };
+
+  const subjectRelations = new Map(
+    (subject.doc.frontmatter.relations ?? []).map((relation) => [relationKey(relation), relation]),
+  );
+  subjectRelations.set(relationKey({ type: "evidenced_by", to: evidenceId }), {
+    type: "evidenced_by",
+    to: evidenceId,
+  });
+  subject.doc.frontmatter.relations = [...subjectRelations.values()].sort((a, b) =>
+    relationKey(a).localeCompare(relationKey(b)),
+  );
+  subject.doc.frontmatter.updatedAt = nowIso();
+  const timelineEntry = goatBrainTimelineEntryFromParts({
+    evidenceId,
+    at: capturedAt,
+    summary: `[[${evidenceId}|${title}]]: ${summary}`,
+    detail,
+    sourceRef,
+    sourceTitle: sourceTitle ?? "",
+  });
+  if (!subject.doc.timeline.some((entry) => entry.evidenceId === evidenceId)) {
+    subject.doc.timeline = [...subject.doc.timeline, timelineEntry];
+  }
+
+  const evidencePath = await persist(ctx.root, evidenceDoc);
+  const subjectPath = await persist(ctx.root, subject.doc);
+  return ok(`Created evidence "${evidenceId}" and linked it to "${subjectId}".`, {
+    id: subjectId,
+    path: subjectPath,
+    evidenceId,
+    evidencePath,
+    evidenceKind,
+  });
+}
+
 function sortedTimelineEntries(entries: GoatBrainDocument["timeline"]) {
   return [...entries].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+type EvidenceKindResult = { ok: true; value: GoatBrainEvidenceKind } | { ok: false; error: string };
+
+function resolveEvidenceKindForCreate(
+  value: string | undefined,
+  folder: string | undefined,
+): EvidenceKindResult {
+  const fromValue = value?.trim();
+  if (fromValue && !isValidGoatBrainEvidenceKind(fromValue)) {
+    return {
+      ok: false,
+      error: "`--evidence-kind` must be chat, email, correction, or document.",
+    };
+  }
+  const flagKind = isValidGoatBrainEvidenceKind(fromValue) ? fromValue : null;
+  const folderKind = evidenceKindFromFolder(folder);
+  const normalizedFolder = folder ? normalizeGoatBrainFolderForV1(folder) : "";
+  if (normalizedFolder.startsWith("evidence/") && !folderKind) {
+    return {
+      ok: false,
+      error:
+        '`--folder` for evidence must be under "evidence/chat", "evidence/email", "evidence/correction", or "evidence/document".',
+    };
+  }
+  if (flagKind && folderKind && flagKind !== folderKind) {
+    return {
+      ok: false,
+      error: "`--evidence-kind` must match the evidence folder subtype.",
+    };
+  }
+  return { ok: true, value: flagKind ?? folderKind ?? "chat" };
+}
+
+function resolveEvidenceKindFlag(value: string | undefined, flagName: string): EvidenceKindResult {
+  const fromValue = value?.trim();
+  if (!fromValue) return { ok: true, value: "chat" };
+  if (isValidGoatBrainEvidenceKind(fromValue)) return { ok: true, value: fromValue };
+  return {
+    ok: false,
+    error: `\`${flagName}\` must be chat, email, correction, or document.`,
+  };
+}
+
+function evidenceKindFromFolder(folder: string | undefined): GoatBrainEvidenceKind | null {
+  if (!folder) return null;
+  const [root, subtype] = normalizeGoatBrainFolderForV1(folder).split("/");
+  if (root !== "evidence") return null;
+  return isValidGoatBrainEvidenceKind(subtype) ? subtype : null;
+}
+
+function normalizeEvidenceRecordId(value: string | undefined): string | null {
+  if (!value) return null;
+  return normalizeEvidenceId(value);
+}
+
+function evidenceTitle(
+  kind: GoatBrainEvidenceKind,
+  sourceTitle: string | undefined,
+  summary: string,
+) {
+  if (sourceTitle?.trim()) return sourceTitle.trim();
+  const clipped = summary.replace(/\s+/g, " ").trim().slice(0, 80);
+  const label = kind[0]?.toUpperCase() ? `${kind[0].toUpperCase()}${kind.slice(1)}` : "Evidence";
+  return clipped ? `${label}: ${clipped}` : `${label} evidence`;
 }
 
 async function alias(ctx: CommandContext): Promise<CommandResult> {
@@ -879,13 +1085,23 @@ async function move(ctx: CommandContext): Promise<CommandResult> {
   }
   const folderTypeError = goatBrainFolderTypeError(folder, type);
   if (folderTypeError) {
-    const expectedFolder = goatBrainFolderForEntityType(type);
+    const expectedFolder =
+      type === "evidence"
+        ? `evidence/${loaded.doc.frontmatter.evidenceKind ?? "chat"}`
+        : goatBrainFolderForEntityType(type);
     return fail(
       `\`--folder\` "${folder}" does not match type "${type}". ${folderTypeError} Use "${expectedFolder}" or a subfolder under it.`,
     );
   }
   const oldPath = loaded.file.relativePath;
   loaded.doc.frontmatter.folder = folder;
+  if (type === "evidence") {
+    const evidenceKind = evidenceKindFromFolder(folder);
+    if (!evidenceKind) return fail("`--folder` for evidence must use a supported evidence kind.");
+    loaded.doc.frontmatter.evidenceKind = evidenceKind;
+  } else {
+    delete loaded.doc.frontmatter.evidenceKind;
+  }
   loaded.doc.frontmatter.updatedAt = nowIso();
   const newPath = await persist(ctx.root, loaded.doc);
   if (newPath !== oldPath) await removeGoatBrainFile(ctx.root, oldPath);
@@ -988,6 +1204,7 @@ function toWritableDocument(
       id: fm.id,
       folder: fm.folder,
       type: fm.type,
+      ...(fm.evidenceKind ? { evidenceKind: fm.evidenceKind } : {}),
       status: fm.status ?? "draft",
       createdAt: fm.createdAt,
       updatedAt: fm.updatedAt,

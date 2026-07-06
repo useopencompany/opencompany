@@ -2,10 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, notInArray } from "drizzle-orm";
 import {
   deriveGoatBrainEdges,
   type GoatBrainEntityType,
+  type GoatBrainEvidenceKind,
   type GoatBrainRelation,
   type GoatBrainSource,
   type GoatBrainStatus,
@@ -24,6 +25,7 @@ import {
   type GoatBrainDocument as ParsedGoatBrainDocument,
   parseGoatBrainDocument,
   parseGoatBrainSidecar,
+  recoverLegacyGoatBrainEntryFromSidecar,
   replaceGoatBrainCompiledTruth,
   serializeGoatBrainDocument,
   serializeLegacyGoatBrainEntry,
@@ -57,6 +59,7 @@ export type GoatBrainFileProjection = {
   sizeBytes: number;
   title: string;
   entityType: GoatBrainEntityType;
+  evidenceKind?: GoatBrainEvidenceKind;
   status: GoatBrainStatus;
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
@@ -67,6 +70,7 @@ export type GoatBrainFileProjection = {
 export type GoatBrainStoredFrontmatter = {
   id?: string;
   type?: string;
+  evidenceKind?: string;
   status?: string;
   title?: string;
   createdAt?: string;
@@ -110,6 +114,7 @@ export function createGoatBrainMarkdownContent(input: {
   folderPath: string;
   title: string;
   type: GoatBrainEntityType;
+  evidenceKind?: GoatBrainEvidenceKind;
   status?: GoatBrainStatus;
   compiledTruth?: string;
   related?: GoatBrainRelation[];
@@ -126,6 +131,7 @@ export function createGoatBrainMarkdownContent(input: {
       id: input.id,
       folder,
       type: input.type,
+      ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
       status: input.status ?? "draft",
       title: input.title,
       createdAt: input.createdAt ?? now,
@@ -189,6 +195,7 @@ export function deriveGoatBrainFileProjection(input: {
   const status = isValidGoatBrainStatus(parsed.frontmatter.status)
     ? parsed.frontmatter.status
     : "draft";
+  const evidenceKind = parsed.frontmatter.evidenceKind;
   const title = parsed.title || parsed.frontmatter.title || titleFromId(brainId);
   const validation = validateGoatBrainDocument(parsed, brainId, source);
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
@@ -199,6 +206,7 @@ export function deriveGoatBrainFileProjection(input: {
     folderPath,
     title,
     entityType,
+    ...(evidenceKind ? { evidenceKind } : {}),
     status,
     source,
   });
@@ -220,6 +228,7 @@ export function deriveGoatBrainFileProjection(input: {
     sizeBytes,
     title,
     entityType,
+    ...(evidenceKind ? { evidenceKind } : {}),
     status,
     relations: parsed.frontmatter.relations ?? [],
     sources: parsed.frontmatter.sources ?? [],
@@ -234,6 +243,7 @@ function canonicalGoatBrainContent(input: {
   folderPath: string;
   title: string;
   entityType: GoatBrainEntityType;
+  evidenceKind?: GoatBrainEvidenceKind;
   status: GoatBrainStatus;
   source: string;
 }): string {
@@ -243,6 +253,7 @@ function canonicalGoatBrainContent(input: {
     fm.folder === input.folderPath &&
     fm.type === input.entityType &&
     fm.status === input.status &&
+    fm.evidenceKind === input.evidenceKind &&
     fm.title === input.title
   ) {
     return input.source;
@@ -255,6 +266,7 @@ function canonicalGoatBrainContent(input: {
       id: input.brainId,
       folder: input.folderPath,
       type: input.entityType,
+      ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
       status: input.status,
       title: input.title,
       createdAt: fm.createdAt ?? new Date().toISOString(),
@@ -439,8 +451,16 @@ export async function materializeGoatBrainFilesToRoot(input: {
     includeInvalid: true,
   });
   for (const row of rows) {
-    const entry = goatBrainEntryFromLegacyMarkdown(row.content);
     const payloadPath = goatBrainFilePathFor(row.folderPath, row.brainId);
+    let entry: ReturnType<typeof goatBrainEntryFromLegacyMarkdown> | null = null;
+    try {
+      entry = goatBrainEntryFromLegacyMarkdown(row.content);
+    } catch {}
+    if (!entry) {
+      await writeRootFile(input.root, payloadPath, row.content);
+      continue;
+    }
+
     const payload = entry.body;
     const sidecarPath = goatBrainSidecarRelativePath(row.folderPath, row.brainId);
     await writeRootFile(input.root, payloadPath, payload);
@@ -460,6 +480,7 @@ export async function materializeGoatBrainFilesToRoot(input: {
           relations: entry.relations,
           sources: entry.sources,
           type: entry.type,
+          ...(entry.evidenceKind ? { evidenceKind: entry.evidenceKind } : {}),
           status: entry.status,
           ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
           tags: entry.tags,
@@ -525,7 +546,11 @@ export async function syncGoatBrainFilesForUser(input: {
     const normalizedPath = normalizeBrainFilePath(file.path);
     if (nextByPath.has(normalizedPath))
       throw new Error(`Duplicate brain file path "${normalizedPath}".`);
-    if (file.skip) {
+    const base = baseByPath.get(normalizedPath);
+    const unchangedFromBase =
+      base !== undefined && hashGoatBrainContent(file.content) === base.contentHash;
+    const skip = Boolean(file.skip || unchangedFromBase);
+    if (skip) {
       skippedPaths.add(normalizedPath);
     } else {
       deriveGoatBrainFileProjection({ path: normalizedPath, content: file.content });
@@ -533,22 +558,23 @@ export async function syncGoatBrainFilesForUser(input: {
     nextByPath.set(normalizedPath, {
       path: normalizedPath,
       content: file.content,
-      ...(file.skip ? { skip: true } : {}),
+      ...(skip ? { skip: true } : {}),
     });
   }
 
   const conflicts: GoatBrainSyncConflict[] = [];
   const handledConflictPaths = new Set<string>();
   for (const [pathName] of nextByPath) {
+    const next = nextByPath.get(pathName);
     const current = currentByPath.get(pathName);
     const base = baseByPath.get(pathName);
     if (current && base && current.contentHash !== base.contentHash) {
       conflicts.push({ path: pathName, reason: "changed_since_materialize" });
-      handledConflictPaths.add(pathName);
+      if (!next?.skip) handledConflictPaths.add(pathName);
     }
     if (current && !base) {
       conflicts.push({ path: pathName, reason: "created_since_materialize" });
-      handledConflictPaths.add(pathName);
+      if (!next?.skip) handledConflictPaths.add(pathName);
     }
   }
   for (const [pathName] of baseByPath) {
@@ -692,6 +718,7 @@ function documentValues(projection: GoatBrainFileProjection) {
     relations: projection.relations,
     sources: projection.sources,
     entityType: projection.entityType,
+    evidenceKind: projection.evidenceKind ?? null,
     status: projection.status,
     aliases: projection.aliases,
     contentHash: projection.contentHash,
@@ -706,12 +733,26 @@ async function replaceDerivedRows(
   projection: GoatBrainFileProjection,
 ) {
   await ensureFolderPath(db, userWorkosId, projection.folderPath);
-  await db.delete(goatBrainTimelineEntries).where(eq(goatBrainTimelineEntries.documentId, row.id));
+  const evidenceIds = projection.timeline.map((entry) => entry.evidenceId);
+  if (evidenceIds.length > 0) {
+    await db
+      .delete(goatBrainTimelineEntries)
+      .where(
+        and(
+          eq(goatBrainTimelineEntries.documentId, row.id),
+          notInArray(goatBrainTimelineEntries.evidenceId, evidenceIds),
+        ),
+      );
+  } else {
+    await db
+      .delete(goatBrainTimelineEntries)
+      .where(eq(goatBrainTimelineEntries.documentId, row.id));
+  }
   await db.delete(goatBrainEdges).where(eq(goatBrainEdges.documentId, row.id));
 
   for (const entry of projection.timeline) {
     const parts = timelineParts(entry);
-    await db.insert(goatBrainTimelineEntries).values({
+    const values = {
       documentId: row.id,
       userWorkosId,
       brainId: row.brainId,
@@ -721,7 +762,22 @@ async function replaceDerivedRows(
       sourceTitle: parts.sourceTitle || null,
       summary: parts.summary,
       detail: parts.detail,
-    });
+    };
+    await db
+      .insert(goatBrainTimelineEntries)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [goatBrainTimelineEntries.documentId, goatBrainTimelineEntries.evidenceId],
+        set: {
+          userWorkosId,
+          brainId: row.brainId,
+          at: values.at,
+          sourceRef: values.sourceRef,
+          sourceTitle: values.sourceTitle,
+          summary: values.summary,
+          detail: values.detail,
+        },
+      });
   }
 
   for (const edge of deriveGoatBrainEdges({
@@ -856,21 +912,22 @@ async function sourceFromRootFile(root: string, relativePath: string): Promise<s
     throw error;
   }
   try {
+    const sidecar = parseGoatBrainSidecar(sidecarSource);
     const validation = validateGoatBrainSidecar({
-      sidecar: parseGoatBrainSidecar(sidecarSource),
+      sidecar,
       payloadContent: payload,
       payloadRelativePath: relativePath,
     });
     if (validation.ok) return serializeLegacyGoatBrainEntry(validation.entry);
     if (isLegacyGoatBrainMarkdown(payload)) return payload;
-    throw new Error(
-      `Brain sidecar for "${relativePath}" is stale or invalid. Rewrite the document through the Brain CLI before syncing.`,
-    );
+    return recoverLegacyGoatBrainEntryFromSidecar({
+      sidecar,
+      payloadContent: payload,
+      payloadRelativePath: relativePath,
+    });
   } catch {
     if (isLegacyGoatBrainMarkdown(payload)) return payload;
-    throw new Error(
-      `Brain sidecar for "${relativePath}" is stale or invalid. Rewrite the document through the Brain CLI before syncing.`,
-    );
+    return null;
   }
 }
 
