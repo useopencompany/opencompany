@@ -38,6 +38,7 @@ vi.mock("@opencompany/goat-observability", async (importOriginal) => {
 
 const harnessSpec: GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1",
+  engine: "opencompany",
   model: "openai/gpt-5.4-mini",
   systemPrompt: "Run the task.",
   initialUserMessage: "Research Marseille",

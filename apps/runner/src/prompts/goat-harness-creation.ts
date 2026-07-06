@@ -1,4 +1,8 @@
-import type { GoatHarnessSpec, GoatTaskToolName } from "@opencompany/db/goat-schema";
+import type {
+  GoatHarnessEngine,
+  GoatHarnessSpec,
+  GoatTaskToolName,
+} from "@opencompany/db/goat-schema";
 
 export type GoatHarnessModelOption = {
   id: GoatHarnessSpec["model"];
@@ -6,6 +10,28 @@ export type GoatHarnessModelOption = {
   guidance: string;
   default?: boolean;
 };
+
+export type GoatHarnessEngineOption = {
+  id: GoatHarnessEngine;
+  label: string;
+  guidance: string;
+  default?: boolean;
+};
+
+export const GOAT_HARNESS_ENGINE_OPTIONS = [
+  {
+    id: "opencompany",
+    label: "OpenCompany model harness",
+    guidance: "Default. Use for research, writing, analysis, planning, and ordinary tool work.",
+    default: true,
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    guidance:
+      "Use for coding tasks, repository edits, tests, debugging, code review, and any coding task where the user explicitly asks for Codex.",
+  },
+] as const satisfies readonly GoatHarnessEngineOption[];
 
 export const GOAT_HARNESS_MODEL_OPTIONS = [
   {
@@ -55,6 +81,20 @@ function promptModelOptions(values: readonly GoatHarnessModelOption[]) {
   );
 }
 
+function promptEngineOptions(values: readonly GoatHarnessEngineOption[]) {
+  return promptBlock(
+    "execution_engine_options",
+    values.map((option) =>
+      promptBlock("engine_option", [
+        promptValue("id", option.id),
+        promptValue("label", option.label),
+        promptValue("selection_guidance", option.guidance),
+        promptValue("default", option.default ? "true" : "false"),
+      ]),
+    ),
+  );
+}
+
 function escapeXmlText(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
@@ -65,7 +105,12 @@ export const GOAT_HARNESS_CREATION_SYSTEM = promptBlock("system", [
 ]);
 
 export const GOAT_HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selection", [
+  "Choose the execution engine from the provided execution_engine_options.",
+  'Use engine "codex" for coding tasks when the user explicitly mentions Codex.',
+  'Use engine "codex" for repository editing, debugging, tests, code review, or pull-request work when Codex is the better executor.',
+  'Use engine "opencompany" for non-coding tasks and for coding-adjacent explanation that does not need a sandboxed coding agent.',
   "Choose the execution model from the provided execution_model_options.",
+  'When engine is "codex", choose an OpenAI Codex-capable model from the execution model options.',
   "Prefer the default model unless the task clearly benefits from a stronger specialized model.",
 ]);
 
@@ -78,7 +123,8 @@ export const GOAT_HARNESS_CREATION_PROMPT_CONTRACT = promptBlock("prompt_contrac
 export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Select only operation-level tools from the available list.",
   "Rewrite stale chat-layer limitations into clear instructions to use connected read-only tools when available.",
-  "For GitHub work, include github_clone_repository plus the needed follow-up GitHub tools only when a concrete owner/repo is relevant to the task.",
+  'For engine "opencompany" GitHub work, include github_clone_repository plus the needed follow-up GitHub tools only when a concrete owner/repo is relevant to the task.',
+  'For engine "codex", do not include GitHub operation tools just so Codex can edit code; instead set codex.repository when the task names a concrete owner/repo.',
   "Include github_open_pull_request only when the user explicitly asked to publish, push, or open a pull request.",
 ]);
 
@@ -99,11 +145,13 @@ export const GOAT_HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_pla
 
 export function buildGoatHarnessCreationPrompt(input: {
   taskPrompt: string;
+  executionEngineOptions: readonly GoatHarnessEngineOption[];
   executionModelOptions: readonly GoatHarnessModelOption[];
   availableOperationTools: readonly GoatTaskToolName[];
   defaultMaxModelSteps: number;
 }) {
   return promptBlock("planner_inputs", [
+    promptEngineOptions(input.executionEngineOptions),
     promptModelOptions(input.executionModelOptions),
     promptList("available_operation_tools", "tool", input.availableOperationTools),
     promptValue("default_max_model_steps", input.defaultMaxModelSteps),

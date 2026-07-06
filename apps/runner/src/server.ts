@@ -1,7 +1,12 @@
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
-import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
+import {
+  pollCodexDeviceAuthFlow,
+  pollGoatCodexDeviceAuthFlow,
+  startCodexDeviceAuthFlow,
+  startGoatCodexDeviceAuthFlow,
+} from "./codex-auth";
 import type { RunnerEnv } from "./env";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
 import { verifyGoatToolToken } from "./goat-tool-auth";
@@ -191,6 +196,39 @@ export function createServer(
       has_user_code: Boolean(flow.userCode),
       has_verification_uri: Boolean(flow.verificationUri),
     });
+    reply.send({ ok: true, flow });
+  });
+
+  app.post("/internal/goat/codex-auth/device/start", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const body = request.body as { userWorkosId?: string } | undefined;
+    const userWorkosId = body?.userWorkosId?.trim();
+    if (!userWorkosId) {
+      reply.status(400).send({ error: "userWorkosId is required." });
+      return;
+    }
+    logger.info("Goat Codex device auth start route received", {
+      event: "opencompany.runner_goat_codex_auth_start_route_received",
+      user_workos_id: userWorkosId,
+    });
+    const flow = await startGoatCodexDeviceAuthFlow({ userWorkosId, env });
+    reply.send({ ok: true, flow });
+  });
+
+  app.post("/internal/goat/codex-auth/device/:flowId/poll", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { flowId } = request.params as { flowId: string };
+    const body = request.body as { userWorkosId?: string } | undefined;
+    const userWorkosId = body?.userWorkosId?.trim();
+    if (!userWorkosId) {
+      reply.status(400).send({ error: "userWorkosId is required." });
+      return;
+    }
+    const flow = await pollGoatCodexDeviceAuthFlow({ userWorkosId, flowId, env });
+    if (!flow) {
+      reply.status(404).send({ error: "Goat Codex device auth flow was not found." });
+      return;
+    }
     reply.send({ ok: true, flow });
   });
 

@@ -175,6 +175,7 @@ function task(overrides: Partial<GoatTaskStepInput> = {}): GoatTaskStepInput {
 function defaultHarnessSpec(): GoatTaskStepInput["harnessSpec"] {
   return {
     schemaVersion: "goat.harness.v1",
+    engine: "opencompany",
     model: "openai/gpt-5.4-mini",
     systemPrompt: "Run the task.",
     initialUserMessage: "Research Marseille",

@@ -16,6 +16,9 @@ const aiMock = vi.hoisted(() => ({
 const goatBrainMock = vi.hoisted(() => ({
   createGoatBrainMarkdownReportForTask: vi.fn(),
 }));
+const goatCodexMock = vi.hoisted(() => ({
+  runGoatCodexTask: vi.fn(),
+}));
 
 vi.mock("ai", () => ({
   generateObject: aiMock.generateObject,
@@ -31,6 +34,7 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 }));
 
 vi.mock("./goat-brain", () => goatBrainMock);
+vi.mock("./goat-codex", () => goatCodexMock);
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
@@ -39,6 +43,7 @@ const claudeModel = "anthropic/claude-sonnet-5" as AgentModelId;
 const gptModel = "openai/gpt-5.5" as AgentModelId;
 const harnessSpec: GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1",
+  engine: "opencompany",
   model,
   systemPrompt: "Use read-only tools and answer directly.",
   initialUserMessage: "Research Marseille.",
@@ -64,6 +69,14 @@ beforeEach(() => {
     url: "/brain/research/marseille-market-research",
     mimeType: "text/markdown",
   });
+  goatCodexMock.runGoatCodexTask.mockResolvedValue({
+    content: "Codex completed.",
+    sandboxId: "sbx_codex",
+    sandboxStartedAt: new Date("2026-01-01T00:00:00.000Z"),
+    sandboxEndedAt: new Date("2026-01-01T00:01:00.000Z"),
+    model: "gpt-5.5",
+    usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+  });
 });
 
 describe("planGoatHarness", () => {
@@ -71,6 +84,7 @@ describe("planGoatHarness", () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
         schemaVersion: "goat.harness.v1",
+        engine: "opencompany",
         model: claudeModel,
         systemPrompt: "Use Gmail.",
         initialUserMessage: "Use Gmail to summarize the latest emails.",
@@ -90,6 +104,7 @@ describe("planGoatHarness", () => {
       }),
     ).resolves.toEqual({
       schemaVersion: "goat.harness.v1",
+      engine: "opencompany",
       model: claudeModel,
       systemPrompt: "Use Gmail.",
       initialUserMessage: "Use Gmail to summarize the latest emails.",
@@ -112,7 +127,11 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain('resultMode "brain_markdown_report"');
     expect(request.system).toContain("<prompt_contract>");
     expect(request.system).toContain("Always return a non-empty systemPrompt");
+    expect(request.system).toContain('Use engine "codex" for coding tasks');
     expect(request.prompt).toContain("<planner_inputs>");
+    expect(request.prompt).toContain("<execution_engine_options>");
+    expect(request.prompt).toContain("<id>\nopencompany\n</id>");
+    expect(request.prompt).toContain("<id>\ncodex\n</id>");
     expect(request.prompt).toContain("<execution_model_options>");
     expect(request.prompt).toContain("<id>\nmoonshotai/kimi-k2.6\n</id>");
     expect(request.prompt).toContain("<selection_guidance>\nDefault.");
@@ -208,6 +227,7 @@ describe("planGoatHarness", () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
         schemaVersion: "goat.harness.v1",
+        engine: "opencompany",
         model: gptModel,
         systemPrompt: "Clone the requested repo, run tests, and open a PR only if requested.",
         initialUserMessage: "Change octo/private-repo and open a PR.",
@@ -258,6 +278,7 @@ describe("planGoatHarness", () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
         schemaVersion: "goat.harness.v1",
+        engine: "opencompany",
         model: claudeModel,
         systemPrompt: "Research the market deeply.",
         initialUserMessage: "Deep research the Marseille AI market.",
@@ -276,12 +297,50 @@ describe("planGoatHarness", () => {
       }),
     ).resolves.toEqual({
       schemaVersion: "goat.harness.v1",
+      engine: "opencompany",
       model: claudeModel,
       systemPrompt: expect.stringContaining("<brain_markdown_report_result_contract>"),
       initialUserMessage: "Deep research the Marseille AI market.",
       tools: ["exa_search"],
       maxModelSteps: 10,
       resultMode: "brain_markdown_report",
+    });
+  });
+
+  it("keeps Codex as the selected engine for explicit Codex coding tasks", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "codex",
+        model: gptModel,
+        systemPrompt: "Use Codex to edit the repository and summarize the diff.",
+        initialUserMessage: "Use Codex to fix the failing tests in octo/repo.",
+        tools: ["exa_search"],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+        codex: {
+          repository: "octo/repo",
+          createPullRequest: false,
+          reasoningEffort: "high",
+        },
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Use Codex to fix the failing tests in octo/repo.",
+        model,
+        availableTools: ["exa_search", "github_clone_repository", "github_shell"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      engine: "codex",
+      model: gptModel,
+      codex: {
+        repository: "octo/repo",
+        createPullRequest: false,
+        reasoningEffort: "high",
+      },
     });
   });
 });
@@ -397,6 +456,60 @@ describe("executeGoatTask", () => {
         phase: "execution",
         stepIndex: 1,
         usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 },
+      }),
+    );
+  });
+
+  it("runs Codex harnesses through the Codex sandbox executor", async () => {
+    const codexHarnessSpec: GoatHarnessSpec = {
+      ...harnessSpec,
+      engine: "codex",
+      model: gptModel,
+      systemPrompt: "Use Codex.",
+      initialUserMessage: "Fix octo/repo.",
+      codex: {
+        repository: "octo/repo",
+        createPullRequest: true,
+        reasoningEffort: "high",
+      },
+    };
+    aiMock.generateObject.mockResolvedValueOnce({ object: codexHarnessSpec });
+    const sink = createSink();
+
+    await expect(
+      executeGoatTask({
+        task: task(),
+        env: env(),
+        signal: new AbortController().signal,
+        sink,
+        reportStage: vi.fn(async () => {}),
+      }),
+    ).resolves.toMatchObject({
+      result: "Codex completed.",
+      harnessSpec: codexHarnessSpec,
+    });
+
+    expect(goatCodexMock.runGoatCodexTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        prompt: "Fix octo/repo.",
+        repository: "octo/repo",
+        createPullRequest: true,
+      }),
+    );
+    expect(sink.recordSandboxUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sandboxId: "sbx_codex",
+        activeMs: 60_000,
+      }),
+    );
+    expect(sink.recordModelUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelProvider: "openai",
+        modelName: "gpt-5.5",
+        costOverride: expect.objectContaining({
+          costBasis: { source: "codex_subscription" },
+        }),
       }),
     );
   });

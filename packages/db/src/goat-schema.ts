@@ -1,4 +1,4 @@
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, sql } from "drizzle-orm";
 import {
@@ -18,6 +18,8 @@ import {
 
 export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
+export type GoatHarnessEngine = "opencompany" | "codex";
+
 export type GoatTaskStage =
   | "queued"
   | "planning"
@@ -31,6 +33,13 @@ export type GoatIntegrationProvider = "gmail" | "google_calendar" | "linear" | "
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
 export type GoatIntegrationCredentialKind = "oauth_token";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
+export type GoatCodexCredentialStatus = "connected" | "needs_reauth";
+export type GoatCodexDeviceAuthFlowStatus =
+  | "pending"
+  | "code_ready"
+  | "completed"
+  | "failed"
+  | "expired";
 export type GoatIntegrationResourceStatus =
   | "available"
   | "permission_lost"
@@ -56,12 +65,18 @@ export type GoatTaskToolName =
 
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
+  engine: GoatHarnessEngine;
   model: AgentModelId;
   systemPrompt: string;
   initialUserMessage: string;
   tools: GoatTaskToolName[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
+  codex?: {
+    repository?: string | null;
+    createPullRequest?: boolean;
+    reasoningEffort?: CodexReasoningEffort;
+  };
 };
 
 export type GoatBrainFolderSource = "system" | "custom";
@@ -943,6 +958,61 @@ export const goatBrainToolRuns = goat.table(
   }),
 );
 
+export const goatCodexCredentials = goat.table(
+  "codex_credentials",
+  {
+    userWorkosId: text("user_workos_id")
+      .primaryKey()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    encryptedAuthJson: jsonb("encrypted_auth_json")
+      .$type<GoatIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    status: text("status").$type<GoatCodexCredentialStatus>().notNull().default("connected"),
+    statusReason: text("status_reason"),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("goat_codex_credentials_status_idx").on(table.status),
+    statusCheck: check(
+      "goat_codex_credentials_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth')`,
+    ),
+  }),
+);
+
+export const goatCodexDeviceAuthFlows = goat.table(
+  "codex_device_auth_flows",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    sandboxId: text("sandbox_id").notNull(),
+    userCode: text("user_code"),
+    verificationUri: text("verification_uri"),
+    status: text("status").$type<GoatCodexDeviceAuthFlowStatus>().notNull().default("pending"),
+    statusReason: text("status_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userStatusIdx: index("goat_codex_device_auth_flows_user_status_idx").on(
+      table.userWorkosId,
+      table.status,
+    ),
+    expiresAtIdx: index("goat_codex_device_auth_flows_expires_at_idx").on(table.expiresAt),
+    statusCheck: check(
+      "goat_codex_device_auth_flows_status_check",
+      sql`${table.status} IN ('pending', 'code_ready', 'completed', 'failed', 'expired')`,
+    ),
+  }),
+);
+
 export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   brainFolders: many(goatBrainFolders),
   brainDocuments: many(goatBrainDocuments),
@@ -960,6 +1030,7 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   integrations: many(goatIntegrations),
   integrationCredentials: many(goatIntegrationCredentials),
   integrationResources: many(goatIntegrationResources),
+  codexDeviceAuthFlows: many(goatCodexDeviceAuthFlows),
 }));
 
 export const goatBrainFoldersRelations = relations(goatBrainFolders, ({ one }) => ({
@@ -1033,6 +1104,20 @@ export const goatBrainToolRunsRelations = relations(goatBrainToolRuns, ({ one })
     fields: [goatBrainToolRuns.assistantMessageId],
     references: [goatChatMessages.id],
     relationName: "goat_brain_tool_runs_assistant_message",
+  }),
+}));
+
+export const goatCodexCredentialsRelations = relations(goatCodexCredentials, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatCodexCredentials.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+}));
+
+export const goatCodexDeviceAuthFlowsRelations = relations(goatCodexDeviceAuthFlows, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatCodexDeviceAuthFlows.userWorkosId],
+    references: [goatUsers.workosUserId],
   }),
 }));
 
@@ -1187,6 +1272,8 @@ export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSe
 export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;
 export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$inferSelect;
+export type GoatCodexCredential = typeof goatCodexCredentials.$inferSelect;
+export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;
 export type GoatTaskMessage = typeof goatTaskMessages.$inferSelect;
 export type GoatTaskEvent = typeof goatTaskEvents.$inferSelect;

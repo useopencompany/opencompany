@@ -51,6 +51,7 @@ describe("createGoatTaskForUser", () => {
         error: null,
         harnessSpec: {
           schemaVersion: "goat.harness.v1",
+          engine: "opencompany",
           model: DEFAULT_GOAT_MODEL,
           systemPrompt: "",
           initialUserMessage: "Research x",

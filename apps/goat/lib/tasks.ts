@@ -247,6 +247,7 @@ export async function createGoatTaskForUser(input: {
   const tools = await getGoatAvailableHarnessTools(input.userWorkosId);
   const harnessSpec: GoatHarnessSpec = {
     schemaVersion: "goat.harness.v1",
+    engine: "opencompany",
     model: input.model,
     systemPrompt: "",
     initialUserMessage: input.prompt,

@@ -209,20 +209,28 @@ The planner is a separate AI SDK `generateObject` Gateway call using:
 - Model: `anthropic/claude-sonnet-4.6`
 - strict JSON schema
 - Structured prompt blocks from `apps/runner/src/prompts/goat-harness-creation.ts`
+- Execution engine options: `opencompany` by default, or `codex` for sandboxed Codex CLI coding
+  tasks.
 - Execution model options: `moonshotai/kimi-k2.6` by default, `anthropic/claude-sonnet-5` for more
-  complex execution or writing, and `openai/gpt-5.5` for coding or sharper analysis.
+  complex execution or writing, and `openai/gpt-5.5` for coding, Codex, or sharper analysis.
 
 The planner returns a `GoatHarnessSpec`:
 
 ```ts
 type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
+  engine: "opencompany" | "codex";
   model: AgentModelId;
   systemPrompt: string;
   initialUserMessage: string;
   tools: GoatTaskToolName[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
+  codex?: {
+    repository?: string | null;
+    createPullRequest?: boolean;
+    reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  };
 };
 ```
 
@@ -231,10 +239,14 @@ Normalization is intentionally conservative:
 - Tool names are operation-level only.
 - Gmail, Calendar, and Linear operations are selected only if both available to the user and chosen
   by the planner.
+- The execution engine must be `opencompany` or `codex`. Missing legacy values normalize to
+  `opencompany`.
 - The execution model must be one of the planner's allowed model options.
 - `systemPrompt` must be non-empty; there is no fallback task system prompt.
 - `resultMode` is `assistant_final` for ordinary tasks and `brain_markdown_report` for deep
   research/report deliverables that should be saved as Brain artifacts.
+- Codex engine runs use `codex.repository` for a Goat-connected GitHub repository and only open a
+  draft PR when `codex.createPullRequest` is true.
 
 The planner request and response content are stored in `debugTrace.planner`.
 
@@ -243,6 +255,7 @@ The planner request and response content are stored in `debugTrace.planner`.
 Entry points:
 
 - `apps/runner/src/goat-harness.ts`
+- `apps/runner/src/goat-codex.ts`
 - `apps/runner/src/goat-tools.ts`
 - `apps/runner/src/goat-google-tools.ts`
 
@@ -397,6 +410,9 @@ Common changes and where they belong:
 - Change planner behavior or harness spec schema: `planGoatHarnessForTask` in
   `apps/runner/src/goat-harness.ts` and prompt blocks in
   `apps/runner/src/prompts/goat-harness-creation.ts`.
+- Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
+  `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
+- Change Goat Codex execution: `apps/runner/src/goat-codex.ts`.
 - Change fallback task harness instructions: `apps/runner/src/prompts/goat-task-harness.ts`.
 - Add or change harness tools: `apps/runner/src/goat-tools.ts`, implementation files like
   `apps/runner/src/goat-google-tools.ts`, and `GoatTaskToolName` in

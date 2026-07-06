@@ -955,14 +955,16 @@ export async function runClaimedGoatTask(input: {
           },
           recordModelUsage: async (usageInput) => {
             const usage = normalizeModelUsage(usageInput.usage);
-            const cost = calculateModelUsageCost({
-              modelName: usageInput.modelName,
-              inputTokens: usage.inputTokens,
-              inputNoCacheTokens: usage.inputNoCacheTokens,
-              inputCacheReadTokens: usage.inputCacheReadTokens,
-              inputCacheWriteTokens: usage.inputCacheWriteTokens,
-              outputTokens: usage.outputTokens,
-            });
+            const calculatedCost =
+              usageInput.costOverride ??
+              calculateModelUsageCost({
+                modelName: usageInput.modelName,
+                inputTokens: usage.inputTokens,
+                inputNoCacheTokens: usage.inputNoCacheTokens,
+                inputCacheReadTokens: usage.inputCacheReadTokens,
+                inputCacheWriteTokens: usage.inputCacheWriteTokens,
+                outputTokens: usage.outputTokens,
+              });
             await requireLeaseWrite(
               store.recordModelUsage({
                 id: input.task.id,
@@ -981,10 +983,10 @@ export async function runClaimedGoatTask(input: {
                 usage,
                 providerCreatedAt: usageInput.providerCreatedAt ?? null,
                 cost: {
-                  providerCostUsdMicros: cost.providerCostUsdMicros,
-                  platformFeeUsdMicros: cost.platformFeeUsdMicros,
-                  totalCostUsdMicros: cost.totalCostUsdMicros,
-                  costBasis: cost.costBasis,
+                  providerCostUsdMicros: calculatedCost.providerCostUsdMicros,
+                  platformFeeUsdMicros: calculatedCost.platformFeeUsdMicros,
+                  totalCostUsdMicros: calculatedCost.totalCostUsdMicros,
+                  costBasis: calculatedCost.costBasis,
                 },
               }),
               "record model usage",
