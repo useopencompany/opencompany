@@ -136,7 +136,8 @@ describe("runOpenCompanyChatAgent", () => {
       runBrainCli,
       generateTextImpl: (async (options: unknown) => {
         expect(extractGoatBrainToolDescription(options)).toContain("personal Goat Brain");
-        expect(extractGoatBrainToolDescription(options)).toContain("ingest");
+        expect(extractGoatBrainToolDescription(options)).not.toContain("ingest");
+        expect(extractGoatBrainToolDescription(options)).toContain("append-evidence");
         const toolResult = await executeGoatBrainTool(options, {
           command: "query",
           flags: {

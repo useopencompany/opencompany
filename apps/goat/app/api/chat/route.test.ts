@@ -142,6 +142,81 @@ describe("POST /api/chat", () => {
     });
   });
 
+  it("wires brain create saves into the model stream", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockRunGoatBrainToolForUser().mockResolvedValue({
+      ok: true,
+      exitCode: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        id: "acme",
+        path: "companies/acme.md",
+      }),
+      stderr: "",
+    });
+    let brainToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { goat_brain?: { execute?: unknown } } }).tools
+        ?.goat_brain;
+      if (typeof tool?.execute !== "function") {
+        throw new Error("goat_brain execute function was not configured.");
+      }
+      brainToolPromise = tool.execute(
+        {
+          command: "create",
+          flags: {
+            id: "acme",
+            folder: "companies",
+            title: "Acme",
+            type: "company",
+            truth: "Acme is a company building billing tools.",
+            sourceTitle: "User chat note",
+            json: true,
+          },
+        },
+        { toolCallId: "tool_call_1" },
+      ) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const request = jsonRequest({
+      model: "openai/gpt-5.4-mini",
+      message: {
+        id: "ui_user_1",
+        role: "user",
+        parts: [{ type: "text", text: "remember Acme is a company building billing tools" }],
+      },
+    });
+    const response = await POST(request);
+    await brainToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      toolInput: {
+        command: "create",
+        flags: {
+          id: "acme",
+          folder: "companies",
+          title: "Acme",
+          type: "company",
+          truth: "Acme is a company building billing tools.",
+          sourceTitle: "User chat note",
+          json: true,
+        },
+      },
+      gatewayApiKey: "test-key",
+      sourceRef: "goat-chat:user_message_1",
+      chatSessionId: "session_1",
+      userMessageId: "user_message_1",
+      toolCallId: "tool_call_1",
+      signal: request.signal,
+    });
+  });
+
   it("wires Exa-backed web_search into the model stream when configured", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:00:00.000Z"));

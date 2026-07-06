@@ -3,11 +3,14 @@ import type { GoatChatMessage } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
 
 export const START_TASK_TOOL_NAME = "start_task";
-export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
+export const START_TASK_TOOL_PART_TYPE =
+  `tool-${START_TASK_TOOL_NAME}` as const;
 export const GOAT_BRAIN_TOOL_NAME = "goat_brain";
-export const GOAT_BRAIN_TOOL_PART_TYPE = `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
+export const GOAT_BRAIN_TOOL_PART_TYPE =
+  `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
-export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
+export const WEB_SEARCH_TOOL_PART_TYPE =
+  `tool-${WEB_SEARCH_TOOL_NAME}` as const;
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -37,12 +40,12 @@ export type StartTaskToolOutput = {
 };
 
 export type GoatBrainCliCommand =
+  | "help"
   | "create"
   | "list"
   | "get"
   | "timeline"
   | "query"
-  | "ingest"
   | "append-evidence"
   | "rewrite"
   | "alias"
@@ -142,21 +145,32 @@ export type GoatChatSummaryView = {
 
 export type GoatStoredChatMessage = Pick<
   GoatChatMessage,
-  "id" | "sessionId" | "role" | "content" | "taskId" | "debugTrace" | "createdAt" | "updatedAt"
+  | "id"
+  | "sessionId"
+  | "role"
+  | "content"
+  | "taskId"
+  | "debugTrace"
+  | "createdAt"
+  | "updatedAt"
 > & {
   taskDisplayId: string | null;
   taskName: string | null;
   taskPrompt: string | null;
 };
 
-export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "parts">) {
+export function textFromGoatChatUiMessage(
+  message: Pick<GoatChatUiMessage, "parts">,
+) {
   return message.parts
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("")
     .trim();
 }
 
-export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiMessage {
+export function toGoatChatUiMessage(
+  message: GoatStoredChatMessage,
+): GoatChatUiMessage {
   const metadata = toGoatChatMessageMetadata(message);
   return {
     id: message.id,
@@ -198,10 +212,16 @@ function toGoatChatUiMessageParts(
 ): GoatChatUiMessage["parts"] {
   if (message.role !== "assistant") return textParts(message.content);
 
-  const persistedParts = parseDebugTraceUiMessageParts(message.debugTrace?.uiMessageParts);
-  if (persistedParts) return withStoredContentFallback(persistedParts, message.content);
+  const persistedParts = parseDebugTraceUiMessageParts(
+    message.debugTrace?.uiMessageParts,
+  );
+  if (persistedParts)
+    return withStoredContentFallback(persistedParts, message.content);
 
-  const legacyTaskParts = legacyTaskOrderedParts(message, metadata?.task ?? null);
+  const legacyTaskParts = legacyTaskOrderedParts(
+    message,
+    metadata?.task ?? null,
+  );
   if (legacyTaskParts) return legacyTaskParts;
 
   return textParts(message.content);
@@ -215,11 +235,17 @@ function withStoredContentFallback(
   parts: GoatChatUiMessage["parts"],
   content: string,
 ): GoatChatUiMessage["parts"] {
-  if (!content || parts.some((part) => part.type === "text" && part.text.trim())) return parts;
+  if (
+    !content ||
+    parts.some((part) => part.type === "text" && part.text.trim())
+  )
+    return parts;
   return [...parts, { type: "text", text: content }];
 }
 
-function parseDebugTraceUiMessageParts(value: unknown): GoatChatUiMessage["parts"] | null {
+function parseDebugTraceUiMessageParts(
+  value: unknown,
+): GoatChatUiMessage["parts"] | null {
   if (!Array.isArray(value)) return null;
 
   const parts: GoatChatUiMessage["parts"] = [];
@@ -276,7 +302,8 @@ function legacyStartTaskOutput(
   const toolResults = message.debugTrace?.toolResults;
   if (Array.isArray(toolResults)) {
     for (const result of toolResults) {
-      const output = isRecord(result) && isRecord(result.output) ? result.output : result;
+      const output =
+        isRecord(result) && isRecord(result.output) ? result.output : result;
       if (isStartTaskToolOutput(output)) return output;
     }
   }
@@ -299,11 +326,18 @@ function legacyStartTaskInput(
   if (Array.isArray(toolCalls)) {
     for (const call of toolCalls) {
       if (!isRecord(call)) continue;
-      const input = isRecord(call.input) ? call.input : isRecord(call.args) ? call.args : null;
+      const input = isRecord(call.input)
+        ? call.input
+        : isRecord(call.args)
+          ? call.args
+          : null;
       if (!input) continue;
-      const prompt = typeof input.prompt === "string" ? input.prompt : output.prompt;
-      const name = typeof input.name === "string" ? input.name : output.taskName;
-      const reason = typeof input.reason === "string" ? input.reason : undefined;
+      const prompt =
+        typeof input.prompt === "string" ? input.prompt : output.prompt;
+      const name =
+        typeof input.name === "string" ? input.name : output.taskName;
+      const reason =
+        typeof input.reason === "string" ? input.reason : undefined;
       return {
         prompt,
         name,

@@ -76,7 +76,7 @@ Original timeline body.
     expect(parsed.compiledTruth).toBe("New truth.");
     expect(parsed.timeline).toEqual([
       {
-        evidenceId: "ev-20260101-original-timeline-body",
+        evidenceId: expect.stringMatching(/^ev-20260101-original-timeline-body-[a-f0-9]{8}$/),
         at: "2026-01-01T00:00:00.000Z",
         body: "Original timeline body.",
       },

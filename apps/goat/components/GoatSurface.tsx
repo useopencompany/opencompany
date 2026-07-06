@@ -949,7 +949,7 @@ function toolCallViewFromPart(
   const output = part.output;
   const failedGoatBrain =
     name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
-      ? !goatBrainToolOutputSucceeded(output, part.input)
+      ? !goatBrainToolOutputSucceeded(output)
       : false;
   const status = failedGoatBrain ? "failed" : toolStatusFromState(state, stopped);
   return {
@@ -1031,7 +1031,7 @@ function goatBrainToolDetail(
   status: ToolCallView["status"],
 ) {
   if (part.state === "output-available" && isGoatBrainToolOutput(part.output)) {
-    if (!goatBrainToolOutputSucceeded(part.output, part.input)) {
+    if (!goatBrainToolOutputSucceeded(part.output)) {
       return truncateToolPreview(
         firstNonEmptyLine(part.output.error, part.output.stderr, part.output.stdout) ??
           formatToolInput(part.input),
@@ -1164,16 +1164,9 @@ function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOutput {
   );
 }
 
-function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput, input?: unknown) {
-  if (isGoatBrainDoctorCall(output, input)) return true;
+function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput) {
   if (output.ok) return true;
   return parseGoatBrainCliJson(output.stdout)?.ok === true;
-}
-
-function isGoatBrainDoctorCall(output: GoatBrainToolOutput, input?: unknown) {
-  if (isRecord(input) && input.command === "doctor") return true;
-  if (Array.isArray(output.argv) && output.argv[0] === "doctor") return true;
-  return typeof output.command === "string" && output.command.trim().startsWith("doctor");
 }
 
 function goatBrainCliSuccessSummary(stdout: string | undefined) {

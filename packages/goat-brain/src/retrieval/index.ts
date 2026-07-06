@@ -13,6 +13,7 @@ export type GoatBrainQueryOptions = {
   hops?: number;
   graphDirection?: GoatBrainGraphDirection;
   includeInvalid?: boolean;
+  includeMerged?: boolean;
 };
 
 export type RetrievalProviders = {
@@ -148,6 +149,7 @@ function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): I
   const sinceMs = options.since ? Date.parse(options.since) : Number.NaN;
   return records.filter((record) => {
     if (!options.includeInvalid && !record.valid) return false;
+    if (!options.includeMerged && record.status === "merged") return false;
     if (
       options.folder &&
       record.folder !== options.folder &&

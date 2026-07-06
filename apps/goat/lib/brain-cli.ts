@@ -10,6 +10,12 @@ import {
   syncGoatBrainFilesFromRoot,
 } from "@opencompany/db/goat-brain-files";
 import { goatBrainToolRuns } from "@opencompany/db/goat-schema";
+import { createPooledDb } from "@opencompany/db/pool";
+import {
+  GOAT_BRAIN_ENTITY_TYPES,
+  goatBrainFolderForEntityType,
+  isBuiltInGoatBrainEntityType,
+} from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import type {
   GoatBrainCliCommand,
@@ -20,8 +26,11 @@ import type {
 
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
+const GOAT_BRAIN_TOOL_HELP =
+  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, rewrite, alias, link, merge, move, delete, folder, doctor. Use includeMerged when you need merged records.';
 
 const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
+  "help",
   "list",
   "get",
   "timeline",
@@ -159,7 +168,7 @@ async function runResolvedGoatBrainCliForUser(
 
     output = publicGoatBrainCliOutput(processResult, resolved);
     if (shouldSync && processResult.ok) {
-      const synced = await syncGoatBrainFilesFromRoot({
+      const synced = await syncGoatBrainFilesFromRootWithTransactionDb({
         userWorkosId: input.userWorkosId,
         root,
         baseSnapshot: materialized,
@@ -216,6 +225,22 @@ async function runResolvedGoatBrainCliForUser(
   return output;
 }
 
+async function syncGoatBrainFilesFromRootWithTransactionDb(input: {
+  userWorkosId: string;
+  root: string;
+  baseSnapshot: MaterializedGoatBrainFile[];
+}) {
+  const pooled = createPooledDb(undefined, { max: 1 });
+  try {
+    return await syncGoatBrainFilesFromRoot({
+      ...input,
+      db: pooled.db,
+    });
+  } finally {
+    await pooled.close();
+  }
+}
+
 function goatBrainToolInvocation(
   input: GoatBrainToolInput,
   sourceRef: string,
@@ -228,6 +253,7 @@ function goatBrainToolInvocation(
 }
 
 const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string[]> = {
+  help: ["topic", "command", "json"],
   create: [
     "folder",
     "id",
@@ -244,7 +270,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "status",
     "json",
   ],
-  list: ["folder", "limit", "json"],
+  list: ["folder", "limit", "include-merged", "json"],
   get: ["id", "section", "json"],
   query: [
     "text",
@@ -255,10 +281,10 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "graph-direction",
     "lexical-only",
     "include-invalid",
+    "include-merged",
     "json",
   ],
   timeline: ["id", "limit", "since", "json"],
-  ingest: ["text", "text-stdin", "source-ref", "source-title", "at", "dry-run", "model", "json"],
   rewrite: ["id", "truth", "truth-stdin", "json"],
   "timeline-add": [
     "id",
@@ -305,26 +331,39 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   doctor: ["json"],
 };
 
-function renderGoatBrainToolCommand(
+export function renderGoatBrainToolCommand(
   input: GoatBrainToolInput,
   sourceRef: string,
 ): { argv: string[]; stdin?: string } {
   const allowed = GOAT_BRAIN_TOOL_COMMAND_FLAGS[input.command];
-  if (!allowed) throw new Error(`Unsupported goat_brain command "${input.command}".`);
+  if (!allowed) throw goatBrainToolInputError(`Unsupported goat_brain command "${input.command}".`);
 
   const flags = normalizeCliToolFlags(input.flags ?? {});
+  applyImplicitStdinFlags(input.command, flags, input.stdin);
   const allowedSet = new Set(allowed);
   const unknown = Object.keys(flags).find((name) => !allowedSet.has(name));
   if (unknown) {
-    throw new Error(`Unsupported goat_brain flag "--${unknown}" for command "${input.command}".`);
+    throw goatBrainToolInputError(
+      `Unsupported goat_brain flag "--${unknown}" for command "${input.command}".`,
+      input.command,
+    );
   }
 
   if (input.command === "delete" && flags.force === true) {
-    throw new Error("The chat tool may only preview deletes. Use dryRun: true.");
+    throw goatBrainToolInputError("The chat tool may only preview deletes. Use dryRun: true.", [
+      "delete",
+    ]);
   }
+  if (input.command === "create") validateCreateFlags(flags, input.stdin);
 
   const command = cliCommandForToolCommand(input.command);
   const argv: string[] = [command];
+  if (input.command === "help") {
+    const topic = flags.topic ?? flags.command;
+    if (typeof topic === "string" && topic.trim()) argv.push(topic.trim());
+    delete flags.topic;
+    delete flags.command;
+  }
   if (input.command === "folder") {
     const subcommand = flags.subcommand;
     if (typeof subcommand === "string" && subcommand.trim()) argv.push(subcommand.trim());
@@ -343,6 +382,31 @@ function renderGoatBrainToolCommand(
 function cliCommandForToolCommand(command: GoatBrainCliCommand): string {
   if (command === "append-evidence") return "timeline-add";
   return command;
+}
+
+function applyImplicitStdinFlags(
+  command: GoatBrainCliCommand,
+  flags: Record<string, GoatBrainToolFlagValue>,
+  stdin: string | undefined,
+) {
+  if (!stdin?.trim()) return;
+  if (command === "create" && flags.truth === undefined && flags["truth-stdin"] === undefined) {
+    flags["truth-stdin"] = true;
+    return;
+  }
+  if (command === "rewrite" && flags.truth === undefined && flags["truth-stdin"] === undefined) {
+    flags["truth-stdin"] = true;
+    return;
+  }
+  if (
+    (command === "timeline-add" ||
+      command === "append-timeline" ||
+      command === "append-evidence") &&
+    flags.body === undefined &&
+    flags["body-stdin"] === undefined
+  ) {
+    flags["body-stdin"] = true;
+  }
 }
 
 function normalizeCliToolFlags(input: Record<string, GoatBrainToolFlagValue>) {
@@ -368,11 +432,61 @@ function injectGoatBrainSourceRef(
     command === "create" ||
     command === "timeline-add" ||
     command === "append-timeline" ||
-    command === "append-evidence" ||
-    command === "ingest"
+    command === "append-evidence"
   ) {
     flags["source-ref"] = sourceRef;
   }
+}
+
+function validateCreateFlags(
+  flags: Record<string, GoatBrainToolFlagValue>,
+  stdin: string | undefined,
+) {
+  const type = typeof flags.type === "string" ? flags.type.trim() : "";
+  if (!type) {
+    throw goatBrainToolInputError(
+      `goat_brain create requires a type. Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
+      "create",
+    );
+  }
+  if (!isBuiltInGoatBrainEntityType(type)) {
+    throw goatBrainToolInputError(
+      `Unsupported Goat Brain entity type "${type}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(
+        ", ",
+      )}.`,
+      "create",
+    );
+  }
+  const hasTruth =
+    (typeof flags.truth === "string" && flags.truth.trim().length > 0) ||
+    (flags["truth-stdin"] === true && Boolean(stdin?.trim()));
+  if (!hasTruth) {
+    throw goatBrainToolInputError(
+      "goat_brain create requires compiled truth via truth or non-empty truthStdin.",
+      "create",
+    );
+  }
+  const expectedFolder = goatBrainFolderForEntityType(type);
+  const folder = typeof flags.folder === "string" ? flags.folder.trim() : "";
+  if (!folder) {
+    flags.folder = expectedFolder;
+    return;
+  }
+  if (folder !== expectedFolder && !folder.startsWith(`${expectedFolder}/`)) {
+    throw goatBrainToolInputError(
+      `goat_brain create folder "${folder}" does not match type "${type}". Use "${expectedFolder}".`,
+      "create",
+    );
+  }
+}
+
+function goatBrainToolInputError(message: string, command?: GoatBrainCliCommand | string[]) {
+  const topics =
+    typeof command === "string" ? [command] : Array.isArray(command) ? command : undefined;
+  const topicHelp = topics?.length
+    ? `\n\nRelevant help command: { command: "help", flags: { topic: "${topics[0]}" } }.`
+    : "";
+  return new Error(`${message}\n\n${GOAT_BRAIN_TOOL_HELP}${topicHelp}`);
 }
 
 function appendCliFlag(argv: string[], name: string, value: GoatBrainToolFlagValue) {
@@ -552,16 +666,30 @@ function publicGoatBrainCliOutput(
   resolved: ResolvedGoatBrainCliArgs,
 ): GoatBrainToolOutput {
   const stdout = cleanCliStdout(result.rawStdout);
+  const stderr = truncate(result.rawStderr, 20_000);
+  const parsed = parseCliJson(stdout);
+  const parsedError = readParsedCliError(parsed);
+  const error = result.error
+    ? !result.ok && stderr.trim()
+      ? stderr.trim()
+      : (parsedError ?? result.error)
+    : undefined;
   return {
     ok: result.ok,
     exitCode: result.exitCode,
     stdout,
-    stderr: truncate(result.rawStderr, 20_000),
+    stderr,
     command: resolved.display,
     argv: resolved.argv,
-    ...(parseCliJson(stdout) !== null ? { parsed: parseCliJson(stdout) } : {}),
-    ...(result.error ? { error: result.error } : {}),
+    ...(parsed !== null ? { parsed } : {}),
+    ...(error ? { error } : {}),
   };
+}
+
+function readParsedCliError(parsed: unknown): string | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const error = (parsed as { error?: unknown }).error;
+  return typeof error === "string" && error.trim() ? error.trim() : null;
 }
 
 async function recordGoatBrainToolRun(input: {

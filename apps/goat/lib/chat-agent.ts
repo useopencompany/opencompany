@@ -1,5 +1,12 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
+import {
+  createGateway,
+  generateText,
+  jsonSchema,
+  stepCountIs,
+  type ToolSet,
+  tool,
+} from "ai";
 import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainCliCommand,
@@ -26,9 +33,13 @@ import {
   WEB_SEARCH_TOOL_DESCRIPTION,
 } from "@/lib/prompts";
 
-export { createOpenCompanyChatSystemPrompt, OPENCOMPANY_CHAT_SYSTEM_PROMPT } from "@/lib/prompts";
+export {
+  createOpenCompanyChatSystemPrompt,
+  OPENCOMPANY_CHAT_SYSTEM_PROMPT,
+} from "@/lib/prompts";
 
-export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
+export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION =
+  "opencompany.chat.debug.v1";
 export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
 
 type OpenCompanyChatAgentMessage = {
@@ -48,15 +59,17 @@ type GoatBrainCliRunner = (
   input: GoatBrainToolInput,
   executionContext?: unknown,
 ) => Promise<GoatBrainToolOutput>;
-type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
+type WebSearchRunner = (
+  input: WebSearchToolInput,
+) => Promise<WebSearchToolOutput>;
 
 const GOAT_BRAIN_CLI_COMMANDS = [
+  "help",
   "create",
   "list",
   "get",
   "timeline",
   "query",
-  "ingest",
   "append-evidence",
   "rewrite",
   "alias",
@@ -91,7 +104,11 @@ export async function runOpenCompanyChatAgent(input: {
   messages: readonly OpenCompanyChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
-  startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
+  startTask: (task: {
+    prompt: string;
+    name?: string;
+    model: AgentModelId;
+  }) => Promise<StartedTask>;
   runBrainCli?: GoatBrainCliRunner;
   webSearch?: WebSearchRunner;
   currentDate?: Date | string;
@@ -144,7 +161,11 @@ export async function runOpenCompanyChatAgent(input: {
 
 export function createOpenCompanyChatToolContext(input: {
   model: AgentModelId;
-  startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
+  startTask: (task: {
+    prompt: string;
+    name?: string;
+    model: AgentModelId;
+  }) => Promise<StartedTask>;
   runBrainCli?: GoatBrainCliRunner;
   webSearch?: WebSearchRunner;
 }) {
@@ -179,7 +200,7 @@ export function createOpenCompanyChatToolContext(input: {
           stdin: {
             type: "string",
             description:
-              "Optional stdin for commands that use *-stdin flags, such as ingest --text-stdin or rewrite --truth-stdin.",
+              "Optional stdin for commands that use *-stdin flags, such as create --truth-stdin, append-evidence --body-stdin, or rewrite --truth-stdin.",
           },
         },
         required: ["command"],
@@ -216,9 +237,11 @@ export function createOpenCompanyChatToolContext(input: {
         required: ["prompt", "name"],
       }),
       execute: async (args) => {
-        if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
+        if (startedTask)
+          return toStartTaskToolOutput(startedTask, "already_started");
 
-        const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+        const prompt =
+          typeof args.prompt === "string" ? args.prompt.trim() : "";
         if (!prompt) {
           throw new Error("start_task prompt is required.");
         }
@@ -236,47 +259,52 @@ export function createOpenCompanyChatToolContext(input: {
 
   const webSearch = input.webSearch;
   if (webSearch) {
-    tools[WEB_SEARCH_TOOL_NAME] = tool<WebSearchToolInput, WebSearchToolOutput>({
-      description: WEB_SEARCH_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<WebSearchToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          query: {
-            type: "string",
-            description: WEB_SEARCH_QUERY_DESCRIPTION,
+    tools[WEB_SEARCH_TOOL_NAME] = tool<WebSearchToolInput, WebSearchToolOutput>(
+      {
+        description: WEB_SEARCH_TOOL_DESCRIPTION,
+        inputSchema: jsonSchema<WebSearchToolInput>({
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: {
+              type: "string",
+              description: WEB_SEARCH_QUERY_DESCRIPTION,
+            },
+            recencyDays: {
+              type: "number",
+              enum: [7, 30, 90],
+              description: WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
+            },
           },
-          recencyDays: {
-            type: "number",
-            enum: [7, 30, 90],
-            description: WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
-          },
+          required: ["query"],
+        }),
+        execute: async (args) => {
+          if (webSearchCallCount >= 1) {
+            return {
+              ok: false,
+              error:
+                "web_search is limited to one search per chat turn. Start a task for deeper research.",
+            };
+          }
+          webSearchCallCount += 1;
+
+          const query = typeof args.query === "string" ? args.query.trim() : "";
+          if (!query)
+            return { ok: false, error: "web_search query must not be empty." };
+          const recencyDays =
+            args.recencyDays === 7 ||
+            args.recencyDays === 30 ||
+            args.recencyDays === 90
+              ? args.recencyDays
+              : undefined;
+
+          return webSearch({
+            query,
+            ...(recencyDays ? { recencyDays } : {}),
+          });
         },
-        required: ["query"],
-      }),
-      execute: async (args) => {
-        if (webSearchCallCount >= 1) {
-          return {
-            ok: false,
-            error:
-              "web_search is limited to one search per chat turn. Start a task for deeper research.",
-          };
-        }
-        webSearchCallCount += 1;
-
-        const query = typeof args.query === "string" ? args.query.trim() : "";
-        if (!query) return { ok: false, error: "web_search query must not be empty." };
-        const recencyDays =
-          args.recencyDays === 7 || args.recencyDays === 30 || args.recencyDays === 90
-            ? args.recencyDays
-            : undefined;
-
-        return webSearch({
-          query,
-          ...(recencyDays ? { recencyDays } : {}),
-        });
       },
-    });
+    );
   }
 
   return {
@@ -298,14 +326,19 @@ export function createOpenCompanyChatDebugTrace(input: {
     model: input.model,
     ...(input.aborted ? { aborted: true } : {}),
     ...(input.finishReason ? { finishReason: input.finishReason } : {}),
-    ...(input.uiMessageParts?.length ? { uiMessageParts: input.uiMessageParts } : {}),
+    ...(input.uiMessageParts?.length
+      ? { uiMessageParts: input.uiMessageParts }
+      : {}),
     toolCalls: compactStepValues(input.steps, "toolCalls"),
     toolResults: compactStepValues(input.steps, "toolResults"),
     ...(input.error ? { error: input.error } : {}),
   };
 }
 
-export function normalizeAgentText(text: string, startedTask: StartedTask | null) {
+export function normalizeAgentText(
+  text: string,
+  startedTask: StartedTask | null,
+) {
   const trimmed = text.trim();
   if (trimmed) return trimmed;
   if (startedTask) {
@@ -318,7 +351,9 @@ export function stringifyFinishReason(value: unknown) {
   return typeof value === "string" ? value : undefined;
 }
 
-export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput {
+export function normalizeGoatBrainToolInput(
+  input: unknown,
+): GoatBrainToolInput {
   if (!input || typeof input !== "object") {
     throw new Error("goat_brain command is required.");
   }
@@ -341,7 +376,9 @@ function normalizeGoatBrainCommand(value: unknown): GoatBrainCliCommand | null {
     : null;
 }
 
-function normalizeGoatBrainFlags(value: unknown): Record<string, GoatBrainToolFlagValue> {
+function normalizeGoatBrainFlags(
+  value: unknown,
+): Record<string, GoatBrainToolFlagValue> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, GoatBrainToolFlagValue> = {};
   for (const [key, raw] of Object.entries(value)) {
@@ -361,7 +398,8 @@ function normalizeGoatBrainFlags(value: unknown): Record<string, GoatBrainToolFl
     }
     if (Array.isArray(raw)) {
       const values = raw.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
       );
       if (values.length > 0) out[key] = values.map((item) => item.trim());
     }

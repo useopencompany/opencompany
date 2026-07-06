@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getGoatBrainCliSource } from "../generated/cli-bundle";
 import { DEFAULT_GOAT_BRAIN_FOLDERS } from "../schema";
 import { parseArgs } from "./args";
-import { HELP, ingestCommandExitCode, validateCommandArgs } from "./index";
+import { commandHelp, HELP, ingestCommandExitCode, validateCommandArgs } from "./index";
 import { execaNode } from "./test-support";
 
 const require = createRequire(import.meta.url);
@@ -27,7 +27,95 @@ describe("goat-brain cli", () => {
     expect(validateCommandArgs("ingest", parseArgs(["--nope"]))).toBe('Unknown option "--nope".');
     expect(validateCommandArgs("create", parseArgs(["--nope"]))).toBe('Unknown option "--nope".');
     expect(HELP).toContain("goat-brain <command>");
+    expect(HELP).toContain("help");
     expect(HELP).toContain("doctor");
+    expect(commandHelp("create")).toContain("Usage: goat-brain create");
+  });
+
+  it("prints global and command-specific help", async () => {
+    await expect(run(["help"])).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining("goat-brain - folder-first personal brain CLI"),
+    });
+    await expect(run(["help", "create"])).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining("Usage: goat-brain create"),
+    });
+    await expect(run(["create", "--help"])).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining("Usage: goat-brain create"),
+    });
+  });
+
+  it("includes help for unknown commands, unknown options, and wrong invocation", async () => {
+    await expect(run(["wat"])).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('Unknown command "wat".'),
+    });
+    await expect(run(["wat"])).resolves.toMatchObject({
+      stderr: expect.stringContaining("Usage: goat-brain <command>"),
+    });
+
+    await expect(run(["query", "--wat"])).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('Unknown option "--wat".'),
+    });
+    await expect(run(["query", "--wat"])).resolves.toMatchObject({
+      stderr: expect.stringContaining("Usage: goat-brain query"),
+    });
+
+    await expect(run(["get", "--root", root])).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("Provide a brain id."),
+    });
+    await expect(run(["get", "--root", root])).resolves.toMatchObject({
+      stderr: expect.stringContaining("Usage: goat-brain get"),
+    });
+
+    await expect(
+      run(["create", "--root", root, "--folder", "companies", "--id", "acme", "--title", "Acme"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("`--type` is required."),
+    });
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "people",
+        "--type",
+        "company",
+        "--id",
+        "acme",
+        "--title",
+        "Acme",
+        "--truth",
+        "Acme is a company.",
+      ]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('`--folder` "people" does not match type "company"'),
+    });
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "companies",
+        "--type",
+        "company",
+        "--id",
+        "acme",
+        "--title",
+        "Acme",
+      ]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("`--truth` or `--truth-stdin` is required."),
+    });
   });
 
   it("lists the system default folders", async () => {
@@ -47,14 +135,32 @@ describe("goat-brain cli", () => {
         root,
         "--folder",
         "projects",
+        "--type",
+        "project",
         "--id",
         "launch-plan",
         "--title",
         "Launch plan",
+        "--truth",
+        "Launch plan is a project.",
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
     await expect(
-      run(["create", "--root", root, "--folder", "people", "--id", "jane", "--title", "Jane"]),
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "people",
+        "--type",
+        "person",
+        "--id",
+        "jane",
+        "--title",
+        "Jane",
+        "--truth",
+        "Jane is a person.",
+      ]),
     ).resolves.toMatchObject({ exitCode: 0 });
 
     const listed = await run(["list", "--root", root, "--folder", "projects", "--json"]);
@@ -87,11 +193,15 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--folder",
-        "ideas",
+        "projects",
+        "--type",
+        "project",
         "--id",
         "launch-plan",
         "--title",
         "Launch plan",
+        "--truth",
+        "Launch plan is a project.",
       ]),
     ).resolves.toMatchObject({
       exitCode: 0,
@@ -118,11 +228,37 @@ describe("goat-brain cli", () => {
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
     await expect(
-      run(["create", "--root", root, "--folder", "people", "--id", "jane", "--title", "Jane"]),
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "people",
+        "--type",
+        "person",
+        "--id",
+        "jane",
+        "--title",
+        "Jane",
+        "--truth",
+        "Jane is a person.",
+      ]),
     ).resolves.toMatchObject({ exitCode: 0 });
     await expect(
       run(["link", "--root", root, "launch-plan", "--to", "jane", "--as", "owner"]),
     ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      run(["link", "--root", root, "launch-plan", "--to", "jane", "--as", "attended"]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const linked = JSON.parse(
+      (await run(["get", "--root", root, "launch-plan", "--section", "frontmatter", "--json"]))
+        .stdout,
+    ) as { frontmatter: { relations: Array<{ type: string; to: string }> } };
+    expect(linked.frontmatter.relations).toEqual([
+      { type: "attended", to: "jane" },
+      { type: "owner", to: "jane" },
+    ]);
 
     const get = await run(["get", "--root", root, "launch-plan", "--section", "truth"]);
     expect(get.stdout).toContain("founder-led beta");
@@ -130,7 +266,9 @@ describe("goat-brain cli", () => {
     const query = await run(["query", "--root", root, "founder beta", "--lexical-only"]);
     expect(query.stdout).toContain("launch-plan");
 
-    await expect(run(["doctor", "--root", root])).resolves.toMatchObject({ exitCode: 0 });
+    await expect(run(["doctor", "--root", root])).resolves.toMatchObject({
+      exitCode: 0,
+    });
   });
 
   it("adds and reads sourced timeline entries through gbrain-style commands", async () => {
@@ -140,11 +278,15 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--folder",
-        "ideas",
+        "concepts",
+        "--type",
+        "concept",
         "--id",
         "timeline-note",
         "--title",
         "Timeline note",
+        "--truth",
+        "Timeline note is a concept.",
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
 
@@ -189,6 +331,174 @@ describe("goat-brain cli", () => {
     expect(getTimeline.stdout).toContain("Source: Launch chat (goat-chat:message_1)");
   });
 
+  it("generates unique evidence ids for multiple updates from one chat source", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "people",
+        "--type",
+        "person",
+        "--id",
+        "sarah-chen",
+        "--title",
+        "Sarah Chen",
+        "--truth",
+        "Sarah Chen is an investor.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const first = await run([
+      "timeline-add",
+      "--root",
+      root,
+      "sarah-chen",
+      "--at",
+      "2026-07-06T12:00:00.000Z",
+      "--body",
+      "Sarah asked for the data room.",
+      "--source-ref",
+      "goat-chat:message_1",
+      "--json",
+    ]);
+    const second = await run([
+      "timeline-add",
+      "--root",
+      root,
+      "sarah-chen",
+      "--at",
+      "2026-07-06T12:00:00.000Z",
+      "--body",
+      "Sarah wants a partner meeting next week.",
+      "--source-ref",
+      "goat-chat:message_1",
+      "--json",
+    ]);
+
+    expect(first).toMatchObject({ exitCode: 0 });
+    expect(second).toMatchObject({ exitCode: 0 });
+    const firstParsed = JSON.parse(first.stdout) as { evidenceId: string };
+    const secondParsed = JSON.parse(second.stdout) as { evidenceId: string };
+    expect(firstParsed.evidenceId).not.toBe(secondParsed.evidenceId);
+
+    const timeline = await run(["timeline", "--root", root, "sarah-chen", "--json"]);
+    const parsed = JSON.parse(timeline.stdout) as {
+      timeline: Array<{ evidenceId: string }>;
+    };
+    expect(new Set(parsed.timeline.map((entry) => entry.evidenceId)).size).toBe(2);
+  });
+
+  it("hides merged docs from list and query unless explicitly included", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "people",
+        "--type",
+        "person",
+        "--id",
+        "sarah-chen",
+        "--title",
+        "Sarah Chen",
+        "--truth",
+        "Sarah Chen is the lead investor prospect.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "people",
+        "--type",
+        "person",
+        "--id",
+        "sarah-chen-dup",
+        "--title",
+        "Sarah Chen VC",
+        "--truth",
+        "Sarah Chen VC is a duplicate investor note.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      run(["merge", "--root", root, "--from", "sarah-chen-dup", "--into", "sarah-chen"]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const listed = JSON.parse(
+      (await run(["list", "--root", root, "--folder", "people", "--json"])).stdout,
+    ) as { docs: Array<{ id: string }> };
+    expect(listed.docs.map((doc) => doc.id)).toEqual(["sarah-chen"]);
+
+    const query = JSON.parse(
+      (await run(["query", "--root", root, "Sarah Chen", "--lexical-only", "--json"])).stdout,
+    ) as { hits: Array<{ id: string }> };
+    expect(query.hits.map((hit) => hit.id)).not.toContain("sarah-chen-dup");
+
+    const included = JSON.parse(
+      (
+        await run([
+          "query",
+          "--root",
+          root,
+          "Sarah Chen",
+          "--lexical-only",
+          "--include-merged",
+          "--json",
+        ])
+      ).stdout,
+    ) as { hits: Array<{ id: string }> };
+    expect(included.hits.map((hit) => hit.id)).toContain("sarah-chen-dup");
+  });
+
+  it("warns about possible duplicates when creating similar docs", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "people",
+        "--type",
+        "person",
+        "--id",
+        "sarah-chen-basecamp",
+        "--title",
+        "Sarah Chen Basecamp Ventures",
+        "--truth",
+        "Sarah Chen invests in seed infrastructure startups.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const created = await run([
+      "create",
+      "--root",
+      root,
+      "--folder",
+      "people",
+      "--type",
+      "person",
+      "--id",
+      "sarah-chen-quick-note",
+      "--title",
+      "Sarah Chen VC",
+      "--truth",
+      "Sarah Chen is an investor at Basecamp Ventures.",
+      "--json",
+    ]);
+    const parsed = JSON.parse(created.stdout) as {
+      warnings?: { possibleDuplicates?: Array<{ id: string }> };
+    };
+
+    expect(parsed.warnings?.possibleDuplicates).toEqual([
+      expect.objectContaining({ id: "sarah-chen-basecamp" }),
+    ]);
+  });
+
   it("does not fail ingest for pre-existing health errors outside applied docs", () => {
     expect(
       ingestCommandExitCode({
@@ -226,6 +536,8 @@ describe("goat-brain cli", () => {
       "create",
       "--folder",
       "inbox",
+      "--type",
+      "note",
       "--title",
       "Bundle entry",
       "--truth",

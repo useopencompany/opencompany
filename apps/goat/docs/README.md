@@ -88,15 +88,16 @@ optionally stops the active stream, and marks the chat session closed through
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Creates the chat tool context for `start_task` and `goat_brain`.
+6. Creates the chat tool context for `start_task`, `goat_brain`, and optional `web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the selected model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
 
 The chat agent's system prompt is `OPENCOMPANY_CHAT_SYSTEM_PROMPT`, assembled from structured
-blocks in `apps/goat/lib/prompts/main-chat.ts`. Its tools are `start_task` and `goat_brain`; tool
-descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`. The prompt tells the model to
-answer directly for small or ambiguous work, use `goat_brain` for durable personal context, and
+blocks in `apps/goat/lib/prompts/main-chat.ts`. Its tools are `start_task`, `goat_brain`, and
+optional `web_search`; tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`. The
+prompt tells the model to answer directly for small or ambiguous work, use `goat_brain` for durable
+personal context, use `web_search` for one-shot public freshness checks when Exa is configured, and
 start a task for research, monitoring, comparison, connected-account work, or durable work that
 belongs in Results.
 

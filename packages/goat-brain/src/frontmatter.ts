@@ -98,12 +98,16 @@ function readRelations(value: unknown): GoatBrainRelation[] {
       if (target)
         relation = { type: readString(item.type) ?? DEFAULT_GOAT_BRAIN_RELATION_TYPE, to: target };
     }
-    if (relation && !seen.has(relation.to)) {
-      seen.add(relation.to);
+    if (relation && !seen.has(relationKey(relation))) {
+      seen.add(relationKey(relation));
       out.push(relation);
     }
   }
   return out;
+}
+
+function relationKey(relation: GoatBrainRelation): string {
+  return `${relation.type}:${relation.to}`;
 }
 
 function readStatus(value: unknown): GoatBrainStatus | null {

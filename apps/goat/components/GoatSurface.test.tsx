@@ -577,17 +577,28 @@ describe("GoatSurface chat streaming UI", () => {
                   toolCallId: "tool_brain_1",
                   state: "output-available",
                   input: {
-                    command: "ingest",
-                    flags: { textStdin: true, json: true },
+                    command: "create",
+                    flags: {
+                      id: "louis-morgner",
+                      title: "Louis Morgner",
+                      type: "person",
+                      json: true,
+                    },
                     stdin: "Louis Morgner is a person.",
                   },
                   output: {
                     ok: false,
                     exitCode: 1,
-                    command: "ingest --text-stdin --json --source-ref goat-chat:user_message_1",
+                    command:
+                      'create --id louis-morgner --title "Louis Morgner" --type person --json --source-ref goat-chat:user_message_1',
                     argv: [
-                      "ingest",
-                      "--text-stdin",
+                      "create",
+                      "--id",
+                      "louis-morgner",
+                      "--title",
+                      "Louis Morgner",
+                      "--type",
+                      "person",
                       "--json",
                       "--source-ref",
                       "goat-chat:user_message_1",
@@ -642,7 +653,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(within(firstBrainCall).getByText(/goat-chat:user_message_1/)).toBeInTheDocument();
   });
 
-  it("does not mark doctor health findings as a failed brain tool call", async () => {
+  it("marks doctor health errors as a failed brain tool call", async () => {
     const user = userEvent.setup();
     render(
       <GoatSurface
@@ -681,7 +692,7 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     const doctorCall = screen.getByTestId("chat-tool-call-goat_brain");
-    expect(within(doctorCall).queryByText("failed")).not.toBeInTheDocument();
+    expect(within(doctorCall).getByText("failed")).toBeInTheDocument();
     expect(screen.getByText(/12 files checked/)).toBeInTheDocument();
 
     await user.click(within(doctorCall).getByRole("button", { name: /Brain/i }));

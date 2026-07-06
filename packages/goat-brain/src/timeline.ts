@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { GoatBrainTimelineEntry } from "./schema";
 import { isValidGoatBrainEvidenceId, normalizeGoatBrainId } from "./schema";
 
@@ -112,9 +113,16 @@ export function deterministicEvidenceId(input: {
 }): string {
   const normalizedAt = normalizeTimelineAt(input.at) ?? input.at;
   const dateSlug = normalizedAt.slice(0, 10).replace(/-/g, "");
-  const sourceOrSummary = normalizeGoatBrainId(input.sourceRef || input.summary || "evidence");
-  const suffix = sourceOrSummary || "evidence";
-  return normalizeEvidenceId(`ev-${dateSlug}-${suffix}`) ?? "ev-evidence";
+  const label = normalizeGoatBrainId(input.sourceRef || input.summary || "evidence") || "evidence";
+  const digest = createHash("sha256")
+    .update([normalizedAt, input.sourceRef ?? "", input.summary ?? ""].join("\n"))
+    .digest("hex")
+    .slice(0, 8);
+  const maxLabelLength = 76 - dateSlug.length - digest.length - 2;
+  return (
+    normalizeEvidenceId(`ev-${dateSlug}-${label.slice(0, maxLabelLength)}-${digest}`) ??
+    "ev-evidence"
+  );
 }
 
 function parseSourceLine(value: string) {

@@ -808,14 +808,29 @@ async function sourceFromRootFile(root: string, relativePath: string): Promise<s
       payloadRelativePath: relativePath,
     });
     if (validation.ok) return serializeLegacyGoatBrainEntry(validation.entry);
-    return null;
+    if (isLegacyGoatBrainMarkdown(payload)) return payload;
+    throw new Error(
+      `Brain sidecar for "${relativePath}" is stale or invalid. Rewrite the document through the Brain CLI before syncing.`,
+    );
   } catch {
-    return null;
+    if (isLegacyGoatBrainMarkdown(payload)) return payload;
+    throw new Error(
+      `Brain sidecar for "${relativePath}" is stale or invalid. Rewrite the document through the Brain CLI before syncing.`,
+    );
   }
 }
 
 function sourceFromSidecarOrPayloadSync(_relativePath: string, content: string) {
   return content;
+}
+
+function isLegacyGoatBrainMarkdown(value: string) {
+  return (
+    value.startsWith("---\n") &&
+    value.includes("\n---") &&
+    value.includes("## Compiled truth") &&
+    value.includes("## Timeline")
+  );
 }
 
 async function writeRootFile(root: string, relativePath: string, content: string) {
