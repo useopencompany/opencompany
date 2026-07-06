@@ -593,6 +593,7 @@ export const goatTasks = goat.table(
       .$type<GoatTaskDebugTrace>()
       .notNull()
       .default(sql`'{}'::jsonb`),
+    codexEngineSessionId: text("codex_engine_session_id"),
     sandboxId: text("sandbox_id"),
     attempts: integer("attempts").notNull().default(0),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),

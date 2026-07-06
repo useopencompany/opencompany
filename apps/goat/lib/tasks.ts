@@ -327,6 +327,7 @@ export async function createGoatTaskForUser(input: {
         task.error AS "error",
         task.harness_spec AS "harnessSpec",
         task.debug_trace AS "debugTrace",
+        task.codex_engine_session_id AS "codexEngineSessionId",
         task.sandbox_id AS "sandboxId",
         task.attempts AS "attempts",
         task.next_run_at AS "nextRunAt",

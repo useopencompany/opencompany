@@ -478,7 +478,7 @@ describe("executeGoatTask", () => {
 
     await expect(
       executeGoatTask({
-        task: task(),
+        task: task({ codexEngineSessionId: "thread_existing" }),
         env: env(),
         signal: new AbortController().signal,
         sink,
@@ -493,8 +493,10 @@ describe("executeGoatTask", () => {
       expect.objectContaining({
         userWorkosId: "user_1",
         prompt: "Fix octo/repo.",
+        existingEngineSessionId: "thread_existing",
         repository: "octo/repo",
         createPullRequest: true,
+        onEngineSessionId: sink.updateCodexEngineSessionId,
       }),
     );
     expect(sink.recordSandboxUsage).toHaveBeenCalledWith(
@@ -617,6 +619,7 @@ function createSink(): GoatTaskRunSink {
     recordModelUsage: vi.fn(async () => {}),
     recordToolUsage: vi.fn(async () => {}),
     recordSandboxUsage: vi.fn(async () => {}),
+    updateCodexEngineSessionId: vi.fn(async () => {}),
   };
 }
 
@@ -639,6 +642,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     error: null,
     harnessSpec,
     debugTrace: {},
+    codexEngineSessionId: null,
     sandboxId: null,
     attempts: 1,
     nextRunAt: now,

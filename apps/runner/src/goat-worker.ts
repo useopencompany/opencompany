@@ -73,6 +73,13 @@ export type GoatTaskStore = {
     harnessSpec?: GoatHarnessSpec;
     debugTrace?: GoatTaskDebugTrace;
   }): Promise<boolean>;
+  updateCodexEngineSessionId(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    codexEngineSessionId: string;
+  }): Promise<boolean>;
   ensureUserMessage(input: {
     id: string;
     leaseId: string;
@@ -247,6 +254,20 @@ export function createDbGoatTaskStore(): GoatTaskStore {
             model = COALESCE(${input.harnessSpec?.model ?? null}, model),
             harness_spec = COALESCE(${input.harnessSpec ? JSON.stringify(input.harnessSpec) : null}::jsonb, harness_spec),
             debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
+            updated_at = ${input.now}
+        WHERE id = ${input.id}
+          AND lease_id = ${input.leaseId}
+          AND lease_owner = ${input.leaseOwner}
+          AND status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async updateCodexEngineSessionId(input) {
+      const result = await getDb().execute(sql`
+        UPDATE goat.tasks
+        SET codex_engine_session_id = ${input.codexEngineSessionId},
             updated_at = ${input.now}
         WHERE id = ${input.id}
           AND lease_id = ${input.leaseId}
@@ -1054,6 +1075,18 @@ export async function runClaimedGoatTask(input: {
               "record sandbox usage",
             );
           },
+          updateCodexEngineSessionId: async (codexEngineSessionId) => {
+            await requireLeaseWrite(
+              store.updateCodexEngineSessionId({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                codexEngineSessionId,
+              }),
+              "update Codex engine session id",
+            );
+          },
         },
         reportStage: async (stage, patch = {}) => {
           if (patch.debugTrace) {
@@ -1315,6 +1348,7 @@ const goatTaskColumnsSql = sql`
   task.error,
   task.harness_spec AS "harnessSpec",
   task.debug_trace AS "debugTrace",
+  task.codex_engine_session_id AS "codexEngineSessionId",
   task.sandbox_id AS "sandboxId",
   task.attempts,
   task.next_run_at AS "nextRunAt",

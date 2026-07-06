@@ -8,14 +8,8 @@ import {
 import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat-schema";
 import type { LanguageModelUsage } from "ai";
 import { and, eq, ne } from "drizzle-orm";
-import {
-  buildCodexCommand,
-  buildCodexConfigForAuth,
-  type CodexCliAuth,
-  codexApiKeyFallbackEnabled,
-  createCodexStreamAccumulator,
-  ensureCodexInstalled,
-} from "./codex-tool";
+import { runCodexAppServerTurn } from "./codex-app-server";
+import { type CodexCliAuth, codexApiKeyFallbackEnabled, ensureCodexInstalled } from "./codex-tool";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
@@ -37,17 +31,14 @@ import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github
 import { withBrokerDelegation } from "./llm-broker-tokens";
 import {
   cloneGitHubRepositoryIntoWorkdir,
-  commandExitResult,
   createOrConnectSandbox,
-  guardCommandStreamCallbacks,
-  isCommandTimeoutError,
   killSandbox,
   type SandboxHandle,
 } from "./sandbox";
 
-const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
 const CODEX_HOME = "/home/user/.opencompany-goat/codex-home";
 const CODEX_WORKDIR = "/home/user/opencompany-goat/codex";
+const GOAT_CODEX_SKILL_FINGERPRINT = "goat-codex-v1";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";
 const CODEX_DIRECT_API_KEY_ENV_VAR = "CODEX_API_KEY";
 const BROKER_TOKEN_ENV_VAR = "OPENCOMPANY_LLM_BROKER_TOKEN";
@@ -75,11 +66,13 @@ export async function runGoatCodexTask(input: {
   prompt: string;
   systemPrompt: string;
   model: string;
+  existingEngineSessionId?: string | null;
   repository?: string | null;
   createPullRequest?: boolean;
   reasoningEffort?: CodexReasoningEffort;
   env: RunnerEnv;
   signal: AbortSignal;
+  onEngineSessionId?: (engineSessionId: string) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
 }): Promise<GoatCodexRunResult> {
   assertNotAborted(input.signal);
@@ -124,12 +117,14 @@ async function runGoatCodexWithAuth(input: {
   prompt: string;
   systemPrompt: string;
   model: string;
+  existingEngineSessionId?: string | null;
   repository: GoatCodexRepositoryAccess | null;
   createPullRequest?: boolean;
   reasoningEffort?: CodexReasoningEffort;
   env: RunnerEnv;
   signal: AbortSignal;
   sandbox: SandboxHandle;
+  onEngineSessionId?: (engineSessionId: string) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
 }): Promise<{ content: string; usage?: LanguageModelUsage }> {
   const runWithAuth = async (auth: CodexCliAuth) => runGoatCodexCommand({ ...input, auth });
@@ -182,6 +177,7 @@ async function runGoatCodexCommand(input: {
   prompt: string;
   systemPrompt: string;
   model: string;
+  existingEngineSessionId?: string | null;
   repository: GoatCodexRepositoryAccess | null;
   createPullRequest?: boolean;
   reasoningEffort?: CodexReasoningEffort;
@@ -189,6 +185,7 @@ async function runGoatCodexCommand(input: {
   signal: AbortSignal;
   sandbox: SandboxHandle;
   auth: CodexCliAuth;
+  onEngineSessionId?: (engineSessionId: string) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
 }): Promise<{ content: string; usage?: LanguageModelUsage }> {
   const serializedAuthJson =
@@ -202,7 +199,6 @@ async function runGoatCodexCommand(input: {
       timeoutMs: 30_000,
     },
   );
-  await input.sandbox.files.write(`${CODEX_HOME}/config.toml`, buildCodexConfigForAuth(input.auth));
   if (serializedAuthJson) {
     await input.sandbox.files.write(`${CODEX_HOME}/auth.json`, serializedAuthJson);
   }
@@ -240,7 +236,6 @@ async function runGoatCodexCommand(input: {
     githubAuthHeader,
   ]);
 
-  const stream = createCodexStreamAccumulator();
   const task = buildCodexTask(input);
   const envs = {
     CODEX_HOME,
@@ -254,52 +249,31 @@ async function runGoatCodexCommand(input: {
         })
       : {}),
   };
-  const guardedRun = guardCommandStreamCallbacks({
-    envs,
-    timeoutMs: input.env.codexTimeoutMs,
-    onStdout: async (data) => {
-      const activity = stream.push(redact(data));
-      if (activity) await input.onOutput?.(activity);
-    },
-    onStderr: async (data) => {
-      await input.onOutput?.(redact(data));
-    },
-  });
 
-  let timedOut = false;
-  let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
-  try {
-    result = await input.sandbox.commands.run(
-      `cd ${shellQuote(CODEX_WORKDIR)} && export PATH=${CODEX_BIN_PATH}:"$PATH" && ${buildCodexCommand(
-        {
-          task,
-          workRoot: CODEX_WORKDIR,
-          model: input.model,
-          reasoningEffort: input.reasoningEffort ?? "high",
-        },
-      )}`,
-      guardedRun.options,
-    );
-  } catch (error) {
-    const exitResult = commandExitResult(error);
-    if (exitResult) {
-      result = exitResult;
-    } else if (isCommandTimeoutError(error)) {
-      timedOut = true;
-      result = { stdout: "", stderr: "", exitCode: null };
-      await input.onOutput?.("Codex timed out; capturing partial output.\n");
-    } else {
-      throw error;
-    }
-  }
-  await guardedRun.rethrow();
-  stream.finish();
-  const summary = stream.summary({
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-    stdout: redact(String(result.stdout ?? "")),
-    stderr: redact(String(result.stderr ?? "")),
-    timedOut,
+  const summary = await runCodexAppServerTurn({
+    sandbox: input.sandbox,
+    codexWorkRoot: CODEX_WORKDIR,
+    codexHome: CODEX_HOME,
+    skillFingerprint: GOAT_CODEX_SKILL_FINGERPRINT,
+    task,
+    model: input.model,
+    reasoningEffort: input.reasoningEffort ?? "high",
+    planModeReasoningEffort: null,
+    existingEngineSessionId: input.existingEngineSessionId ?? null,
+    auth: input.auth,
+    githubAuth: { githubToken, githubAuthHeader },
+    timeoutMs: input.env.codexTimeoutMs,
+    checkAbort: async () => {
+      assertNotAborted(input.signal);
+    },
+    onRuntimeEvents: async () => undefined,
+    onActivity: async (activity) => {
+      await input.onOutput?.(redact(activity));
+    },
   });
+  if (summary.sessionId) {
+    await input.onEngineSessionId?.(summary.sessionId);
+  }
   await persistRefreshedGoatCodexAuth({
     sandbox: input.sandbox,
     userWorkosId: input.userWorkosId,
@@ -318,8 +292,8 @@ async function runGoatCodexCommand(input: {
       })
     : null;
   const content = formatCodexResult({
-    result: summary.result,
-    error: summary.error,
+    result: redact(summary.result),
+    error: summary.error ? redact(summary.error) : null,
     status: summary.status,
     repositoryFullName: input.repository?.repositoryFullName ?? null,
     diffStat: diff?.diffStat ?? null,
@@ -338,7 +312,7 @@ async function runGoatCodexCommand(input: {
             inputTokenDetails: {
               noCacheTokens: undefined,
               cacheReadTokens: summary.usage.cache_read_input_tokens,
-              cacheWriteTokens: summary.usage.cache_creation_input_tokens,
+              cacheWriteTokens: undefined,
             },
             outputTokenDetails: {
               reasoningTokens: undefined,

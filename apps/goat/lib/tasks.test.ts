@@ -60,6 +60,7 @@ describe("createGoatTaskForUser", () => {
           resultMode: "assistant_final",
         },
         debugTrace: {},
+        codexEngineSessionId: null,
         sandboxId: null,
         attempts: 0,
         nextRunAt: "2026-01-01T00:00:00.000Z",

@@ -276,6 +276,34 @@ describe("runClaimedGoatTask", () => {
     );
   });
 
+  it("persists Codex engine session ids through the active task lease", async () => {
+    const store = createStore();
+    const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
+      await input.sink.updateCodexEngineSessionId("thread_123");
+      return {
+        result: "Done.",
+        harnessSpec,
+        debugTrace,
+      };
+    });
+
+    await runClaimedGoatTask({
+      task: task(),
+      env: env(),
+      store,
+      executor,
+    });
+
+    expect(store.updateCodexEngineSessionId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "goat_task_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        codexEngineSessionId: "thread_123",
+      }),
+    );
+  });
+
   it("aborts without completing when heartbeat loses the lease", async () => {
     vi.useFakeTimers();
     try {
@@ -352,6 +380,7 @@ function createStore(): GoatTaskStore {
     claimNext: vi.fn(async () => null),
     heartbeat: vi.fn(async () => true),
     updateStage: vi.fn(async () => true),
+    updateCodexEngineSessionId: vi.fn(async () => true),
     ensureUserMessage: vi.fn(async () => "goat_task_msg_user"),
     createMessage: vi.fn(async () => true),
     updateMessageContent: vi.fn(async () => true),
@@ -381,6 +410,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     error: null,
     harnessSpec,
     debugTrace: {},
+    codexEngineSessionId: null,
     sandboxId: null,
     attempts: 1,
     nextRunAt: now,

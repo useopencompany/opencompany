@@ -112,6 +112,7 @@ export type GoatTaskRunSink = {
     activeMs: number;
     rawMetrics?: Record<string, unknown>;
   }): Promise<void>;
+  updateCodexEngineSessionId(codexEngineSessionId: string): Promise<void>;
 };
 
 export type GoatTaskExecutorInput = {
@@ -196,6 +197,7 @@ export async function executeGoatTask(
             prompt: input.task.prompt,
             env: input.env,
             userWorkosId: input.task.userWorkosId,
+            existingEngineSessionId: input.task.codexEngineSessionId,
             harnessSpec,
             signal: input.signal,
             sink: input.sink,
@@ -275,6 +277,7 @@ async function runGoatTaskCodex(input: {
   prompt: string;
   env: RunnerEnv;
   userWorkosId: string;
+  existingEngineSessionId: string | null;
   harnessSpec: GoatHarnessSpec;
   signal: AbortSignal;
   sink: GoatTaskRunSink;
@@ -288,6 +291,7 @@ async function runGoatTaskCodex(input: {
     prompt: input.harnessSpec.initialUserMessage || input.prompt,
     systemPrompt: input.harnessSpec.systemPrompt,
     model: input.harnessSpec.model,
+    existingEngineSessionId: input.existingEngineSessionId,
     env: input.env,
     signal: input.signal,
     ...(input.harnessSpec.codex?.repository !== undefined
@@ -299,6 +303,7 @@ async function runGoatTaskCodex(input: {
     ...(input.harnessSpec.codex?.reasoningEffort
       ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }
       : {}),
+    onEngineSessionId: input.sink.updateCodexEngineSessionId,
     onOutput: async (delta) => {
       codexActivity = `${codexActivity}${delta}`;
       await input.sink.updateMessageContent({
