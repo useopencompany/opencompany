@@ -7,6 +7,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const DEFAULT_LOCAL_WEB_PORT = "3000";
+const NGROK_API_PORTS = Array.from({ length: 10 }, (_, index) => 4040 + index);
+const NGROK_API_FETCH_TIMEOUT_MS = 300;
 
 export function ngrokConfigState() {
   const command = spawnSync("ngrok", ["version"], {
@@ -137,8 +139,18 @@ function localWebOrigin(port) {
 }
 
 async function readNgrokUrl(targetPort) {
+  for (const apiPort of NGROK_API_PORTS) {
+    const url = await readNgrokUrlFromApiPort(targetPort, apiPort);
+    if (url) return url;
+  }
+  return null;
+}
+
+async function readNgrokUrlFromApiPort(targetPort, apiPort) {
   try {
-    const response = await fetch("http://127.0.0.1:4040/api/tunnels");
+    const response = await fetch(`http://127.0.0.1:${apiPort}/api/tunnels`, {
+      signal: AbortSignal.timeout(NGROK_API_FETCH_TIMEOUT_MS),
+    });
     if (!response.ok) return null;
     const payload = await response.json();
     const tunnels = Array.isArray(payload.tunnels) ? payload.tunnels : [];

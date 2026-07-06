@@ -44,6 +44,43 @@ describe("goat brain retrieval", () => {
     );
   });
 
+  it("does not return evidence records from hop-based retrieval", async () => {
+    await writeDoc("companies/acme.md", {
+      id: "acme",
+      folder: "companies",
+      type: "company",
+      title: "Acme",
+      truth: "Acme is evaluating enterprise search.",
+      relations: [],
+      timeline: [
+        {
+          evidenceId: "ev-acme-email",
+          at: "2026-01-01T00:00:00.000Z",
+          body: "Captured [[evidence:ev-acme-email|Acme email]].",
+        },
+      ],
+    });
+    await writeDoc("evidence/email/ev-acme-email.md", {
+      id: "ev-acme-email",
+      folder: "evidence/email",
+      type: "evidence",
+      evidenceKind: "email",
+      title: "Acme email",
+      truth: "Enterprise search raw source evidence.",
+      relations: [{ type: "about", to: "acme" }],
+    });
+
+    await expect(
+      queryGoatBrain(root, { text: "enterprise search", lexicalOnly: true }),
+    ).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: "ev-acme-email" })]));
+
+    await expect(
+      queryGoatBrain(root, { text: "enterprise search", hops: 1, lexicalOnly: true }),
+    ).resolves.not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "ev-acme-email" })]),
+    );
+  });
+
   it("can constrain graph expansion to outgoing edges", async () => {
     await writeDoc("companies/acme.md", {
       id: "acme",
@@ -267,11 +304,13 @@ async function writeDoc(
       | "concept"
       | "evidence"
       | "note";
+    evidenceKind?: "chat" | "email" | "correction" | "document";
     title: string;
     truth: string;
     relations: Array<{ type: string; to: string }>;
     status?: "active" | "draft" | "archived" | "merged";
     updatedAt?: string;
+    timeline?: Array<{ evidenceId: string; at: string; body: string }>;
   },
 ) {
   await mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
@@ -282,6 +321,7 @@ async function writeDoc(
         id: input.id,
         folder: input.folder,
         type: input.type,
+        ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
         status: input.status ?? "active",
         title: input.title,
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -290,7 +330,9 @@ async function writeDoc(
       },
       title: input.title,
       compiledTruth: `${input.truth} [^ev:ev-seed]`,
-      timeline: [{ evidenceId: "ev-seed", at: "2026-01-01T00:00:00.000Z", body: "Seed." }],
+      timeline: input.timeline ?? [
+        { evidenceId: "ev-seed", at: "2026-01-01T00:00:00.000Z", body: "Seed." },
+      ],
     }),
     "utf8",
   );

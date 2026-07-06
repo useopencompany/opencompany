@@ -1,5 +1,6 @@
 "use client";
 
+import { parseGoatBrainInlineLinks } from "@opencompany/goat-brain/inline-links";
 import { Extension } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
 import { Plugin } from "@tiptap/pm/state";
@@ -115,8 +116,6 @@ export function MarkdownGoatBrainEditor({
   );
 }
 
-const WIKI_LINK_PATTERN = /\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g;
-
 const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string> }>({
   name: "wikiLinkDecoration",
   addOptions() {
@@ -131,22 +130,14 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
             const decorations: Decoration[] = [];
             state.doc.descendants((node, pos) => {
               if (!node.isText || !node.text) return;
-              for (const match of node.text.matchAll(WIKI_LINK_PATTERN)) {
-                const raw = match[0];
-                const target = (match[1] ?? "").trim();
-                const href = links[target];
+              for (const link of parseGoatBrainInlineLinks(node.text)) {
+                const href = inlineLinkHref(link, links);
                 decorations.push(
-                  Decoration.inline(
-                    pos + (match.index ?? 0),
-                    pos + (match.index ?? 0) + raw.length,
-                    {
-                      class: href
-                        ? "wiki-brain-link"
-                        : "wiki-brain-link wiki-brain-link-unresolved",
-                      title: href ? "Command-click to open brain link" : "Unresolved brain link",
-                      ...(href ? { "data-brain-href": href } : {}),
-                    },
-                  ),
+                  Decoration.inline(pos + link.index, pos + link.index + link.raw.length, {
+                    class: href ? "wiki-brain-link" : "wiki-brain-link wiki-brain-link-unresolved",
+                    title: href ? "Command-click to open brain link" : "Unresolved brain link",
+                    ...(href ? { "data-brain-href": href } : {}),
+                  }),
                 );
               }
             });
@@ -166,6 +157,13 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
     ];
   },
 });
+
+function inlineLinkHref(
+  link: ReturnType<typeof parseGoatBrainInlineLinks>[number],
+  links: Record<string, string>,
+) {
+  return links[`${link.kind}:${link.target}`] ?? (link.kind === "page" ? links[link.target] : "");
+}
 
 function FormatButton({
   label,
