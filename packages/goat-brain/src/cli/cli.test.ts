@@ -127,6 +127,37 @@ describe("goat-brain cli", () => {
     );
   });
 
+  it("defaults create folders from type and rejects unknown folder roots", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "company",
+        "--id",
+        "acme",
+        "--title",
+        "Acme",
+        "--truth",
+        "Acme is a company.",
+        "--json",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const created = JSON.parse((await run(["get", "--root", root, "acme", "--json"])).stdout) as {
+      doc: { frontmatter: { folder: string; type: string } };
+    };
+    expect(created.doc.frontmatter).toMatchObject({ folder: "companies", type: "company" });
+
+    await expect(
+      run(["folder", "--root", root, "create", "--path", "random"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("must be under a known type folder"),
+    });
+  });
+
   it("lists brain docs without retrieval", async () => {
     await expect(
       run([
@@ -250,6 +281,12 @@ describe("goat-brain cli", () => {
     await expect(
       run(["link", "--root", root, "launch-plan", "--to", "jane", "--as", "attended"]),
     ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      run(["move", "--root", root, "launch-plan", "--folder", "people"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('`--folder` "people" does not match type "project"'),
+    });
 
     const linked = JSON.parse(
       (await run(["get", "--root", root, "launch-plan", "--section", "frontmatter", "--json"]))

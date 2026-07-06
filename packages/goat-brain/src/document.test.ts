@@ -5,6 +5,7 @@ import {
   serializeGoatBrainDocument,
 } from "./document";
 import type { GoatBrainDocument } from "./schema";
+import { validateGoatBrainDocument } from "./validate";
 
 describe("goat brain document", () => {
   it("round-trips frontmatter, compiled truth, and timeline", () => {
@@ -81,5 +82,30 @@ Original timeline body.
         body: "Original timeline body.",
       },
     ]);
+  });
+
+  it("rejects documents whose folder root does not match the type", () => {
+    const source = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "acme",
+        folder: "people",
+        type: "company",
+        status: "draft",
+        title: "Acme",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Acme",
+      compiledTruth: "Acme is a company.",
+      timeline: [],
+    });
+
+    expect(validateGoatBrainDocument(parseGoatBrainDocument(source), "acme", source)).toEqual({
+      ok: false,
+      errors: expect.arrayContaining([
+        expect.stringContaining('folder "people" maps to type "person", not "company"'),
+      ]),
+    });
   });
 });

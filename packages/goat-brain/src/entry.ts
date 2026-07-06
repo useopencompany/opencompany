@@ -19,7 +19,7 @@ import {
   isValidGoatBrainRelationType,
   normalizeGoatBrainFolder,
 } from "./schema";
-import { inferGoatBrainEntityTypeFromFolder } from "./schemas";
+import { goatBrainFolderTypeError, inferGoatBrainEntityTypeFromFolder } from "./schemas";
 import { isIsoDate } from "./time";
 
 export const GOAT_BRAIN_ENTRY_SCHEMA_VERSION = "goat.brain.entry.v1";
@@ -246,6 +246,10 @@ export function validateGoatBrainSidecar(input: {
   }
   if (!sidecar.title?.trim()) errors.push("sidecar.title must not be empty.");
   if (!isValidGoatBrainEntityType(sidecar.type)) errors.push("sidecar.type is invalid.");
+  if (typeof sidecar.folder === "string" && typeof sidecar.type === "string") {
+    const folderTypeError = goatBrainFolderTypeError(sidecar.folder, sidecar.type);
+    if (folderTypeError) errors.push(`sidecar.folder/type mismatch: ${folderTypeError}`);
+  }
   if (
     sidecar.status !== undefined &&
     sidecar.status !== "draft" &&

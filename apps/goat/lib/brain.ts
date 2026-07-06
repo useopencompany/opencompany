@@ -20,7 +20,9 @@ import {
   type GoatBrainSource,
   type GoatBrainStatus,
   type GoatBrainTimelineEntry,
-  inferGoatBrainEntityTypeFromFolder,
+  goatBrainEntityTypeForFolder,
+  goatBrainFolderForEntityType,
+  goatBrainFolderTypeError,
   isBuiltInGoatBrainEntityType,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
@@ -114,6 +116,12 @@ export async function createGoatBrainFolderForUser(
   if (!isValidGoatBrainFolder(normalized)) {
     return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
+  if (!goatBrainEntityTypeForFolder(normalized)) {
+    return {
+      ok: false,
+      message: `Folders must live under a known type folder: ${DEFAULT_GOAT_BRAIN_FOLDERS.join(", ")}.`,
+    };
+  }
   return { ok: true, path: normalized };
 }
 
@@ -126,13 +134,20 @@ export async function createGoatBrainDocumentForUser(input: {
   if (!isValidGoatBrainFolder(folderPath)) {
     return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
+  const type = goatBrainEntityTypeForFolder(folderPath);
+  if (!type) {
+    return {
+      ok: false,
+      message: `Documents must live under a known type folder: ${DEFAULT_GOAT_BRAIN_FOLDERS.join(", ")}.`,
+    };
+  }
   const title = input.title?.trim() || "Untitled";
   const brainId = await nextAvailableGoatBrainId(input.userWorkosId, normalizeGoatBrainId(title));
   const content = createGoatBrainMarkdownContent({
     id: brainId,
     folderPath,
     title,
-    type: inferGoatBrainEntityTypeFromFolder(folderPath),
+    type,
     status: "draft",
   });
   const row = await upsertGoatBrainFileForUser({
@@ -191,6 +206,18 @@ export async function moveGoatBrainDocumentForUser(input: {
   });
   if (!existing) return { ok: false, message: "Brain file not found." };
   const parsed = parseGoatBrainDocument(existing.content);
+  const type =
+    parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
+      ? parsed.frontmatter.type
+      : existing.entityType;
+  const folderTypeError = goatBrainFolderTypeError(folderPath, type);
+  if (folderTypeError) {
+    const expectedFolder = goatBrainFolderForEntityType(type);
+    return {
+      ok: false,
+      message: `Folder "${folderPath}" does not match type "${type}". ${folderTypeError} Use "${expectedFolder}" or a subfolder under it.`,
+    };
+  }
   const content = serializeGoatBrainDocument({
     title: parsed.title || existing.title || existing.brainId,
     compiledTruth: parsed.compiledTruth,
@@ -198,10 +225,7 @@ export async function moveGoatBrainDocumentForUser(input: {
     frontmatter: {
       id: existing.brainId,
       folder: folderPath,
-      type:
-        parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
-          ? parsed.frontmatter.type
-          : inferGoatBrainEntityTypeFromFolder(folderPath),
+      type,
       status: parsed.frontmatter.status ?? existing.status,
       title: parsed.frontmatter.title ?? existing.title ?? existing.brainId,
       createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),

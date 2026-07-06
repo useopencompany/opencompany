@@ -12,6 +12,7 @@ import {
   isValidGoatBrainRelationType,
   isValidGoatBrainStatus,
 } from "./schema";
+import { goatBrainFolderTypeError } from "./schemas";
 import { isIsoDate } from "./time";
 import { parseGoatBrainWikiLinks } from "./wiki-links";
 
@@ -33,6 +34,10 @@ export function validateGoatBrainDocument(
   }
   if (!isValidGoatBrainEntityType(fm.type)) {
     errors.push("frontmatter.type must be a built-in brain entity type.");
+  }
+  if (typeof fm.folder === "string" && typeof fm.type === "string") {
+    const folderTypeError = goatBrainFolderTypeError(fm.folder, fm.type);
+    if (folderTypeError) errors.push(`frontmatter.folder/type mismatch: ${folderTypeError}`);
   }
   if (!isValidGoatBrainStatus(fm.status)) {
     errors.push("frontmatter.status must be draft, active, archived, or merged.");

@@ -152,6 +152,35 @@ export function goatBrainFolderForEntityType(type: string | undefined): string {
   );
 }
 
+export function goatBrainEntityTypeForFolder(folder: string): GoatBrainEntityType | null {
+  const rootFolder = normalizeGoatBrainFolder(folder).split("/")[0] ?? "";
+  for (const entry of GOAT_DEFAULT_SCHEMA_PACK.types) {
+    if (entry.pathPrefixes[0] === rootFolder) return entry.name;
+  }
+  return null;
+}
+
+export function goatBrainFolderMatchesEntityType(folder: string, type: string): boolean {
+  const normalized = normalizeBuiltInGoatBrainEntityType(type);
+  if (!normalized) return false;
+  return goatBrainEntityTypeForFolder(folder) === normalized;
+}
+
+export function goatBrainFolderTypeError(folder: string, type: string): string | null {
+  const normalized = normalizeBuiltInGoatBrainEntityType(type);
+  if (!normalized) return `type "${type}" is not a built-in brain entity type.`;
+  const actual = goatBrainEntityTypeForFolder(folder);
+  if (!actual) {
+    return `folder "${folder}" must be under a known type folder: ${GOAT_DEFAULT_SCHEMA_PACK.types
+      .map((entry) => entry.pathPrefixes[0])
+      .join(", ")}.`;
+  }
+  if (actual !== normalized) {
+    return `folder "${folder}" maps to type "${actual}", not "${normalized}".`;
+  }
+  return null;
+}
+
 export function inferGoatBrainEntityTypeFromFolder(folder: string): GoatBrainEntityType {
   const rootFolder = normalizeGoatBrainFolder(folder).split("/")[0] ?? "";
   for (const entry of GOAT_DEFAULT_SCHEMA_PACK.types) {

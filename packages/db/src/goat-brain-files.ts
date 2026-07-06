@@ -15,7 +15,6 @@ import {
   goatBrainIdFromRelativePath,
   goatBrainRelativePath,
   goatBrainSidecarRelativePath,
-  inferGoatBrainEntityTypeFromFolder,
   isBuiltInGoatBrainEntityType,
   isSafeGoatBrainRelativePath,
   isValidGoatBrainFolder,
@@ -109,7 +108,7 @@ export function createGoatBrainMarkdownContent(input: {
   id: string;
   folderPath: string;
   title: string;
-  type?: GoatBrainEntityType;
+  type: GoatBrainEntityType;
   status?: GoatBrainStatus;
   compiledTruth?: string;
   related?: GoatBrainRelation[];
@@ -125,7 +124,7 @@ export function createGoatBrainMarkdownContent(input: {
     frontmatter: {
       id: input.id,
       folder,
-      type: input.type ?? inferGoatBrainEntityTypeFromFolder(folder),
+      type: input.type,
       status: input.status ?? "draft",
       title: input.title,
       createdAt: input.createdAt ?? now,
@@ -188,13 +187,14 @@ export function deriveGoatBrainFileProjection(input: {
   const entityType =
     parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
       ? parsed.frontmatter.type
-      : inferGoatBrainEntityTypeFromFolder(folderPath);
+      : null;
   const status = isValidGoatBrainStatus(parsed.frontmatter.status)
     ? parsed.frontmatter.status
     : "draft";
   const title = parsed.title || parsed.frontmatter.title || titleFromId(brainId);
   const validation = validateGoatBrainDocument(parsed, brainId, source);
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
+  if (!entityType) throw new Error("frontmatter.type must be a built-in brain entity type.");
 
   return {
     path: normalizedPath,
@@ -599,7 +599,7 @@ async function upsertConflictDocument(input: {
       ...parsed.frontmatter,
       id: conflictId,
       folder: folderPath,
-      type: parsed.frontmatter.type ?? inferGoatBrainEntityTypeFromFolder(folderPath),
+      type: parsed.frontmatter.type ?? input.current.entityType,
       title,
       status:
         parsed.frontmatter.status === "active" ? "draft" : (parsed.frontmatter.status ?? "draft"),

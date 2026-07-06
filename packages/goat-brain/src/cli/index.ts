@@ -10,9 +10,10 @@ import {
   type GoatBrainDocument,
   type GoatBrainRelation,
   type GoatBrainSource,
+  goatBrainEntityTypeForFolder,
   goatBrainFolderForEntityType,
+  goatBrainFolderTypeError,
   goatBrainTimelineEntryFromParts,
-  inferGoatBrainEntityTypeFromFolder,
   ingestGoatBrain,
   isBuiltInGoatBrainEntityType,
   isValidGoatBrainFolder,
@@ -189,7 +190,7 @@ Required:
   --truth <text>      Compiled truth, or pass --truth-stdin and write truth to stdin.
 
 Common options:
-  --folder <path>     Folder path. Must match --type's canonical folder.
+  --folder <path>     Folder path. Defaults to --type's canonical folder; must match that type.
   --alias <text>      Repeatable alias.
   --tag <text>        Repeatable tag.
   --relation <type:id>
@@ -368,8 +369,6 @@ async function helpCommand(ctx: CommandContext): Promise<CommandResult> {
 }
 
 async function create(ctx: CommandContext): Promise<CommandResult> {
-  const folder = normalizeGoatBrainFolder(ctx.args.get("folder") ?? "inbox");
-  if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
   const typeInput = ctx.args.get("type")?.trim();
   if (!typeInput) {
     return fail(`\`--type\` is required. Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`);
@@ -382,9 +381,12 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
     );
   }
   const expectedFolder = goatBrainFolderForEntityType(typeInput);
-  if (folder !== expectedFolder && !folder.startsWith(`${expectedFolder}/`)) {
+  const folder = normalizeGoatBrainFolder(ctx.args.get("folder") ?? expectedFolder);
+  if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
+  const folderTypeError = goatBrainFolderTypeError(folder, typeInput);
+  if (folderTypeError) {
     return fail(
-      `\`--folder\` "${folder}" does not match type "${typeInput}". Use "${expectedFolder}" or a subfolder under it.`,
+      `\`--folder\` "${folder}" does not match type "${typeInput}". ${folderTypeError} Use "${expectedFolder}" or a subfolder under it.`,
     );
   }
   const rawId = ctx.args.get("id") ?? ctx.args.get("title") ?? "untitled";
@@ -518,12 +520,16 @@ async function list(ctx: CommandContext): Promise<CommandResult> {
             return null;
           }
           if (!ctx.args.has("include-merged") && doc.frontmatter.status === "merged") return null;
+          const type = isBuiltInGoatBrainEntityType(doc.frontmatter.type)
+            ? doc.frontmatter.type
+            : null;
+          if (!type) return null;
           return {
             id: file.id,
             path: file.relativePath,
             folder: folderPath,
             title: doc.frontmatter.title ?? doc.title ?? file.id,
-            type: doc.frontmatter.type ?? inferGoatBrainEntityTypeFromFolder(folderPath),
+            type,
             updatedAt: doc.frontmatter.updatedAt ?? "",
           };
         } catch {
@@ -858,6 +864,17 @@ async function move(ctx: CommandContext): Promise<CommandResult> {
   if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
   const loaded = await loadDoc(ctx.root, id);
   if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const type = loaded.doc.frontmatter.type;
+  if (!isBuiltInGoatBrainEntityType(type)) {
+    return fail(`Cannot move "${id}" because frontmatter.type is missing or invalid.`);
+  }
+  const folderTypeError = goatBrainFolderTypeError(folder, type);
+  if (folderTypeError) {
+    const expectedFolder = goatBrainFolderForEntityType(type);
+    return fail(
+      `\`--folder\` "${folder}" does not match type "${type}". ${folderTypeError} Use "${expectedFolder}" or a subfolder under it.`,
+    );
+  }
   const oldPath = loaded.file.relativePath;
   loaded.doc.frontmatter.folder = folder;
   loaded.doc.frontmatter.updatedAt = nowIso();
@@ -896,6 +913,11 @@ async function folder(ctx: CommandContext): Promise<CommandResult> {
   if (subcommand === "create") {
     const folderPath = normalizeGoatBrainFolder(ctx.args.get("path") ?? "");
     if (!isValidGoatBrainFolder(folderPath)) return fail("`--path` must be a safe folder path.");
+    if (!goatBrainEntityTypeForFolder(folderPath)) {
+      return fail(
+        `Folder "${folderPath}" must be under a known type folder: ${DEFAULT_GOAT_BRAIN_FOLDERS.join(", ")}.`,
+      );
+    }
     return ok(`Folder "${folderPath}" is available.`, { folder: folderPath });
   }
   return fail('folder command must be "list" or "create".');
@@ -943,8 +965,11 @@ function toWritableDocument(
   doc: ReturnType<typeof parseGoatBrainDocument> | GoatBrainDocument,
 ): GoatBrainDocument {
   const fm = doc.frontmatter;
-  if (!fm.id || !fm.folder || !fm.createdAt || !fm.updatedAt) {
+  if (!fm.id || !fm.folder || !fm.createdAt || !fm.updatedAt || !fm.type) {
     throw new Error("Cannot write an invalid brain document.");
+  }
+  if (!isBuiltInGoatBrainEntityType(fm.type)) {
+    throw new Error("Cannot write a brain document without a valid type.");
   }
   return {
     title: doc.title,
@@ -953,7 +978,7 @@ function toWritableDocument(
     frontmatter: {
       id: fm.id,
       folder: fm.folder,
-      type: fm.type ?? inferGoatBrainEntityTypeFromFolder(fm.folder),
+      type: fm.type,
       status: fm.status ?? "draft",
       createdAt: fm.createdAt,
       updatedAt: fm.updatedAt,

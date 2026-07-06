@@ -624,6 +624,13 @@
       "when": 1783355400000,
       "tag": "0088_goat_brain_v1_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1783355700000,
+      "tag": "0089_goat_brain_required_types",
+      "breakpoints": true
     }
   ]
 }
