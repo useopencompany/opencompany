@@ -25,6 +25,7 @@ export type GoatTaskRunTaskInput =
       stage: GoatTaskStage;
       result: string | null;
       error: string | null;
+      harnessSpec?: unknown;
       createdAt: Date | string;
       updatedAt: Date | string;
     }
@@ -38,6 +39,7 @@ export type GoatTaskRunTaskInput =
       stage: GoatTaskStage;
       result: string | null;
       error: string | null;
+      harness_spec?: unknown;
       created_at: string;
       updated_at: string;
     };
@@ -172,6 +174,7 @@ export type GoatHarnessRunViewModel = {
   resultArtifact: GoatRunArtifact | null;
   events: GoatRunEvent[];
   models: GoatRunModelSummary[];
+  harnessConfig: GoatRunHarnessConfig | null;
   cost: GoatRunCostSummary;
 };
 
@@ -192,6 +195,22 @@ export type GoatRunModelSummary = {
   label: string;
   usageCount: number;
   phases: GoatTaskModelUsagePhase[];
+};
+
+export type GoatRunHarnessConfig = {
+  model: string;
+  modelLabel: string;
+  tools: GoatRunHarnessTool[];
+  skills: string[];
+  maxModelSteps: number | null;
+  resultMode: string;
+  rawSpec: unknown;
+};
+
+export type GoatRunHarnessTool = {
+  id: string;
+  label: string;
+  kind: GoatHarnessRunToolCall["kind"];
 };
 
 export type GoatRunCostSummary = {
@@ -280,6 +299,7 @@ export function buildGoatHarnessRun(input: {
   const toolCalls = buildToolCalls(events);
   const artifacts = buildArtifacts(events);
   const models = buildModelSummary(task.model, input.modelUsage ?? []);
+  const harnessConfig = buildHarnessConfig(readTaskHarnessSpec(input.task), task.model);
 
   return {
     hasDurableRun: messages.length > 0 || events.length > 0,
@@ -292,6 +312,7 @@ export function buildGoatHarnessRun(input: {
     resultArtifact: artifacts.at(-1) ?? null,
     events,
     models,
+    harnessConfig,
     cost:
       input.cost ??
       buildCostSummary({
@@ -299,6 +320,31 @@ export function buildGoatHarnessRun(input: {
         toolUsage: input.toolUsage ?? [],
         sandboxUsage: input.sandboxUsage ?? [],
       }),
+  };
+}
+
+function buildHarnessConfig(value: unknown, fallbackModel: string): GoatRunHarnessConfig | null {
+  const spec = readRecord(value);
+  if (!spec || Object.keys(spec).length === 0) return null;
+
+  const model = readString(spec.model).trim() || fallbackModel;
+  const tools = readStringArray(spec.tools).map((id) => {
+    const description = describeTool(id);
+    return {
+      id,
+      label: description.label,
+      kind: description.kind,
+    };
+  });
+
+  return {
+    model,
+    modelLabel: modelLabel(model),
+    tools,
+    skills: readStringArray(spec.skills),
+    maxModelSteps: readPositiveInteger(spec.maxModelSteps),
+    resultMode: readString(spec.resultMode).trim(),
+    rawSpec: value,
   };
 }
 
@@ -624,6 +670,11 @@ function describeTool(name: string): Pick<GoatHarnessRunToolCall, "label" | "kin
   return { label: name, kind: "tool" };
 }
 
+function readTaskHarnessSpec(task: GoatTaskRunTaskInput): unknown {
+  if ("displayId" in task) return task.harnessSpec;
+  return task.harness_spec;
+}
+
 function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["task"] {
   if ("displayId" in task) {
     return {
@@ -736,6 +787,31 @@ function parsePreview(preview: string) {
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.flatMap((item) => {
+        const text = readString(item).trim();
+        return text ? [text] : [];
+      })
+    : [];
+}
+
+function readPositiveInteger(value: unknown) {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function readUsageNumber(value: unknown, camelKey: string, snakeKey: string) {
