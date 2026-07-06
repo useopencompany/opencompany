@@ -2,6 +2,8 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
 import {
   GOAT_BRAIN_TOOL_NAME,
+  type GoatBrainCliCommand,
+  type GoatBrainToolFlagValue,
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
   START_TASK_TOOL_NAME,
@@ -27,6 +29,7 @@ import {
 export { createOpenCompanyChatSystemPrompt, OPENCOMPANY_CHAT_SYSTEM_PROMPT } from "@/lib/prompts";
 
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
+export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
 
 type OpenCompanyChatAgentMessage = {
   role: "user" | "assistant";
@@ -47,9 +50,30 @@ type GoatBrainCliRunner = (
 ) => Promise<GoatBrainToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 
+const GOAT_BRAIN_CLI_COMMANDS = [
+  "create",
+  "list",
+  "get",
+  "timeline",
+  "query",
+  "ingest",
+  "append-evidence",
+  "rewrite",
+  "alias",
+  "timeline-add",
+  "append-timeline",
+  "link",
+  "merge",
+  "move",
+  "delete",
+  "folder",
+  "doctor",
+] as const satisfies readonly GoatBrainCliCommand[];
+
 export type OpenCompanyChatAgentDebugTrace = {
   schemaVersion: typeof OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION;
   model: string;
+  aborted?: boolean;
   finishReason?: string;
   uiMessageParts?: unknown[];
   toolCalls?: unknown[];
@@ -99,7 +123,7 @@ export async function runOpenCompanyChatAgent(input: {
       role: message.role,
       content: message.content,
     })),
-    stopWhen: stepCountIs(3),
+    stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     tools: toolContext.tools,
   });
 
@@ -134,35 +158,31 @@ export function createOpenCompanyChatToolContext(input: {
         type: "object",
         additionalProperties: false,
         properties: {
-          action: {
+          command: {
             type: "string",
-            enum: ["ingest", "query", "get"],
+            enum: [...GOAT_BRAIN_CLI_COMMANDS],
             description: GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
           },
-          text: {
+          flags: {
+            type: "object",
+            additionalProperties: {
+              anyOf: [
+                { type: "string" },
+                { type: "number" },
+                { type: "boolean" },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+            description:
+              "CLI flags for the command, without leading dashes. Use camelCase or kebab-case names, for example sourceTitle or source-title.",
+          },
+          stdin: {
             type: "string",
-            description: "Text to ingest or query.",
-          },
-          sourceTitle: {
-            type: "string",
-            description: "Optional human-readable title for the source being ingested.",
-          },
-          id: {
-            type: "string",
-            description: "Brain id for get actions.",
-          },
-          section: {
-            type: "string",
-            enum: ["truth", "timeline", "frontmatter", "all"],
-          },
-          limit: {
-            type: "number",
-          },
-          hops: {
-            type: "number",
+            description:
+              "Optional stdin for commands that use *-stdin flags, such as ingest --text-stdin or rewrite --truth-stdin.",
           },
         },
-        required: ["action"],
+        required: ["command"],
       }),
       execute: async (args, executionContext?: unknown) => {
         if (!input.runBrainCli) {
@@ -267,6 +287,7 @@ export function createOpenCompanyChatToolContext(input: {
 
 export function createOpenCompanyChatDebugTrace(input: {
   model: string;
+  aborted?: boolean;
   finishReason?: string;
   uiMessageParts?: unknown[];
   steps?: unknown;
@@ -275,6 +296,7 @@ export function createOpenCompanyChatDebugTrace(input: {
   return {
     schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
     model: input.model,
+    ...(input.aborted ? { aborted: true } : {}),
     ...(input.finishReason ? { finishReason: input.finishReason } : {}),
     ...(input.uiMessageParts?.length ? { uiMessageParts: input.uiMessageParts } : {}),
     toolCalls: compactStepValues(input.steps, "toolCalls"),
@@ -298,43 +320,53 @@ export function stringifyFinishReason(value: unknown) {
 
 export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput {
   if (!input || typeof input !== "object") {
-    throw new Error("goat_brain action is required.");
+    throw new Error("goat_brain command is required.");
   }
   const record = input as Record<string, unknown>;
-  if (typeof record.args === "string" && record.args.trim()) {
-    return { args: record.args.trim() };
+  const command = normalizeGoatBrainCommand(record.command);
+  if (!command) throw new Error("goat_brain command is invalid.");
+  const flags = normalizeGoatBrainFlags(record.flags);
+  const stdin = typeof record.stdin === "string" ? record.stdin : "";
+  return {
+    command,
+    ...(Object.keys(flags).length > 0 ? { flags } : {}),
+    ...(stdin ? { stdin } : {}),
+  };
+}
+
+function normalizeGoatBrainCommand(value: unknown): GoatBrainCliCommand | null {
+  if (typeof value !== "string") return null;
+  return (GOAT_BRAIN_CLI_COMMANDS as readonly string[]).includes(value)
+    ? (value as GoatBrainCliCommand)
+    : null;
+}
+
+function normalizeGoatBrainFlags(value: unknown): Record<string, GoatBrainToolFlagValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, GoatBrainToolFlagValue> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!key.trim()) continue;
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed) out[key] = trimmed;
+      continue;
+    }
+    if (typeof raw === "number") {
+      if (Number.isFinite(raw)) out[key] = raw;
+      continue;
+    }
+    if (typeof raw === "boolean") {
+      out[key] = raw;
+      continue;
+    }
+    if (Array.isArray(raw)) {
+      const values = raw.filter(
+        (item): item is string => typeof item === "string" && item.trim().length > 0,
+      );
+      if (values.length > 0) out[key] = values.map((item) => item.trim());
+    }
   }
-  if (record.action === "ingest") {
-    const text = typeof record.text === "string" ? record.text.trim() : "";
-    if (!text) throw new Error("goat_brain ingest text is required.");
-    const sourceTitle = typeof record.sourceTitle === "string" ? record.sourceTitle.trim() : "";
-    return { action: "ingest", text, ...(sourceTitle ? { sourceTitle } : {}) };
-  }
-  if (record.action === "query") {
-    const text = typeof record.text === "string" ? record.text.trim() : "";
-    if (!text) throw new Error("goat_brain query text is required.");
-    return {
-      action: "query",
-      text,
-      ...(typeof record.limit === "number"
-        ? { limit: Math.max(1, Math.min(20, record.limit)) }
-        : {}),
-      ...(typeof record.hops === "number" ? { hops: Math.max(0, Math.min(3, record.hops)) } : {}),
-    };
-  }
-  if (record.action === "get") {
-    const id = typeof record.id === "string" ? record.id.trim() : "";
-    if (!id) throw new Error("goat_brain get id is required.");
-    const section =
-      record.section === "truth" ||
-      record.section === "timeline" ||
-      record.section === "frontmatter" ||
-      record.section === "all"
-        ? record.section
-        : undefined;
-    return { action: "get", id, ...(section ? { section } : {}) };
-  }
-  throw new Error("goat_brain action is invalid.");
+  return out;
 }
 
 function toStartTaskToolOutput(

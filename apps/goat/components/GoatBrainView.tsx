@@ -39,7 +39,8 @@ import {
 import {
   createGoatCollections,
   type GoatBrainDocumentRow,
-  type GoatBrainFolderRow,
+  type GoatBrainEdgeRow,
+  type GoatBrainTimelineEntryRow,
 } from "@/lib/task-collections";
 
 type Props = {
@@ -57,13 +58,34 @@ type BrainTreeNode = {
   document?: GoatBrainDocumentView;
 };
 
+type BrainGraphLink = {
+  from: string;
+  to: string;
+  type: string;
+  sourceKind: "relation" | "wiki_link";
+};
+
 const ROOT_FOLDER_GROUPS = [
   ["inbox"],
-  ["people", "meetings", "companies"],
-  ["ideas", "decisions", "insights", "references", "research"],
-  ["projects"],
+  ["people", "companies", "projects"],
+  ["meetings", "conversations", "daily"],
+  ["decisions", "concepts", "references", "research", "docs"],
 ];
-const HIDDEN_EMPTY_ROOT_FOLDERS = new Set(["concepts", "docs"]);
+const HIDDEN_EMPTY_ROOT_FOLDERS = new Set(["daily"]);
+const DEFAULT_BRAIN_FOLDERS = [
+  "inbox",
+  "people",
+  "companies",
+  "projects",
+  "decisions",
+  "meetings",
+  "conversations",
+  "research",
+  "docs",
+  "concepts",
+  "references",
+  "daily",
+];
 
 export function GoatBrainView({ folders, documents, initialFolderPath, initialBrainId }: Props) {
   const hydrated = useHydrated();
@@ -94,36 +116,45 @@ function LiveGoatBrainView({
   initialBrainId,
 }: Props) {
   const collections = useMemo(() => createGoatCollections(), []);
-  const { data: folderRows, isLoading: foldersLoading } = useLiveQuery((q) =>
-    q.from({ folder: collections.brainFolders }),
+  const { data: fileRows, isLoading: filesLoading } = useLiveQuery((q) =>
+    q.from({ file: collections.brainDocuments }),
   );
-  const { data: documentRows, isLoading: documentsLoading } = useLiveQuery((q) =>
-    q.from({ document: collections.brainDocuments }),
+  const { data: timelineRows } = useLiveQuery((q) =>
+    q.from({ timeline: collections.brainTimelineEntries }),
   );
-  const folders = useMemo(() => {
-    if (foldersLoading && !folderRows?.length) return initialFolders;
-    return ((folderRows ?? []) as GoatBrainFolderRow[])
-      .map(folderViewFromRow)
-      .toSorted((a, b) => a.path.localeCompare(b.path));
-  }, [folderRows, foldersLoading, initialFolders]);
+  const { data: edgeRows } = useLiveQuery((q) => q.from({ edge: collections.brainEdges }));
   const documents = useMemo(() => {
-    if (documentsLoading && !documentRows?.length) return initialDocuments;
-    return ((documentRows ?? []) as GoatBrainDocumentRow[])
-      .map(documentViewFromRow)
+    if (filesLoading && !fileRows?.length) return initialDocuments;
+    const timelinesByDocument = groupTimelineRows(
+      (timelineRows ?? []) as GoatBrainTimelineEntryRow[],
+    );
+    return ((fileRows ?? []) as GoatBrainDocumentRow[])
+      .map((row) => documentViewFromRow(row, timelinesByDocument.get(row.id)))
       .toSorted(compareBrainDocuments);
-  }, [documentRows, documentsLoading, initialDocuments]);
+  }, [fileRows, filesLoading, initialDocuments, timelineRows]);
+  const folders = useMemo(() => {
+    if (filesLoading && !fileRows?.length) return initialFolders;
+    return deriveFolderViews(documents);
+  }, [documents, fileRows?.length, filesLoading, initialFolders]);
 
   return (
     <GoatBrainEditor
       folders={folders}
       documents={documents}
+      edgeRows={(edgeRows ?? []) as GoatBrainEdgeRow[]}
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
     />
   );
 }
 
-function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId }: Props) {
+function GoatBrainEditor({
+  folders,
+  documents,
+  edgeRows = [],
+  initialFolderPath,
+  initialBrainId,
+}: Props & { edgeRows?: GoatBrainEdgeRow[] }) {
   const router = useRouter();
   const initialDocument = useMemo(
     () => resolveInitialDocument(documents, initialFolderPath, initialBrainId),
@@ -153,6 +184,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
     [documents, folders, query],
   );
   const brainLinks = useMemo(() => brainLinkMap(documents), [documents]);
+  const graphLinks = useMemo(() => buildGraphLinks(documents, edgeRows), [documents, edgeRows]);
   const rootGroups = useMemo(() => groupRootNodes(tree.children), [tree.children]);
   const hasRootNodes = rootGroups.some((group) => group.length > 0);
   const isSearching = Boolean(query.trim());
@@ -184,7 +216,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
     startTransition(async () => {
       const result = await createGoatBrainFolderAction(path);
       if (!result.ok) {
-        toast.error(result.error);
+        toast.error(result.message);
         return;
       }
       const folderPath = result.path ?? path;
@@ -203,7 +235,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
         ...(title ? { title } : {}),
       });
       if (!result.ok) {
-        toast.error(result.error);
+        toast.error(result.message);
         return;
       }
       const document = result.document;
@@ -330,6 +362,7 @@ function GoatBrainEditor({ folders, documents, initialFolderPath, initialBrainId
           documents={documents}
           folders={folders}
           brainLinks={brainLinks}
+          graphLinks={graphLinks}
           selectedFolder={activeFolder}
           onSelectFolder={setSelectedFolder}
           onSelectDocumentId={setSelectedDocumentId}
@@ -414,6 +447,7 @@ function BrainDocumentPanel({
   documents,
   folders,
   brainLinks,
+  graphLinks,
   selectedFolder,
   onSelectFolder,
   onSelectDocumentId,
@@ -423,6 +457,7 @@ function BrainDocumentPanel({
   documents: GoatBrainDocumentView[];
   folders: GoatBrainFolderView[];
   brainLinks: Record<string, string>;
+  graphLinks: BrainGraphLink[];
   selectedFolder: string;
   onSelectFolder: (folderPath: string) => void;
   onSelectDocumentId: (documentId: string | null) => void;
@@ -444,7 +479,7 @@ function BrainDocumentPanel({
         body: editorValue,
       });
       if (!result.ok) {
-        toast.error(result.error);
+        toast.error(result.message);
         return;
       }
       const document = result.document;
@@ -467,7 +502,7 @@ function BrainDocumentPanel({
         folderPath,
       });
       if (!result.ok) {
-        toast.error(result.error);
+        toast.error(result.message);
         return;
       }
       const document = result.document;
@@ -488,7 +523,7 @@ function BrainDocumentPanel({
       const deletedId = selectedDocument.id;
       const result = await deleteGoatBrainDocumentAction(deletedId);
       if (!result.ok) {
-        toast.error(result.error);
+        toast.error(result.message);
         return;
       }
       const remaining = documents.filter((document) => document.id !== deletedId);
@@ -593,7 +628,11 @@ function BrainDocumentPanel({
         )}
       </div>
       {selectedDocument && detailsOpen ? (
-        <BrainDocumentDetails document={selectedDocument} />
+        <BrainDocumentDetails
+          document={selectedDocument}
+          documents={documents}
+          graphLinks={graphLinks}
+        />
       ) : null}
       {selectedDocument && timelineOpen ? (
         <BrainDocumentTimeline document={selectedDocument} />
@@ -618,33 +657,120 @@ function BrainDocumentPanel({
   );
 }
 
-function BrainDocumentDetails({ document }: { document: GoatBrainDocumentView }) {
+function BrainDocumentDetails({
+  document,
+  documents,
+  graphLinks,
+}: {
+  document: GoatBrainDocumentView;
+  documents: GoatBrainDocumentView[];
+  graphLinks: BrainGraphLink[];
+}) {
+  const documentsByBrainId = useMemo(
+    () => new Map(documents.map((item) => [item.brainId, item])),
+    [documents],
+  );
+  const outgoingLinks = graphLinks.filter((link) => link.from === document.brainId);
+  const backlinks = graphLinks.filter((link) => link.to === document.brainId);
+
   return (
     <aside className="shrink-0 border-b border-border-subtle bg-surface-muted px-5 py-3">
-      <div className="grid gap-4 text-[12px] leading-5 text-ink-muted md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-1">
-          <DetailsRow label="Kind" value={document.kind} />
-          <DetailsRow label="Type" value={document.type} />
-          <DetailsRow label="MIME" value={document.mimeType ?? "text/markdown"} />
-          <DetailsRow label="Created" value={formatDateTime(document.createdAt)} />
-          <DetailsRow label="Updated" value={formatDateTime(document.updatedAt)} />
+      <div className="grid gap-4 text-[12px] leading-5 text-ink-muted lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-1">
+          <div className="min-w-0 space-y-1">
+            <DetailsRow label="Kind" value={document.kind} />
+            <DetailsRow label="Type" value={document.type} />
+            <DetailsRow label="MIME" value={document.mimeType ?? "text/markdown"} />
+            <DetailsRow label="Created" value={formatDateTime(document.createdAt)} />
+            <DetailsRow label="Updated" value={formatDateTime(document.updatedAt)} />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <DetailsRow label="ID" value={document.brainId} />
+            <DetailsRow label="Folder" value={document.folderPath} />
+            <DetailsRow label="Aliases" value={document.aliases.join(", ") || "-"} />
+            <DetailsRow
+              label="Sources"
+              value={document.sources?.map((item) => item.ref).join(", ") || "-"}
+            />
+            <DetailsRow label="Timeline" value={`${document.timeline.length} entries`} />
+          </div>
         </div>
-        <div className="min-w-0 space-y-1">
-          <DetailsRow label="ID" value={document.brainId} />
-          <DetailsRow label="Folder" value={document.folderPath} />
-          <DetailsRow label="Aliases" value={document.aliases.join(", ") || "-"} />
-          <DetailsRow
-            label="Relations"
-            value={document.relations?.map((item) => `${item.type}:${item.to}`).join(", ") || "-"}
+        <div className="grid min-w-0 gap-3 md:grid-cols-2">
+          <GraphLinksList
+            title="Outgoing"
+            links={outgoingLinks}
+            documentsByBrainId={documentsByBrainId}
+            empty="No outgoing links."
+            direction="out"
           />
-          <DetailsRow
-            label="Sources"
-            value={document.sources?.map((item) => item.ref).join(", ") || "-"}
+          <GraphLinksList
+            title="Backlinks"
+            links={backlinks}
+            documentsByBrainId={documentsByBrainId}
+            empty="No backlinks."
+            direction="in"
           />
-          <DetailsRow label="Timeline" value={`${document.timeline.length} entries`} />
         </div>
       </div>
     </aside>
+  );
+}
+
+function GraphLinksList({
+  title,
+  links,
+  documentsByBrainId,
+  empty,
+  direction,
+}: {
+  title: string;
+  links: BrainGraphLink[];
+  documentsByBrainId: Map<string, GoatBrainDocumentView>;
+  empty: string;
+  direction: "out" | "in";
+}) {
+  return (
+    <section className="min-w-0">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h2 className="text-[12px] font-semibold text-ink">{title}</h2>
+        <span className="text-[12px] text-ink-subtle">{links.length}</span>
+      </div>
+      {links.length > 0 ? (
+        <ol className="max-h-32 space-y-1 overflow-y-auto pr-1">
+          {links.map((link) => {
+            const peerId = direction === "out" ? link.to : link.from;
+            const peer = documentsByBrainId.get(peerId);
+            return (
+              <li
+                key={`${link.sourceKind}:${link.type}:${link.from}:${link.to}`}
+                className="min-w-0"
+              >
+                {peer ? (
+                  <Link
+                    href={brainDocumentUrl(peer)}
+                    className="flex min-w-0 items-center gap-1.5 rounded-sm text-ink-muted hover:text-ink"
+                  >
+                    <span className="truncate">{peer.title || peer.brainId}</span>
+                    <span className="shrink-0 text-ink-subtle">
+                      {direction === "out" ? "->" : "<-"} {link.type}
+                    </span>
+                  </Link>
+                ) : (
+                  <span className="flex min-w-0 items-center gap-1.5 text-ink-muted">
+                    <span className="truncate">{peerId}</span>
+                    <span className="shrink-0 text-ink-subtle">
+                      {direction === "out" ? "->" : "<-"} {link.type}
+                    </span>
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="text-[12px] text-ink-subtle">{empty}</p>
+      )}
+    </section>
   );
 }
 
@@ -668,12 +794,17 @@ function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }
           <ol className="max-h-56 space-y-3 overflow-y-auto pr-2">
             {entries.map((entry, index) => (
               <li
-                key={`${entry.at}:${index}:${entry.body.slice(0, 24)}`}
-                className="grid grid-cols-[96px_minmax(0,1fr)] gap-3 text-[12.5px] leading-5"
+                key={`${entry.evidenceId}:${entry.at}:${index}:${entry.body.slice(0, 24)}`}
+                className="grid grid-cols-[132px_minmax(0,1fr)] gap-3 text-[12.5px] leading-5"
               >
-                <time dateTime={entry.at} className="text-ink-subtle">
-                  {formatDateTime(entry.at)}
-                </time>
+                <div className="min-w-0">
+                  <time dateTime={entry.at} className="block text-ink-subtle">
+                    {formatDateTime(entry.at)}
+                  </time>
+                  <code className="mt-1 block truncate rounded-sm bg-surface px-1 py-0.5 text-[11px] text-ink-muted">
+                    [^ev:{entry.evidenceId}]
+                  </code>
+                </div>
                 <p className="min-w-0 whitespace-pre-wrap text-ink-muted">{entry.body}</p>
               </li>
             ))}
@@ -854,6 +985,65 @@ function brainLinkMap(documents: GoatBrainDocumentView[]) {
   );
 }
 
+function buildGraphLinks(
+  documents: GoatBrainDocumentView[],
+  edgeRows: GoatBrainEdgeRow[] = [],
+): BrainGraphLink[] {
+  if (edgeRows.length > 0) {
+    return edgeRows.map((row) => ({
+      from: row.from_brain_id,
+      to: row.to_brain_id,
+      type: row.relation_type,
+      sourceKind: row.source_kind,
+    }));
+  }
+  const links = new Map<string, BrainGraphLink>();
+  const add = (link: BrainGraphLink) => {
+    if (link.from === link.to) return;
+    links.set(`${link.sourceKind}:${link.type}:${link.from}:${link.to}`, link);
+  };
+
+  for (const document of documents) {
+    for (const relation of document.relations ?? []) {
+      add({
+        from: document.brainId,
+        to: relation.to,
+        type: relation.type || "related",
+        sourceKind: "relation",
+      });
+    }
+    for (const target of wikiLinkTargetsFromBody(document.body)) {
+      add({
+        from: document.brainId,
+        to: target,
+        type: "wiki_link",
+        sourceKind: "wiki_link",
+      });
+    }
+  }
+
+  return [...links.values()].sort((a, b) =>
+    `${a.from}:${a.to}:${a.type}:${a.sourceKind}`.localeCompare(
+      `${b.from}:${b.to}:${b.type}:${b.sourceKind}`,
+    ),
+  );
+}
+
+const BRAIN_WIKI_LINK_PATTERN = /\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g;
+const BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
+
+function wikiLinkTargetsFromBody(body: string) {
+  const seen = new Set<string>();
+  const targets: string[] = [];
+  for (const match of body.matchAll(BRAIN_WIKI_LINK_PATTERN)) {
+    const target = (match[1] ?? "").trim();
+    if (!BRAIN_ID_PATTERN.test(target) || seen.has(target)) continue;
+    seen.add(target);
+    targets.push(target);
+  }
+  return targets;
+}
+
 function folderUrlSegments(folderPath: string) {
   return folderPath
     .split("/")
@@ -876,36 +1066,68 @@ function withAncestorFolders(current: Set<string>, folderPath: string, includeFo
   return next;
 }
 
-function folderViewFromRow(row: GoatBrainFolderRow): GoatBrainFolderView {
-  return {
-    id: row.id,
-    path: row.path,
-    source: row.source,
-  };
-}
-
-function documentViewFromRow(row: GoatBrainDocumentRow): GoatBrainDocumentView {
+function documentViewFromRow(
+  row: GoatBrainDocumentRow,
+  timelineRows?: GoatBrainTimelineEntryRow[],
+): GoatBrainDocumentView {
+  const parsed = parseBrainFrontmatter(row.content);
+  const path = `${row.folder_path}/${row.brain_id}.md`;
   return {
     id: row.id,
     brainId: row.brain_id,
     folderPath: row.folder_path,
-    title: row.title,
+    path,
+    title: row.title ?? row.brain_id,
     content: row.content,
     body: row.body,
-    timeline: normalizeTimeline(row.timeline),
+    timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
     kind: normalizeKind(row.kind),
-    mimeType: row.mime_type,
+    mimeType: row.mime_type ?? "text/markdown",
     originalFileName: row.original_file_name,
     assetStorageKey: row.asset_storage_key,
     relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
     type: normalizeEntityType(row.entity_type),
+    status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
+    tags: normalizeStringArray(parsed.tags),
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
+    parseError: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function groupTimelineRows(rows: GoatBrainTimelineEntryRow[]) {
+  const byDocument = new Map<string, GoatBrainTimelineEntryRow[]>();
+  for (const row of rows) {
+    const current = byDocument.get(row.document_id) ?? [];
+    current.push(row);
+    byDocument.set(row.document_id, current);
+  }
+  for (const [documentId, values] of byDocument) {
+    byDocument.set(
+      documentId,
+      values.toSorted((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
+    );
+  }
+  return byDocument;
+}
+
+function timelineRowsFromRows(
+  rows: GoatBrainTimelineEntryRow[],
+): GoatBrainDocumentView["timeline"] {
+  return rows.map((row) => ({
+    evidenceId: row.evidence_id,
+    at: row.at,
+    body: [row.summary, row.detail, sourceLine(row)].filter(Boolean).join("\n\n"),
+  }));
+}
+
+function sourceLine(row: GoatBrainTimelineEntryRow) {
+  if (!row.source_ref) return "";
+  return `Source: ${row.source_title ? `${row.source_title} (${row.source_ref})` : row.source_ref}`;
 }
 
 function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentView) {
@@ -914,14 +1136,58 @@ function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentVie
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 }
 
-function normalizeTimeline(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry): GoatBrainDocumentView["timeline"] => {
-    if (!entry || typeof entry !== "object") return [];
-    const record = entry as Record<string, unknown>;
-    if (typeof record.at !== "string" || typeof record.body !== "string") return [];
-    return [{ at: record.at, body: record.body }];
-  });
+function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderView[] {
+  const byPath = new Map<string, GoatBrainFolderView>();
+  const zero = new Date(0).toISOString();
+  for (const folder of DEFAULT_BRAIN_FOLDERS) {
+    byPath.set(folder, {
+      id: `folder:${folder}`,
+      path: folder,
+      name: folderName(folder),
+      source: "system",
+      createdAt: zero,
+      updatedAt: zero,
+    });
+  }
+  for (const document of documents) {
+    for (const path of ancestorFolderPaths(document.folderPath)) {
+      const existing = byPath.get(path);
+      byPath.set(path, {
+        id: `folder:${path}`,
+        path,
+        name: folderName(path),
+        source: DEFAULT_BRAIN_FOLDERS.includes(path) ? "system" : "custom",
+        createdAt: existing?.createdAt ?? document.createdAt,
+        updatedAt:
+          existing && existing.updatedAt > document.updatedAt
+            ? existing.updatedAt
+            : document.updatedAt,
+      });
+    }
+  }
+  return [...byPath.values()].toSorted((a, b) => a.path.localeCompare(b.path));
+}
+
+function folderName(folderPath: string) {
+  const name = folderPath.split("/").filter(Boolean).at(-1) ?? folderPath;
+  return name
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join(" ");
+}
+
+function normalizeTimeline(
+  value: GoatBrainDocumentRow["timeline"],
+): GoatBrainDocumentView["timeline"] {
+  return Array.isArray(value)
+    ? value.flatMap((entry): GoatBrainDocumentView["timeline"] => {
+        const evidenceId = entry.evidenceId ?? entry.evidence_id;
+        return entry.at && entry.body
+          ? [{ evidenceId: evidenceId ?? "", at: entry.at, body: entry.body }]
+          : [];
+      })
+    : [];
 }
 
 function normalizeKind(value: string): GoatBrainDocumentView["kind"] {
@@ -934,15 +1200,24 @@ function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
     value === "person" ||
     value === "company" ||
     value === "project" ||
-    value === "meeting" ||
     value === "decision" ||
+    value === "meeting" ||
+    value === "conversation" ||
     value === "research" ||
-    value === "source" ||
+    value === "document" ||
+    value === "concept" ||
+    value === "reference" ||
+    value === "daily" ||
     value === "note"
   ) {
     return value;
   }
   return "note";
+}
+
+function normalizeStatus(value: string): GoatBrainDocumentView["status"] {
+  if (value === "active" || value === "archived" || value === "merged") return value;
+  return "draft";
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -979,6 +1254,19 @@ function normalizeSources(value: unknown) {
       },
     ];
   });
+}
+
+function parseBrainFrontmatter(content: string): Record<string, unknown> {
+  const match = /^---\n([\s\S]*?)\n---/.exec(content.replace(/\r\n/g, "\n"));
+  if (!match?.[1]) return {};
+  const tagsMatch = /^tags:\n((?:\s+- .+\n?)+)/m.exec(match[1]);
+  if (!tagsMatch?.[1]) return {};
+  return {
+    tags: tagsMatch[1]
+      .split("\n")
+      .map((line) => line.replace(/^\s+-\s+/, "").trim())
+      .filter(Boolean),
+  };
 }
 
 function formatDateTime(value: string) {

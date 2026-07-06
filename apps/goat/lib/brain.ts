@@ -1,62 +1,70 @@
-import { createHash, randomUUID } from "node:crypto";
-import { getDb } from "@opencompany/db/client";
 import {
-  type GoatBrainRelation,
-  type GoatBrainSource,
-  goatBrainDocuments,
-  goatBrainFolders,
-} from "@opencompany/db/goat-schema";
+  createGoatBrainMarkdownContent,
+  deleteGoatBrainFileForUser,
+  deriveGoatBrainFileProjection,
+  getGoatBrainFileForUser,
+  goatBrainFilePathFor,
+  hashGoatBrainContent,
+  listGoatBrainFilesForUser,
+  moveGoatBrainFileForUser,
+  replaceGoatBrainFileCompiledTruth,
+  updateGoatBrainFileContentForUser,
+  upsertGoatBrainFileForUser,
+} from "@opencompany/db/goat-brain-files";
+import type { GoatBrainDocument as GoatBrainDocumentRow } from "@opencompany/db/goat-schema";
 import {
   DEFAULT_GOAT_BRAIN_FOLDERS,
-  DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-  GOAT_BRAIN_MARKDOWN_MIME_TYPE,
-  type GoatBrainDocument as GoatBrainContractDocument,
-  type GoatBrainDocumentKind,
+  type GoatBrainDocument,
   type GoatBrainEntityType,
-  type GoatBrainEntry,
-  type GoatBrainFrontmatter,
+  type GoatBrainRelation,
+  type GoatBrainSource,
+  type GoatBrainStatus,
   type GoatBrainTimelineEntry,
-  goatBrainEntryFromLegacyMarkdown,
   inferGoatBrainEntityTypeFromFolder,
+  isBuiltInGoatBrainEntityType,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   normalizeGoatBrainFolder,
   normalizeGoatBrainId,
+  nowIso,
   parseGoatBrainDocument,
-  serializeLegacyGoatBrainEntry,
-  validateGoatBrainDocument,
+  serializeGoatBrainDocument,
 } from "@opencompany/goat-brain";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
-
-export const MAX_GOAT_BRAIN_DOC_BYTES = 256 * 1024;
 
 export type GoatBrainFolderView = {
   id: string;
   path: string;
+  name: string;
   source: "system" | "custom";
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type GoatBrainDocumentView = {
   id: string;
   brainId: string;
   folderPath: string;
-  title: string | null;
+  path: string;
+  title: string;
   content: string;
   body: string;
   timeline: GoatBrainTimelineEntry[];
-  kind: GoatBrainDocumentKind;
-  mimeType: string | null;
-  originalFileName: string | null;
-  assetStorageKey: string | null;
+  kind: "markdown" | "pdf" | "docx";
+  mimeType: string;
+  originalFileName?: string | null;
+  assetStorageKey?: string | null;
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
   type: GoatBrainEntityType;
+  status: GoatBrainStatus;
   aliases: string[];
+  tags: string[];
   contentHash: string;
   sizeBytes: number;
-  updatedAt: string;
+  parseError?: string | null;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type GoatBrainSnapshot = {
@@ -66,7 +74,23 @@ export type GoatBrainSnapshot = {
 
 export type BrainMutationResult =
   | { ok: true; path?: string; document?: GoatBrainDocumentView }
-  | { ok: false; error: string };
+  | { ok: false; message: string };
+
+export type ValidatedGoatBrainContent = {
+  document: GoatBrainDocument;
+  title: string;
+  body: string;
+  timeline: GoatBrainTimelineEntry[];
+  relations: GoatBrainRelation[];
+  sources: GoatBrainSource[];
+  aliases: string[];
+  tags: string[];
+  type: GoatBrainEntityType;
+  status: GoatBrainStatus;
+  contentHash: string;
+  sizeBytes: number;
+  parseError: string | null;
+};
 
 export async function listCurrentUserGoatBrain(): Promise<GoatBrainSnapshot> {
   const { user } = await currentGoatUser();
@@ -74,158 +98,52 @@ export async function listCurrentUserGoatBrain(): Promise<GoatBrainSnapshot> {
 }
 
 export async function listGoatBrainForUser(userWorkosId: string): Promise<GoatBrainSnapshot> {
-  await ensureGoatBrainDefaultFolders(userWorkosId);
-  const db = getDb();
-  const [folders, documents] = await Promise.all([
-    db
-      .select()
-      .from(goatBrainFolders)
-      .where(eq(goatBrainFolders.userWorkosId, userWorkosId))
-      .orderBy(asc(goatBrainFolders.path)),
-    db
-      .select()
-      .from(goatBrainDocuments)
-      .where(eq(goatBrainDocuments.userWorkosId, userWorkosId))
-      .orderBy(asc(goatBrainDocuments.folderPath), desc(goatBrainDocuments.updatedAt)),
-  ]);
-
+  const rows = await listGoatBrainFilesForUser(userWorkosId, { includeInvalid: true });
+  const documents = rows.map(documentViewFromFileRow).sort(compareBrainDocuments);
   return {
-    folders: folders.map((folder) => ({
-      id: folder.id,
-      path: folder.path,
-      source: folder.source,
-    })),
-    documents: documents.map(documentViewFromRow),
+    folders: deriveFolderViews(documents),
+    documents,
   };
 }
 
-export async function ensureGoatBrainDefaultFolders(userWorkosId: string) {
-  const now = new Date();
-  const db = getDb();
-  for (const path of DEFAULT_GOAT_BRAIN_FOLDERS) {
-    await db
-      .insert(goatBrainFolders)
-      .values({
-        id: `goat_brain_folder_${randomUUID()}`,
-        userWorkosId,
-        path,
-        source: "system",
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing({
-        target: [goatBrainFolders.userWorkosId, goatBrainFolders.path],
-      });
-    await db
-      .update(goatBrainFolders)
-      .set({ source: "system", updatedAt: now })
-      .where(
-        and(
-          eq(goatBrainFolders.userWorkosId, userWorkosId),
-          eq(goatBrainFolders.path, path),
-          eq(goatBrainFolders.source, "custom"),
-        ),
-      );
-  }
-}
-
 export async function createGoatBrainFolderForUser(
-  userWorkosId: string,
-  rawPath: string,
+  _userWorkosId: string,
+  folderPath: string,
 ): Promise<BrainMutationResult> {
-  const path = normalizeGoatBrainFolder(rawPath);
-  if (!isValidGoatBrainFolder(path)) {
-    return { ok: false, error: "Folder path must be a safe lowercase path." };
+  const normalized = normalizeGoatBrainFolder(folderPath);
+  if (!isValidGoatBrainFolder(normalized)) {
+    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
-
-  const source = DEFAULT_GOAT_BRAIN_FOLDERS.includes(path as never) ? "system" : "custom";
-  await ensureGoatBrainDefaultFolders(userWorkosId);
-  const now = new Date();
-  const [folder] = await getDb()
-    .insert(goatBrainFolders)
-    .values({
-      id: `goat_brain_folder_${randomUUID()}`,
-      userWorkosId,
-      path,
-      source,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [goatBrainFolders.userWorkosId, goatBrainFolders.path],
-      set: { source, updatedAt: now },
-    })
-    .returning();
-
-  return { ok: true, path: folder?.path ?? path };
+  return { ok: true, path: normalized };
 }
 
 export async function createGoatBrainDocumentForUser(input: {
   userWorkosId: string;
   folderPath: string;
   title?: string;
-  truth?: string;
 }): Promise<BrainMutationResult> {
   const folderPath = normalizeGoatBrainFolder(input.folderPath || "inbox");
   if (!isValidGoatBrainFolder(folderPath)) {
-    return { ok: false, error: "Folder path must be a safe lowercase path." };
+    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
-
-  await createGoatBrainFolderForUser(input.userWorkosId, folderPath);
-  const nowIso = new Date().toISOString();
-  const baseId = normalizeGoatBrainId(input.title || "untitled") || "untitled";
-  const brainId = await nextAvailableGoatBrainId(input.userWorkosId, baseId);
-  const title = input.title?.trim() || titleFromId(brainId);
-  const entry: GoatBrainEntry = {
+  const title = input.title?.trim() || "Untitled";
+  const brainId = await nextAvailableGoatBrainId(input.userWorkosId, normalizeGoatBrainId(title));
+  const content = createGoatBrainMarkdownContent({
     id: brainId,
-    folder: folderPath,
+    folderPath,
     title,
-    kind: "markdown",
-    mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
-    body: input.truth?.trim() || "",
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    relations: [],
-    sources: [],
     type: inferGoatBrainEntityTypeFromFolder(folderPath),
-    aliases: [],
-    tags: [],
-    timeline: [],
-  };
-  const content = serializeLegacyGoatBrainEntry(entry);
-  const normalized = validateAndDeriveGoatBrainDocument(content);
-  if (!normalized.ok) return normalized;
-
-  const now = new Date();
-  const [row] = await getDb()
-    .insert(goatBrainDocuments)
-    .values({
-      id: `goat_brain_doc_${randomUUID()}`,
-      userWorkosId: input.userWorkosId,
-      brainId: normalized.document.frontmatter.id,
-      folderPath: normalized.document.frontmatter.folder,
-      title: normalized.title,
-      content,
-      body: entry.body,
-      timeline: entry.timeline,
-      kind: entry.kind,
-      mimeType: entry.mimeType,
-      relations: normalized.relations,
-      sources: normalized.sources,
-      entityType: entry.type,
-      aliases: entry.aliases,
-      contentHash: normalized.contentHash,
-      sizeBytes: normalized.sizeBytes,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning();
-
-  if (!row) return { ok: false, error: "Could not create brain document." };
+    status: "draft",
+  });
+  const row = await upsertGoatBrainFileForUser({
+    userWorkosId: input.userWorkosId,
+    path: goatBrainFilePathFor(folderPath, brainId),
+    content,
+  });
   return {
     ok: true,
-    path: brainDocumentPath(row.folderPath, row.brainId),
-    document: documentViewFromRow(row),
+    path: goatBrainFilePathFor(row.folderPath, row.brainId),
+    document: documentViewFromFileRow(row),
   };
 }
 
@@ -233,130 +151,28 @@ export async function updateGoatBrainDocumentForUser(input: {
   userWorkosId: string;
   documentId: string;
   body: string;
+  expectedContentHash?: string;
 }): Promise<BrainMutationResult> {
-  const db = getDb();
-  const [existing] = await db
-    .select()
-    .from(goatBrainDocuments)
-    .where(
-      and(
-        eq(goatBrainDocuments.id, input.documentId),
-        eq(goatBrainDocuments.userWorkosId, input.userWorkosId),
-      ),
-    )
-    .limit(1);
-  if (!existing) return { ok: false, error: "Brain document was not found." };
-
-  const entry = entryFromDocumentRow(existing);
-  const updatedAt = new Date().toISOString();
-  const nextEntry: GoatBrainEntry = {
-    ...entry,
-    body: input.body,
-    updatedAt,
-  };
-  const content = serializeLegacyGoatBrainEntry(nextEntry);
-  const normalized = validateAndDeriveGoatBrainDocument(content);
-  if (!normalized.ok) return normalized;
-
-  const snapshot = await listGoatBrainForUser(input.userWorkosId);
-  const collision = snapshot.documents.find(
-    (document) =>
-      document.id !== input.documentId && document.brainId === normalized.document.frontmatter.id,
-  );
-  if (collision) {
-    return { ok: false, error: `A brain document with id "${collision.brainId}" already exists.` };
-  }
-
-  await createGoatBrainFolderForUser(input.userWorkosId, normalized.document.frontmatter.folder);
-  const now = new Date();
-  const [row] = rowsFromExecute<GoatBrainDocumentRow>(
-    await db.execute(sql`
-      WITH existing AS (
-        SELECT *
-        FROM goat.brain_documents
-        WHERE id = ${input.documentId}
-          AND user_workos_id = ${input.userWorkosId}
-        LIMIT 1
-      ),
-      version AS (
-        INSERT INTO goat.brain_document_versions (
-          user_workos_id,
-          document_id,
-          brain_id,
-          folder_path,
-          content,
-          content_hash,
-          size_bytes,
-          operation,
-          created_at
-        )
-        SELECT
-          existing.user_workos_id,
-          existing.id,
-          existing.brain_id,
-          existing.folder_path,
-          existing.content,
-          existing.content_hash,
-          existing.size_bytes,
-          'overwrite',
-          ${now}
-        FROM existing
-        RETURNING document_id
-      ),
-      updated AS (
-        UPDATE goat.brain_documents AS document
-        SET brain_id = ${normalized.document.frontmatter.id},
-            folder_path = ${normalized.document.frontmatter.folder},
-            title = ${normalized.title},
-            content = ${content},
-            body = ${nextEntry.body},
-            timeline = ${JSON.stringify(nextEntry.timeline)}::jsonb,
-            kind = ${nextEntry.kind},
-            mime_type = ${nextEntry.mimeType},
-            original_file_name = ${nextEntry.originalFileName ?? null},
-            asset_storage_key = ${nextEntry.assetStorageKey ?? null},
-            relations = ${JSON.stringify(normalized.relations)}::jsonb,
-            sources = ${JSON.stringify(normalized.sources)}::jsonb,
-            entity_type = ${nextEntry.type},
-            aliases = ${JSON.stringify(nextEntry.aliases)}::jsonb,
-            content_hash = ${normalized.contentHash},
-            size_bytes = ${normalized.sizeBytes},
-            updated_at = ${now}
-        WHERE document.id = ${input.documentId}
-          AND document.user_workos_id = ${input.userWorkosId}
-          AND EXISTS (SELECT 1 FROM version)
-        RETURNING document.*
-      )
-      SELECT
-        id,
-        user_workos_id AS "userWorkosId",
-        brain_id AS "brainId",
-        folder_path AS "folderPath",
-        title,
-        content,
-        body,
-        timeline,
-        kind,
-        mime_type AS "mimeType",
-        original_file_name AS "originalFileName",
-        asset_storage_key AS "assetStorageKey",
-        relations,
-        sources,
-        entity_type AS "entityType",
-        aliases,
-        content_hash AS "contentHash",
-        size_bytes AS "sizeBytes",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
-      FROM updated
-    `),
-  );
-
-  if (!row) return { ok: false, error: "Could not save brain document." };
+  const existing = await getGoatBrainFileForUser({
+    userWorkosId: input.userWorkosId,
+    fileId: input.documentId,
+  });
+  if (!existing) return { ok: false, message: "Brain file not found." };
+  const content = replaceGoatBrainFileCompiledTruth({
+    content: existing.content,
+    compiledTruth: input.body,
+    updatedAt: nowIso(),
+  });
+  const row = await updateGoatBrainFileContentForUser({
+    userWorkosId: input.userWorkosId,
+    fileId: input.documentId,
+    content,
+    ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
+  });
   return {
     ok: true,
-    path: brainDocumentPath(row.folderPath, row.brainId),
-    document: documentViewFromRow(row),
+    path: goatBrainFilePathFor(row.folderPath, row.brainId),
+    document: documentViewFromFileRow(row),
   };
 }
 
@@ -367,157 +183,46 @@ export async function moveGoatBrainDocumentForUser(input: {
 }): Promise<BrainMutationResult> {
   const folderPath = normalizeGoatBrainFolder(input.folderPath);
   if (!isValidGoatBrainFolder(folderPath)) {
-    return { ok: false, error: "Folder path must be a safe lowercase path." };
+    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
-
-  const db = getDb();
-  const [existing] = await db
-    .select()
-    .from(goatBrainDocuments)
-    .where(
-      and(
-        eq(goatBrainDocuments.id, input.documentId),
-        eq(goatBrainDocuments.userWorkosId, input.userWorkosId),
-      ),
-    )
-    .limit(1);
-  if (!existing) return { ok: false, error: "Brain document was not found." };
-
-  const entry = entryFromDocumentRow(existing);
-  const content = serializeLegacyGoatBrainEntry({
-    ...entry,
-    folder: folderPath,
-    updatedAt: new Date().toISOString(),
-  });
-
-  return updateGoatBrainDocumentContentForUser({
+  const existing = await getGoatBrainFileForUser({
     userWorkosId: input.userWorkosId,
-    documentId: input.documentId,
+    fileId: input.documentId,
+  });
+  if (!existing) return { ok: false, message: "Brain file not found." };
+  const parsed = parseGoatBrainDocument(existing.content);
+  const content = serializeGoatBrainDocument({
+    title: parsed.title || existing.title || existing.brainId,
+    compiledTruth: parsed.compiledTruth,
+    timeline: parsed.timeline,
+    frontmatter: {
+      id: existing.brainId,
+      folder: folderPath,
+      type:
+        parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
+          ? parsed.frontmatter.type
+          : inferGoatBrainEntityTypeFromFolder(folderPath),
+      status: parsed.frontmatter.status ?? existing.status,
+      title: parsed.frontmatter.title ?? existing.title ?? existing.brainId,
+      createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
+      updatedAt: nowIso(),
+      relations: parsed.frontmatter.relations ?? [],
+      ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+      ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
+      ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
+      ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
+    },
+  });
+  const row = await moveGoatBrainFileForUser({
+    userWorkosId: input.userWorkosId,
+    fileId: input.documentId,
+    path: goatBrainFilePathFor(folderPath, existing.brainId),
     content,
   });
-}
-
-async function updateGoatBrainDocumentContentForUser(input: {
-  userWorkosId: string;
-  documentId: string;
-  content: string;
-}): Promise<BrainMutationResult> {
-  const normalized = validateAndDeriveGoatBrainDocument(input.content);
-  if (!normalized.ok) return normalized;
-  const entry = goatBrainEntryFromLegacyMarkdown(input.content);
-
-  const db = getDb();
-  const [existing] = await db
-    .select()
-    .from(goatBrainDocuments)
-    .where(
-      and(
-        eq(goatBrainDocuments.id, input.documentId),
-        eq(goatBrainDocuments.userWorkosId, input.userWorkosId),
-      ),
-    )
-    .limit(1);
-  if (!existing) return { ok: false, error: "Brain document was not found." };
-
-  const snapshot = await listGoatBrainForUser(input.userWorkosId);
-  const collision = snapshot.documents.find(
-    (document) =>
-      document.id !== input.documentId && document.brainId === normalized.document.frontmatter.id,
-  );
-  if (collision) {
-    return { ok: false, error: `A brain document with id "${collision.brainId}" already exists.` };
-  }
-
-  await createGoatBrainFolderForUser(input.userWorkosId, normalized.document.frontmatter.folder);
-  const now = new Date();
-  const [row] = rowsFromExecute<GoatBrainDocumentRow>(
-    await db.execute(sql`
-      WITH existing AS (
-        SELECT *
-        FROM goat.brain_documents
-        WHERE id = ${input.documentId}
-          AND user_workos_id = ${input.userWorkosId}
-        LIMIT 1
-      ),
-      version AS (
-        INSERT INTO goat.brain_document_versions (
-          user_workos_id,
-          document_id,
-          brain_id,
-          folder_path,
-          content,
-          content_hash,
-          size_bytes,
-          operation,
-          created_at
-        )
-        SELECT
-          existing.user_workos_id,
-          existing.id,
-          existing.brain_id,
-          existing.folder_path,
-          existing.content,
-          existing.content_hash,
-          existing.size_bytes,
-          'overwrite',
-          ${now}
-        FROM existing
-        RETURNING document_id
-      ),
-      updated AS (
-        UPDATE goat.brain_documents AS document
-        SET brain_id = ${normalized.document.frontmatter.id},
-            folder_path = ${normalized.document.frontmatter.folder},
-            title = ${normalized.title},
-            content = ${input.content},
-            body = ${entry.body},
-            timeline = ${JSON.stringify(entry.timeline)}::jsonb,
-            kind = ${entry.kind},
-            mime_type = ${entry.mimeType},
-            original_file_name = ${entry.originalFileName ?? null},
-            asset_storage_key = ${entry.assetStorageKey ?? null},
-            relations = ${JSON.stringify(normalized.relations)}::jsonb,
-            sources = ${JSON.stringify(normalized.sources)}::jsonb,
-            entity_type = ${entry.type},
-            aliases = ${JSON.stringify(entry.aliases)}::jsonb,
-            content_hash = ${normalized.contentHash},
-            size_bytes = ${normalized.sizeBytes},
-            updated_at = ${now}
-        WHERE document.id = ${input.documentId}
-          AND document.user_workos_id = ${input.userWorkosId}
-          AND EXISTS (SELECT 1 FROM version)
-        RETURNING document.*
-      )
-      SELECT
-        id,
-        user_workos_id AS "userWorkosId",
-        brain_id AS "brainId",
-        folder_path AS "folderPath",
-        title,
-        content,
-        body,
-        timeline,
-        kind,
-        mime_type AS "mimeType",
-        original_file_name AS "originalFileName",
-        asset_storage_key AS "assetStorageKey",
-        relations,
-        sources,
-        entity_type AS "entityType",
-        aliases,
-        content_hash AS "contentHash",
-        size_bytes AS "sizeBytes",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
-      FROM updated
-    `),
-  );
-
-  if (!row) return { ok: false, error: "Could not save brain document." };
   return {
     ok: true,
-    path: brainDocumentPath(row.folderPath, row.brainId),
-    document: documentViewFromRow(row),
+    path: goatBrainFilePathFor(row.folderPath, row.brainId),
+    document: documentViewFromFileRow(row),
   };
 }
 
@@ -525,268 +230,162 @@ export async function deleteGoatBrainDocumentForUser(input: {
   userWorkosId: string;
   documentId: string;
 }): Promise<BrainMutationResult> {
-  const db = getDb();
-  const [existing] = await db
-    .select()
-    .from(goatBrainDocuments)
-    .where(
-      and(
-        eq(goatBrainDocuments.id, input.documentId),
-        eq(goatBrainDocuments.userWorkosId, input.userWorkosId),
-      ),
-    )
-    .limit(1);
-  if (!existing) return { ok: false, error: "Brain document was not found." };
-
-  const now = new Date();
-  const deleted = rowsFromExecute<{ id: string }>(
-    await db.execute(sql`
-      WITH existing AS (
-        SELECT *
-        FROM goat.brain_documents
-        WHERE id = ${input.documentId}
-          AND user_workos_id = ${input.userWorkosId}
-        LIMIT 1
-      ),
-      version AS (
-        INSERT INTO goat.brain_document_versions (
-          user_workos_id,
-          document_id,
-          brain_id,
-          folder_path,
-          content,
-          content_hash,
-          size_bytes,
-          operation,
-          created_at
-        )
-        SELECT
-          existing.user_workos_id,
-          existing.id,
-          existing.brain_id,
-          existing.folder_path,
-          existing.content,
-          existing.content_hash,
-          existing.size_bytes,
-          'delete',
-          ${now}
-        FROM existing
-        RETURNING document_id
-      )
-      DELETE FROM goat.brain_documents AS document
-      WHERE document.id = ${input.documentId}
-        AND document.user_workos_id = ${input.userWorkosId}
-        AND EXISTS (SELECT 1 FROM version)
-      RETURNING document.id
-    `),
-  );
-
-  if (deleted.length === 0) return { ok: false, error: "Could not delete brain document." };
-
-  return { ok: true, path: "/brain" };
+  await deleteGoatBrainFileForUser({
+    userWorkosId: input.userWorkosId,
+    fileId: input.documentId,
+  });
+  return { ok: true };
 }
-
-export type ValidatedGoatBrainContent =
-  | {
-      ok: true;
-      document: GoatBrainContractDocument;
-      title: string;
-      relations: GoatBrainRelation[];
-      sources: GoatBrainSource[];
-      contentHash: string;
-      sizeBytes: number;
-    }
-  | { ok: false; error: string };
 
 export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoatBrainContent {
-  const sizeBytes = Buffer.byteLength(source, "utf8");
-  if (sizeBytes > MAX_GOAT_BRAIN_DOC_BYTES) {
-    return { ok: false, error: "Brain document is too large." };
-  }
-
   const parsed = parseGoatBrainDocument(source);
-  const validation = validateGoatBrainDocument(parsed, parsed.frontmatter.id, source);
-  if (!validation.ok) return { ok: false, error: validation.errors.join(" ") };
-
-  const frontmatter = parsed.frontmatter as GoatBrainFrontmatter;
-  if (!isValidGoatBrainId(frontmatter.id) || !isValidGoatBrainFolder(frontmatter.folder)) {
-    return { ok: false, error: "Brain document frontmatter is invalid." };
-  }
-
-  const title = (frontmatter.title ?? parsed.title).trim();
+  const id =
+    parsed.frontmatter.id && isValidGoatBrainId(parsed.frontmatter.id)
+      ? parsed.frontmatter.id
+      : "temporary";
+  const folder =
+    parsed.frontmatter.folder && isValidGoatBrainFolder(parsed.frontmatter.folder)
+      ? parsed.frontmatter.folder
+      : "inbox";
+  const projection = deriveGoatBrainFileProjection({
+    path: goatBrainFilePathFor(folder, id),
+    content: source,
+  });
   return {
-    ok: true,
     document: {
-      frontmatter,
-      title,
-      compiledTruth: parsed.compiledTruth,
+      title: parsed.title || projection.title || projection.brainId,
+      compiledTruth: projection.body,
       timeline: parsed.timeline,
+      frontmatter: {
+        id: parsed.frontmatter.id ?? projection.brainId,
+        folder: parsed.frontmatter.folder ?? projection.folderPath,
+        type: projection.entityType,
+        status: projection.status,
+        title: parsed.frontmatter.title ?? projection.title ?? projection.brainId,
+        createdAt: parsed.frontmatter.createdAt ?? nowIso(),
+        updatedAt: parsed.frontmatter.updatedAt ?? nowIso(),
+        relations: parsed.frontmatter.relations ?? [],
+        ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+        ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
+        ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
+        ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
+      },
     },
-    title,
-    relations: frontmatter.relations.map((relation) => ({
-      type: relation.type,
-      to: relation.to,
-    })),
-    sources: (frontmatter.sources ?? []).map((sourceEntry) => ({
-      ref: sourceEntry.ref,
-      ...(sourceEntry.title ? { title: sourceEntry.title } : {}),
-      ...(sourceEntry.capturedAt ? { capturedAt: sourceEntry.capturedAt } : {}),
-    })),
-    contentHash: hashGoatBrainContent(source),
-    sizeBytes,
+    title: projection.title ?? projection.brainId,
+    body: projection.body,
+    timeline: parsed.timeline,
+    relations: parsed.frontmatter.relations ?? [],
+    sources: parsed.frontmatter.sources ?? [],
+    aliases: parsed.frontmatter.aliases ?? [],
+    tags: parsed.frontmatter.tags ?? [],
+    type: projection.entityType,
+    status: projection.status,
+    contentHash: projection.contentHash,
+    sizeBytes: projection.sizeBytes,
+    parseError: null,
   };
 }
 
-export function hashGoatBrainContent(content: string) {
-  return createHash("sha256").update(content).digest("hex");
-}
-
-export async function nextAvailableGoatBrainId(userWorkosId: string, baseId: string) {
-  const normalizedBase = normalizeGoatBrainId(baseId) || "untitled";
-  const existing = await getDb()
-    .select({ brainId: goatBrainDocuments.brainId })
-    .from(goatBrainDocuments)
-    .where(eq(goatBrainDocuments.userWorkosId, userWorkosId));
-  const taken = new Set(existing.map((document) => document.brainId));
-  if (!taken.has(normalizedBase)) return normalizedBase;
-  for (let suffix = 2; suffix < 10_000; suffix += 1) {
-    const candidate = `${normalizedBase}-${suffix}`;
-    if (!taken.has(candidate) && isValidGoatBrainId(candidate)) return candidate;
-  }
-  return `note-${randomUUID().slice(0, 8)}`;
-}
-
-type GoatBrainDocumentRow = Omit<
-  typeof goatBrainDocuments.$inferSelect,
-  "createdAt" | "updatedAt"
-> & {
-  createdAt: Date | string;
-  updatedAt: Date | string;
-};
-
-function documentViewFromRow(row: GoatBrainDocumentRow): GoatBrainDocumentView {
-  const entry = entryFromDocumentRow(row);
+export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDocumentView {
+  const parsed = parseGoatBrainDocument(row.content);
+  const path = goatBrainFilePathFor(row.folderPath, row.brainId);
   return {
     id: row.id,
-    brainId: entry.id,
-    folderPath: entry.folder,
-    title: row.title ?? entry.title,
+    brainId: row.brainId,
+    folderPath: row.folderPath,
+    path,
+    title: row.title || parsed.title || row.brainId,
     content: row.content,
-    body: entry.body,
-    timeline: entry.timeline,
-    kind: entry.kind,
-    mimeType: entry.mimeType,
-    originalFileName: entry.originalFileName ?? null,
-    assetStorageKey: entry.assetStorageKey ?? null,
-    relations: entry.relations,
-    sources: entry.sources,
-    type: entry.type,
-    aliases: entry.aliases,
+    body: row.body,
+    timeline: parsed.timeline,
+    kind: "markdown",
+    mimeType: row.mimeType ?? "text/markdown",
+    originalFileName: null,
+    assetStorageKey: null,
+    relations: parsed.frontmatter.relations ?? [],
+    sources: parsed.frontmatter.sources ?? [],
+    type: row.entityType,
+    status: row.status,
+    aliases: parsed.frontmatter.aliases ?? [],
+    tags: parsed.frontmatter.tags ?? [],
     contentHash: row.contentHash,
     sizeBytes: row.sizeBytes,
-    createdAt: toIsoString(row.createdAt),
-    updatedAt: toIsoString(row.updatedAt),
+    parseError: null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-function entryFromDocumentRow(row: GoatBrainDocumentRow): GoatBrainEntry {
-  const legacyEntry = safeLegacyEntry(row.content);
-  const kind = isGoatBrainDocumentKind(row.kind) ? row.kind : "markdown";
-  const body = row.body || legacyEntry?.body || "";
-  const timeline = normalizeTimeline(row.timeline, legacyEntry?.timeline ?? []);
-  return {
-    id: row.brainId,
-    folder: row.folderPath,
-    title: row.title?.trim() || legacyEntry?.title || titleFromId(row.brainId),
-    kind,
-    mimeType: row.mimeType?.trim() || mimeTypeForKind(kind),
-    body,
-    createdAt: toIsoString(row.createdAt),
-    updatedAt: toIsoString(row.updatedAt),
-    relations: normalizeEntryRelations(row.relations ?? legacyEntry?.relations ?? []),
-    sources: row.sources ?? legacyEntry?.sources ?? [],
-    type: row.entityType || legacyEntry?.type || inferGoatBrainEntityTypeFromFolder(row.folderPath),
-    aliases: normalizeStringArray(row.aliases, legacyEntry?.aliases ?? []),
-    tags: legacyEntry?.tags ?? [],
-    timeline: kind === "markdown" ? timeline : [],
-    ...(row.originalFileName ? { originalFileName: row.originalFileName } : {}),
-    ...(row.assetStorageKey ? { assetStorageKey: row.assetStorageKey } : {}),
-  };
-}
-
-function safeLegacyEntry(content: string): GoatBrainEntry | null {
-  try {
-    return goatBrainEntryFromLegacyMarkdown(content);
-  } catch {
-    return null;
+export async function nextAvailableGoatBrainId(
+  userWorkosId: string,
+  baseId: string,
+): Promise<string> {
+  const base = isValidGoatBrainId(baseId) ? baseId : "untitled";
+  const rows = await listGoatBrainFilesForUser(userWorkosId, { includeInvalid: true });
+  const used = new Set(rows.map((row) => row.brainId));
+  if (!used.has(base)) return base;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${base}-${i}`;
+    if (!used.has(candidate)) return candidate;
   }
+  throw new Error("Could not allocate a unique brain id.");
 }
 
-function normalizeTimeline(value: unknown, fallback: GoatBrainTimelineEntry[]) {
-  if (!Array.isArray(value)) return fallback;
-  const entries = value.flatMap((entry): GoatBrainTimelineEntry[] => {
-    if (!entry || typeof entry !== "object") return [];
-    const record = entry as Record<string, unknown>;
-    if (typeof record.at !== "string" || typeof record.body !== "string") return [];
-    return [{ at: record.at, body: record.body }];
-  });
-  return entries;
-}
+export { hashGoatBrainContent };
 
-function normalizeEntryRelations(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((relation): GoatBrainEntry["relations"] => {
-    if (!relation || typeof relation !== "object") return [];
-    const record = relation as Record<string, unknown>;
-    if (typeof record.to !== "string") return [];
-    return [
-      {
-        type: typeof record.type === "string" ? record.type : DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-        to: record.to,
-      },
-    ];
-  });
-}
-
-function normalizeStringArray(value: unknown, fallback: string[]) {
-  if (!Array.isArray(value)) return fallback;
-  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-}
-
-function isGoatBrainDocumentKind(value: unknown): value is GoatBrainDocumentKind {
-  return value === "markdown" || value === "pdf" || value === "docx";
-}
-
-function mimeTypeForKind(kind: GoatBrainDocumentKind) {
-  if (kind === "pdf") return "application/pdf";
-  if (kind === "docx") {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderView[] {
+  const now = new Date(0).toISOString();
+  const byPath = new Map<string, GoatBrainFolderView>();
+  for (const folder of DEFAULT_GOAT_BRAIN_FOLDERS) {
+    byPath.set(folder, {
+      id: `folder:${folder}`,
+      path: folder,
+      name: folderName(folder),
+      source: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
   }
-  return GOAT_BRAIN_MARKDOWN_MIME_TYPE;
+  for (const document of documents) {
+    for (const path of ancestorFolders(document.folderPath)) {
+      const existing = byPath.get(path);
+      const updatedAt =
+        existing && existing.updatedAt > document.updatedAt
+          ? existing.updatedAt
+          : document.updatedAt;
+      byPath.set(path, {
+        id: `folder:${path}`,
+        path,
+        name: folderName(path),
+        source: DEFAULT_GOAT_BRAIN_FOLDERS.includes(
+          path as (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number],
+        )
+          ? "system"
+          : "custom",
+        createdAt: existing?.createdAt ?? document.createdAt,
+        updatedAt,
+      });
+    }
+  }
+  return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function titleFromId(id: string) {
-  return id
+function ancestorFolders(folderPath: string): string[] {
+  const parts = folderPath.split("/").filter(Boolean);
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function folderName(folderPath: string): string {
+  const last = folderPath.split("/").filter(Boolean).at(-1) ?? folderPath;
+  return last
     .split("-")
     .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
     .join(" ");
 }
 
-function brainDocumentPath(folderPath: string, brainId: string) {
-  const folderSegments = folderPath.split("/").map((segment) => encodeURIComponent(segment));
-  return `/brain/${folderSegments.join("/")}/${encodeURIComponent(brainId)}`;
-}
-
-function rowsFromExecute<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in result) {
-    const rows = (result as { rows?: unknown }).rows;
-    if (Array.isArray(rows)) return rows as T[];
-  }
-  return [];
-}
-
-function toIsoString(value: Date | string) {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentView) {
+  const folder = a.folderPath.localeCompare(b.folderPath);
+  if (folder !== 0) return folder;
+  return a.title.localeCompare(b.title);
 }

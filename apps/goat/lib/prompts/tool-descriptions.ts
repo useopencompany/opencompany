@@ -1,8 +1,8 @@
 export const GOAT_BRAIN_TOOL_DESCRIPTION =
-  "Use the user's personal Goat Brain for durable world knowledge: people, companies, projects, meetings, decisions, insights, research, references, and durable notes. Use ingest when the user asks to remember/save new information, query for recall/search, and get for a known brain id. Do not treat Brain as current chat scratchpad.";
+  "Use the user's personal Goat Brain CLI for durable structured memory stored as Markdown files. Use list for inventory, query for recall/search, get for a known brain id, ingest for sourced inline capture, create for explicit new records, append-evidence to add sourced timeline evidence, rewrite only for compiled truth, alias for name aliases, link for related records, merge for duplicates, delete only with dryRun: true, and doctor for validation. Do not treat Brain as current chat scratchpad.";
 
 export const GOAT_BRAIN_TOOL_ARGS_DESCRIPTION =
-  "Structured brain action. Use { action: 'ingest', text, sourceTitle? }, { action: 'query', text, limit?, hops? }, or { action: 'get', id, section? }. Raw args are internal-only.";
+  "CLI-shaped structured invocation. Use { command, flags, stdin? }, where flags are CLI options without leading dashes. Examples: { command: 'query', flags: { text: 'hiring', hops: 2, graphDirection: 'both', limit: 5, json: true } }, { command: 'get', flags: { id: 'garry-tan', json: true } }, { command: 'append-evidence', flags: { id: 'garry-tan', body: 'Met at YC event.', sourceTitle: 'User chat note', json: true } }, or { command: 'delete', flags: { id: 'old-note', dryRun: true, json: true } }. Delete is preview-only in chat. Use camelCase or kebab-case flag names.";
 
 export const START_TASK_TOOL_DESCRIPTION =
   "Start a task when the user's request should become an asynchronous tracked Result, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent.";

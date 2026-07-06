@@ -43,6 +43,48 @@ describe("goat brain retrieval", () => {
       ]),
     );
   });
+
+  it("can constrain graph expansion to outgoing edges", async () => {
+    await writeDoc("companies/acme.md", {
+      id: "acme",
+      folder: "companies",
+      type: "company",
+      title: "Acme",
+      truth: "Acme is evaluating enterprise search.",
+      relations: [{ type: "employs", to: "jane-doe" }],
+    });
+    await writeDoc("people/jane-doe.md", {
+      id: "jane-doe",
+      folder: "people",
+      type: "person",
+      title: "Jane Doe",
+      truth: "Jane owns procurement.",
+      relations: [],
+    });
+
+    await expect(
+      queryGoatBrain(root, {
+        text: "enterprise search",
+        hops: 1,
+        graphDirection: "out",
+        lexicalOnly: true,
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "acme" }),
+        expect.objectContaining({ id: "jane-doe", matchedBy: "graph" }),
+      ]),
+    );
+
+    await expect(
+      queryGoatBrain(root, {
+        text: "enterprise search",
+        hops: 1,
+        graphDirection: "in",
+        lexicalOnly: true,
+      }),
+    ).resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "jane-doe" })]));
+  });
 });
 
 async function writeDoc(
@@ -55,9 +97,13 @@ async function writeDoc(
       | "company"
       | "project"
       | "meeting"
+      | "conversation"
       | "decision"
       | "research"
-      | "source"
+      | "document"
+      | "concept"
+      | "reference"
+      | "daily"
       | "note";
     title: string;
     truth: string;
@@ -72,14 +118,15 @@ async function writeDoc(
         id: input.id,
         folder: input.folder,
         type: input.type,
+        status: "active",
         title: input.title,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         relations: input.relations,
       },
       title: input.title,
-      compiledTruth: input.truth,
-      timeline: [{ at: "2026-01-01T00:00:00.000Z", body: "Seed." }],
+      compiledTruth: `${input.truth} [^ev:ev-seed]`,
+      timeline: [{ evidenceId: "ev-seed", at: "2026-01-01T00:00:00.000Z", body: "Seed." }],
     }),
     "utf8",
   );

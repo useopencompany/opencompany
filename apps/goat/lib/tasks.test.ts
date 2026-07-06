@@ -130,6 +130,9 @@ describe("cancelGoatTaskAction", () => {
     });
 
     expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.task_messages AS message");
+    expect(sqlTextFromExecuteCall(0)).toContain("message.status = 'running'");
+    expect(sqlTextFromExecuteCall(0)).toContain("'Stopped by user.'");
   });
 
   it("rejects terminal or inaccessible tasks", async () => {
@@ -141,3 +144,14 @@ describe("cancelGoatTaskAction", () => {
     });
   });
 });
+
+function sqlTextFromExecuteCall(callIndex: number) {
+  const query = mocks.execute.mock.calls[callIndex]?.[0] as
+    | { queryChunks?: Array<string | { value?: string[] }> }
+    | undefined;
+  return (
+    query?.queryChunks
+      ?.map((chunk) => (typeof chunk === "string" ? "?" : (chunk.value ?? []).join("")))
+      .join("") ?? ""
+  );
+}

@@ -22,6 +22,7 @@ import {
   createOpenCompanyChatSystemPrompt,
   createOpenCompanyChatToolContext,
   normalizeAgentText,
+  OPENCOMPANY_CHAT_MAX_STEPS,
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
@@ -200,7 +201,7 @@ export async function POST(request: Request): Promise<Response> {
       webSearchEnabled: Boolean(exaApiKey),
     }),
     messages: await convertToModelMessages(turn.messages),
-    stopWhen: stepCountIs(3),
+    stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     abortSignal: request.signal,
     tools: toolContext.tools,
     onFinish(event) {
@@ -245,7 +246,8 @@ export async function POST(request: Request): Promise<Response> {
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
       const startedTask = toolContext.getStartedTask();
       const rawContent = textFromGoatChatUiMessage(responseMessage);
-      if (isAborted && !rawContent && !startedTask) {
+      const hasAssistantParts = hasDisplayableAssistantParts(responseMessage);
+      if (isAborted && !rawContent && !startedTask && !hasAssistantParts) {
         finishChatTelemetry("aborted", {
           "goat.chat_session_id": turn.session.id,
           "goat.chat_message_id": turn.userMessage.id,
@@ -259,6 +261,7 @@ export async function POST(request: Request): Promise<Response> {
       const responseMessageId = safeClientMessageId(responseMessage.id);
       const finalTrace = {
         ...debugTrace,
+        ...(isAborted ? { aborted: true } : {}),
         ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
       };
@@ -266,7 +269,10 @@ export async function POST(request: Request): Promise<Response> {
         {
           sessionId: turn.session.id,
           ...(responseMessageId ? { messageId: responseMessageId } : {}),
-          content: normalizeAgentText(rawContent, startedTask),
+          content:
+            isAborted && !rawContent && hasAssistantParts && !startedTask
+              ? ""
+              : normalizeAgentText(rawContent, startedTask),
           taskId: startedTask?.id ?? null,
           debugTrace: finalTrace,
         },
@@ -426,6 +432,17 @@ function goatBrainToolCallId(value: unknown) {
     normalizedOptionalString(value.toolCall.toolCallId) ??
     normalizedOptionalString(value.toolCall.id)
   );
+}
+
+function hasDisplayableAssistantParts(message: Pick<GoatChatUiMessage, "parts">) {
+  return message.parts.some((part) => {
+    if (part.type === "text") return part.text.trim().length > 0;
+    return isRecord(part) && isPersistableToolPartType(part.type);
+  });
+}
+
+function isPersistableToolPartType(value: unknown) {
+  return typeof value === "string" && (value === "dynamic-tool" || value.startsWith("tool-"));
 }
 
 function normalizedOptionalString(value: unknown) {

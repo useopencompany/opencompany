@@ -138,10 +138,13 @@ describe("runOpenCompanyChatAgent", () => {
         expect(extractGoatBrainToolDescription(options)).toContain("personal Goat Brain");
         expect(extractGoatBrainToolDescription(options)).toContain("ingest");
         const toolResult = await executeGoatBrainTool(options, {
-          action: "query",
-          text: "hiring",
-          hops: 1,
-          limit: 5,
+          command: "query",
+          flags: {
+            text: "hiring",
+            hops: 1,
+            limit: 5,
+            json: true,
+          },
         });
 
         return {
@@ -159,14 +162,101 @@ describe("runOpenCompanyChatAgent", () => {
 
     expect(startTask).not.toHaveBeenCalled();
     expect(runBrainCli).toHaveBeenCalledWith({
-      action: "query",
-      text: "hiring",
-      hops: 1,
-      limit: 5,
+      command: "query",
+      flags: {
+        text: "hiring",
+        hops: 1,
+        limit: 5,
+        json: true,
+      },
     });
     expect(result.task).toBeNull();
     expect(result.content).toBe("Your Brain has a hiring note in inbox.");
     expect(result.debugTrace.toolResults).toHaveLength(1);
+  });
+
+  it("allows listing personal brain docs without semantic search", async () => {
+    const startTask = vi.fn();
+    const runBrainCli = vi.fn(async (input: GoatBrainToolInput) => ({
+      ok: true,
+      exitCode: 0,
+      stdout: "[projects] Launch plan (launch-plan, updated 2026-01-01T00:00:00.000Z)",
+      stderr: "",
+      input,
+    }));
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "show me everything in my brain" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      runBrainCli,
+      generateTextImpl: (async (options: unknown) => {
+        expect(extractSystemPrompt(options)).toContain("Use list for inventory");
+        return {
+          text: "You have one project note.",
+          finishReason: "stop",
+          steps: [
+            {
+              toolCalls: [{ toolName: GOAT_BRAIN_TOOL_NAME }],
+              toolResults: [
+                await executeGoatBrainTool(options, {
+                  command: "list",
+                  flags: { limit: 50, json: true },
+                }),
+              ],
+            },
+          ],
+        };
+      }) as never,
+    });
+
+    expect(runBrainCli).toHaveBeenCalledWith({
+      command: "list",
+      flags: { limit: 50, json: true },
+    });
+  });
+
+  it("documents and forwards dry-run previews for explicit brain deletes", async () => {
+    const startTask = vi.fn();
+    const runBrainCli = vi.fn(async (input: GoatBrainToolInput) => ({
+      ok: true,
+      exitCode: 0,
+      stdout: JSON.stringify({ ok: true, id: "old-note" }),
+      stderr: "",
+      input,
+    }));
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "delete old-note from my brain" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      runBrainCli,
+      generateTextImpl: (async (options: unknown) => {
+        expect(extractGoatBrainToolDescription(options)).toContain("dryRun: true");
+        return {
+          text: "Previewed deleting old-note from Brain.",
+          finishReason: "stop",
+          steps: [
+            {
+              toolCalls: [{ toolName: GOAT_BRAIN_TOOL_NAME }],
+              toolResults: [
+                await executeGoatBrainTool(options, {
+                  command: "delete",
+                  flags: { id: "old-note", dryRun: true, json: true },
+                }),
+              ],
+            },
+          ],
+        };
+      }) as never,
+    });
+
+    expect(runBrainCli).toHaveBeenCalledWith({
+      command: "delete",
+      flags: { id: "old-note", dryRun: true, json: true },
+    });
   });
 
   it("can call web_search inside the chat loop without starting a task", async () => {

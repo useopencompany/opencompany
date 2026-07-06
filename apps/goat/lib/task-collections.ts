@@ -1,5 +1,4 @@
 import type {
-  GoatBrainFolderSource,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
   GoatTaskEventType,
@@ -151,15 +150,6 @@ export type GoatIntegrationRow = {
   updated_at: string;
 };
 
-export type GoatBrainFolderRow = {
-  id: string;
-  user_workos_id: string;
-  path: string;
-  source: GoatBrainFolderSource;
-  created_at: string;
-  updated_at: string;
-};
-
 export type GoatBrainDocumentRow = {
   id: string;
   user_workos_id: string;
@@ -168,17 +158,44 @@ export type GoatBrainDocumentRow = {
   title: string | null;
   content: string;
   body: string;
-  timeline: unknown[];
+  timeline: Array<{ evidenceId?: string; evidence_id?: string; at: string; body: string }>;
   kind: string;
   mime_type: string | null;
   original_file_name: string | null;
   asset_storage_key: string | null;
-  relations: unknown[];
-  sources: unknown[];
-  entity_type: string;
-  aliases: unknown[];
+  relations: Array<{ type: string; to: string }>;
+  sources: Array<{ ref: string; capturedAt?: string; captured_at?: string; title?: string }>;
   content_hash: string;
   size_bytes: number;
+  entity_type: string;
+  status: string;
+  aliases: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatBrainTimelineEntryRow = {
+  id: number;
+  document_id: string;
+  user_workos_id: string;
+  brain_id: string;
+  evidence_id: string;
+  at: string;
+  source_ref: string;
+  source_title: string | null;
+  summary: string;
+  detail: string;
+  created_at: string;
+};
+
+export type GoatBrainEdgeRow = {
+  id: string;
+  user_workos_id: string;
+  document_id: string;
+  from_brain_id: string;
+  to_brain_id: string;
+  relation_type: string;
+  source_kind: "relation" | "wiki_link";
   created_at: string;
   updated_at: string;
 };
@@ -242,15 +259,21 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
-  const brainFolders = createGoatElectricCollection<GoatBrainFolderRow>({
-    id: "goat:brain_folders",
-    table: "goat.brain_folders",
-    getKey: (row) => row.id,
-  });
-
   const brainDocuments = createGoatElectricCollection<GoatBrainDocumentRow>({
     id: "goat:brain_documents",
     table: "goat.brain_documents",
+    getKey: (row) => row.id,
+  });
+
+  const brainTimelineEntries = createGoatElectricCollection<GoatBrainTimelineEntryRow>({
+    id: "goat:brain_timeline_entries",
+    table: "goat.brain_timeline_entries",
+    getKey: (row) => row.id,
+  });
+
+  const brainEdges = createGoatElectricCollection<GoatBrainEdgeRow>({
+    id: "goat:brain_edges",
+    table: "goat.brain_edges",
     getKey: (row) => row.id,
   });
 
@@ -258,8 +281,9 @@ function buildGoatCollections() {
     tasks,
     taskRunCollections: getTaskRunCollections,
     integrations,
-    brainFolders,
     brainDocuments,
+    brainTimelineEntries,
+    brainEdges,
   };
 }
 

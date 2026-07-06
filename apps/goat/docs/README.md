@@ -107,7 +107,7 @@ catalog and writes that planned model back to the task row.
 Important runtime settings:
 
 - `maxOutputTokens: 900`
-- `stopWhen: stepCountIs(3)`
+- `stopWhen: stepCountIs(8)`
 - `abortSignal: request.signal`
 
 The chat path is a normal request/response stream. It has no runner lease or durable retry. The

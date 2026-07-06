@@ -11,6 +11,7 @@ import {
   ArrowUp,
   BookOpen,
   CheckCircle2,
+  ChevronRight,
   CircleDotDashed,
   Clock,
   FileText,
@@ -90,6 +91,9 @@ export function GoatSurface({
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
   const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
+  const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -231,6 +235,7 @@ export function GoatSurface({
     clearError();
     setMode("chat");
     isPinnedAtBottomRef.current = true;
+    setLocallyStoppedAssistantMessageIds(new Set());
     setInput("");
     void sendMessage({ text: prompt }).catch((error) => {
       setInput(prompt);
@@ -249,6 +254,16 @@ export function GoatSurface({
     router.replace("/");
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [chatSessionId, clearError, isGenerating, router, setMessages, stop]);
+
+  const stopGeneration = useCallback(() => {
+    const lastAssistantMessage = messages.findLast((message) => message.role === "assistant");
+    if (lastAssistantMessage) {
+      setLocallyStoppedAssistantMessageIds((current) =>
+        new Set(current).add(lastAssistantMessage.id),
+      );
+    }
+    void stop();
+  }, [messages, stop]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -362,7 +377,11 @@ export function GoatSurface({
           >
             <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 pb-40 pt-2">
               {messages.map((message) => (
-                <Bubble key={message.id} message={message} />
+                <Bubble
+                  key={message.id}
+                  message={message}
+                  stopped={locallyStoppedAssistantMessageIds.has(message.id)}
+                />
               ))}
               {showThinkingBubble ? <ThinkingBubble /> : null}
             </div>
@@ -403,7 +422,7 @@ export function GoatSurface({
             <SubmitButton
               disabled={!input.trim()}
               isGenerating={isGenerating}
-              onStop={() => void stop()}
+              onStop={stopGeneration}
             />
           </div>
         </div>
@@ -596,13 +615,13 @@ function ResultRow({
   );
 }
 
-function Bubble({ message }: { message: GoatChatUiMessage }) {
+function Bubble({ message, stopped = false }: { message: GoatChatUiMessage; stopped?: boolean }) {
   const isUser = message.role === "user";
   const text = textFromGoatChatUiMessage(message);
   const error = message.metadata?.error;
 
   if (!isUser) {
-    const items = getOrderedAssistantItems(message);
+    const items = getOrderedAssistantItems(message, stopped || message.metadata?.aborted === true);
 
     return (
       <div className="flex flex-col gap-2">
@@ -677,6 +696,10 @@ function TaskCard({ task }: { task: GoatTaskCardMetadata }) {
 }
 
 function ToolCallRow({ tool }: { tool: ToolCallView }) {
+  if (tool.name === GOAT_BRAIN_TOOL_NAME) {
+    return <BrainToolCallRow tool={tool} />;
+  }
+
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
   return (
@@ -698,6 +721,94 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
         </div>
         {tool.detail ? <p className="truncate leading-4 text-ink-subtle">{tool.detail}</p> : null}
       </div>
+    </div>
+  );
+}
+
+function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
+  const [expanded, setExpanded] = useState(false);
+  const detail = tool.detail ?? "goat_brain";
+  const commandPreview = brainOutputCommand(tool.output);
+  const stdoutPreview = brainOutputStdout(tool.output);
+  const parsedPreview = brainOutputParsed(tool.output);
+  const stderrPreview = brainOutputStderr(tool.output);
+  const errorPreview = brainOutputError(tool.output, tool.errorText);
+  return (
+    <div
+      data-testid={`chat-tool-call-${tool.name}`}
+      className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted"
+    >
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+            <BookOpen size={11} strokeWidth={1.75} />
+          </span>
+          <span className="shrink-0 font-medium text-ink/65">Brain</span>
+          <span
+            title={detail}
+            className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+          >
+            <span className="min-w-0 truncate">{detail}</span>
+          </span>
+          <BrainStatusText status={tool.status} />
+        </button>
+      </div>
+      {expanded ? (
+        <div className="ml-6 mt-1 border-l border-border pl-3">
+          <BrainPreviewBlock label="Input" value={formatDebugValue(tool.input)} />
+          {commandPreview ? <BrainPreviewBlock label="Command" value={commandPreview} /> : null}
+          {stdoutPreview ? <BrainPreviewBlock label="Stdout" value={stdoutPreview} /> : null}
+          {parsedPreview ? <BrainPreviewBlock label="Parsed" value={parsedPreview} /> : null}
+          {stderrPreview ? <BrainPreviewBlock label="Stderr" value={stderrPreview} /> : null}
+          {errorPreview ? <BrainPreviewBlock label="Error" value={errorPreview} /> : null}
+          {!isGoatBrainToolOutput(tool.output) && !tool.errorText ? (
+            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BrainStatusText({ status }: { status: ToolCallView["status"] }) {
+  if (status === "completed") return null;
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+        status === "failed" ? "text-danger" : "text-ink-subtle"
+      }`}
+    >
+      {status === "failed" ? (
+        <AlertCircle size={9} strokeWidth={1.9} />
+      ) : (
+        <CircleDotDashed
+          size={9}
+          strokeWidth={2}
+          className="animate-[spin_3s_linear_infinite] text-warning"
+        />
+      )}
+      {status}
+    </span>
+  );
+}
+
+function BrainPreviewBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="py-1 first:pt-0">
+      <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">{label}</div>
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-ink/60">
+        {value}
+      </pre>
     </div>
   );
 }
@@ -768,12 +879,15 @@ type AssistantRenderItem =
 type ToolCallView = {
   name: string;
   label: string;
-  status: "running" | "completed" | "failed" | "waiting";
+  status: "running" | "completed" | "failed" | "waiting" | "stopped";
   statusText: string;
   detail: string | null;
+  input: unknown;
+  output: unknown;
+  errorText: string | null;
 };
 
-function getOrderedAssistantItems(message: GoatChatUiMessage) {
+function getOrderedAssistantItems(message: GoatChatUiMessage, stopped = false) {
   const items: AssistantRenderItem[] = [];
   let textBuffer = "";
 
@@ -790,7 +904,7 @@ function getOrderedAssistantItems(message: GoatChatUiMessage) {
       continue;
     }
     if (!isToolPartRecord(part)) continue;
-    const tool = toolCallViewFromPart(part);
+    const tool = toolCallViewFromPart(part, stopped);
     if (!tool) continue;
     flushText(`text-${index}`);
     if (
@@ -827,6 +941,7 @@ function getOrderedAssistantItems(message: GoatChatUiMessage) {
 
 function toolCallViewFromPart(
   part: Record<string, unknown> & { type: string },
+  stopped = false,
 ): ToolCallView | null {
   const name = toolNameFromPart(part);
   if (!name) return null;
@@ -834,15 +949,18 @@ function toolCallViewFromPart(
   const output = part.output;
   const failedGoatBrain =
     name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
-      ? !goatBrainToolOutputSucceeded(output)
+      ? !goatBrainToolOutputSucceeded(output, part.input)
       : false;
-  const status = failedGoatBrain ? "failed" : toolStatusFromState(state);
+  const status = failedGoatBrain ? "failed" : toolStatusFromState(state, stopped);
   return {
     name,
     label: toolLabel(name),
     status,
     statusText: toolStatusText(status, state),
     detail: toolDetail(name, part, status),
+    input: part.input,
+    output: part.output,
+    errorText: typeof part.errorText === "string" ? part.errorText : null,
   };
 }
 
@@ -859,10 +977,11 @@ function toolNameFromPart(part: Record<string, unknown> & { type: string }) {
   return part.type.slice("tool-".length);
 }
 
-function toolStatusFromState(state: string): ToolCallView["status"] {
+function toolStatusFromState(state: string, stopped = false): ToolCallView["status"] {
   if (state === "output-error" || state === "output-denied") return "failed";
   if (state === "output-available") return "completed";
   if (state === "approval-requested" || state === "approval-responded") return "waiting";
+  if (stopped) return "stopped";
   return "running";
 }
 
@@ -872,6 +991,7 @@ function toolStatusText(status: ToolCallView["status"], state: string) {
   if (state === "approval-responded") return "Approved";
   if (status === "completed") return "Done";
   if (status === "failed") return "Failed";
+  if (status === "stopped") return "Stopped";
   return "Running";
 }
 
@@ -911,7 +1031,7 @@ function goatBrainToolDetail(
   status: ToolCallView["status"],
 ) {
   if (part.state === "output-available" && isGoatBrainToolOutput(part.output)) {
-    if (!goatBrainToolOutputSucceeded(part.output)) {
+    if (!goatBrainToolOutputSucceeded(part.output, part.input)) {
       return truncateToolPreview(
         firstNonEmptyLine(part.output.error, part.output.stderr, part.output.stdout) ??
           formatToolInput(part.input),
@@ -944,6 +1064,9 @@ function formatToolInput(value: unknown) {
   if (typeof value === "string") return truncateToolPreview(value);
   if (!isRecord(value)) return null;
   if (typeof value.args === "string") return truncateToolPreview(`goat_brain ${value.args}`);
+  if (typeof value.command === "string") {
+    return truncateToolPreview(`goat_brain ${formatGoatBrainCommandInput(value)}`);
+  }
   if (typeof value.action === "string") {
     const detail =
       typeof value.text === "string"
@@ -962,6 +1085,75 @@ function formatToolInput(value: unknown) {
   }
 }
 
+function formatGoatBrainCommandInput(input: Record<string, unknown>) {
+  const command = input.command;
+  const flags = isRecord(input.flags) ? input.flags : {};
+  const parts = [String(command)];
+  for (const [rawName, value] of Object.entries(flags)) {
+    const name = rawName
+      .replace(/_/g, "-")
+      .replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)
+      .replace(/^-+/, "")
+      .replace(/-+/g, "-");
+    if (typeof value === "boolean") {
+      if (value) parts.push(`--${name}`);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === "string") parts.push(`--${name}`, formatToolArg(item));
+      }
+      continue;
+    }
+    if (typeof value === "string" || typeof value === "number") {
+      parts.push(`--${name}`, formatToolArg(String(value)));
+    }
+  }
+  return parts.join(" ");
+}
+
+function formatToolArg(value: string) {
+  if (/^[a-zA-Z0-9._/:=@,+-]+$/.test(value)) return value;
+  return `"${value.replace(/["\\]/g, "\\$&")}"`;
+}
+
+function formatDebugValue(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function brainOutputCommand(value: unknown) {
+  if (!isGoatBrainToolOutput(value)) return null;
+  const lines: string[] = [];
+  if (value.command) lines.push(`goat_brain ${value.command}`);
+  if (Array.isArray(value.argv)) lines.push(`argv: ${JSON.stringify(value.argv)}`);
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function brainOutputStdout(value: unknown) {
+  return isGoatBrainToolOutput(value) && value.stdout.trim() ? value.stdout : null;
+}
+
+function brainOutputStderr(value: unknown) {
+  return isGoatBrainToolOutput(value) && value.stderr.trim() ? value.stderr : null;
+}
+
+function brainOutputParsed(value: unknown) {
+  return isGoatBrainToolOutput(value) && value.parsed !== undefined
+    ? formatDebugValue(value.parsed)
+    : null;
+}
+
+function brainOutputError(value: unknown, errorText: string | null) {
+  if (errorText?.trim()) return errorText;
+  return isGoatBrainToolOutput(value) && value.error?.trim() ? value.error : null;
+}
+
 function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOutput {
   if (!isRecord(value)) return false;
   return (
@@ -972,9 +1164,16 @@ function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOutput {
   );
 }
 
-function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput) {
+function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput, input?: unknown) {
+  if (isGoatBrainDoctorCall(output, input)) return true;
   if (output.ok) return true;
   return parseGoatBrainCliJson(output.stdout)?.ok === true;
+}
+
+function isGoatBrainDoctorCall(output: GoatBrainToolOutput, input?: unknown) {
+  if (isRecord(input) && input.command === "doctor") return true;
+  if (Array.isArray(output.argv) && output.argv[0] === "doctor") return true;
+  return typeof output.command === "string" && output.command.trim().startsWith("doctor");
 }
 
 function goatBrainCliSuccessSummary(stdout: string | undefined) {
@@ -1028,6 +1227,9 @@ function getToolCallMeta(tool: ToolCallView): {
   }
   if (tool.status === "waiting") {
     return { icon: Clock, className: "text-ink-subtle", spin: false };
+  }
+  if (tool.status === "stopped") {
+    return { icon: Square, className: "text-ink-subtle", spin: false };
   }
   return {
     icon: tool.name === GOAT_BRAIN_TOOL_NAME ? BookOpen : CircleDotDashed,

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serializeGoatBrainDocument } from "./document";
+import { deriveGoatBrainEdges } from "./edges";
 import { checkGoatBrainHealth } from "./health";
 import { ingestGoatBrain } from "./ingest";
 import { inferGoatBrainEntityTypeFromFolder } from "./schemas";
@@ -22,14 +23,28 @@ describe("goat brain entity types and wiki links", () => {
   it("infers built-in entity types from existing folders", () => {
     expect(inferGoatBrainEntityTypeFromFolder("people")).toBe("person");
     expect(inferGoatBrainEntityTypeFromFolder("companies")).toBe("company");
-    expect(inferGoatBrainEntityTypeFromFolder("docs/api")).toBe("source");
-    expect(inferGoatBrainEntityTypeFromFolder("ideas")).toBe("note");
+    expect(inferGoatBrainEntityTypeFromFolder("docs/api")).toBe("document");
+    expect(inferGoatBrainEntityTypeFromFolder("ideas")).toBe("concept");
   });
 
   it("parses wiki links with optional labels", () => {
     expect(parseGoatBrainWikiLinks("Talk to [[jane-doe|Jane]] about [[acme]].")).toEqual([
       expect.objectContaining({ target: "jane-doe", label: "Jane", valid: true }),
       expect.objectContaining({ target: "acme", label: "acme", valid: true }),
+    ]);
+  });
+
+  it("derives typed relation and wiki-link graph edges deterministically", () => {
+    expect(
+      deriveGoatBrainEdges({
+        id: "acme",
+        relations: [{ type: "employs", to: "jane-doe" }],
+        body: "Talk to [[jane-doe|Jane]] and [[roadmap]].",
+      }),
+    ).toEqual([
+      { from: "acme", to: "jane-doe", type: "employs", sourceKind: "relation" },
+      { from: "acme", to: "jane-doe", type: "wiki_link", sourceKind: "wiki_link" },
+      { from: "acme", to: "roadmap", type: "wiki_link", sourceKind: "wiki_link" },
     ]);
   });
 });
@@ -136,9 +151,13 @@ async function writeDoc(
       | "company"
       | "project"
       | "meeting"
+      | "conversation"
       | "decision"
       | "research"
-      | "source"
+      | "document"
+      | "concept"
+      | "reference"
+      | "daily"
       | "note";
     title: string;
     truth: string;
@@ -152,14 +171,15 @@ async function writeDoc(
         id: input.id,
         folder: input.folder,
         type: input.type,
+        status: "active",
         title: input.title,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         relations: [],
       },
       title: input.title,
-      compiledTruth: input.truth,
-      timeline: [{ at: "2026-01-01T00:00:00.000Z", body: "Seed." }],
+      compiledTruth: `${input.truth} [^ev:ev-seed]`,
+      timeline: [{ evidenceId: "ev-seed", at: "2026-01-01T00:00:00.000Z", body: "Seed." }],
     }),
     "utf8",
   );

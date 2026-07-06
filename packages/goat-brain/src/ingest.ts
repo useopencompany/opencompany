@@ -14,6 +14,7 @@ import {
 import { goatBrainFolderForEntityType, normalizeBuiltInGoatBrainEntityType } from "./schemas";
 import { findGoatBrainFile, listGoatBrainFiles, writeGoatBrainEntry } from "./store";
 import { nowIso } from "./time";
+import { goatBrainTimelineEntryFromParts } from "./timeline";
 import { parseGoatBrainWikiLinks } from "./wiki-links";
 
 type IngestGateway = Pick<Gateway, "chat">;
@@ -151,12 +152,15 @@ function buildIngestPrompt(input: {
     "You are the controlled ingestion loop for Goat Brain, a durable graph of user-owned knowledge.",
     "Return only JSON. Do not include markdown fences.",
     "Use existing ids when information belongs to an existing entity. Create a new entry only when no existing entry is the primary home.",
-    "Use only these types: person, company, project, meeting, decision, research, source, note.",
+    "Use only these types: person, company, project, decision, meeting, conversation, research, document, concept, reference, daily, note.",
     "Prefer relations over extra structured fields. People, companies, projects, meetings, decisions, and sources should connect through relations.",
     "Use wiki links like [[brain-id]] or [[brain-id|Label]] only for existing or planned ids.",
+    "Compiled truth is the current synthesis for the entity. Rewrite it as the durable state of play, not as a chronological log.",
+    "Timeline entries are append-only evidence. `timelineBody` must be a concise factual event from this source, not a restatement of the full source text.",
+    "Every timeline entry must preserve source context; the system will attach the source ref, so make `timelineBody` say what happened and why it matters.",
     "",
     "JSON shape:",
-    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|project|meeting|decision|research|source|note","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}],"tags":[]}]}',
+    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|project|decision|meeting|conversation|research|document|concept|reference|daily|note","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}],"tags":[]}]}',
     "",
     `Existing entries:\n${docs || "(none)"}`,
     "",
@@ -262,6 +266,7 @@ async function applyIngestOperation(
       relations: [],
       sources: [],
       tags: [],
+      status: "draft" as const,
       timeline: [],
     }),
     id: operation.id,
@@ -280,10 +285,12 @@ async function applyIngestOperation(
   entry.tags = mergeStrings(entry.tags, operation.tags);
   entry.timeline = [
     ...entry.timeline,
-    {
+    goatBrainTimelineEntryFromParts({
       at: source.at,
-      body: `${operation.timelineBody}\n\nSource: ${source.sourceRef}`,
-    },
+      summary: operation.timelineBody,
+      sourceRef: source.sourceRef,
+      sourceTitle: source.sourceTitle ?? "",
+    }),
   ];
   const path = await writeGoatBrainEntry(root, entry);
   return { action: existingEntry ? "update" : "create", id: entry.id, path, type: entry.type };

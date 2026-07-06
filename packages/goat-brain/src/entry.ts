@@ -11,6 +11,7 @@ import {
   type GoatBrainFrontmatter,
   type GoatBrainRelation,
   type GoatBrainSource,
+  type GoatBrainStatus,
   type GoatBrainTimelineEntry,
   isValidGoatBrainEntityType,
   isValidGoatBrainFolder,
@@ -38,6 +39,7 @@ export type GoatBrainEntry = {
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
   type: GoatBrainEntityType;
+  status: GoatBrainStatus;
   aliases: string[];
   tags: string[];
   timeline: GoatBrainTimelineEntry[];
@@ -64,6 +66,7 @@ export type GoatBrainSidecar = {
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
   type: GoatBrainEntityType;
+  status?: GoatBrainStatus;
   aliases?: string[];
   tags: string[];
   timeline?: GoatBrainTimelineEntry[];
@@ -121,6 +124,7 @@ export function goatBrainEntryFromLegacyDocument(doc: GoatBrainDocument): GoatBr
     relations: doc.frontmatter.relations ?? [],
     sources: doc.frontmatter.sources ?? [],
     type: doc.frontmatter.type ?? inferGoatBrainEntityTypeFromFolder(doc.frontmatter.folder),
+    status: doc.frontmatter.status ?? "draft",
     aliases: doc.frontmatter.aliases ?? [],
     tags: doc.frontmatter.tags ?? [],
     timeline: doc.timeline,
@@ -144,6 +148,7 @@ export function goatBrainEntryFromParsedLegacy(parsed: ParsedGoatBrainDocument):
     relations: frontmatter.relations ?? [],
     sources: frontmatter.sources ?? [],
     type: frontmatter.type ?? inferGoatBrainEntityTypeFromFolder(folder),
+    status: frontmatter.status ?? "draft",
     aliases: frontmatter.aliases ?? [],
     tags: frontmatter.tags ?? [],
     timeline: parsed.timeline,
@@ -157,6 +162,7 @@ export function legacyGoatBrainDocumentFromEntry(entry: GoatBrainEntry): GoatBra
       folder: entry.folder,
       title: entry.title,
       type: entry.type,
+      status: entry.status,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
       relations: entry.relations,
@@ -198,6 +204,7 @@ export function serializeGoatBrainSidecar(entry: GoatBrainEntry): string {
     relations: entry.relations,
     sources: entry.sources,
     type: entry.type,
+    status: entry.status,
     ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
     tags: entry.tags,
     ...(entry.kind === "markdown" ? { timeline: entry.timeline } : {}),
@@ -239,6 +246,15 @@ export function validateGoatBrainSidecar(input: {
   }
   if (!sidecar.title?.trim()) errors.push("sidecar.title must not be empty.");
   if (!isValidGoatBrainEntityType(sidecar.type)) errors.push("sidecar.type is invalid.");
+  if (
+    sidecar.status !== undefined &&
+    sidecar.status !== "draft" &&
+    sidecar.status !== "active" &&
+    sidecar.status !== "archived" &&
+    sidecar.status !== "merged"
+  ) {
+    errors.push("sidecar.status is invalid.");
+  }
   if (sidecar.aliases && !validStringArray(sidecar.aliases)) {
     errors.push("sidecar.aliases must be an array of non-empty strings.");
   }
@@ -279,6 +295,7 @@ export function validateGoatBrainSidecar(input: {
       relations: sidecar.relations ?? [],
       sources: sidecar.sources ?? [],
       type: sidecar.type,
+      status: sidecar.status ?? "draft",
       aliases: sidecar.aliases ?? [],
       tags: sidecar.tags ?? [],
       timeline: sidecar.kind === "markdown" ? (sidecar.timeline ?? []) : [],

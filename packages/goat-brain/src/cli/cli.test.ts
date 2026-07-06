@@ -39,6 +39,47 @@ describe("goat-brain cli", () => {
     );
   });
 
+  it("lists brain docs without retrieval", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "projects",
+        "--id",
+        "launch-plan",
+        "--title",
+        "Launch plan",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      run(["create", "--root", root, "--folder", "people", "--id", "jane", "--title", "Jane"]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const listed = await run(["list", "--root", root, "--folder", "projects", "--json"]);
+    const parsed = JSON.parse(listed.stdout) as {
+      ok: boolean;
+      count: number;
+      docs: Array<{ id: string; folder: string; title: string; path: string }>;
+    };
+
+    expect(parsed).toMatchObject({ ok: true, count: 1 });
+    expect(parsed.docs).toEqual([
+      {
+        id: "launch-plan",
+        folder: "projects",
+        title: "Launch plan",
+        path: "projects/launch-plan.md",
+        type: "project",
+        updatedAt: expect.any(String),
+      },
+    ]);
+
+    const text = await run(["list", "--root", root, "--limit", "1"]);
+    expect(text.stdout.trim().split("\n")).toHaveLength(1);
+  });
+
   it("creates, reads, rewrites, links, and doctors docs", async () => {
     await expect(
       run([
@@ -92,6 +133,62 @@ describe("goat-brain cli", () => {
     await expect(run(["doctor", "--root", root])).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("adds and reads sourced timeline entries through gbrain-style commands", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "ideas",
+        "--id",
+        "timeline-note",
+        "--title",
+        "Timeline note",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(
+      run([
+        "timeline-add",
+        "--root",
+        root,
+        "timeline-note",
+        "2026-01-02",
+        "Met Ada about launch sequencing.",
+        "--detail",
+        "Ada recommended starting with founder-led beta.",
+        "--source-ref",
+        "goat-chat:message_1",
+        "--source-title",
+        "Launch chat",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const timeline = await run(["timeline", "--root", root, "timeline-note", "--json"]);
+    const parsed = JSON.parse(timeline.stdout) as {
+      timeline: Array<{ at: string; body: string }>;
+    };
+    expect(parsed.timeline).toEqual([
+      expect.objectContaining({
+        at: "2026-01-02T00:00:00.000Z",
+        body: expect.stringContaining("Met Ada about launch sequencing."),
+      }),
+    ]);
+    expect(parsed.timeline[0]?.body).toContain("Source: Launch chat (goat-chat:message_1)");
+
+    const getTimeline = await run([
+      "get",
+      "--root",
+      root,
+      "timeline-note",
+      "--section",
+      "timeline",
+    ]);
+    expect(getTimeline.stdout).toContain("Met Ada about launch sequencing.");
+    expect(getTimeline.stdout).toContain("Source: Launch chat (goat-chat:message_1)");
+  });
+
   it("does not fail ingest for pre-existing health errors outside applied docs", () => {
     expect(
       ingestCommandExitCode({
@@ -140,10 +237,7 @@ describe("goat-brain cli", () => {
       stdout: expect.stringContaining('Created "bundle-entry"'),
     });
     const inboxEntries = await readdir(path.join(root, "inbox"));
-    expect(inboxEntries.toSorted()).toEqual([".brain", "bundle-entry.md"]);
-    await expect(readdir(path.join(root, "inbox", ".brain"))).resolves.toEqual([
-      "bundle-entry.json",
-    ]);
+    expect(inboxEntries.toSorted()).toEqual(["bundle-entry.md"]);
   });
 });
 

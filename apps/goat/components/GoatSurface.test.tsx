@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
@@ -494,7 +494,11 @@ describe("GoatSurface chat streaming UI", () => {
                   toolCallId: "tool_brain_1",
                   state: "input-available",
                   input: {
-                    args: 'query --text "hiring" --limit 5',
+                    command: "query",
+                    flags: {
+                      text: "hiring",
+                      limit: 5,
+                    },
                   },
                 },
               ],
@@ -508,12 +512,52 @@ describe("GoatSurface chat streaming UI", () => {
     const toolRow = screen.getByTestId("chat-tool-call-goat_brain");
 
     expect(screen.getByText("Brain")).toBeInTheDocument();
-    expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText('goat_brain query --text "hiring" --limit 5')).toBeInTheDocument();
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.getByText("goat_brain query --text hiring --limit 5")).toBeInTheDocument();
     expect(intro.compareDocumentPosition(toolRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("renders completed and failed brain tool calls", () => {
+  it("renders unfinished tool calls from stopped assistant turns as stopped", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1", aborted: true },
+              parts: [
+                {
+                  type: GOAT_BRAIN_TOOL_PART_TYPE,
+                  toolCallId: "tool_brain_1",
+                  state: "input-available",
+                  input: {
+                    command: "query",
+                    flags: {
+                      text: "hiring",
+                    },
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    const toolRow = screen.getByTestId("chat-tool-call-goat_brain");
+
+    expect(within(toolRow).getByText("stopped")).toBeInTheDocument();
+    expect(within(toolRow).queryByText("running")).not.toBeInTheDocument();
+  });
+
+  it("renders expandable completed and failed brain tool calls", async () => {
+    const user = userEvent.setup();
     render(
       <GoatSurface
         tasks={[]}
@@ -532,14 +576,30 @@ describe("GoatSurface chat streaming UI", () => {
                   type: GOAT_BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_1",
                   state: "output-available",
-                  input: { action: "ingest", text: "Louis Morgner is a person." },
+                  input: {
+                    command: "ingest",
+                    flags: { textStdin: true, json: true },
+                    stdin: "Louis Morgner is a person.",
+                  },
                   output: {
                     ok: false,
                     exitCode: 1,
+                    command: "ingest --text-stdin --json --source-ref goat-chat:user_message_1",
+                    argv: [
+                      "ingest",
+                      "--text-stdin",
+                      "--json",
+                      "--source-ref",
+                      "goat-chat:user_message_1",
+                    ],
                     stdout: JSON.stringify({
                       ok: true,
                       applied: [{ id: "louis-morgner" }],
                     }),
+                    parsed: {
+                      ok: true,
+                      applied: [{ id: "louis-morgner" }],
+                    },
                     stderr: "",
                   },
                 },
@@ -547,7 +607,7 @@ describe("GoatSurface chat streaming UI", () => {
                   type: GOAT_BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_2",
                   state: "output-available",
-                  input: { args: "rewrite bad-id" },
+                  input: { command: "rewrite", flags: { id: "bad-id", truth: "Noop" } },
                   output: {
                     ok: false,
                     exitCode: 1,
@@ -563,11 +623,71 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getAllByTestId("chat-tool-call-goat_brain")).toHaveLength(2);
-    expect(screen.getByText("Done")).toBeInTheDocument();
+    const brainCalls = screen.getAllByTestId("chat-tool-call-goat_brain");
+    expect(brainCalls).toHaveLength(2);
     expect(screen.getByText("Ingested 1 brain change.")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("failed")).toBeInTheDocument();
     expect(screen.getByText("Document was not found.")).toBeInTheDocument();
+
+    const firstBrainCall = brainCalls[0]!;
+    expect(within(firstBrainCall).queryByText("Input")).not.toBeInTheDocument();
+
+    await user.click(within(firstBrainCall).getByRole("button", { name: /Brain/i }));
+
+    expect(within(firstBrainCall).getByText("Input")).toBeInTheDocument();
+    expect(within(firstBrainCall).getByText("Command")).toBeInTheDocument();
+    expect(within(firstBrainCall).getByText("Stdout")).toBeInTheDocument();
+    expect(within(firstBrainCall).getByText("Parsed")).toBeInTheDocument();
+    expect(within(firstBrainCall).getByText(/Louis Morgner is a person/)).toBeInTheDocument();
+    expect(within(firstBrainCall).getByText(/goat-chat:user_message_1/)).toBeInTheDocument();
+  });
+
+  it("does not mark doctor health findings as a failed brain tool call", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                {
+                  type: GOAT_BRAIN_TOOL_PART_TYPE,
+                  toolCallId: "tool_brain_doctor",
+                  state: "output-available",
+                  input: { command: "doctor" },
+                  output: {
+                    ok: false,
+                    exitCode: 1,
+                    command: "doctor",
+                    argv: ["doctor"],
+                    stdout: "",
+                    stderr:
+                      "12 files checked - 2 error(s), 0 warning(s).\nERROR invalid bad-doc: Missing type.",
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    const doctorCall = screen.getByTestId("chat-tool-call-goat_brain");
+    expect(within(doctorCall).queryByText("failed")).not.toBeInTheDocument();
+    expect(screen.getByText(/12 files checked/)).toBeInTheDocument();
+
+    await user.click(within(doctorCall).getByRole("button", { name: /Brain/i }));
+
+    expect(within(doctorCall).getByText("Stderr")).toBeInTheDocument();
+    expect(within(doctorCall).getByText(/Missing type/)).toBeInTheDocument();
   });
 
   it("renders persisted web search tool calls with a generic tool row", () => {

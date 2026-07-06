@@ -1,4 +1,4 @@
-import type { GoatBrainRelation } from "../schema";
+import type { GoatBrainGraphDirection, GoatBrainRelation } from "../schema";
 import { blend } from "./blend";
 import { lexicalSearch, titleTagMatch } from "./bm25";
 import { buildCorpus, type IndexRecord } from "./corpus";
@@ -11,6 +11,7 @@ export type GoatBrainQueryOptions = {
   limit?: number;
   lexicalOnly?: boolean;
   hops?: number;
+  graphDirection?: GoatBrainGraphDirection;
   includeInvalid?: boolean;
 };
 
@@ -24,8 +25,13 @@ export type GoatBrainQueryHit = {
   id: string;
   folder: string;
   title: string;
+  type: string;
+  status: string;
+  valid: boolean;
   score: number;
   snippet: string;
+  compiledTruth: string;
+  relationContext: string;
   updatedAt: string;
   matchedBy: "text" | "graph" | "both";
   via?: GoatBrainGraphHop[];
@@ -75,7 +81,15 @@ export async function queryGoatBrain(
 
   const textMatchIds = new Set(relevanceById.keys());
   const graphPaths = new Map<string, GoatBrainGraphHop[]>();
-  if ((options.hops ?? 0) > 0) expandAlongGraph(relevanceById, graphPaths, byId, options.hops ?? 0);
+  if ((options.hops ?? 0) > 0) {
+    expandAlongGraph(
+      relevanceById,
+      graphPaths,
+      byId,
+      options.hops ?? 0,
+      options.graphDirection ?? "both",
+    );
+  }
   applyNameBoost(relevanceById, byId, options.text);
 
   let ordered = [...relevanceById.entries()]
@@ -111,8 +125,13 @@ export async function queryGoatBrain(
         id: record.id,
         folder: record.folder,
         title: record.title,
+        type: record.type,
+        status: record.status,
+        valid: record.valid,
         score: Number(score.toFixed(4)),
         snippet: snippetFor(record),
+        compiledTruth: record.compiledTruth,
+        relationContext: record.relationText,
         updatedAt: record.updatedAt,
         matchedBy:
           graphPaths.has(record.id) && textMatchIds.has(record.id)
@@ -152,8 +171,9 @@ function expandAlongGraph(
   graphPaths: Map<string, GoatBrainGraphHop[]>,
   byId: Map<string, IndexRecord>,
   hops: number,
+  direction: GoatBrainGraphDirection,
 ): void {
-  const adjacency = buildAdjacency(byId);
+  const adjacency = buildAdjacency(byId, direction);
   let frontier = [...relevance.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, GRAPH_SEED_LIMIT)
@@ -177,14 +197,21 @@ function expandAlongGraph(
   }
 }
 
-function buildAdjacency(byId: Map<string, IndexRecord>): Map<string, GoatBrainGraphHop[]> {
+function buildAdjacency(
+  byId: Map<string, IndexRecord>,
+  direction: GoatBrainGraphDirection,
+): Map<string, GoatBrainGraphHop[]> {
   const adjacency = new Map<string, GoatBrainGraphHop[]>();
   const link = (a: string, type: string, b: string) => {
     if (a === b) return;
     const forward = { from: a, type, to: b };
     const reverse = { from: b, type, to: a };
-    (adjacency.get(a) ?? adjacency.set(a, []).get(a))?.push(forward);
-    (adjacency.get(b) ?? adjacency.set(b, []).get(b))?.push(reverse);
+    if (direction === "out" || direction === "both") {
+      (adjacency.get(a) ?? adjacency.set(a, []).get(a))?.push(forward);
+    }
+    if (direction === "in" || direction === "both") {
+      (adjacency.get(b) ?? adjacency.set(b, []).get(b))?.push(reverse);
+    }
   };
   for (const record of byId.values()) {
     for (const relation of record.relations as GoatBrainRelation[])

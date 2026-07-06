@@ -1,6 +1,6 @@
 import { parseGoatBrainDocument } from "../document";
 import { goatBrainFolderFromRelativePath } from "../paths";
-import type { GoatBrainEntityType, GoatBrainRelation } from "../schema";
+import type { GoatBrainEntityType, GoatBrainRelation, GoatBrainStatus } from "../schema";
 import { inferGoatBrainEntityTypeFromFolder } from "../schemas";
 import { listGoatBrainFiles } from "../store";
 import { validateGoatBrainDocument } from "../validate";
@@ -11,6 +11,7 @@ export type IndexRecord = {
   folder: string;
   title: string;
   type: GoatBrainEntityType;
+  status: GoatBrainStatus;
   aliases: string[];
   tags: string;
   tagList: string[];
@@ -38,6 +39,7 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
         type:
           doc.frontmatter.type ??
           inferGoatBrainEntityTypeFromFolder(doc.frontmatter.folder ?? folder),
+        status: doc.frontmatter.status ?? "draft",
         aliases: doc.frontmatter.aliases ?? [],
         tags: (doc.frontmatter.tags ?? []).join(" "),
         tagList: doc.frontmatter.tags ?? [],

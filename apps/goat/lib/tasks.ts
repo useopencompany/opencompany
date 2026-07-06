@@ -176,6 +176,28 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
         AND task.status IN ('queued', 'running')
       RETURNING task.id, task.user_workos_id
     ),
+    canceled_messages AS (
+      UPDATE goat.task_messages AS message
+      SET status = 'failed',
+          model_message = COALESCE(
+            message.model_message,
+            jsonb_build_object(
+              'role',
+              message.role,
+              'content',
+              message.content,
+              'error',
+              'Stopped by user.'
+            )
+          ),
+          updated_at = ${now},
+          completed_at = ${now}
+      FROM canceled_task AS task
+      WHERE message.task_id = task.id
+        AND message.user_workos_id = task.user_workos_id
+        AND message.status = 'running'
+      RETURNING message.id
+    ),
     inserted_event AS (
       INSERT INTO goat.task_events (
         task_id,
@@ -199,7 +221,9 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
       FROM canceled_task AS task
       RETURNING id
     )
-    SELECT id FROM canceled_task
+    SELECT task.id
+    FROM canceled_task AS task
+    CROSS JOIN (SELECT count(*) FROM canceled_messages) AS message_updates
     WHERE EXISTS (SELECT 1 FROM inserted_event)
   `);
 

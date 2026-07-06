@@ -82,6 +82,7 @@ describe("buildGoatElectricOriginUrl", () => {
     "goat.integrations",
     "goat.brain_folders",
     "goat.brain_documents",
+    "goat.brain_timeline_entries",
   ])("scopes %s to the authenticated WorkOS user", (table) => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",

@@ -1,5 +1,6 @@
 import { parseFrontmatter, serializeFrontmatter, splitFrontmatter } from "./frontmatter";
 import type { GoatBrainDocument, GoatBrainFrontmatter, GoatBrainTimelineEntry } from "./schema";
+import { deterministicEvidenceId, normalizeEvidenceId, normalizeTimelineAt } from "./timeline";
 
 export const GOAT_BRAIN_TRUTH_HEADING = "## Compiled truth";
 export const GOAT_BRAIN_TIMELINE_HEADING = "## Timeline";
@@ -48,7 +49,12 @@ export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
   const title = doc.title.trim() || doc.frontmatter.title?.trim() || doc.frontmatter.id;
   const timeline = [...doc.timeline].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const timelineBody = timeline
-    .map((entry) => `### ${entry.at}\n${entry.body.trim()}`)
+    .map((entry) => {
+      const evidenceId =
+        normalizeEvidenceId(entry.evidenceId) ??
+        deterministicEvidenceId({ at: entry.at, summary: entry.body });
+      return `### ${evidenceId} - ${entry.at}\n${entry.body.trim()}`;
+    })
     .join("\n\n");
   return [
     serializeFrontmatter({
@@ -69,6 +75,40 @@ export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
   ].join("\n");
 }
 
+export function replaceGoatBrainCompiledTruth(
+  source: string,
+  compiledTruth: string,
+  options: { updatedAt?: string } = {},
+): string {
+  const { yaml, body } = splitFrontmatter(source);
+  const frontmatter = parseFrontmatter(yaml);
+  const header =
+    frontmatter.id &&
+    frontmatter.folder &&
+    frontmatter.type &&
+    frontmatter.status &&
+    frontmatter.createdAt &&
+    frontmatter.updatedAt
+      ? `${serializeFrontmatter({
+          id: frontmatter.id,
+          folder: frontmatter.folder,
+          type: frontmatter.type,
+          status: frontmatter.status,
+          createdAt: frontmatter.createdAt,
+          updatedAt: options.updatedAt ?? frontmatter.updatedAt,
+          relations: frontmatter.relations ?? [],
+          ...(frontmatter.title ? { title: frontmatter.title } : {}),
+          ...(frontmatter.aliases ? { aliases: frontmatter.aliases } : {}),
+          ...(frontmatter.tags ? { tags: frontmatter.tags } : {}),
+          ...(frontmatter.sources ? { sources: frontmatter.sources } : {}),
+          ...(frontmatter.mergedInto ? { mergedInto: frontmatter.mergedInto } : {}),
+        })}\n\n`
+      : yaml
+        ? `---\n${yaml.trim()}\n---\n\n`
+        : "";
+  return `${header}${replaceCompiledTruthInBody(body, compiledTruth)}`;
+}
+
 function readTitle(body: string): string {
   for (const line of body.split("\n")) {
     const match = /^#\s+(.+?)\s*$/.exec(line);
@@ -84,6 +124,40 @@ function sectionStart(body: string, heading: string): number {
   return match ? match.index : -1;
 }
 
+function replaceCompiledTruthInBody(body: string, compiledTruth: string): string {
+  const normalized = body.replace(/\r\n/g, "\n");
+  const truthStart = sectionStart(normalized, GOAT_BRAIN_TRUTH_HEADING);
+  if (truthStart === -1) {
+    const title = readTitle(normalized) || "Untitled";
+    return [
+      `# ${title}`,
+      "",
+      GOAT_BRAIN_TRUTH_HEADING,
+      compiledTruth.trim() || "_No compiled truth yet._",
+      "",
+      GOAT_BRAIN_TIMELINE_SENTINEL,
+      "",
+      GOAT_BRAIN_TIMELINE_HEADING,
+      "",
+    ].join("\n");
+  }
+
+  const truthHeadingEnd = normalized.indexOf("\n", truthStart);
+  const contentStart =
+    truthHeadingEnd === -1 ? truthStart + GOAT_BRAIN_TRUTH_HEADING.length : truthHeadingEnd + 1;
+  const timelineStart = sectionStart(normalized, GOAT_BRAIN_TIMELINE_HEADING);
+  const sentinelStart = normalized.indexOf(GOAT_BRAIN_TIMELINE_SENTINEL, contentStart);
+  const contentEnd =
+    sentinelStart !== -1 && (timelineStart === -1 || sentinelStart < timelineStart)
+      ? sentinelStart
+      : timelineStart !== -1
+        ? timelineStart
+        : normalized.length;
+  const prefix = normalized.slice(0, contentStart).replace(/\n*$/, "\n");
+  const suffix = normalized.slice(contentEnd).replace(/^\n*/, "");
+  return `${prefix}${compiledTruth.trim() || "_No compiled truth yet._"}\n\n${suffix}`;
+}
+
 function stripSentinel(text: string): string {
   return text
     .replace(GOAT_BRAIN_TIMELINE_SENTINEL, "")
@@ -97,15 +171,46 @@ function parseTimeline(text: string): GoatBrainTimelineEntry[] {
   for (let i = 0; i < matches.length; i++) {
     const current = matches[i];
     if (!current || current.index === undefined) continue;
-    const at = (current[1] ?? "").trim();
+    const heading = (current[1] ?? "").trim();
     const bodyStart = current.index + current[0].length;
     const next = matches[i + 1];
     const bodyEnd = next?.index ?? text.length;
     const entryBody = text.slice(bodyStart, bodyEnd).trim();
-    if (at) entries.push({ at, body: entryBody });
+    const parsed = parseTimelineHeading(heading, entryBody);
+    if (parsed) entries.push(parsed);
   }
   return entries;
 }
+
+const TIMELINE_EVIDENCE_HEADING = /^(ev-[a-z0-9][a-z0-9-]{0,76})\s+-\s+(.+)$/;
+const CITATION_RE = /(?<!\\)\[\^ev:([a-z0-9][a-z0-9-]{0,79})\]/g;
+
+function parseTimelineHeading(heading: string, body: string): GoatBrainTimelineEntry | null {
+  const evidenceHeading = TIMELINE_EVIDENCE_HEADING.exec(heading);
+  if (evidenceHeading?.[1] && evidenceHeading[2]) {
+    const at = normalizeTimelineAt(evidenceHeading[2]);
+    if (!at) return null;
+    return { evidenceId: evidenceHeading[1], at, body };
+  }
+  const at = normalizeTimelineAt(heading);
+  if (!at) return null;
+  return {
+    evidenceId: deterministicEvidenceId({ at, summary: body }),
+    at,
+    body,
+  };
+}
+
+export function extractGoatBrainCitations(text: string): string[] {
+  const ids = new Set<string>();
+  for (const match of text.matchAll(CITATION_RE)) {
+    const id = normalizeEvidenceId(match[1]);
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
+export const extractCitations = extractGoatBrainCitations;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

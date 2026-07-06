@@ -79,6 +79,22 @@ const SHAPE_SCOPES = {
     table: "goat.brain_documents",
     where: scopedUserWhere,
   },
+  brain_timeline_entries: {
+    table: "goat.brain_timeline_entries",
+    where: scopedUserWhere,
+  },
+  "goat.brain_timeline_entries": {
+    table: "goat.brain_timeline_entries",
+    where: scopedUserWhere,
+  },
+  brain_edges: {
+    table: "goat.brain_edges",
+    where: scopedUserWhere,
+  },
+  "goat.brain_edges": {
+    table: "goat.brain_edges",
+    where: scopedUserWhere,
+  },
 } as const;
 
 export function goatElectricBaseUrl() {

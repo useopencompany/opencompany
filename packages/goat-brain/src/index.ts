@@ -1,4 +1,5 @@
 export * from "./document";
+export * from "./edges";
 export * from "./entry";
 export * from "./frontmatter";
 export * from "./health";
@@ -9,5 +10,6 @@ export * from "./schema";
 export * from "./schemas";
 export * from "./store";
 export { nowIso } from "./time";
+export * from "./timeline";
 export * from "./validate";
 export * from "./wiki-links";

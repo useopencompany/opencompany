@@ -19,6 +19,7 @@ export type GoatChatMessageMetadata = {
   sessionId?: string;
   task?: GoatTaskCardMetadata | null;
   error?: string;
+  aborted?: boolean;
 };
 
 export type StartTaskToolInput = {
@@ -35,32 +36,41 @@ export type StartTaskToolOutput = {
   prompt: string;
 };
 
-export type GoatBrainToolInput =
-  | {
-      action: "ingest";
-      text: string;
-      sourceTitle?: string;
-    }
-  | {
-      action: "query";
-      text: string;
-      limit?: number;
-      hops?: number;
-    }
-  | {
-      action: "get";
-      id: string;
-      section?: "truth" | "timeline" | "frontmatter" | "all";
-    }
-  | {
-      args: string;
-    };
+export type GoatBrainCliCommand =
+  | "create"
+  | "list"
+  | "get"
+  | "timeline"
+  | "query"
+  | "ingest"
+  | "append-evidence"
+  | "rewrite"
+  | "alias"
+  | "timeline-add"
+  | "append-timeline"
+  | "link"
+  | "merge"
+  | "move"
+  | "delete"
+  | "folder"
+  | "doctor";
+
+export type GoatBrainToolFlagValue = string | number | boolean | string[];
+
+export type GoatBrainToolInput = {
+  command: GoatBrainCliCommand;
+  flags?: Record<string, GoatBrainToolFlagValue>;
+  stdin?: string;
+};
 
 export type GoatBrainToolOutput = {
   ok: boolean;
   exitCode: number | null;
   stdout: string;
   stderr: string;
+  command?: string;
+  argv?: string[];
+  parsed?: unknown;
   error?: string;
   traceId?: string;
   tracePath?: string;
@@ -171,12 +181,14 @@ export function toGoatChatMessageMetadata(
         }
       : null;
   const error = message.debugTrace?.error;
+  const aborted = message.debugTrace?.aborted === true;
 
-  if (!message.sessionId && !task && !error) return undefined;
+  if (!message.sessionId && !task && !error && !aborted) return undefined;
   return {
     sessionId: message.sessionId,
     ...(task ? { task } : {}),
     ...(error ? { error } : {}),
+    ...(aborted ? { aborted } : {}),
   };
 }
 

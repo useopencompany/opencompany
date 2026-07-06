@@ -9,8 +9,9 @@ describe("createGoatCollections", () => {
     expect(second).toBe(first);
     expect(second.tasks).toBe(first.tasks);
     expect(second.integrations).toBe(first.integrations);
-    expect(second.brainFolders).toBe(first.brainFolders);
     expect(second.brainDocuments).toBe(first.brainDocuments);
+    expect(second.brainTimelineEntries).toBe(first.brainTimelineEntries);
+    expect(second.brainEdges).toBe(first.brainEdges);
   });
 
   it("reuses task-scoped Electric collections for the same task id", () => {

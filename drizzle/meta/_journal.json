@@ -603,6 +603,27 @@
       "when": 1783354500000,
       "tag": "0085_goat_brain_tool_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1783354800000,
+      "tag": "0086_goat_brain_timeline_entries",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1783355100000,
+      "tag": "0087_goat_brain_edges",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1783355400000,
+      "tag": "0088_goat_brain_v1_documents",
+      "breakpoints": true
     }
   ]
 }

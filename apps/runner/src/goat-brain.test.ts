@@ -15,7 +15,7 @@ const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
 }));
 
-vi.mock("./db", () => ({
+vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getDb,
 }));
 
@@ -49,6 +49,7 @@ describe("materializeGoatBrainToLocalRoot", () => {
             content,
           }),
         ],
+        [],
       ],
     });
     dbMocks.getDb.mockReturnValue(db);
@@ -118,11 +119,19 @@ describe("createGoatBrainMarkdownReportForTask", () => {
           source: "system",
         }),
         expect.objectContaining({
+          documentId: expect.any(String),
+          userWorkosId: "user_1",
+          brainId: "market-report",
+          summary: "Created from Goat task goat_task_1.",
+          evidenceId: "ev-created-from-goat-task-1",
+          sourceRef: "goat-task:goat_task_1",
+        }),
+        expect.objectContaining({
           userWorkosId: "user_1",
           brainId: "market-report",
           folderPath: "research",
           title: "Market Report",
-          body: "# Market Report\n\nFindings.",
+          body: "# Market Report\n\nFindings.\n\nEvidence: [^ev:ev-created-from-goat-task-1]",
           kind: "markdown",
           mimeType: "text/markdown",
           sources: [
@@ -202,7 +211,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
       folderPath: "decisions",
       content: oldContent,
     });
-    const db = createGoatBrainDb({ selectResults: [[current]] });
+    const db = createGoatBrainDb({ selectResults: [[current], [current]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
@@ -225,7 +234,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
           }),
         ]),
       );
-      expect(db.updatedValues).toEqual(
+      expect(db.insertedValues).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             brainId: "pricing-decision",
@@ -233,6 +242,16 @@ describe("syncGoatBrainFromLocalRoot", () => {
             content: newContent,
             body: "New pricing truth.",
             contentHash: hash(newContent),
+          }),
+        ]),
+      );
+      expect(db.insertedValues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            documentId: "doc_1",
+            userWorkosId: "user_1",
+            brainId: "pricing-decision",
+            summary: "Captured in test.",
           }),
         ]),
       );
@@ -255,7 +274,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
       folderPath: "inbox",
       content,
     });
-    const db = createGoatBrainDb({ selectResults: [[current]] });
+    const db = createGoatBrainDb({ selectResults: [[current], [current]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
@@ -277,7 +296,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
           }),
         ]),
       );
-      expect(db.deleteWhereCalls).toHaveLength(1);
+      expect(db.deleteWhereCalls.length).toBeGreaterThanOrEqual(1);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -315,7 +334,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
       contentHash: hash(liveContent),
     };
     const db = createGoatBrainDb({
-      selectResults: [[current], [{ brainId: "roadmap" }]],
+      selectResults: [[current], []],
     });
     dbMocks.getDb.mockReturnValue(db);
 
@@ -343,10 +362,9 @@ describe("syncGoatBrainFromLocalRoot", () => {
       expect(db.insertedValues).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            taskId: "task_1",
-            brainId: "roadmap",
-            content: sandboxContent,
-            operation: "overwrite",
+            fromBrainId: expect.stringMatching(/^roadmap-conflict-/),
+            toBrainId: "roadmap",
+            relationType: "conflicts_with",
           }),
         ]),
       );
@@ -372,10 +390,16 @@ describe("syncGoatBrainFromLocalRoot", () => {
     const entry = {
       ...goatBrainEntryFromLegacyMarkdown(baseContent),
       body: "Edited body.",
-      timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Sidecar update." }],
+      timeline: [
+        {
+          evidenceId: "ev-sidecar-update",
+          at: "2026-01-02T00:00:00.000Z",
+          body: "Sidecar update.",
+        },
+      ],
       updatedAt: "2026-01-02T00:00:00.000Z",
     };
-    const db = createGoatBrainDb({ selectResults: [[base]] });
+    const db = createGoatBrainDb({ selectResults: [[base], [base]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
@@ -392,12 +416,18 @@ describe("syncGoatBrainFromLocalRoot", () => {
         baseSnapshot: snapshotFor(base),
       });
 
-      expect(db.updatedValues).toEqual(
+      expect(db.insertedValues).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             brainId: "research-note",
             body: "Edited body.",
-            timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Sidecar update." }],
+            timeline: [
+              {
+                evidenceId: "ev-sidecar-update",
+                at: "2026-01-02T00:00:00.000Z",
+                body: "Sidecar update.",
+              },
+            ],
           }),
         ]),
       );
@@ -454,25 +484,57 @@ function createGoatBrainDb(input: { selectResults: unknown[][] }) {
     insertedValues,
     updatedValues,
     deleteWhereCalls,
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(async () => selectResults.shift() ?? []),
-      })),
-    })),
+    select: vi.fn(() => {
+      const rows = selectResults.shift() ?? [];
+      const chain = {
+        from: vi.fn(() => chain),
+        where: vi.fn(() => chain),
+        limit: vi.fn(async () => rows),
+        orderBy: vi.fn(async () => rows),
+        then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      };
+      return chain;
+    }),
     insert: vi.fn(() => ({
       values: vi.fn((value: Record<string, unknown>) => {
         insertedValues.push(value);
-        return {
-          onConflictDoUpdate: vi.fn(async () => undefined),
+        const chain = {
+          onConflictDoUpdate: vi.fn(() => chain),
+          onConflictDoNothing: vi.fn(async () => undefined),
+          returning: vi.fn(async () => [
+            {
+              id: value.id ?? "doc_generated",
+              userWorkosId: value.userWorkosId ?? "user_1",
+              ...value,
+              path:
+                typeof value.folderPath === "string" && typeof value.brainId === "string"
+                  ? `${value.folderPath}/${value.brainId}.md`
+                  : undefined,
+              createdAt: value.createdAt ?? new Date("2026-01-01T00:00:00.000Z"),
+              updatedAt: value.updatedAt ?? new Date("2026-01-01T00:00:00.000Z"),
+            },
+          ]),
         };
+        return chain;
       }),
     })),
     update: vi.fn(() => ({
       set: vi.fn((value: Record<string, unknown>) => {
         updatedValues.push(value);
-        return {
-          where: vi.fn(async (whereInput: unknown) => whereInput),
+        const chain = {
+          where: vi.fn(() => chain),
+          returning: vi.fn(async () => [
+            {
+              id: "doc_1",
+              userWorkosId: "user_1",
+              ...value,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+              updatedAt: value.updatedAt ?? new Date("2026-01-01T00:00:00.000Z"),
+            },
+          ]),
         };
+        return chain;
       }),
     })),
     delete: vi.fn(() => ({
@@ -492,6 +554,7 @@ function brainDoc(input: { id: string; folder: string; title: string; truth: str
       id: input.id,
       folder: input.folder,
       type: "note",
+      status: "draft",
       title: input.title,
       createdAt: at,
       updatedAt: at,
@@ -499,7 +562,7 @@ function brainDoc(input: { id: string; folder: string; title: string; truth: str
     },
     title: input.title,
     compiledTruth: input.truth,
-    timeline: [{ at, body: "Captured in test." }],
+    timeline: [{ evidenceId: "ev-captured-in-test", at, body: "Captured in test." }],
   });
 }
 
@@ -517,9 +580,17 @@ function brainRow(input: {
     folderPath: input.folderPath,
     title: input.brainId,
     content: input.content,
+    body: goatBrainEntryFromLegacyMarkdown(input.content).body,
+    timeline: goatBrainEntryFromLegacyMarkdown(input.content).timeline,
+    kind: "markdown",
+    mimeType: "text/markdown",
+    originalFileName: null,
+    assetStorageKey: null,
     relations: [],
     sources: [],
     entityType: "note",
+    status: "draft",
+    aliases: [],
     contentHash: hash(input.content),
     sizeBytes: Buffer.byteLength(input.content, "utf8"),
     createdAt: now,

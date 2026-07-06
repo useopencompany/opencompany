@@ -4,6 +4,7 @@ import {
   type GoatBrainFrontmatter,
   type GoatBrainRelation,
   type GoatBrainSource,
+  type GoatBrainStatus,
 } from "./schema";
 import { normalizeBuiltInGoatBrainEntityType } from "./schemas";
 
@@ -36,14 +37,18 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   if (title) out.title = title;
   const type = normalizeBuiltInGoatBrainEntityType(readString(raw.type) ?? undefined);
   if (type) out.type = type;
+  const status = readStatus(raw.status);
+  if (status) out.status = status;
   const aliases = readStringArray(raw.aliases);
   if (aliases.length > 0) out.aliases = aliases;
-  const createdAt = readString(raw.created_at);
+  const createdAt = readString(raw.createdAt) ?? readString(raw.created_at);
   if (createdAt) out.createdAt = createdAt;
-  const updatedAt = readString(raw.updated_at);
+  const updatedAt = readString(raw.updatedAt) ?? readString(raw.updated_at);
   if (updatedAt) out.updatedAt = updatedAt;
-  out.relations = readRelations(raw.relations);
-  const legacyKeys = ["schema_type", "metadata", "related"].filter((key) => key in raw);
+  out.relations = readRelations("related" in raw ? raw.related : raw.relations);
+  const mergedInto = readString(raw.mergedInto) ?? readString(raw.merged_into);
+  if (mergedInto) out.mergedInto = mergedInto;
+  const legacyKeys = ["schema_type", "metadata"].filter((key) => key in raw);
   if (legacyKeys.length > 0) out.legacyKeys = legacyKeys;
   const tags = readStringArray(raw.tags);
   if (tags.length > 0) out.tags = tags;
@@ -57,9 +62,10 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
     id: frontmatter.id,
     folder: frontmatter.folder,
     type: frontmatter.type,
-    created_at: frontmatter.createdAt,
-    updated_at: frontmatter.updatedAt,
-    relations: (frontmatter.relations ?? []).map((relation) => ({
+    status: frontmatter.status,
+    createdAt: frontmatter.createdAt,
+    updatedAt: frontmatter.updatedAt,
+    related: (frontmatter.relations ?? []).map((relation) => ({
       type: relation.type,
       to: relation.to,
     })),
@@ -67,6 +73,7 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
   if (frontmatter.title) record.title = frontmatter.title;
   if (frontmatter.aliases && frontmatter.aliases.length > 0) record.aliases = frontmatter.aliases;
   if (frontmatter.tags && frontmatter.tags.length > 0) record.tags = frontmatter.tags;
+  if (frontmatter.mergedInto) record.mergedInto = frontmatter.mergedInto;
   if (frontmatter.sources && frontmatter.sources.length > 0) {
     record.sources = frontmatter.sources.map((source) => ({
       ref: source.ref,
@@ -99,6 +106,14 @@ function readRelations(value: unknown): GoatBrainRelation[] {
   return out;
 }
 
+function readStatus(value: unknown): GoatBrainStatus | null {
+  const status = readString(value);
+  if (status === "draft" || status === "active" || status === "archived" || status === "merged") {
+    return status;
+  }
+  return null;
+}
+
 function readSources(value: unknown): GoatBrainSource[] {
   if (!Array.isArray(value)) return [];
   const out: GoatBrainSource[] = [];
@@ -106,7 +121,7 @@ function readSources(value: unknown): GoatBrainSource[] {
     if (!isRecord(item)) continue;
     const ref = readString(item.ref);
     if (!ref) continue;
-    const capturedAt = readString(item.captured_at);
+    const capturedAt = readString(item.captured_at) ?? readString(item.capturedAt);
     const title = readString(item.title);
     out.push({
       ref,

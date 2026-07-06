@@ -23,9 +23,16 @@ const entry: GoatBrainEntry = {
   relations: [{ type: "owner", to: "jane" }],
   sources: [{ ref: "meeting:launch", title: "Launch meeting" }],
   type: "note",
+  status: "draft",
   aliases: ["Founder beta"],
   tags: ["launch"],
-  timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Discussed launch sequencing." }],
+  timeline: [
+    {
+      evidenceId: "ev-launch-meeting",
+      at: "2026-01-02T00:00:00.000Z",
+      body: "Discussed launch sequencing.",
+    },
+  ],
 };
 
 describe("goat brain canonical entries", () => {
@@ -45,7 +52,13 @@ describe("goat brain canonical entries", () => {
       type: "note",
       aliases: ["Founder beta"],
       tags: ["launch"],
-      timeline: [{ at: "2026-01-02T00:00:00.000Z", body: "Discussed launch sequencing." }],
+      timeline: [
+        {
+          evidenceId: "ev-launch-meeting",
+          at: "2026-01-02T00:00:00.000Z",
+          body: "Discussed launch sequencing.",
+        },
+      ],
     });
   });
 

@@ -9,7 +9,7 @@ import {
   type GoatBrainDocument,
   type GoatBrainRelation,
   type GoatBrainSource,
-  goatBrainEntryFromLegacyDocument,
+  goatBrainTimelineEntryFromParts,
   inferGoatBrainEntityTypeFromFolder,
   ingestGoatBrain,
   isBuiltInGoatBrainEntityType,
@@ -20,12 +20,13 @@ import {
   normalizeGoatBrainId,
   nowIso,
   parseGoatBrainDocument,
+  pathForGoatBrainDocument,
   queryGoatBrain,
   removeGoatBrainFile,
   resolveGoatBrainRoot,
   serializeGoatBrainDocument,
   validateGoatBrainDocument,
-  writeGoatBrainEntry,
+  writeGoatBrainDocumentText,
 } from "../index";
 import { createGateway } from "../retrieval/gateway";
 import { loadProviders } from "../retrieval/providers";
@@ -38,12 +39,18 @@ type Handler = (ctx: CommandContext) => Promise<CommandResult>;
 
 const COMMANDS: Record<string, Handler> = {
   create,
+  list,
   get,
+  timeline,
   query,
   ingest,
   rewrite,
+  "timeline-add": appendTimeline,
   "append-timeline": appendTimeline,
+  "append-evidence": appendTimeline,
+  alias,
   link,
+  merge,
   move,
   delete: del,
   folder,
@@ -63,17 +70,65 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "tag",
     "relation",
     "source-ref",
+    "source-title",
+    "evidence-id",
+    "status",
   ],
+  list: ["folder", "limit"],
   rewrite: ["id", "truth", "truth-stdin"],
-  "append-timeline": ["id", "at", "body", "body-stdin", "source-ref", "source-title"],
+  timeline: ["id", "limit", "since"],
+  "timeline-add": [
+    "id",
+    "at",
+    "body",
+    "body-stdin",
+    "detail",
+    "detail-stdin",
+    "source-ref",
+    "source-title",
+    "evidence-id",
+  ],
+  "append-timeline": [
+    "id",
+    "at",
+    "body",
+    "body-stdin",
+    "detail",
+    "detail-stdin",
+    "source-ref",
+    "source-title",
+    "evidence-id",
+  ],
+  "append-evidence": [
+    "id",
+    "at",
+    "body",
+    "body-stdin",
+    "detail",
+    "detail-stdin",
+    "source-ref",
+    "source-title",
+    "evidence-id",
+  ],
+  alias: ["id", "add", "remove"],
   link: ["id", "to", "as", "remove"],
+  merge: ["from", "into"],
   move: ["id", "folder"],
   delete: ["id", "force", "dry-run"],
   folder: ["path"],
   doctor: [],
   get: ["id", "section"],
   ingest: ["text", "text-stdin", "source-ref", "source-title", "at", "dry-run", "model"],
-  query: ["text", "folder", "since", "limit", "hops", "lexical-only", "include-invalid"],
+  query: [
+    "text",
+    "folder",
+    "since",
+    "limit",
+    "hops",
+    "graph-direction",
+    "lexical-only",
+    "include-invalid",
+  ],
 };
 
 export const HELP = `goat-brain - folder-first personal brain CLI
@@ -82,12 +137,18 @@ Usage: goat-brain <command> [options]
 
 Commands:
   create            Create a markdown brain doc in a folder.
+  list              List brain docs without retrieval or model calls.
   ingest            Graph-first LLM ingest from source text.
   get               Read a doc by id (--section truth|timeline|frontmatter|all).
+  timeline          Read dated evidence entries for a doc.
   query             Hybrid retrieval over docs (--folder, --since, --hops, --limit).
   rewrite           Replace compiled truth for a doc.
-  append-timeline   Append a dated timeline entry and optional source ref.
+  timeline-add      Add a dated evidence entry and optional source ref.
+  append-timeline   Compatibility alias for timeline-add.
+  append-evidence   Compatibility alias for timeline-add.
+  alias             Add/remove aliases for a doc.
   link              Add/remove related edges.
+  merge             Mark one doc as merged into another.
   move              Move a doc to another folder.
   delete            Delete a doc (--dry-run, --force).
   folder            folder list | folder create --path <folder>.
@@ -123,31 +184,58 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
   const title = ctx.args.get("title")?.trim() || titleFromId(id);
   const type = ctx.args.get("type")?.trim() || inferGoatBrainEntityTypeFromFolder(folder);
   if (!isBuiltInGoatBrainEntityType(type)) return fail("`--type` must be a built-in entity type.");
+  const status = ctx.args.get("status")?.trim() ?? "draft";
+  if (status !== "draft" && status !== "active" && status !== "archived" && status !== "merged") {
+    return fail("`--status` must be draft, active, archived, or merged.");
+  }
   const truth = (
     ctx.args.has("truth-stdin") ? await readStdin() : (ctx.args.get("truth") ?? "")
   ).trim();
   const relations = readRelations(ctx.args.getAll("relation"));
   if (!relations.ok) return fail(relations.error);
   const sourceRef = ctx.args.get("source-ref")?.trim();
+  const sourceTitle = ctx.args.get("source-title")?.trim();
+  const evidenceId = ctx.args.get("evidence-id")?.trim();
+  const evidenceEntry = sourceRef
+    ? goatBrainTimelineEntryFromParts({
+        at: now,
+        summary: `Created ${title}.`,
+        sourceRef,
+        sourceTitle: sourceTitle ?? "",
+        ...(evidenceId ? { evidenceId } : {}),
+      })
+    : null;
   const doc: GoatBrainDocument = {
     frontmatter: {
       id,
       folder,
       type,
+      status,
       title,
       createdAt: now,
       updatedAt: now,
       relations: relations.value,
       ...(ctx.args.getAll("alias").length > 0 ? { aliases: ctx.args.getAll("alias") } : {}),
       ...(ctx.args.getAll("tag").length > 0 ? { tags: ctx.args.getAll("tag") } : {}),
-      ...(sourceRef ? { sources: [{ ref: sourceRef, capturedAt: now }] } : {}),
+      ...(sourceRef
+        ? {
+            sources: [
+              { ref: sourceRef, capturedAt: now, ...(sourceTitle ? { title: sourceTitle } : {}) },
+            ],
+          }
+        : {}),
     },
     title,
     compiledTruth: truth,
-    timeline: sourceRef ? [{ at: now, body: `Created from ${sourceRef}.` }] : [],
+    timeline: evidenceEntry ? [evidenceEntry] : [],
   };
   const relativePath = await persist(ctx.root, doc);
-  return ok(`Created "${id}" at ${relativePath}.`, { id, folder, path: relativePath });
+  return ok(`Created "${id}" at ${relativePath}.`, {
+    id,
+    folder,
+    path: relativePath,
+    ...(evidenceEntry ? { evidenceId: evidenceEntry.evidenceId } : {}),
+  });
 }
 
 async function get(ctx: CommandContext): Promise<CommandResult> {
@@ -180,6 +268,80 @@ async function get(ctx: CommandContext): Promise<CommandResult> {
   return ok(file.source, { id: file.id, path: file.relativePath, doc });
 }
 
+async function list(ctx: CommandContext): Promise<CommandResult> {
+  const folderInput = ctx.args.get("folder");
+  const folder = folderInput ? normalizeGoatBrainFolder(folderInput) : null;
+  if (folderInput && !isValidGoatBrainFolder(folder ?? "")) {
+    return fail("`--folder` must be a safe folder path.");
+  }
+
+  const limit = Math.max(1, ctx.args.number("limit") ?? Number.POSITIVE_INFINITY);
+  const docs = (
+    await Promise.all(
+      (
+        await listGoatBrainFiles(ctx.root)
+      ).map(async (file) => {
+        try {
+          const doc = parseGoatBrainDocument(file.source);
+          const folderPath = doc.frontmatter.folder;
+          if (
+            !folderPath ||
+            (folder && folderPath !== folder && !folderPath.startsWith(`${folder}/`))
+          ) {
+            return null;
+          }
+          return {
+            id: file.id,
+            path: file.relativePath,
+            folder: folderPath,
+            title: doc.frontmatter.title ?? doc.title ?? file.id,
+            type: doc.frontmatter.type ?? inferGoatBrainEntityTypeFromFolder(folderPath),
+            updatedAt: doc.frontmatter.updatedAt ?? "",
+          };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  )
+    .filter((doc): doc is NonNullable<typeof doc> => doc !== null)
+    .sort((a, b) => {
+      const updated = b.updatedAt.localeCompare(a.updatedAt);
+      return updated !== 0 ? updated : a.path.localeCompare(b.path);
+    })
+    .slice(0, limit);
+
+  const rendered = docs.length
+    ? docs
+        .map(
+          (doc) =>
+            `[${doc.folder}] ${doc.title} (${doc.id}, updated ${doc.updatedAt || "unknown"})`,
+        )
+        .join("\n")
+    : "No brain docs found.";
+  return ok(rendered, { count: docs.length, docs });
+}
+
+async function timeline(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const sinceInput = ctx.args.get("since");
+  const since = sinceInput ? resolveSince(sinceInput) : undefined;
+  if (sinceInput && !since) {
+    return fail(`Invalid --since value "${sinceInput}". Use 30m, 24h, 7d, 2w, or ISO-8601.`);
+  }
+  const limit = Math.max(1, ctx.args.number("limit") ?? 100);
+  const entries = sortedTimelineEntries(loaded.doc.timeline)
+    .filter((entry) => !since || entry.at >= since)
+    .slice(0, limit);
+  const text = entries.length
+    ? entries.map((entry) => `### ${entry.at}\n${entry.body}`).join("\n\n")
+    : "_No timeline yet._";
+  return ok(text, { id: loaded.file.id, path: loaded.file.relativePath, timeline: entries });
+}
+
 async function query(ctx: CommandContext): Promise<CommandResult> {
   const text = (ctx.args.get("text") ?? ctx.args.positionals.join(" ")).trim();
   const usage: GoatBrainUsageEntry[] = [];
@@ -190,6 +352,11 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
   const since = sinceInput ? resolveSince(sinceInput) : undefined;
   if (sinceInput && !since) {
     return fail(`Invalid --since value "${sinceInput}". Use 30m, 24h, 7d, 2w, or ISO-8601.`);
+  }
+  const graphDirectionInput = ctx.args.get("graph-direction");
+  const graphDirection = readGraphDirection(graphDirectionInput);
+  if (graphDirectionInput && !graphDirection) {
+    return fail('Invalid --graph-direction value. Use "out", "in", or "both".');
   }
   const hits = await queryGoatBrain(
     ctx.root,
@@ -202,6 +369,7 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
       ...(ctx.args.number("hops") !== undefined
         ? { hops: Math.max(0, ctx.args.number("hops") ?? 0) }
         : {}),
+      ...(graphDirection ? { graphDirection } : {}),
       limit: ctx.args.number("limit") ?? 10,
       lexicalOnly: ctx.args.has("lexical-only"),
       ...(ctx.args.has("include-invalid") ? { includeInvalid: true } : {}),
@@ -296,15 +464,32 @@ async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
   if (!id) return fail("Provide a brain id.");
   const loaded = await loadDoc(ctx.root, id);
   if (!loaded) return notFound(`No brain doc found with id "${id}".`);
-  const body = (
-    ctx.args.has("body-stdin") ? await readStdin() : (ctx.args.get("body") ?? "")
+  if (ctx.args.has("body-stdin") && ctx.args.has("detail-stdin")) {
+    return fail("Use only one stdin flag: `--body-stdin` or `--detail-stdin`.");
+  }
+  const summary = (
+    ctx.args.has("body-stdin")
+      ? await readStdin()
+      : (ctx.args.get("body") ?? ctx.args.positionals.slice(2).join(" "))
   ).trim();
-  if (!body) return fail("`--body` or `--body-stdin` is required.");
-  const at = ctx.args.get("at") ?? nowIso();
+  if (!summary) return fail("`--body` or `--body-stdin` is required.");
+  const detail = (
+    ctx.args.has("detail-stdin") ? await readStdin() : (ctx.args.get("detail") ?? "")
+  ).trim();
+  const at = ctx.args.get("at") ?? ctx.args.positionals[1] ?? nowIso();
   const parsedAt = Date.parse(at);
   if (Number.isNaN(parsedAt)) return fail("`--at` must be an ISO-8601 timestamp.");
   const entryAt = new Date(parsedAt).toISOString();
-  loaded.doc.timeline.push({ at: entryAt, body });
+  const evidenceId = ctx.args.get("evidence-id")?.trim();
+  const entry = goatBrainTimelineEntryFromParts({
+    at: entryAt,
+    summary,
+    detail,
+    sourceRef: ctx.args.get("source-ref")?.trim() ?? "",
+    sourceTitle: ctx.args.get("source-title")?.trim() ?? "",
+    ...(evidenceId ? { evidenceId } : {}),
+  });
+  loaded.doc.timeline.push(entry);
   loaded.doc.frontmatter.updatedAt = nowIso();
   const sourceRef = ctx.args.get("source-ref")?.trim();
   if (sourceRef) {
@@ -319,7 +504,36 @@ async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
     loaded.doc.frontmatter.sources = sources;
   }
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Appended timeline entry to "${id}".`, { id, path: relativePath });
+  return ok(`Appended timeline entry to "${id}".`, {
+    id,
+    path: relativePath,
+    evidenceId: entry.evidenceId,
+  });
+}
+
+function sortedTimelineEntries(entries: GoatBrainDocument["timeline"]) {
+  return [...entries].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+async function alias(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const aliases = new Set(loaded.doc.frontmatter.aliases ?? []);
+  for (const value of ctx.args.getAll("remove")) aliases.delete(value.trim());
+  for (const value of ctx.args.getAll("add")) {
+    const alias = value.trim();
+    if (alias) aliases.add(alias);
+  }
+  loaded.doc.frontmatter.aliases = [...aliases].sort((a, b) => a.localeCompare(b));
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(`Updated aliases for "${id}".`, {
+    id,
+    path: relativePath,
+    aliases: loaded.doc.frontmatter.aliases,
+  });
 }
 
 async function link(ctx: CommandContext): Promise<CommandResult> {
@@ -348,6 +562,46 @@ async function link(ctx: CommandContext): Promise<CommandResult> {
     id,
     path: relativePath,
     relations: loaded.doc.frontmatter.relations,
+  });
+}
+
+async function merge(ctx: CommandContext): Promise<CommandResult> {
+  const from = ctx.args.get("from") ?? ctx.args.positionals[0];
+  const into = ctx.args.get("into") ?? ctx.args.positionals[1];
+  if (!from || !into) return fail("Provide --from and --into brain ids.");
+  if (!isValidGoatBrainId(from) || !isValidGoatBrainId(into)) {
+    return fail("Merge ids must be lowercase brain slugs.");
+  }
+  if (from === into) return fail("Cannot merge a brain doc into itself.");
+  const source = await loadDoc(ctx.root, from);
+  if (!source) return notFound(`No brain doc found with id "${from}".`);
+  const target = await loadDoc(ctx.root, into);
+  if (!target) return notFound(`No brain doc found with id "${into}".`);
+
+  const targetAliases = new Set(target.doc.frontmatter.aliases ?? []);
+  if (source.doc.title) targetAliases.add(source.doc.title);
+  for (const alias of source.doc.frontmatter.aliases ?? []) targetAliases.add(alias);
+  target.doc.frontmatter.aliases = [...targetAliases].sort((a, b) => a.localeCompare(b));
+  target.doc.frontmatter.updatedAt = nowIso();
+
+  const sourceRelations = new Map(
+    (source.doc.frontmatter.relations ?? []).map((relation) => [relation.to, relation]),
+  );
+  sourceRelations.set(into, { type: "merged_into", to: into });
+  source.doc.frontmatter.relations = [...sourceRelations.values()].sort((a, b) =>
+    a.to.localeCompare(b.to),
+  );
+  source.doc.frontmatter.status = "merged";
+  source.doc.frontmatter.mergedInto = into;
+  source.doc.frontmatter.updatedAt = nowIso();
+
+  const targetPath = await persist(ctx.root, target.doc);
+  const sourcePath = await persist(ctx.root, source.doc);
+  return ok(`Marked "${from}" as merged into "${into}".`, {
+    from,
+    into,
+    sourcePath,
+    targetPath,
   });
 }
 
@@ -431,7 +685,9 @@ async function persist(
     source,
   );
   if (!validation.ok) throw new Error(validation.errors.join(" "));
-  return writeGoatBrainEntry(root, goatBrainEntryFromLegacyDocument(normalized));
+  const relativePath = pathForGoatBrainDocument(normalized);
+  await writeGoatBrainDocumentText(root, relativePath, source);
+  return relativePath;
 }
 
 function toWritableDocument(
@@ -449,6 +705,7 @@ function toWritableDocument(
       id: fm.id,
       folder: fm.folder,
       type: fm.type ?? inferGoatBrainEntityTypeFromFolder(fm.folder),
+      status: fm.status ?? "draft",
       createdAt: fm.createdAt,
       updatedAt: fm.updatedAt,
       relations: fm.relations ?? [],
@@ -456,6 +713,7 @@ function toWritableDocument(
       ...(fm.aliases ? { aliases: fm.aliases } : {}),
       ...(fm.tags ? { tags: fm.tags } : {}),
       ...(fm.sources ? { sources: fm.sources } : {}),
+      ...(fm.mergedInto ? { mergedInto: fm.mergedInto } : {}),
     },
   };
 }
@@ -518,6 +776,11 @@ function resolveSince(raw: string, now = Date.now()): string | null {
   }
   const parsed = Date.parse(trimmed);
   return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+}
+
+function readGraphDirection(raw: string | undefined) {
+  if (raw === "out" || raw === "in" || raw === "both") return raw;
+  return undefined;
 }
 
 async function main(): Promise<void> {

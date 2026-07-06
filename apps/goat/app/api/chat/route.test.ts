@@ -2,7 +2,9 @@ import { streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
-import { createGoatChatUserTurn } from "@/lib/chat";
+import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
+import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
+import { GOAT_BRAIN_TOOL_PART_TYPE } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { POST } from "./route";
 
@@ -95,9 +97,12 @@ describe("POST /api/chat", () => {
       }
       brainToolPromise = tool.execute(
         {
-          action: "query",
-          text: "hiring",
-          limit: 5,
+          command: "query",
+          flags: {
+            text: "hiring",
+            limit: 5,
+            json: true,
+          },
         },
         { toolCallId: "tool_call_1" },
       ) as Promise<unknown>;
@@ -120,7 +125,14 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(200);
     expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
-      toolInput: { action: "query", text: "hiring", limit: 5 },
+      toolInput: {
+        command: "query",
+        flags: {
+          text: "hiring",
+          limit: 5,
+          json: true,
+        },
+      },
       gatewayApiKey: "test-key",
       sourceRef: "goat-chat:user_message_1",
       chatSessionId: "session_1",
@@ -239,8 +251,10 @@ describe("POST /api/chat", () => {
     mockStreamText().mockImplementation((options: unknown) => {
       const typedOptions = options as {
         system?: string;
+        stopWhen?: unknown;
         tools?: { web_search?: unknown };
       };
+      expect(typedOptions.stopWhen).toEqual({ count: OPENCOMPANY_CHAT_MAX_STEPS });
       expect(typedOptions.tools?.web_search).toBeUndefined();
       expect(typedOptions.system).not.toContain("Use the web_search tool inside chat");
       return {
@@ -260,6 +274,73 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
+  });
+
+  it("persists streamed tool parts when the chat stream is stopped before final text", async () => {
+    mockAuth();
+    mockCreateTurn();
+    const toolPart = {
+      type: GOAT_BRAIN_TOOL_PART_TYPE,
+      toolCallId: "tool_brain_1",
+      state: "input-available",
+      input: { command: "query", flags: { text: "hiring" } },
+    };
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            async (options: {
+              onFinish: (event: {
+                responseMessage: {
+                  id: string;
+                  role: "assistant";
+                  parts: Array<typeof toolPart>;
+                };
+                finishReason: string;
+                isAborted: boolean;
+              }) => Promise<void>;
+            }) => {
+              await options.onFinish({
+                responseMessage: {
+                  id: "assistant_1",
+                  role: "assistant",
+                  parts: [toolPart],
+                },
+                finishReason: "stop",
+                isAborted: true,
+              });
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "check my hiring notes" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      {
+        sessionId: "session_1",
+        messageId: "assistant_1",
+        content: "",
+        taskId: null,
+        debugTrace: expect.objectContaining({
+          aborted: true,
+          finishReason: "stop",
+          uiMessageParts: [toolPart],
+        }),
+      },
+      expect.anything(),
+    );
   });
 });
 

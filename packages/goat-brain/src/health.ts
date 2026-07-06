@@ -1,4 +1,5 @@
 import { parseGoatBrainDocument } from "./document";
+import { deriveGoatBrainEdges } from "./edges";
 import { goatBrainRelativePath } from "./paths";
 import { isValidGoatBrainFolder, isValidGoatBrainId } from "./schema";
 import { listGoatBrainFiles, type StoredGoatBrainFile } from "./store";
@@ -44,6 +45,8 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
       });
     }
   }
+
+  const degreeById = graphDegreeById(byId);
 
   for (const file of files) {
     const doc = parseGoatBrainDocument(file.source);
@@ -94,6 +97,15 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
       findings,
     });
 
+    if (files.length > 1 && (degreeById.get(file.id) ?? 0) === 0) {
+      findings.push({
+        severity: "warn",
+        code: "orphan_node",
+        id: file.id,
+        message: "Document has no incoming or outgoing valid graph edges.",
+      });
+    }
+
     if (
       doc.compiledTruth.trim() &&
       doc.timeline.length === 0 &&
@@ -111,6 +123,24 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
   const errors = findings.filter((finding) => finding.severity === "error").length;
   const warnings = findings.filter((finding) => finding.severity === "warn").length;
   return { files: files.length, errors, warnings, findings };
+}
+
+function graphDegreeById(
+  byId: Map<string, { file: StoredGoatBrainFile; doc: ReturnType<typeof parseGoatBrainDocument> }>,
+) {
+  const degreeById = new Map([...byId.keys()].map((id) => [id, 0]));
+  for (const [id, { doc }] of byId) {
+    for (const edge of deriveGoatBrainEdges({
+      id,
+      relations: doc.frontmatter.relations ?? [],
+      body: doc.compiledTruth,
+    })) {
+      if (!byId.has(edge.to)) continue;
+      degreeById.set(edge.from, (degreeById.get(edge.from) ?? 0) + 1);
+      degreeById.set(edge.to, (degreeById.get(edge.to) ?? 0) + 1);
+    }
+  }
+  return degreeById;
 }
 
 function checkRelations(input: {
