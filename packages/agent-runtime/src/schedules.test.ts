@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
   cronForSchedulePreset,
+  isValidFiveFieldCron,
+  latestCronRunAt,
+  nextCronRunAt,
   scheduleNextRunAt,
   schedulePresetFromCron,
   scheduleSummary,
@@ -88,5 +91,28 @@ describe("agent schedules", () => {
         new Date("2026-06-01T16:00:00.000Z"),
       ),
     ).toBeNull();
+  });
+
+  test("validates arbitrary 5-field cron expressions", () => {
+    expect(isValidFiveFieldCron("13 7 3 2 5", "UTC")).toBe(true);
+    expect(isValidFiveFieldCron("0 0 9 * * *", "UTC")).toBe(false);
+    expect(isValidFiveFieldCron("61 * * * *", "UTC")).toBe(false);
+  });
+
+  test("finds next and latest cron runs in the configured timezone", () => {
+    expect(
+      nextCronRunAt(
+        "0 9 * * 1-5",
+        "America/Los_Angeles",
+        new Date("2026-06-01T15:59:00.000Z"),
+      )?.toISOString(),
+    ).toBe("2026-06-01T16:00:00.000Z");
+    expect(
+      latestCronRunAt(
+        "0 9 * * 1-5",
+        "America/Los_Angeles",
+        new Date("2026-06-03T18:00:00.000Z"),
+      )?.toISOString(),
+    ).toBe("2026-06-03T16:00:00.000Z");
   });
 });

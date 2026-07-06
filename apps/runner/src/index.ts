@@ -17,6 +17,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./delegation";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
+import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { setGoatTaskWakeup, startGoatTaskWorker } from "./goat-worker";
 import { setRunnerJobWakeup, startRunnerJobWorker } from "./jobs";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
@@ -87,6 +88,10 @@ const jobWorker = startRunnerJobWorker(env, {
   },
 });
 const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
+const goatTaskScheduleWorker =
+  env.goatTaskWorkerEnabled && goatTaskWorker
+    ? startGoatTaskScheduleWorker({ onTaskCreated: goatTaskWorker.notify })
+    : null;
 if (!goatTaskWorker) {
   logger.info("Goat task worker disabled", {
     event: "opencompany.goat_task_worker_disabled",
@@ -95,7 +100,10 @@ if (!goatTaskWorker) {
 // Let any in-process enqueue (delegation spawn, child-finish parent-wake) nudge the worker
 // immediately instead of waiting out the poll interval — the same wake the HTTP server uses.
 setRunnerJobWakeup(jobWorker.notify);
-setGoatTaskWakeup(goatTaskWorker?.notify ?? null);
+setGoatTaskWakeup(() => {
+  goatTaskWorker?.notify();
+  goatTaskScheduleWorker?.notify();
+});
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -128,6 +136,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           });
         },
       }),
+      goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
       goatTaskWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])

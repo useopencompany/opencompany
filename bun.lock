@@ -70,6 +70,7 @@
         "@workos-inc/authkit-nextjs": "^4.1.0",
         "@workos-inc/node": "^9.3.1",
         "ai": "^6.0.189",
+        "cron-parser": "^5.6.1",
         "drizzle-orm": "^0.45.2",
         "lucide-react": "^1.16.0",
         "next": "16.2.10",
@@ -113,6 +114,7 @@
         "@sentry/bun": "^10.53.1",
         "@vercel/blob": "^2.4.0",
         "ai": "^6.0.189",
+        "cron-parser": "^5.6.1",
         "dotenv": "^17.4.2",
         "drizzle-orm": "^0.45.2",
         "e2b": "^2.21.0",
@@ -203,6 +205,7 @@
       "name": "@opencompany/agent-runtime",
       "version": "0.2.0",
       "dependencies": {
+        "cron-parser": "^5.6.1",
         "yaml": "^2.9.0",
       },
       "devDependencies": {
@@ -1908,6 +1911,8 @@
     "core-js": ["core-js@3.49.0", "", {}, "sha512-es1U2+YTtzpwkxVLwAFdSpaIMyQaq0PBgm3YD1W3Qpsn1NAmO3KSgZfu+oGSWVu6NvLHoHCV/aYcsE5wiB7ALg=="],
 
     "cors": ["cors@2.8.6", "", { "dependencies": { "object-assign": "^4", "vary": "^1" } }, "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw=="],
+
+    "cron-parser": ["cron-parser@5.6.1", "", { "dependencies": { "luxon": "^3.7.2" } }, "sha512-QBm4o1PwZiuY7KFbVvW7FLC8bozy7YWzv+Fz6KRS7sQghzcbDZCGxr/Bc5b6TQreAoSwuWVP491dIcK0THCX6A=="],
 
     "cross-fetch": ["cross-fetch@4.1.0", "", { "dependencies": { "node-fetch": "^2.7.0" } }, "sha512-uKm5PU+MHTootlWEY+mZ4vvXoCn4fLQxT9dSc1sXVMSFkINTJVN8cAQROpwcKm8bJ/c7rgZVIBWzH5T78sNZZw=="],
 
