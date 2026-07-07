@@ -769,7 +769,9 @@ describe("executeGoatTask", () => {
     };
     aiMock.generateObject.mockResolvedValueOnce({ object: codexHarnessSpec });
     goatCodexMock.runGoatCodexTask.mockImplementationOnce(async (input) => {
-      await input.onOutput?.("I'll clone the repository.");
+      await input.onOutput?.(
+        "Codex command completed: /bin/bash -lc 'git status --short --branch'",
+      );
       await input.onRuntimeEvents?.([
         {
           method: "item/agentMessage/delta",
@@ -861,6 +863,10 @@ describe("executeGoatTask", () => {
     expect(sink.updateMessageContent).toHaveBeenCalledWith({
       messageId: "assistant_msg_1",
       content: "I'll clone the repository.",
+    });
+    expect(sink.updateMessageContent).not.toHaveBeenCalledWith({
+      messageId: "assistant_msg_1",
+      content: expect.stringContaining("Codex command completed"),
     });
     expect(sink.appendEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "assistant.delta" }),
