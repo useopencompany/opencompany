@@ -6,7 +6,7 @@ const release =
   process.env.VERCEL_GIT_COMMIT_SHA ||
   "";
 const vercelManagedDeploymentId = process.env.NEXT_DEPLOYMENT_ID?.startsWith("dpl_") ?? false;
-const deploymentId = vercelManagedDeploymentId ? "" : release.slice(0, 32);
+const deploymentId = vercelManagedDeploymentId ? "" : `goat-${release}`.slice(0, 32);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
