@@ -25,8 +25,9 @@ import type {
 } from "@/lib/task-harness-run";
 
 export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
-  const assistantMessages = run.assistantMessages.filter(
-    (message) => message.content.trim() || message.status === "running",
+  const transcriptMessages = run.messages.filter(
+    (message) =>
+      message.role !== "tool" && (message.content.trim() || message.status === "running"),
   );
   const finalResult = run.task.result || lastCompletedAssistantContent(run.assistantMessages);
 
@@ -49,7 +50,19 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
 
   return (
     <div className="flex w-full max-w-[720px] flex-col gap-5">
-      <TranscriptMessage role="user" content={run.userMessage?.content || run.task.prompt} />
+      {transcriptMessages.length > 0 ? (
+        <div className="flex flex-col gap-5">
+          {transcriptMessages.map((message) =>
+            message.role === "assistant" ? (
+              <AssistantMessage key={message.id} message={message} />
+            ) : (
+              <TranscriptMessage key={message.id} role="user" content={message.content} />
+            ),
+          )}
+        </div>
+      ) : (
+        <TranscriptMessage role="user" content={run.userMessage?.content || run.task.prompt} />
+      )}
 
       {run.toolCalls.length > 0 ? (
         <div className="space-y-1.5 md:max-w-[72%]">
@@ -59,13 +72,8 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
         </div>
       ) : null}
 
-      {assistantMessages.length > 0 ? (
-        <div className="flex flex-col gap-5">
-          {assistantMessages.map((message) => (
-            <AssistantMessage key={message.id} message={message} />
-          ))}
-        </div>
-      ) : run.task.status === "queued" || run.task.status === "running" ? (
+      {transcriptMessages.every((message) => message.role !== "assistant") &&
+      (run.task.status === "queued" || run.task.status === "running") ? (
         <div className="max-w-full text-[13px] leading-6 text-ink-muted md:max-w-[68%]">
           The runner is preparing the task transcript.
         </div>

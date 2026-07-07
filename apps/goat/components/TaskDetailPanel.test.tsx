@@ -7,11 +7,14 @@ import { TaskDetailPanel } from "./TaskDetailPanel";
 
 const mocks = vi.hoisted(() => ({
   cancelGoatTaskAction: vi.fn(),
+  continueGoatTaskAction: vi.fn(),
+  routerRefresh: vi.fn(),
   toastError: vi.fn(),
 }));
 
 vi.mock("@/lib/tasks", () => ({
   cancelGoatTaskAction: mocks.cancelGoatTaskAction,
+  continueGoatTaskAction: mocks.continueGoatTaskAction,
 }));
 
 vi.mock("@opencompany/ui/components/sonner", () => ({
@@ -20,9 +23,21 @@ vi.mock("@opencompany/ui/components/sonner", () => ({
   },
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: mocks.routerRefresh,
+  }),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.cancelGoatTaskAction.mockResolvedValue({ ok: true, error: null });
+  mocks.continueGoatTaskAction.mockResolvedValue({
+    ok: true,
+    taskId: "goat_task_1",
+    displayId: "TASK-1",
+    messageId: "goat_task_msg_1",
+  });
 });
 
 describe("TaskDetailPanel cost summary", () => {
@@ -220,6 +235,85 @@ describe("TaskDetailPanel stop action", () => {
     render(<TaskDetailPanel initialRun={run} />);
 
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailPanel continuation composer", () => {
+  it.each([
+    ["succeeded", "completed"],
+    ["failed", "failed"],
+  ] as const)("renders the continuation composer for %s tasks", (status, stage) => {
+    const run = buildGoatHarnessRun({
+      task: task({ status, stage }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.getByPlaceholderText("Steer this task worker")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Continue task" })).toBeDisabled();
+  });
+
+  it.each([
+    ["running", "running"],
+    ["queued", "queued"],
+    ["canceled", "canceled"],
+  ] as const)("does not render the continuation composer for %s tasks", (status, stage) => {
+    const run = buildGoatHarnessRun({
+      task: task({ status, stage }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.queryByPlaceholderText("Steer this task worker")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue task" })).not.toBeInTheDocument();
+  });
+
+  it("submits continuation input and disables the composer while queued locally", async () => {
+    const user = userEvent.setup();
+    const run = buildGoatHarnessRun({
+      task: task({ status: "succeeded", stage: "completed" }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    await user.type(screen.getByPlaceholderText("Steer this task worker"), "Make it shorter");
+    await user.click(screen.getByRole("button", { name: "Continue task" }));
+
+    await waitFor(() => {
+      expect(mocks.continueGoatTaskAction).toHaveBeenCalledWith("TASK-1", "Make it shorter");
+    });
+    expect(screen.getByPlaceholderText("Task worker is running")).toBeDisabled();
+  });
+
+  it("restores input and shows the service error when continuation fails", async () => {
+    mocks.continueGoatTaskAction.mockResolvedValueOnce({
+      ok: false,
+      error: "Only completed or failed tasks can be continued.",
+    });
+    const user = userEvent.setup();
+    const run = buildGoatHarnessRun({
+      task: task({ status: "succeeded", stage: "completed" }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    await user.type(screen.getByPlaceholderText("Steer this task worker"), "Try again");
+    await user.click(screen.getByRole("button", { name: "Continue task" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Only completed or failed tasks can be continued."),
+      ).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Steer this task worker")).toHaveValue("Try again");
+    });
   });
 });
 

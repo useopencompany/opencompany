@@ -167,6 +167,7 @@ export type GoatHarnessRunViewModel = {
     createdAt: string;
     updatedAt: string;
   };
+  messages: GoatRunMessage[];
   userMessage: GoatRunMessage | null;
   assistantMessages: GoatRunMessage[];
   toolCalls: GoatHarnessRunToolCall[];
@@ -311,6 +312,7 @@ export function buildGoatHarnessRun(input: {
     hasDurableRun: messages.length > 0 || events.length > 0,
     legacyDetailText: "Detailed run events are available for new tasks only.",
     task,
+    messages,
     userMessage,
     assistantMessages,
     toolCalls,

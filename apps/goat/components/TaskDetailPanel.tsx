@@ -2,8 +2,11 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import {
+  ArrowUp,
+  Bot,
   CircleDollarSign,
   CircleDotDashed,
+  LoaderCircle,
   SlidersHorizontal,
   Square,
   Target,
@@ -11,7 +14,8 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import { formatUsdMicros } from "@/lib/cost-format";
@@ -21,7 +25,9 @@ import type {
   GoatRunHarnessConfig,
   GoatRunModelSummary,
 } from "@/lib/task-harness-run";
-import { cancelGoatTaskAction } from "@/lib/tasks";
+import { cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
+
+const TEXTAREA_MAX_HEIGHT_PX = 180;
 
 export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
   return (
@@ -82,7 +88,134 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
         </div>
         <TaskHarnessRunView run={run} />
       </section>
+
+      <TaskContinuationComposer run={run} />
     </>
+  );
+}
+
+function TaskContinuationComposer({ run }: { run: GoatHarnessRunViewModel }) {
+  const router = useRouter();
+  const [input, setInput] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [optimisticMessage, setOptimisticMessage] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const task = run.task;
+  const isTerminal = task.status === "succeeded" || task.status === "failed";
+  const canContinue = isTerminal && !isPending && !optimisticMessage;
+  const showComposer = isTerminal || Boolean(optimisticMessage) || Boolean(formError);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (!input) {
+      el.style.height = "";
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+  }, [input]);
+
+  useEffect(() => {
+    if (!optimisticMessage) return;
+    if (
+      run.messages.some(
+        (message) => message.role === "user" && message.content.trim() === optimisticMessage,
+      )
+    ) {
+      setOptimisticMessage(null);
+    }
+  }, [optimisticMessage, run.messages]);
+
+  if (!showComposer) return null;
+
+  const submit = () => {
+    const content = input.trim();
+    if (!content || !canContinue) return;
+    setFormError(null);
+    setInput("");
+    setOptimisticMessage(content);
+
+    startTransition(async () => {
+      try {
+        const result = await continueGoatTaskAction(task.displayId, content);
+        if (result.ok) {
+          router.refresh();
+          return;
+        }
+        setOptimisticMessage(null);
+        setInput((current) => (current.trim() ? current : content));
+        setFormError(result.error);
+      } catch {
+        setOptimisticMessage(null);
+        setInput((current) => (current.trim() ? current : content));
+        setFormError("Could not continue task.");
+      }
+    });
+  };
+
+  return (
+    <section className="sticky bottom-0 -mx-6 border-border border-t bg-canvas/95 px-6 py-4 backdrop-blur">
+      <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3">
+        {optimisticMessage ? (
+          <div className="flex justify-start">
+            <div className="max-w-full break-words rounded-2xl rounded-tl-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink opacity-75 md:max-w-[68%]">
+              {optimisticMessage}
+            </div>
+          </div>
+        ) : null}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+          className="rounded-lg border border-border bg-surface px-3 py-2 shadow-sm"
+        >
+          <div className="flex min-w-0 items-end gap-2">
+            <div className="flex min-h-9 min-w-0 flex-1 flex-col">
+              <label
+                htmlFor="task-continuation-input"
+                className="mb-1 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-ink-muted"
+              >
+                <Bot size={13} strokeWidth={1.8} />
+                Continue task
+              </label>
+              <textarea
+                ref={textareaRef}
+                id="task-continuation-input"
+                value={input}
+                disabled={!canContinue}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                rows={1}
+                placeholder={canContinue ? "Steer this task worker" : "Task worker is running"}
+                className="min-h-8 w-full resize-none bg-transparent text-[14px] leading-6 text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:text-ink-muted"
+                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!input.trim() || !canContinue}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors hover:bg-ink/85 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Continue task"
+            >
+              {isPending ? (
+                <LoaderCircle size={14} strokeWidth={2} className="animate-spin" />
+              ) : (
+                <ArrowUp size={13} strokeWidth={2} />
+              )}
+            </button>
+          </div>
+          {formError ? <p className="mt-2 text-[12px] leading-5 text-danger">{formError}</p> : null}
+        </form>
+      </div>
+    </section>
   );
 }
 
