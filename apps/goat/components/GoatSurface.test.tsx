@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
+  type GoatChatMessageMetadata,
   type GoatChatUiMessage,
   START_TASK_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
@@ -71,13 +72,14 @@ vi.mock("@ai-sdk/react", async () => {
         stop: () => {
           chatMock.stop();
         },
-        sendMessage: async (message: { text: string }) => {
+        sendMessage: async (message: { text: string; metadata?: GoatChatMessageMetadata }) => {
           chatMock.sendMessage(message);
           setMessages((current) => [
             ...current,
             {
               id: "ui_user_1",
               role: "user",
+              ...(message.metadata ? { metadata: message.metadata } : {}),
               parts: [{ type: "text", text: message.text }],
             },
           ]);
@@ -111,7 +113,14 @@ describe("GoatSurface chat streaming UI", () => {
   it("clears the composer and paints the user message immediately", async () => {
     const user = userEvent.setup();
 
-    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
 
     const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Hello Goat");
@@ -120,6 +129,94 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(screen.getByText("Hello Goat")).toBeInTheDocument();
+  });
+
+  it("shows the Codex mention menu and submits selected mention metadata", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@");
+
+    expect(screen.getByRole("listbox", { name: "Mention menu" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: /@codex/i }));
+    expect(textarea).toHaveValue("@codex ");
+    expect(screen.getByTestId("selected-codex-mention")).toHaveTextContent("@codex");
+
+    await user.type(textarea, "check repo access");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "@codex check repo access",
+      metadata: { mentions: [{ kind: "engine", id: "codex" }] },
+    });
+  });
+
+  it("does not show Codex mention options when Codex is not connected", async () => {
+    const user = userEvent.setup();
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@");
+
+    expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
+  });
+
+  it("does not send steering metadata for manually typed @codex", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@codex check repo access");
+    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "@codex check repo access",
+    });
+  });
+
+  it("clears selected mention metadata when visible @codex text is deleted", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@");
+    await user.click(screen.getByRole("option", { name: /@codex/i }));
+    await user.clear(textarea);
+    await user.type(textarea, "check repo access");
+    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "check repo access",
+    });
   });
 
   it("keeps a completed new chat visible while server props refresh", async () => {

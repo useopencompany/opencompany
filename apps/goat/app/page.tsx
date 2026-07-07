@@ -1,5 +1,6 @@
 import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
 import { listCurrentUserRecentGoatChats, loadCurrentGoatChatSessionById } from "@/lib/chat";
+import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
@@ -13,11 +14,12 @@ type GoatHomePageProps = {
 export default async function GoatHomePage({ searchParams }: GoatHomePageProps) {
   const params = await searchParams;
   const chatParam = Array.isArray(params.chat) ? params.chat[0] : params.chat;
-  const [tasks, schedules, initialChat, recentChats] = await Promise.all([
+  const [tasks, schedules, initialChat, recentChats, codexAuth] = await Promise.all([
     listCurrentUserGoatTasks(),
     listCurrentUserGoatTaskSchedules(),
     loadCurrentGoatChatSessionById(chatParam),
     listCurrentUserRecentGoatChats(),
+    loadCurrentGoatCodexAuthSettings(),
   ]);
   const taskViews = tasks.map(
     (task): GoatTaskView => ({
@@ -46,6 +48,7 @@ export default async function GoatHomePage({ searchParams }: GoatHomePageProps) 
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={initialChat}
         recentChats={recentChats}
+        codexConnected={codexAuth.status === "connected"}
       />
     </main>
   );
