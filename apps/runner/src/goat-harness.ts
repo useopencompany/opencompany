@@ -121,6 +121,9 @@ export type GoatTaskRunSink = {
 export type GoatTaskExecutorInput = {
   task: GoatTask;
   env: RunnerEnv;
+  plannerContext?: {
+    githubRepositories?: readonly string[];
+  };
   signal: AbortSignal;
   sink: GoatTaskRunSink;
   reportStage: (
@@ -159,6 +162,7 @@ export async function executeGoatTask(
           prompt: input.task.prompt,
           model: input.task.model,
           availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
+          githubRepositories: input.plannerContext?.githubRepositories ?? [],
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
           signal: input.signal,
         });
@@ -298,6 +302,17 @@ async function runGoatTaskCodex(input: {
   assistantMessageId: string;
 }): Promise<{ assistantContent: string; usage?: LanguageModelUsage }> {
   let codexActivity = "";
+  let lastCodexActivityFlushAt = 0;
+  const flushCodexActivity = async (force = false) => {
+    if (!codexActivity) return;
+    const now = Date.now();
+    if (!force && now - lastCodexActivityFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) return;
+    lastCodexActivityFlushAt = now;
+    await input.sink.updateMessageContent({
+      messageId: input.assistantMessageId,
+      content: codexActivity,
+    });
+  };
   const result = await runGoatCodexTask({
     userWorkosId: input.userWorkosId,
     taskId: input.taskId,
@@ -320,12 +335,10 @@ async function runGoatTaskCodex(input: {
     onEngineSessionId: input.sink.updateCodexEngineSessionId,
     onOutput: async (delta) => {
       codexActivity = `${codexActivity}${delta}`;
-      await input.sink.updateMessageContent({
-        messageId: input.assistantMessageId,
-        content: codexActivity,
-      });
+      await flushCodexActivity(false);
     },
   });
+  await flushCodexActivity(true);
 
   await input.sink.recordSandboxUsage({
     messageId: input.assistantMessageId,
@@ -555,12 +568,14 @@ export async function planGoatHarness(input: {
   model: GoatHarnessSpec["model"];
   gatewayApiKey: string;
   availableTools?: readonly GoatTaskToolName[];
+  githubRepositories?: readonly string[];
   signal?: AbortSignal;
 }): Promise<GoatHarnessSpec> {
   return (
     await planGoatHarnessForTask({
       ...input,
       availableTools: input.availableTools ?? ["exa_search"],
+      githubRepositories: input.githubRepositories ?? [],
     })
   ).harnessSpec;
 }
@@ -570,6 +585,7 @@ export async function planGoatHarnessForTask(input: {
   model: GoatHarnessSpec["model"];
   gatewayApiKey: string;
   availableTools: readonly GoatTaskToolName[];
+  githubRepositories?: readonly string[];
   signal?: AbortSignal;
 }): Promise<{
   harnessSpec: GoatHarnessSpec;
@@ -595,6 +611,7 @@ export async function planGoatHarnessForTask(input: {
     executionModelOptions: GOAT_HARNESS_MODEL_OPTIONS,
     availableOperationTools: availableTools,
     availableSkills: GOAT_HARNESS_SKILL_OPTIONS,
+    githubRepositories: input.githubRepositories ?? [],
     defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
   });
 
@@ -623,6 +640,7 @@ export async function planGoatHarnessForTask(input: {
     availableEngines,
     availableModels,
     availableSkills,
+    input.githubRepositories ?? [],
   );
 
   return {
@@ -712,6 +730,7 @@ function normalizeHarnessSpec(
   availableEngines: readonly GoatHarnessSpec["engine"][],
   availableModels: readonly GoatHarnessSpec["model"][],
   availableSkills: readonly GoatTaskSkillId[],
+  githubRepositories: readonly string[],
 ): GoatHarnessSpec {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const engine = readHarnessEngine(record.engine, availableEngines);
@@ -748,7 +767,9 @@ function normalizeHarnessSpec(
     skills: selectedSkills,
     maxModelSteps,
     resultMode,
-    ...(engine === "codex" ? { codex: readCodexHarnessConfig(record.codex) } : {}),
+    ...(engine === "codex"
+      ? { codex: readCodexHarnessConfig(record.codex, fallback.prompt, githubRepositories) }
+      : {}),
   };
 }
 
@@ -780,11 +801,21 @@ function readHarnessModel(
     : null;
 }
 
-function readCodexHarnessConfig(value: unknown): NonNullable<GoatHarnessSpec["codex"]> {
+function readCodexHarnessConfig(
+  value: unknown,
+  prompt: string,
+  githubRepositories: readonly string[],
+): NonNullable<GoatHarnessSpec["codex"]> {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const plannedRepository = normalizeGitHubRepositoryMention(readNonEmptyString(record.repository));
+  const repository =
+    canonicalGitHubRepository(plannedRepository, githubRepositories) ??
+    inferCodexRepositoryFromPrompt(prompt, githubRepositories) ??
+    plannedRepository;
+  const promptPullRequestIntent = readPullRequestIntent(prompt);
   return {
-    repository: readNonEmptyString(record.repository),
-    createPullRequest: record.createPullRequest === true,
+    repository,
+    createPullRequest: promptPullRequestIntent ?? record.createPullRequest === true,
     reasoningEffort: readCodexReasoningEffort(record.reasoningEffort),
   };
 }
@@ -793,6 +824,77 @@ function readCodexReasoningEffort(value: unknown) {
   return value === "low" || value === "medium" || value === "high" || value === "xhigh"
     ? value
     : "high";
+}
+
+function inferCodexRepositoryFromPrompt(prompt: string, githubRepositories: readonly string[]) {
+  const explicit = normalizeGitHubRepositoryMention(prompt);
+  if (explicit) return canonicalGitHubRepository(explicit, githubRepositories) ?? explicit;
+
+  const matches = normalizeGitHubRepositories(githubRepositories).filter((repository) =>
+    textMentionsRepositoryName(prompt, repository.name),
+  );
+  return matches.length === 1 ? matches[0]!.fullName : null;
+}
+
+function canonicalGitHubRepository(
+  repository: string | null,
+  githubRepositories: readonly string[],
+) {
+  if (!repository) return null;
+  const normalized = repository.toLowerCase();
+  return (
+    normalizeGitHubRepositories(githubRepositories).find(
+      (candidate) => candidate.fullName.toLowerCase() === normalized,
+    )?.fullName ?? null
+  );
+}
+
+function normalizeGitHubRepositories(githubRepositories: readonly string[]) {
+  return githubRepositories
+    .map((fullName) => normalizeGitHubRepositoryMention(fullName))
+    .filter((fullName): fullName is string => Boolean(fullName))
+    .map((fullName) => ({
+      fullName,
+      name: fullName.split("/")[1] ?? fullName,
+    }));
+}
+
+function normalizeGitHubRepositoryMention(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const githubUrl = trimmed.match(
+    /https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\.git)?(?:[/?#].*)?/i,
+  );
+  const candidate = githubUrl ? `${githubUrl[1]}/${githubUrl[2]}` : findOwnerRepoMention(trimmed);
+  if (!candidate) return null;
+  const withoutGitSuffix = candidate.replace(/[.,;:!?]+$/, "").replace(/\.git$/i, "");
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(withoutGitSuffix) ? withoutGitSuffix : null;
+}
+
+function findOwnerRepoMention(value: string) {
+  const match = value.match(
+    /(?:^|[\s([`'"])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?=$|[\s)\]`'".,;:!?])/,
+  );
+  return match?.[1] ?? null;
+}
+
+function textMentionsRepositoryName(text: string, repositoryName: string) {
+  const escaped = repositoryName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_.-])${escaped}($|[^A-Za-z0-9_.-])`, "i").test(text);
+}
+
+function readPullRequestIntent(prompt: string) {
+  const text = prompt.toLowerCase();
+  if (
+    /\b(do not|don't|dont|without|no)\s+(open|create|publish|push|make)?\s*(a\s*)?(draft\s*)?(pr|pull request)\b/.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  return /\b(open|create|publish|push|make)\s+(a\s*)?(draft\s*)?(pr|pull request)\b/.test(text)
+    ? true
+    : null;
 }
 
 function toolEventPayload(event: GoatToolLifecycleInput) {

@@ -207,6 +207,50 @@ describe("runGoatCodexTask", () => {
     );
   });
 
+  it("canonicalizes GitHub URL repositories through the connected resource", async () => {
+    dbRows.push(repositoryRow({ name: "octo/repo" }));
+
+    await runGoatCodexTask({
+      userWorkosId: "user_1",
+      taskId: "goat_task_1",
+      messageId: "msg_1",
+      prompt: "Fix https://github.com/OCTO/repo.git.",
+      systemPrompt: "Use Codex.",
+      model: "openai/gpt-5.5",
+      repository: "https://github.com/OCTO/repo.git",
+      env: env(),
+      signal: new AbortController().signal,
+    });
+
+    expect(githubMocks.getGitHubWorkInstallationToken).toHaveBeenCalledWith({
+      installationId: "98765",
+      repositoryFullName: "octo/repo",
+    });
+    expect(sandboxMocks.cloneGitHubRepositoryIntoWorkdir).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryFullName: "octo/repo",
+      }),
+    );
+  });
+
+  it("validates repository access before creating a sandbox", async () => {
+    await expect(
+      runGoatCodexTask({
+        userWorkosId: "user_1",
+        taskId: "goat_task_1",
+        messageId: "msg_1",
+        prompt: "Fix octo/private.",
+        systemPrompt: "Use Codex.",
+        model: "openai/gpt-5.5",
+        repository: "octo/private",
+        env: env(),
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("Connect GitHub in Goat settings");
+
+    expect(sandboxMocks.createOrConnectSandbox).not.toHaveBeenCalled();
+  });
+
   it("refreshes ChatGPT auth from the app-server Codex home", async () => {
     const authJson = { OPENAI_API_KEY: "chatgpt_secret" };
     codexAuthMocks.loadGoatCodexCredential.mockResolvedValueOnce({
@@ -299,7 +343,14 @@ function fakeSandbox() {
   };
 }
 
-function repositoryRow() {
+function repositoryRow(overrides: Partial<ReturnType<typeof baseRepositoryRow>> = {}) {
+  return {
+    ...baseRepositoryRow(),
+    ...overrides,
+  };
+}
+
+function baseRepositoryRow() {
   return {
     integrationId: "goat_integration_1",
     installationId: "98765",

@@ -121,6 +121,7 @@ function CodexIntegrationRow({ integration }: { integration: GoatCodexProviderSt
   const router = useRouter();
   const [flow, setFlow] = useState<GoatCodexDeviceAuthFlow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
   const [isPending, startTransition] = useTransition();
   const status = flow?.status ?? integration.status;
 
@@ -134,22 +135,39 @@ function CodexIntegrationRow({ integration }: { integration: GoatCodexProviderSt
       return;
     }
 
+    let active = true;
+    let pollInFlight = false;
     const timer = window.setInterval(() => {
-      startTransition(async () => {
-        const result = await pollGoatCodexDeviceAuth(flow.id);
-        if (result.ok) {
-          setFlow(result.flow);
-          if (result.flow.status === "completed") {
-            setError(null);
-            router.refresh();
+      if (pollInFlight) return;
+      pollInFlight = true;
+      setIsPolling(true);
+      void (async () => {
+        try {
+          const result = await pollGoatCodexDeviceAuth(flow.id);
+          if (!active) return;
+          if (result.ok) {
+            if (result.flow.status === "completed") {
+              setFlow(null);
+              setError(null);
+              router.refresh();
+            } else {
+              setFlow(result.flow);
+            }
+          } else {
+            setError(result.error);
           }
-        } else {
-          setError(result.error);
+        } finally {
+          pollInFlight = false;
+          if (active) setIsPolling(false);
         }
-      });
+      })();
     }, 2500);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      setIsPolling(false);
+    };
   }, [flow, router]);
 
   const startAuth = () => {
@@ -157,7 +175,12 @@ function CodexIntegrationRow({ integration }: { integration: GoatCodexProviderSt
     startTransition(async () => {
       const result = await startGoatCodexDeviceAuth();
       if (result.ok) {
-        setFlow(result.flow);
+        if (result.flow.status === "completed") {
+          setFlow(null);
+          router.refresh();
+        } else {
+          setFlow(result.flow);
+        }
       } else {
         setError(result.error);
       }
@@ -166,6 +189,7 @@ function CodexIntegrationRow({ integration }: { integration: GoatCodexProviderSt
 
   const disconnect = () => {
     setError(null);
+    setIsPolling(false);
     startTransition(async () => {
       await disconnectGoatCodexAuth();
       setFlow(null);
@@ -210,6 +234,7 @@ function CodexIntegrationRow({ integration }: { integration: GoatCodexProviderSt
               type="button"
               onClick={startAuth}
               disabled={isPending}
+              aria-busy={isPending || isPolling}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
             >
               {buttonLabel(status, isPending)}

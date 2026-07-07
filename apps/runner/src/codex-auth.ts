@@ -10,7 +10,7 @@ import {
 import { goatCodexDeviceAuthFlows } from "@opencompany/db/goat-schema";
 import { workspaceCodexDeviceAuthFlows } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
 import { CODEX_FALLBACK_NPM_PACKAGE } from "./codex-tool";
 import { getDb } from "./db";
@@ -141,6 +141,7 @@ export async function startGoatCodexDeviceAuthFlow(input: {
   userWorkosId: string;
   env: RunnerEnv;
 }): Promise<CodexDeviceAuthFlowStatus> {
+  await supersedeActiveGoatCodexAuthFlows(input.userWorkosId);
   const sandbox = await createCodexAuthSandbox({
     ownerLogFields: { user_workos_id: input.userWorkosId },
     template: input.env.ampE2bTemplate ?? "amp",
@@ -191,6 +192,40 @@ export async function startGoatCodexDeviceAuthFlow(input: {
     await killSandbox(sandbox.sandboxId).catch(() => {});
     throw error;
   }
+}
+
+async function supersedeActiveGoatCodexAuthFlows(userWorkosId: string) {
+  const activeFlows = await getDb()
+    .select({
+      id: goatCodexDeviceAuthFlows.id,
+      sandboxId: goatCodexDeviceAuthFlows.sandboxId,
+    })
+    .from(goatCodexDeviceAuthFlows)
+    .where(
+      and(
+        eq(goatCodexDeviceAuthFlows.userWorkosId, userWorkosId),
+        inArray(goatCodexDeviceAuthFlows.status, ["pending", "code_ready"]),
+      ),
+    );
+
+  if (activeFlows.length === 0) return;
+
+  const now = new Date();
+  for (const flow of activeFlows) {
+    await markGoatFlowTerminal({
+      userWorkosId,
+      flowId: flow.id,
+      status: "failed",
+      statusReason: "Superseded by a new Codex device authentication attempt.",
+      now,
+    });
+    await killSandbox(flow.sandboxId).catch(() => {});
+  }
+  logger.info("Superseded active Goat Codex auth flows", {
+    event: "opencompany.runner_goat_codex_auth_flows_superseded",
+    user_workos_id: userWorkosId,
+    flow_count: activeFlows.length,
+  });
 }
 
 export async function pollCodexDeviceAuthFlow(input: {

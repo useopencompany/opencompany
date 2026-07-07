@@ -160,6 +160,8 @@ export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Rewrite stale chat-layer limitations into clear instructions to use connected read-only tools when available.",
   'For engine "opencompany" GitHub work, include github_clone_repository plus the needed follow-up GitHub tools only when a concrete owner/repo is relevant to the task.',
   'For engine "codex", do not include GitHub operation tools just so Codex can edit code; instead set codex.repository when the task names a concrete owner/repo.',
+  'For engine "codex", set codex.repository to the exact owner/repo from available_github_repositories when the task mentions that full name or uniquely mentions the repo name.',
+  'For engine "codex", set codex.createPullRequest true only when the user explicitly asks to publish, push, create, make, or open a PR/pull request.',
   "Include github_open_pull_request only when the user explicitly asked to publish, push, or open a pull request.",
 ]);
 
@@ -193,13 +195,18 @@ export function buildGoatHarnessCreationPrompt(input: {
   executionModelOptions: readonly GoatHarnessModelOption[];
   availableOperationTools: readonly GoatTaskToolName[];
   availableSkills: readonly GoatHarnessSkillOption[];
+  githubRepositories?: readonly string[];
   defaultMaxModelSteps: number;
 }) {
+  const githubRepositories = input.githubRepositories ?? [];
   return promptBlock("planner_inputs", [
     promptEngineOptions(input.executionEngineOptions),
     promptModelOptions(input.executionModelOptions),
     promptList("available_operation_tools", "tool", input.availableOperationTools),
     promptSkillOptions(input.availableSkills),
+    ...(githubRepositories.length > 0
+      ? [promptList("available_github_repositories", "repository", githubRepositories)]
+      : []),
     promptValue("default_max_model_steps", input.defaultMaxModelSteps),
     promptValue("task_prompt", input.taskPrompt),
   ]);

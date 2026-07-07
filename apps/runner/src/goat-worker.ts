@@ -32,6 +32,7 @@ import {
   type GoatTaskExecutorInput,
   type GoatTaskExecutorResult,
 } from "./goat-harness";
+import { getGoatAvailableGitHubRepositoryNamesForRunner } from "./goat-harness-planner";
 import { rowsFromExecute } from "./sql-exec";
 import { type NormalizedModelUsage, normalizeModelUsage } from "./usage";
 
@@ -959,10 +960,17 @@ export async function runClaimedGoatTask(input: {
       return;
     }
 
+    const githubRepositories = input.task.harnessSpec.tools.some((tool) =>
+      tool.startsWith("github_"),
+    )
+      ? await getGoatAvailableGitHubRepositoryNamesForRunner(input.task.userWorkosId)
+      : [];
+
     const result = await runSpan.runInContext(() =>
       executor({
         task: input.task,
         env: input.env,
+        plannerContext: { githubRepositories },
         signal: abortController.signal,
         sink: {
           createAssistantMessage: async (messageInput) => {

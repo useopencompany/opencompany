@@ -7,7 +7,7 @@ import {
 } from "@opencompany/db/goat-codex-auth";
 import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat-schema";
 import type { LanguageModelUsage } from "ai";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { runCodexAppServerTurn } from "./codex-app-server";
 import { type CodexCliAuth, codexApiKeyFallbackEnabled, ensureCodexInstalled } from "./codex-tool";
 import {
@@ -76,12 +76,6 @@ export async function runGoatCodexTask(input: {
   onOutput?: (delta: string) => Promise<void>;
 }): Promise<GoatCodexRunResult> {
   assertNotAborted(input.signal);
-  const sandboxStartedAt = new Date();
-  const sandbox = await createOrConnectSandbox({
-    template: input.env.codexE2bTemplate ?? "codex",
-    envs: {},
-    idleTimeoutMs: input.env.e2bSandboxIdleTimeoutMs,
-  });
   const model = codexCliModelNameForModelId(input.model) ?? input.env.codexModel;
   const repository = input.repository?.trim()
     ? await resolveRepositoryAccess({
@@ -89,6 +83,12 @@ export async function runGoatCodexTask(input: {
         repositoryFullName: normalizeRepositoryFullName(input.repository),
       })
     : null;
+  const sandboxStartedAt = new Date();
+  const sandbox = await createOrConnectSandbox({
+    template: input.env.codexE2bTemplate ?? "codex",
+    envs: {},
+    idleTimeoutMs: input.env.e2bSandboxIdleTimeoutMs,
+  });
 
   try {
     const summary = await runGoatCodexWithAuth({
@@ -500,7 +500,7 @@ async function resolveRepositoryAccess(input: {
         eq(goatIntegrationResources.userWorkosId, input.userWorkosId),
         eq(goatIntegrationResources.provider, "github"),
         eq(goatIntegrationResources.resourceType, "repository"),
-        eq(goatIntegrationResources.name, input.repositoryFullName),
+        sql`lower(${goatIntegrationResources.name}) = lower(${input.repositoryFullName})`,
         eq(goatIntegrations.provider, "github"),
         ne(goatIntegrations.status, "disconnected"),
       ),
@@ -571,7 +571,7 @@ function formatCodexResult(input: {
 function normalizeRepositoryFullName(value: string | null | undefined) {
   const trimmed = value?.trim() ?? "";
   const githubUrl = trimmed.match(/^https:\/\/github\.com\/([^/]+\/[^/#?]+)(?:[/?#].*)?$/i)?.[1];
-  const candidate = githubUrl ?? trimmed;
+  const candidate = (githubUrl ?? trimmed).replace(/\.git$/i, "");
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(candidate)) {
     throw new Error('Codex repository must be "owner/repo" or a GitHub repository URL.');
   }

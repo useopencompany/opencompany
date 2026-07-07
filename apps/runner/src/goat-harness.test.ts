@@ -359,6 +359,90 @@ describe("planGoatHarness", () => {
     });
   });
 
+  it("infers a Codex repository and PR intent from connected repository names", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "codex",
+        model: gptModel,
+        systemPrompt: "Use Codex to edit the repository and summarize the result.",
+        initialUserMessage: "Fix Yellowknife and open a PR.",
+        tools: ["exa_search"],
+        skills: [],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+        codex: {
+          repository: null,
+          createPullRequest: false,
+          reasoningEffort: "medium",
+        },
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Use Codex to fix Yellowknife and open a PR.",
+        model,
+        availableTools: ["exa_search", "github_clone_repository", "github_shell"],
+        githubRepositories: ["OpenCompany/Yellowknife"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      engine: "codex",
+      codex: {
+        repository: "OpenCompany/Yellowknife",
+        createPullRequest: true,
+        reasoningEffort: "medium",
+      },
+    });
+
+    const request = aiMock.generateObject.mock.calls[0]?.[0] as {
+      system: string;
+      prompt: string;
+    };
+    expect(request.system).toContain("available_github_repositories");
+    expect(request.system).toContain("codex.createPullRequest true");
+    expect(request.prompt).toContain("<available_github_repositories>");
+    expect(request.prompt).toContain("<repository>\nOpenCompany/Yellowknife\n</repository>");
+  });
+
+  it("lets an explicit no-PR prompt override an over-eager planner", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "codex",
+        model: gptModel,
+        systemPrompt: "Use Codex to edit the repository and summarize the result.",
+        initialUserMessage: "Fix octo/repo but do not open a PR.",
+        tools: ["exa_search"],
+        skills: [],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+        codex: {
+          repository: "https://github.com/octo/repo.git",
+          createPullRequest: true,
+          reasoningEffort: "high",
+        },
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Use Codex to fix octo/repo but do not open a PR.",
+        model,
+        availableTools: ["exa_search", "github_clone_repository", "github_shell"],
+        githubRepositories: ["octo/repo"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      engine: "codex",
+      codex: {
+        repository: "octo/repo",
+        createPullRequest: false,
+      },
+    });
+  });
+
   it("keeps selected skills and injects their execution guidance into the system prompt", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
