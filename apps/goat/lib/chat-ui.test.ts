@@ -79,6 +79,26 @@ describe("toGoatChatUiMessage", () => {
       text: "Added to Results as TASK-26. It'll pull the Goat team's Linear board.",
     });
   });
+
+  it("preserves task id and status in message metadata", () => {
+    const message = storedAssistantMessage({
+      taskId: "task_1",
+      taskDisplayId: "TASK-1",
+      taskName: "Research market",
+      taskStatus: "succeeded",
+    });
+
+    expect(toGoatChatUiMessage(message).metadata).toMatchObject({
+      sessionId: "goat_chat_1",
+      taskId: "task_1",
+      task: {
+        id: "task_1",
+        displayId: "TASK-1",
+        title: "Research market",
+        status: "succeeded",
+      },
+    });
+  });
 });
 
 function storedAssistantMessage(
@@ -99,6 +119,7 @@ function storedAssistantMessage(
     taskDisplayId: null,
     taskName: null,
     taskPrompt: null,
+    taskStatus: null,
     ...overrides,
   };
 }
