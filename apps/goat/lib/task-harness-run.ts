@@ -1,8 +1,8 @@
 import { getAgentModelDefinition } from "@opencompany/agent-runtime";
 import type {
+  GoatHarnessEngine,
   GoatTaskEvent,
   GoatTaskEventType,
-  GoatHarnessEngine,
   GoatTaskMessage,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
