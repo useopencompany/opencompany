@@ -6,16 +6,18 @@ import { currentGoatUser } from "@/lib/auth";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
+import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const { authUser, user } = await currentGoatUser();
-  const [googleIntegrations, linear, github, codex] = await Promise.all([
+  const [googleIntegrations, linear, github, jamie, codex] = await Promise.all([
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
     getGoatGitHubIntegrationState(user.workosUserId),
+    getGoatJamieIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
   ]);
   const codexStatus: "connected" | "needs_reauth" | "not_connected" =
@@ -24,6 +26,7 @@ export default async function SettingsPage() {
     ...googleIntegrations,
     linear,
     github,
+    jamie,
     codex: {
       provider: "codex" as const,
       connected: codex.status === "connected",

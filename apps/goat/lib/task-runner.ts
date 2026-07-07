@@ -131,6 +131,29 @@ export async function triggerGoatTaskRun(
   });
 }
 
+export async function triggerGoatBrainIngestWake() {
+  const baseUrl = runnerInternalBaseUrl();
+  const token = runnerToken();
+  if (!baseUrl || !token) {
+    console.warn("Goat Brain ingest wake skipped because the runner is not configured.", {
+      event: "goat.brain_ingest_wake_unconfigured",
+    });
+    return;
+  }
+
+  const response = await fetch(`${baseUrl}/internal/goat/brain-ingest/wake`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Goat Brain ingest wake failed with ${response.status}: ${details}`);
+  }
+}
+
 function isGoatHarnessSpec(value: unknown): value is GoatHarnessSpec {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
