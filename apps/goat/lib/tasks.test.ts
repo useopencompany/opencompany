@@ -3,13 +3,15 @@ import { currentGoatUser } from "@/lib/auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import {
   buildGoatTaskContinuationPrompt,
+  GOAT_TASK_CONTINUATION_MAX_CHARS,
+  type GoatTaskContinuationEventRow,
+  type GoatTaskContinuationMessageRow,
+} from "@/lib/task-continuation";
+import {
   cancelGoatTaskAction,
   continueGoatTaskAction,
   continueGoatTaskForActor,
   createGoatTaskForUser,
-  GOAT_TASK_CONTINUATION_MAX_CHARS,
-  type GoatTaskContinuationEventRow,
-  type GoatTaskContinuationMessageRow,
 } from "@/lib/tasks";
 
 const mocks = vi.hoisted(() => {
