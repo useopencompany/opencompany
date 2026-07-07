@@ -27,6 +27,8 @@ export type GoatTaskRunTaskInput =
       result: string | null;
       error: string | null;
       harnessSpec?: unknown;
+      startedAt?: Date | string | null;
+      completedAt?: Date | string | null;
       createdAt: Date | string;
       updatedAt: Date | string;
     }
@@ -41,6 +43,8 @@ export type GoatTaskRunTaskInput =
       result: string | null;
       error: string | null;
       harness_spec?: unknown;
+      started_at?: string | null;
+      completed_at?: string | null;
       created_at: string;
       updated_at: string;
     };
@@ -166,6 +170,8 @@ export type GoatHarnessRunViewModel = {
     stage: GoatTaskStage;
     result: string;
     error: string;
+    startedAt: string | null;
+    completedAt: string | null;
     createdAt: string;
     updatedAt: string;
   };
@@ -725,6 +731,8 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
       stage: task.stage,
       result: task.result ?? "",
       error: task.error ?? "",
+      startedAt: task.startedAt ? serializeDate(task.startedAt) : null,
+      completedAt: task.completedAt ? serializeDate(task.completedAt) : null,
       createdAt: serializeDate(task.createdAt),
       updatedAt: serializeDate(task.updatedAt),
     };
@@ -740,6 +748,8 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
     stage: task.stage,
     result: task.result ?? "",
     error: task.error ?? "",
+    startedAt: task.started_at ?? null,
+    completedAt: task.completed_at ?? null,
     createdAt: task.created_at,
     updatedAt: task.updated_at,
   };

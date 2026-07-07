@@ -56,3 +56,28 @@ export function formatGoatStartedAt(value: Date | string) {
     timeStyle: "short",
   }).format(date);
 }
+
+export function formatGoatDurationMs(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return [`${hours}h`, minutes > 0 ? `${minutes}m` : null, seconds > 0 ? `${seconds}s` : null]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (minutes > 0) {
+    return [`${minutes}m`, seconds > 0 ? `${seconds}s` : null].filter(Boolean).join(" ");
+  }
+
+  return `${seconds}s`;
+}
+
+export function taskTimestampMs(value: Date | string | null | undefined) {
+  if (!value) return null;
+  const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
