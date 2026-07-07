@@ -41,6 +41,7 @@ type GoatTask = typeof goatTasks.$inferSelect;
 const model = "moonshotai/kimi-k2.6" as AgentModelId;
 const claudeModel = "anthropic/claude-sonnet-5" as AgentModelId;
 const gptModel = "openai/gpt-5.5" as AgentModelId;
+const glmModel = "zai/glm-5.2" as AgentModelId;
 const harnessSpec: GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1",
   engine: "opencompany",
@@ -140,6 +141,12 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("<prompt_contract>");
     expect(request.system).toContain("Always return a non-empty systemPrompt");
     expect(request.system).toContain('Use engine "codex" for coding tasks');
+    expect(request.system).toContain("Cost matters");
+    expect(request.system).toContain("choose Kimi K2.6 by default");
+    expect(request.system).toContain("Do not upgrade deep research to Claude Sonnet");
+    expect(request.system).toContain(
+      "Choose GLM 5.2 when the task likely needs very large context",
+    );
     expect(request.prompt).toContain("<planner_inputs>");
     expect(request.prompt).toContain("<execution_engine_options>");
     expect(request.prompt).toContain("<id>\nopencompany\n</id>");
@@ -147,7 +154,10 @@ describe("planGoatHarness", () => {
     expect(request.prompt).toContain("<execution_model_options>");
     expect(request.prompt).toContain("<id>\nmoonshotai/kimi-k2.6\n</id>");
     expect(request.prompt).toContain("<selection_guidance>\nDefault.");
+    expect(request.prompt).toContain("<id>\nzai/glm-5.2\n</id>");
+    expect(request.prompt).toContain("long source-set synthesis");
     expect(request.prompt).toContain("<id>\nanthropic/claude-sonnet-5\n</id>");
+    expect(request.prompt).toContain("Premium fallback");
     expect(request.prompt).toContain("<id>\nopenai/gpt-5.5\n</id>");
     expect(request.prompt).toContain("<available_operation_tools>");
     expect(request.prompt).toContain("<tool>\nexa_search\n</tool>");
@@ -239,6 +249,34 @@ describe("planGoatHarness", () => {
       }),
     ).resolves.toMatchObject({
       tools: ["linear_search_tools", "linear_use_tool"],
+    });
+  });
+
+  it("accepts GLM 5.2 as a planned large-context execution model", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "opencompany",
+        model: glmModel,
+        systemPrompt: "Synthesize many sources into a structured report.",
+        initialUserMessage: "Research every relevant source and produce a report.",
+        tools: ["exa_search"],
+        skills: [],
+        maxModelSteps: 16,
+        resultMode: "brain_markdown_report",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Deeply research the category across many sources and produce a report.",
+        model,
+        availableTools: ["exa_search"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      model: glmModel,
+      resultMode: "brain_markdown_report",
     });
   });
 

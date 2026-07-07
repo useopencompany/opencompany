@@ -219,8 +219,10 @@ The planner is a separate AI SDK `generateObject` Gateway call using:
 - Structured prompt blocks from `apps/runner/src/prompts/goat-harness-creation.ts`
 - Execution engine options: `opencompany` by default, or `codex` for sandboxed Codex CLI coding
   tasks.
-- Execution model options: `moonshotai/kimi-k2.6` by default, `anthropic/claude-sonnet-5` for more
-  complex execution or writing, and `openai/gpt-5.5` for coding, Codex, or sharper analysis.
+- Execution model options: `moonshotai/kimi-k2.6` by default for most work and deep research,
+  `zai/glm-5.2` for very large-context or long source-set synthesis, `anthropic/claude-sonnet-5`
+  as the premium fallback for explicit Claude/Sonnet, maximum-quality, polished writing, vision, or
+  file-input cases, and `openai/gpt-5.5` for coding, Codex, or sharper analysis.
 
 The planner returns a `GoatHarnessSpec`:
 

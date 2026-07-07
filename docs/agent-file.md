@@ -114,7 +114,7 @@ The model the OpenCompany engine runs on. Must be one of:
 | `xai/grok-4.1-fast-non-reasoning`          | Fast, low-cost Grok model for direct answers.                   |
 | `xai/grok-build-0.1`                       | xAI coding model for fast agentic software development.         |
 | `zai/glm-5.1`                              | Latest GLM for coding-heavy and agentic engineering tasks.      |
-| `zai/glm-5.2`                              | Latest GLM with improved reasoning and coding capabilities.     |
+| `zai/glm-5.2`                              | Latest GLM with 1M context, reasoning, and coding capabilities. |
 | `zai/glm-5-turbo`                          | Faster GLM 5 variant for production agent workflows.            |
 | `zai/glm-5v-turbo`                         | Multimodal GLM 5 model for visual coding and GUI tasks.         |
 | `openrouter/fusion`                        | OpenRouter multi-model router for research and critique.        |
