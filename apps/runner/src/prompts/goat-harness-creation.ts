@@ -158,6 +158,7 @@ export const GOAT_HARNESS_CREATION_PROMPT_CONTRACT = promptBlock("prompt_contrac
 export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Select only operation-level tools from the available list.",
   "Rewrite stale chat-layer limitations into clear instructions to use connected read-only tools when available.",
+  "For X/Twitter social-listening, complaint-mining, or profile research tasks, include the relevant x_* tools when available; start from profile/search posts, then inspect discussions on specific high-signal posts with x_get_discussion.",
   'For engine "opencompany" GitHub work, include github_clone_repository plus the needed follow-up GitHub tools only when a concrete owner/repo is relevant to the task.',
   'For engine "codex", do not include GitHub operation tools just so Codex can edit code; instead set codex.repository when the task names a concrete owner/repo.',
   'For engine "codex", set codex.repository to the exact owner/repo from available_github_repositories when the task mentions that full name or uniquely mentions the repo name.',

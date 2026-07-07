@@ -49,6 +49,11 @@ export type GoatIntegrationResourceStatus =
 
 export type GoatTaskToolName =
   | "exa_search"
+  | "x_search_posts"
+  | "x_get_profile"
+  | "x_get_user_posts"
+  | "x_get_discussion"
+  | "social_get_job"
   | "gmail_search"
   | "gmail_get_message"
   | "gmail_list_threads"

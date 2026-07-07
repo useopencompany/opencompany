@@ -649,6 +649,16 @@ function makeToolCall(input: {
 
 function describeTool(name: string): Pick<GoatHarnessRunToolCall, "label" | "kind"> {
   if (name === "exa_search") return { label: "Web search", kind: "search" };
+  if (name.startsWith("x_") || name === "social_get_job") {
+    const labels: Record<string, string> = {
+      x_search_posts: "X search",
+      x_get_profile: "X profile",
+      x_get_user_posts: "X posts",
+      x_get_discussion: "X discussion",
+      social_get_job: "Social job",
+    };
+    return { label: labels[name] ?? "X", kind: "tool" };
+  }
   if (name.startsWith("gmail_")) {
     const labels: Record<string, string> = {
       gmail_search: "Gmail search",

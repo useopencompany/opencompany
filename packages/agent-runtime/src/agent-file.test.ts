@@ -265,8 +265,7 @@ describe(".agent files", () => {
         id: "x",
         type: "hosted_tool",
         label: "x",
-        description:
-          "Read public X posts, profiles, timelines, discussions, and trends through the official X API.",
+        description: "Scrape public X posts, profiles, timelines, and discussions through Apify.",
       },
     ]);
   });
