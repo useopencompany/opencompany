@@ -118,14 +118,13 @@ describe("AGENT_TOOL_CATALOG", () => {
     const x = AGENT_TOOL_DEFINITION_BY_ID.get("x");
 
     expect(x?.credentialSource).toBe("platform");
-    expect(x?.requiredPlatformEnvVars).toEqual(["X_API_BEARER_TOKEN"]);
+    expect(x?.requiredPlatformEnvVars).toEqual(["APIFY_API_TOKEN"]);
     expect(x?.requiredWorkspaceResource).toBeUndefined();
     expect(x?.runtimeTools).toEqual([
       "x_search_posts",
       "x_get_profile",
       "x_get_user_posts",
       "x_get_discussion",
-      "x_get_trends",
     ]);
   });
 
@@ -276,9 +275,8 @@ describe("runtime tool definitions", () => {
     const search = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_search_posts");
     const userPosts = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_user_posts");
     const discussion = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_discussion");
-    const trends = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_trends");
 
-    if (!search || !userPosts || !discussion || !trends) {
+    if (!search || !userPosts || !discussion) {
       throw new Error("Expected X runtime tool definitions to exist");
     }
 
@@ -287,37 +285,32 @@ describe("runtime tool definitions", () => {
 
     expect(search.configToolId).toBe("x");
     expect(search.parameters.required).toEqual(["query"]);
-    expect(search.parameters.properties).toHaveProperty("mode");
-    expect(search.parameters.properties).toHaveProperty("paginationToken");
-    expect(search.description).toContain("official X API");
+    expect(search.parameters.properties).toHaveProperty("runMode");
+    expect(search.parameters.properties).not.toHaveProperty("paginationToken");
+    expect(search.description).toContain("Apify-backed scraping");
     const searchMaxResults = maxResultsFor(search);
     expect(searchMaxResults.default).toBe(10);
-    expect(String(searchMaxResults.description)).toContain("Defaults to 10");
-    expect(String(searchMaxResults.description)).toContain(
-      "ask the user before using larger values",
-    );
+    expect(String(searchMaxResults.description)).toContain("Maximum 50");
     expect(search.help).toContain("Start with maxResults=10");
-    expect(search.help).toContain("explicitly asks for broader coverage");
+    expect(search.help).toContain("runMode=async");
 
     const userPostsMaxResults = maxResultsFor(userPosts);
     expect(userPostsMaxResults.default).toBe(10);
-    expect(String(userPostsMaxResults.description)).toContain("Defaults to 10");
-    expect(userPosts.help).toContain("Start with maxResults=10");
+    expect(String(userPostsMaxResults.description)).toContain("Maximum 50");
+    expect(userPosts.parameters.properties).toHaveProperty("runMode");
+    expect(userPosts.help).toContain("login-gated");
 
     expect(discussion.configToolId).toBe("x");
     expect(discussion.parameters.required).toEqual(["postIdOrUrl"]);
-    expect(discussion.help).toContain("target post");
+    expect(discussion.parameters.properties).toHaveProperty("runMode");
+    expect(discussion.help).toContain("replies/comments");
     const discussionMaxResults = maxResultsFor(discussion);
+    expect(String(discussionMaxResults.description)).toContain("Maximum 50");
     expect(discussionMaxResults.default).toBe(10);
     expect(String(discussionMaxResults.description)).toContain("Defaults to 10");
     expect(discussion.help).toContain("Start with maxResults=10");
     expect(discussion.parameters.properties).not.toHaveProperty("paginationToken");
     expect(discussion.help).not.toContain("pagination");
-
-    const trendsMaxResults = maxResultsFor(trends);
-    expect(trendsMaxResults.default).toBe(10);
-    expect(String(trendsMaxResults.description)).toContain("Defaults to 10");
-    expect(trends.help).toContain("Start with maxResults=10");
   });
 });
 
@@ -449,7 +442,6 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
         "x_get_profile",
         "x_get_user_posts",
         "x_get_discussion",
-        "x_get_trends",
       ]),
     );
   });

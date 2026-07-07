@@ -80,6 +80,64 @@ describe("buildGoatTaskTools usage metadata", () => {
     );
   });
 
+  it("passes X hosted-tool usage through lifecycle completion and compacts large output", async () => {
+    toolMocks.executeHostedTool.mockResolvedValueOnce({
+      output: {
+        posts: Array.from({ length: 25 }, (_, index) => ({
+          id: String(index + 1),
+          caption: `${"complaint ".repeat(200)}${index + 1}`,
+        })),
+      },
+      usage: {
+        provider: "x",
+        operation: "search",
+        costUsdMicros: 6_000,
+        rawUsage: { provider: "apify", actorId: "apidojo/tweet-scraper", itemsReturned: 25 },
+      },
+    });
+    const lifecycle = lifecycleMocks();
+    const tools = buildGoatTaskTools({
+      selectedTools: ["x_search_posts"],
+      userWorkosId: "user_1",
+      env: env({ apifyApiToken: "apify" }),
+      signal: new AbortController().signal,
+      lifecycle,
+    });
+
+    const output = await callTool(toExecutableTool(tools.x_search_posts), {
+      input: { query: "complaints", maxResults: 25 },
+      toolCallId: "call_x",
+    });
+
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "x_search_posts",
+        enabledTools: [
+          "x_search_posts",
+          "x_get_profile",
+          "x_get_user_posts",
+          "x_get_discussion",
+          "social_get_job",
+        ],
+      }),
+    );
+    expect(output).toMatchObject({
+      posts: expect.arrayContaining([expect.objectContaining({ id: "1" })]),
+    });
+    expect((output as { posts: unknown[] }).posts).toHaveLength(20);
+    expect(lifecycle.onToolCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCallId: "call_x",
+        toolName: "x_search_posts",
+        usage: expect.objectContaining({
+          provider: "x",
+          operation: "search",
+          costUsdMicros: 6_000,
+        }),
+      }),
+    );
+  });
+
   it("records zero-cost display usage for Google tools", async () => {
     toolMocks.executeGoatGoogleTool.mockResolvedValueOnce({ ok: true, messages: [] });
     const lifecycle = lifecycleMocks();
@@ -299,6 +357,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
     exaApiKey: "exa",
     xApiBearerToken: undefined,
+    apifyApiToken: undefined,
     supadataApiKey: undefined,
     ampApiKey: undefined,
     e2bTemplate: undefined,
