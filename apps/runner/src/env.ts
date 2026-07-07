@@ -26,6 +26,12 @@ export type RunnerEnv = {
   llmBrokerEnabled: boolean;
   integrationCredentialEncryptionKey: Buffer;
   exaApiKey: string | undefined;
+  goatBrowserEnabled: boolean;
+  agentBrowserProvider: string | undefined;
+  browserlessApiKey: string | undefined;
+  browserlessApiUrl: string | undefined;
+  browserlessTtl: string | undefined;
+  browserlessStealth: string | undefined;
   xApiBearerToken: string | undefined;
   apifyApiToken?: string | undefined;
   supadataApiKey: string | undefined;
@@ -81,6 +87,14 @@ export function loadEnv(): RunnerEnv {
     llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
+    goatBrowserEnabled: optionalBooleanEnv("RUNNER_GOAT_BROWSER_ENABLED", false),
+    agentBrowserProvider:
+      optionalEnv("AGENT_BROWSER_PROVIDER") ??
+      (process.env.NODE_ENV === "production" ? "browserless" : undefined),
+    browserlessApiKey: optionalEnv("BROWSERLESS_API_KEY"),
+    browserlessApiUrl: optionalEnv("BROWSERLESS_API_URL"),
+    browserlessTtl: optionalEnv("BROWSERLESS_TTL"),
+    browserlessStealth: optionalEnv("BROWSERLESS_STEALTH"),
     xApiBearerToken: optionalEnv("X_API_BEARER_TOKEN"),
     apifyApiToken: optionalEnv("APIFY_API_TOKEN"),
     supadataApiKey: optionalEnv("SUPADATA_API_KEY"),

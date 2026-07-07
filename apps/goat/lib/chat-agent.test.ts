@@ -47,6 +47,37 @@ describe("runOpenCompanyChatAgent", () => {
     expect(startTask).not.toHaveBeenCalled();
   });
 
+  it("injects DB-backed user context into the system prompt", async () => {
+    const startTask = vi.fn();
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "what should I do today?" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      userContext: {
+        email: "ada@example.com",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        timezone: "Europe/London",
+      },
+      generateTextImpl: (async (options: unknown) => {
+        const system = extractSystemPrompt(options);
+        expect(system).toContain("<user_context>");
+        expect(system).toContain("compact user.md-style profile from the database");
+        expect(system).toContain('firstName="Ada"');
+        expect(system).toContain('lastName="Lovelace"');
+        expect(system).toContain('email="ada@example.com"');
+        expect(system).toContain('timezone="Europe/London"');
+        return {
+          text: "Start with the highest-leverage item.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+  });
+
   it("returns a normal assistant message without creating a task", async () => {
     const startTask = vi.fn();
 

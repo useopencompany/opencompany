@@ -288,6 +288,12 @@ export async function POST(request: Request): Promise<Response> {
     model: gateway(turn.session.model),
     system: createOpenCompanyChatSystemPrompt({
       currentDate,
+      userContext: {
+        email: context.user.email,
+        firstName: context.user.firstName,
+        lastName: context.user.lastName,
+        timezone: context.user.timezone,
+      },
       webSearchEnabled: Boolean(exaApiKey),
       recurringSchedules,
     }),
@@ -521,6 +527,7 @@ function toStreamMessageMetadata(
     sessionId,
     ...(task
       ? {
+          taskId: task.id,
           task: {
             id: task.id,
             displayId: task.displayId,

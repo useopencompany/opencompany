@@ -2,6 +2,13 @@ function promptBlock(name: string, lines: readonly string[]) {
   return [`<${name}>`, ...lines, `</${name}>`].join("\n");
 }
 
+export type OpenCompanyChatUserContext = {
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  timezone: string;
+};
+
 export const OPENCOMPANY_CHAT_SYSTEM = promptBlock("system", [
   "You are OpenCompany, the main agent for getting work done and building the user's agentic company.",
   "You run in the main app as a chat interface. The rest of the app is organized around tasks: durable work items that can be spawned from this main agent when useful, tracked in Results, and executed by more specialized agents.",
@@ -50,6 +57,7 @@ export const OPENCOMPANY_CHAT_SYSTEM_PROMPT = [
 export function createOpenCompanyChatSystemPrompt(
   input: {
     currentDate?: Date | string;
+    userContext?: OpenCompanyChatUserContext;
     webSearchEnabled?: boolean;
     recurringSchedules?: readonly {
       id: string;
@@ -67,6 +75,7 @@ export function createOpenCompanyChatSystemPrompt(
       `Current date: ${formatPromptDate(input.currentDate)}.`,
       ...formatRecurringScheduleContext(input.recurringSchedules),
     ]),
+    promptBlock("user_context", formatUserContext(input.userContext)),
     promptBlock("behavior", [
       ...OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES,
       ...(input.webSearchEnabled ? OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES : []),
@@ -103,6 +112,29 @@ function formatRecurringScheduleContext(
         ].join(" "),
       ),
   ];
+}
+
+function formatUserContext(userContext: OpenCompanyChatUserContext | undefined) {
+  if (!userContext) {
+    return [
+      "User profile context is unavailable.",
+      "Do not infer the user's name, email, or timezone from chat history.",
+    ];
+  }
+
+  return [
+    "This is the user's compact user.md-style profile from the database.",
+    "Use it as durable personal context. Do not invent missing profile fields.",
+    `firstName=${formatPromptString(userContext.firstName)}`,
+    `lastName=${formatPromptString(userContext.lastName)}`,
+    `email=${formatPromptString(userContext.email)}`,
+    `timezone=${formatPromptString(userContext.timezone)}`,
+  ];
+}
+
+function formatPromptString(value: string | null | undefined) {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed ? JSON.stringify(trimmed) : "null";
 }
 
 function formatPromptDate(value: Date | string | undefined) {
