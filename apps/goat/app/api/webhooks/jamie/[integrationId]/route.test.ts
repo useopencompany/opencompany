@@ -76,10 +76,11 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_123",
+        sourceConnectionId: "gint_123",
         integrationId: "gint_123",
         rawPayload: jamiePayload(),
         item: expect.objectContaining({
-          provider: "jamie",
+          sourceProvider: "jamie",
           sourceType: "meeting",
           externalId: "calendar_event_123",
         }),

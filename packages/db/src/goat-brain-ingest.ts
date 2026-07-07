@@ -21,7 +21,8 @@ export type UpsertGoatBrainSourceItemResult = {
 
 export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   userWorkosId: string;
-  integrationId: string;
+  sourceConnectionId: string;
+  integrationId?: string | null;
   item: NormalizedBrainSourceItem;
   rawPayload: unknown;
   now?: Date;
@@ -31,14 +32,16 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   const now = input.now ?? new Date();
   const occurredAt = new Date(input.item.occurredAt);
   const capturedAt = new Date(input.item.capturedAt);
+  const integrationId = input.integrationId ?? null;
 
   const [sourceItem] = await db
     .insert(goatBrainSourceItems)
     .values({
       id: newGoatBrainSourceItemId(),
       userWorkosId: input.userWorkosId,
-      integrationId: input.integrationId,
-      provider: input.item.provider,
+      sourceProvider: input.item.sourceProvider,
+      sourceConnectionId: input.sourceConnectionId,
+      integrationId,
       sourceType: input.item.sourceType,
       externalId: input.item.externalId,
       sourceRef: input.item.sourceRef,
@@ -52,13 +55,15 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     })
     .onConflictDoUpdate({
       target: [
-        goatBrainSourceItems.integrationId,
+        goatBrainSourceItems.userWorkosId,
+        goatBrainSourceItems.sourceProvider,
+        goatBrainSourceItems.sourceConnectionId,
         goatBrainSourceItems.sourceType,
         goatBrainSourceItems.externalId,
         goatBrainSourceItems.contentHash,
       ],
       set: {
-        provider: input.item.provider,
+        integrationId,
         sourceRef: input.item.sourceRef,
         title: input.item.title,
         occurredAt,
@@ -81,8 +86,9 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
       id: newGoatBrainIngestJobId(),
       sourceItemId: sourceItem.id,
       userWorkosId: input.userWorkosId,
-      integrationId: input.integrationId,
-      provider: input.item.provider,
+      sourceProvider: input.item.sourceProvider,
+      sourceConnectionId: input.sourceConnectionId,
+      integrationId,
       kind: GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND,
       contentHash: input.item.contentHash,
       status: "queued",

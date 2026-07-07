@@ -5,11 +5,17 @@ import {
   MAX_GOAT_BRAIN_FILE_BYTES,
   upsertGoatBrainFileForUser,
 } from "@opencompany/db/goat-brain-files";
-import type { GoatBrainIngestJob } from "@opencompany/db/goat-schema";
+import {
+  type GoatBrainIngestJob,
+  type GoatBrainIngestJobKind,
+  type GoatBrainSourceProvider,
+  type GoatBrainSourceType,
+} from "@opencompany/db/goat-schema";
 import {
   formatGoatBrainEvidenceLink,
   goatBrainTimelineEntryFromParts,
   isNormalizedJamieMeetingSourceItem,
+  type NormalizedBrainSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedJamieMeetingTranscriptSegment,
   normalizeEvidenceId,
@@ -29,9 +35,38 @@ export const GOAT_BRAIN_INGEST_MAX_ATTEMPTS = 5;
 const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
 const JAMIE_TRANSCRIPT_EXCERPT_BYTES = 400_000;
 
-type GoatBrainIngestJobWithSource = GoatBrainIngestJob & {
+export type GoatBrainIngestJobWithSource = GoatBrainIngestJob & {
+  sourceType: GoatBrainSourceType;
   normalizedPayload: unknown;
 };
+
+export type GoatBrainIngestJobDescriptor = {
+  kind: GoatBrainIngestJobKind;
+  sourceProvider: GoatBrainSourceProvider;
+  sourceType: GoatBrainSourceType;
+};
+
+export type GoatBrainIngestHandler<
+  TItem extends NormalizedBrainSourceItem = NormalizedBrainSourceItem,
+> = {
+  descriptor: GoatBrainIngestJobDescriptor;
+  isPayload(value: unknown): value is TItem;
+  run(input: { userWorkosId: string; item: TItem }): Promise<Record<string, unknown>>;
+};
+
+const JAMIE_MEETING_INGEST_DESCRIPTOR = {
+  kind: "brain_source_item_ingest",
+  sourceProvider: "jamie",
+  sourceType: "meeting",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
+const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
+  {
+    descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedJamieMeetingSourceItem,
+    run: writeJamieMeetingToBrain,
+  },
+];
 
 export type GoatBrainIngestStore = {
   claimNext(input: {
@@ -39,6 +74,7 @@ export type GoatBrainIngestStore = {
     leaseOwner: string;
     now: Date;
     leaseExpiresAt: Date;
+    supportedJobs: readonly GoatBrainIngestJobDescriptor[];
   }): Promise<GoatBrainIngestJobWithSource | null>;
   heartbeat(input: {
     id: string;
@@ -70,15 +106,20 @@ export type GoatBrainIngestStore = {
 export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
   return {
     async claimNext(input) {
+      const supportedJobsWhere = supportedJobDescriptorsWhere(input.supportedJobs);
       const result = await getDb().execute(sql`
         WITH candidate AS (
-          SELECT id
-          FROM goat.brain_ingest_jobs
+          SELECT job.id
+          FROM goat.brain_ingest_jobs AS job
+          INNER JOIN goat.brain_source_items AS source ON source.id = job.source_item_id
           WHERE
-            (status = 'queued' AND next_run_at <= ${input.now})
-            OR (status = 'running' AND lease_expires_at < ${input.now})
-          ORDER BY next_run_at ASC, created_at ASC
-          FOR UPDATE SKIP LOCKED
+            (
+              (job.status = 'queued' AND job.next_run_at <= ${input.now})
+              OR (job.status = 'running' AND job.lease_expires_at < ${input.now})
+            )
+            AND (${supportedJobsWhere})
+          ORDER BY job.next_run_at ASC, job.created_at ASC
+          FOR UPDATE OF job SKIP LOCKED
           LIMIT 1
         ),
         claimed AS (
@@ -93,7 +134,10 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
           WHERE job.id = candidate.id
           RETURNING ${goatBrainIngestJobColumnsSql}
         )
-        SELECT claimed.*, source.normalized_payload AS "normalizedPayload"
+        SELECT
+          claimed.*,
+          source.source_type AS "sourceType",
+          source.normalized_payload AS "normalizedPayload"
         FROM claimed
         INNER JOIN goat.brain_source_items AS source ON source.id = claimed."sourceItemId"
       `);
@@ -198,6 +242,7 @@ export function wakeGoatBrainIngestWorker() {
 
 export async function claimNextGoatBrainIngestJob(input: {
   leaseOwner: string;
+  supportedJobs: readonly GoatBrainIngestJobDescriptor[];
   store?: GoatBrainIngestStore;
   leaseTtlMs?: number;
 }) {
@@ -208,15 +253,18 @@ export async function claimNextGoatBrainIngestJob(input: {
     leaseOwner: input.leaseOwner,
     now,
     leaseExpiresAt: new Date(now.getTime() + (input.leaseTtlMs ?? GOAT_BRAIN_INGEST_LEASE_TTL_MS)),
+    supportedJobs: input.supportedJobs,
   });
 }
 
 export async function runClaimedGoatBrainIngestJob(input: {
   job: GoatBrainIngestJobWithSource;
   env: Pick<RunnerEnv, "jobLeaseTtlMs">;
+  handlers?: readonly GoatBrainIngestHandler[];
   store?: GoatBrainIngestStore;
 }) {
   const store = input.store ?? createDbGoatBrainIngestStore();
+  const handlers = input.handlers ?? GOAT_BRAIN_INGEST_HANDLERS;
   const leaseId = requireJobLease(input.job, "leaseId");
   const leaseOwner = requireJobLease(input.job, "leaseOwner");
   let leaseActive = true;
@@ -252,17 +300,22 @@ export async function runClaimedGoatBrainIngestJob(input: {
     if (input.job.kind !== "brain_source_item_ingest") {
       throw new Error(`Unsupported Goat Brain ingest job kind: ${input.job.kind}`);
     }
-    if (input.job.provider !== "jamie") {
-      throw new Error(`Unsupported Goat Brain ingest provider: ${input.job.provider}`);
+    const handler = findGoatBrainIngestHandler(handlers, input.job);
+    if (!handler) {
+      throw new Error(
+        `Unsupported Goat Brain ingest source: ${input.job.kind}/${input.job.sourceProvider}/${input.job.sourceType}`,
+      );
     }
-    if (!isNormalizedJamieMeetingSourceItem(input.job.normalizedPayload)) {
-      throw new Error("Goat Brain ingest job has an invalid Jamie normalized payload.");
+    if (!handler.isPayload(input.job.normalizedPayload)) {
+      throw new Error(
+        `Goat Brain ingest job has an invalid ${input.job.sourceProvider}/${input.job.sourceType} normalized payload.`,
+      );
     }
     if (input.job.normalizedPayload.contentHash !== input.job.contentHash) {
       throw new Error("Goat Brain ingest job content hash does not match its source payload.");
     }
 
-    const result = await writeJamieMeetingToBrain({
+    const result = await handler.run({
       userWorkosId: input.job.userWorkosId,
       item: input.job.normalizedPayload,
     });
@@ -301,6 +354,8 @@ export function startGoatBrainIngestWorker(
   } = {},
 ) {
   const store = options.store ?? createDbGoatBrainIngestStore();
+  const handlers = GOAT_BRAIN_INGEST_HANDLERS;
+  const supportedJobs = handlers.map((handler) => handler.descriptor);
   const concurrency = Math.max(1, options.concurrency ?? Math.min(2, env.workerConcurrency));
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? GOAT_BRAIN_INGEST_POLL_INTERVAL_MS);
   const active = new Set<Promise<void>>();
@@ -340,11 +395,12 @@ export function startGoatBrainIngestWorker(
         while (!stopped && active.size < concurrency) {
           const job = await claimNextGoatBrainIngestJob({
             leaseOwner: env.instanceId,
+            supportedJobs,
             store,
             leaseTtlMs: env.jobLeaseTtlMs,
           });
           if (!job) break;
-          const running = runClaimedGoatBrainIngestJob({ job, env, store })
+          const running = runClaimedGoatBrainIngestJob({ job, env, handlers, store })
             .catch((error) => {
               captureException(error, {
                 event: "opencompany.goat_brain_ingest_job_failed",
@@ -645,12 +701,41 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Goat Brain ingest error.";
 }
 
+function findGoatBrainIngestHandler(
+  handlers: readonly GoatBrainIngestHandler[],
+  job: Pick<GoatBrainIngestJobWithSource, "kind" | "sourceProvider" | "sourceType">,
+) {
+  return handlers.find(
+    (handler) =>
+      handler.descriptor.kind === job.kind &&
+      handler.descriptor.sourceProvider === job.sourceProvider &&
+      handler.descriptor.sourceType === job.sourceType,
+  );
+}
+
+function supportedJobDescriptorsWhere(descriptors: readonly GoatBrainIngestJobDescriptor[]) {
+  if (descriptors.length === 0) return sql`FALSE`;
+  return sql.join(
+    descriptors.map(
+      (descriptor) => sql`
+        (
+          job.kind = ${descriptor.kind}
+          AND job.source_provider = ${descriptor.sourceProvider}
+          AND source.source_type = ${descriptor.sourceType}
+        )
+      `,
+    ),
+    sql` OR `,
+  );
+}
+
 const goatBrainIngestJobColumnsSql = sql`
   job.id,
   job.source_item_id AS "sourceItemId",
   job.user_workos_id AS "userWorkosId",
+  job.source_provider AS "sourceProvider",
+  job.source_connection_id AS "sourceConnectionId",
   job.integration_id AS "integrationId",
-  job.provider,
   job.kind,
   job.content_hash AS "contentHash",
   job.status,

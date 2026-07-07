@@ -60,6 +60,7 @@ export async function POST(
 
   const result = await upsertGoatBrainSourceItemAndEnqueue({
     userWorkosId: webhookContext.userWorkosId,
+    sourceConnectionId: webhookContext.integrationId,
     integrationId: webhookContext.integrationId,
     item,
     rawPayload: payload,

@@ -4,7 +4,7 @@ export type BrainSourceProvider = "jamie";
 export type BrainSourceType = "meeting";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
-  provider: BrainSourceProvider;
+  sourceProvider: BrainSourceProvider;
   sourceType: BrainSourceType;
   externalId: string;
   sourceRef: string;
@@ -56,7 +56,7 @@ export type NormalizedJamieMeetingContent = {
 
 export type NormalizedJamieMeetingSourceItem =
   NormalizedBrainSourceItem<NormalizedJamieMeetingContent> & {
-    provider: "jamie";
+    sourceProvider: "jamie";
     sourceType: "meeting";
   };
 
@@ -103,7 +103,7 @@ export function normalizeJamieMeetingCompletedWebhook(
   const sourceRef = `jamie:meeting:${externalId}`;
 
   const contentHashInput = {
-    provider: "jamie",
+    sourceProvider: "jamie",
     sourceType: "meeting",
     externalId,
     title,
@@ -116,7 +116,7 @@ export function normalizeJamieMeetingCompletedWebhook(
   };
 
   return {
-    provider: "jamie",
+    sourceProvider: "jamie",
     sourceType: "meeting",
     externalId,
     sourceRef,
@@ -153,7 +153,7 @@ export function isNormalizedJamieMeetingSourceItem(
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<NormalizedJamieMeetingSourceItem>;
   return (
-    item.provider === "jamie" &&
+    item.sourceProvider === "jamie" &&
     item.sourceType === "meeting" &&
     typeof item.externalId === "string" &&
     typeof item.sourceRef === "string" &&

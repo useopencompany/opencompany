@@ -45,7 +45,7 @@ describe("Jamie brain source normalization", () => {
       capturedAt: "2026-01-01T11:06:00.000Z",
     });
 
-    expect(item.provider).toBe("jamie");
+    expect(item.sourceProvider).toBe("jamie");
     expect(item.sourceType).toBe("meeting");
     expect(item.externalId).toBe("calendar_event_123");
     expect(item.sourceRef).toBe("jamie:meeting:calendar_event_123");

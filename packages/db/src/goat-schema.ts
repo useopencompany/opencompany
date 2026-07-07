@@ -37,6 +37,7 @@ export type GoatIntegrationResourceStatus =
   | "permission_lost"
   | "archived"
   | "sync_failed";
+export type GoatBrainSourceProvider = "jamie";
 export type GoatBrainSourceType = "meeting";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest";
@@ -572,8 +573,9 @@ export const goatBrainSourceItems = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    integrationId: text("integration_id").notNull(),
-    provider: text("provider").$type<GoatIntegrationProvider>().notNull(),
+    sourceProvider: text("source_provider").$type<GoatBrainSourceProvider>().notNull(),
+    sourceConnectionId: text("source_connection_id").notNull(),
+    integrationId: text("integration_id"),
     sourceType: text("source_type").$type<GoatBrainSourceType>().notNull(),
     externalId: text("external_id").notNull(),
     sourceRef: text("source_ref").notNull(),
@@ -591,12 +593,19 @@ export const goatBrainSourceItems = goat.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    integrationSourceExternalHashIdx: uniqueIndex(
-      "goat_brain_source_items_integration_source_external_hash_idx",
-    ).on(table.integrationId, table.sourceType, table.externalId, table.contentHash),
-    userProviderOccurredIdx: index("goat_brain_source_items_user_provider_occurred_idx").on(
+    sourceConnectionExternalHashIdx: uniqueIndex(
+      "goat_brain_source_items_connection_external_hash_idx",
+    ).on(
       table.userWorkosId,
-      table.provider,
+      table.sourceProvider,
+      table.sourceConnectionId,
+      table.sourceType,
+      table.externalId,
+      table.contentHash,
+    ),
+    userSourceProviderOccurredIdx: index("goat_brain_source_items_user_provider_occurred_idx").on(
+      table.userWorkosId,
+      table.sourceProvider,
       table.occurredAt,
     ),
     userUpdatedIdx: index("goat_brain_source_items_user_updated_idx").on(
@@ -609,16 +618,16 @@ export const goatBrainSourceItems = goat.table(
     ),
     integrationUserProviderFk: foreignKey({
       name: "goat_brain_source_items_integration_user_provider_fk",
-      columns: [table.integrationId, table.userWorkosId, table.provider],
+      columns: [table.integrationId, table.userWorkosId, table.sourceProvider],
       foreignColumns: [
         goatIntegrations.id,
         goatIntegrations.userWorkosId,
         goatIntegrations.provider,
       ],
     }).onDelete("cascade"),
-    providerCheck: check(
-      "goat_brain_source_items_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
+    sourceProviderCheck: check(
+      "goat_brain_source_items_source_provider_check",
+      sql`${table.sourceProvider} IN ('jamie')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
@@ -641,8 +650,9 @@ export const goatBrainIngestJobs = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    integrationId: text("integration_id").notNull(),
-    provider: text("provider").$type<GoatIntegrationProvider>().notNull(),
+    sourceProvider: text("source_provider").$type<GoatBrainSourceProvider>().notNull(),
+    sourceConnectionId: text("source_connection_id").notNull(),
+    integrationId: text("integration_id"),
     kind: text("kind").$type<GoatBrainIngestJobKind>().notNull(),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<GoatBrainIngestJobStatus>().notNull().default("queued"),
@@ -674,9 +684,9 @@ export const goatBrainIngestJobs = goat.table(
       table.userWorkosId,
       table.createdAt,
     ),
-    providerCheck: check(
-      "goat_brain_ingest_jobs_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
+    sourceProviderCheck: check(
+      "goat_brain_ingest_jobs_source_provider_check",
+      sql`${table.sourceProvider} IN ('jamie')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",

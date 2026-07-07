@@ -1,6 +1,10 @@
 import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/goat-brain";
-import { describe, expect, it } from "vitest";
-import { buildJamieMeetingBrainWrites } from "./goat-brain-ingest-worker";
+import { describe, expect, it, vi } from "vitest";
+import {
+  buildJamieMeetingBrainWrites,
+  type GoatBrainIngestStore,
+  runClaimedGoatBrainIngestJob,
+} from "./goat-brain-ingest-worker";
 
 function jamieItem(segmentCount = 2) {
   return normalizeJamieMeetingCompletedWebhook(
@@ -56,5 +60,72 @@ describe("Goat Brain ingest worker", () => {
     expect(writes.truncatedTranscript).toBe(true);
     expect(writes.evidenceContent).toContain("Transcript truncated after");
     expect(Buffer.byteLength(writes.evidenceContent, "utf8")).toBeLessThan(1_000_000);
+  });
+
+  it("dispatches claimed jobs through a registered source handler", async () => {
+    const normalizedPayload = {
+      sourceProvider: "jamie" as const,
+      sourceType: "meeting" as const,
+      externalId: "external_123",
+      sourceRef: "jamie:meeting:external_123",
+      title: "Registry Test",
+      occurredAt: "2026-01-01T10:00:00.000Z",
+      capturedAt: "2026-01-01T10:01:00.000Z",
+      contentHash: "hash_123",
+      contentHashInput: {},
+      content: {},
+    };
+    const run = vi.fn(async () => ({ handled: true }));
+    const complete = vi.fn(async () => true);
+    const fail = vi.fn(async () => true);
+    const store: GoatBrainIngestStore = {
+      claimNext: vi.fn(async () => null),
+      heartbeat: vi.fn(async () => true),
+      complete,
+      fail,
+    };
+
+    await runClaimedGoatBrainIngestJob({
+      env: { jobLeaseTtlMs: 30_000 },
+      store,
+      handlers: [
+        {
+          descriptor: {
+            kind: "brain_source_item_ingest",
+            sourceProvider: "jamie",
+            sourceType: "meeting",
+          },
+          isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+          run,
+        },
+      ],
+      job: {
+        id: "gbjob_123",
+        sourceItemId: "gbsrc_123",
+        userWorkosId: "user_123",
+        sourceProvider: "jamie",
+        sourceConnectionId: "gint_123",
+        integrationId: "gint_123",
+        sourceType: "meeting",
+        kind: "brain_source_item_ingest",
+        contentHash: "hash_123",
+        status: "running",
+        attempts: 1,
+        nextRunAt: new Date("2026-01-01T10:00:00.000Z"),
+        leaseId: "lease_123",
+        leaseOwner: "runner_123",
+        leaseExpiresAt: new Date("2026-01-01T10:05:00.000Z"),
+        lastError: null,
+        result: {},
+        completedAt: null,
+        createdAt: new Date("2026-01-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-01-01T10:00:00.000Z"),
+        normalizedPayload,
+      },
+    });
+
+    expect(run).toHaveBeenCalledWith({ userWorkosId: "user_123", item: normalizedPayload });
+    expect(complete).toHaveBeenCalledWith(expect.objectContaining({ result: { handled: true } }));
+    expect(fail).not.toHaveBeenCalled();
   });
 });
