@@ -1,3 +1,5 @@
+import { createMDX } from "fumadocs-mdx/next";
+
 const release =
   process.env.RELEASE_SHA ||
   process.env.GITHUB_SHA ||
@@ -23,4 +25,6 @@ const nextConfig = {
   ],
 };
 
-export default nextConfig;
+const withMDX = createMDX();
+
+export default withMDX(nextConfig);
