@@ -213,6 +213,7 @@ export function createOpenCompanyChatToolContext(input: {
   let startTaskInFlight: Promise<StartedTask> | null = null;
   let scheduledTask: ScheduleTaskToolOutput | null = null;
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
+  let visibleToolActivity = false;
   let webSearchCallCount = 0;
 
   const tools: ToolSet = {
@@ -252,6 +253,7 @@ export function createOpenCompanyChatToolContext(input: {
         if (!input.runBrainCli) {
           throw new Error("goat_brain is not configured for this chat.");
         }
+        visibleToolActivity = true;
         const normalized = normalizeGoatBrainToolInput(args);
         return executionContext === undefined
           ? input.runBrainCli(normalized)
@@ -285,6 +287,7 @@ export function createOpenCompanyChatToolContext(input: {
         required: ["prompt", "name"],
       }),
       execute: async (args) => {
+        visibleToolActivity = true;
         if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
         if (startTaskInFlight) {
           startedTask = await startTaskInFlight;
@@ -354,6 +357,7 @@ export function createOpenCompanyChatToolContext(input: {
         required: ["prompt", "name", "cron"],
       }),
       execute: async (args) => {
+        visibleToolActivity = true;
         if (scheduledTask) return scheduledTask;
         if (scheduleTaskInFlight) {
           scheduledTask = await scheduleTaskInFlight;
@@ -416,7 +420,10 @@ export function createOpenCompanyChatToolContext(input: {
         },
         required: [],
       }),
-      execute: input.editTaskSchedule,
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return input.editTaskSchedule!(args);
+      },
     });
   }
 
@@ -445,7 +452,10 @@ export function createOpenCompanyChatToolContext(input: {
         },
         required: [],
       }),
-      execute: input.deleteTaskSchedule,
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return input.deleteTaskSchedule!(args);
+      },
     });
   }
 
@@ -470,6 +480,7 @@ export function createOpenCompanyChatToolContext(input: {
         required: ["query"],
       }),
       execute: async (args) => {
+        visibleToolActivity = true;
         if (webSearchCallCount >= 1) {
           return {
             ok: false,
@@ -496,6 +507,7 @@ export function createOpenCompanyChatToolContext(input: {
 
   return {
     getStartedTask: () => startedTask,
+    hasVisibleToolActivity: () => visibleToolActivity,
     tools,
   };
 }

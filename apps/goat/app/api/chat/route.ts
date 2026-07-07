@@ -46,7 +46,7 @@ import {
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
-export const maxDuration = 60;
+export const maxDuration = 240;
 export const runtime = "nodejs";
 
 type ChatRequestBody = {
@@ -293,6 +293,59 @@ export async function POST(request: Request): Promise<Response> {
   let debugTrace: GoatChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
     model: turn.session.model,
   });
+  let assistantPersisted = false;
+  let assistantPersistPromise: Promise<void> | null = null;
+  const persistFallbackAssistantMessage = (error: unknown, finishReason: string) => {
+    if (assistantPersisted || assistantPersistPromise) return assistantPersistPromise;
+    const startedTask = toolContext.getStartedTask();
+    if (!startedTask && !toolContext.hasVisibleToolActivity()) return null;
+
+    const fallbackTrace = {
+      ...debugTrace,
+      ...(request.signal.aborted ? { aborted: true } : {}),
+      error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
+      finishReason,
+    };
+    finishChatTelemetry(request.signal.aborted ? "aborted" : "failure", {
+      "goat.chat_session_id": turn.session.id,
+      "goat.chat_message_id": turn.userMessage.id,
+      "goat.model": turn.session.model,
+      "goat.task_started": Boolean(startedTask),
+      "goat.task_id": startedTask?.id,
+    });
+    assistantPersistPromise = Promise.resolve(
+      persistGoatChatAssistantMessage(
+        {
+          sessionId: turn.session.id,
+          content: startedTask
+            ? normalizeAgentText("", startedTask)
+            : "Goat stopped before it could finish.",
+          taskId: startedTask?.id ?? null,
+          debugTrace: fallbackTrace,
+        },
+        store,
+      ),
+    )
+      .then(() => {
+        assistantPersisted = true;
+      })
+      .catch((persistError) => {
+        console.warn("Goat chat fallback persistence failed.", {
+          event: "goat.chat_fallback_persist_failed",
+          session_id: turn.session.id,
+          error: persistError,
+        });
+      });
+    return assistantPersistPromise;
+  };
+  request.signal.addEventListener(
+    "abort",
+    () => {
+      void persistFallbackAssistantMessage(new Error("Goat chat request aborted."), "abort");
+    },
+    { once: true },
+  );
+
   const gateway = createGateway({ apiKey: gatewayApiKey });
   const result = streamText({
     model: gateway(turn.session.model),
@@ -335,6 +388,7 @@ export async function POST(request: Request): Promise<Response> {
         model: turn.session.model,
         error: event.error instanceof Error ? event.error.message : "Goat chat failed.",
       });
+      void persistFallbackAssistantMessage(event.error, "error");
     },
   });
 
@@ -348,9 +402,13 @@ export async function POST(request: Request): Promise<Response> {
         session_id: turn.session.id,
         error,
       });
+      void persistFallbackAssistantMessage(error, "error");
       return "Goat could not answer that right now.";
     },
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
+      if (assistantPersistPromise) await assistantPersistPromise;
+      if (assistantPersisted) return;
+
       const startedTask = toolContext.getStartedTask();
       const rawContent = textFromGoatChatUiMessage(responseMessage);
       const hasAssistantParts = hasDisplayableAssistantParts(responseMessage);
@@ -372,19 +430,34 @@ export async function POST(request: Request): Promise<Response> {
         ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
       };
-      await persistGoatChatAssistantMessage(
-        {
-          sessionId: turn.session.id,
-          ...(responseMessageId ? { messageId: responseMessageId } : {}),
-          content:
-            isAborted && !rawContent && hasAssistantParts && !startedTask
-              ? ""
-              : normalizeAgentText(rawContent, startedTask),
-          taskId: startedTask?.id ?? null,
-          debugTrace: finalTrace,
-        },
-        store,
-      );
+      const assistantMessageInput = {
+        sessionId: turn.session.id,
+        ...(responseMessageId ? { messageId: responseMessageId } : {}),
+        content:
+          isAborted && !rawContent && hasAssistantParts && !startedTask
+            ? ""
+            : normalizeAgentText(rawContent, startedTask),
+        taskId: startedTask?.id ?? null,
+        debugTrace: finalTrace,
+      };
+      try {
+        await persistGoatChatAssistantMessage(assistantMessageInput, store);
+      } catch (error) {
+        if (!responseMessageId) throw error;
+        console.warn("Goat chat assistant persistence failed; retrying with a server id.", {
+          event: "goat.chat_assistant_persist_retry",
+          session_id: turn.session.id,
+          error,
+        });
+        await persistGoatChatAssistantMessage(
+          {
+            ...assistantMessageInput,
+            messageId: null,
+          },
+          store,
+        );
+      }
+      assistantPersisted = true;
       finishChatTelemetry(isAborted ? "aborted" : "success", {
         "goat.chat_session_id": turn.session.id,
         "goat.chat_message_id": turn.userMessage.id,
