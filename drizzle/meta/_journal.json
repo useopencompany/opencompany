@@ -645,6 +645,34 @@
       "when": 1783356300000,
       "tag": "0091_goat_recurring_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1783363150211,
+      "tag": "0092_goat_codex_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1783363450000,
+      "tag": "0093_goat_codex_engine_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1783423300000,
+      "tag": "0094_repair_goat_recurring_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1783423600000,
+      "tag": "0095_goat_brain_ingest",
+      "breakpoints": true
     }
   ]
 }

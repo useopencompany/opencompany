@@ -24,11 +24,31 @@ export type GoatGitHubProviderState = {
   statusReason: string | null;
 };
 
+export type GoatJamieProviderState = {
+  provider: "jamie";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  accountName: string | null;
+  statusReason: string | null;
+  integrationId: string | null;
+  webhookUrl: string | null;
+};
+
+export type GoatCodexProviderState = {
+  provider: "codex";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "not_connected";
+  statusReason: string | null;
+  lastValidatedAt: string | null;
+};
+
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
   google_calendar: GoatGoogleProviderState;
   linear: GoatLinearProviderState;
   github: GoatGitHubProviderState;
+  jamie: GoatJamieProviderState;
+  codex: GoatCodexProviderState;
 };
 
 type IntegrationStateRow = {
@@ -54,6 +74,14 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     google_calendar: googleProviderState("google_calendar", byProvider.get("google_calendar")),
     linear: linearProviderState(byProvider.get("linear")),
     github: githubProviderState(byProvider.get("github")),
+    jamie: jamieProviderState(byProvider.get("jamie")),
+    codex: {
+      provider: "codex",
+      connected: false,
+      status: "not_connected",
+      statusReason: null,
+      lastValidatedAt: null,
+    },
   };
 }
 
@@ -119,5 +147,29 @@ function githubProviderState(row: IntegrationStateRow | undefined): GoatGitHubPr
     status: row.status,
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function jamieProviderState(row: IntegrationStateRow | undefined): GoatJamieProviderState {
+  if (!row) {
+    return {
+      provider: "jamie",
+      connected: false,
+      status: "not_connected",
+      accountName: null,
+      statusReason: null,
+      integrationId: null,
+      webhookUrl: null,
+    };
+  }
+
+  return {
+    provider: "jamie",
+    connected: row.status === "connected",
+    status: row.status,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    integrationId: null,
+    webhookUrl: null,
   };
 }

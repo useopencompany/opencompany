@@ -8,7 +8,13 @@ const release =
   process.env.VERCEL_GIT_COMMIT_SHA ||
   "";
 const vercelManagedDeploymentId = process.env.NEXT_DEPLOYMENT_ID?.startsWith("dpl_") ?? false;
-const deploymentId = vercelManagedDeploymentId ? "" : release.slice(0, 32);
+const releaseWorkflowDeploymentId =
+  release && process.env.GITHUB_RUN_ID
+    ? `${release.slice(0, 10)}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT || "1"}`
+    : "";
+const deploymentId = vercelManagedDeploymentId
+  ? ""
+  : (releaseWorkflowDeploymentId || release).slice(0, 32);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -16,10 +22,11 @@ const nextConfig = {
   // deploys (`vercel build` + `vercel deploy --prebuilt`). Next writes this into
   // the build output (routes-manifest.json) and stamps it on client requests, so a
   // stale client's Server Actions/assets route to the deployment that served its
-  // page instead of throwing into the error boundary. Must be unique per release
+  // page instead of throwing into the error boundary. Must be unique per deployment
   // and must not start with `dpl_`. Vercel caps custom IDs at 32 characters, so
-  // use the commit prefix for skew protection while preserving the full release
-  // value for observability. Vercel-managed builds already inject NEXT_DEPLOYMENT_ID
+  // GitHub Actions release builds include the run id to allow env-only redeploys
+  // of the same commit while preserving the full release value for observability.
+  // Vercel-managed builds already inject NEXT_DEPLOYMENT_ID
   // with a platform `dpl_...` value; in that path, let Next use Vercel's deployment
   // identity instead of providing a conflicting custom ID. Only set when present so
   // local `next dev`/`next build` are unaffected.

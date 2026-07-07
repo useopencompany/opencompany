@@ -20,6 +20,7 @@ import {
   createGoatBrainMarkdownReportForTask,
   type GoatBrainMarkdownReportArtifact,
 } from "./goat-brain";
+import { runGoatCodexTask } from "./goat-codex";
 import {
   buildGoatTaskToolRuntime,
   type GoatToolLifecycleInput,
@@ -30,6 +31,7 @@ import {
   buildGoatHarnessCreationPrompt,
   buildGoatHarnessSkillSystemPrompt,
   GOAT_HARNESS_CREATION_SYSTEM_PROMPT,
+  GOAT_HARNESS_ENGINE_OPTIONS,
   GOAT_HARNESS_MODEL_OPTIONS,
   GOAT_HARNESS_SKILL_OPTIONS,
 } from "./prompts/goat-harness-creation";
@@ -38,6 +40,10 @@ const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_GOAT_MAX_MODEL_STEPS = 16;
 const MAX_GOAT_MODEL_STEPS = 32;
 const MIN_GOAT_BROWSER_MODEL_STEPS = 16;
+const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
+const DEFAULT_CODEX_GOAL_TOKEN_BUDGET = 200_000;
+const MIN_CODEX_GOAL_TOKEN_BUDGET = 1;
+const MAX_CODEX_GOAL_TOKEN_BUDGET = 1_000_000;
 const ASSISTANT_CONTENT_FLUSH_INTERVAL_MS = 500;
 const GOAT_FINALIZATION_SYSTEM_INSTRUCTION =
   "You are on the final reserved step for this Goat task. Do not call any more tools. Use the tool results and context so far to provide the best final answer now. If the task is incomplete, clearly state what you could and could not verify.";
@@ -92,6 +98,12 @@ export type GoatTaskRunSink = {
     finishReason?: string | null;
     rawFinishReason?: string | null;
     providerCreatedAt?: Date | null;
+    costOverride?: {
+      providerCostUsdMicros: number;
+      platformFeeUsdMicros: number;
+      totalCostUsdMicros: number;
+      costBasis: Record<string, unknown>;
+    };
   }): Promise<void>;
   recordToolUsage(input: {
     messageId?: string | null;
@@ -110,11 +122,15 @@ export type GoatTaskRunSink = {
     activeMs: number;
     rawMetrics?: Record<string, unknown>;
   }): Promise<void>;
+  updateCodexEngineSessionId(codexEngineSessionId: string): Promise<void>;
 };
 
 export type GoatTaskExecutorInput = {
   task: GoatTask;
   env: RunnerEnv;
+  plannerContext?: {
+    githubRepositories?: readonly string[];
+  };
   signal: AbortSignal;
   sink: GoatTaskRunSink;
   reportStage: (
@@ -153,6 +169,7 @@ export async function executeGoatTask(
           prompt: input.task.prompt,
           model: input.task.model,
           availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
+          githubRepositories: input.plannerContext?.githubRepositories ?? [],
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
           signal: input.signal,
         });
@@ -172,11 +189,13 @@ export async function executeGoatTask(
     type: "harness.planned",
     payload: {
       schemaVersion: harnessSpec.schemaVersion,
+      engine: harnessSpec.engine,
       model: harnessSpec.model,
       tools: harnessSpec.tools,
       skills: harnessSpec.skills,
       maxModelSteps: harnessSpec.maxModelSteps,
       resultMode: harnessSpec.resultMode,
+      codex: harnessSpec.codex ?? null,
     },
   });
   await input.sink.appendEvent({
@@ -196,15 +215,28 @@ export async function executeGoatTask(
   });
 
   try {
-    const result = await runGoatTaskModelStream({
-      env: input.env,
-      taskId: input.task.id,
-      userWorkosId: input.task.userWorkosId,
-      harnessSpec,
-      signal: input.signal,
-      sink: input.sink,
-      assistantMessageId: assistant.id,
-    });
+    const result =
+      harnessSpec.engine === "codex"
+        ? await runGoatTaskCodex({
+            taskId: input.task.id,
+            prompt: input.task.prompt,
+            env: input.env,
+            userWorkosId: input.task.userWorkosId,
+            existingEngineSessionId: input.task.codexEngineSessionId,
+            harnessSpec,
+            signal: input.signal,
+            sink: input.sink,
+            assistantMessageId: assistant.id,
+          })
+        : await runGoatTaskModelStream({
+            env: input.env,
+            taskId: input.task.id,
+            userWorkosId: input.task.userWorkosId,
+            harnessSpec,
+            signal: input.signal,
+            sink: input.sink,
+            assistantMessageId: assistant.id,
+          });
 
     const finalContent = result.assistantContent.trim();
     if (!finalContent) {
@@ -256,6 +288,94 @@ export async function executeGoatTask(
     await markAssistantMessageFailedBestEffort(input.sink, assistant.id, errorMessage(error));
     throw error;
   }
+}
+
+async function runGoatTaskCodex(input: {
+  taskId: string;
+  prompt: string;
+  env: RunnerEnv;
+  userWorkosId: string;
+  existingEngineSessionId: string | null;
+  harnessSpec: GoatHarnessSpec;
+  signal: AbortSignal;
+  sink: GoatTaskRunSink;
+  assistantMessageId: string;
+}): Promise<{ assistantContent: string; usage?: LanguageModelUsage }> {
+  let codexActivity = "";
+  let lastCodexActivityFlushAt = 0;
+  const flushCodexActivity = async (force = false) => {
+    if (!codexActivity) return;
+    const now = Date.now();
+    if (!force && now - lastCodexActivityFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) return;
+    lastCodexActivityFlushAt = now;
+    await input.sink.updateMessageContent({
+      messageId: input.assistantMessageId,
+      content: codexActivity,
+    });
+  };
+  const result = await runGoatCodexTask({
+    userWorkosId: input.userWorkosId,
+    taskId: input.taskId,
+    messageId: input.assistantMessageId,
+    prompt: input.harnessSpec.initialUserMessage || input.prompt,
+    systemPrompt: input.harnessSpec.systemPrompt,
+    model: input.harnessSpec.model,
+    existingEngineSessionId: input.existingEngineSessionId,
+    env: input.env,
+    signal: input.signal,
+    ...(input.harnessSpec.codex?.repository !== undefined
+      ? { repository: input.harnessSpec.codex.repository }
+      : {}),
+    ...(input.harnessSpec.codex?.createPullRequest !== undefined
+      ? { createPullRequest: input.harnessSpec.codex.createPullRequest }
+      : {}),
+    ...(input.harnessSpec.codex?.reasoningEffort
+      ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }
+      : {}),
+    ...(input.harnessSpec.codex?.goalMode ? { goalMode: input.harnessSpec.codex.goalMode } : {}),
+    onEngineSessionId: input.sink.updateCodexEngineSessionId,
+    onOutput: async (delta) => {
+      codexActivity = `${codexActivity}${delta}`;
+      await flushCodexActivity(false);
+    },
+  });
+  await flushCodexActivity(true);
+
+  await input.sink.recordSandboxUsage({
+    messageId: input.assistantMessageId,
+    sandboxId: result.sandboxId,
+    template: input.env.codexE2bTemplate ?? "codex",
+    vcpu: null,
+    ramMib: null,
+    startedAt: result.sandboxStartedAt,
+    endedAt: result.sandboxEndedAt,
+    activeMs: Math.max(0, result.sandboxEndedAt.getTime() - result.sandboxStartedAt.getTime()),
+    rawMetrics: {
+      engine: "codex",
+      repository: input.harnessSpec.codex?.repository ?? null,
+      goalMode: Boolean(input.harnessSpec.codex?.goalMode),
+      goalStatus: result.goal?.status ?? null,
+    },
+  });
+  if (result.usage) {
+    await input.sink.recordModelUsage({
+      messageId: input.assistantMessageId,
+      phase: "execution",
+      stepIndex: 0,
+      modelProvider: "openai",
+      modelName: result.model,
+      usage: result.usage,
+      finishReason: "stop",
+      costOverride: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        costBasis: { source: "codex_subscription" },
+      },
+    });
+  }
+
+  return { assistantContent: result.content, ...(result.usage ? { usage: result.usage } : {}) };
 }
 
 function hasPreplannedHarnessSpec(value: GoatHarnessSpec) {
@@ -490,12 +610,14 @@ export async function planGoatHarness(input: {
   model: GoatHarnessSpec["model"];
   gatewayApiKey: string;
   availableTools?: readonly GoatTaskToolName[];
+  githubRepositories?: readonly string[];
   signal?: AbortSignal;
 }): Promise<GoatHarnessSpec> {
   return (
     await planGoatHarnessForTask({
       ...input,
       availableTools: input.availableTools ?? ["exa_search"],
+      githubRepositories: input.githubRepositories ?? [],
     })
   ).harnessSpec;
 }
@@ -505,6 +627,7 @@ export async function planGoatHarnessForTask(input: {
   model: GoatHarnessSpec["model"];
   gatewayApiKey: string;
   availableTools: readonly GoatTaskToolName[];
+  githubRepositories?: readonly string[];
   signal?: AbortSignal;
 }): Promise<{
   harnessSpec: GoatHarnessSpec;
@@ -512,17 +635,25 @@ export async function planGoatHarnessForTask(input: {
   usage?: LanguageModelUsage;
 }> {
   const availableTools = normalizeGoatTaskToolNames(input.availableTools);
+  const availableEngines = GOAT_HARNESS_ENGINE_OPTIONS.map((option) => option.id);
   const availableModels = GOAT_HARNESS_MODEL_OPTIONS.map((option) => option.id);
   const availableSkills = GOAT_HARNESS_SKILL_OPTIONS.map((option) => option.id);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
-  const schema = goatHarnessSpecResponseSchema(availableTools, availableModels, availableSkills);
+  const schema = goatHarnessSpecResponseSchema(
+    availableTools,
+    availableEngines,
+    availableModels,
+    availableSkills,
+  );
   const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
   const userPrompt = buildGoatHarnessCreationPrompt({
     taskPrompt: input.prompt,
+    executionEngineOptions: GOAT_HARNESS_ENGINE_OPTIONS,
     executionModelOptions: GOAT_HARNESS_MODEL_OPTIONS,
     availableOperationTools: availableTools,
     availableSkills: GOAT_HARNESS_SKILL_OPTIONS,
+    githubRepositories: input.githubRepositories ?? [],
     defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
   });
 
@@ -548,8 +679,10 @@ export async function planGoatHarnessForTask(input: {
     result.object,
     input,
     availableTools,
+    availableEngines,
     availableModels,
     availableSkills,
+    input.githubRepositories ?? [],
   );
 
   return {
@@ -578,6 +711,7 @@ export async function planGoatHarnessForTask(input: {
 
 function goatHarnessSpecResponseSchema(
   availableTools: readonly GoatTaskToolName[],
+  availableEngines: readonly GoatHarnessSpec["engine"][],
   availableModels: readonly GoatHarnessSpec["model"][],
   availableSkills: readonly GoatTaskSkillId[],
 ) {
@@ -586,6 +720,7 @@ function goatHarnessSpecResponseSchema(
     additionalProperties: false,
     properties: {
       schemaVersion: { type: "string", enum: ["goat.harness.v1"] },
+      engine: { type: "string", enum: availableEngines },
       model: { type: "string", enum: availableModels },
       systemPrompt: { type: "string", minLength: 1 },
       initialUserMessage: { type: "string", minLength: 1 },
@@ -604,9 +739,36 @@ function goatHarnessSpecResponseSchema(
       },
       maxModelSteps: { type: "integer", minimum: 1, maximum: MAX_GOAT_MODEL_STEPS },
       resultMode: { type: "string", enum: ["assistant_final", "brain_markdown_report"] },
+      codex: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          repository: { type: ["string", "null"] },
+          createPullRequest: { type: "boolean" },
+          reasoningEffort: { type: "string", enum: ["low", "medium", "high", "xhigh"] },
+          goalMode: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              objective: {
+                type: "string",
+                minLength: 1,
+                maxLength: CODEX_GOAL_OBJECTIVE_MAX_LENGTH,
+              },
+              tokenBudget: {
+                type: ["integer", "null"],
+                minimum: MIN_CODEX_GOAL_TOKEN_BUDGET,
+                maximum: MAX_CODEX_GOAL_TOKEN_BUDGET,
+              },
+            },
+            required: ["objective"],
+          },
+        },
+      },
     },
     required: [
       "schemaVersion",
+      "engine",
       "model",
       "systemPrompt",
       "initialUserMessage",
@@ -624,10 +786,13 @@ function normalizeHarnessSpec(
     prompt: string;
   },
   availableTools: readonly GoatTaskToolName[],
+  availableEngines: readonly GoatHarnessSpec["engine"][],
   availableModels: readonly GoatHarnessSpec["model"][],
   availableSkills: readonly GoatTaskSkillId[],
+  githubRepositories: readonly string[],
 ): GoatHarnessSpec {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const engine = readHarnessEngine(record.engine, availableEngines);
   const model = readHarnessModel(record.model, availableModels);
   if (!model) {
     throw new Error("Goat harness planner must choose a supported execution model.");
@@ -659,6 +824,7 @@ function normalizeHarnessSpec(
 
   return {
     schemaVersion: "goat.harness.v1",
+    engine,
     model,
     systemPrompt: augmentSystemPrompt(systemPrompt, resultMode, selectedSkills),
     initialUserMessage,
@@ -666,7 +832,20 @@ function normalizeHarnessSpec(
     skills: selectedSkills,
     maxModelSteps,
     resultMode,
+    ...(engine === "codex"
+      ? { codex: readCodexHarnessConfig(record.codex, fallback.prompt, githubRepositories) }
+      : {}),
   };
+}
+
+function readHarnessEngine(
+  value: unknown,
+  availableEngines: readonly GoatHarnessSpec["engine"][],
+): GoatHarnessSpec["engine"] {
+  const engine = readNonEmptyString(value);
+  return engine && availableEngines.includes(engine as GoatHarnessSpec["engine"])
+    ? (engine as GoatHarnessSpec["engine"])
+    : "opencompany";
 }
 
 function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
@@ -684,6 +863,125 @@ function readHarnessModel(
   const model = readNonEmptyString(value);
   return model && availableModels.includes(model as GoatHarnessSpec["model"])
     ? (model as GoatHarnessSpec["model"])
+    : null;
+}
+
+function readCodexHarnessConfig(
+  value: unknown,
+  prompt: string,
+  githubRepositories: readonly string[],
+): NonNullable<GoatHarnessSpec["codex"]> {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const plannedRepository = normalizeGitHubRepositoryMention(readNonEmptyString(record.repository));
+  const repository =
+    canonicalGitHubRepository(plannedRepository, githubRepositories) ??
+    inferCodexRepositoryFromPrompt(prompt, githubRepositories) ??
+    plannedRepository;
+  const promptPullRequestIntent = readPullRequestIntent(prompt);
+  const goalMode = readCodexGoalMode(record.goalMode);
+  return {
+    repository,
+    createPullRequest: promptPullRequestIntent ?? record.createPullRequest === true,
+    reasoningEffort: readCodexReasoningEffort(record.reasoningEffort),
+    ...(goalMode ? { goalMode } : {}),
+  };
+}
+
+function readCodexReasoningEffort(value: unknown) {
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh"
+    ? value
+    : "high";
+}
+
+function readCodexGoalMode(
+  value: unknown,
+): NonNullable<GoatHarnessSpec["codex"]>["goalMode"] | null {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!record) return null;
+  const objective = readNonEmptyString(record.objective);
+  if (!objective) return null;
+  const hasTokenBudget = Object.prototype.hasOwnProperty.call(record, "tokenBudget");
+  const tokenBudget = !hasTokenBudget
+    ? DEFAULT_CODEX_GOAL_TOKEN_BUDGET
+    : record.tokenBudget === null
+      ? null
+      : typeof record.tokenBudget === "number"
+        ? clampInteger(record.tokenBudget, MIN_CODEX_GOAL_TOKEN_BUDGET, MAX_CODEX_GOAL_TOKEN_BUDGET)
+        : DEFAULT_CODEX_GOAL_TOKEN_BUDGET;
+  return {
+    objective: objective.slice(0, CODEX_GOAL_OBJECTIVE_MAX_LENGTH),
+    tokenBudget,
+  };
+}
+
+function inferCodexRepositoryFromPrompt(prompt: string, githubRepositories: readonly string[]) {
+  const explicit = normalizeGitHubRepositoryMention(prompt);
+  if (explicit) return canonicalGitHubRepository(explicit, githubRepositories) ?? explicit;
+
+  const matches = normalizeGitHubRepositories(githubRepositories).filter((repository) =>
+    textMentionsRepositoryName(prompt, repository.name),
+  );
+  return matches.length === 1 ? matches[0]!.fullName : null;
+}
+
+function canonicalGitHubRepository(
+  repository: string | null,
+  githubRepositories: readonly string[],
+) {
+  if (!repository) return null;
+  const normalized = repository.toLowerCase();
+  return (
+    normalizeGitHubRepositories(githubRepositories).find(
+      (candidate) => candidate.fullName.toLowerCase() === normalized,
+    )?.fullName ?? null
+  );
+}
+
+function normalizeGitHubRepositories(githubRepositories: readonly string[]) {
+  return githubRepositories
+    .map((fullName) => normalizeGitHubRepositoryMention(fullName))
+    .filter((fullName): fullName is string => Boolean(fullName))
+    .map((fullName) => ({
+      fullName,
+      name: fullName.split("/")[1] ?? fullName,
+    }));
+}
+
+function normalizeGitHubRepositoryMention(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const githubUrl = trimmed.match(
+    /https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\.git)?(?:[/?#].*)?/i,
+  );
+  const candidate = githubUrl ? `${githubUrl[1]}/${githubUrl[2]}` : findOwnerRepoMention(trimmed);
+  if (!candidate) return null;
+  const withoutGitSuffix = candidate.replace(/[.,;:!?]+$/, "").replace(/\.git$/i, "");
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(withoutGitSuffix) ? withoutGitSuffix : null;
+}
+
+function findOwnerRepoMention(value: string) {
+  const match = value.match(
+    /(?:^|[\s([`'"])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?=$|[\s)\]`'".,;:!?])/,
+  );
+  return match?.[1] ?? null;
+}
+
+function textMentionsRepositoryName(text: string, repositoryName: string) {
+  const escaped = repositoryName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_.-])${escaped}($|[^A-Za-z0-9_.-])`, "i").test(text);
+}
+
+function readPullRequestIntent(prompt: string) {
+  const text = prompt.toLowerCase();
+  if (
+    /\b(do not|don't|dont|without|no)\s+(open|create|publish|push|make)?\s*(a\s*)?(draft\s*)?(pr|pull request)\b/.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  return /\b(open|create|publish|push|make)\s+(a\s*)?(draft\s*)?(pr|pull request)\b/.test(text)
+    ? true
     : null;
 }
 

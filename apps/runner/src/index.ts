@@ -17,6 +17,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./delegation";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
+import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { setGoatTaskWakeup, startGoatTaskWorker } from "./goat-worker";
 import { setRunnerJobWakeup, startRunnerJobWorker } from "./jobs";
@@ -88,6 +89,7 @@ const jobWorker = startRunnerJobWorker(env, {
   },
 });
 const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
+const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
 const goatTaskScheduleWorker =
   env.goatTaskWorkerEnabled && goatTaskWorker
     ? startGoatTaskScheduleWorker({ onTaskCreated: goatTaskWorker.notify })
@@ -104,6 +106,9 @@ setGoatTaskWakeup(() => {
   goatTaskWorker?.notify();
   goatTaskScheduleWorker?.notify();
 });
+setGoatBrainIngestWakeup(() => {
+  goatBrainIngestWorker?.notify();
+});
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -113,6 +118,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       signal,
       active_job_count: jobWorker.activeCount(),
       active_goat_task_count: goatTaskWorker?.activeCount() ?? 0,
+      active_goat_brain_ingest_count: goatBrainIngestWorker?.activeCount() ?? 0,
       active_run_count: listActiveRuns().length,
     });
     // Stop accepting work and drain in-flight jobs/requests first, flush any pending
@@ -138,6 +144,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       }),
       goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
       goatTaskWorker?.stop() ?? Promise.resolve(),
+      goatBrainIngestWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])
       .then(() => Promise.allSettled([flushAllSessionStreams()]))

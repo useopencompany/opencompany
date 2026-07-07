@@ -40,7 +40,6 @@ export type RuntimeToolName =
   | "x_get_profile"
   | "x_get_user_posts"
   | "x_get_discussion"
-  | "x_get_trends"
   | "youtube_search"
   | "youtube_get_video"
   | "youtube_get_transcript"
@@ -145,18 +144,11 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     id: "x",
     type: "hosted_tool",
     label: "x",
-    description:
-      "Read public X posts, profiles, timelines, discussions, and trends through the official X API.",
-    runtimeTools: [
-      "x_search_posts",
-      "x_get_profile",
-      "x_get_user_posts",
-      "x_get_discussion",
-      "x_get_trends",
-    ],
+    description: "Scrape public X posts, profiles, timelines, and discussions through Apify.",
+    runtimeTools: ["x_search_posts", "x_get_profile", "x_get_user_posts", "x_get_discussion"],
     defaultEnabled: true,
     credentialSource: "platform",
-    requiredPlatformEnvVars: ["X_API_BEARER_TOKEN"],
+    requiredPlatformEnvVars: ["APIFY_API_TOKEN"],
   },
   {
     id: "youtube",
@@ -1509,7 +1501,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     kind: "hosted",
     configToolId: "x",
     description:
-      'Search public X posts through the official X API. Use recent search first for current conversations; mode="all" uses full-archive search and requires elevated X API access.',
+      "Search public X posts through Apify-backed scraping. Use for current public conversations, hashtags, mentions, links, and posts from specific users.",
     parameters: {
       type: "object",
       properties: {
@@ -1518,45 +1510,42 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           description:
             'X search query using X operators, such as "AI agents lang:en -is:retweet" or "from:openai".',
         },
-        mode: {
-          type: "string",
-          enum: ["recent", "all"],
-          description:
-            'Search recent posts or the full archive. Defaults to recent. mode="all" requires elevated X API access and may fail with standard bearer tokens.',
-          default: "recent",
-        },
         maxResults: {
           type: "number",
           description:
-            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+            "Number of posts to return. Defaults to 10. Maximum 50. Use larger values only for explicit broader social-listening requests.",
           default: 10,
         },
-        paginationToken: {
+        runMode: {
           type: "string",
-          description: "Optional next_token from a previous search result.",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start an Apify job and poll with social_get_job.",
+          default: "sync",
         },
       },
       required: ["query"],
       additionalProperties: false,
     },
     help: [
-      "Use x_search_posts to discover current public X conversations, hashtags, mentions, links, and posts from specific users.",
-      'Start with maxResults=10 and mode="recent". Use larger values, pagination, or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
-      "The X API bills per returned Post and expanded User.",
-      "The output includes normalized posts, author profiles, result count, and an optional nextToken for pagination.",
+      "Use x_search_posts to discover public X conversations, hashtags, mentions, links, and posts from specific users.",
+      "Start with maxResults=10. Use larger values or runMode=async only when the user explicitly asks for broader coverage.",
+      "The tool scrapes public data only. It does not access private, protected, or login-gated content.",
+      "The output includes normalized posts, author profiles when available, sourceProvider, and fetchedAt.",
     ].join("\n"),
   },
   {
     name: "x_get_profile",
     kind: "hosted",
     configToolId: "x",
-    description: "Look up a public X profile by username through the official X API.",
+    description:
+      "Look up a public X profile by username, handle, or profile URL through Apify-backed scraping.",
     parameters: {
       type: "object",
       properties: {
         username: {
           type: "string",
-          description: "X username, with or without a leading @.",
+          description: "X username, @handle, or profile URL.",
         },
       },
       required: ["username"],
@@ -1564,35 +1553,38 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_profile to inspect a public X account's bio, verification flags, profile images, and public metrics.",
-      "Protected or suspended accounts may return limited data or provider errors.",
+      "Protected, suspended, or login-gated accounts may return limited data or provider errors.",
     ].join("\n"),
   },
   {
     name: "x_get_user_posts",
     kind: "hosted",
     configToolId: "x",
-    description: "Fetch recent public posts from an X user timeline by username.",
+    description: "Fetch recent public posts from an X user profile through Apify-backed scraping.",
     parameters: {
       type: "object",
       properties: {
         username: {
           type: "string",
-          description: "X username, with or without a leading @.",
+          description: "X username, @handle, or profile URL.",
         },
         maxResults: {
           type: "number",
           description:
-            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+            "Number of posts to return. Defaults to 10. Maximum 50. Use larger values only for explicit broader social-listening requests.",
           default: 10,
-        },
-        paginationToken: {
-          type: "string",
-          description: "Optional pagination_token from a previous timeline result.",
         },
         excludeReplies: {
           type: "boolean",
           description: "Whether to exclude reply posts. Defaults to false.",
           default: false,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start an Apify job and poll with social_get_job.",
+          default: "sync",
         },
       },
       required: ["username"],
@@ -1600,9 +1592,9 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_user_posts to understand what a public profile has been posting recently.",
-      "Start with maxResults=10. Use larger values or pagination only when the user explicitly asks for broader coverage.",
+      "Start with maxResults=10. Use larger values or runMode=async only when the user explicitly asks for broader coverage.",
       "Set excludeReplies=true for a cleaner top-level timeline.",
-      "The tool first resolves the username to a user id, then fetches that user's public posts.",
+      "The tool scrapes public data only. It does not access private, protected, or login-gated content.",
     ].join("\n"),
   },
   {
@@ -1610,7 +1602,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     kind: "hosted",
     configToolId: "x",
     description:
-      'Inspect a public X post discussion by fetching the target post, replies in its conversation, and quote posts. mode="all" requires elevated X API access for full-archive reply search.',
+      "Inspect a public X post discussion by scraping the target post and public replies/comments.",
     parameters: {
       type: "object",
       properties: {
@@ -1618,18 +1610,18 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           type: "string",
           description: "X post ID or URL, such as https://x.com/user/status/123.",
         },
-        mode: {
-          type: "string",
-          enum: ["recent", "all"],
-          description:
-            'Search recent replies or the full archive. Defaults to recent. mode="all" requires elevated X API access and may fail with standard bearer tokens.',
-          default: "recent",
-        },
         maxResults: {
           type: "number",
           description:
-            "Maximum replies and maximum quote posts to return per collection. Defaults to 10; ask the user before using larger values. Maximum 100.",
+            "Maximum replies/comments to return. Defaults to 10. Maximum 50. Use larger values only for explicit complaint or sentiment analysis.",
           default: 10,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start an Apify job and poll with social_get_job.",
+          default: "sync",
         },
       },
       required: ["postIdOrUrl"],
@@ -1637,38 +1629,9 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_discussion when the user provides a post URL/id or asks what people are saying around one post.",
-      'Start with maxResults=10 per collection and mode="recent". Use larger values or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
-      "The result includes the target post, replies from the same conversation, quote posts, and author profiles.",
-      "This can be more expensive than a simple lookup because it may return many Posts.",
-    ].join("\n"),
-  },
-  {
-    name: "x_get_trends",
-    kind: "hosted",
-    configToolId: "x",
-    description: "Fetch current X trending topics for a WOEID location.",
-    parameters: {
-      type: "object",
-      properties: {
-        woeid: {
-          type: "number",
-          description:
-            "Yahoo Where On Earth ID. Defaults to 1 for worldwide; United States is 23424977.",
-          default: 1,
-        },
-        maxResults: {
-          type: "number",
-          description:
-            "Number of trends to return. Defaults to 10; ask the user before using larger values. Maximum 50.",
-          default: 10,
-        },
-      },
-      additionalProperties: false,
-    },
-    help: [
-      "Use x_get_trends to answer what is currently trending on X in a broad location.",
-      "Start with maxResults=10. Use larger values only when the user explicitly asks for broader coverage.",
-      "Common WOEIDs: worldwide=1, United States=23424977, United Kingdom=23424975, New York=2459115, London=44418.",
+      "Start with maxResults=10. Use larger values or runMode=async only when the user explicitly asks for broader coverage.",
+      "The result includes the target post when available, replies/comments, author profiles when available, sourceProvider, and fetchedAt.",
+      "This tool scrapes public data only. It does not bypass login gates or private/protected content.",
     ].join("\n"),
   },
   {
@@ -2269,22 +2232,22 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "social_get_job",
     kind: "hosted",
-    sharedConfigToolIds: ["instagram", "tiktok"],
+    sharedConfigToolIds: ["instagram", "tiktok", "x"],
     description:
-      "Poll an async Instagram or TikTok social scraping job started by a profile, feed, comments, or search tool.",
+      "Poll an async Instagram, TikTok, or X social scraping job started by a profile, feed, comments, discussion, or search tool.",
     parameters: {
       type: "object",
       properties: {
         jobId: {
           type: "string",
-          description: "Job id returned by a prior Instagram or TikTok social scraping tool.",
+          description: "Job id returned by a prior Instagram, TikTok, or X social scraping tool.",
         },
       },
       required: ["jobId"],
       additionalProperties: false,
     },
     help: [
-      "Use social_get_job only for job ids returned by Instagram/TikTok tools with runMode=async.",
+      "Use social_get_job only for job ids returned by Instagram, TikTok, or X tools with runMode=async.",
       "When status is processing, wait before polling again. When completed, results are returned in the same normalized shape as the original tool.",
     ].join("\n"),
   },
@@ -3237,7 +3200,6 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   x_get_profile: "X profile",
   x_get_user_posts: "X posts",
   x_get_discussion: "X discussion",
-  x_get_trends: "X trends",
   youtube_search: "Search YouTube",
   youtube_get_video: "YouTube video",
   youtube_get_transcript: "YouTube transcript",

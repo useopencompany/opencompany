@@ -39,6 +39,11 @@ export const GOAT_TASK_TOOL_NAMES = [
   "browser_scroll",
   "browser_screenshot",
   "browser_close",
+  "x_search_posts",
+  "x_get_profile",
+  "x_get_user_posts",
+  "x_get_discussion",
+  "social_get_job",
   "gmail_search",
   "gmail_get_message",
   "gmail_list_threads",
@@ -330,6 +335,25 @@ async function executeGoatTaskTool(input: {
       guard: input.checkExaSearchGuard(),
     });
   }
+  if (isGoatXToolName(input.toolName)) {
+    const hosted = await executeHostedTool({
+      name: input.toolName as RuntimeToolName,
+      args: input.toolInput,
+      env: input.env,
+      enabledTools: [
+        "x_search_posts",
+        "x_get_profile",
+        "x_get_user_posts",
+        "x_get_discussion",
+        "social_get_job",
+      ] as RuntimeToolName[],
+      signal: input.signal,
+    });
+    return {
+      output: compactHostedSocialOutput(hosted.output),
+      ...(hosted.usage ? { usage: hosted.usage } : {}),
+    };
+  }
   if (isGoatGoogleToolName(input.toolName)) {
     const output = await executeGoatGoogleTool({
       name: input.toolName as GoatGoogleToolName,
@@ -380,6 +404,16 @@ async function executeGoatTaskTool(input: {
     output: { ok: false, error: `Unknown Goat tool "${input.toolName}".` },
     usage: zeroCostToolUsage(input.toolName, input.toolName),
   };
+}
+
+function isGoatXToolName(toolName: GoatTaskToolName) {
+  return (
+    toolName === "x_search_posts" ||
+    toolName === "x_get_profile" ||
+    toolName === "x_get_user_posts" ||
+    toolName === "x_get_discussion" ||
+    toolName === "social_get_job"
+  );
 }
 
 type ExaSearchGuardResult =
@@ -465,6 +499,45 @@ function compactExaResult(value: unknown) {
   };
 }
 
+function compactHostedSocialOutput(output: unknown): unknown {
+  if (!isRecord(output)) return output;
+  const record = output as Record<string, unknown>;
+  return {
+    ...record,
+    ...(Array.isArray(record.posts)
+      ? { posts: record.posts.slice(0, 20).map(compactSocialItem) }
+      : {}),
+    ...(Array.isArray(record.replies)
+      ? { replies: record.replies.slice(0, 30).map(compactSocialItem) }
+      : {}),
+    ...(Array.isArray(record.comments)
+      ? { comments: record.comments.slice(0, 30).map(compactSocialItem) }
+      : {}),
+    ...(Array.isArray(record.profiles)
+      ? { profiles: record.profiles.slice(0, 20).map(compactSocialItem) }
+      : {}),
+    ...(Array.isArray(record.users)
+      ? { users: record.users.slice(0, 30).map(compactSocialItem) }
+      : {}),
+    ...(isRecord(record.post) ? { post: compactSocialItem(record.post) } : {}),
+    ...(isRecord(record.profile) ? { profile: compactSocialItem(record.profile) } : {}),
+  };
+}
+
+function compactSocialItem(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const record = value as Record<string, unknown>;
+  return {
+    ...record,
+    ...(typeof record.text === "string" ? { text: truncate(record.text, 1200) } : {}),
+    ...(typeof record.caption === "string" ? { caption: truncate(record.caption, 1200) } : {}),
+    ...(typeof record.bio === "string" ? { bio: truncate(record.bio, 600) } : {}),
+    ...(Array.isArray(record.replies)
+      ? { replies: record.replies.slice(0, 5).map(compactSocialItem) }
+      : {}),
+  };
+}
+
 function goatToolDescription(toolName: GoatTaskToolName) {
   switch (toolName) {
     case "exa_search":
@@ -491,6 +564,16 @@ function goatToolDescription(toolName: GoatTaskToolName) {
       return "Capture a screenshot of the active browser page for traceability. The output includes the saved screenshot path from agent-browser.";
     case "browser_close":
       return "Close the task's isolated browser session. Usually automatic at cleanup, but call it when browser work is done.";
+    case "x_search_posts":
+      return "Search public X posts through Apify-backed scraping. Use for current public conversations, hashtags, mentions, and posts from specific users. Public data only; no private, protected, or login-gated access.";
+    case "x_get_profile":
+      return "Look up one public X profile by username, @handle, or profile URL through Apify-backed scraping. Public data only.";
+    case "x_get_user_posts":
+      return "Fetch recent public posts from an X profile. Start with a small maxResults value, then inspect specific high-signal posts with x_get_discussion.";
+    case "x_get_discussion":
+      return "Scrape public replies/comments for one X post URL or id. Use this for complaint mining, sentiment, or what people are saying about a specific post.";
+    case "social_get_job":
+      return "Poll an async Apify social scraping job returned by an X tool with runMode=async.";
     case "gmail_search":
       return "Search connected Gmail with Gmail query syntax and return message ids, snippets, and headers. Read-only.";
     case "gmail_get_message":
@@ -669,6 +752,58 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
         additionalProperties: false,
         properties: {},
       } as const;
+    case "x_search_posts":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: { type: "string" },
+          maxResults: { type: "number", minimum: 1, maximum: 50 },
+          runMode: { type: "string", enum: ["sync", "async"] },
+        },
+        required: ["query"],
+      } as const;
+    case "x_get_profile":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          username: { type: "string" },
+        },
+        required: ["username"],
+      } as const;
+    case "x_get_user_posts":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          username: { type: "string" },
+          maxResults: { type: "number", minimum: 1, maximum: 50 },
+          excludeReplies: { type: "boolean" },
+          runMode: { type: "string", enum: ["sync", "async"] },
+        },
+        required: ["username"],
+      } as const;
+    case "x_get_discussion":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          postIdOrUrl: { type: "string" },
+          maxResults: { type: "number", minimum: 1, maximum: 50 },
+          runMode: { type: "string", enum: ["sync", "async"] },
+        },
+        required: ["postIdOrUrl"],
+      } as const;
+    case "social_get_job":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          jobId: { type: "string" },
+        },
+        required: ["jobId"],
+      } as const;
     case "gmail_search":
       return {
         type: "object",
@@ -837,6 +972,7 @@ function goatToolProvider(toolName: GoatTaskToolName) {
   if (toolName.startsWith("linear_")) return "linear";
   if (toolName.startsWith("github_")) return "github";
   if (toolName.startsWith("browser_")) return "browser";
+  if (toolName.startsWith("x_") || toolName === "social_get_job") return "x";
   if (toolName === "exa_search") return "exa";
   return "goat";
 }
@@ -858,6 +994,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function readString(record: Record<string, unknown>, key: string) {

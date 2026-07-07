@@ -1,11 +1,17 @@
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
-import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
+import {
+  pollCodexDeviceAuthFlow,
+  pollGoatCodexDeviceAuthFlow,
+  startCodexDeviceAuthFlow,
+  startGoatCodexDeviceAuthFlow,
+} from "./codex-auth";
 import type { RunnerEnv } from "./env";
+import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
 import { planGoatHarnessForTask } from "./goat-harness";
-import { getGoatAvailableHarnessToolsForRunner } from "./goat-harness-planner";
+import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
 import { verifyGoatToolToken } from "./goat-tool-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
@@ -100,6 +106,16 @@ export function createServer(
     reply.status(202).send({ ok: true });
   });
 
+  app.post("/internal/goat/brain-ingest/wake", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat workers are disabled." });
+      return;
+    }
+    wakeGoatBrainIngestWorker();
+    reply.status(202).send({ ok: true });
+  });
+
   app.post("/internal/goat/task-harness/plan", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     if (!env.goatTaskWorkerEnabled) {
@@ -115,13 +131,14 @@ export function createServer(
       return;
     }
 
-    const availableTools = await getGoatAvailableHarnessToolsForRunner(userWorkosId, {
+    const plannerContext = await getGoatHarnessPlannerContextForRunner(userWorkosId, {
       browserEnabled: env.goatBrowserEnabled,
     });
     const planned = await planGoatHarnessForTask({
       prompt,
       model: "moonshotai/kimi-k2.6",
-      availableTools,
+      availableTools: plannerContext.availableTools,
+      githubRepositories: plannerContext.githubRepositories,
       gatewayApiKey: env.vercelAiGatewayApiKey,
       signal: new AbortController().signal,
     });
@@ -216,6 +233,58 @@ export function createServer(
     logger.debug("Codex device auth poll route completed", {
       event: "opencompany.runner_codex_auth_poll_route_completed",
       workspace_id: workspaceId,
+      flow_id: flow.id,
+      flow_status: flow.status,
+      has_user_code: Boolean(flow.userCode),
+      has_verification_uri: Boolean(flow.verificationUri),
+    });
+    reply.send({ ok: true, flow });
+  });
+
+  app.post("/internal/goat/codex-auth/device/start", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const body = request.body as { userWorkosId?: unknown } | undefined;
+    const userWorkosId = typeof body?.userWorkosId === "string" ? body.userWorkosId.trim() : "";
+    if (!userWorkosId) {
+      reply.status(400).send({ error: "userWorkosId is required." });
+      return;
+    }
+    logger.info("Goat Codex device auth start route received", {
+      event: "opencompany.runner_goat_codex_auth_start_route_received",
+      user_workos_id: userWorkosId,
+    });
+    const flow = await startGoatCodexDeviceAuthFlow({ userWorkosId, env });
+    logger.info("Goat Codex device auth start route completed", {
+      event: "opencompany.runner_goat_codex_auth_start_route_completed",
+      user_workos_id: userWorkosId,
+      flow_id: flow.id,
+      flow_status: flow.status,
+    });
+    reply.send({ ok: true, flow });
+  });
+
+  app.post("/internal/goat/codex-auth/device/:flowId/poll", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { flowId } = request.params as { flowId: string };
+    const body = request.body as { userWorkosId?: unknown } | undefined;
+    const userWorkosId = typeof body?.userWorkosId === "string" ? body.userWorkosId.trim() : "";
+    if (!userWorkosId) {
+      reply.status(400).send({ error: "userWorkosId is required." });
+      return;
+    }
+    logger.debug("Goat Codex device auth poll route received", {
+      event: "opencompany.runner_goat_codex_auth_poll_route_received",
+      user_workos_id: userWorkosId,
+      flow_id: flowId,
+    });
+    const flow = await pollGoatCodexDeviceAuthFlow({ userWorkosId, flowId, env });
+    if (!flow) {
+      reply.status(404).send({ error: "Goat Codex device auth flow was not found." });
+      return;
+    }
+    logger.debug("Goat Codex device auth poll route completed", {
+      event: "opencompany.runner_goat_codex_auth_poll_route_completed",
+      user_workos_id: userWorkosId,
       flow_id: flow.id,
       flow_status: flow.status,
       has_user_code: Boolean(flow.userCode),

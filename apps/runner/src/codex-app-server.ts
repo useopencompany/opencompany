@@ -29,12 +29,35 @@ type CodexUsage = {
   output_tokens: number;
 };
 
+export type CodexGoalModeInput = {
+  objective: string;
+  tokenBudget?: number | null;
+};
+
+export type CodexGoalStatus =
+  | "active"
+  | "paused"
+  | "complete"
+  | "blocked"
+  | "budgetLimited"
+  | "usageLimited"
+  | "cleared";
+
+export type CodexAppServerGoalSummary = {
+  objective: string | null;
+  status: CodexGoalStatus | null;
+  tokenBudget: number | null;
+  tokensUsed: number | null;
+  timeUsedSeconds: number | null;
+};
+
 export type CodexAppServerSummary = {
   sessionId: string | null;
   status: "success" | "error" | "timeout" | "unknown";
   result: string;
   error: string | null;
   usage: CodexUsage | null;
+  goal: CodexAppServerGoalSummary | null;
 };
 
 type AppServerState = {
@@ -116,6 +139,7 @@ export async function runCodexAppServerTurn(input: {
   model: string;
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
+  goalMode?: CodexGoalModeInput | null;
   existingEngineSessionId: string | null;
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
@@ -232,6 +256,7 @@ async function runTurnThroughProxy(input: {
   model: string;
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
+  goalMode?: CodexGoalModeInput | null;
   existingEngineSessionId: string | null;
   timeoutMs: number;
   checkAbort: () => Promise<void>;
@@ -239,7 +264,7 @@ async function runTurnThroughProxy(input: {
   onActivity: (activity: string) => Promise<void>;
   plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
 }): Promise<CodexAppServerSummary> {
-  const accumulator = createCodexAppServerAccumulator();
+  const accumulator = createCodexAppServerAccumulator({ goalMode: Boolean(input.goalMode) });
   const notificationBatcher = createCodexAppServerNotificationBatcher({
     onFlush: async ({ events, activity }) => {
       if (events.length > 0) await input.onRuntimeEvents(events);
@@ -271,6 +296,10 @@ async function runTurnThroughProxy(input: {
     await client.notify("initialized", {});
 
     const threadId = await startOrResumeThread({ client, input });
+    if (input.goalMode) {
+      const goal = await setThreadGoal({ client, threadId, goalMode: input.goalMode });
+      accumulator.setGoal(goal);
+    }
     const turn = await client.request("turn/start", {
       threadId,
       input: [{ type: "text", text: input.task, text_elements: [] }],
@@ -316,6 +345,21 @@ async function runTurnThroughProxy(input: {
     await notificationBatcher.settleIgnoringError();
     await client.stop();
   }
+}
+
+async function setThreadGoal(input: {
+  client: AppServerProxyClient;
+  threadId: string;
+  goalMode: CodexGoalModeInput;
+}) {
+  const params = {
+    threadId: input.threadId,
+    objective: input.goalMode.objective,
+    status: "active",
+    ...(input.goalMode.tokenBudget != null ? { tokenBudget: input.goalMode.tokenBudget } : {}),
+  };
+  const response = await input.client.request("thread/goal/set", params);
+  return goalFromValue(response) ?? goalFromValue(params);
 }
 
 async function startOrResumeThread(input: {
@@ -684,21 +728,29 @@ class CodexAppServerRpcError extends Error {
   }
 }
 
-export function createCodexAppServerAccumulator() {
+export function createCodexAppServerAccumulator(input: { goalMode?: boolean } = {}) {
   let sessionId: string | null = null;
   let latestAgentMessageText = "";
   const agentMessageTextByItemId = new Map<string, string>();
   let finalAgentText = "";
   let error: string | null = null;
   let usage: CodexUsage | null = null;
+  let goal: CodexAppServerGoalSummary | null = null;
   let completedResolve: (() => void) | null = null;
   const completed = new Promise<void>((resolve) => {
     completedResolve = resolve;
   });
   let status: CodexAppServerSummary["status"] = "unknown";
+  const resolveCompleted = () => {
+    completedResolve?.();
+    completedResolve = null;
+  };
 
   return {
     completed,
+    setGoal(nextGoal: CodexAppServerGoalSummary | null) {
+      goal = mergeGoal(goal, nextGoal);
+    },
     push(notification: JsonRpcNotification) {
       const params = notification.params;
       const foundThreadId = firstString(params?.threadId, stringFromPath(params, ["thread", "id"]));
@@ -736,6 +788,23 @@ export function createCodexAppServerAccumulator() {
         usage = usageFromNotification(params);
       }
 
+      if (notification.method === "thread/goal/updated") {
+        goal = mergeGoal(goal, goalFromValue(params));
+        const goalStatus = goal?.status ?? null;
+        if (goalStatus && isTerminalGoalStatus(goalStatus)) {
+          status = "success";
+          resolveCompleted();
+        }
+        return goalStatus ? compactActivity(`Codex goal: ${formatGoalStatus(goalStatus)}`) : null;
+      }
+
+      if (notification.method === "thread/goal/cleared") {
+        goal = mergeGoal(goal, { status: "cleared" });
+        status = "success";
+        if (input.goalMode) resolveCompleted();
+        return compactActivity("Codex goal: cleared");
+      }
+
       if (notification.method === "turn/completed") {
         const turn = isRecord(params?.turn) ? params.turn : null;
         const turnStatus = firstString(turn?.status);
@@ -749,7 +818,13 @@ export function createCodexAppServerAccumulator() {
           turnStatus === "interrupted"
             ? "Codex was interrupted before finishing."
             : (firstString(stringFromPath(turn, ["error", "message"])) ?? error);
-        completedResolve?.();
+        if (
+          status === "error" ||
+          !input.goalMode ||
+          (goal?.status && isTerminalGoalStatus(goal.status))
+        ) {
+          resolveCompleted();
+        }
         return status === "success" ? "Codex completed" : null;
       }
 
@@ -767,6 +842,7 @@ export function createCodexAppServerAccumulator() {
         result,
         error,
         usage,
+        goal,
       };
     },
   };
@@ -943,6 +1019,75 @@ function usageFromNotification(params: Record<string, unknown> | undefined): Cod
     output_tokens: outputTokens,
     ...(cachedInputTokens ? { cache_read_input_tokens: cachedInputTokens } : {}),
   };
+}
+
+function goalFromValue(value: unknown): CodexAppServerGoalSummary | null {
+  const record = isRecord(value) ? value : null;
+  if (!record) return null;
+  const goalRecord = isRecord(record.goal) ? record.goal : record;
+  const objective = firstString(goalRecord.objective) ?? null;
+  const status = goalStatusFromValue(goalRecord.status);
+  const tokenBudget = numberFrom(goalRecord.tokenBudget);
+  const tokensUsed = numberFrom(goalRecord.tokensUsed);
+  const timeUsedSeconds = numberFrom(goalRecord.timeUsedSeconds);
+  if (
+    !objective &&
+    !status &&
+    tokenBudget == null &&
+    tokensUsed == null &&
+    timeUsedSeconds == null
+  ) {
+    return null;
+  }
+  return {
+    objective,
+    status,
+    tokenBudget,
+    tokensUsed,
+    timeUsedSeconds,
+  };
+}
+
+function mergeGoal(
+  current: CodexAppServerGoalSummary | null,
+  next: Partial<CodexAppServerGoalSummary> | null,
+): CodexAppServerGoalSummary | null {
+  if (!next) return current;
+  return {
+    objective: next.objective ?? current?.objective ?? null,
+    status: next.status ?? current?.status ?? null,
+    tokenBudget: next.tokenBudget ?? current?.tokenBudget ?? null,
+    tokensUsed: next.tokensUsed ?? current?.tokensUsed ?? null,
+    timeUsedSeconds: next.timeUsedSeconds ?? current?.timeUsedSeconds ?? null,
+  };
+}
+
+function goalStatusFromValue(value: unknown): CodexGoalStatus | null {
+  return value === "active" ||
+    value === "paused" ||
+    value === "complete" ||
+    value === "blocked" ||
+    value === "budgetLimited" ||
+    value === "usageLimited" ||
+    value === "cleared"
+    ? value
+    : null;
+}
+
+function isTerminalGoalStatus(status: CodexGoalStatus) {
+  return (
+    status === "complete" ||
+    status === "blocked" ||
+    status === "budgetLimited" ||
+    status === "usageLimited" ||
+    status === "cleared"
+  );
+}
+
+function formatGoalStatus(status: CodexGoalStatus) {
+  if (status === "budgetLimited") return "budget-limited";
+  if (status === "usageLimited") return "usage-limited";
+  return status;
 }
 
 function isInitializeFailure(error: unknown) {

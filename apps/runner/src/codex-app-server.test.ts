@@ -189,6 +189,56 @@ describe("createCodexAppServerAccumulator", () => {
       error: "Codex was interrupted before finishing.",
     });
   });
+
+  it("tracks goal updates and waits for terminal goal status in goal mode", async () => {
+    const accumulator = createCodexAppServerAccumulator({ goalMode: true });
+
+    accumulator.setGoal({
+      objective: "Fix the tests",
+      status: "active",
+      tokenBudget: 200_000,
+      tokensUsed: null,
+      timeUsedSeconds: null,
+    });
+    accumulator.push({
+      method: "turn/completed",
+      params: { threadId: "thread_123", turn: { status: "completed" } },
+    });
+
+    let didComplete = false;
+    void accumulator.completed.then(() => {
+      didComplete = true;
+    });
+    await Promise.resolve();
+    expect(didComplete).toBe(false);
+
+    accumulator.push({
+      method: "thread/goal/updated",
+      params: {
+        threadId: "thread_123",
+        goal: {
+          objective: "Fix the tests",
+          status: "complete",
+          tokenBudget: 200_000,
+          tokensUsed: 1234,
+          timeUsedSeconds: 45,
+        },
+      },
+    });
+    await accumulator.completed;
+
+    expect(accumulator.summary()).toMatchObject({
+      sessionId: "thread_123",
+      status: "success",
+      goal: {
+        objective: "Fix the tests",
+        status: "complete",
+        tokenBudget: 200_000,
+        tokensUsed: 1234,
+        timeUsedSeconds: 45,
+      },
+    });
+  });
 });
 
 describe("coalesceCodexAppServerNotifications", () => {
@@ -340,6 +390,64 @@ describe("runCodexAppServerTurn", () => {
     expect(summary.sessionId).toBe("thread_existing");
   });
 
+  it("sets a Codex goal after materializing the thread and before starting the turn", async () => {
+    const sandbox = fakeSandbox({ completeGoalDelayMs: 5 });
+    const activities: string[] = [];
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "fix tests",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      goalMode: {
+        objective: "Fix tests and verify they pass.",
+        tokenBudget: 200_000,
+      },
+      existingEngineSessionId: null,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onActivity: async (activity) => {
+        activities.push(activity);
+      },
+    });
+
+    expect(sandbox.sentMethods()).toEqual([
+      "initialize",
+      "initialized",
+      "thread/start",
+      "thread/goal/set",
+      "turn/start",
+    ]);
+    expect(
+      sandbox.sentMessages().find((message) => message.method === "thread/goal/set"),
+    ).toMatchObject({
+      params: {
+        threadId: "thread_started",
+        objective: "Fix tests and verify they pass.",
+        status: "active",
+        tokenBudget: 200_000,
+      },
+    });
+    expect(summary).toMatchObject({
+      status: "success",
+      goal: {
+        objective: "Fix tests and verify they pass.",
+        status: "complete",
+        tokenBudget: 200_000,
+        tokensUsed: 3456,
+        timeUsedSeconds: 12,
+      },
+    });
+    expect(activities.join("\n")).toContain("Codex goal: complete");
+  });
+
   it("interrupts and returns timeout when the turn does not complete", async () => {
     const sandbox = fakeSandbox({ completeTurn: false });
 
@@ -369,7 +477,7 @@ describe("runCodexAppServerTurn", () => {
   });
 });
 
-function fakeSandbox(options: { completeTurn?: boolean } = {}) {
+function fakeSandbox(options: { completeTurn?: boolean; completeGoalDelayMs?: number } = {}) {
   const files = new Map<string, string>();
   let proxyStdout: ((data: string) => void | Promise<void>) | null = null;
   let nextPid = 100;
@@ -427,7 +535,7 @@ function fakeSandbox(options: { completeTurn?: boolean } = {}) {
 async function respondToProxyMessage(
   message: { method: string; params?: unknown; id?: number },
   onStdout: ((data: string) => void | Promise<void>) | null,
-  options: { completeTurn?: boolean },
+  options: { completeTurn?: boolean; completeGoalDelayMs?: number },
 ) {
   if (!onStdout || message.id == null) return;
   if (message.method === "initialize") {
@@ -448,6 +556,21 @@ async function respondToProxyMessage(
       `${JSON.stringify({
         id: message.id,
         result: { thread: { id: "thread_existing" } },
+      })}\n`,
+    );
+    return;
+  }
+  if (message.method === "thread/goal/set") {
+    await onStdout(
+      `${JSON.stringify({
+        id: message.id,
+        result: {
+          goal: {
+            objective: "Fix tests and verify they pass.",
+            status: "active",
+            tokenBudget: 200_000,
+          },
+        },
       })}\n`,
     );
     return;
@@ -474,6 +597,24 @@ async function respondToProxyMessage(
         params: { threadId, turn: { id: "turn_1", status: "completed" } },
       })}\n`,
     );
+    if (options.completeGoalDelayMs != null) {
+      await new Promise((resolve) => setTimeout(resolve, options.completeGoalDelayMs));
+      await onStdout(
+        `${JSON.stringify({
+          method: "thread/goal/updated",
+          params: {
+            threadId,
+            goal: {
+              objective: "Fix tests and verify they pass.",
+              status: "complete",
+              tokenBudget: 200_000,
+              tokensUsed: 3456,
+              timeUsedSeconds: 12,
+            },
+          },
+        })}\n`,
+      );
+    }
     return;
   }
   if (message.method === "turn/interrupt") {

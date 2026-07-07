@@ -91,7 +91,6 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   x_get_profile: 8,
   x_get_user_posts: 4,
   x_get_discussion: 3,
-  x_get_trends: 4,
   youtube_search: 6,
   youtube_get_video: 8,
   youtube_get_transcript: 6,

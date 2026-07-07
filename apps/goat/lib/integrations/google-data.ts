@@ -77,6 +77,15 @@ export async function getGoatAvailableHarnessTools(
       "github_open_pull_request",
     );
   }
+  if (process.env.APIFY_API_TOKEN?.trim()) {
+    tools.push(
+      "x_search_posts",
+      "x_get_profile",
+      "x_get_user_posts",
+      "x_get_discussion",
+      "social_get_job",
+    );
+  }
   return tools;
 }
 

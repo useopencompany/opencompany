@@ -1,7 +1,11 @@
+import { getDb } from "@opencompany/db/client";
+import { goatChatSessions } from "@opencompany/db/goat-schema";
+import { and, eq, isNull } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   buildGoatElectricOriginUrl,
   goatElectricBaseUrl,
+  goatElectricChatMessagesSessionId,
   hasInvalidElectricCloudSecretPair,
 } from "@/lib/electric";
 
@@ -23,10 +27,17 @@ export async function GET(request: Request): Promise<Response> {
     return new Response("Electric sync is misconfigured.", { status: 503 });
   }
 
+  const requestUrl = new URL(request.url);
+  const authorizedChatSessionId = await authorizeChatMessagesShape({
+    requestUrl,
+    userWorkosId: context.user.workosUserId,
+  });
+
   const originUrl = buildGoatElectricOriginUrl({
     electricUrl,
-    requestUrl: new URL(request.url),
+    requestUrl,
     userWorkosId: context.user.workosUserId,
+    authorizedChatSessionId,
     sourceId,
     sourceSecret,
     electricSecret,
@@ -53,4 +64,26 @@ export async function GET(request: Request): Promise<Response> {
     statusText: response.statusText,
     headers,
   });
+}
+
+async function authorizeChatMessagesShape(input: {
+  requestUrl: URL;
+  userWorkosId: string;
+}): Promise<string | null> {
+  const sessionId = goatElectricChatMessagesSessionId(input.requestUrl);
+  if (!sessionId) return null;
+
+  const [session] = await getDb()
+    .select({ id: goatChatSessions.id })
+    .from(goatChatSessions)
+    .where(
+      and(
+        eq(goatChatSessions.id, sessionId),
+        eq(goatChatSessions.userWorkosId, input.userWorkosId),
+        isNull(goatChatSessions.closedAt),
+      ),
+    )
+    .limit(1);
+
+  return session?.id ?? null;
 }

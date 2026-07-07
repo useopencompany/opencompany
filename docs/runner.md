@@ -258,8 +258,8 @@ Required environment variables:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
-- `X_API_BEARER_TOKEN` (optional; required only for agents that enable the X hosted tool)
-- `APIFY_API_TOKEN` (optional; required only for agents that enable Instagram/TikTok profile, feed, comment, or search tools)
+- `APIFY_API_TOKEN` (optional; required only for agents that enable X/Instagram/TikTok profile, feed, comment, search, or discussion tools)
+- `X_API_BEARER_TOKEN` (deprecated/unused by the X hosted tool; retained only for older local env files)
 - `SUPADATA_API_KEY` (optional; required only for agents that enable YouTube or Instagram/TikTok direct-media transcript/metadata tools)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
@@ -302,8 +302,8 @@ retrying the stale id.
 
 `apps/runner/src/load-env.ts` loads the repo root `.env.local` for local runs. `bun run env:pull`
 also merges the runner env vars from Infisical `dev` + `/runner` into `.env.local`, including
-hosted-tool secrets like `EXA_API_KEY`, `X_API_BEARER_TOKEN`, `APIFY_API_TOKEN`, and
-`SUPADATA_API_KEY` when they are present.
+hosted-tool secrets like `EXA_API_KEY`, `APIFY_API_TOKEN`, `SUPADATA_API_KEY`, and
+`AMP_API_KEY` when they are present.
 
 Run the app, Inngest dev server, and runner together:
 
