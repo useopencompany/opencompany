@@ -155,6 +155,41 @@ describe("POST /api/chat", () => {
     });
   });
 
+  it("injects DB-backed user context into the model stream prompt", async () => {
+    mockAuth({
+      email: "ada@example.com",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      timezone: "Europe/London",
+    });
+    mockCreateTurn();
+    mockStreamText().mockImplementation((options: unknown) => {
+      const system = (options as { system?: string }).system;
+      expect(system).toContain("<user_context>");
+      expect(system).toContain("compact user.md-style profile from the database");
+      expect(system).toContain('firstName="Ada"');
+      expect(system).toContain('lastName="Lovelace"');
+      expect(system).toContain('email="ada@example.com"');
+      expect(system).toContain('timezone="Europe/London"');
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "what should I do today?" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   it("wires brain create saves into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
@@ -572,19 +607,33 @@ function jsonRequest(body: unknown) {
   });
 }
 
-function mockAuth() {
+function mockAuth(
+  overrides: Partial<{
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    timezone: string;
+  }> = {},
+) {
+  const user = {
+    email: overrides.email ?? "user@example.com",
+    firstName: overrides.firstName ?? null,
+    lastName: overrides.lastName ?? null,
+    timezone: overrides.timezone ?? "UTC",
+  };
+
   mockCurrentGoatUser().mockResolvedValue({
     authUser: {
       id: "user_1",
-      email: "user@example.com",
+      email: user.email,
     } as never,
     user: {
       workosUserId: "user_1",
-      email: "user@example.com",
-      firstName: null,
-      lastName: null,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
       avatarUrl: null,
-      timezone: "UTC",
+      timezone: user.timezone,
       createdAt: new Date(),
       updatedAt: new Date(),
     },

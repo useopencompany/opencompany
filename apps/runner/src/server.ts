@@ -131,7 +131,9 @@ export function createServer(
       return;
     }
 
-    const plannerContext = await getGoatHarnessPlannerContextForRunner(userWorkosId);
+    const plannerContext = await getGoatHarnessPlannerContextForRunner(userWorkosId, {
+      browserEnabled: env.goatBrowserEnabled,
+    });
     const planned = await planGoatHarnessForTask({
       prompt,
       model: "moonshotai/kimi-k2.6",

@@ -3,34 +3,33 @@
 import { Check, Copy, RotateCw } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
 import type { GoatJamieProviderState } from "@/lib/integration-state";
-import { createOrRotateJamieWebhookSecretAction } from "@/lib/integrations/jamie-actions";
+import { createOrResetJamieWebhookEndpointAction } from "@/lib/integrations/jamie-actions";
 import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
 
-type GeneratedSetup = {
+type EndpointSetup = {
   integrationId: string;
   webhookUrl: string;
   headerName: string;
-  secret: string;
 };
 
 export function JamieIntegrationSetup({ initialState }: { initialState: GoatJamieProviderState }) {
-  const [generated, setGenerated] = useState<GeneratedSetup | null>(null);
+  const [endpoint, setEndpoint] = useState<EndpointSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const webhookUrl = generated?.webhookUrl ?? initialState.webhookUrl;
-  const headerName = generated?.headerName ?? GOAT_JAMIE_WEBHOOK_SECRET_HEADER;
-  const status = useMemo(() => setupStatus(initialState, generated), [generated, initialState]);
+  const webhookUrl = endpoint?.webhookUrl ?? initialState.webhookUrl;
+  const headerName = endpoint?.headerName ?? GOAT_JAMIE_WEBHOOK_SECRET_HEADER;
+  const status = useMemo(() => setupStatus(initialState, endpoint), [endpoint, initialState]);
 
-  function generateSecret() {
+  function createEndpoint() {
     setError(null);
     startTransition(async () => {
-      const result = await createOrRotateJamieWebhookSecretAction();
+      const result = await createOrResetJamieWebhookEndpointAction();
       if (!result.ok) {
         setError(result.error);
         return;
       }
-      setGenerated(result.setup);
+      setEndpoint(result.setup);
     });
   }
 
@@ -55,7 +54,7 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
             ) : null}
           </div>
           <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
-            {initialState.connected ? "Connected" : "Setup"}
+            {status.badge}
           </span>
         </div>
       </section>
@@ -66,7 +65,7 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
         </h2>
         <SetupValue
           label="Endpoint URL"
-          value={webhookUrl ?? "Generate a secret first"}
+          value={webhookUrl ?? "Create an endpoint first"}
           copyable={Boolean(webhookUrl)}
           copied={copiedKey === "url"}
           onCopy={() => copyValue("url", webhookUrl)}
@@ -78,23 +77,16 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
           copied={copiedKey === "header"}
           onCopy={() => copyValue("header", headerName)}
         />
-        <SetupValue
-          label="Secret"
-          value={generated?.secret ?? "Hidden after generation"}
-          copyable={Boolean(generated?.secret)}
-          copied={copiedKey === "secret"}
-          onCopy={() => copyValue("secret", generated?.secret ?? null)}
-        />
         {error ? <p className="px-2 text-[12px] leading-4 text-red-600">{error}</p> : null}
         <div className="pt-1">
           <button
             type="button"
-            onClick={generateSecret}
+            onClick={createEndpoint}
             disabled={isPending}
             className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCw size={14} strokeWidth={2} />
-            {initialState.integrationId ? "Rotate secret" : "Generate secret"}
+            {initialState.integrationId ? "Reset API key binding" : "Create endpoint"}
           </button>
         </div>
       </section>
@@ -106,7 +98,7 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
         <ol className="list-decimal space-y-2 pl-6 text-[13px] leading-5 text-ink-subtle">
           <li>Create a Jamie webhook for completed meetings.</li>
           <li>Set the event to meeting.completed.</li>
-          <li>Use the endpoint URL and send the secret in the x-jamie-api-key header.</li>
+          <li>Use the endpoint URL. Jamie will send its API key in the x-jamie-api-key header.</li>
         </ol>
       </section>
     </div>
@@ -145,22 +137,25 @@ function SetupValue({
   );
 }
 
-function setupStatus(initialState: GoatJamieProviderState, generated: GeneratedSetup | null) {
-  if (initialState.connected) {
-    return {
-      label: "Jamie is connected",
-      detail: "New completed meeting notes are accepted by the Goat Brain ingestion queue.",
-    };
-  }
-  if (generated || initialState.status === "needs_reauth") {
+function setupStatus(initialState: GoatJamieProviderState, endpoint: EndpointSetup | null) {
+  if (endpoint || initialState.status === "needs_reauth") {
     return {
       label: "Waiting for Jamie",
       detail:
         initialState.statusReason ?? "Send the first completed-meeting webhook to finish setup.",
+      badge: "Setup",
+    };
+  }
+  if (initialState.connected) {
+    return {
+      label: "Jamie is connected",
+      detail: "New completed meeting notes are accepted by the Goat Brain ingestion queue.",
+      badge: "Connected",
     };
   }
   return {
     label: "Not connected",
-    detail: "Generate a webhook secret, then add the endpoint in Jamie.",
+    detail: "Create an endpoint, then add it in Jamie.",
+    badge: "Setup",
   };
 }
