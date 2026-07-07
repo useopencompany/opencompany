@@ -6,6 +6,7 @@ import {
   CircleDotDashed,
   SlidersHorizontal,
   Square,
+  Target,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
@@ -94,6 +95,9 @@ function HarnessConfigSection({ config }: { config: GoatRunHarnessConfig | null 
       {config ? (
         <>
           <DetailRow label="Config" value={formatHarnessConfig(config)} icon="config" />
+          {config.codexGoalMode ? (
+            <DetailRow label="Goal" value={formatCodexGoalMode(config.codexGoalMode)} icon="goal" />
+          ) : null}
           <div className="flex items-start gap-3 rounded-lg px-2 py-2">
             <Wrench size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
             <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -142,6 +146,11 @@ function formatResultMode(resultMode: string) {
   if (resultMode === "assistant_final") return "Assistant final";
   if (resultMode === "brain_markdown_report") return "Brain report";
   return resultMode;
+}
+
+function formatCodexGoalMode(goalMode: NonNullable<GoatRunHarnessConfig["codexGoalMode"]>) {
+  const budget = goalMode.tokenBudget ? ` - ${goalMode.tokenBudget} token budget` : "";
+  return `${goalMode.objective}${budget}`;
 }
 
 function executionRunModels(models: GoatRunModelSummary[]) {
@@ -194,10 +203,16 @@ function DetailRow({
   label: string;
   value: string;
   active?: boolean;
-  icon?: "status" | "cost" | "config";
+  icon?: "status" | "cost" | "config" | "goal";
 }) {
   const Icon =
-    icon === "cost" ? CircleDollarSign : icon === "config" ? SlidersHorizontal : CircleDotDashed;
+    icon === "cost"
+      ? CircleDollarSign
+      : icon === "config"
+        ? SlidersHorizontal
+        : icon === "goal"
+          ? Target
+          : CircleDotDashed;
   return (
     <div className="flex items-center gap-3 rounded-lg px-2 py-2">
       <Icon

@@ -24,11 +24,20 @@ export type GoatGitHubProviderState = {
   statusReason: string | null;
 };
 
+export type GoatCodexProviderState = {
+  provider: "codex";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "not_connected";
+  statusReason: string | null;
+  lastValidatedAt: string | null;
+};
+
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
   google_calendar: GoatGoogleProviderState;
   linear: GoatLinearProviderState;
   github: GoatGitHubProviderState;
+  codex: GoatCodexProviderState;
 };
 
 type IntegrationStateRow = {
@@ -54,6 +63,13 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     google_calendar: googleProviderState("google_calendar", byProvider.get("google_calendar")),
     linear: linearProviderState(byProvider.get("linear")),
     github: githubProviderState(byProvider.get("github")),
+    codex: {
+      provider: "codex",
+      connected: false,
+      status: "not_connected",
+      statusReason: null,
+      lastValidatedAt: null,
+    },
   };
 }
 

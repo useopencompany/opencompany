@@ -1,5 +1,5 @@
 import type { GoatTaskToolName } from "@opencompany/db/goat-schema";
-import { goatIntegrations } from "@opencompany/db/goat-schema";
+import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 
@@ -48,4 +48,44 @@ export async function getGoatAvailableHarnessToolsForRunner(
     }
   }
   return [...tools];
+}
+
+export async function getGoatHarnessPlannerContextForRunner(userWorkosId: string): Promise<{
+  availableTools: GoatTaskToolName[];
+  githubRepositories: string[];
+}> {
+  const [availableTools, githubRepositories] = await Promise.all([
+    getGoatAvailableHarnessToolsForRunner(userWorkosId),
+    getGoatAvailableGitHubRepositoryNamesForRunner(userWorkosId),
+  ]);
+  return { availableTools, githubRepositories };
+}
+
+export async function getGoatAvailableGitHubRepositoryNamesForRunner(
+  userWorkosId: string,
+): Promise<string[]> {
+  const rows = await getDb()
+    .select({ name: goatIntegrationResources.name })
+    .from(goatIntegrationResources)
+    .innerJoin(
+      goatIntegrations,
+      and(
+        eq(goatIntegrationResources.integrationId, goatIntegrations.id),
+        eq(goatIntegrationResources.userWorkosId, goatIntegrations.userWorkosId),
+        eq(goatIntegrationResources.provider, goatIntegrations.provider),
+      ),
+    )
+    .where(
+      and(
+        eq(goatIntegrationResources.userWorkosId, userWorkosId),
+        eq(goatIntegrationResources.provider, "github"),
+        eq(goatIntegrationResources.resourceType, "repository"),
+        eq(goatIntegrationResources.status, "available"),
+        eq(goatIntegrations.provider, "github"),
+        eq(goatIntegrations.status, "connected"),
+      ),
+    )
+    .orderBy(goatIntegrationResources.name);
+
+  return [...new Set(rows.map((row) => row.name).filter(Boolean))];
 }

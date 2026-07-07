@@ -51,6 +51,7 @@ describe("createGoatTaskForUser", () => {
         error: null,
         harnessSpec: {
           schemaVersion: "goat.harness.v1",
+          engine: "opencompany",
           model: DEFAULT_GOAT_MODEL,
           systemPrompt: "",
           initialUserMessage: "Research x",
@@ -60,6 +61,7 @@ describe("createGoatTaskForUser", () => {
           resultMode: "assistant_final",
         },
         debugTrace: {},
+        codexEngineSessionId: null,
         sandboxId: null,
         attempts: 0,
         nextRunAt: "2026-01-01T00:00:00.000Z",

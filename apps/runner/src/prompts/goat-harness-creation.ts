@@ -1,4 +1,5 @@
 import type {
+  GoatHarnessEngine,
   GoatHarnessSpec,
   GoatTaskSkillId,
   GoatTaskToolName,
@@ -10,6 +11,28 @@ export type GoatHarnessModelOption = {
   guidance: string;
   default?: boolean;
 };
+
+export type GoatHarnessEngineOption = {
+  id: GoatHarnessEngine;
+  label: string;
+  guidance: string;
+  default?: boolean;
+};
+
+export const GOAT_HARNESS_ENGINE_OPTIONS = [
+  {
+    id: "opencompany",
+    label: "OpenCompany model harness",
+    guidance: "Default. Use for research, writing, analysis, planning, and ordinary tool work.",
+    default: true,
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    guidance:
+      "Use for coding tasks, repository edits, tests, debugging, code review, and any coding task where the user explicitly asks for Codex.",
+  },
+] as const satisfies readonly GoatHarnessEngineOption[];
 
 export type GoatHarnessSkillOption = {
   id: GoatTaskSkillId;
@@ -80,6 +103,20 @@ function promptModelOptions(values: readonly GoatHarnessModelOption[]) {
   );
 }
 
+function promptEngineOptions(values: readonly GoatHarnessEngineOption[]) {
+  return promptBlock(
+    "execution_engine_options",
+    values.map((option) =>
+      promptBlock("engine_option", [
+        promptValue("id", option.id),
+        promptValue("label", option.label),
+        promptValue("selection_guidance", option.guidance),
+        promptValue("default", option.default ? "true" : "false"),
+      ]),
+    ),
+  );
+}
+
 function promptSkillOptions(values: readonly GoatHarnessSkillOption[]) {
   return promptBlock(
     "available_skills",
@@ -103,7 +140,12 @@ export const GOAT_HARNESS_CREATION_SYSTEM = promptBlock("system", [
 ]);
 
 export const GOAT_HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selection", [
+  "Choose the execution engine from the provided execution_engine_options.",
+  'Use engine "codex" for coding tasks when the user explicitly mentions Codex.',
+  'Use engine "codex" for repository editing, debugging, tests, code review, or pull-request work when Codex is the better executor.',
+  'Use engine "opencompany" for non-coding tasks and for coding-adjacent explanation that does not need a sandboxed coding agent.',
   "Choose the execution model from the provided execution_model_options.",
+  'When engine is "codex", choose an OpenAI Codex-capable model from the execution model options.',
   "Prefer the default model unless the task clearly benefits from a stronger specialized model.",
 ]);
 
@@ -117,8 +159,19 @@ export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Select only operation-level tools from the available list.",
   "Rewrite stale chat-layer limitations into clear instructions to use connected read-only tools when available.",
   "For X/Twitter social-listening, complaint-mining, or profile research tasks, include the relevant x_* tools when available; start from profile/search posts, then inspect discussions on specific high-signal posts with x_get_discussion.",
-  "For GitHub work, include github_clone_repository plus the needed follow-up GitHub tools only when a concrete owner/repo is relevant to the task.",
+  'For engine "opencompany" GitHub work, include github_clone_repository plus the needed follow-up GitHub tools only when a concrete owner/repo is relevant to the task.',
+  'For engine "codex", do not include GitHub operation tools just so Codex can edit code; instead set codex.repository when the task names a concrete owner/repo.',
+  'For engine "codex", set codex.repository to the exact owner/repo from available_github_repositories when the task mentions that full name or uniquely mentions the repo name.',
+  'For engine "codex", set codex.createPullRequest true only when the user explicitly asks to publish, push, create, make, or open a PR/pull request.',
   "Include github_open_pull_request only when the user explicitly asked to publish, push, or open a pull request.",
+]);
+
+export const GOAT_HARNESS_CREATION_CODEX_GOAL_POLICY = promptBlock("codex_goal_policy", [
+  'For engine "codex", set codex.goalMode only when the task has an iterative path, a clear finish line, and a verification surface such as tests, build output, reproduced bug behavior, or a review checklist.',
+  "Use Goal mode for multi-step coding tasks where Codex should keep working across evidence-based continuation until the objective is complete, blocked, budget-limited, usage-limited, or timed out.",
+  "Do not set codex.goalMode for simple one-shot edits, straightforward explanations, quick lookups, or tasks that can finish in a single normal Codex turn.",
+  "When setting codex.goalMode, write a concise objective with concrete success criteria. The objective must be non-empty and no more than 4,000 characters.",
+  "Omit codex.goalMode.tokenBudget unless the task clearly needs a custom budget. The runner applies a 200000-token default when it is omitted.",
 ]);
 
 export const GOAT_HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
@@ -141,21 +194,29 @@ export const GOAT_HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_pla
   GOAT_HARNESS_CREATION_MODEL_SELECTION,
   GOAT_HARNESS_CREATION_PROMPT_CONTRACT,
   GOAT_HARNESS_CREATION_TOOL_POLICY,
+  GOAT_HARNESS_CREATION_CODEX_GOAL_POLICY,
   GOAT_HARNESS_CREATION_SKILL_POLICY,
   GOAT_HARNESS_CREATION_RESULT_CONTRACT,
 ]);
 
 export function buildGoatHarnessCreationPrompt(input: {
   taskPrompt: string;
+  executionEngineOptions: readonly GoatHarnessEngineOption[];
   executionModelOptions: readonly GoatHarnessModelOption[];
   availableOperationTools: readonly GoatTaskToolName[];
   availableSkills: readonly GoatHarnessSkillOption[];
+  githubRepositories?: readonly string[];
   defaultMaxModelSteps: number;
 }) {
+  const githubRepositories = input.githubRepositories ?? [];
   return promptBlock("planner_inputs", [
+    promptEngineOptions(input.executionEngineOptions),
     promptModelOptions(input.executionModelOptions),
     promptList("available_operation_tools", "tool", input.availableOperationTools),
     promptSkillOptions(input.availableSkills),
+    ...(githubRepositories.length > 0
+      ? [promptList("available_github_repositories", "repository", githubRepositories)]
+      : []),
     promptValue("default_max_model_steps", input.defaultMaxModelSteps),
     promptValue("task_prompt", input.taskPrompt),
   ]);
