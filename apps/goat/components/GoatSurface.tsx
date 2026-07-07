@@ -15,6 +15,7 @@ import {
   ChevronRight,
   CircleDotDashed,
   Clock,
+  Code2,
   FileText,
   Pause,
   Play,
@@ -42,6 +43,8 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolOutput,
+  type GoatChatMention,
+  type GoatChatMessageMetadata,
   type GoatChatSessionView,
   type GoatChatSummaryView,
   type GoatChatUiMessage,
@@ -74,6 +77,13 @@ import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
+
+type ActiveMentionToken = {
+  start: number;
+  end: number;
+  query: string;
+};
 
 export type GoatTaskView = {
   id: string;
@@ -98,12 +108,14 @@ export function GoatSurface({
   defaultModel,
   initialChat,
   recentChats = [],
+  codexConnected = false,
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
   defaultModel: string;
   initialChat: GoatChatSessionView | null;
   recentChats?: readonly GoatChatSummaryView[];
+  codexConnected?: boolean;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -114,10 +126,15 @@ export function GoatSurface({
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingMessageMentionsRef = useRef<GoatChatMention[] | null>(null);
+  const pendingInputCaretRef = useRef<number | null>(null);
   const [input, setInput] = useState("");
+  const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
+  const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
   const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
+  const shouldHighlightCodexMention = selectedMentions.length > 0 && hasCodexMentionToken(input);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -129,13 +146,21 @@ export function GoatSurface({
     () =>
       new DefaultChatTransport<GoatChatUiMessage>({
         api: "/api/chat",
-        prepareSendMessagesRequest: ({ messages }) => ({
-          body: {
-            sessionId: chatSessionId,
-            model: chatModel,
-            message: messages.at(-1),
-          },
-        }),
+        prepareSendMessagesRequest: ({ messages }) => {
+          const message = messages.at(-1);
+          const metadataMentions = mentionsFromMessageMetadata(message?.metadata);
+          const mentions = metadataMentions.length
+            ? metadataMentions
+            : (pendingMessageMentionsRef.current ?? []);
+          return {
+            body: {
+              sessionId: chatSessionId,
+              model: chatModel,
+              message,
+              ...(mentions.length ? { mentions } : {}),
+            },
+          };
+        },
       }),
     [chatModel, chatSessionId],
   );
@@ -207,6 +232,14 @@ export function GoatSurface({
   }, [input]);
 
   useLayoutEffect(() => {
+    const caret = pendingInputCaretRef.current;
+    if (caret === null) return;
+    pendingInputCaretRef.current = null;
+    inputRef.current?.focus();
+    inputRef.current?.setSelectionRange(caret, caret);
+  }, [input]);
+
+  useLayoutEffect(() => {
     if (mode !== "chat" || !hasMessages) return;
     const thread = threadRef.current;
     if (!thread || typeof thread.scrollTo !== "function") return;
@@ -241,6 +274,12 @@ export function GoatSurface({
     void updateGoatTimezoneAction(timezone).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (codexConnected) return;
+    setMentionToken(null);
+    setSelectedMentions((current) => (current.length > 0 ? [] : current));
+  }, [codexConnected]);
+
   const archiveTask = (task: GoatTaskView) => {
     setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
     startArchiveTransition(async () => {
@@ -264,16 +303,30 @@ export function GoatSurface({
 
     const prompt = input.trim();
     if (!prompt) return;
+    const mentions =
+      selectedMentions.length > 0 && hasCodexMentionToken(prompt) ? selectedMentions : [];
 
     clearError();
     setMode("chat");
     isPinnedAtBottomRef.current = true;
     setLocallyStoppedAssistantMessageIds(new Set());
+    pendingMessageMentionsRef.current = mentions.length ? mentions : null;
     setInput("");
-    void sendMessage({ text: prompt }).catch((error) => {
-      setInput(prompt);
-      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
-    });
+    setMentionToken(null);
+    setSelectedMentions([]);
+    const message =
+      mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
+    void sendMessage(message)
+      .catch((error) => {
+        setInput(prompt);
+        setSelectedMentions(mentions);
+        toast.error(
+          error instanceof Error ? error.message : "Goat could not answer that right now.",
+        );
+      })
+      .finally(() => {
+        pendingMessageMentionsRef.current = null;
+      });
   };
 
   const closeChat = useCallback(() => {
@@ -312,11 +365,57 @@ export function GoatSurface({
   }, [closeChat, mode]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionToken) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setMentionToken(null);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        selectCodexMention();
+        return;
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       formRef.current?.requestSubmit();
     }
   };
+
+  const updateMentionToken = useCallback(
+    (value: string, selectionStart: number | null) => {
+      if (selectionStart === null) {
+        setMentionToken(null);
+        return;
+      }
+      setMentionToken(codexConnected ? findActiveMentionToken(value, selectionStart) : null);
+    },
+    [codexConnected],
+  );
+
+  const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextInput = event.target.value;
+    setInput(nextInput);
+    setSelectedMentions((current) =>
+      current.length > 0 && !hasCodexMentionToken(nextInput) ? [] : current,
+    );
+    updateMentionToken(nextInput, event.target.selectionStart);
+  };
+
+  const selectCodexMention = useCallback(() => {
+    if (!codexConnected || !mentionToken) return;
+    const before = input.slice(0, mentionToken.start);
+    const after = input.slice(mentionToken.end);
+    const nextInput = `${before}@codex ${after}`;
+    const nextCaret = before.length + "@codex ".length;
+    pendingInputCaretRef.current = nextCaret;
+    setInput(nextInput);
+    setSelectedMentions([CODEX_MENTION]);
+    setMentionToken(null);
+  }, [codexConnected, input, mentionToken]);
 
   const markUserScrollIntent = () => {
     userScrollIntentRef.current = true;
@@ -438,7 +537,7 @@ export function GoatSurface({
         onSubmit={onSubmit}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
       >
-        <div className="pointer-events-auto flex w-full max-w-[720px] flex-col gap-2">
+        <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
           {chatError ? (
             <p
               className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
@@ -447,22 +546,62 @@ export function GoatSurface({
               {chatError.message || "Goat could not answer that right now."}
             </p>
           ) : null}
+          {mentionToken ? (
+            <div
+              role="listbox"
+              aria-label="Mention menu"
+              className="absolute bottom-full left-3 z-20 mb-2 w-56 rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+            >
+              <button
+                type="button"
+                role="option"
+                aria-selected="true"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  selectCodexMention();
+                }}
+                onClick={selectCodexMention}
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none"
+              >
+                <Code2 size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                <span className="text-[13px] font-medium leading-4 text-ink">@codex</span>
+                <span className="ml-auto text-[12px] leading-4 text-ink-subtle">Codex</span>
+              </button>
+            </div>
+          ) : null}
           <div className="flex items-end gap-2.5 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              id="prompt"
-              name="prompt"
-              value={input}
-              placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={onKeyDown}
-              disabled={isGenerating}
-              className="max-h-32 flex-1 resize-none self-center bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
-              style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-              maxLength={10_000}
-              required
-            />
+            <div className="relative min-w-0 flex-1 self-center">
+              {input ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                >
+                  {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
+                </div>
+              ) : null}
+              <textarea
+                ref={inputRef}
+                rows={1}
+                id="prompt"
+                name="prompt"
+                value={input}
+                placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
+                onChange={onInputChange}
+                onBlur={() => setMentionToken(null)}
+                onClick={(event) =>
+                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                onKeyDown={onKeyDown}
+                onSelect={(event) =>
+                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                disabled={isGenerating}
+                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                maxLength={10_000}
+                required
+              />
+            </div>
             <SubmitButton
               disabled={!input.trim()}
               isGenerating={isGenerating}
@@ -472,6 +611,63 @@ export function GoatSurface({
         </div>
       </form>
     </div>
+  );
+}
+
+function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefined) {
+  const mentions = metadata?.mentions ?? [];
+  return mentions.filter(isSupportedMention);
+}
+
+function isSupportedMention(mention: GoatChatMention): mention is GoatChatMention {
+  return mention.kind === "engine" && mention.id === "codex";
+}
+
+function hasCodexMentionToken(value: string) {
+  return /(^|\s)@codex(?=\s|$)/i.test(value);
+}
+
+function findActiveMentionToken(value: string, caret: number): ActiveMentionToken | null {
+  const beforeCaret = value.slice(0, caret);
+  const boundary = Math.max(
+    beforeCaret.lastIndexOf(" "),
+    beforeCaret.lastIndexOf("\n"),
+    beforeCaret.lastIndexOf("\t"),
+  );
+  const start = boundary + 1;
+  const suffix = value.slice(caret);
+  const nextWhitespace = suffix.search(/\s/);
+  const end = nextWhitespace === -1 ? value.length : caret + nextWhitespace;
+  const token = value.slice(start, end);
+  if (!token.startsWith("@")) return null;
+
+  const query = token.slice(1).toLowerCase();
+  if (!query || "codex".startsWith(query)) {
+    return { start, end, query };
+  }
+  return null;
+}
+
+function renderComposerInputOverlay(value: string, highlightCodexMention: boolean) {
+  if (!highlightCodexMention) return value;
+  const match = /(^|\s)(@codex)(?=\s|$)/i.exec(value);
+  if (!match || match.index === undefined) return value;
+
+  const leadingWhitespace = match[1] ?? "";
+  const mention = match[2] ?? "@codex";
+  const mentionStart = match.index + leadingWhitespace.length;
+  const mentionEnd = mentionStart + mention.length;
+  return (
+    <>
+      {value.slice(0, mentionStart)}
+      <span
+        data-testid="selected-codex-mention"
+        className="rounded-md bg-ink/8 px-1 py-0.5 font-medium text-ink"
+      >
+        {value.slice(mentionStart, mentionEnd)}
+      </span>
+      {value.slice(mentionEnd)}
+    </>
   );
 }
 

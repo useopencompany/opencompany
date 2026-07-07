@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import type { GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
+import type { GoatHarnessEngine, GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
 import {
   goatTaskEvents,
   goatTaskMessages,
@@ -239,6 +239,7 @@ export async function createGoatTaskForUser(input: {
   prompt: string;
   model: AgentModelId;
   name?: string;
+  engine?: GoatHarnessEngine;
   harnessSpec?: GoatHarnessSpec;
   scheduleId?: string;
   scheduledFor?: Date;
@@ -250,7 +251,7 @@ export async function createGoatTaskForUser(input: {
   const tools = input.harnessSpec ? [] : await getGoatAvailableHarnessTools(input.userWorkosId);
   const harnessSpec: GoatHarnessSpec = input.harnessSpec ?? {
     schemaVersion: "goat.harness.v1",
-    engine: "opencompany",
+    engine: input.engine ?? "opencompany",
     model: input.model,
     systemPrompt: "",
     initialUserMessage: input.prompt,

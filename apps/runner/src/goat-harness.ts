@@ -152,6 +152,7 @@ export async function executeGoatTask(
     payload: { status: "running", stage: "planning" },
   });
 
+  const taskRequestedEngine = requestedGoatHarnessEngine(input.task.harnessSpec);
   const planned =
     input.task.scheduleId && hasPreplannedHarnessSpec(input.task.harnessSpec)
       ? {
@@ -165,6 +166,7 @@ export async function executeGoatTask(
       : await planGoatHarnessForTask({
           prompt: input.task.prompt,
           model: input.task.model,
+          ...(taskRequestedEngine ? { requestedEngine: taskRequestedEngine } : {}),
           availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
           githubRepositories: input.plannerContext?.githubRepositories ?? [],
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
@@ -573,6 +575,7 @@ async function runGoatTaskModelStreamInner(input: {
 export async function planGoatHarness(input: {
   prompt: string;
   model: GoatHarnessSpec["model"];
+  requestedEngine?: GoatHarnessSpec["engine"];
   gatewayApiKey: string;
   availableTools?: readonly GoatTaskToolName[];
   githubRepositories?: readonly string[];
@@ -590,6 +593,7 @@ export async function planGoatHarness(input: {
 export async function planGoatHarnessForTask(input: {
   prompt: string;
   model: GoatHarnessSpec["model"];
+  requestedEngine?: GoatHarnessSpec["engine"];
   gatewayApiKey: string;
   availableTools: readonly GoatTaskToolName[];
   githubRepositories?: readonly string[];
@@ -603,6 +607,7 @@ export async function planGoatHarnessForTask(input: {
   const availableEngines = GOAT_HARNESS_ENGINE_OPTIONS.map((option) => option.id);
   const availableModels = GOAT_HARNESS_MODEL_OPTIONS.map((option) => option.id);
   const availableSkills = GOAT_HARNESS_SKILL_OPTIONS.map((option) => option.id);
+  const requestedEngine = readRequestedHarnessEngine(input.requestedEngine, availableEngines);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
   const schema = goatHarnessSpecResponseSchema(
@@ -614,6 +619,7 @@ export async function planGoatHarnessForTask(input: {
   const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
   const userPrompt = buildGoatHarnessCreationPrompt({
     taskPrompt: input.prompt,
+    ...(requestedEngine ? { requestedEngine } : {}),
     executionEngineOptions: GOAT_HARNESS_ENGINE_OPTIONS,
     executionModelOptions: GOAT_HARNESS_MODEL_OPTIONS,
     availableOperationTools: availableTools,
@@ -642,7 +648,10 @@ export async function planGoatHarnessForTask(input: {
   );
   const harnessSpec = normalizeHarnessSpec(
     result.object,
-    input,
+    {
+      prompt: input.prompt,
+      ...(requestedEngine ? { requestedEngine } : {}),
+    },
     availableTools,
     availableEngines,
     availableModels,
@@ -749,6 +758,7 @@ function normalizeHarnessSpec(
   value: unknown,
   fallback: {
     prompt: string;
+    requestedEngine?: GoatHarnessSpec["engine"];
   },
   availableTools: readonly GoatTaskToolName[],
   availableEngines: readonly GoatHarnessSpec["engine"][],
@@ -757,8 +767,8 @@ function normalizeHarnessSpec(
   githubRepositories: readonly string[],
 ): GoatHarnessSpec {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  const engine = readHarnessEngine(record.engine, availableEngines);
-  const model = readHarnessModel(record.model, availableModels);
+  const engine = fallback.requestedEngine ?? readHarnessEngine(record.engine, availableEngines);
+  const model = readHarnessModel(record.model, availableModels, engine);
   if (!model) {
     throw new Error("Goat harness planner must choose a supported execution model.");
   }
@@ -807,6 +817,22 @@ function readHarnessEngine(
     : "opencompany";
 }
 
+function requestedGoatHarnessEngine(
+  harnessSpec: GoatHarnessSpec,
+): GoatHarnessSpec["engine"] | undefined {
+  return harnessSpec.engine === "codex" ? "codex" : undefined;
+}
+
+function readRequestedHarnessEngine(
+  value: unknown,
+  availableEngines: readonly GoatHarnessSpec["engine"][],
+): GoatHarnessSpec["engine"] | undefined {
+  const engine = readNonEmptyString(value);
+  return engine && availableEngines.includes(engine as GoatHarnessSpec["engine"])
+    ? (engine as GoatHarnessSpec["engine"])
+    : undefined;
+}
+
 function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
   if (!Array.isArray(value)) return [];
   const ids = value.filter((item): item is GoatTaskSkillId =>
@@ -818,8 +844,13 @@ function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
 function readHarnessModel(
   value: unknown,
   availableModels: readonly GoatHarnessSpec["model"][],
+  engine: GoatHarnessSpec["engine"],
 ): GoatHarnessSpec["model"] | null {
   const model = readNonEmptyString(value);
+  if (engine === "codex") {
+    const codexModel = availableModels.find((candidate) => candidate.startsWith("openai/"));
+    return codexModel ?? null;
+  }
   return model && availableModels.includes(model as GoatHarnessSpec["model"])
     ? (model as GoatHarnessSpec["model"])
     : null;

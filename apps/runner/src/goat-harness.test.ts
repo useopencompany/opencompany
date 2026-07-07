@@ -361,6 +361,41 @@ describe("planGoatHarness", () => {
     });
   });
 
+  it("enforces a requested Codex engine even if the planner response downgrades it", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "opencompany",
+        model: claudeModel,
+        systemPrompt: "Inspect the repository and report readiness.",
+        initialUserMessage:
+          "Check out opencompany-experimental and report whether development work can start.",
+        tools: ["github_clone_repository", "github_shell"],
+        skills: [],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Check out opencompany-experimental and report whether development work can start.",
+        model,
+        requestedEngine: "codex",
+        availableTools: ["github_clone_repository", "github_shell"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      engine: "codex",
+      model: gptModel,
+      codex: {
+        createPullRequest: false,
+      },
+    });
+    const prompt = aiMock.generateObject.mock.calls[0]?.[0]?.prompt as string;
+    expect(prompt).toContain("<requested_engine>\ncodex\n</requested_engine>");
+  });
+
   it("normalizes planner-selected Codex goal mode with a default token budget", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {

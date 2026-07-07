@@ -1,4 +1,5 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
@@ -34,6 +35,7 @@ import {
   SCHEDULE_TASK_SOURCE_DESCRIPTION,
   SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
   SCHEDULE_TASK_TOOL_DESCRIPTION,
+  START_TASK_ENGINE_DESCRIPTION,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
   START_TASK_REASON_DESCRIPTION,
@@ -120,11 +122,19 @@ type OpenCompanyChatSystemPromptInput = NonNullable<
   Parameters<typeof createOpenCompanyChatSystemPrompt>[0]
 >;
 
+type StartTaskRequest = {
+  prompt: string;
+  name?: string;
+  model: AgentModelId;
+  engine?: GoatHarnessEngine;
+};
+
 export async function runOpenCompanyChatAgent(input: {
   messages: readonly OpenCompanyChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
-  startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
+  startTask: (task: StartTaskRequest) => Promise<StartedTask>;
+  requestedEngine?: GoatHarnessEngine;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
@@ -141,9 +151,12 @@ export async function runOpenCompanyChatAgent(input: {
 
   const generate = input.generateTextImpl ?? generateText;
   const gateway = createGateway({ apiKey: gatewayApiKey });
+  const latestUserMessage = latestUserMessageContent(input.messages);
   const toolContext = createOpenCompanyChatToolContext({
     model: input.model,
     startTask: input.startTask,
+    ...(latestUserMessage ? { latestUserMessage } : {}),
+    ...(input.requestedEngine ? { requestedEngine: input.requestedEngine } : {}),
     ...(input.scheduleTask ? { scheduleTask: input.scheduleTask } : {}),
     ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
@@ -185,7 +198,9 @@ export async function runOpenCompanyChatAgent(input: {
 
 export function createOpenCompanyChatToolContext(input: {
   model: AgentModelId;
-  startTask: (task: { prompt: string; name?: string; model: AgentModelId }) => Promise<StartedTask>;
+  startTask: (task: StartTaskRequest) => Promise<StartedTask>;
+  requestedEngine?: GoatHarnessEngine;
+  latestUserMessage?: string;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
@@ -259,6 +274,11 @@ export function createOpenCompanyChatToolContext(input: {
             type: "string",
             description: START_TASK_REASON_DESCRIPTION,
           },
+          engine: {
+            type: "string",
+            enum: ["opencompany", "codex"],
+            description: START_TASK_ENGINE_DESCRIPTION,
+          },
         },
         required: ["prompt", "name"],
       }),
@@ -274,12 +294,19 @@ export function createOpenCompanyChatToolContext(input: {
           throw new Error("start_task prompt is required.");
         }
         const name = typeof args.name === "string" ? args.name.trim() : "";
+        const reason = typeof args.reason === "string" ? args.reason : "";
+        const engine =
+          input.requestedEngine ??
+          normalizeStartTaskEngine(args.engine) ??
+          inferStartTaskEngine(input.latestUserMessage) ??
+          inferStartTaskEngine([name, prompt, reason].join("\n"));
 
         try {
           startTaskInFlight = input.startTask({
             prompt,
             ...(name ? { name } : {}),
             model: input.model,
+            ...(engine ? { engine } : {}),
           });
           startedTask = await startTaskInFlight;
         } finally {
@@ -502,6 +529,31 @@ export function normalizeAgentText(text: string, startedTask: StartedTask | null
 
 export function stringifyFinishReason(value: unknown) {
   return typeof value === "string" ? value : undefined;
+}
+
+function latestUserMessageContent(messages: readonly OpenCompanyChatAgentMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    const trimmed = message.content.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+function normalizeStartTaskEngine(value: unknown): GoatHarnessEngine | undefined {
+  return value === "opencompany" || value === "codex" ? value : undefined;
+}
+
+function inferStartTaskEngine(value: string | undefined): GoatHarnessEngine | undefined {
+  if (!value) return undefined;
+  const normalized = value.toLowerCase();
+  const steeringText = normalized.replace(/@codex\b/g, "");
+  if (!/\bcodex\b/.test(steeringText)) return undefined;
+  if (/\b(?:do not|don't|dont|without|avoid|no|not)\b.{0,24}\bcodex\b/.test(steeringText)) {
+    return undefined;
+  }
+  return "codex";
 }
 
 export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput {

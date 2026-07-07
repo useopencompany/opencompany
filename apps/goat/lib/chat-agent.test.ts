@@ -118,6 +118,122 @@ describe("runOpenCompanyChatAgent", () => {
     expect(result.content).toBe("I started a task and added it to Results.");
   });
 
+  it("preserves Codex task intent from the original user turn when start_task rewrites the prompt", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Test repo access",
+      prompt: task.prompt,
+    }));
+
+    await runOpenCompanyChatAgent({
+      messages: [
+        {
+          role: "user",
+          content:
+            "try creating a new codex task that checks out opencompany-experimental and tests repo access",
+        },
+      ],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      generateTextImpl: (async (options: unknown) => {
+        await executeStartTaskTool(options, {
+          name: "Test repo access",
+          prompt:
+            "Check out opencompany-experimental, verify the repository can be viewed, and report whether development work can start.",
+          reason: "Requires connected source-control access.",
+        });
+
+        return {
+          text: "I started a task and added it to Results.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+
+    expect(startTask).toHaveBeenCalledWith({
+      name: "Test repo access",
+      prompt:
+        "Check out opencompany-experimental, verify the repository can be viewed, and report whether development work can start.",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "codex",
+    });
+  });
+
+  it("does not infer Codex steering from a manually typed @codex token", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Test repo access",
+      prompt: task.prompt,
+    }));
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "@codex check repo access" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      generateTextImpl: (async (options: unknown) => {
+        await executeStartTaskTool(options, {
+          name: "Test repo access",
+          prompt: "Check repo access and report whether development work can start.",
+          reason: "Requires connected source-control access.",
+        });
+
+        return {
+          text: "I started a task and added it to Results.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+
+    expect(startTask).toHaveBeenCalledWith({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: DEFAULT_GOAT_MODEL,
+    });
+  });
+
+  it("uses structured requested Codex steering even when the prompt omits Codex", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Test repo access",
+      prompt: task.prompt,
+    }));
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "@codex check repo access" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      requestedEngine: "codex",
+      startTask,
+      generateTextImpl: (async (options: unknown) => {
+        await executeStartTaskTool(options, {
+          name: "Test repo access",
+          prompt: "Check repo access and report whether development work can start.",
+          reason: "Requires connected source-control access.",
+        });
+
+        return {
+          text: "I started a task and added it to Results.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+
+    expect(startTask).toHaveBeenCalledWith({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "codex",
+    });
+  });
+
   it("deduplicates concurrent start_task tool calls", async () => {
     type TestStartedTask = {
       id: string;
@@ -423,7 +539,7 @@ function extractLastUserMessage(options: unknown) {
 
 async function executeStartTaskTool(
   options: unknown,
-  input: { prompt: string; name: string; reason: string },
+  input: { prompt: string; name: string; reason: string; engine?: "opencompany" | "codex" },
 ) {
   type ToolOptions = { tools?: Record<typeof START_TASK_TOOL_NAME, { execute?: unknown }> };
   const tool = (options as ToolOptions).tools?.[START_TASK_TOOL_NAME];
