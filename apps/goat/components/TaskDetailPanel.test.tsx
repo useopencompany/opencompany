@@ -113,6 +113,7 @@ describe("TaskDetailPanel harness config", () => {
       task: task({
         harnessSpec: {
           schemaVersion: "goat.harness.v1",
+          engine: "opencompany",
           model: "openai/gpt-5.4-mini",
           systemPrompt: "",
           initialUserMessage: "Research Marseille",
