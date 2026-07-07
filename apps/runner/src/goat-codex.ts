@@ -79,6 +79,7 @@ export async function runGoatCodexTask(input: {
   env: RunnerEnv;
   signal: AbortSignal;
   onEngineSessionId?: (engineSessionId: string) => Promise<void>;
+  onRuntimeEvents?: (events: Record<string, unknown>[]) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
 }): Promise<GoatCodexRunResult> {
   assertNotAborted(input.signal);
@@ -132,6 +133,7 @@ async function runGoatCodexWithAuth(input: {
   signal: AbortSignal;
   sandbox: SandboxHandle;
   onEngineSessionId?: (engineSessionId: string) => Promise<void>;
+  onRuntimeEvents?: (events: Record<string, unknown>[]) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
 }): Promise<{
   content: string;
@@ -198,6 +200,7 @@ async function runGoatCodexCommand(input: {
   sandbox: SandboxHandle;
   auth: CodexCliAuth;
   onEngineSessionId?: (engineSessionId: string) => Promise<void>;
+  onRuntimeEvents?: (events: Record<string, unknown>[]) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
 }): Promise<{
   content: string;
@@ -283,7 +286,7 @@ async function runGoatCodexCommand(input: {
     checkAbort: async () => {
       assertNotAborted(input.signal);
     },
-    onRuntimeEvents: async () => undefined,
+    onRuntimeEvents: input.onRuntimeEvents ?? (async () => undefined),
     onActivity: async (activity) => {
       await input.onOutput?.(redact(activity));
     },

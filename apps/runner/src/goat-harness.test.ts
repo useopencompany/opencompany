@@ -768,6 +768,66 @@ describe("executeGoatTask", () => {
       },
     };
     aiMock.generateObject.mockResolvedValueOnce({ object: codexHarnessSpec });
+    goatCodexMock.runGoatCodexTask.mockImplementationOnce(async (input) => {
+      await input.onOutput?.("I'll clone the repository.");
+      await input.onRuntimeEvents?.([
+        {
+          method: "item/agentMessage/delta",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            itemId: "agent_1",
+            delta: "I'll clone the repository.",
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            item: {
+              id: "agent_1",
+              type: "agentMessage",
+              text: "I'll clone the repository.",
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            item: {
+              id: "reasoning_1",
+              type: "reasoning",
+              text: "Checked the repository state.",
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            item: {
+              id: "cmd_1",
+              type: "commandExecution",
+              command: "git log --oneline -10",
+              status: "completed",
+              exitCode: 0,
+            },
+          },
+        },
+      ]);
+      return {
+        content: "Codex completed.",
+        sandboxId: "sbx_codex",
+        sandboxStartedAt: new Date("2026-01-01T00:00:00.000Z"),
+        sandboxEndedAt: new Date("2026-01-01T00:01:00.000Z"),
+        model: "gpt-5.5",
+        usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+      };
+    });
     const sink = createSink();
 
     await expect(
@@ -795,8 +855,45 @@ describe("executeGoatTask", () => {
           tokenBudget: 200_000,
         },
         onEngineSessionId: sink.updateCodexEngineSessionId,
+        onRuntimeEvents: expect.any(Function),
       }),
     );
+    expect(sink.updateMessageContent).toHaveBeenCalledWith({
+      messageId: "assistant_msg_1",
+      content: "I'll clone the repository.",
+    });
+    expect(sink.appendEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "assistant.delta" }),
+    );
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "message.completed",
+      messageId: "assistant_msg_1",
+      payload: expect.objectContaining({
+        source: "codex_app_server",
+        role: "assistant",
+        content: "I'll clone the repository.",
+        itemId: "agent_1",
+      }),
+    });
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "reasoning.completed",
+      messageId: "assistant_msg_1",
+      payload: expect.objectContaining({
+        source: "codex_app_server",
+        text: "Checked the repository state.",
+        itemId: "reasoning_1",
+      }),
+    });
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "tool.completed",
+      messageId: "assistant_msg_1",
+      payload: expect.objectContaining({
+        source: "codex_app_server",
+        toolCallId: "cmd_1",
+        toolName: "codex_command",
+        output: { status: "completed", exitCode: 0 },
+      }),
+    });
     expect(sink.recordSandboxUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         sandboxId: "sbx_codex",

@@ -157,6 +157,7 @@ export type GoatTaskEventType =
   | "harness.planned"
   | "artifact.created"
   | "assistant.delta"
+  | "reasoning.completed"
   | "message.created"
   | "message.completed"
   | "message.failed"

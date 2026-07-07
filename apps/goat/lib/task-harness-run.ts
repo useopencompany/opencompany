@@ -702,6 +702,7 @@ function describeTool(name: string): Pick<GoatHarnessRunToolCall, "label" | "kin
     };
     return { label: labels[name] ?? "Linear", kind: "linear" };
   }
+  if (name === "codex_command") return { label: "Codex command", kind: "tool" };
   return { label: name, kind: "tool" };
 }
 
