@@ -70,6 +70,20 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
+      # Optional Goat rendered-browser task tools. Production uses Browserless by default when
+      # RUNNER_GOAT_BROWSER_ENABLED=true unless AGENT_BROWSER_PROVIDER overrides it.
+      - key: RUNNER_GOAT_BROWSER_ENABLED
+        sync: false
+      - key: AGENT_BROWSER_PROVIDER
+        sync: false
+      - key: BROWSERLESS_API_KEY
+        sync: false
+      - key: BROWSERLESS_API_URL
+        sync: false
+      - key: BROWSERLESS_TTL
+        sync: false
+      - key: BROWSERLESS_STEALTH
+        sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE
         sync: false
       - key: OPENCOMPANY_CODEX_E2B_TEMPLATE

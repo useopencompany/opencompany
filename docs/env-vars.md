@@ -260,6 +260,10 @@ Set these in the Render `opencompany-runner` service.
 | `E2B_API_KEY` | Yes | Creates/connects E2B sandboxes. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
 | `EXA_API_KEY` | Goat/Exa only | Required for Goat main chat web search, Goat tasks, and agents that enable Exa. |
+| `RUNNER_GOAT_BROWSER_ENABLED` | Goat Browser only | Enables Goat task browser tools. Defaults to `false`. When enabled in production, the runner defaults to `AGENT_BROWSER_PROVIDER=browserless`. |
+| `AGENT_BROWSER_PROVIDER` | Goat Browser only | Optional `agent-browser` provider override. Leave unset for local Chrome; use `browserless` in production unless intentionally testing another provider. |
+| `BROWSERLESS_API_KEY` | Goat Browser only | Required when browser tools run with `AGENT_BROWSER_PROVIDER=browserless`. |
+| `BROWSERLESS_API_URL` / `BROWSERLESS_TTL` / `BROWSERLESS_STEALTH` | Goat Browser only | Optional Browserless provider settings passed through to `agent-browser`. |
 | `X_API_BEARER_TOKEN` | No | Required only for agents that enable the X read-only hosted tool. |
 | `APIFY_API_TOKEN` | No | Required only for agents that enable Apify-backed Instagram or TikTok profile/feed/comment/search tools. |
 | `SUPADATA_API_KEY` | No | Required only for agents that enable Supadata-backed YouTube tools or TikTok/Instagram direct-media transcript/metadata tools. |

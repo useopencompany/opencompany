@@ -4,6 +4,11 @@ import { GOAT_SPANS, recordGoatToolCall, startGoatSpan } from "@opencompany/goat
 import { jsonSchema, type ToolSet, tool } from "ai";
 import type { RunnerEnv } from "./env";
 import {
+  createGoatBrowserToolSession,
+  type GoatBrowserToolName,
+  isGoatBrowserToolName,
+} from "./goat-browser-tools";
+import {
   createGoatGitHubToolSession,
   type GoatGitHubSandboxUsage,
   type GoatGitHubToolName,
@@ -23,6 +28,17 @@ import { executeHostedTool, type HostedToolUsage } from "./hosted-tools";
 
 export const GOAT_TASK_TOOL_NAMES = [
   "exa_search",
+  "browser_open",
+  "browser_snapshot",
+  "browser_click",
+  "browser_fill",
+  "browser_wait",
+  "browser_read",
+  "browser_get",
+  "browser_find",
+  "browser_scroll",
+  "browser_screenshot",
+  "browser_close",
   "gmail_search",
   "gmail_get_message",
   "gmail_list_threads",
@@ -51,6 +67,7 @@ export type GoatToolLifecycleInput = {
 
 export type GoatToolLifecycleCompletion = GoatToolLifecycleInput & {
   output: unknown;
+  modelOutput?: unknown;
   usage?: HostedToolUsage;
 };
 
@@ -66,6 +83,7 @@ export type GoatToolLifecycle = {
 
 export type GoatTaskToolsInput = {
   selectedTools: readonly GoatTaskToolName[];
+  taskId?: string;
   userWorkosId: string;
   env: RunnerEnv;
   signal: AbortSignal;
@@ -99,21 +117,32 @@ export function buildGoatTaskTools(input: GoatTaskToolsInput): ToolSet {
 }
 
 export function buildGoatTaskToolRuntime(input: GoatTaskToolsInput): GoatTaskToolRuntime {
+  const selected = new Set(normalizeGoatTaskToolNames(input.selectedTools));
   const githubSession = createGoatGitHubToolSession({
     userWorkosId: input.userWorkosId,
     env: input.env,
     signal: input.signal,
     ...(input.recordSandboxUsage ? { recordSandboxUsage: input.recordSandboxUsage } : {}),
   });
+  const browserSession = [...selected].some(isGoatBrowserToolName)
+    ? createGoatBrowserToolSession({
+        env: input.env,
+        signal: input.signal,
+        ...(input.taskId ? { taskId: input.taskId } : {}),
+      })
+    : null;
   return {
-    tools: buildGoatTaskToolsForSession(input, githubSession),
-    cleanup: () => githubSession.cleanup(),
+    tools: buildGoatTaskToolsForSession(input, githubSession, browserSession),
+    cleanup: async () => {
+      await Promise.all([githubSession.cleanup(), browserSession?.cleanup() ?? Promise.resolve()]);
+    },
   };
 }
 
 function buildGoatTaskToolsForSession(
   input: GoatTaskToolsInput,
   githubSession: ReturnType<typeof createGoatGitHubToolSession>,
+  browserSession: ReturnType<typeof createGoatBrowserToolSession> | null,
 ): ToolSet {
   const tools: ToolSet = {};
   const selected = new Set(normalizeGoatTaskToolNames(input.selectedTools));
@@ -136,6 +165,7 @@ function buildGoatTaskToolsForSession(
     toolInput: unknown,
     toolCallId: string,
     output: unknown,
+    modelOutput: unknown,
     usage: HostedToolUsage | undefined,
   ) => {
     const messageId = messageIdsByCallId.get(toolCallId);
@@ -144,6 +174,7 @@ function buildGoatTaskToolsForSession(
       toolName,
       input: toolInput,
       output,
+      modelOutput,
       ...(usage ? { usage } : {}),
       ...(messageId ? { messageId } : {}),
     });
@@ -196,6 +227,7 @@ function buildGoatTaskToolsForSession(
             toolCallId: options.toolCallId,
             messageId: messageIdsByCallId.get(options.toolCallId) ?? null,
             githubSession,
+            browserSession,
             checkExaSearchGuard: () => {
               const currentProgressVersion = input.getAssistantProgressVersion?.() ?? 0;
               if (reflectionBlockProgressVersion !== null) {
@@ -222,7 +254,14 @@ function buildGoatTaskToolsForSession(
               };
             },
           });
-          await completeTool(toolName, toolInput, options.toolCallId, result.output, result.usage);
+          await completeTool(
+            toolName,
+            toolInput,
+            options.toolCallId,
+            result.transcriptOutput ?? result.output,
+            result.output,
+            result.usage,
+          );
           span.end({
             ...attributes,
             "goat.outcome": "success",
@@ -280,8 +319,9 @@ async function executeGoatTaskTool(input: {
   toolCallId: string;
   messageId?: string | null;
   githubSession: ReturnType<typeof createGoatGitHubToolSession>;
+  browserSession: ReturnType<typeof createGoatBrowserToolSession> | null;
   checkExaSearchGuard: () => ExaSearchGuardResult;
-}): Promise<{ output: unknown; usage?: HostedToolUsage }> {
+}): Promise<{ output: unknown; transcriptOutput?: unknown; usage?: HostedToolUsage }> {
   if (input.toolName === "exa_search") {
     return executeExaSearch({
       args: input.toolInput,
@@ -323,6 +363,18 @@ async function executeGoatTaskTool(input: {
       output,
       usage: zeroCostToolUsage(input.toolName, githubOperation(input.toolName)),
     };
+  }
+  if (isGoatBrowserToolName(input.toolName)) {
+    if (!input.browserSession) {
+      return {
+        output: { ok: false, error: "Browser session is not available for this task." },
+        usage: zeroCostToolUsage(input.toolName, browserOperation(input.toolName)),
+      };
+    }
+    return input.browserSession.execute({
+      name: input.toolName as GoatBrowserToolName,
+      args: input.toolInput,
+    });
   }
   return {
     output: { ok: false, error: `Unknown Goat tool "${input.toolName}".` },
@@ -417,6 +469,28 @@ function goatToolDescription(toolName: GoatTaskToolName) {
   switch (toolName) {
     case "exa_search":
       return "Search the web with Exa and return concise source results. A run can use at most 32 Exa searches. After 8 successful searches in a reflection window, the next Exa call returns reflectionRequired; emit a quick assistant update before retrying.";
+    case "browser_open":
+      return "Open a rendered browser page at an absolute http(s) URL in the task's isolated browser session. Read/research only: never log in, check out, purchase, mutate accounts, or handle credentials.";
+    case "browser_snapshot":
+      return "Return a compact accessibility snapshot of the active rendered browser page, with element refs like @e1 for later browser_click or browser_fill calls. Use includeUrls=true only when the task needs direct link URLs from a listing page.";
+    case "browser_click":
+      return "Click one element by a browser_snapshot ref like @e1. Use only for read/research navigation, filters, sorting, tabs, consent dismissal, or non-destructive interaction.";
+    case "browser_fill":
+      return "Fill one input by a browser_snapshot ref like @e1. Use for search boxes and read-only filters only; never enter credentials, payment details, or private user data.";
+    case "browser_wait":
+      return "Wait briefly for browser page state: milliseconds, an element ref, text, URL pattern, or load state.";
+    case "browser_read":
+      return "Read text from either the active rendered browser page or an absolute http(s) URL. Optionally filter returned lines by text. Prefer this over snapshots when page text is the main evidence.";
+    case "browser_get":
+      return "Get one targeted value from the active browser page: url, title, text, value, attr, or count. Prefer this over snapshots when you know what to inspect. For direct URLs from link refs, use target attr with attribute href instead of guessing slugs.";
+    case "browser_find":
+      return "Use semantic locators to find or act on one element without taking a broad snapshot. Supports role, text, label, placeholder, alt, title, testid, first, last, and nth.";
+    case "browser_scroll":
+      return "Scroll the active browser viewport up, down, left, or right. Use before a scoped follow-up snapshot or targeted get when content is below the fold.";
+    case "browser_screenshot":
+      return "Capture a screenshot of the active browser page for traceability. The output includes the saved screenshot path from agent-browser.";
+    case "browser_close":
+      return "Close the task's isolated browser session. Usually automatic at cleanup, but call it when browser work is done.";
     case "gmail_search":
       return "Search connected Gmail with Gmail query syntax and return message ids, snippets, and headers. Read-only.";
     case "gmail_get_message":
@@ -463,6 +537,137 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
           },
         },
         required: ["query"],
+      } as const;
+    case "browser_open":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          url: { type: "string" },
+        },
+        required: ["url"],
+      } as const;
+    case "browser_snapshot":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          interactive: { type: "boolean" },
+          includeUrls: { type: "boolean" },
+          compact: { type: "boolean" },
+          depth: { type: "number", minimum: 1, maximum: 10 },
+          selector: { type: "string" },
+        },
+      } as const;
+    case "browser_click":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ref: { type: "string" },
+        },
+        required: ["ref"],
+      } as const;
+    case "browser_fill":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ref: { type: "string" },
+          text: { type: "string" },
+        },
+        required: ["ref", "text"],
+      } as const;
+    case "browser_wait":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          milliseconds: { type: "number", minimum: 100, maximum: 30000 },
+          ref: { type: "string" },
+          text: { type: "string" },
+          urlPattern: { type: "string" },
+          loadState: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
+        },
+      } as const;
+    case "browser_read":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          url: { type: "string" },
+          filter: { type: "string" },
+          outline: { type: "boolean" },
+        },
+      } as const;
+    case "browser_get":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          target: { type: "string", enum: ["url", "title", "text", "value", "attr", "count"] },
+          ref: { type: "string" },
+          selector: { type: "string" },
+          attribute: { type: "string" },
+        },
+        required: ["target"],
+      } as const;
+    case "browser_find":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          by: {
+            type: "string",
+            enum: [
+              "role",
+              "text",
+              "label",
+              "placeholder",
+              "alt",
+              "title",
+              "testid",
+              "first",
+              "last",
+              "nth",
+            ],
+          },
+          value: { type: "string" },
+          action: {
+            type: "string",
+            enum: ["click", "fill", "type", "hover", "focus", "check", "uncheck"],
+          },
+          text: { type: "string" },
+          name: { type: "string" },
+          exact: { type: "boolean" },
+          index: { type: "number", minimum: 0, maximum: 10000 },
+        },
+        required: ["by", "value", "action"],
+      } as const;
+    case "browser_scroll":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          direction: { type: "string", enum: ["up", "down", "left", "right"] },
+          pixels: { type: "number", minimum: 1, maximum: 5000 },
+        },
+        required: ["direction"],
+      } as const;
+    case "browser_screenshot":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          fullPage: { type: "boolean" },
+          annotate: { type: "boolean" },
+        },
+      } as const;
+    case "browser_close":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
       } as const;
     case "gmail_search":
       return {
@@ -631,6 +836,7 @@ function goatToolProvider(toolName: GoatTaskToolName) {
   if (toolName.startsWith("calendar_")) return "google_calendar";
   if (toolName.startsWith("linear_")) return "linear";
   if (toolName.startsWith("github_")) return "github";
+  if (toolName.startsWith("browser_")) return "browser";
   if (toolName === "exa_search") return "exa";
   return "goat";
 }
@@ -642,6 +848,10 @@ function linearOperation(toolName: GoatTaskToolName, toolInput: unknown) {
 
 function githubOperation(toolName: GoatTaskToolName) {
   return toolName.replace(/^github_/, "");
+}
+
+function browserOperation(toolName: GoatTaskToolName) {
+  return toolName.replace(/^browser_/, "");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -40,6 +40,17 @@ export type GoatIntegrationResourceStatus =
 
 export type GoatTaskToolName =
   | "exa_search"
+  | "browser_open"
+  | "browser_snapshot"
+  | "browser_click"
+  | "browser_fill"
+  | "browser_wait"
+  | "browser_read"
+  | "browser_get"
+  | "browser_find"
+  | "browser_scroll"
+  | "browser_screenshot"
+  | "browser_close"
   | "gmail_search"
   | "gmail_get_message"
   | "gmail_list_threads"

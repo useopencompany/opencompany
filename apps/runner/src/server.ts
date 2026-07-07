@@ -115,7 +115,9 @@ export function createServer(
       return;
     }
 
-    const availableTools = await getGoatAvailableHarnessToolsForRunner(userWorkosId);
+    const availableTools = await getGoatAvailableHarnessToolsForRunner(userWorkosId, {
+      browserEnabled: env.goatBrowserEnabled,
+    });
     const planned = await planGoatHarnessForTask({
       prompt,
       model: "moonshotai/kimi-k2.6",

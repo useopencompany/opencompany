@@ -689,85 +689,114 @@ export function createDbGoatTaskStore(): GoatTaskStore {
     },
 
     async fail(input) {
-      const notificationContent = goatTaskFailedChatNotification({
-        displayId: input.displayId,
-        error: input.error,
-      });
       const result = await getDb().execute(sql`
-        WITH failed_task AS (
-          UPDATE goat.tasks
-          SET status = 'failed',
-              stage = 'failed',
-              error = ${input.error},
-              debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
-              lease_id = NULL,
-              lease_owner = NULL,
-              lease_expires_at = NULL,
-              updated_at = ${input.now}
-          WHERE id = ${input.id}
-            AND lease_id = ${input.leaseId}
-            AND lease_owner = ${input.leaseOwner}
-            AND status = 'running'
-          RETURNING id, display_id, name
-        ),
-        origin_chat AS (
-          SELECT message.session_id
-          FROM goat.chat_messages AS message
-          INNER JOIN goat.chat_sessions AS session ON session.id = message.session_id
-          INNER JOIN failed_task AS task ON task.id = message.task_id
-          WHERE session.closed_at IS NULL
-          ORDER BY message.created_at ASC
-          LIMIT 1
-        ),
-        inserted_notification AS (
-          INSERT INTO goat.chat_messages (
-            id,
-            session_id,
-            role,
-            content,
-            debug_trace,
-            created_at,
-            updated_at
-          )
-          SELECT
-            ${newGoatChatMessageId()},
-            origin.session_id,
-            'assistant',
-            ${notificationContent},
-            jsonb_build_object(
-              'schemaVersion', 'goat.chat.debug.v1',
-              'taskNotification', jsonb_build_object(
-                'taskId', task.id,
-                'taskDisplayId', task.display_id,
-                'taskName', task.name,
-                'status', 'failed'
-              ),
-              'error', ${input.error}
-            ),
-            ${input.now},
-            ${input.now}
-          FROM failed_task AS task
-          CROSS JOIN origin_chat AS origin
-          WHERE NOT EXISTS (
-            SELECT 1
-            FROM goat.chat_messages AS existing
-            WHERE existing.session_id = origin.session_id
-              AND existing.debug_trace->'taskNotification'->>'taskId' = task.id
-          )
-          RETURNING session_id
-        ),
-        touched_chat AS (
-          UPDATE goat.chat_sessions AS session
-          SET updated_at = ${input.now}
-          FROM inserted_notification AS notification
-          WHERE session.id = notification.session_id
-          RETURNING session.id
-        )
-        SELECT id FROM failed_task
+        UPDATE goat.tasks
+        SET status = 'failed',
+            stage = 'failed',
+            error = ${input.error},
+            debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
+            lease_id = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = ${input.now}
+        WHERE id = ${input.id}
+          AND lease_id = ${input.leaseId}
+          AND lease_owner = ${input.leaseOwner}
+          AND status = 'running'
+        RETURNING id, display_id, name
       `);
-      return rowsFromExecute<{ id: string }>(result).length > 0;
+      const failedTask = rowsFromExecute<{ id: string; display_id: string; name: string }>(
+        result,
+      )[0];
+      if (!failedTask) return false;
+
+      try {
+        await insertGoatTaskFailureNotification({
+          taskId: failedTask.id,
+          displayId: failedTask.display_id,
+          name: failedTask.name,
+          error: input.error,
+          now: input.now,
+        });
+      } catch (error) {
+        captureException(error, {
+          event: "opencompany.goat_task_failure_notification_failed",
+          task_id: failedTask.id,
+        });
+        logger.warn("Failed to insert Goat task failure notification", {
+          event: "opencompany.goat_task_failure_notification_failed",
+          task_id: failedTask.id,
+          error,
+        });
+      }
+
+      return true;
     },
   };
+}
+
+async function insertGoatTaskFailureNotification(input: {
+  taskId: string;
+  displayId: string;
+  name: string;
+  error: string;
+  now: Date;
+}) {
+  const notificationContent = goatTaskFailedChatNotification({
+    displayId: input.displayId,
+    error: input.error,
+  });
+  await getDb().execute(sql`
+    WITH origin_chat AS (
+      SELECT message.session_id
+      FROM goat.chat_messages AS message
+      INNER JOIN goat.chat_sessions AS session ON session.id = message.session_id
+      WHERE message.task_id = ${input.taskId}
+        AND session.closed_at IS NULL
+      ORDER BY message.created_at ASC
+      LIMIT 1
+    ),
+    inserted_notification AS (
+      INSERT INTO goat.chat_messages (
+        id,
+        session_id,
+        role,
+        content,
+        debug_trace,
+        created_at,
+        updated_at
+      )
+      SELECT
+        ${newGoatChatMessageId()},
+        origin.session_id,
+        'assistant',
+        ${notificationContent},
+        jsonb_build_object(
+          'schemaVersion', 'goat.chat.debug.v1',
+          'taskNotification', jsonb_build_object(
+            'taskId', ${input.taskId},
+            'taskDisplayId', ${input.displayId},
+            'taskName', ${input.name},
+            'status', 'failed'
+          ),
+          'error', ${input.error}
+        ),
+        ${input.now},
+        ${input.now}
+      FROM origin_chat AS origin
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM goat.chat_messages AS existing
+        WHERE existing.session_id = origin.session_id
+          AND existing.debug_trace->'taskNotification'->>'taskId' = ${input.taskId}
+      )
+      RETURNING session_id
+    )
+    UPDATE goat.chat_sessions AS session
+    SET updated_at = ${input.now}
+    FROM inserted_notification AS notification
+    WHERE session.id = notification.session_id
+  `);
 }
 
 let registeredGoatTaskWakeup: (() => void) | null = null;

@@ -238,6 +238,9 @@ Normalization is intentionally conservative:
 - Tool names are operation-level only.
 - Skills are reasoning/operating guidance only, selected from the planner's available skill list
   (`first-principles`, `yc-office-hours`) and injected into the execution system prompt.
+- `maxModelSteps` is a runaway ceiling, not a difficulty estimate. The planner default is 16,
+  browser-capable tasks are normalized to at least 16, and the runner reserves the final step for
+  a no-tool answer.
 - Gmail, Calendar, and Linear operations are selected only if both available to the user and chosen
   by the planner.
 - The execution model must be one of the planner's allowed model options.

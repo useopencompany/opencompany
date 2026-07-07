@@ -16,9 +16,23 @@ const TOOL_PROVIDER_MAP: Record<string, GoatTaskToolName[]> = {
 };
 
 const PLANNABLE_PROVIDERS = ["gmail", "google_calendar", "linear", "github"] as const;
+const GOAT_BROWSER_TOOLS = [
+  "browser_open",
+  "browser_snapshot",
+  "browser_click",
+  "browser_fill",
+  "browser_wait",
+  "browser_read",
+  "browser_get",
+  "browser_find",
+  "browser_scroll",
+  "browser_screenshot",
+  "browser_close",
+] as const satisfies readonly GoatTaskToolName[];
 
 export async function getGoatAvailableHarnessToolsForRunner(
   userWorkosId: string,
+  options: { browserEnabled?: boolean } = {},
 ): Promise<GoatTaskToolName[]> {
   const rows = await getDb()
     .select({ provider: goatIntegrations.provider })
@@ -32,6 +46,9 @@ export async function getGoatAvailableHarnessToolsForRunner(
     );
 
   const tools = new Set<GoatTaskToolName>(["exa_search"]);
+  if (options.browserEnabled) {
+    for (const toolName of GOAT_BROWSER_TOOLS) tools.add(toolName);
+  }
   for (const row of rows) {
     for (const toolName of TOOL_PROVIDER_MAP[row.provider] ?? []) {
       tools.add(toolName);

@@ -271,7 +271,7 @@ export type GoatHarnessRunToolCall = {
   id: string;
   name: GoatTaskToolName | string;
   label: string;
-  kind: "search" | "gmail" | "calendar" | "linear" | "tool";
+  kind: "search" | "browser" | "gmail" | "calendar" | "linear" | "tool";
   status: "running" | "completed" | "failed";
   inputPreview: string;
   outputPreview: string;
@@ -642,6 +642,22 @@ function makeToolCall(input: {
 
 function describeTool(name: string): Pick<GoatHarnessRunToolCall, "label" | "kind"> {
   if (name === "exa_search") return { label: "Web search", kind: "search" };
+  if (name.startsWith("browser_")) {
+    const labels: Record<string, string> = {
+      browser_open: "Browser open",
+      browser_snapshot: "Browser snapshot",
+      browser_click: "Browser click",
+      browser_fill: "Browser fill",
+      browser_wait: "Browser wait",
+      browser_read: "Browser read",
+      browser_get: "Browser get",
+      browser_find: "Browser find",
+      browser_scroll: "Browser scroll",
+      browser_screenshot: "Browser screenshot",
+      browser_close: "Browser close",
+    };
+    return { label: labels[name] ?? "Browser", kind: "browser" };
+  }
   if (name.startsWith("gmail_")) {
     const labels: Record<string, string> = {
       gmail_search: "Gmail search",
