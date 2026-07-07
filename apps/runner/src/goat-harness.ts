@@ -136,13 +136,23 @@ export async function executeGoatTask(
     payload: { status: "running", stage: "planning" },
   });
 
-  const planned = await planGoatHarnessForTask({
-    prompt: input.task.prompt,
-    model: input.task.model,
-    availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
-    gatewayApiKey: input.env.vercelAiGatewayApiKey,
-    signal: input.signal,
-  });
+  const planned =
+    input.task.scheduleId && hasPreplannedHarnessSpec(input.task.harnessSpec)
+      ? {
+          harnessSpec: input.task.harnessSpec,
+          debugTrace:
+            Object.keys(input.task.debugTrace).length > 0
+              ? input.task.debugTrace
+              : ({ schemaVersion: "goat.debug.v1" } satisfies GoatTaskDebugTrace),
+          usage: undefined,
+        }
+      : await planGoatHarnessForTask({
+          prompt: input.task.prompt,
+          model: input.task.model,
+          availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
+          gatewayApiKey: input.env.vercelAiGatewayApiKey,
+          signal: input.signal,
+        });
   const harnessSpec = planned.harnessSpec;
   if (planned.usage) {
     await input.sink.recordModelUsage({
@@ -252,6 +262,15 @@ export async function executeGoatTask(
   }
 }
 
+function hasPreplannedHarnessSpec(value: GoatHarnessSpec) {
+  return (
+    value.schemaVersion === "goat.harness.v1" &&
+    value.systemPrompt.trim().length > 0 &&
+    value.initialUserMessage.trim().length > 0 &&
+    value.tools.length > 0
+  );
+}
+
 async function runGoatTaskModelStream(input: {
   env: RunnerEnv;
   userWorkosId: string;
@@ -284,11 +303,13 @@ async function runGoatTaskModelStreamInner(input: {
   const { streamText } = getBraintrustAISDK(ai);
   const toolMessagesByCallId = new Map<string, string>();
   const streamAssistantContent = input.harnessSpec.resultMode === "assistant_final";
+  let assistantProgressVersion = 0;
   const toolRuntime = buildGoatTaskToolRuntime({
     selectedTools: input.harnessSpec.tools,
     userWorkosId: input.userWorkosId,
     env: input.env,
     signal: input.signal,
+    getAssistantProgressVersion: () => assistantProgressVersion,
     recordSandboxUsage: (usageInput) =>
       input.sink.recordSandboxUsage({
         messageId: usageInput.messageId ?? input.assistantMessageId,
@@ -382,6 +403,7 @@ async function runGoatTaskModelStreamInner(input: {
       assertNotAborted(input.signal);
       if (part.type === "text-delta") {
         assistantContent += part.text;
+        if (part.text.trim()) assistantProgressVersion += 1;
         await flushContent(false);
       } else if (part.type === "finish-step") {
         const finishPart = part as {
@@ -443,7 +465,7 @@ export async function planGoatHarness(input: {
   ).harnessSpec;
 }
 
-async function planGoatHarnessForTask(input: {
+export async function planGoatHarnessForTask(input: {
   prompt: string;
   model: GoatHarnessSpec["model"];
   gatewayApiKey: string;

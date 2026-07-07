@@ -375,6 +375,8 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     userWorkosId: "user_1",
     prompt: "Research Marseille",
     model: "openai/gpt-5.4-mini",
+    scheduleId: null,
+    scheduledFor: null,
     status: "running",
     stage: "planning",
     result: null,

@@ -40,6 +40,8 @@ export const GOAT_TASK_TOOL_NAMES = [
 ] as const satisfies readonly GoatTaskToolName[];
 
 const GOAT_TASK_TOOL_SET = new Set<GoatTaskToolName>(GOAT_TASK_TOOL_NAMES);
+const EXA_SEARCH_REFLECTION_THRESHOLD = 8;
+const EXA_SEARCH_RUN_LIMIT = 32;
 
 export type GoatToolLifecycleInput = {
   toolCallId: string;
@@ -67,6 +69,7 @@ export type GoatTaskToolsInput = {
   userWorkosId: string;
   env: RunnerEnv;
   signal: AbortSignal;
+  getAssistantProgressVersion?: () => number;
   lifecycle?: GoatToolLifecycle;
   recordSandboxUsage?: (usage: GoatGitHubSandboxUsage) => Promise<void>;
 };
@@ -116,6 +119,8 @@ function buildGoatTaskToolsForSession(
   const selected = new Set(normalizeGoatTaskToolNames(input.selectedTools));
   const messageIdsByCallId = new Map<string, string>();
   let exaSearchCount = 0;
+  let exaSearchesSinceReflection = 0;
+  let reflectionBlockProgressVersion: number | null = null;
 
   const startTool = async (toolName: GoatTaskToolName, toolInput: unknown, toolCallId: string) => {
     const result = await input.lifecycle?.onToolStarted?.({
@@ -191,9 +196,30 @@ function buildGoatTaskToolsForSession(
             toolCallId: options.toolCallId,
             messageId: messageIdsByCallId.get(options.toolCallId) ?? null,
             githubSession,
-            nextExaSearchCount: () => {
+            checkExaSearchGuard: () => {
+              const currentProgressVersion = input.getAssistantProgressVersion?.() ?? 0;
+              if (reflectionBlockProgressVersion !== null) {
+                if (currentProgressVersion !== reflectionBlockProgressVersion) {
+                  reflectionBlockProgressVersion = null;
+                  exaSearchesSinceReflection = 0;
+                } else {
+                  return { allowed: false as const, reason: "reflection_required" as const };
+                }
+              }
+              if (exaSearchCount >= EXA_SEARCH_RUN_LIMIT) {
+                return { allowed: false as const, reason: "run_limit" as const };
+              }
+              if (exaSearchesSinceReflection >= EXA_SEARCH_REFLECTION_THRESHOLD) {
+                reflectionBlockProgressVersion = currentProgressVersion;
+                return { allowed: false as const, reason: "reflection_required" as const };
+              }
               exaSearchCount += 1;
-              return exaSearchCount;
+              exaSearchesSinceReflection += 1;
+              return {
+                allowed: true as const,
+                searchCount: exaSearchCount,
+                searchesSinceReflection: exaSearchesSinceReflection,
+              };
             },
           });
           await completeTool(toolName, toolInput, options.toolCallId, result.output, result.usage);
@@ -254,14 +280,14 @@ async function executeGoatTaskTool(input: {
   toolCallId: string;
   messageId?: string | null;
   githubSession: ReturnType<typeof createGoatGitHubToolSession>;
-  nextExaSearchCount: () => number;
+  checkExaSearchGuard: () => ExaSearchGuardResult;
 }): Promise<{ output: unknown; usage?: HostedToolUsage }> {
   if (input.toolName === "exa_search") {
     return executeExaSearch({
       args: input.toolInput,
       env: input.env,
       signal: input.signal,
-      searchCount: input.nextExaSearchCount(),
+      guard: input.checkExaSearchGuard(),
     });
   }
   if (isGoatGoogleToolName(input.toolName)) {
@@ -304,22 +330,46 @@ async function executeGoatTaskTool(input: {
   };
 }
 
+type ExaSearchGuardResult =
+  | {
+      allowed: true;
+      searchCount: number;
+      searchesSinceReflection: number;
+    }
+  | {
+      allowed: false;
+      reason: "reflection_required" | "run_limit";
+    };
+
 async function executeExaSearch(input: {
   args: unknown;
   env: RunnerEnv;
   signal: AbortSignal;
-  searchCount: number;
+  guard: ExaSearchGuardResult;
 }) {
   const args = asRecord(input.args);
   const query = readString(args, "query");
-  if (input.searchCount > 10) {
+  const guard = input.guard;
+  if (!guard.allowed) {
+    if (guard.reason === "reflection_required") {
+      return {
+        output: {
+          ok: false,
+          blocked: true,
+          reflectionRequired: true,
+          query,
+          error:
+            "Pause Exa search and reflect briefly before continuing. Produce a quick assistant update with what you have learned, what is still missing, and the next specific search you would run if needed.",
+        },
+      };
+    }
     return {
       output: {
         ok: false,
         blocked: true,
         query,
         error:
-          "Exa search limit reached for this task. Report the result before doing more search work.",
+          "Exa search limit reached for this run. You have used 32 Exa searches; produce a response from the evidence already gathered.",
       },
     };
   }
@@ -335,12 +385,6 @@ async function executeExaSearch(input: {
       ok: true,
       query,
       results: compactHostedExaResults(hosted.output),
-      ...(input.searchCount === 5
-        ? {
-            warning:
-              "Exa tool calls can be expensive. Avoid more than 10 Exa searches for this task.",
-          }
-        : {}),
     },
     ...(hosted.usage ? { usage: hosted.usage } : {}),
   };
@@ -372,7 +416,7 @@ function compactExaResult(value: unknown) {
 function goatToolDescription(toolName: GoatTaskToolName) {
   switch (toolName) {
     case "exa_search":
-      return "Search the web with Exa and return concise source results.";
+      return "Search the web with Exa and return concise source results. A run can use at most 32 Exa searches. After 8 successful searches in a reflection window, the next Exa call returns reflectionRequired; emit a quick assistant update before retrying.";
     case "gmail_search":
       return "Search connected Gmail with Gmail query syntax and return message ids, snippets, and headers. Read-only.";
     case "gmail_get_message":

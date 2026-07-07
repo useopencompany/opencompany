@@ -14,6 +14,9 @@ const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   'Before calling any tool, first send a short user-visible sentence explaining what you are about to do and why. Keep it natural and specific, for example: "I\'ll save this to Brain first, then give you the recommendation." Do not silently call tools as your first visible action.',
   "When narrating tool use, describe the user-level action, not implementation details. Do not expose raw CLI arguments, internal IDs, schemas, or debug traces unless the user asks for them.",
   "Start a task when the user asks for deep research, investigation, monitoring, comparison across sources, connected-account work, code execution, longer-running execution, or anything that should be tracked as a Result.",
+  "Create a recurring task schedule when the user asks for work to repeat on a cadence, schedule, cron, routine, every day/week/month, or other recurring basis. Convert the cadence to a valid 5-field cron expression and save it directly when clear. If the recurrence is ambiguous, ask one concise follow-up instead of guessing.",
+  "Edit or delete an existing recurring task schedule when the user asks to change, pause by removal, remove, cancel, stop, or delete a routine. Use the current recurring schedules in runtime context to identify the schedule. If the target schedule is unclear, ask one concise follow-up.",
+  "Recurring schedules generate separate tracked Results each time they fire.",
   "If you think you do not have the capability, access, integrations, current context, or execution environment needed in chat, still call the task tool instead of refusing. Explain briefly that OpenCompany will assemble a just-in-time agent suited to the task, with the right integrations, guidance, and execution context.",
   "Requests to check, read, summarize, triage, or monitor the user's latest emails, inbox, Gmail, calendar, or connected accounts are task requests.",
   "When you start a task, keep the chat response short and say that it was added to Results.",
@@ -45,17 +48,61 @@ export const OPENCOMPANY_CHAT_SYSTEM_PROMPT = [
 ].join("\n\n");
 
 export function createOpenCompanyChatSystemPrompt(
-  input: { currentDate?: Date | string; webSearchEnabled?: boolean } = {},
+  input: {
+    currentDate?: Date | string;
+    webSearchEnabled?: boolean;
+    recurringSchedules?: readonly {
+      id: string;
+      name: string;
+      cron: string;
+      timezone: string;
+      enabled: boolean;
+      nextRunAt: string;
+    }[];
+  } = {},
 ) {
   return [
     OPENCOMPANY_CHAT_SYSTEM,
-    promptBlock("runtime_context", [`Current date: ${formatPromptDate(input.currentDate)}.`]),
+    promptBlock("runtime_context", [
+      `Current date: ${formatPromptDate(input.currentDate)}.`,
+      ...formatRecurringScheduleContext(input.recurringSchedules),
+    ]),
     promptBlock("behavior", [
       ...OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES,
       ...(input.webSearchEnabled ? OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES : []),
     ]),
     OPENCOMPANY_CHAT_SOUL,
   ].join("\n\n");
+}
+
+function formatRecurringScheduleContext(
+  schedules:
+    | readonly {
+        id: string;
+        name: string;
+        cron: string;
+        timezone: string;
+        enabled: boolean;
+        nextRunAt: string;
+      }[]
+    | undefined,
+) {
+  if (!schedules?.length) return ["Current recurring schedules: none."];
+  return [
+    "Current recurring schedules:",
+    ...schedules
+      .slice(0, 20)
+      .map((schedule) =>
+        [
+          `- id=${schedule.id}`,
+          `name=${JSON.stringify(schedule.name)}`,
+          `cron=${JSON.stringify(schedule.cron)}`,
+          `timezone=${JSON.stringify(schedule.timezone)}`,
+          `enabled=${schedule.enabled ? "true" : "false"}`,
+          `nextRunAt=${JSON.stringify(schedule.nextRunAt)}`,
+        ].join(" "),
+      ),
+  ];
 }
 
 function formatPromptDate(value: Date | string | undefined) {

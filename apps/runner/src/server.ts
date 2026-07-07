@@ -4,6 +4,8 @@ import { abortSession, archiveSession } from "./agent-loop";
 import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
 import type { RunnerEnv } from "./env";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
+import { planGoatHarnessForTask } from "./goat-harness";
+import { getGoatAvailableHarnessToolsForRunner } from "./goat-harness-planner";
 import { verifyGoatToolToken } from "./goat-tool-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
@@ -96,6 +98,32 @@ export function createServer(
     });
     wakeGoatTaskWorker();
     reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/goat/task-harness/plan", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat task worker is disabled." });
+      return;
+    }
+
+    const body = request.body as { userWorkosId?: unknown; prompt?: unknown } | undefined;
+    const userWorkosId = typeof body?.userWorkosId === "string" ? body.userWorkosId.trim() : "";
+    const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+    if (!userWorkosId || !prompt) {
+      reply.status(400).send({ error: "userWorkosId and prompt are required." });
+      return;
+    }
+
+    const availableTools = await getGoatAvailableHarnessToolsForRunner(userWorkosId);
+    const planned = await planGoatHarnessForTask({
+      prompt,
+      model: "moonshotai/kimi-k2.6",
+      availableTools,
+      gatewayApiKey: env.vercelAiGatewayApiKey,
+      signal: new AbortController().signal,
+    });
+    reply.send({ ok: true, harnessSpec: planned.harnessSpec });
   });
 
   app.post("/goat/tools/:taskId", async (request, reply) => {

@@ -239,13 +239,16 @@ export async function createGoatTaskForUser(input: {
   prompt: string;
   model: AgentModelId;
   name?: string;
+  harnessSpec?: GoatHarnessSpec;
+  scheduleId?: string;
+  scheduledFor?: Date;
 }) {
   const id = `goat_task_${randomUUID()}`;
   const userMessageId = `goat_task_msg_${randomUUID()}`;
   const now = new Date();
   const name = normalizeGoatTaskName(input.name, input.prompt);
-  const tools = await getGoatAvailableHarnessTools(input.userWorkosId);
-  const harnessSpec: GoatHarnessSpec = {
+  const tools = input.harnessSpec ? [] : await getGoatAvailableHarnessTools(input.userWorkosId);
+  const harnessSpec: GoatHarnessSpec = input.harnessSpec ?? {
     schemaVersion: "goat.harness.v1",
     model: input.model,
     systemPrompt: "",
@@ -265,6 +268,8 @@ export async function createGoatTaskForUser(input: {
           user_workos_id,
           prompt,
           model,
+          schedule_id,
+          scheduled_for,
           status,
           stage,
           next_run_at,
@@ -277,7 +282,9 @@ export async function createGoatTaskForUser(input: {
           ${name},
           ${input.userWorkosId},
           ${input.prompt},
-          ${input.model},
+          ${harnessSpec.model},
+          ${input.scheduleId ?? null},
+          ${input.scheduledFor ?? null},
           'queued',
           'queued',
           ${now},
@@ -321,6 +328,8 @@ export async function createGoatTaskForUser(input: {
         task.user_workos_id AS "userWorkosId",
         task.prompt AS "prompt",
         task.model AS "model",
+        task.schedule_id AS "scheduleId",
+        task.scheduled_for AS "scheduledFor",
         task.status AS "status",
         task.stage AS "stage",
         task.result AS "result",
@@ -363,8 +372,9 @@ export async function createGoatTaskForUser(input: {
 
 type GoatTaskRow = Omit<
   GoatTask,
-  "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
+  "scheduledFor" | "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
 > & {
+  scheduledFor: Date | string | null;
   nextRunAt: Date | string;
   leaseExpiresAt: Date | string | null;
   archivedAt: Date | string | null;
@@ -375,6 +385,7 @@ type GoatTaskRow = Omit<
 function goatTaskFromRow(row: GoatTaskRow): GoatTask {
   return {
     ...row,
+    scheduledFor: row.scheduledFor ? toDate(row.scheduledFor) : null,
     nextRunAt: toDate(row.nextRunAt),
     leaseExpiresAt: row.leaseExpiresAt ? toDate(row.leaseExpiresAt) : null,
     archivedAt: row.archivedAt ? toDate(row.archivedAt) : null,
