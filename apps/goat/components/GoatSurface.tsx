@@ -128,7 +128,6 @@ export function GoatSurface({
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingMessageMentionsRef = useRef<GoatChatMention[] | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
@@ -136,7 +135,9 @@ export function GoatSurface({
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
   const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
-  const shouldHighlightCodexMention = selectedMentions.length > 0 && hasCodexMentionToken(input);
+  const activeSelectedMentions = codexConnected ? selectedMentions : [];
+  const shouldHighlightCodexMention =
+    activeSelectedMentions.length > 0 && hasCodexMentionToken(input);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -151,10 +152,7 @@ export function GoatSurface({
         api: "/api/chat",
         prepareSendMessagesRequest: ({ messages }) => {
           const message = messages.at(-1);
-          const metadataMentions = mentionsFromMessageMetadata(message?.metadata);
-          const mentions = metadataMentions.length
-            ? metadataMentions
-            : (pendingMessageMentionsRef.current ?? []);
+          const mentions = mentionsFromMessageMetadata(message?.metadata);
           return {
             body: {
               sessionId: chatSessionId,
@@ -286,12 +284,6 @@ export function GoatSurface({
     void updateGoatTimezoneAction(timezone).catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    if (codexConnected) return;
-    setMentionToken(null);
-    setSelectedMentions((current) => (current.length > 0 ? [] : current));
-  }, [codexConnected]);
-
   const archiveTask = (task: GoatTaskView) => {
     setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
     startArchiveTransition(async () => {
@@ -316,29 +308,24 @@ export function GoatSurface({
     const prompt = input.trim();
     if (!prompt) return;
     const mentions =
-      selectedMentions.length > 0 && hasCodexMentionToken(prompt) ? selectedMentions : [];
+      activeSelectedMentions.length > 0 && hasCodexMentionToken(prompt)
+        ? activeSelectedMentions
+        : [];
 
     clearError();
     setMode("chat");
     isPinnedAtBottomRef.current = true;
     setLocallyStoppedAssistantMessageIds(new Set());
-    pendingMessageMentionsRef.current = mentions.length ? mentions : null;
     setInput("");
     setMentionToken(null);
     setSelectedMentions([]);
     const message =
       mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
-    void sendMessage(message)
-      .catch((error) => {
-        setInput(prompt);
-        setSelectedMentions(mentions);
-        toast.error(
-          error instanceof Error ? error.message : "Goat could not answer that right now.",
-        );
-      })
-      .finally(() => {
-        pendingMessageMentionsRef.current = null;
-      });
+    void sendMessage(message).catch((error) => {
+      setInput(prompt);
+      setSelectedMentions(mentions);
+      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
+    });
   };
 
   const closeChat = useCallback(() => {
@@ -397,16 +384,13 @@ export function GoatSurface({
     }
   };
 
-  const updateMentionToken = useCallback(
-    (value: string, selectionStart: number | null) => {
-      if (selectionStart === null) {
-        setMentionToken(null);
-        return;
-      }
-      setMentionToken(codexConnected ? findActiveMentionToken(value, selectionStart) : null);
-    },
-    [codexConnected],
-  );
+  const updateMentionToken = (value: string, selectionStart: number | null) => {
+    if (selectionStart === null) {
+      setMentionToken(null);
+      return;
+    }
+    setMentionToken(codexConnected ? findActiveMentionToken(value, selectionStart) : null);
+  };
 
   const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextInput = event.target.value;
@@ -417,7 +401,7 @@ export function GoatSurface({
     updateMentionToken(nextInput, event.target.selectionStart);
   };
 
-  const selectCodexMention = useCallback(() => {
+  const selectCodexMention = () => {
     if (!codexConnected || !mentionToken) return;
     const before = input.slice(0, mentionToken.start);
     const after = input.slice(mentionToken.end);
@@ -427,7 +411,7 @@ export function GoatSurface({
     setInput(nextInput);
     setSelectedMentions([CODEX_MENTION]);
     setMentionToken(null);
-  }, [codexConnected, input, mentionToken]);
+  };
 
   const markUserScrollIntent = () => {
     userScrollIntentRef.current = true;
