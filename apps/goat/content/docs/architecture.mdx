@@ -1,0 +1,54 @@
+---
+title: Architecture
+description: The current Goat runtime shape from browser chat to durable task execution.
+---
+
+## High-level flow
+
+```text
+Browser
+  GoatSurface
+    POST /api/chat
+      persist user message
+      stream foreground assistant response
+      optionally start a durable task
+
+Runner
+  Goat task worker
+    claim queued task
+    plan harness spec
+    run model loop with available tools
+    persist messages, events, result, and status
+
+Goat UI
+  read chat and task state
+  subscribe to task updates through Electric-backed collections
+```
+
+## Foreground chat
+
+The chat entry point is `apps/goat/app/api/chat/route.ts`. It authenticates the current Goat user, validates the submitted message, stores the user turn, and streams a response through Vercel AI Gateway.
+
+The chat agent can answer directly or use the tools assembled in `apps/goat/lib/chat-agent.ts`:
+
+- `goat_brain` for durable personal context.
+- `web_search` when Exa is configured.
+- `start_task` for work that belongs in Results.
+
+## Durable tasks
+
+Durable tasks start in `apps/goat/lib/tasks.ts` and run in `apps/runner/src/goat-worker.ts`.
+
+The runner claims queued tasks, plans a `goat.harness.v1` spec, executes the selected model with the available harness tools, then writes the final status and result back to the database.
+
+Task messages and events are persisted while the run is active so the UI can show progress instead of waiting for a single final response.
+
+## Data boundaries
+
+Goat uses the existing OpenCompany database and runner infrastructure, but it is not a full `.agent` session path yet. The task harness has its own schema, planning prompt, tool catalog, and result model.
+
+Keep this distinction clear when changing the system:
+
+- `.agent` session changes belong in the main OpenCompany agent runtime.
+- Goat chat and task harness changes belong in `apps/goat`, `apps/runner/src/goat-*`, and the Goat-specific packages.
+- Shared schema changes belong in `packages/db` and require a Drizzle migration.
