@@ -24,6 +24,10 @@
       "types": "./src/goat-brain-files.ts",
       "default": "./src/goat-brain-files.ts"
     },
+    "./goat-brain-ingest": {
+      "types": "./src/goat-brain-ingest.ts",
+      "default": "./src/goat-brain-ingest.ts"
+    },
     "./goat-schema": {
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"

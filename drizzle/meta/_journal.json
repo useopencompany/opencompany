@@ -645,6 +645,13 @@
       "when": 1783356300000,
       "tag": "0091_goat_recurring_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1783356600000,
+      "tag": "0092_goat_brain_ingest",
+      "breakpoints": true
     }
   ]
 }

@@ -5,18 +5,20 @@ import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPane
 import { currentGoatUser } from "@/lib/auth";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
+import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const { authUser, user } = await currentGoatUser();
-  const [googleIntegrations, linear, github] = await Promise.all([
+  const [googleIntegrations, linear, github, jamie] = await Promise.all([
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
     getGoatGitHubIntegrationState(user.workosUserId),
+    getGoatJamieIntegrationState(user.workosUserId),
   ]);
-  const integrations = { ...googleIntegrations, linear, github };
+  const integrations = { ...googleIntegrations, linear, github, jamie };
   const name = [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
   const initials = getInitials(authUser.firstName, authUser.lastName, user.email);

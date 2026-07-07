@@ -28,15 +28,19 @@ export type GoatTaskStage =
   | "canceled";
 export type GoatTaskScheduleRunStatus = "pending" | "created" | "failed";
 
-export type GoatIntegrationProvider = "gmail" | "google_calendar" | "linear" | "github";
+export type GoatIntegrationProvider = "gmail" | "google_calendar" | "linear" | "github" | "jamie";
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
-export type GoatIntegrationCredentialKind = "oauth_token";
+export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
 export type GoatIntegrationResourceStatus =
   | "available"
   | "permission_lost"
   | "archived"
   | "sync_failed";
+export type GoatBrainSourceType = "meeting";
+export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
+export type GoatBrainIngestJobKind = "brain_source_item_ingest";
+export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type GoatTaskToolName =
   | "exa_search"
@@ -449,7 +453,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -498,11 +502,11 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
-      sql`${table.kind} IN ('oauth_token')`,
+      sql`${table.kind} IN ('oauth_token', 'webhook_secret')`,
     ),
   }),
 );
@@ -552,11 +556,135 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
       sql`${table.status} IN ('available', 'permission_lost', 'archived', 'sync_failed')`,
+    ),
+  }),
+);
+
+export const goatBrainSourceItems = goat.table(
+  "brain_source_items",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    integrationId: text("integration_id").notNull(),
+    provider: text("provider").$type<GoatIntegrationProvider>().notNull(),
+    sourceType: text("source_type").$type<GoatBrainSourceType>().notNull(),
+    externalId: text("external_id").notNull(),
+    sourceRef: text("source_ref").notNull(),
+    title: text("title"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+    contentHash: text("content_hash").notNull(),
+    rawPayload: jsonb("raw_payload").$type<unknown>().notNull(),
+    normalizedPayload: jsonb("normalized_payload").$type<unknown>().notNull(),
+    lastIngestJobId: text("last_ingest_job_id"),
+    lastIngestStatus: text("last_ingest_status").$type<GoatBrainSourceItemIngestStatus>(),
+    lastIngestedAt: timestamp("last_ingested_at", { withTimezone: true }),
+    lastIngestError: text("last_ingest_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationSourceExternalHashIdx: uniqueIndex(
+      "goat_brain_source_items_integration_source_external_hash_idx",
+    ).on(table.integrationId, table.sourceType, table.externalId, table.contentHash),
+    userProviderOccurredIdx: index("goat_brain_source_items_user_provider_occurred_idx").on(
+      table.userWorkosId,
+      table.provider,
+      table.occurredAt,
+    ),
+    userUpdatedIdx: index("goat_brain_source_items_user_updated_idx").on(
+      table.userWorkosId,
+      table.updatedAt,
+    ),
+    lastIngestStatusIdx: index("goat_brain_source_items_last_ingest_status_idx").on(
+      table.lastIngestStatus,
+      table.updatedAt,
+    ),
+    integrationUserProviderFk: foreignKey({
+      name: "goat_brain_source_items_integration_user_provider_fk",
+      columns: [table.integrationId, table.userWorkosId, table.provider],
+      foreignColumns: [
+        goatIntegrations.id,
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+      ],
+    }).onDelete("cascade"),
+    providerCheck: check(
+      "goat_brain_source_items_provider_check",
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
+    ),
+    sourceTypeCheck: check(
+      "goat_brain_source_items_source_type_check",
+      sql`${table.sourceType} IN ('meeting')`,
+    ),
+    lastIngestStatusCheck: check(
+      "goat_brain_source_items_last_ingest_status_check",
+      sql`${table.lastIngestStatus} IS NULL OR ${table.lastIngestStatus} IN ('pending', 'succeeded', 'failed')`,
+    ),
+  }),
+);
+
+export const goatBrainIngestJobs = goat.table(
+  "brain_ingest_jobs",
+  {
+    id: text("id").primaryKey(),
+    sourceItemId: text("source_item_id")
+      .notNull()
+      .references(() => goatBrainSourceItems.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    integrationId: text("integration_id").notNull(),
+    provider: text("provider").$type<GoatIntegrationProvider>().notNull(),
+    kind: text("kind").$type<GoatBrainIngestJobKind>().notNull(),
+    contentHash: text("content_hash").notNull(),
+    status: text("status").$type<GoatBrainIngestJobStatus>().notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceItemHashKindIdx: uniqueIndex("goat_brain_ingest_jobs_source_item_hash_kind_idx").on(
+      table.sourceItemId,
+      table.contentHash,
+      table.kind,
+    ),
+    statusNextRunIdx: index("goat_brain_ingest_jobs_status_next_run_idx").on(
+      table.status,
+      table.nextRunAt,
+    ),
+    leaseExpiresAtIdx: index("goat_brain_ingest_jobs_lease_expires_at_idx").on(
+      table.leaseExpiresAt,
+    ),
+    userCreatedIdx: index("goat_brain_ingest_jobs_user_created_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    providerCheck: check(
+      "goat_brain_ingest_jobs_provider_check",
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
+    ),
+    kindCheck: check(
+      "goat_brain_ingest_jobs_kind_check",
+      sql`${table.kind} IN ('brain_source_item_ingest')`,
+    ),
+    statusCheck: check(
+      "goat_brain_ingest_jobs_status_check",
+      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed')`,
     ),
   }),
 );
@@ -1044,6 +1172,8 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   integrations: many(goatIntegrations),
   integrationCredentials: many(goatIntegrationCredentials),
   integrationResources: many(goatIntegrationResources),
+  brainSourceItems: many(goatBrainSourceItems),
+  brainIngestJobs: many(goatBrainIngestJobs),
 }));
 
 export const goatBrainFoldersRelations = relations(goatBrainFolders, ({ one }) => ({
@@ -1127,6 +1257,7 @@ export const goatIntegrationsRelations = relations(goatIntegrations, ({ one, man
   }),
   credentials: many(goatIntegrationCredentials),
   resources: many(goatIntegrationResources),
+  brainSourceItems: many(goatBrainSourceItems),
 }));
 
 export const goatIntegrationCredentialsRelations = relations(
@@ -1151,6 +1282,29 @@ export const goatIntegrationResourcesRelations = relations(goatIntegrationResour
   integration: one(goatIntegrations, {
     fields: [goatIntegrationResources.integrationId],
     references: [goatIntegrations.id],
+  }),
+}));
+
+export const goatBrainSourceItemsRelations = relations(goatBrainSourceItems, ({ one, many }) => ({
+  user: one(goatUsers, {
+    fields: [goatBrainSourceItems.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  integration: one(goatIntegrations, {
+    fields: [goatBrainSourceItems.integrationId],
+    references: [goatIntegrations.id],
+  }),
+  ingestJobs: many(goatBrainIngestJobs),
+}));
+
+export const goatBrainIngestJobsRelations = relations(goatBrainIngestJobs, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatBrainIngestJobs.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  sourceItem: one(goatBrainSourceItems, {
+    fields: [goatBrainIngestJobs.sourceItemId],
+    references: [goatBrainSourceItems.id],
   }),
 }));
 
@@ -1300,6 +1454,8 @@ export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSe
 export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;
 export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$inferSelect;
+export type GoatBrainSourceItem = typeof goatBrainSourceItems.$inferSelect;
+export type GoatBrainIngestJob = typeof goatBrainIngestJobs.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;

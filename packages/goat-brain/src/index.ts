@@ -9,6 +9,7 @@ export * from "./paths";
 export * from "./retrieval";
 export * from "./schema";
 export * from "./schemas";
+export * from "./source-items";
 export * from "./store";
 export { nowIso } from "./time";
 export * from "./timeline";

@@ -2,13 +2,14 @@
 
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
-import { CalendarDays, GitBranch, ListTodo, Mail } from "lucide-react";
+import { CalendarDays, FileText, GitBranch, ListTodo, Mail } from "lucide-react";
 import { useMemo } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
   type GoatGitHubProviderState,
   type GoatGoogleProviderState,
   type GoatIntegrationState,
+  type GoatJamieProviderState,
   type GoatLinearProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
@@ -52,6 +53,7 @@ function IntegrationRows({ integrations }: { integrations: GoatIntegrationState 
       />
       <IntegrationRow icon={ListTodo} label="Linear" integration={integrations.linear} />
       <IntegrationRow icon={GitBranch} label="GitHub" integration={integrations.github} />
+      <IntegrationRow icon={FileText} label="Jamie" integration={integrations.jamie} />
     </>
   );
 }
@@ -63,7 +65,11 @@ function IntegrationRow({
 }: {
   icon: LucideIcon;
   label: string;
-  integration: GoatGoogleProviderState | GoatLinearProviderState | GoatGitHubProviderState;
+  integration:
+    | GoatGoogleProviderState
+    | GoatLinearProviderState
+    | GoatGitHubProviderState
+    | GoatJamieProviderState;
 }) {
   const status = integrationStatus(integration);
   const connectHref = integrationConnectHref(integration.provider);
@@ -72,7 +78,9 @@ function IntegrationRow({
       ? integration.accountName
       : integration.provider === "github"
         ? integration.accountName
-        : (integration.accountEmail ?? integration.accountName);
+        : integration.provider === "jamie"
+          ? integration.accountName
+          : (integration.accountEmail ?? integration.accountName);
 
   return (
     <div className="flex items-center gap-3 rounded-lg px-2 py-2">
@@ -106,9 +114,15 @@ function IntegrationRow({
 }
 
 function integrationStatus(
-  integration: GoatGoogleProviderState | GoatLinearProviderState | GoatGitHubProviderState,
+  integration:
+    | GoatGoogleProviderState
+    | GoatLinearProviderState
+    | GoatGitHubProviderState
+    | GoatJamieProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
+  if (integration.provider === "jamie" && integration.status === "needs_reauth")
+    return "Finish setup";
   if (integration.status === "needs_reauth" || integration.status === "sync_failed") {
     return "Reconnect";
   }
@@ -116,12 +130,13 @@ function integrationStatus(
 }
 
 function integrationConnectHref(
-  provider: GoatGoogleProviderState["provider"] | "linear" | "github",
+  provider: GoatGoogleProviderState["provider"] | "linear" | "github" | "jamie",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings";
   }
   if (provider === "github") return "/api/integrations/github/start?returnTo=/settings";
+  if (provider === "jamie") return "/settings/jamie";
   return "/api/integrations/linear/start?returnTo=/settings";
 }
