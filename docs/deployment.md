@@ -46,11 +46,12 @@ The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so
 same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
 bursts from spending Actions minutes on commits that can no longer release.
 
-The web smoke check uses `PRODUCTION_WEB_URL` from Infisical `prod` + `/release`, not the raw Vercel
-deployment URL, so Vercel deployment protection can remain enabled on generated preview-style URLs.
-In production this canonical web URL is `https://my.opencompany.cloud`. The Better Stack status page
-monitors the same web `/api/healthz` and runner `/healthz` endpoints as the release smoke check, so
-keep those health endpoints stable when changing deployment or monitoring behavior.
+The web and Goat smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_GOAT_URL` from Infisical
+`prod` + `/release`, not the raw Vercel deployment URLs, so Vercel deployment protection can remain
+enabled on generated preview-style URLs. In production the canonical web URL is
+`https://my.opencompany.cloud`. The Better Stack status page monitors the same web `/api/healthz`,
+Goat `/api/healthz`, and runner `/healthz` endpoints as the release smoke check, so keep those
+health endpoints stable when changing deployment or monitoring behavior.
 
 Release attribution is not managed as an Infisical secret. Vercel and Render expose commit metadata
 to the server runtimes, and the production workflow injects `RELEASE_SHA` as

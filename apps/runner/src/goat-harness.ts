@@ -403,11 +403,13 @@ async function runGoatTaskModelStreamInner(input: {
   const { streamText } = getBraintrustAISDK(ai);
   const toolMessagesByCallId = new Map<string, string>();
   const streamAssistantContent = input.harnessSpec.resultMode === "assistant_final";
+  let assistantProgressVersion = 0;
   const toolRuntime = buildGoatTaskToolRuntime({
     selectedTools: input.harnessSpec.tools,
     userWorkosId: input.userWorkosId,
     env: input.env,
     signal: input.signal,
+    getAssistantProgressVersion: () => assistantProgressVersion,
     recordSandboxUsage: (usageInput) =>
       input.sink.recordSandboxUsage({
         messageId: usageInput.messageId ?? input.assistantMessageId,
@@ -501,6 +503,7 @@ async function runGoatTaskModelStreamInner(input: {
       assertNotAborted(input.signal);
       if (part.type === "text-delta") {
         assistantContent += part.text;
+        if (part.text.trim()) assistantProgressVersion += 1;
         await flushContent(false);
       } else if (part.type === "finish-step") {
         const finishPart = part as {

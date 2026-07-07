@@ -41,6 +41,44 @@ const groups = {
       "LINEAR_TEAM_ID",
     ],
   },
+  goat: {
+    label: "Vercel Goat app",
+    required: [
+      "DATABASE_URL",
+      "WORKOS_CLIENT_ID",
+      "WORKOS_API_KEY",
+      "WORKOS_COOKIE_PASSWORD",
+      "GOAT_NEXT_PUBLIC_APP_URL",
+      "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+      "VERCEL_AI_GATEWAY_API_KEY",
+      "RUNNER_PUBLIC_URL",
+      "RUNNER_INTERNAL_TOKEN",
+      "ELECTRIC_URL",
+    ],
+    optional: [
+      "RUNNER_INTERNAL_URL",
+      "EXA_API_KEY",
+      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
+      "MCP_OAUTH_STATE_SECRET",
+      "GITHUB_INTEGRATION_APP_ID",
+      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      "GITHUB_INTEGRATION_APP_SLUG",
+      "GITHUB_INTEGRATION_APP_CLIENT_ID",
+      "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
+      "GITHUB_INTEGRATION_STATE_SECRET",
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "GOOGLE_OAUTH_CALLBACK_URL",
+      "GOOGLE_INTEGRATION_STATE_SECRET",
+      "ELECTRIC_SOURCE_ID",
+      "ELECTRIC_SOURCE_SECRET",
+      "ELECTRIC_SECRET",
+      "ELECTRIC_TOKEN",
+      "GOAT_OBSERVABILITY_ENABLED",
+      "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
+      "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+    ],
+  },
   runner: {
     label: "Render runner",
     required: [
@@ -82,9 +120,11 @@ const groups = {
       "VERCEL_TOKEN",
       "VERCEL_ORG_ID",
       "VERCEL_PROJECT_ID",
+      "GOAT_VERCEL_PROJECT_ID",
       "RENDER_SERVICE_ID",
       "RENDER_API_KEY",
       "PRODUCTION_WEB_URL",
+      "PRODUCTION_GOAT_URL",
       "RUNNER_PUBLIC_URL",
     ],
     optional: [],
@@ -134,6 +174,18 @@ const redirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
 if (redirectUri && !redirectUri.startsWith("https://") && !redirectUri.includes("localhost")) {
   failed = true;
   console.log("\nNEXT_PUBLIC_WORKOS_REDIRECT_URI should be https:// outside local development.");
+}
+
+const goatRedirectUri = process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI;
+if (
+  goatRedirectUri &&
+  !goatRedirectUri.startsWith("https://") &&
+  !goatRedirectUri.includes("localhost")
+) {
+  failed = true;
+  console.log(
+    "\nGOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI should be https:// outside local development.",
+  );
 }
 
 if (failed) {

@@ -140,23 +140,25 @@ describe("buildGoatTaskTools usage metadata", () => {
 });
 
 describe("buildGoatTaskTools Exa query guard", () => {
-  it("warns once on the fifth Exa search and continues through the tenth", async () => {
+  it("blocks the ninth Exa search until the model emits assistant progress", async () => {
     toolMocks.executeHostedTool.mockResolvedValue({
       output: {
         results: [{ title: "Result", url: "https://example.com", text: "Summary" }],
       },
     });
+    let assistantProgressVersion = 0;
     const tools = buildGoatTaskTools({
       selectedTools: ["exa_search"],
       userWorkosId: "user_1",
       env: env(),
       signal: new AbortController().signal,
+      getAssistantProgressVersion: () => assistantProgressVersion,
       lifecycle: lifecycleMocks(),
     });
     const exa = toExecutableTool(tools.exa_search);
 
     const outputs: Record<string, unknown>[] = [];
-    for (let index = 1; index <= 10; index += 1) {
+    for (let index = 1; index <= 8; index += 1) {
       outputs.push(
         (await callTool(exa, {
           input: { query: `query ${index}` },
@@ -165,46 +167,102 @@ describe("buildGoatTaskTools Exa query guard", () => {
       );
     }
 
-    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(10);
-    expect(outputs[4]).toMatchObject({
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(8);
+    expect(outputs[6]).toMatchObject({ ok: true });
+    expect(outputs[7]).toMatchObject({
       ok: true,
-      warning: "Exa tool calls can be expensive. Avoid more than 10 Exa searches for this task.",
     });
-    expect(outputs.filter((output) => typeof output.warning === "string")).toHaveLength(1);
+    expect(outputs[7]?.warning).toBeUndefined();
+
+    assistantProgressVersion += 1;
+    const blockedDespitePreemptiveText = await callTool(exa, {
+      input: { query: "query after preemptive text" },
+      toolCallId: "call_exa_after_preemptive_text",
+    });
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(8);
+    expect(blockedDespitePreemptiveText).toMatchObject({
+      ok: false,
+      blocked: true,
+      reflectionRequired: true,
+    });
+
+    const blockedAgainBeforeUpdate = await callTool(exa, {
+      input: { query: "query before update" },
+      toolCallId: "call_exa_before_update",
+    });
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(8);
+    expect(blockedAgainBeforeUpdate).toMatchObject({
+      ok: false,
+      blocked: true,
+      reflectionRequired: true,
+      error:
+        "Pause Exa search and reflect briefly before continuing. Produce a quick assistant update with what you have learned, what is still missing, and the next specific search you would run if needed.",
+    });
+
+    assistantProgressVersion += 1;
+    const allowedAfterProgress = await callTool(exa, {
+      input: { query: "query after update" },
+      toolCallId: "call_exa_after_update",
+    });
+
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(9);
+    expect(allowedAfterProgress).toMatchObject({
+      ok: true,
+      query: "query after update",
+    });
   });
 
-  it("blocks Exa searches after the tenth without calling the hosted tool", async () => {
+  it("blocks Exa searches after the thirty-second without calling the hosted tool", async () => {
     toolMocks.executeHostedTool.mockResolvedValue({
       output: {
         results: [{ title: "Result", url: "https://example.com", text: "Summary" }],
       },
     });
+    let assistantProgressVersion = 0;
     const tools = buildGoatTaskTools({
       selectedTools: ["exa_search"],
       userWorkosId: "user_1",
       env: env(),
       signal: new AbortController().signal,
+      getAssistantProgressVersion: () => assistantProgressVersion,
       lifecycle: lifecycleMocks(),
     });
     const exa = toExecutableTool(tools.exa_search);
 
     let output: unknown;
-    for (let index = 1; index <= 11; index += 1) {
+    let successfulSearches = 0;
+    let attempt = 0;
+    while (successfulSearches < 32) {
+      attempt += 1;
       output = await callTool(exa, {
-        input: { query: `query ${index}` },
-        toolCallId: `call_exa_${index}`,
+        input: { query: `query ${attempt}` },
+        toolCallId: `call_exa_${attempt}`,
       });
+      if (isRecord(output) && output.reflectionRequired) {
+        assistantProgressVersion += 1;
+        continue;
+      }
+      successfulSearches += 1;
     }
+    assistantProgressVersion += 1;
+    output = await callTool(exa, {
+      input: { query: "query over total limit" },
+      toolCallId: "call_exa_over_total_limit",
+    });
 
-    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(10);
+    expect(toolMocks.executeHostedTool).toHaveBeenCalledTimes(32);
     expect(output).toMatchObject({
       ok: false,
       blocked: true,
       error:
-        "Exa search limit reached for this task. Report the result before doing more search work.",
+        "Exa search limit reached for this run. You have used 32 Exa searches; produce a response from the evidence already gathered.",
     });
   });
 });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 type ExecutableTool = {
   onInputAvailable(input: { input: unknown; toolCallId: string }): Promise<void>;
