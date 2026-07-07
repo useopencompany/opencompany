@@ -199,10 +199,12 @@ Put these keys in Infisical `prod` + `/release`:
 | `PRODUCTION_DATABASE_URL` | Production Neon URL for migrations. |
 | `VERCEL_TOKEN` | Vercel deploy token. |
 | `VERCEL_ORG_ID` | Vercel org/team id. |
-| `VERCEL_PROJECT_ID` | Vercel project id. |
+| `VERCEL_PROJECT_ID` | Vercel web project id. |
+| `GOAT_VERCEL_PROJECT_ID` | Vercel Goat project id. |
 | `RENDER_SERVICE_ID` | Render service id for the runner. |
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
+| `PRODUCTION_GOAT_URL` | Canonical production Goat URL for smoke checks. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 
 The workflow maps `PRODUCTION_DATABASE_URL` to `DATABASE_URL` before running Drizzle migrations.
