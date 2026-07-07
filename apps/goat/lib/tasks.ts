@@ -256,7 +256,7 @@ export async function createGoatTaskForUser(input: {
     initialUserMessage: input.prompt,
     tools,
     skills: [],
-    maxModelSteps: 8,
+    maxModelSteps: 16,
     resultMode: "assistant_final",
   };
   const modelMessage = { role: "user", content: input.prompt };

@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ExternalLink,
   FileText,
+  Globe,
   ListTodo,
   LoaderCircle,
   Mail,
@@ -215,6 +216,7 @@ function ToolCallRow({ toolCall }: { toolCall: GoatHarnessRunToolCall }) {
 
 function ToolIcon({ toolCall }: { toolCall: GoatHarnessRunToolCall }) {
   if (toolCall.kind === "search") return <Search size={11} strokeWidth={1.75} />;
+  if (toolCall.kind === "browser") return <Globe size={11} strokeWidth={1.75} />;
   if (toolCall.kind === "gmail") return <Mail size={11} strokeWidth={1.75} />;
   if (toolCall.kind === "calendar") return <CalendarDays size={11} strokeWidth={1.75} />;
   if (toolCall.kind === "linear") return <ListTodo size={11} strokeWidth={1.75} />;
@@ -257,6 +259,17 @@ function toolCallDisplay(toolCall: GoatHarnessRunToolCall) {
     return {
       label: "Web search",
       detail: readJsonPreviewField(toolCall.inputPreview, "query"),
+    };
+  }
+  if (toolCall.name.startsWith("browser_")) {
+    return {
+      label: toolCall.label,
+      detail:
+        readJsonPreviewField(toolCall.inputPreview, "url") ||
+        readJsonPreviewField(toolCall.inputPreview, "ref") ||
+        readJsonPreviewField(toolCall.inputPreview, "text") ||
+        readJsonPreviewField(toolCall.inputPreview, "urlPattern") ||
+        readJsonPreviewField(toolCall.inputPreview, "loadState"),
     };
   }
   if (toolCall.name.startsWith("gmail_")) {
