@@ -239,7 +239,14 @@ jobs:
           deployment_id="$(printf "%s\n" "$verify_output" | sed -n '1p')"
           url="$(printf "%s\n" "$verify_output" | sed -n '2p')"
 
-          bunx vercel promote "$deployment_id" --yes --timeout 3m --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+          if ! promote_output="$(bunx vercel promote "$deployment_id" --yes --timeout 3m --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" 2>&1)"; then
+            echo "$promote_output"
+            if ! printf "%s" "$promote_output" | grep -q "already the current"; then
+              exit 1
+            fi
+          else
+            echo "$promote_output"
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed web to $url"
 
@@ -437,7 +444,14 @@ jobs:
           deployment_id="$(printf "%s\n" "$verify_output" | sed -n '1p')"
           url="$(printf "%s\n" "$verify_output" | sed -n '2p')"
 
-          bunx vercel promote "$deployment_id" --yes --timeout 3m --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+          if ! promote_output="$(bunx vercel promote "$deployment_id" --yes --timeout 3m --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" 2>&1)"; then
+            echo "$promote_output"
+            if ! printf "%s" "$promote_output" | grep -q "already the current"; then
+              exit 1
+            fi
+          else
+            echo "$promote_output"
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed Goat to $url"
 
