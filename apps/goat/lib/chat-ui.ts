@@ -1,5 +1,9 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { GoatChatMessage, GoatHarnessEngine } from "@opencompany/db/goat-schema";
+import type {
+  GoatChatMessage,
+  GoatHarnessEngine,
+  GoatTaskStatus,
+} from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
 
 export const START_TASK_TOOL_NAME = "start_task";
@@ -18,8 +22,9 @@ export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const
 
 export type GoatTaskCardMetadata = {
   id: string;
-  displayId: string;
-  title: string;
+  displayId?: string | null;
+  title?: string | null;
+  status?: GoatTaskStatus | null;
 };
 
 export type GoatChatMention = {
@@ -30,6 +35,7 @@ export type GoatChatMention = {
 export type GoatChatMessageMetadata = {
   sessionId?: string;
   mentions?: GoatChatMention[];
+  taskId?: string;
   task?: GoatTaskCardMetadata | null;
   error?: string;
   aborted?: boolean;
@@ -238,6 +244,7 @@ export type GoatStoredChatMessage = Pick<
   taskDisplayId: string | null;
   taskName: string | null;
   taskPrompt: string | null;
+  taskStatus: GoatTaskStatus | null;
 };
 
 export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "parts">) {
@@ -260,7 +267,7 @@ export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiM
 export function toGoatChatMessageMetadata(
   message: Pick<
     GoatStoredChatMessage,
-    "sessionId" | "taskId" | "taskDisplayId" | "taskName" | "debugTrace"
+    "sessionId" | "taskId" | "taskDisplayId" | "taskName" | "taskStatus" | "debugTrace"
   >,
 ): GoatChatMessageMetadata | undefined {
   const task =
@@ -269,14 +276,16 @@ export function toGoatChatMessageMetadata(
           id: message.taskId,
           displayId: message.taskDisplayId,
           title: message.taskName,
+          status: message.taskStatus,
         }
       : null;
   const error = message.debugTrace?.error;
   const aborted = message.debugTrace?.aborted === true;
 
-  if (!message.sessionId && !task && !error && !aborted) return undefined;
+  if (!message.sessionId && !message.taskId && !task && !error && !aborted) return undefined;
   return {
     sessionId: message.sessionId,
+    ...(message.taskId ? { taskId: message.taskId } : {}),
     ...(task ? { task } : {}),
     ...(error ? { error } : {}),
     ...(aborted ? { aborted } : {}),
@@ -375,8 +384,8 @@ function legacyStartTaskOutput(
   if (!task) return null;
   return {
     taskId: task.id,
-    taskDisplayId: task.displayId,
-    taskName: task.title,
+    taskDisplayId: task.displayId ?? task.id,
+    taskName: task.title ?? "Task",
     status: "queued",
     prompt: message.taskPrompt ?? "",
   };

@@ -141,6 +141,7 @@ export async function runOpenCompanyChatAgent(input: {
   runBrainCli?: GoatBrainCliRunner;
   webSearch?: WebSearchRunner;
   currentDate?: Date | string;
+  userContext?: OpenCompanyChatSystemPromptInput["userContext"];
   recurringSchedules?: OpenCompanyChatSystemPromptInput["recurringSchedules"];
   generateTextImpl?: GenerateTextLike;
 }): Promise<OpenCompanyChatAgentResult> {
@@ -167,6 +168,7 @@ export async function runOpenCompanyChatAgent(input: {
   const systemPromptInput = {
     webSearchEnabled: Boolean(input.webSearch),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
+    ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
   };
 

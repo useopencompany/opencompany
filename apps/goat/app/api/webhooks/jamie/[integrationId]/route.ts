@@ -5,9 +5,10 @@ import {
 } from "@opencompany/goat-brain";
 import { NextResponse } from "next/server";
 import {
+  bindGoatJamieWebhookApiKey,
   loadGoatJamieWebhookContext,
   markGoatJamieWebhookConnected,
-  verifyGoatJamieWebhookSecret,
+  verifyGoatJamieWebhookApiKey,
 } from "@/lib/integrations/jamie";
 import {
   GOAT_JAMIE_WEBHOOK_EVENT_HEADER,
@@ -28,9 +29,14 @@ export async function POST(
     return NextResponse.json({ error: "Jamie integration not found." }, { status: 404 });
   }
 
-  const secret = request.headers.get(GOAT_JAMIE_WEBHOOK_SECRET_HEADER);
-  if (!verifyGoatJamieWebhookSecret({ candidate: secret, secretHash: webhookContext.secretHash })) {
-    return NextResponse.json({ error: "Invalid Jamie webhook secret." }, { status: 401 });
+  const apiKey = request.headers.get(GOAT_JAMIE_WEBHOOK_SECRET_HEADER);
+  const apiKeyVerification = verifyGoatJamieWebhookApiKey({
+    candidate: apiKey,
+    apiKeyHash: webhookContext.apiKeyHash,
+    legacySecretHash: webhookContext.legacySecretHash,
+  });
+  if (!apiKeyVerification.valid) {
+    return NextResponse.json({ error: "Invalid Jamie webhook API key." }, { status: 401 });
   }
 
   const event = request.headers.get(GOAT_JAMIE_WEBHOOK_EVENT_HEADER);
@@ -56,6 +62,15 @@ export async function POST(
       return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
     }
     throw error;
+  }
+
+  if (apiKeyVerification.shouldBind) {
+    await bindGoatJamieWebhookApiKey({
+      integrationId: webhookContext.integrationId,
+      userWorkosId: webhookContext.userWorkosId,
+      apiKey: apiKeyVerification.apiKey,
+      now: receivedAt,
+    });
   }
 
   const result = await upsertGoatBrainSourceItemAndEnqueue({

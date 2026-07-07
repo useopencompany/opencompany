@@ -99,6 +99,27 @@ describe("buildGoatHarnessRun", () => {
     ]);
   });
 
+  it("labels Browser tools", () => {
+    const run = buildGoatHarnessRun({
+      task: task(),
+      messages: [],
+      events: [
+        event(1, "tool.completed", {
+          toolCallId: "call_browser",
+          toolName: "browser_open",
+          input: { url: "https://example.com/products" },
+          output: { ok: true, output: "Opened https://example.com/products" },
+        }),
+      ],
+    });
+
+    expect(run.toolCalls[0]).toMatchObject({
+      label: "Browser open",
+      kind: "browser",
+      inputPreview: expect.stringContaining("https://example.com/products"),
+    });
+  });
+
   it("labels X tools in the Results timeline", () => {
     const run = buildGoatHarnessRun({
       task: task(),

@@ -530,6 +530,120 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Added it to Results.")).toBeInTheDocument();
     expect(screen.getByText("Research market")).toBeInTheDocument();
     expect(screen.getByText("TASK-42")).toBeInTheDocument();
+    expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+  });
+
+  it("renders current task status from task state instead of start_task output", () => {
+    render(
+      <GoatSurface
+        tasks={[
+          taskView({
+            id: "task_1",
+            displayId: "TASK-42",
+            name: "Research market",
+            status: "failed",
+            stage: "failed",
+            error: "Runner failed.",
+          }),
+        ]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                {
+                  type: START_TASK_TOOL_PART_TYPE,
+                  toolCallId: "tool_1",
+                  state: "output-available",
+                  input: {
+                    prompt: "Research the market",
+                    name: "Research market",
+                  },
+                  output: {
+                    taskId: "task_1",
+                    taskDisplayId: "TASK-42",
+                    taskName: "Research market",
+                    status: "queued",
+                    prompt: "Research the market",
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("TASK-42 · Failed")).toBeInTheDocument();
+    expect(screen.queryByText(/Task running/i)).not.toBeInTheDocument();
+  });
+
+  it("renders a metadata-only task card from the task state lookup", () => {
+    render(
+      <GoatSurface
+        tasks={[
+          taskView({
+            id: "task_1",
+            displayId: "TASK-42",
+            name: "Research market",
+            status: "succeeded",
+            stage: "completed",
+          }),
+        ]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1", taskId: "task_1" },
+              parts: [{ type: "text", text: "Added it to Results." }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Added it to Results.")).toBeInTheDocument();
+    const taskCard = screen.getByRole("link", { name: /Research market/ });
+    expect(taskCard).toHaveAttribute("href", "/tasks/TASK-42");
+    expect(screen.getByText("TASK-42 · Done")).toBeInTheDocument();
+  });
+
+  it("uses a neutral fallback when only the task id is known", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1", taskId: "task_unknown" },
+              parts: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const taskCard = screen.getByRole("link", { name: /Status pending/ });
+    expect(taskCard).toHaveAttribute("href", "/tasks/task_unknown");
+    expect(screen.getByText("Task · Status pending")).toBeInTheDocument();
+    expect(screen.queryByText(/Task running/i)).not.toBeInTheDocument();
   });
 
   it("renders assistant text and task cards in message part order", () => {

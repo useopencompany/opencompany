@@ -1,17 +1,19 @@
 import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  bindGoatJamieWebhookApiKey,
   loadGoatJamieWebhookContext,
   markGoatJamieWebhookConnected,
-  verifyGoatJamieWebhookSecret,
+  verifyGoatJamieWebhookApiKey,
 } from "@/lib/integrations/jamie";
 import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 import { POST } from "./route";
 
 vi.mock("@/lib/integrations/jamie", () => ({
+  bindGoatJamieWebhookApiKey: vi.fn(),
   loadGoatJamieWebhookContext: vi.fn(),
   markGoatJamieWebhookConnected: vi.fn(),
-  verifyGoatJamieWebhookSecret: vi.fn(),
+  verifyGoatJamieWebhookApiKey: vi.fn(),
 }));
 
 vi.mock("@/lib/task-runner", () => ({
@@ -28,14 +30,20 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     vi.mocked(loadGoatJamieWebhookContext).mockResolvedValue({
       integrationId: "gint_123",
       userWorkosId: "user_123",
-      secretHash: "hash",
+      apiKeyHash: "hash",
+      legacySecretHash: null,
     });
-    vi.mocked(verifyGoatJamieWebhookSecret).mockReturnValue(true);
+    vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
+      valid: true,
+      shouldBind: false,
+      apiKey: jamieApiKey(),
+    });
     vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
       sourceItemId: "gbsrc_123",
       jobId: "gbjob_123",
       enqueued: true,
     });
+    vi.mocked(bindGoatJamieWebhookApiKey).mockResolvedValue(undefined);
     vi.mocked(markGoatJamieWebhookConnected).mockResolvedValue(undefined);
   });
 
@@ -48,8 +56,12 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
   });
 
-  it("returns 401 for a missing or wrong secret", async () => {
-    vi.mocked(verifyGoatJamieWebhookSecret).mockReturnValue(false);
+  it("returns 401 for a missing or wrong Jamie API key", async () => {
+    vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
+      valid: false,
+      shouldBind: false,
+      apiKey: null,
+    });
 
     const response = await POST(jamieRequest(jamiePayload()), routeContext());
 
@@ -94,6 +106,32 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     );
     expect(triggerGoatBrainIngestWake).toHaveBeenCalledTimes(1);
   });
+
+  it("binds the Jamie API key on the first valid delivery", async () => {
+    vi.mocked(loadGoatJamieWebhookContext).mockResolvedValue({
+      integrationId: "gint_123",
+      userWorkosId: "user_123",
+      apiKeyHash: null,
+      legacySecretHash: null,
+    });
+    vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
+      valid: true,
+      shouldBind: true,
+      apiKey: jamieApiKey(),
+    });
+
+    const response = await POST(jamieRequest(jamiePayload()), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(bindGoatJamieWebhookApiKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: "gint_123",
+        userWorkosId: "user_123",
+        apiKey: jamieApiKey(),
+      }),
+    );
+    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledTimes(1);
+  });
 });
 
 function routeContext() {
@@ -106,10 +144,14 @@ function jamieRequest(payload: unknown, options: { event?: string; secret?: stri
     headers: {
       "content-type": "application/json",
       "jamie-event": options.event ?? "meeting.completed",
-      "x-jamie-api-key": options.secret ?? "secret",
+      "x-jamie-api-key": options.secret ?? jamieApiKey(),
     },
     body: JSON.stringify(payload),
   });
+}
+
+function jamieApiKey() {
+  return "sk_0000000000000000000000000000000000000000000000000000000000000000";
 }
 
 function jamiePayload() {

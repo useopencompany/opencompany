@@ -37,13 +37,16 @@ import {
 } from "./prompts/goat-harness-creation";
 
 const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
-const DEFAULT_GOAT_MAX_MODEL_STEPS = 8;
-const MAX_GOAT_MODEL_STEPS = 16;
+const DEFAULT_GOAT_MAX_MODEL_STEPS = 16;
+const MAX_GOAT_MODEL_STEPS = 32;
+const MIN_GOAT_BROWSER_MODEL_STEPS = 16;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const DEFAULT_CODEX_GOAL_TOKEN_BUDGET = 200_000;
 const MIN_CODEX_GOAL_TOKEN_BUDGET = 1;
 const MAX_CODEX_GOAL_TOKEN_BUDGET = 1_000_000;
 const ASSISTANT_CONTENT_FLUSH_INTERVAL_MS = 500;
+const GOAT_FINALIZATION_SYSTEM_INSTRUCTION =
+  "You are on the final reserved step for this Goat task. Do not call any more tools. Use the tool results and context so far to provide the best final answer now. If the task is incomplete, clearly state what you could and could not verify.";
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
@@ -229,6 +232,7 @@ export async function executeGoatTask(
           })
         : await runGoatTaskModelStream({
             env: input.env,
+            taskId: input.task.id,
             userWorkosId: input.task.userWorkosId,
             harnessSpec,
             signal: input.signal,
@@ -283,15 +287,7 @@ export async function executeGoatTask(
       ...(artifact ? { artifact } : {}),
     };
   } catch (error) {
-    await input.sink.failMessage({
-      messageId: assistant.id,
-      error: errorMessage(error),
-    });
-    await input.sink.appendEvent({
-      type: "message.failed",
-      messageId: assistant.id,
-      payload: { role: "assistant", error: errorMessage(error) },
-    });
+    await markAssistantMessageFailedBestEffort(input.sink, assistant.id, errorMessage(error));
     throw error;
   }
 }
@@ -393,8 +389,39 @@ function hasPreplannedHarnessSpec(value: GoatHarnessSpec) {
   );
 }
 
+function goatFinalizationStepSettings(input: {
+  stepNumber: number;
+  maxModelSteps: number;
+  system: string;
+}) {
+  if (input.stepNumber < input.maxModelSteps - 1) return {};
+  return {
+    activeTools: [],
+    toolChoice: "none" as const,
+    system: `${input.system}\n\n${GOAT_FINALIZATION_SYSTEM_INSTRUCTION}`,
+  };
+}
+
+async function markAssistantMessageFailedBestEffort(
+  sink: GoatTaskRunSink,
+  messageId: string,
+  error: string,
+) {
+  try {
+    await sink.failMessage({ messageId, error });
+    await sink.appendEvent({
+      type: "message.failed",
+      messageId,
+      payload: { role: "assistant", error },
+    });
+  } catch {
+    // Task-level failure persists the root error; this cleanup write can race lease release.
+  }
+}
+
 async function runGoatTaskModelStream(input: {
   env: RunnerEnv;
+  taskId: string;
   userWorkosId: string;
   harnessSpec: GoatHarnessSpec;
   signal: AbortSignal;
@@ -415,6 +442,7 @@ async function runGoatTaskModelStream(input: {
 
 async function runGoatTaskModelStreamInner(input: {
   env: RunnerEnv;
+  taskId: string;
   userWorkosId: string;
   harnessSpec: GoatHarnessSpec;
   signal: AbortSignal;
@@ -428,6 +456,7 @@ async function runGoatTaskModelStreamInner(input: {
   let assistantProgressVersion = 0;
   const toolRuntime = buildGoatTaskToolRuntime({
     selectedTools: input.harnessSpec.tools,
+    taskId: input.taskId,
     userWorkosId: input.userWorkosId,
     env: input.env,
     signal: input.signal,
@@ -502,6 +531,12 @@ async function runGoatTaskModelStreamInner(input: {
       messages: [{ role: "user", content: input.harnessSpec.initialUserMessage }],
       tools,
       stopWhen: [ai.stepCountIs(input.harnessSpec.maxModelSteps)],
+      prepareStep: ({ stepNumber }) =>
+        goatFinalizationStepSettings({
+          stepNumber,
+          maxModelSteps: input.harnessSpec.maxModelSteps,
+          system: input.harnessSpec.systemPrompt,
+        }),
       abortSignal: input.signal,
     });
 
@@ -780,13 +815,19 @@ function normalizeHarnessSpec(
   const selectedTools = normalizeGoatTaskToolNames(record.tools).filter((toolName) =>
     availableTools.includes(toolName),
   );
+  const tools =
+    selectedTools.length > 0 ? selectedTools : normalizeGoatTaskToolNames(availableTools);
   const selectedSkills = normalizeGoatTaskSkillIds(record.skills).filter((skillId) =>
     availableSkills.includes(skillId),
   );
-  const maxModelSteps =
+  const requestedMaxModelSteps =
     typeof record.maxModelSteps === "number" && Number.isFinite(record.maxModelSteps)
       ? clampInteger(record.maxModelSteps, 1, MAX_GOAT_MODEL_STEPS)
       : DEFAULT_GOAT_MAX_MODEL_STEPS;
+  const minModelSteps = tools.some((toolName) => toolName.startsWith("browser_"))
+    ? MIN_GOAT_BROWSER_MODEL_STEPS
+    : 1;
+  const maxModelSteps = Math.max(requestedMaxModelSteps, minModelSteps);
 
   const resultMode =
     record.resultMode === "brain_markdown_report" ? "brain_markdown_report" : "assistant_final";
@@ -797,7 +838,7 @@ function normalizeHarnessSpec(
     model,
     systemPrompt: augmentSystemPrompt(systemPrompt, resultMode, selectedSkills),
     initialUserMessage,
-    tools: selectedTools.length > 0 ? selectedTools : normalizeGoatTaskToolNames(availableTools),
+    tools,
     skills: selectedSkills,
     maxModelSteps,
     resultMode,

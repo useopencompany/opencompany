@@ -1,4 +1,4 @@
-import type { GoatChatSession } from "@opencompany/db/goat-schema";
+import type { GoatChatSession, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatChatSessionForUser,
@@ -129,6 +129,7 @@ describe("persistGoatChatAssistantMessage", () => {
           displayId: "TASK-1",
           name: "Market research for x",
           prompt: "Research the market for x",
+          status: "running",
         },
       },
     });
@@ -165,6 +166,7 @@ describe("persistGoatChatAssistantMessage", () => {
       taskId: "task_1",
       taskDisplayId: "TASK-1",
       taskName: "Market research for x",
+      taskStatus: "running",
       debugTrace: {
         schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
         model: DEFAULT_GOAT_MODEL,
@@ -231,7 +233,12 @@ describe("Goat chat history helpers", () => {
 });
 
 function createInMemoryChatStore(
-  options: { tasks?: Record<string, { displayId: string; name: string; prompt: string }> } = {},
+  options: {
+    tasks?: Record<
+      string,
+      { displayId: string; name: string; prompt: string; status: GoatTaskStatus }
+    >;
+  } = {},
 ) {
   const sessions: GoatChatSession[] = [];
   const messages: StoredChatMessage[] = [];
@@ -292,6 +299,7 @@ function createInMemoryChatStore(
         taskDisplayId: task?.displayId ?? null,
         taskName: task?.name ?? null,
         taskPrompt: task?.prompt ?? null,
+        taskStatus: task?.status ?? null,
       };
       messages.push(message);
       return message;

@@ -131,6 +131,12 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
     expect(request.system).toContain('resultMode "brain_markdown_report"');
+    expect(request.system).toContain("Use exa_search for broad web discovery");
+    expect(request.system).toContain(
+      "Use browser_* tools when the task depends on rendered websites",
+    );
+    expect(request.system).toContain("Never instruct the execution model to log in");
+    expect(request.system).toContain("never infer slugs from titles");
     expect(request.system).toContain("<prompt_contract>");
     expect(request.system).toContain("Always return a non-empty systemPrompt");
     expect(request.system).toContain('Use engine "codex" for coding tasks');
@@ -149,7 +155,7 @@ describe("planGoatHarness", () => {
     expect(request.prompt).toContain("<available_skills>");
     expect(request.prompt).toContain("<id>\nfirst-principles\n</id>");
     expect(request.prompt).toContain("<id>\nyc-office-hours\n</id>");
-    expect(request.prompt).toContain("<default_max_model_steps>\n8\n</default_max_model_steps>");
+    expect(request.prompt).toContain("<default_max_model_steps>\n16\n</default_max_model_steps>");
     expect(request.prompt).toContain("<task_prompt>");
     expect(request.prompt).toContain("no inbox access is available in chat");
   });
@@ -180,7 +186,7 @@ describe("planGoatHarness", () => {
       initialUserMessage: "Research Marseille.",
       tools: ["exa_search"],
       skills: [],
-      maxModelSteps: 8,
+      maxModelSteps: 16,
       resultMode: "assistant_final",
     });
     expect(result.systemPrompt).toBe("Run the research task with the selected tools.");
@@ -286,6 +292,45 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("github_clone_repository");
     expect(request.system).toContain("explicitly asked to publish");
     expect(request.prompt).toContain("github_open_pull_request");
+  });
+
+  it("keeps Browser tools when rendered-site navigation is available", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        model: claudeModel,
+        systemPrompt:
+          "Use Browser for rendered product-page inspection. Do not log in, purchase, or check out.",
+        initialUserMessage: "Find three wireless mice on Amazon under $50.",
+        tools: ["exa_search", "browser_open", "browser_snapshot", "browser_click", "browser_read"],
+        skills: [],
+        maxModelSteps: 14,
+        resultMode: "assistant_final",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Find three wireless mice on Amazon under $50.",
+        model,
+        availableTools: [
+          "exa_search",
+          "browser_open",
+          "browser_snapshot",
+          "browser_click",
+          "browser_read",
+        ],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      model: claudeModel,
+      tools: ["exa_search", "browser_open", "browser_snapshot", "browser_click", "browser_read"],
+      maxModelSteps: 16,
+    });
+
+    const request = aiMock.generateObject.mock.calls[0]?.[0] as { prompt: string };
+    expect(request.prompt).toContain("<tool>\nbrowser_open\n</tool>");
+    expect(request.prompt).toContain("<tool>\nbrowser_read\n</tool>");
   });
 
   it("keeps brain markdown report mode and augments the execution contract", async () => {
@@ -668,6 +713,43 @@ describe("executeGoatTask", () => {
     );
   });
 
+  it("reserves the last Goat model step for a no-tool final answer", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({ object: harnessSpec });
+    aiMock.streamText.mockReturnValueOnce({
+      fullStream: streamParts(
+        { type: "text-delta", text: "Done." },
+        { type: "finish-step", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
+      ),
+      text: Promise.resolve("Done."),
+    });
+
+    await executeGoatTask({
+      task: task(),
+      env: env(),
+      signal: new AbortController().signal,
+      sink: createSink(),
+      reportStage: vi.fn(async () => {}),
+    });
+
+    const request = aiMock.streamText.mock.calls[0]?.[0] as {
+      prepareStep?: (input: { stepNumber: number }) => unknown;
+    };
+
+    expect(request.prepareStep?.({ stepNumber: harnessSpec.maxModelSteps - 2 })).toEqual({});
+    const finalSettings = request.prepareStep?.({ stepNumber: harnessSpec.maxModelSteps - 1 });
+    expect(finalSettings).toMatchObject({
+      activeTools: [],
+      toolChoice: "none",
+      system: expect.stringContaining("Do not call any more tools"),
+    });
+    const system =
+      finalSettings && typeof finalSettings === "object" && "system" in finalSettings
+        ? String(finalSettings.system)
+        : "";
+    expect(system).toContain(harnessSpec.systemPrompt);
+    expect(system).toContain("provide the best final answer now");
+  });
+
   it("runs Codex harnesses through the Codex sandbox executor", async () => {
     const codexHarnessSpec: GoatHarnessSpec = {
       ...harnessSpec,
@@ -824,6 +906,31 @@ describe("executeGoatTask", () => {
       }),
     );
   });
+
+  it("preserves the root execution error when failing the assistant message also fails", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({ object: harnessSpec });
+    aiMock.streamText.mockReturnValueOnce({
+      fullStream: streamParts({ type: "finish-step", usage: {} }),
+      text: Promise.resolve(" "),
+    });
+    const sink = createSink();
+    vi.mocked(sink.failMessage).mockRejectedValueOnce(new Error("cleanup write failed"));
+
+    await expect(
+      executeGoatTask({
+        task: task(),
+        env: env(),
+        signal: new AbortController().signal,
+        sink,
+        reportStage: vi.fn(async () => {}),
+      }),
+    ).rejects.toThrow("Goat task completed without a final assistant message.");
+
+    expect(sink.failMessage).toHaveBeenCalledWith({
+      messageId: "assistant_msg_1",
+      error: "Goat task completed without a final assistant message.",
+    });
+  });
 });
 
 function createSink(): GoatTaskRunSink {
@@ -890,6 +997,12 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     llmBrokerEnabled: true,
     integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
     exaApiKey: "exa",
+    goatBrowserEnabled: false,
+    agentBrowserProvider: undefined,
+    browserlessApiKey: undefined,
+    browserlessApiUrl: undefined,
+    browserlessTtl: undefined,
+    browserlessStealth: undefined,
     xApiBearerToken: undefined,
     supadataApiKey: undefined,
     ampApiKey: undefined,

@@ -8,6 +8,19 @@ import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 const GOOGLE_PROVIDERS: GoatIntegrationProvider[] = ["gmail", "google_calendar"];
+const GOAT_BROWSER_TOOLS = [
+  "browser_open",
+  "browser_snapshot",
+  "browser_click",
+  "browser_fill",
+  "browser_wait",
+  "browser_read",
+  "browser_get",
+  "browser_find",
+  "browser_scroll",
+  "browser_screenshot",
+  "browser_close",
+] as const satisfies readonly GoatTaskToolName[];
 
 export async function getGoatGoogleIntegrationState(userWorkosId: string) {
   const rows = await getDb()
@@ -39,6 +52,9 @@ export async function getGoatAvailableHarnessTools(
     getGoatGitHubIntegrationState(userWorkosId),
   ]);
   const tools: GoatTaskToolName[] = ["exa_search"];
+  if (process.env.RUNNER_GOAT_BROWSER_ENABLED?.trim().toLowerCase() === "true") {
+    tools.push(...GOAT_BROWSER_TOOLS);
+  }
   if (state.gmail.connected) {
     tools.push("gmail_search", "gmail_get_message", "gmail_list_threads", "gmail_get_thread");
   }
