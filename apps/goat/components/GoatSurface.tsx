@@ -26,8 +26,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  type FormEvent,
   type Dispatch,
+  type FormEvent,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -1098,9 +1098,7 @@ function TaskCard({ task }: { task: ChatTaskCardView }) {
         className={`${meta.className} shrink-0 ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[13.5px] font-medium leading-tight text-ink">
-          {title}
-        </span>
+        <span className="truncate text-[13.5px] font-medium leading-tight text-ink">{title}</span>
         <span className="text-[12px] leading-tight text-ink-subtle">
           {displayLabel} · {meta.label}
         </span>
@@ -1751,10 +1749,7 @@ function buildChatTaskLookup(input: {
   return lookup;
 }
 
-function setChatTaskLookupValue(
-  lookup: Map<string, ChatTaskCardView>,
-  task: GoatTaskCardMetadata,
-) {
+function setChatTaskLookupValue(lookup: Map<string, ChatTaskCardView>, task: GoatTaskCardMetadata) {
   const existing = lookup.get(task.id);
   lookup.set(task.id, {
     id: task.id,
