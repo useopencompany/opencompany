@@ -1,19 +1,22 @@
+type ShapeWhere = {
+  clause: string;
+  params: string[];
+};
+
+type ShapeWhereContext = {
+  authorizedChatSessionId?: string | null | undefined;
+};
+
 const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"] as const;
 
 const SHAPE_SCOPES = {
   tasks: {
     table: "goat.tasks",
-    where: (userWorkosId: string) => ({
-      clause: `"user_workos_id" = $1`,
-      params: [userWorkosId],
-    }),
+    where: scopedUserWhere,
   },
   "goat.tasks": {
     table: "goat.tasks",
-    where: (userWorkosId: string) => ({
-      clause: `"user_workos_id" = $1`,
-      params: [userWorkosId],
-    }),
+    where: scopedUserWhere,
   },
   task_schedules: {
     table: "goat.task_schedules",
@@ -128,6 +131,7 @@ export function buildGoatElectricOriginUrl(input: {
   electricUrl: string;
   requestUrl: URL;
   userWorkosId: string;
+  authorizedChatSessionId?: string | null | undefined;
   sourceId?: string | null | undefined;
   sourceSecret?: string | null | undefined;
   electricSecret?: string | null | undefined;
@@ -142,7 +146,11 @@ export function buildGoatElectricOriginUrl(input: {
     if (value !== null) originUrl.searchParams.set(key, value);
   }
 
-  const resolved = scope.where(input.userWorkosId, input.requestUrl);
+  const resolved = scope.where(input.userWorkosId, input.requestUrl, {
+    authorizedChatSessionId: input.authorizedChatSessionId,
+  });
+  if (!resolved) return null;
+
   originUrl.searchParams.set("table", scope.table);
   originUrl.searchParams.set("where", resolved.clause);
   resolved.params.forEach((param, index) => {
@@ -159,7 +167,7 @@ export function buildGoatElectricOriginUrl(input: {
   return originUrl;
 }
 
-function scopedTaskWhere(userWorkosId: string, requestUrl: URL) {
+function scopedTaskWhere(userWorkosId: string, requestUrl: URL): ShapeWhere {
   const taskId = requestUrl.searchParams.get("task_id")?.trim();
   if (!taskId) {
     return {
@@ -173,21 +181,29 @@ function scopedTaskWhere(userWorkosId: string, requestUrl: URL) {
   };
 }
 
-function scopedChatMessageWhere(userWorkosId: string, requestUrl: URL) {
+export function goatElectricChatMessagesSessionId(requestUrl: URL) {
+  const table = requestUrl.searchParams.get("table");
+  if (table !== "chat_messages" && table !== "goat.chat_messages") return null;
+
   const sessionId = requestUrl.searchParams.get("session_id")?.trim();
-  if (!sessionId) {
-    return {
-      clause: `"session_id" IN (SELECT "id" FROM "goat"."chat_sessions" WHERE "user_workos_id" = $1 AND "closed_at" IS NULL)`,
-      params: [userWorkosId],
-    };
-  }
+  return sessionId || null;
+}
+
+function scopedChatMessageWhere(
+  _userWorkosId: string,
+  requestUrl: URL,
+  context: ShapeWhereContext,
+): ShapeWhere | null {
+  const sessionId = goatElectricChatMessagesSessionId(requestUrl);
+  if (!sessionId || context.authorizedChatSessionId !== sessionId) return null;
+
   return {
-    clause: `"session_id" = $1 AND "session_id" IN (SELECT "id" FROM "goat"."chat_sessions" WHERE "user_workos_id" = $2 AND "closed_at" IS NULL)`,
-    params: [sessionId, userWorkosId],
+    clause: `"session_id" = $1`,
+    params: [sessionId],
   };
 }
 
-function scopedUserWhere(userWorkosId: string) {
+function scopedUserWhere(userWorkosId: string): ShapeWhere {
   return {
     clause: `"user_workos_id" = $1`,
     params: [userWorkosId],

@@ -237,6 +237,10 @@ type GoatHarnessSpec = {
     repository?: string | null;
     createPullRequest?: boolean;
     reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+    goalMode?: {
+      objective: string;
+      tokenBudget?: number | null;
+    };
   };
 };
 ```
@@ -256,6 +260,9 @@ Normalization is intentionally conservative:
   research/report deliverables that should be saved as Brain artifacts.
 - Codex engine runs use `codex.repository` for a Goat-connected GitHub repository and only open a
   draft PR when `codex.createPullRequest` is true.
+- Codex engine runs may use `codex.goalMode` for iterative coding tasks with a clear finish line
+  and verification surface. Objectives are trimmed to Codex's 4,000-character limit, omitted token
+  budgets default to `200000`, and v1 goal-mode tasks run within one Goat worker execution.
 
 The planner request and response content are stored in `debugTrace.planner`.
 

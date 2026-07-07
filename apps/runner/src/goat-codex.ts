@@ -8,7 +8,11 @@ import {
 import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat-schema";
 import type { LanguageModelUsage } from "ai";
 import { and, eq, ne, sql } from "drizzle-orm";
-import { runCodexAppServerTurn } from "./codex-app-server";
+import {
+  type CodexAppServerGoalSummary,
+  type CodexGoalModeInput,
+  runCodexAppServerTurn,
+} from "./codex-app-server";
 import { type CodexCliAuth, codexApiKeyFallbackEnabled, ensureCodexInstalled } from "./codex-tool";
 import {
   buildGitHubCommandEnv,
@@ -56,6 +60,7 @@ export type GoatCodexRunResult = {
   sandboxStartedAt: Date;
   sandboxEndedAt: Date;
   model: string;
+  goal?: CodexAppServerGoalSummary | null;
   usage?: LanguageModelUsage;
 };
 
@@ -70,6 +75,7 @@ export async function runGoatCodexTask(input: {
   repository?: string | null;
   createPullRequest?: boolean;
   reasoningEffort?: CodexReasoningEffort;
+  goalMode?: CodexGoalModeInput | null;
   env: RunnerEnv;
   signal: AbortSignal;
   onEngineSessionId?: (engineSessionId: string) => Promise<void>;
@@ -121,12 +127,17 @@ async function runGoatCodexWithAuth(input: {
   repository: GoatCodexRepositoryAccess | null;
   createPullRequest?: boolean;
   reasoningEffort?: CodexReasoningEffort;
+  goalMode?: CodexGoalModeInput | null;
   env: RunnerEnv;
   signal: AbortSignal;
   sandbox: SandboxHandle;
   onEngineSessionId?: (engineSessionId: string) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
-}): Promise<{ content: string; usage?: LanguageModelUsage }> {
+}): Promise<{
+  content: string;
+  goal?: CodexAppServerGoalSummary | null;
+  usage?: LanguageModelUsage;
+}> {
   const runWithAuth = async (auth: CodexCliAuth) => runGoatCodexCommand({ ...input, auth });
   const goatAuth = await loadGoatCodexCliAuth(input.userWorkosId);
   if (goatAuth) return runWithAuth(goatAuth);
@@ -181,13 +192,18 @@ async function runGoatCodexCommand(input: {
   repository: GoatCodexRepositoryAccess | null;
   createPullRequest?: boolean;
   reasoningEffort?: CodexReasoningEffort;
+  goalMode?: CodexGoalModeInput | null;
   env: RunnerEnv;
   signal: AbortSignal;
   sandbox: SandboxHandle;
   auth: CodexCliAuth;
   onEngineSessionId?: (engineSessionId: string) => Promise<void>;
   onOutput?: (delta: string) => Promise<void>;
-}): Promise<{ content: string; usage?: LanguageModelUsage }> {
+}): Promise<{
+  content: string;
+  goal?: CodexAppServerGoalSummary | null;
+  usage?: LanguageModelUsage;
+}> {
   const serializedAuthJson =
     input.auth.kind === "chatgpt" ? JSON.stringify(input.auth.authJson) : null;
   let githubToken: string | null = null;
@@ -259,6 +275,7 @@ async function runGoatCodexCommand(input: {
     model: input.model,
     reasoningEffort: input.reasoningEffort ?? "high",
     planModeReasoningEffort: null,
+    goalMode: input.goalMode ?? null,
     existingEngineSessionId: input.existingEngineSessionId ?? null,
     auth: input.auth,
     githubAuth: { githubToken, githubAuthHeader },
@@ -295,6 +312,7 @@ async function runGoatCodexCommand(input: {
     result: redact(summary.result),
     error: summary.error ? redact(summary.error) : null,
     status: summary.status,
+    goal: summary.goal,
     repositoryFullName: input.repository?.repositoryFullName ?? null,
     diffStat: diff?.diffStat ?? null,
     diffPreview: diff?.diffPreview ?? null,
@@ -303,6 +321,7 @@ async function runGoatCodexCommand(input: {
   });
   return {
     content,
+    goal: summary.goal,
     ...(summary.usage
       ? {
           usage: {
@@ -528,10 +547,26 @@ async function resolveRepositoryAccess(input: {
   };
 }
 
-function buildCodexTask(input: { systemPrompt: string; prompt: string; repository: unknown }) {
+function buildCodexTask(input: {
+  systemPrompt: string;
+  prompt: string;
+  repository: unknown;
+  goalMode?: CodexGoalModeInput | null;
+}) {
   return [
     input.systemPrompt,
     "",
+    input.goalMode
+      ? [
+          "<goal_mode>",
+          `Objective: ${input.goalMode.objective}`,
+          input.goalMode.tokenBudget != null
+            ? `Token budget: ${input.goalMode.tokenBudget}`
+            : "Token budget: runner default",
+          "Use the objective as the persistent finish line while executing this GOAT Codex task.",
+          "</goal_mode>",
+        ].join("\n")
+      : null,
     "<task>",
     input.prompt,
     "</task>",
@@ -545,6 +580,7 @@ function formatCodexResult(input: {
   result: string;
   error: string | null;
   status: string;
+  goal: CodexAppServerGoalSummary | null;
   repositoryFullName: string | null;
   diffStat: string | null;
   diffPreview: string | null;
@@ -553,6 +589,7 @@ function formatCodexResult(input: {
 }) {
   return [
     input.result || `Codex finished with status: ${input.status}.`,
+    input.goal ? formatCodexGoalSummary(input.goal) : null,
     input.error ? `\nCodex error: ${input.error}` : null,
     input.repositoryFullName ? `\nRepository: ${input.repositoryFullName}` : null,
     input.pullRequestUrl ? `Pull request: ${input.pullRequestUrl}` : null,
@@ -566,6 +603,20 @@ function formatCodexResult(input: {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatCodexGoalSummary(goal: CodexAppServerGoalSummary) {
+  const parts = [`Goal status: ${goal.status ? formatCodexGoalStatus(goal.status) : "unknown"}`];
+  if (goal.tokenBudget != null) parts.push(`budget ${goal.tokenBudget}`);
+  if (goal.tokensUsed != null) parts.push(`used ${goal.tokensUsed}`);
+  if (goal.timeUsedSeconds != null) parts.push(`${goal.timeUsedSeconds}s`);
+  return parts.join(" - ");
+}
+
+function formatCodexGoalStatus(status: string) {
+  if (status === "budgetLimited") return "budget-limited";
+  if (status === "usageLimited") return "usage-limited";
+  return status;
 }
 
 function normalizeRepositoryFullName(value: string | null | undefined) {

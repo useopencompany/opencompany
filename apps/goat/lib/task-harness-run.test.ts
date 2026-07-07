@@ -187,6 +187,38 @@ describe("buildGoatHarnessRun", () => {
     });
   });
 
+  it("extracts Codex goal mode from harness specs", () => {
+    const run = buildGoatHarnessRun({
+      task: task({
+        harnessSpec: {
+          schemaVersion: "goat.harness.v1",
+          engine: "codex",
+          model: "openai/gpt-5.5",
+          systemPrompt: "Use Codex.",
+          initialUserMessage: "Fix tests.",
+          tools: ["exa_search"],
+          skills: [],
+          maxModelSteps: 8,
+          resultMode: "assistant_final",
+          codex: {
+            repository: "octo/repo",
+            goalMode: {
+              objective: "Fix tests and verify they pass.",
+              tokenBudget: 200_000,
+            },
+          },
+        },
+      }),
+      messages: [],
+      events: [],
+    });
+
+    expect(run.harnessConfig?.codexGoalMode).toEqual({
+      objective: "Fix tests and verify they pass.",
+      tokenBudget: 200_000,
+    });
+  });
+
   it("summarizes the models used by model usage rows", () => {
     const run = buildGoatHarnessRun({
       task: task({ model: "openai/gpt-5.4-mini" }),

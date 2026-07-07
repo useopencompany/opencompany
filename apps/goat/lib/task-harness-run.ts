@@ -204,7 +204,13 @@ export type GoatRunHarnessConfig = {
   skills: string[];
   maxModelSteps: number | null;
   resultMode: string;
+  codexGoalMode: GoatRunCodexGoalMode | null;
   rawSpec: unknown;
+};
+
+export type GoatRunCodexGoalMode = {
+  objective: string;
+  tokenBudget: number | null;
 };
 
 export type GoatRunHarnessTool = {
@@ -344,6 +350,7 @@ function buildHarnessConfig(value: unknown, fallbackModel: string): GoatRunHarne
     skills: readStringArray(spec.skills),
     maxModelSteps: readPositiveInteger(spec.maxModelSteps),
     resultMode: readString(spec.resultMode).trim(),
+    codexGoalMode: readCodexGoalMode(spec.codex),
     rawSpec: value,
   };
 }
@@ -812,6 +819,18 @@ function readPositiveInteger(value: unknown) {
         ? Number(value)
         : Number.NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function readCodexGoalMode(value: unknown): GoatRunCodexGoalMode | null {
+  const codex = readRecord(value);
+  const goalMode = readRecord(codex?.goalMode);
+  if (!goalMode) return null;
+  const objective = readString(goalMode.objective).trim();
+  if (!objective) return null;
+  return {
+    objective,
+    tokenBudget: readPositiveInteger(goalMode.tokenBudget),
+  };
 }
 
 function readUsageNumber(value: unknown, camelKey: string, snakeKey: string) {

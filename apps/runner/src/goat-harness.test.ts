@@ -126,6 +126,8 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("<goat_harness_planner>");
     expect(request.system).toContain("<tool_policy>");
     expect(request.system).toContain("<skill_policy>");
+    expect(request.system).toContain("<codex_goal_policy>");
+    expect(request.system).toContain("set codex.goalMode only");
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
     expect(request.system).toContain('resultMode "brain_markdown_report"');
@@ -355,6 +357,49 @@ describe("planGoatHarness", () => {
         repository: "octo/repo",
         createPullRequest: false,
         reasoningEffort: "high",
+      },
+    });
+  });
+
+  it("normalizes planner-selected Codex goal mode with a default token budget", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "codex",
+        model: gptModel,
+        systemPrompt: "Use Codex to edit the repository, run tests, and continue until verified.",
+        initialUserMessage: "Fix the flaky test suite in octo/repo and verify the fix.",
+        tools: ["exa_search"],
+        skills: [],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+        codex: {
+          repository: "octo/repo",
+          createPullRequest: false,
+          reasoningEffort: "high",
+          goalMode: {
+            objective: "Fix the flaky tests in octo/repo and verify the suite passes.",
+          },
+        },
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Use Codex to fix the flaky test suite in octo/repo and verify it.",
+        model,
+        availableTools: ["exa_search", "github_clone_repository", "github_shell"],
+        githubRepositories: ["octo/repo"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      engine: "codex",
+      codex: {
+        repository: "octo/repo",
+        goalMode: {
+          objective: "Fix the flaky tests in octo/repo and verify the suite passes.",
+          tokenBudget: 200_000,
+        },
       },
     });
   });
@@ -599,6 +644,10 @@ describe("executeGoatTask", () => {
         repository: "octo/repo",
         createPullRequest: true,
         reasoningEffort: "high",
+        goalMode: {
+          objective: "Fix octo/repo and verify tests pass.",
+          tokenBudget: 200_000,
+        },
       },
     };
     aiMock.generateObject.mockResolvedValueOnce({ object: codexHarnessSpec });
@@ -624,6 +673,10 @@ describe("executeGoatTask", () => {
         existingEngineSessionId: "thread_existing",
         repository: "octo/repo",
         createPullRequest: true,
+        goalMode: {
+          objective: "Fix octo/repo and verify tests pass.",
+          tokenBudget: 200_000,
+        },
         onEngineSessionId: sink.updateCodexEngineSessionId,
       }),
     );
@@ -631,6 +684,10 @@ describe("executeGoatTask", () => {
       expect.objectContaining({
         sandboxId: "sbx_codex",
         activeMs: 60_000,
+        rawMetrics: expect.objectContaining({
+          goalMode: true,
+          goalStatus: null,
+        }),
       }),
     );
     expect(sink.recordModelUsage).toHaveBeenCalledWith(

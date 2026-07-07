@@ -39,6 +39,10 @@ import {
 const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_GOAT_MAX_MODEL_STEPS = 8;
 const MAX_GOAT_MODEL_STEPS = 16;
+const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
+const DEFAULT_CODEX_GOAL_TOKEN_BUDGET = 200_000;
+const MIN_CODEX_GOAL_TOKEN_BUDGET = 1;
+const MAX_CODEX_GOAL_TOKEN_BUDGET = 1_000_000;
 const ASSISTANT_CONTENT_FLUSH_INTERVAL_MS = 500;
 
 type GoatTask = typeof goatTasks.$inferSelect;
@@ -332,6 +336,7 @@ async function runGoatTaskCodex(input: {
     ...(input.harnessSpec.codex?.reasoningEffort
       ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }
       : {}),
+    ...(input.harnessSpec.codex?.goalMode ? { goalMode: input.harnessSpec.codex.goalMode } : {}),
     onEngineSessionId: input.sink.updateCodexEngineSessionId,
     onOutput: async (delta) => {
       codexActivity = `${codexActivity}${delta}`;
@@ -352,6 +357,8 @@ async function runGoatTaskCodex(input: {
     rawMetrics: {
       engine: "codex",
       repository: input.harnessSpec.codex?.repository ?? null,
+      goalMode: Boolean(input.harnessSpec.codex?.goalMode),
+      goalStatus: result.goal?.status ?? null,
     },
   });
   if (result.usage) {
@@ -704,6 +711,23 @@ function goatHarnessSpecResponseSchema(
           repository: { type: ["string", "null"] },
           createPullRequest: { type: "boolean" },
           reasoningEffort: { type: "string", enum: ["low", "medium", "high", "xhigh"] },
+          goalMode: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              objective: {
+                type: "string",
+                minLength: 1,
+                maxLength: CODEX_GOAL_OBJECTIVE_MAX_LENGTH,
+              },
+              tokenBudget: {
+                type: ["integer", "null"],
+                minimum: MIN_CODEX_GOAL_TOKEN_BUDGET,
+                maximum: MAX_CODEX_GOAL_TOKEN_BUDGET,
+              },
+            },
+            required: ["objective"],
+          },
         },
       },
     },
@@ -813,10 +837,12 @@ function readCodexHarnessConfig(
     inferCodexRepositoryFromPrompt(prompt, githubRepositories) ??
     plannedRepository;
   const promptPullRequestIntent = readPullRequestIntent(prompt);
+  const goalMode = readCodexGoalMode(record.goalMode);
   return {
     repository,
     createPullRequest: promptPullRequestIntent ?? record.createPullRequest === true,
     reasoningEffort: readCodexReasoningEffort(record.reasoningEffort),
+    ...(goalMode ? { goalMode } : {}),
   };
 }
 
@@ -824,6 +850,27 @@ function readCodexReasoningEffort(value: unknown) {
   return value === "low" || value === "medium" || value === "high" || value === "xhigh"
     ? value
     : "high";
+}
+
+function readCodexGoalMode(
+  value: unknown,
+): NonNullable<GoatHarnessSpec["codex"]>["goalMode"] | null {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!record) return null;
+  const objective = readNonEmptyString(record.objective);
+  if (!objective) return null;
+  const hasTokenBudget = Object.prototype.hasOwnProperty.call(record, "tokenBudget");
+  const tokenBudget = !hasTokenBudget
+    ? DEFAULT_CODEX_GOAL_TOKEN_BUDGET
+    : record.tokenBudget === null
+      ? null
+      : typeof record.tokenBudget === "number"
+        ? clampInteger(record.tokenBudget, MIN_CODEX_GOAL_TOKEN_BUDGET, MAX_CODEX_GOAL_TOKEN_BUDGET)
+        : DEFAULT_CODEX_GOAL_TOKEN_BUDGET;
+  return {
+    objective: objective.slice(0, CODEX_GOAL_OBJECTIVE_MAX_LENGTH),
+    tokenBudget,
+  };
 }
 
 function inferCodexRepositoryFromPrompt(prompt: string, githubRepositories: readonly string[]) {

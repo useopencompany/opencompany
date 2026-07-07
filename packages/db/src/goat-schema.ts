@@ -80,6 +80,10 @@ export type GoatHarnessSpec = {
     repository?: string | null;
     createPullRequest?: boolean;
     reasoningEffort?: CodexReasoningEffort;
+    goalMode?: {
+      objective: string;
+      tokenBudget?: number | null;
+    };
   };
 };
 

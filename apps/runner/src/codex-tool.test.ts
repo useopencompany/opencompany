@@ -156,6 +156,8 @@ describe("buildCodexConfig", () => {
 
     expect(config).toContain('model_provider = "opencompany"');
     expect(config).toContain('model_verbosity = "medium"');
+    expect(config).toContain("[features]");
+    expect(config).toContain("goals = true");
     expect(config).toContain("[sandbox_workspace_write]");
     expect(config).toContain("network_access = true");
     expect(config).toContain("[model_providers.opencompany]");
@@ -174,6 +176,8 @@ describe("buildCodexConfig", () => {
 
     expect(config).toContain('cli_auth_credentials_store = "file"');
     expect(config).toContain('forced_login_method = "chatgpt"');
+    expect(config).toContain("[features]");
+    expect(config).toContain("goals = true");
     expect(config).toContain("[sandbox_workspace_write]");
     expect(config).toContain("network_access = true");
     expect(config).not.toContain("model_provider");

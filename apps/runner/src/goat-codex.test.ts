@@ -83,6 +83,7 @@ describe("runGoatCodexTask", () => {
       status: "success",
       result: "Codex completed.",
       error: null,
+      goal: null,
       usage: { input_tokens: 10, cache_read_input_tokens: 4, output_tokens: 3 },
     });
   });
@@ -114,6 +115,7 @@ describe("runGoatCodexTask", () => {
         model: "gpt-5.5",
         reasoningEffort: "high",
         planModeReasoningEffort: null,
+        goalMode: null,
         existingEngineSessionId: null,
         githubAuth: { githubToken: null, githubAuthHeader: null },
       }),
@@ -156,6 +158,56 @@ describe("runGoatCodexTask", () => {
         reasoningEffort: "medium",
       }),
     );
+  });
+
+  it("passes goal mode into app-server execution and formats terminal goal status", async () => {
+    appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
+      sessionId: "thread_new",
+      status: "success",
+      result: "Codex completed.",
+      error: null,
+      goal: {
+        objective: "Fix tests and verify they pass.",
+        status: "complete",
+        tokenBudget: 200_000,
+        tokensUsed: 12_345,
+        timeUsedSeconds: 67,
+      },
+      usage: null,
+    });
+
+    const result = await runGoatCodexTask({
+      userWorkosId: "user_1",
+      taskId: "goat_task_1",
+      messageId: "msg_1",
+      prompt: "Fix the tests.",
+      systemPrompt: "Use Codex.",
+      model: "openai/gpt-5.5",
+      goalMode: {
+        objective: "Fix tests and verify they pass.",
+        tokenBudget: 200_000,
+      },
+      env: env(),
+      signal: new AbortController().signal,
+    });
+
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goalMode: {
+          objective: "Fix tests and verify they pass.",
+          tokenBudget: 200_000,
+        },
+      }),
+    );
+    expect(appServerMocks.runCodexAppServerTurn.mock.calls[0]![0].task).toContain("<goal_mode>");
+    expect(appServerMocks.runCodexAppServerTurn.mock.calls[0]![0].task).toContain(
+      "Objective: Fix tests and verify they pass.",
+    );
+    expect(result.content).toContain("Goal status: complete - budget 200000 - used 12345 - 67s");
+    expect(result.goal).toMatchObject({
+      status: "complete",
+      tokenBudget: 200_000,
+    });
   });
 
   it("persists the returned thread id before repository diff and PR work", async () => {

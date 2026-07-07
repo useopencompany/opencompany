@@ -121,6 +121,12 @@ describe("TaskDetailPanel harness config", () => {
           skills: ["first-principles"],
           maxModelSteps: 6,
           resultMode: "brain_markdown_report",
+          codex: {
+            goalMode: {
+              objective: "Fix tests and verify they pass.",
+              tokenBudget: 200_000,
+            },
+          },
         },
       }),
       messages: [],
@@ -136,6 +142,10 @@ describe("TaskDetailPanel harness config", () => {
     expect(screen.getByText("Linear tools")).toBeInTheDocument();
     expect(
       screen.getByText("GPT 5.4 Mini - 6 max steps - Brain report - 1 skill"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Goal")).toBeInTheDocument();
+    expect(
+      screen.getByText("Fix tests and verify they pass. - 200000 token budget"),
     ).toBeInTheDocument();
   });
 });
