@@ -210,6 +210,20 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed web to $url"
 
+      - name: Map Goat production app env
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        run: |
+          goat_url="${PRODUCTION_GOAT_URL%/}"
+          if [ -z "$goat_url" ]; then
+            echo "PRODUCTION_GOAT_URL is required to deploy Goat."
+            exit 1
+          fi
+
+          {
+            echo "GOAT_NEXT_PUBLIC_APP_URL=$goat_url"
+            echo "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$goat_url/auth/callback"
+          } >> "$GITHUB_ENV"
+
       - name: Pull Vercel Goat project config
         if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
         run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID" --local-config=vercel.goat.json
