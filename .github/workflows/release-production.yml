@@ -158,7 +158,7 @@ jobs:
 
       - name: Pull Vercel project config
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$VERCEL_PROJECT_ID"
 
       - name: Check Vercel web env
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
@@ -171,7 +171,7 @@ jobs:
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-        run: bunx vercel build --prod --token="$VERCEL_TOKEN"
+        run: bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$VERCEL_PROJECT_ID"
 
       - name: Re-check automatic release before deploy
         id: deploy-release
@@ -200,7 +200,7 @@ jobs:
         id: deploy-web
         if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
         run: |
-          output="$(bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
+          output="$(bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$VERCEL_PROJECT_ID")"
           echo "$output"
           url="$(printf "%s\n" "$output" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
           if [ -z "$url" ]; then
@@ -210,7 +210,38 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed web to $url"
 
-      - name: Cancel runner deploy after web failure
+      - name: Pull Vercel Goat project config
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID" --local-config=vercel.goat.json
+
+      - name: Check Vercel Goat env
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        env:
+          OPENCOMPANY_LOAD_VERCEL_ENV: "1"
+        run: bun run release:preflight -- --goat
+
+      - name: Build Goat
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        env:
+          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+        run: bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID" --local-config=vercel.goat.json
+
+      - name: Deploy Goat
+        id: deploy-goat
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        run: |
+          output="$(bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID" --local-config=vercel.goat.json)"
+          echo "$output"
+          url="$(printf "%s\n" "$output" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
+          if [ -z "$url" ]; then
+            echo "Could not find Goat deployment URL in Vercel output."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed Goat to $url"
+
+      - name: Cancel runner deploy after Vercel failure
         if: ${{ failure() && steps.trigger-runner.outputs.deploy_id != '' }}
         run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
 
@@ -222,8 +253,10 @@ jobs:
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
           EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
+          SMOKE_GOAT: "true"
           SMOKE_RUNNER: ${{ github.event_name == 'workflow_run' || inputs.deploy_runner }}
           SMOKE_WEB_ATTEMPTS: "12"
+          SMOKE_GOAT_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke
