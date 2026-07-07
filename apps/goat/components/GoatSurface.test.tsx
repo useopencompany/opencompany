@@ -1,10 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
+  type GoatChatMessageMetadata,
   type GoatChatUiMessage,
   START_TASK_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
@@ -50,6 +51,10 @@ vi.mock("@/lib/user-preferences", () => ({
   updateGoatTimezoneAction: vi.fn(async () => ({ ok: true, timezone: "UTC" })),
 }));
 
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => false,
+}));
+
 vi.mock("@ai-sdk/react", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {
@@ -71,13 +76,14 @@ vi.mock("@ai-sdk/react", async () => {
         stop: () => {
           chatMock.stop();
         },
-        sendMessage: async (message: { text: string }) => {
+        sendMessage: async (message: { text: string; metadata?: GoatChatMessageMetadata }) => {
           chatMock.sendMessage(message);
           setMessages((current) => [
             ...current,
             {
               id: "ui_user_1",
               role: "user",
+              ...(message.metadata ? { metadata: message.metadata } : {}),
               parts: [{ type: "text", text: message.text }],
             },
           ]);
@@ -108,10 +114,21 @@ describe("GoatSurface chat streaming UI", () => {
     vi.mocked(closeGoatChatSessionAction).mockClear();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("clears the composer and paints the user message immediately", async () => {
     const user = userEvent.setup();
 
-    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
 
     const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Hello Goat");
@@ -120,6 +137,97 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(screen.getByText("Hello Goat")).toBeInTheDocument();
+  });
+
+  it("shows the Codex mention menu and submits selected mention metadata", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@");
+
+    expect(screen.getByRole("listbox", { name: "Mention menu" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: /@codex/i }));
+    expect(textarea).toHaveValue("@codex ");
+    const selectedMention = screen.getByTestId("selected-codex-mention");
+    expect(selectedMention).toHaveTextContent("@codex");
+    expect(selectedMention).not.toHaveClass("px-1");
+    expect(selectedMention).not.toHaveClass("font-medium");
+
+    await user.type(textarea, "check repo access");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "@codex check repo access",
+      metadata: { mentions: [{ kind: "engine", id: "codex" }] },
+    });
+  });
+
+  it("does not show Codex mention options when Codex is not connected", async () => {
+    const user = userEvent.setup();
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@");
+
+    expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
+  });
+
+  it("does not send steering metadata for manually typed @codex", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@codex check repo access");
+    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "@codex check repo access",
+    });
+  });
+
+  it("clears selected mention metadata when visible @codex text is deleted", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "@");
+    await user.click(screen.getByRole("option", { name: /@codex/i }));
+    await user.clear(textarea);
+    await user.type(textarea, "check repo access");
+    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "check repo access",
+    });
   });
 
   it("keeps a completed new chat visible while server props refresh", async () => {
@@ -159,6 +267,66 @@ describe("GoatSurface chat streaming UI", () => {
     const chatLink = screen.getByRole("link", { name: /Market research/ });
     expect(chatLink).toHaveAttribute("href", "/?chat=chat_1");
     expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
+  });
+
+  it("opens the new chat command with Cmd+N and starts a background chat", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (String(input).includes("/api/electric/")) {
+        return new Response("", {
+          headers: {
+            "electric-handle": "test-handle",
+            "electric-offset": "0",
+            "electric-schema": "[]",
+          },
+        });
+      }
+
+      return new Response("done", { status: 200 });
+    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.keyboard("{Meta>}n{/Meta}");
+    await user.type(screen.getByPlaceholderText("Describe the new chat or task..."), "Research Q3");
+    await user.keyboard("{Enter}");
+
+    const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
+    await waitFor(() => expect(chatRequests()).toHaveLength(1));
+    const [, init] = chatRequests()[0]!;
+    expect(init).toBeDefined();
+    const body = JSON.parse(String((init as RequestInit).body));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/chat",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(body).toMatchObject({
+      sessionId: null,
+      model: DEFAULT_GOAT_MODEL,
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "Research Q3" }],
+      },
+    });
+    expect(body.message.id).toMatch(/^ui_background_/);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(
+      screen.queryByPlaceholderText("Describe the new chat or task..."),
+    ).not.toBeInTheDocument();
   });
 
   it("updates the URL when a new chat returns a session id", async () => {
@@ -433,6 +601,120 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Added it to Results.")).toBeInTheDocument();
     expect(screen.getByText("Research market")).toBeInTheDocument();
     expect(screen.getByText("TASK-42")).toBeInTheDocument();
+    expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+  });
+
+  it("renders current task status from task state instead of start_task output", () => {
+    render(
+      <GoatSurface
+        tasks={[
+          taskView({
+            id: "task_1",
+            displayId: "TASK-42",
+            name: "Research market",
+            status: "failed",
+            stage: "failed",
+            error: "Runner failed.",
+          }),
+        ]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                {
+                  type: START_TASK_TOOL_PART_TYPE,
+                  toolCallId: "tool_1",
+                  state: "output-available",
+                  input: {
+                    prompt: "Research the market",
+                    name: "Research market",
+                  },
+                  output: {
+                    taskId: "task_1",
+                    taskDisplayId: "TASK-42",
+                    taskName: "Research market",
+                    status: "queued",
+                    prompt: "Research the market",
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("TASK-42 · Failed")).toBeInTheDocument();
+    expect(screen.queryByText(/Task running/i)).not.toBeInTheDocument();
+  });
+
+  it("renders a metadata-only task card from the task state lookup", () => {
+    render(
+      <GoatSurface
+        tasks={[
+          taskView({
+            id: "task_1",
+            displayId: "TASK-42",
+            name: "Research market",
+            status: "succeeded",
+            stage: "completed",
+          }),
+        ]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1", taskId: "task_1" },
+              parts: [{ type: "text", text: "Added it to Results." }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Added it to Results.")).toBeInTheDocument();
+    const taskCard = screen.getByRole("link", { name: /Research market/ });
+    expect(taskCard).toHaveAttribute("href", "/tasks/TASK-42");
+    expect(screen.getByText("TASK-42 · Done")).toBeInTheDocument();
+  });
+
+  it("uses a neutral fallback when only the task id is known", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1", taskId: "task_unknown" },
+              parts: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const taskCard = screen.getByRole("link", { name: /Status pending/ });
+    expect(taskCard).toHaveAttribute("href", "/tasks/task_unknown");
+    expect(screen.getByText("Task · Status pending")).toBeInTheDocument();
+    expect(screen.queryByText(/Task running/i)).not.toBeInTheDocument();
   });
 
   it("renders assistant text and task cards in message part order", () => {

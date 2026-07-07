@@ -148,6 +148,8 @@ export const GOAT_HARNESS_CREATION_SYSTEM = promptBlock("system", [
 
 export const GOAT_HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selection", [
   "Choose the execution engine from the provided execution_engine_options.",
+  "If requested_engine is present, use that exact engine unless it is unavailable in execution_engine_options.",
+  "Do not override requested_engine just because the task is read-only, analytical, or could also be done with ordinary tools.",
   'Use engine "codex" for coding tasks when the user explicitly mentions Codex.',
   'Use engine "codex" for repository editing, debugging, tests, code review, or pull-request work when Codex is the better executor.',
   'Use engine "opencompany" for non-coding tasks and for coding-adjacent explanation that does not need a sandboxed coding agent.',
@@ -221,6 +223,7 @@ export const GOAT_HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_pla
 
 export function buildGoatHarnessCreationPrompt(input: {
   taskPrompt: string;
+  requestedEngine?: GoatHarnessEngine | null;
   executionEngineOptions: readonly GoatHarnessEngineOption[];
   executionModelOptions: readonly GoatHarnessModelOption[];
   availableOperationTools: readonly GoatTaskToolName[];
@@ -231,6 +234,7 @@ export function buildGoatHarnessCreationPrompt(input: {
   const githubRepositories = input.githubRepositories ?? [];
   return promptBlock("planner_inputs", [
     promptEngineOptions(input.executionEngineOptions),
+    ...(input.requestedEngine ? [promptValue("requested_engine", input.requestedEngine)] : []),
     promptModelOptions(input.executionModelOptions),
     promptList("available_operation_tools", "tool", input.availableOperationTools),
     promptSkillOptions(input.availableSkills),

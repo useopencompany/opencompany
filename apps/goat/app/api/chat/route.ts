@@ -36,6 +36,7 @@ import {
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import { validateGoatChatInput } from "@/lib/chat-validation";
+import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleAction,
@@ -52,6 +53,7 @@ type ChatRequestBody = {
   sessionId?: unknown;
   model?: unknown;
   message?: unknown;
+  mentions?: unknown;
 };
 
 export async function POST(request: Request): Promise<Response> {
@@ -72,6 +74,11 @@ export async function POST(request: Request): Promise<Response> {
     sessionId: body.value.sessionId,
   });
   if (!parsed.ok) return new Response(parsed.error, { status: 400 });
+  const mentionEngine = readGoatChatMentionEngine(body.value.mentions);
+  const requestedEngine =
+    mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
+      ? "codex"
+      : undefined;
 
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
@@ -141,6 +148,8 @@ export async function POST(request: Request): Promise<Response> {
 
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
+    latestUserMessage: parsed.value.prompt,
+    ...(requestedEngine ? { requestedEngine } : {}),
     runBrainCli: (toolInput, toolExecutionContext) => {
       const toolCallId = goatBrainToolCallId(toolExecutionContext);
       return runGoatBrainToolForUser({
@@ -178,6 +187,7 @@ export async function POST(request: Request): Promise<Response> {
         ...(task.name ? { name: task.name } : {}),
         prompt: task.prompt,
         model: task.model,
+        ...(task.engine ? { engine: task.engine } : {}),
       });
       const attributes = {
         ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
@@ -527,6 +537,7 @@ function toStreamMessageMetadata(
     sessionId,
     ...(task
       ? {
+          taskId: task.id,
           task: {
             id: task.id,
             displayId: task.displayId,
@@ -588,6 +599,15 @@ function normalizedOptionalString(value: unknown) {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function readGoatChatMentionEngine(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value.some((item) => isCodexEngineMention(item)) ? "codex" : undefined;
+}
+
+function isCodexEngineMention(value: unknown) {
+  return isRecord(value) && value.kind === "engine" && value.id === "codex";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
