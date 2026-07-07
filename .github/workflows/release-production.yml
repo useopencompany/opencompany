@@ -226,12 +226,13 @@ jobs:
 
       - name: Pull Vercel Goat project config
         if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
-        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID" --local-config=vercel.goat.json
+        run: bunx vercel pull apps/goat --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
 
       - name: Check Vercel Goat env
         if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
         env:
           OPENCOMPANY_LOAD_VERCEL_ENV: "1"
+          OPENCOMPANY_VERCEL_ENV_PATH: apps/goat/.vercel/.env.production.local
         run: bun run release:preflight -- --goat
 
       - name: Build Goat
@@ -239,13 +240,13 @@ jobs:
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-        run: bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID" --local-config=vercel.goat.json
+        run: bunx vercel build --cwd apps/goat --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
 
       - name: Deploy Goat
         id: deploy-goat
         if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
         run: |
-          output="$(bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID" --local-config=vercel.goat.json)"
+          output="$(bunx vercel deploy apps/goat --prebuilt --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID")"
           echo "$output"
           url="$(printf "%s\n" "$output" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
           if [ -z "$url" ]; then

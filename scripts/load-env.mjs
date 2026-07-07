@@ -8,7 +8,9 @@ import { config } from "dotenv";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 if (process.env.OPENCOMPANY_LOAD_VERCEL_ENV === "1") {
-  config({ path: join(repoRoot, ".vercel", ".env.production.local"), quiet: true });
+  const vercelEnvPath =
+    process.env.OPENCOMPANY_VERCEL_ENV_PATH?.trim() || ".vercel/.env.production.local";
+  config({ path: join(repoRoot, vercelEnvPath), quiet: true });
 }
 
 config({ path: join(repoRoot, ".env.override.local"), quiet: true });
