@@ -144,7 +144,6 @@ describe("resolveSubagentGrant", () => {
         "x_get_profile",
         "x_get_user_posts",
         "x_get_discussion",
-        "x_get_trends",
       ],
       personalAgent: false,
     });

@@ -14,6 +14,7 @@ vi.mock("./db", () => ({
 
 const harnessSpec: GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1",
+  engine: "opencompany",
   model: "moonshotai/kimi-k2.6",
   systemPrompt: "Run this recurring task.",
   initialUserMessage: "Send a daily briefing.",

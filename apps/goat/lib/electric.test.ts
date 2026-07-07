@@ -66,14 +66,25 @@ describe("buildGoatElectricOriginUrl", () => {
         "https://goat.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1&where=1=1",
       ),
       userWorkosId: "user_123",
+      authorizedChatSessionId: "goat_chat_1",
     });
 
     expect(url?.searchParams.get("table")).toBe("goat.chat_messages");
-    expect(url?.searchParams.get("where")).toBe(
-      `"session_id" = $1 AND "session_id" IN (SELECT "id" FROM "goat"."chat_sessions" WHERE "user_workos_id" = $2 AND "closed_at" IS NULL)`,
-    );
+    expect(url?.searchParams.get("where")).toBe(`"session_id" = $1`);
     expect(url?.searchParams.get("params[1]")).toBe("goat_chat_1");
-    expect(url?.searchParams.get("params[2]")).toBe("user_123");
+    expect(url?.searchParams.get("params[2]")).toBeNull();
+  });
+
+  it("rejects goat.chat_messages without a route-authorized session id", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1",
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url).toBeNull();
   });
 
   it.each([

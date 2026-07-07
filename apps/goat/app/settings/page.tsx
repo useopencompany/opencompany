@@ -3,6 +3,7 @@ import { ArrowLeft, CircleUserRound, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { currentGoatUser } from "@/lib/auth";
+import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
@@ -12,13 +13,28 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const { authUser, user } = await currentGoatUser();
-  const [googleIntegrations, linear, github, jamie] = await Promise.all([
+  const [googleIntegrations, linear, github, jamie, codex] = await Promise.all([
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
     getGoatGitHubIntegrationState(user.workosUserId),
     getGoatJamieIntegrationState(user.workosUserId),
+    loadCurrentGoatCodexAuthSettings(),
   ]);
-  const integrations = { ...googleIntegrations, linear, github, jamie };
+  const codexStatus: "connected" | "needs_reauth" | "not_connected" =
+    codex.status ?? "not_connected";
+  const integrations = {
+    ...googleIntegrations,
+    linear,
+    github,
+    jamie,
+    codex: {
+      provider: "codex" as const,
+      connected: codex.status === "connected",
+      status: codexStatus,
+      statusReason: codex.statusReason,
+      lastValidatedAt: codex.lastValidatedAt,
+    },
+  };
   const name = [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
   const initials = getInitials(authUser.firstName, authUser.lastName, user.email);

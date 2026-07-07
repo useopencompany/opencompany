@@ -1,3 +1,5 @@
+import { createMDX } from "fumadocs-mdx/next";
+
 const release =
   process.env.RELEASE_SHA ||
   process.env.GITHUB_SHA ||
@@ -6,7 +8,13 @@ const release =
   process.env.VERCEL_GIT_COMMIT_SHA ||
   "";
 const vercelManagedDeploymentId = process.env.NEXT_DEPLOYMENT_ID?.startsWith("dpl_") ?? false;
-const deploymentId = vercelManagedDeploymentId ? "" : `goat-${release}`.slice(0, 32);
+const releaseWorkflowDeploymentId =
+  release && process.env.GITHUB_RUN_ID
+    ? `${release.slice(0, 10)}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT || "1"}`
+    : "";
+const deploymentId = vercelManagedDeploymentId
+  ? ""
+  : `goat-${releaseWorkflowDeploymentId || release}`.slice(0, 32);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -23,4 +31,6 @@ const nextConfig = {
   ],
 };
 
-export default nextConfig;
+const withMDX = createMDX();
+
+export default withMDX(nextConfig);

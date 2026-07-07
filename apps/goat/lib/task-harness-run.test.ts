@@ -99,6 +99,39 @@ describe("buildGoatHarnessRun", () => {
     ]);
   });
 
+  it("labels X tools in the Results timeline", () => {
+    const run = buildGoatHarnessRun({
+      task: task(),
+      messages: [],
+      events: [
+        event(1, "tool.completed", {
+          toolCallId: "call_x_posts",
+          toolName: "x_get_user_posts",
+          input: { username: "opencompany" },
+          output: { posts: [{ caption: "launch" }] },
+        }),
+        event(2, "tool.completed", {
+          toolCallId: "call_x_discussion",
+          toolName: "x_get_discussion",
+          input: { postIdOrUrl: "https://x.com/opencompany/status/123" },
+          output: { comments: [{ text: "complaint" }] },
+        }),
+        event(3, "tool.completed", {
+          toolCallId: "call_social_job",
+          toolName: "social_get_job",
+          input: { jobId: "job" },
+          output: { status: "completed" },
+        }),
+      ],
+    });
+
+    expect(run.toolCalls.map((tool) => [tool.label, tool.kind])).toEqual([
+      ["X posts", "tool"],
+      ["X discussion", "tool"],
+      ["Social job", "tool"],
+    ]);
+  });
+
   it("extracts brain report artifacts from durable events", () => {
     const run = buildGoatHarnessRun({
       task: task({
@@ -184,6 +217,38 @@ describe("buildGoatHarnessRun", () => {
       modelCostUsdMicros: 0,
       toolCostUsdMicros: 0,
       sandboxCostUsdMicros: 0,
+    });
+  });
+
+  it("extracts Codex goal mode from harness specs", () => {
+    const run = buildGoatHarnessRun({
+      task: task({
+        harnessSpec: {
+          schemaVersion: "goat.harness.v1",
+          engine: "codex",
+          model: "openai/gpt-5.5",
+          systemPrompt: "Use Codex.",
+          initialUserMessage: "Fix tests.",
+          tools: ["exa_search"],
+          skills: [],
+          maxModelSteps: 8,
+          resultMode: "assistant_final",
+          codex: {
+            repository: "octo/repo",
+            goalMode: {
+              objective: "Fix tests and verify they pass.",
+              tokenBudget: 200_000,
+            },
+          },
+        },
+      }),
+      messages: [],
+      events: [],
+    });
+
+    expect(run.harnessConfig?.codexGoalMode).toEqual({
+      objective: "Fix tests and verify they pass.",
+      tokenBudget: 200_000,
     });
   });
 

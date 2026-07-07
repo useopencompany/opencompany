@@ -32,6 +32,7 @@ import {
   type GoatTaskExecutorInput,
   type GoatTaskExecutorResult,
 } from "./goat-harness";
+import { getGoatAvailableGitHubRepositoryNamesForRunner } from "./goat-harness-planner";
 import { rowsFromExecute } from "./sql-exec";
 import { type NormalizedModelUsage, normalizeModelUsage } from "./usage";
 
@@ -72,6 +73,13 @@ export type GoatTaskStore = {
     stage: GoatTaskStage;
     harnessSpec?: GoatHarnessSpec;
     debugTrace?: GoatTaskDebugTrace;
+  }): Promise<boolean>;
+  updateCodexEngineSessionId(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    codexEngineSessionId: string;
   }): Promise<boolean>;
   ensureUserMessage(input: {
     id: string;
@@ -249,6 +257,20 @@ export function createDbGoatTaskStore(): GoatTaskStore {
             model = COALESCE(${input.harnessSpec?.model ?? null}, model),
             harness_spec = COALESCE(${input.harnessSpec ? JSON.stringify(input.harnessSpec) : null}::jsonb, harness_spec),
             debug_trace = COALESCE(${input.debugTrace ? JSON.stringify(input.debugTrace) : null}::jsonb, debug_trace),
+            updated_at = ${input.now}
+        WHERE id = ${input.id}
+          AND lease_id = ${input.leaseId}
+          AND lease_owner = ${input.leaseOwner}
+          AND status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async updateCodexEngineSessionId(input) {
+      const result = await getDb().execute(sql`
+        UPDATE goat.tasks
+        SET codex_engine_session_id = ${input.codexEngineSessionId},
             updated_at = ${input.now}
         WHERE id = ${input.id}
           AND lease_id = ${input.leaseId}
@@ -938,10 +960,17 @@ export async function runClaimedGoatTask(input: {
       return;
     }
 
+    const githubRepositories = input.task.harnessSpec.tools.some((tool) =>
+      tool.startsWith("github_"),
+    )
+      ? await getGoatAvailableGitHubRepositoryNamesForRunner(input.task.userWorkosId)
+      : [];
+
     const result = await runSpan.runInContext(() =>
       executor({
         task: input.task,
         env: input.env,
+        plannerContext: { githubRepositories },
         signal: abortController.signal,
         sink: {
           createAssistantMessage: async (messageInput) => {
@@ -1076,14 +1105,16 @@ export async function runClaimedGoatTask(input: {
           },
           recordModelUsage: async (usageInput) => {
             const usage = normalizeModelUsage(usageInput.usage);
-            const cost = calculateModelUsageCost({
-              modelName: usageInput.modelName,
-              inputTokens: usage.inputTokens,
-              inputNoCacheTokens: usage.inputNoCacheTokens,
-              inputCacheReadTokens: usage.inputCacheReadTokens,
-              inputCacheWriteTokens: usage.inputCacheWriteTokens,
-              outputTokens: usage.outputTokens,
-            });
+            const calculatedCost =
+              usageInput.costOverride ??
+              calculateModelUsageCost({
+                modelName: usageInput.modelName,
+                inputTokens: usage.inputTokens,
+                inputNoCacheTokens: usage.inputNoCacheTokens,
+                inputCacheReadTokens: usage.inputCacheReadTokens,
+                inputCacheWriteTokens: usage.inputCacheWriteTokens,
+                outputTokens: usage.outputTokens,
+              });
             await requireLeaseWrite(
               store.recordModelUsage({
                 id: input.task.id,
@@ -1102,10 +1133,10 @@ export async function runClaimedGoatTask(input: {
                 usage,
                 providerCreatedAt: usageInput.providerCreatedAt ?? null,
                 cost: {
-                  providerCostUsdMicros: cost.providerCostUsdMicros,
-                  platformFeeUsdMicros: cost.platformFeeUsdMicros,
-                  totalCostUsdMicros: cost.totalCostUsdMicros,
-                  costBasis: cost.costBasis,
+                  providerCostUsdMicros: calculatedCost.providerCostUsdMicros,
+                  platformFeeUsdMicros: calculatedCost.platformFeeUsdMicros,
+                  totalCostUsdMicros: calculatedCost.totalCostUsdMicros,
+                  costBasis: calculatedCost.costBasis,
                 },
               }),
               "record model usage",
@@ -1171,6 +1202,18 @@ export async function runClaimedGoatTask(input: {
                 },
               }),
               "record sandbox usage",
+            );
+          },
+          updateCodexEngineSessionId: async (codexEngineSessionId) => {
+            await requireLeaseWrite(
+              store.updateCodexEngineSessionId({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                codexEngineSessionId,
+              }),
+              "update Codex engine session id",
             );
           },
         },
@@ -1454,6 +1497,7 @@ const goatTaskColumnsSql = sql`
   task.error,
   task.harness_spec AS "harnessSpec",
   task.debug_trace AS "debugTrace",
+  task.codex_engine_session_id AS "codexEngineSessionId",
   task.sandbox_id AS "sandboxId",
   task.attempts,
   task.next_run_at AS "nextRunAt",

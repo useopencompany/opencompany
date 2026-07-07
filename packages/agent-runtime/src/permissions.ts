@@ -493,7 +493,6 @@ const RUNTIME_TOOL_CLASSIFICATION: Record<
   x_get_profile: { providerKey: "x", group: "read" },
   x_get_user_posts: { providerKey: "x", group: "read" },
   x_get_discussion: { providerKey: "x", group: "read" },
-  x_get_trends: { providerKey: "x", group: "read" },
   // Supadata/Apify-backed hosted media tools — read-only external lookups.
   youtube_search: { providerKey: "youtube", group: "read" },
   youtube_get_video: { providerKey: "youtube", group: "read" },
