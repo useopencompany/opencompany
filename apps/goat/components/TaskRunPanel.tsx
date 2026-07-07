@@ -165,6 +165,8 @@ function taskFromInitialRun(run: GoatHarnessRunViewModel): GoatTaskRow {
     lease_owner: null,
     lease_expires_at: null,
     archived_at: null,
+    started_at: run.task.startedAt,
+    completed_at: run.task.completedAt,
     created_at: run.task.createdAt,
     updated_at: run.task.updatedAt,
   };

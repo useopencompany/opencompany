@@ -421,6 +421,8 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-01-01T00:05:00.000Z"),
     archivedAt: null,
+    startedAt: now,
+    completedAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,

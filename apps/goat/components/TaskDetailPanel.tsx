@@ -4,6 +4,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   CircleDollarSign,
   CircleDotDashed,
+  Clock3,
   SlidersHorizontal,
   Square,
   Target,
@@ -11,11 +12,18 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import { formatUsdMicros } from "@/lib/cost-format";
-import { formatGoatStartedAt, GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
+import {
+  formatGoatDurationMs,
+  formatGoatStartedAt,
+  GOAT_STAGE_COPY,
+  GOAT_STATUS_COPY,
+  taskTimestampMs,
+} from "@/lib/task-display";
 import type {
   GoatHarnessRunViewModel,
   GoatRunHarnessConfig,
@@ -52,7 +60,8 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
           Task
         </h2>
         <DetailRow label="ID" value={task.displayId} />
-        <DetailRow label="Started" value={formatGoatStartedAt(task.createdAt)} />
+        <DetailRow label="Started" value={formatTaskStartedAt(task)} />
+        <TaskDurationRow task={task} />
         <DetailRow
           label={visibleModels.length === 1 ? "Model" : "Models"}
           value={formatRunModels(visibleModels)}
@@ -168,6 +177,64 @@ function formatRunEngine(engine: GoatHarnessRunViewModel["task"]["engine"]) {
   return engine === "codex" ? "Codex" : "OpenCompany";
 }
 
+function TaskDurationRow({ task }: { task: GoatHarnessRunViewModel["task"] }) {
+  const startedAtMs = taskTimestampMs(task.startedAt);
+  const shouldTick = task.status === "running" && startedAtMs !== null;
+  const nowMs = useLiveNowMs(shouldTick);
+  const value = formatTaskDuration(task, nowMs);
+
+  return (
+    <DetailRow
+      label="Duration"
+      value={value}
+      icon="duration"
+      suppressHydrationWarning={shouldTick}
+    />
+  );
+}
+
+function useLiveNowMs(active: boolean) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!active) return;
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [active]);
+
+  return nowMs;
+}
+
+function formatTaskDuration(task: GoatHarnessRunViewModel["task"], nowMs: number) {
+  const startedAtMs = taskTimestampMs(task.startedAt);
+
+  if (task.status === "queued") {
+    return startedAtMs === null ? "Not started" : formatGoatDurationMs(nowMs - startedAtMs);
+  }
+
+  if (task.status === "running") {
+    return startedAtMs === null ? "Starting" : formatGoatDurationMs(nowMs - startedAtMs);
+  }
+
+  if (startedAtMs === null) {
+    return task.status === "canceled" ? "Not started" : "Unavailable";
+  }
+
+  const completedAtMs = taskTimestampMs(task.completedAt);
+  if (completedAtMs === null) return "Unavailable";
+
+  return formatGoatDurationMs(completedAtMs - startedAtMs);
+}
+
+function formatTaskStartedAt(task: GoatHarnessRunViewModel["task"]) {
+  if (task.status === "queued" && !task.startedAt) return "Not started";
+  if (!task.startedAt) return "Unknown";
+  return formatGoatStartedAt(task.startedAt);
+}
+
 function StopTaskButton({ taskId }: { taskId: string }) {
   const [isPending, startTransition] = useTransition();
   const [stopRequested, setStopRequested] = useState(false);
@@ -204,11 +271,13 @@ function DetailRow({
   value,
   active = false,
   icon = "status",
+  suppressHydrationWarning = false,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   active?: boolean;
-  icon?: "status" | "cost" | "config" | "engine" | "goal";
+  icon?: "status" | "cost" | "config" | "engine" | "goal" | "duration";
+  suppressHydrationWarning?: boolean;
 }) {
   const Icon =
     icon === "cost"
@@ -219,7 +288,9 @@ function DetailRow({
           ? TerminalSquare
           : icon === "goal"
             ? Target
-            : CircleDotDashed;
+            : icon === "duration"
+              ? Clock3
+              : CircleDotDashed;
   return (
     <div className="flex items-center gap-3 rounded-lg px-2 py-2">
       <Icon
@@ -229,7 +300,12 @@ function DetailRow({
       />
       <div className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="w-16 shrink-0 text-[12.5px] leading-tight text-ink-subtle">{label}</span>
-        <span className="truncate text-[14px] font-medium leading-tight text-ink">{value}</span>
+        <span
+          suppressHydrationWarning={suppressHydrationWarning}
+          className="truncate text-[14px] font-medium leading-tight text-ink"
+        >
+          {value}
+        </span>
       </div>
     </div>
   );

@@ -170,6 +170,7 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
           lease_id = NULL,
           lease_owner = NULL,
           lease_expires_at = NULL,
+          completed_at = ${now},
           updated_at = ${now}
       WHERE task.id = ${taskId}
         AND task.user_workos_id = ${user.workosUserId}
@@ -346,6 +347,8 @@ export async function createGoatTaskForUser(input: {
         task.lease_owner AS "leaseOwner",
         task.lease_expires_at AS "leaseExpiresAt",
         task.archived_at AS "archivedAt",
+        task.started_at AS "startedAt",
+        task.completed_at AS "completedAt",
         task.created_at AS "createdAt",
         task.updated_at AS "updatedAt"
       FROM created_task AS task
@@ -375,12 +378,21 @@ export async function createGoatTaskForUser(input: {
 
 type GoatTaskRow = Omit<
   GoatTask,
-  "scheduledFor" | "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
+  | "scheduledFor"
+  | "nextRunAt"
+  | "leaseExpiresAt"
+  | "archivedAt"
+  | "startedAt"
+  | "completedAt"
+  | "createdAt"
+  | "updatedAt"
 > & {
   scheduledFor: Date | string | null;
   nextRunAt: Date | string;
   leaseExpiresAt: Date | string | null;
   archivedAt: Date | string | null;
+  startedAt: Date | string | null;
+  completedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -392,6 +404,8 @@ function goatTaskFromRow(row: GoatTaskRow): GoatTask {
     nextRunAt: toDate(row.nextRunAt),
     leaseExpiresAt: row.leaseExpiresAt ? toDate(row.leaseExpiresAt) : null,
     archivedAt: row.archivedAt ? toDate(row.archivedAt) : null,
+    startedAt: row.startedAt ? toDate(row.startedAt) : null,
+    completedAt: row.completedAt ? toDate(row.completedAt) : null,
     createdAt: toDate(row.createdAt),
     updatedAt: toDate(row.updatedAt),
   };

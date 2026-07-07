@@ -227,6 +227,8 @@ export function createDbGoatTaskStore(): GoatTaskStore {
             lease_id = ${input.leaseId},
             lease_owner = ${input.leaseOwner},
             lease_expires_at = ${input.leaseExpiresAt},
+            started_at = COALESCE(task.started_at, ${input.now}),
+            completed_at = NULL,
             updated_at = ${input.now}
         FROM candidate
         WHERE task.id = candidate.id
@@ -646,6 +648,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
               lease_id = NULL,
               lease_owner = NULL,
               lease_expires_at = NULL,
+              completed_at = ${input.now},
               updated_at = ${input.now}
           WHERE id = ${input.id}
             AND lease_id = ${input.leaseId}
@@ -720,6 +723,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
             lease_id = NULL,
             lease_owner = NULL,
             lease_expires_at = NULL,
+            completed_at = ${input.now},
             updated_at = ${input.now}
         WHERE id = ${input.id}
           AND lease_id = ${input.leaseId}
@@ -1534,17 +1538,27 @@ const goatTaskColumnsSql = sql`
   task.lease_owner AS "leaseOwner",
   task.lease_expires_at AS "leaseExpiresAt",
   task.archived_at AS "archivedAt",
+  task.started_at AS "startedAt",
+  task.completed_at AS "completedAt",
   task.created_at AS "createdAt",
   task.updated_at AS "updatedAt"
 `;
 
 type GoatTaskRow = Omit<
   GoatTask,
-  "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
+  | "nextRunAt"
+  | "leaseExpiresAt"
+  | "archivedAt"
+  | "startedAt"
+  | "completedAt"
+  | "createdAt"
+  | "updatedAt"
 > & {
   nextRunAt: Date | string;
   leaseExpiresAt: Date | string | null;
   archivedAt: Date | string | null;
+  startedAt: Date | string | null;
+  completedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -1555,6 +1569,8 @@ function goatTaskFromRow(row: GoatTaskRow): GoatTask {
     nextRunAt: toDate(row.nextRunAt),
     leaseExpiresAt: row.leaseExpiresAt ? toDate(row.leaseExpiresAt) : null,
     archivedAt: row.archivedAt ? toDate(row.archivedAt) : null,
+    startedAt: row.startedAt ? toDate(row.startedAt) : null,
+    completedAt: row.completedAt ? toDate(row.completedAt) : null,
     createdAt: toDate(row.createdAt),
     updatedAt: toDate(row.updatedAt),
   };

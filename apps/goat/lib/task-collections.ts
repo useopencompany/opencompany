@@ -34,6 +34,8 @@ export type GoatTaskRow = {
   lease_owner: string | null;
   lease_expires_at: string | null;
   archived_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 };

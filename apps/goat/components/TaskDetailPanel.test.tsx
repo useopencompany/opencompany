@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildGoatHarnessRun } from "@/lib/task-harness-run";
@@ -25,6 +25,7 @@ vi.mock("@/components/useHydrated", () => ({
 }));
 
 beforeEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   mocks.cancelGoatTaskAction.mockResolvedValue({ ok: true, error: null });
 });
@@ -156,6 +157,82 @@ describe("TaskDetailPanel harness config", () => {
   });
 });
 
+describe("TaskDetailPanel duration", () => {
+  it.each([
+    ["succeeded", "completed"],
+    ["failed", "failed"],
+    ["canceled", "canceled"],
+  ] as const)("renders a static final duration for %s tasks", (status, stage) => {
+    const run = buildGoatHarnessRun({
+      task: task({
+        status,
+        stage,
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+        completedAt: new Date("2026-01-01T00:02:34.000Z"),
+      }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.getByText("Duration")).toBeInTheDocument();
+    expect(screen.getByText("2m 34s")).toBeInTheDocument();
+  });
+
+  it("ticks the elapsed duration every second for running tasks", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:02.000Z"));
+    const run = buildGoatHarnessRun({
+      task: task({
+        status: "running",
+        stage: "running",
+        result: null,
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+      }),
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.getByText("2s")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(screen.getByText("3s")).toBeInTheDocument();
+  });
+
+  it("handles tasks that have not started or are missing timestamps", () => {
+    const queuedRun = buildGoatHarnessRun({
+      task: task({ status: "queued", stage: "queued", result: null }),
+      messages: [],
+      events: [],
+    });
+    const failedRun = buildGoatHarnessRun({
+      task: task({
+        status: "failed",
+        stage: "failed",
+        result: null,
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+        completedAt: null,
+      }),
+      messages: [],
+      events: [],
+    });
+
+    const { rerender } = render(<TaskDetailPanel initialRun={queuedRun} />);
+
+    expect(screen.getAllByText("Not started").length).toBeGreaterThan(0);
+
+    rerender(<TaskDetailPanel initialRun={failedRun} />);
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+  });
+});
+
 describe("TaskDetailPanel stop action", () => {
   it("renders a stop button for active tasks and calls the cancel action", async () => {
     const user = userEvent.setup();
@@ -240,6 +317,8 @@ function task(overrides: Record<string, unknown> = {}) {
     stage: "completed" as const,
     result: "Done.",
     error: null,
+    startedAt: null,
+    completedAt: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     ...overrides,
