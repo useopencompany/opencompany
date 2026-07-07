@@ -99,10 +99,12 @@ the task link and final result or error so the next user reply has the completed
 This is only a persisted notification; Goat does not automatically spend another foreground chat
 model turn when the task finishes.
 
-The chat agent's system prompt is `OPENCOMPANY_CHAT_SYSTEM_PROMPT`, assembled from structured
-blocks in `apps/goat/lib/prompts/main-chat.ts`. Its tools are `start_task`, `goat_brain`, and
-optional `web_search`; tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`. The
-prompt tells the model to answer directly for small or ambiguous work, use `goat_brain` for durable
+The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
+structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
+the current date, recurring schedules, and a compact DB-backed `user_context` profile with the
+user's name, email, and timezone. Its tools are `start_task`, `goat_brain`, and optional
+`web_search`; tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`. The prompt
+tells the model to answer directly for small or ambiguous work, use `goat_brain` for durable
 personal context, use `web_search` for one-shot public freshness checks when Exa is configured, and
 start a task for research, monitoring, comparison, connected-account work, or durable work that
 belongs in Results.
@@ -419,9 +421,9 @@ Goat does not currently expose that parent/child session model in its app surfac
 
 Common changes and where they belong:
 
-- Change when chat starts a task: `OPENCOMPANY_CHAT_SYSTEM_PROMPT` and
-  `createOpenCompanyChatToolContext` in `apps/goat/lib/chat-agent.ts`; prompt blocks live in
-  `apps/goat/lib/prompts/main-chat.ts`.
+- Change when chat starts a task: `createOpenCompanyChatSystemPrompt` in
+  `apps/goat/lib/prompts/main-chat.ts` and `createOpenCompanyChatToolContext` in
+  `apps/goat/lib/chat-agent.ts`.
 - Change lightweight chat web search: `web_search` in `apps/goat/lib/chat-agent.ts` and the Exa
   callback in `apps/goat/app/api/chat/route.ts`.
 - Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
