@@ -57,6 +57,7 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
           label={visibleModels.length === 1 ? "Model" : "Models"}
           value={formatRunModels(visibleModels)}
         />
+        <DetailRow label="Engine" value={formatRunEngine(task.engine)} icon="engine" />
         <DetailRow
           label="Status"
           value={`${GOAT_STATUS_COPY[task.status]} - ${GOAT_STAGE_COPY[task.stage]}`}
@@ -163,6 +164,10 @@ function formatRunModels(models: GoatRunModelSummary[]) {
   return models.map((model) => model.label || model.id).join(", ");
 }
 
+function formatRunEngine(engine: GoatHarnessRunViewModel["task"]["engine"]) {
+  return engine === "codex" ? "Codex" : "OpenCompany";
+}
+
 function StopTaskButton({ taskId }: { taskId: string }) {
   const [isPending, startTransition] = useTransition();
   const [stopRequested, setStopRequested] = useState(false);
@@ -203,16 +208,18 @@ function DetailRow({
   label: string;
   value: string;
   active?: boolean;
-  icon?: "status" | "cost" | "config" | "goal";
+  icon?: "status" | "cost" | "config" | "engine" | "goal";
 }) {
   const Icon =
     icon === "cost"
       ? CircleDollarSign
       : icon === "config"
         ? SlidersHorizontal
-        : icon === "goal"
-          ? Target
-          : CircleDotDashed;
+        : icon === "engine"
+          ? TerminalSquare
+          : icon === "goal"
+            ? Target
+            : CircleDotDashed;
   return (
     <div className="flex items-center gap-3 rounded-lg px-2 py-2">
       <Icon

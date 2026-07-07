@@ -2,6 +2,7 @@ import { getAgentModelDefinition } from "@opencompany/agent-runtime";
 import type {
   GoatTaskEvent,
   GoatTaskEventType,
+  GoatHarnessEngine,
   GoatTaskMessage,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
@@ -160,6 +161,7 @@ export type GoatHarnessRunViewModel = {
     name: string;
     prompt: string;
     model: string;
+    engine: GoatHarnessEngine;
     status: GoatTaskStatus;
     stage: GoatTaskStage;
     result: string;
@@ -709,6 +711,7 @@ function readTaskHarnessSpec(task: GoatTaskRunTaskInput): unknown {
 }
 
 function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["task"] {
+  const engine = readHarnessEngine(readTaskHarnessSpec(task));
   if ("displayId" in task) {
     return {
       id: task.id,
@@ -716,6 +719,7 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
       name: task.name,
       prompt: task.prompt,
       model: task.model,
+      engine,
       status: task.status,
       stage: task.stage,
       result: task.result ?? "",
@@ -730,6 +734,7 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
     name: task.name,
     prompt: task.prompt,
     model: task.model,
+    engine,
     status: task.status,
     stage: task.stage,
     result: task.result ?? "",
@@ -737,6 +742,11 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
     createdAt: task.created_at,
     updatedAt: task.updated_at,
   };
+}
+
+function readHarnessEngine(value: unknown): GoatHarnessEngine {
+  const spec = readRecord(value);
+  return spec?.engine === "codex" ? "codex" : "opencompany";
 }
 
 function normalizeMessage(message: GoatTaskRunMessageInput): GoatRunMessage {
