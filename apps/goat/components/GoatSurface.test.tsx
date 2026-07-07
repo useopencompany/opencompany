@@ -158,7 +158,10 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     expect(textarea).toHaveValue("@codex ");
-    expect(screen.getByTestId("selected-codex-mention")).toHaveTextContent("@codex");
+    const selectedMention = screen.getByTestId("selected-codex-mention");
+    expect(selectedMention).toHaveTextContent("@codex");
+    expect(selectedMention).not.toHaveClass("px-1");
+    expect(selectedMention).not.toHaveClass("font-medium");
 
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
