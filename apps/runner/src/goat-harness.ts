@@ -303,16 +303,19 @@ async function runGoatTaskCodex(input: {
   sink: GoatTaskRunSink;
   assistantMessageId: string;
 }): Promise<{ assistantContent: string; usage?: LanguageModelUsage }> {
-  let codexActivity = "";
-  let lastCodexActivityFlushAt = 0;
-  const flushCodexActivity = async (force = false) => {
-    if (!codexActivity) return;
+  let codexAssistantContent = "";
+  let lastCodexAssistantContentFlushAt = 0;
+  const agentTextByItemId = new Map<string, string>();
+  const flushCodexAssistantContent = async (force = false) => {
+    if (!codexAssistantContent) return;
     const now = Date.now();
-    if (!force && now - lastCodexActivityFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) return;
-    lastCodexActivityFlushAt = now;
+    if (!force && now - lastCodexAssistantContentFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) {
+      return;
+    }
+    lastCodexAssistantContentFlushAt = now;
     await input.sink.updateMessageContent({
       messageId: input.assistantMessageId,
-      content: codexActivity,
+      content: codexAssistantContent,
     });
   };
   const result = await runGoatCodexTask({
@@ -337,6 +340,13 @@ async function runGoatTaskCodex(input: {
     ...(input.harnessSpec.codex?.goalMode ? { goalMode: input.harnessSpec.codex.goalMode } : {}),
     onEngineSessionId: input.sink.updateCodexEngineSessionId,
     onRuntimeEvents: async (events) => {
+      for (const event of events) {
+        const agentText = codexAgentTextFromAppServerEvent(event, agentTextByItemId);
+        if (agentText != null) {
+          codexAssistantContent = agentText;
+          await flushCodexAssistantContent(false);
+        }
+      }
       for (const event of codexAppServerEventsToGoatEvents(events)) {
         await input.sink.appendEvent({
           type: event.type,
@@ -345,12 +355,8 @@ async function runGoatTaskCodex(input: {
         });
       }
     },
-    onOutput: async (delta) => {
-      codexActivity = `${codexActivity}${delta}`;
-      await flushCodexActivity(false);
-    },
   });
-  await flushCodexActivity(true);
+  await flushCodexAssistantContent(true);
 
   await input.sink.recordSandboxUsage({
     messageId: input.assistantMessageId,
@@ -1126,6 +1132,35 @@ function codexAppServerEventsToGoatEvents(events: readonly Record<string, unknow
       ];
     },
   );
+}
+
+function codexAgentTextFromAppServerEvent(
+  event: Record<string, unknown>,
+  agentTextByItemId: Map<string, string>,
+) {
+  const method = typeof event.method === "string" ? event.method : "";
+  const params = readRecord(event.params);
+  const itemId = readNonEmptyString(params?.itemId) ?? "__default_agent_message";
+
+  if (method === "item/agentMessage/delta") {
+    const delta = readRawString(params?.delta);
+    if (delta == null) return null;
+    const next = `${agentTextByItemId.get(itemId) ?? ""}${delta}`;
+    agentTextByItemId.set(itemId, next);
+    return next;
+  }
+
+  if (method !== "item/completed") return null;
+
+  const item = readRecord(params?.item);
+  if (item?.type !== "agentMessage") return null;
+
+  const completedText = readRawString(item.text) ?? readRawString(item.content);
+  if (completedText == null) return null;
+
+  const completedItemId = readNonEmptyString(item.id) ?? itemId;
+  agentTextByItemId.set(completedItemId, completedText);
+  return completedText;
 }
 
 function isCodexReasoningItem(item: Record<string, unknown>) {
