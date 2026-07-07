@@ -263,6 +263,7 @@ export function createDbGoatChatStore(): GoatChatStore {
           taskDisplayId: goatTasks.displayId,
           taskName: goatTasks.name,
           taskPrompt: goatTasks.prompt,
+          taskStatus: goatTasks.status,
         })
         .from(goatChatMessages)
         .leftJoin(goatTasks, eq(goatChatMessages.taskId, goatTasks.id))
@@ -396,6 +397,7 @@ function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
     taskDisplayId: null,
     taskName: null,
     taskPrompt: null,
+    taskStatus: null,
   };
 }
 

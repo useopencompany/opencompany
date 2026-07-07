@@ -521,6 +521,7 @@ function toStreamMessageMetadata(
     sessionId,
     ...(task
       ? {
+          taskId: task.id,
           task: {
             id: task.id,
             displayId: task.displayId,

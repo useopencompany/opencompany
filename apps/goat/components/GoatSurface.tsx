@@ -27,6 +27,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   type FormEvent,
+  type Dispatch,
+  type SetStateAction,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -124,6 +126,7 @@ export function GoatSurface({
   const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
   const [, startArchiveTransition] = useTransition();
   const transport = useMemo(
     () =>
@@ -167,6 +170,15 @@ export function GoatSurface({
   const isGenerating = status === "submitted" || status === "streaming";
   const hasMessages = messages.length > 0;
   const showThinkingBubble = isGenerating && shouldShowThinkingBubble(messages);
+  const chatTaskLookup = useMemo(
+    () =>
+      buildChatTaskLookup({
+        messages,
+        tasks,
+        liveTasks: liveChatTasks,
+      }),
+    [liveChatTasks, messages, tasks],
+  );
 
   useEffect(() => {
     if (isGenerating) return;
@@ -420,6 +432,7 @@ export function GoatSurface({
                 <Bubble
                   key={message.id}
                   message={message}
+                  taskLookup={chatTaskLookup}
                   stopped={locallyStoppedAssistantMessageIds.has(message.id)}
                 />
               ))}
@@ -432,6 +445,7 @@ export function GoatSurface({
       {mode === "chat" && chatSessionId ? (
         <LiveChatMessages sessionId={chatSessionId} setMessages={setMessages} />
       ) : null}
+      {mode === "chat" ? <LiveChatTasks setTasks={setLiveChatTasks} /> : null}
 
       <form
         ref={formRef}
@@ -515,6 +529,32 @@ function LiveChatMessageSubscriber({
       return [...current, ...missingMessages];
     });
   }, [liveMessages, setMessages]);
+
+  return null;
+}
+
+function LiveChatTasks({
+  setTasks,
+}: {
+  setTasks: Dispatch<SetStateAction<readonly GoatTaskView[] | null>>;
+}) {
+  const hydrated = useHydrated();
+  if (!hydrated) return null;
+  return <LiveChatTaskSubscriber setTasks={setTasks} />;
+}
+
+function LiveChatTaskSubscriber({
+  setTasks,
+}: {
+  setTasks: Dispatch<SetStateAction<readonly GoatTaskView[] | null>>;
+}) {
+  const collections = useMemo(() => createGoatCollections(), []);
+  const { data: rows } = useLiveQuery((q) => q.from({ task: collections.tasks }));
+  const liveTasks = useMemo(() => (rows ?? []).map(taskRowToView), [rows]);
+
+  useEffect(() => {
+    setTasks(liveTasks);
+  }, [liveTasks, setTasks]);
 
   return null;
 }
@@ -917,6 +957,7 @@ function chatMessageRowToUiMessage(row: GoatChatMessageRow): GoatChatUiMessage {
     taskDisplayId: null,
     taskName: null,
     taskPrompt: null,
+    taskStatus: null,
   });
 }
 
@@ -974,13 +1015,25 @@ function ResultRow({
   );
 }
 
-function Bubble({ message, stopped = false }: { message: GoatChatUiMessage; stopped?: boolean }) {
+function Bubble({
+  message,
+  taskLookup,
+  stopped = false,
+}: {
+  message: GoatChatUiMessage;
+  taskLookup: ChatTaskLookup;
+  stopped?: boolean;
+}) {
   const isUser = message.role === "user";
   const text = textFromGoatChatUiMessage(message);
   const error = message.metadata?.error;
 
   if (!isUser) {
-    const items = getOrderedAssistantItems(message, stopped || message.metadata?.aborted === true);
+    const items = getOrderedAssistantItems(
+      message,
+      taskLookup,
+      stopped || message.metadata?.aborted === true,
+    );
 
     return (
       <div className="flex flex-col gap-2">
@@ -1028,27 +1081,32 @@ function AssistantTextBubble({ text, error }: { text: string; error?: string | u
   );
 }
 
-function TaskCard({ task }: { task: GoatTaskCardMetadata }) {
+function TaskCard({ task }: { task: ChatTaskCardView }) {
+  const meta = getChatTaskCardMeta(task.status);
+  const Icon = meta.icon;
+  const linkId = task.displayId ?? task.id;
+  const displayLabel = task.displayId ?? "Task";
+  const title = task.title ?? "Task";
   return (
     <Link
-      href={`/tasks/${encodeURIComponent(task.displayId)}`}
+      href={`/tasks/${encodeURIComponent(linkId)}`}
       className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
-      <CircleDotDashed
+      <Icon
         size={16}
         strokeWidth={2}
-        className="shrink-0 animate-[spin_3s_linear_infinite] text-amber-500"
+        className={`${meta.className} shrink-0 ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[13.5px] font-medium leading-tight text-ink">
-          {task.title}
+          {title}
         </span>
         <span className="text-[12px] leading-tight text-ink-subtle">
-          {task.displayId} · Task running - added to Results
+          {displayLabel} · {meta.label}
         </span>
       </div>
       <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-ink-muted">
-        {task.displayId}
+        {displayLabel}
       </span>
     </Link>
   );
@@ -1192,7 +1250,7 @@ function ThinkingBubble() {
 function shouldShowThinkingBubble(messages: readonly GoatChatUiMessage[]) {
   const lastMessage = messages.at(-1);
   if (!lastMessage || lastMessage.role === "user") return true;
-  return getOrderedAssistantItems(lastMessage).length === 0;
+  return getOrderedAssistantItems(lastMessage, new Map<string, ChatTaskCardView>()).length === 0;
 }
 
 function SubmitButton({
@@ -1232,8 +1290,17 @@ function SubmitButton({
 
 type AssistantRenderItem =
   | { type: "text"; key: string; text: string }
-  | { type: "task"; key: string; task: GoatTaskCardMetadata }
+  | { type: "task"; key: string; task: ChatTaskCardView }
   | { type: "tool"; key: string; tool: ToolCallView };
+
+type ChatTaskCardView = {
+  id: string;
+  displayId: string | null;
+  title: string | null;
+  status: GoatTaskStatus | null;
+};
+
+type ChatTaskLookup = ReadonlyMap<string, ChatTaskCardView>;
 
 type ToolCallView = {
   name: string;
@@ -1246,7 +1313,11 @@ type ToolCallView = {
   errorText: string | null;
 };
 
-function getOrderedAssistantItems(message: GoatChatUiMessage, stopped = false) {
+function getOrderedAssistantItems(
+  message: GoatChatUiMessage,
+  taskLookup: ChatTaskLookup,
+  stopped = false,
+) {
   const items: AssistantRenderItem[] = [];
   let textBuffer = "";
 
@@ -1274,7 +1345,7 @@ function getOrderedAssistantItems(message: GoatChatUiMessage, stopped = false) {
       items.push({
         type: "task",
         key: `task-${index}`,
-        task: taskFromOutput(part.output),
+        task: resolveChatTaskCard(taskFromOutput(part.output), taskLookup),
       });
       continue;
     }
@@ -1287,15 +1358,22 @@ function getOrderedAssistantItems(message: GoatChatUiMessage, stopped = false) {
 
   flushText("text-end");
 
-  if (!items.some((item) => item.type === "task") && message.metadata?.task) {
+  const metadataTask = metadataTaskCard(message.metadata);
+  if (!items.some((item) => item.type === "task") && metadataTask) {
     items.push({
       type: "task",
       key: "task-metadata",
-      task: message.metadata.task,
+      task: resolveChatTaskCard(metadataTask, taskLookup),
     });
   }
 
   return items;
+}
+
+function metadataTaskCard(metadata: GoatChatUiMessage["metadata"]): GoatTaskCardMetadata | null {
+  if (metadata?.task) return metadata.task;
+  if (metadata?.taskId) return { id: metadata.taskId };
+  return null;
 }
 
 function toolCallViewFromPart(
@@ -1650,11 +1728,70 @@ function getToolCallMeta(tool: ToolCallView): {
   };
 }
 
+function buildChatTaskLookup(input: {
+  messages: readonly GoatChatUiMessage[];
+  tasks: readonly GoatTaskView[];
+  liveTasks: readonly GoatTaskView[] | null;
+}): ChatTaskLookup {
+  const lookup = new Map<string, ChatTaskCardView>();
+
+  for (const message of input.messages) {
+    const task = metadataTaskCard(message.metadata);
+    if (task) setChatTaskLookupValue(lookup, task);
+  }
+
+  for (const task of input.tasks) {
+    setChatTaskLookupValue(lookup, taskCardFromTask(task));
+  }
+
+  for (const task of input.liveTasks ?? []) {
+    setChatTaskLookupValue(lookup, taskCardFromTask(task));
+  }
+
+  return lookup;
+}
+
+function setChatTaskLookupValue(
+  lookup: Map<string, ChatTaskCardView>,
+  task: GoatTaskCardMetadata,
+) {
+  const existing = lookup.get(task.id);
+  lookup.set(task.id, {
+    id: task.id,
+    displayId: task.displayId ?? existing?.displayId ?? null,
+    title: task.title ?? existing?.title ?? null,
+    status: task.status ?? existing?.status ?? null,
+  });
+}
+
+function taskCardFromTask(task: GoatTaskView): ChatTaskCardView {
+  return {
+    id: task.id,
+    displayId: task.displayId,
+    title: task.name,
+    status: task.status,
+  };
+}
+
+function resolveChatTaskCard(
+  fallback: GoatTaskCardMetadata,
+  lookup: ChatTaskLookup,
+): ChatTaskCardView {
+  const resolved = lookup.get(fallback.id);
+  return {
+    id: fallback.id,
+    displayId: resolved?.displayId ?? fallback.displayId ?? null,
+    title: resolved?.title ?? fallback.title ?? null,
+    status: resolved?.status ?? fallback.status ?? null,
+  };
+}
+
 function taskFromOutput(output: StartTaskToolOutput): GoatTaskCardMetadata {
   return {
     id: output.taskId,
     displayId: output.taskDisplayId,
     title: output.taskName,
+    status: output.status === "queued" ? "queued" : null,
   };
 }
 
@@ -1716,6 +1853,60 @@ function getTaskMeta(task: GoatTaskView): {
     className: "text-amber-500",
     detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
     spin: true,
+  };
+}
+
+function getChatTaskCardMeta(status: GoatTaskStatus | null): {
+  icon: typeof FileText;
+  className: string;
+  label: string;
+  spin: boolean;
+} {
+  if (status === "failed") {
+    return {
+      icon: AlertCircle,
+      className: "text-danger",
+      label: GOAT_STATUS_COPY.failed,
+      spin: false,
+    };
+  }
+  if (status === "canceled") {
+    return {
+      icon: X,
+      className: "text-ink-subtle",
+      label: GOAT_STATUS_COPY.canceled,
+      spin: false,
+    };
+  }
+  if (status === "succeeded") {
+    return {
+      icon: CheckCircle2,
+      className: "text-emerald-600",
+      label: GOAT_STATUS_COPY.succeeded,
+      spin: false,
+    };
+  }
+  if (status === "running") {
+    return {
+      icon: CircleDotDashed,
+      className: "text-amber-500",
+      label: GOAT_STATUS_COPY.running,
+      spin: true,
+    };
+  }
+  if (status === "queued") {
+    return {
+      icon: Clock,
+      className: "text-ink-subtle",
+      label: GOAT_STATUS_COPY.queued,
+      spin: false,
+    };
+  }
+  return {
+    icon: Clock,
+    className: "text-ink-subtle",
+    label: "Status pending",
+    spin: false,
   };
 }
 
