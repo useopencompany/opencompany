@@ -170,6 +170,7 @@ export type GoatHarnessRunViewModel = {
     updatedAt: string;
   };
   messages: GoatRunMessage[];
+  turns: GoatRunTurn[];
   userMessage: GoatRunMessage | null;
   assistantMessages: GoatRunMessage[];
   toolCalls: GoatHarnessRunToolCall[];
@@ -263,6 +264,7 @@ export type GoatRunMessage = {
   content: string;
   toolName: GoatTaskToolName | null;
   toolCallId: string | null;
+  responseToMessageId: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -282,12 +284,55 @@ export type GoatHarnessRunToolCall = {
   label: string;
   kind: "search" | "browser" | "gmail" | "calendar" | "linear" | "tool";
   status: "running" | "completed" | "failed";
+  messageId: string | null;
+  toolMessageId: string | null;
   inputPreview: string;
   outputPreview: string;
   errorPreview: string;
   rawJson: string;
   createdAt: string;
 };
+
+export type GoatRunTurn = {
+  id: string;
+  userMessage: GoatRunMessage;
+  assistantMessage: GoatRunMessage | null;
+  parts: GoatRunTurnPart[];
+  error: string | null;
+};
+
+export type GoatRunTurnPart =
+  | {
+      type: "reasoning";
+      id: string;
+      text: string;
+      createdAt: string;
+    }
+  | {
+      type: "assistant_text";
+      id: string;
+      text: string;
+      tone: "work" | "final";
+      createdAt: string;
+    }
+  | {
+      type: "tool_call";
+      id: string;
+      toolCall: GoatHarnessRunToolCall;
+      createdAt: string;
+    }
+  | {
+      type: "artifact";
+      id: string;
+      artifact: GoatRunArtifact;
+      createdAt: string;
+    }
+  | {
+      type: "error";
+      id: string;
+      message: string;
+      createdAt: string;
+    };
 
 const PREVIEW_MAX_LENGTH = 900;
 
@@ -307,6 +352,13 @@ export function buildGoatHarnessRun(input: {
   const assistantMessages = messages.filter((message) => message.role === "assistant");
   const toolCalls = buildToolCalls(events);
   const artifacts = buildArtifacts(events);
+  const turns = buildTurns({
+    task,
+    messages,
+    events,
+    toolCalls,
+    artifacts,
+  });
   const models = buildModelSummary(task.model, input.modelUsage ?? []);
   const harnessConfig = buildHarnessConfig(readTaskHarnessSpec(input.task), task.model);
 
@@ -315,6 +367,7 @@ export function buildGoatHarnessRun(input: {
     legacyDetailText: "Detailed run events are available for new tasks only.",
     task,
     messages,
+    turns,
     userMessage,
     assistantMessages,
     toolCalls,
@@ -539,12 +592,16 @@ function buildToolCalls(events: readonly GoatRunEvent[]) {
     }
     const toolCallId = readString(event.payload.toolCallId) || `tool-${event.id}`;
     const toolName = readString(event.payload.toolName) || "tool";
+    const messageId = readString(event.payload.assistantMessageId) || event.messageId;
+    const toolMessageId = readString(event.payload.toolMessageId) || event.messageId;
     const current =
       byCallId.get(toolCallId) ??
       makeToolCall({
         id: toolCallId,
         name: toolName,
         status: "running",
+        messageId,
+        toolMessageId,
         input: event.payload.input,
         output: null,
         error: null,
@@ -558,6 +615,8 @@ function buildToolCalls(events: readonly GoatRunEvent[]) {
         makeToolCall({
           ...current,
           status: "completed",
+          messageId: current.messageId ?? messageId,
+          toolMessageId: current.toolMessageId ?? toolMessageId,
           input: event.payload.input ?? parsePreview(current.inputPreview),
           output: event.payload.output,
           error: null,
@@ -571,6 +630,8 @@ function buildToolCalls(events: readonly GoatRunEvent[]) {
         makeToolCall({
           ...current,
           status: "failed",
+          messageId: current.messageId ?? messageId,
+          toolMessageId: current.toolMessageId ?? toolMessageId,
           input: event.payload.input ?? parsePreview(current.inputPreview),
           output: null,
           error: event.payload.error,
@@ -584,6 +645,244 @@ function buildToolCalls(events: readonly GoatRunEvent[]) {
   }
 
   return Array.from(byCallId.values()).toSorted(compareCreatedAt);
+}
+
+function buildTurns(input: {
+  task: GoatHarnessRunViewModel["task"];
+  messages: readonly GoatRunMessage[];
+  events: readonly GoatRunEvent[];
+  toolCalls: readonly GoatHarnessRunToolCall[];
+  artifacts: readonly GoatRunArtifact[];
+}): GoatRunTurn[] {
+  const userMessages = input.messages.filter((message) => message.role === "user");
+  const seedUserMessages =
+    userMessages.length > 0
+      ? userMessages
+      : input.task.prompt.trim()
+        ? [
+            {
+              id: `${input.task.id}:prompt`,
+              role: "user" as const,
+              status: "completed" as const,
+              content: input.task.prompt,
+              toolName: null,
+              toolCallId: null,
+              responseToMessageId: null,
+              createdAt: input.task.createdAt,
+              updatedAt: input.task.createdAt,
+              completedAt: input.task.createdAt,
+            },
+          ]
+        : [];
+
+  const turns: GoatRunTurn[] = seedUserMessages.map((message, index) => ({
+    id: message.id,
+    userMessage: message,
+    assistantMessage: findAssistantForUserMessage(input.messages, message, index, seedUserMessages),
+    parts: [],
+    error: null,
+  }));
+
+  if (turns.length === 0) return [];
+
+  const turnByAssistantId = new Map<string, GoatRunTurn>();
+  for (const turn of turns) {
+    if (turn.assistantMessage) turnByAssistantId.set(turn.assistantMessage.id, turn);
+  }
+
+  for (const event of input.events) {
+    if (event.type !== "reasoning.completed" && event.type !== "message.completed") continue;
+    const turn = turnForEvent(event, turns, turnByAssistantId, input.messages);
+    if (!turn) continue;
+
+    if (event.type === "reasoning.completed") {
+      const text =
+        readString(event.payload.text) ||
+        readString(event.payload.summary) ||
+        readString(event.payload.content);
+      turn.parts.push({
+        type: "reasoning",
+        id: `reasoning-${event.id}`,
+        text,
+        createdAt: event.createdAt,
+      });
+      continue;
+    }
+
+    const content = readString(event.payload.content).trim();
+    if (content && content !== turn.assistantMessage?.content.trim()) {
+      turn.parts.push({
+        type: "assistant_text",
+        id: `assistant-text-${event.id}`,
+        text: content,
+        tone: "work",
+        createdAt: event.createdAt,
+      });
+    }
+  }
+
+  for (const toolCall of input.toolCalls) {
+    const turn = turnForToolCall(toolCall, turns, turnByAssistantId, input.messages);
+    if (!turn) continue;
+    turn.parts.push({
+      type: "tool_call",
+      id: `tool-${toolCall.id}`,
+      toolCall,
+      createdAt: toolCall.createdAt,
+    });
+  }
+
+  for (const turn of turns) {
+    const assistant = turn.assistantMessage;
+    const content = assistant?.content.trim();
+    if (assistant && content) {
+      turn.parts.push({
+        type: "assistant_text",
+        id: `assistant-final-${assistant.id}`,
+        text: content,
+        tone: "final",
+        createdAt: assistant.completedAt ?? assistant.updatedAt,
+      });
+    }
+  }
+
+  for (const artifact of input.artifacts) {
+    const artifactMessageId = artifactMessageIdFor(input.events, artifact);
+    const turn =
+      (artifactMessageId ? turnByAssistantId.get(artifactMessageId) : null) ??
+      turnForCreatedAt(artifact.createdAt, turns) ??
+      turns.at(-1);
+    if (!turn) continue;
+    turn.parts.push({
+      type: "artifact",
+      id: `artifact-${artifact.documentId}`,
+      artifact,
+      createdAt: artifact.createdAt,
+    });
+  }
+
+  if (input.task.error) {
+    const turn = turns.at(-1);
+    if (turn) {
+      turn.error = input.task.error;
+      turn.parts.push({
+        type: "error",
+        id: `task-error-${input.task.id}`,
+        message: input.task.error,
+        createdAt: input.task.updatedAt,
+      });
+    }
+  }
+
+  return turns.map((turn) => ({
+    ...turn,
+    parts: turn.parts.toSorted(compareTurnPartOrder),
+  }));
+}
+
+function findAssistantForUserMessage(
+  messages: readonly GoatRunMessage[],
+  userMessage: GoatRunMessage,
+  userIndex: number,
+  userMessages: readonly GoatRunMessage[],
+) {
+  const direct = messages.find(
+    (message) => message.role === "assistant" && message.responseToMessageId === userMessage.id,
+  );
+  if (direct) return direct;
+
+  const nextUser = userMessages[userIndex + 1];
+  const userCreatedAt = timestampMs(userMessage.createdAt);
+  const nextUserCreatedAt = nextUser ? timestampMs(nextUser.createdAt) : Number.POSITIVE_INFINITY;
+  return (
+    messages.find((message) => {
+      if (message.role !== "assistant" || message.responseToMessageId) return false;
+      const createdAt = timestampMs(message.createdAt);
+      return createdAt >= userCreatedAt && createdAt < nextUserCreatedAt;
+    }) ?? null
+  );
+}
+
+function turnForEvent(
+  event: GoatRunEvent,
+  turns: readonly GoatRunTurn[],
+  turnByAssistantId: ReadonlyMap<string, GoatRunTurn>,
+  messages: readonly GoatRunMessage[],
+) {
+  if (event.messageId) {
+    const direct = turnByAssistantId.get(event.messageId);
+    if (direct) return direct;
+    const message = messages.find((candidate) => candidate.id === event.messageId);
+    if (message?.responseToMessageId) {
+      const responseTurn = turns.find((turn) => turn.userMessage.id === message.responseToMessageId);
+      if (responseTurn) return responseTurn;
+    }
+  }
+  return turnForCreatedAt(event.createdAt, turns) ?? turns.at(-1) ?? null;
+}
+
+function turnForToolCall(
+  toolCall: GoatHarnessRunToolCall,
+  turns: readonly GoatRunTurn[],
+  turnByAssistantId: ReadonlyMap<string, GoatRunTurn>,
+  messages: readonly GoatRunMessage[],
+) {
+  if (toolCall.messageId) {
+    const direct = turnByAssistantId.get(toolCall.messageId);
+    if (direct) return direct;
+    const message = messages.find((candidate) => candidate.id === toolCall.messageId);
+    if (message?.responseToMessageId) {
+      const responseTurn = turns.find((turn) => turn.userMessage.id === message.responseToMessageId);
+      if (responseTurn) return responseTurn;
+    }
+  }
+  return turnForCreatedAt(toolCall.createdAt, turns) ?? turns.at(-1) ?? null;
+}
+
+function turnForCreatedAt(createdAt: string, turns: readonly GoatRunTurn[]) {
+  const createdAtMs = timestampMs(createdAt);
+  return (
+    turns.find((turn, index) => {
+      const turnStart = timestampMs(turn.userMessage.createdAt);
+      const nextTurn = turns[index + 1];
+      const turnEnd = nextTurn
+        ? timestampMs(nextTurn.userMessage.createdAt)
+        : Number.POSITIVE_INFINITY;
+      return createdAtMs >= turnStart && createdAtMs < turnEnd;
+    }) ?? null
+  );
+}
+
+function compareTurnPartOrder(a: GoatRunTurnPart, b: GoatRunTurnPart) {
+  const rankDelta = turnPartRank(a) - turnPartRank(b);
+  if (turnPartRank(a) >= 3 || turnPartRank(b) >= 3) return rankDelta;
+  const delta = timestampMs(a.createdAt) - timestampMs(b.createdAt);
+  if (delta !== 0) return delta;
+  return rankDelta;
+}
+
+function turnPartRank(part: GoatRunTurnPart) {
+  if (part.type === "reasoning") return 0;
+  if (part.type === "tool_call") return 1;
+  if (part.type === "assistant_text" && part.tone === "work") return 2;
+  if (part.type === "assistant_text") return 3;
+  if (part.type === "artifact") return 4;
+  return 5;
+}
+
+function timestampMs(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function artifactMessageIdFor(events: readonly GoatRunEvent[], artifact: GoatRunArtifact) {
+  return (
+    events.find((event) => {
+      if (event.type !== "artifact.created") return false;
+      const record = readRecord(event.payload.artifact);
+      return readString(record?.documentId) === artifact.documentId;
+    })?.messageId ?? null
+  );
 }
 
 function buildArtifacts(events: readonly GoatRunEvent[]): GoatRunArtifact[] {
@@ -630,6 +929,8 @@ function makeToolCall(input: {
   id: string;
   name: string;
   status: GoatHarnessRunToolCall["status"];
+  messageId: string | null;
+  toolMessageId: string | null;
   input: unknown;
   output: unknown;
   error: unknown;
@@ -643,6 +944,8 @@ function makeToolCall(input: {
     label: description.label,
     kind: description.kind,
     status: input.status,
+    messageId: input.messageId,
+    toolMessageId: input.toolMessageId,
     inputPreview: previewValue(input.input),
     outputPreview: previewValue(input.output),
     errorPreview: previewValue(input.error),
@@ -761,6 +1064,7 @@ function normalizeMessage(message: GoatTaskRunMessageInput): GoatRunMessage {
       content: message.content,
       toolName: message.toolName,
       toolCallId: message.toolCallId,
+      responseToMessageId: message.responseToMessageId,
       createdAt: serializeDate(message.createdAt),
       updatedAt: serializeDate(message.updatedAt),
       completedAt: message.completedAt ? serializeDate(message.completedAt) : null,
@@ -773,6 +1077,7 @@ function normalizeMessage(message: GoatTaskRunMessageInput): GoatRunMessage {
     content: message.content,
     toolName: message.tool_name,
     toolCallId: message.tool_call_id,
+    responseToMessageId: message.response_to_message_id,
     createdAt: message.created_at,
     updatedAt: message.updated_at,
     completedAt: message.completed_at,

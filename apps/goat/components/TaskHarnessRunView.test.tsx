@@ -26,6 +26,20 @@ describe("TaskHarnessRunView", () => {
     );
   });
 
+  it("renders Codex reasoning as a collapsed Thinking row", async () => {
+    const user = userEvent.setup();
+    render(<TaskHarnessRunView run={runWithReasoning()} />);
+
+    const toggle = screen.getByRole("button", { name: "Thinking" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Checked repository state.")).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Checked repository state.")).toBeInTheDocument();
+  });
+
   it("keeps tool input and output details collapsed until expanded", async () => {
     const user = userEvent.setup();
     render(<TaskHarnessRunView run={runWithEvents()} />);
@@ -147,6 +161,26 @@ function runWithArtifact() {
   });
 }
 
+function runWithReasoning() {
+  return buildGoatHarnessRun({
+    task: task({ status: "succeeded", stage: "completed", result: "Done." }),
+    messages: [
+      message({ id: "user_msg", role: "user", content: "Fix tests" }),
+      message({ id: "assistant_msg", role: "assistant", content: "Done." }),
+    ],
+    events: [
+      event(
+        1,
+        "reasoning.completed",
+        {
+          text: "Checked repository state.",
+        },
+        "assistant_msg",
+      ),
+    ],
+  });
+}
+
 function task(overrides: Record<string, unknown> = {}) {
   return {
     id: "goat_task_1",
@@ -184,14 +218,15 @@ function message(overrides: { id: string; role: "user" | "assistant" | "tool"; c
 
 function event(
   id: number,
-  type: "tool.started" | "tool.completed" | "artifact.created",
+  type: "tool.started" | "tool.completed" | "artifact.created" | "reasoning.completed",
   payload: Record<string, unknown>,
+  messageId: string | null = null,
 ) {
   return {
     id,
     taskId: "goat_task_1",
     userWorkosId: "user_1",
-    messageId: null,
+    messageId,
     type,
     payload,
     createdAt: new Date(`2026-01-01T00:00:${String(id).padStart(2, "0")}.000Z`),

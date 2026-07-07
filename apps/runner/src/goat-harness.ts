@@ -494,8 +494,12 @@ async function runGoatTaskModelStreamInner(input: {
         toolMessagesByCallId.set(event.toolCallId, message.id);
         await input.sink.appendEvent({
           type: "tool.started",
-          messageId: message.id,
-          payload: toolEventPayload(event),
+          messageId: input.assistantMessageId,
+          payload: {
+            ...toolEventPayload(event),
+            assistantMessageId: input.assistantMessageId,
+            toolMessageId: message.id,
+          },
         });
         return { messageId: message.id };
       },
@@ -514,9 +518,11 @@ async function runGoatTaskModelStreamInner(input: {
         }
         await input.sink.appendEvent({
           type: "tool.completed",
-          messageId: messageId ?? null,
+          messageId: input.assistantMessageId,
           payload: {
             ...toolEventPayload(event),
+            assistantMessageId: input.assistantMessageId,
+            toolMessageId: messageId ?? null,
             output: event.output,
           },
         });
@@ -528,9 +534,11 @@ async function runGoatTaskModelStreamInner(input: {
         }
         await input.sink.appendEvent({
           type: "tool.failed",
-          messageId: messageId ?? null,
+          messageId: input.assistantMessageId,
           payload: {
             ...toolEventPayload(event),
+            assistantMessageId: input.assistantMessageId,
+            toolMessageId: messageId ?? null,
             error: event.error,
           },
         });

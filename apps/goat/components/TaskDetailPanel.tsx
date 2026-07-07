@@ -3,7 +3,6 @@
 import { toast } from "@opencompany/ui/components/sonner";
 import {
   ArrowUp,
-  Bot,
   CircleDollarSign,
   CircleDotDashed,
   LoaderCircle,
@@ -104,8 +103,13 @@ function TaskContinuationComposer({ run }: { run: GoatHarnessRunViewModel }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const task = run.task;
   const isTerminal = task.status === "succeeded" || task.status === "failed";
+  const isActive = task.status === "queued" || task.status === "running";
   const canContinue = isTerminal && !isPending && !optimisticMessage;
-  const showComposer = isTerminal || Boolean(optimisticMessage) || Boolean(formError);
+  const placeholder = canContinue
+    ? "Message this task"
+    : isActive
+      ? "Task is running"
+      : "Task is not accepting messages";
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -128,8 +132,6 @@ function TaskContinuationComposer({ run }: { run: GoatHarnessRunViewModel }) {
       setOptimisticMessage(null);
     }
   }, [optimisticMessage, run.messages]);
-
-  if (!showComposer) return null;
 
   const submit = () => {
     const content = input.trim();
@@ -157,11 +159,11 @@ function TaskContinuationComposer({ run }: { run: GoatHarnessRunViewModel }) {
   };
 
   return (
-    <section className="sticky bottom-0 -mx-6 border-border border-t bg-canvas/95 px-6 py-4 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3">
+    <section className="sticky bottom-0 -mx-6 bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8">
+      <div className="mx-auto flex w-full max-w-[720px] flex-col gap-2">
         {optimisticMessage ? (
-          <div className="flex justify-start">
-            <div className="max-w-full break-words rounded-2xl rounded-tl-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink opacity-75 md:max-w-[68%]">
+          <div className="flex justify-end">
+            <div className="max-w-full break-words rounded-2xl rounded-br-md bg-ink px-3 py-2 text-[13px] leading-5 text-canvas opacity-75 md:max-w-[62%]">
               {optimisticMessage}
             </div>
           </div>
@@ -171,50 +173,48 @@ function TaskContinuationComposer({ run }: { run: GoatHarnessRunViewModel }) {
             event.preventDefault();
             submit();
           }}
-          className="rounded-lg border border-border bg-surface px-3 py-2 shadow-sm"
+          className="flex items-end gap-2.5 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
         >
-          <div className="flex min-w-0 items-end gap-2">
-            <div className="flex min-h-9 min-w-0 flex-1 flex-col">
-              <label
-                htmlFor="task-continuation-input"
-                className="mb-1 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-ink-muted"
-              >
-                <Bot size={13} strokeWidth={1.8} />
-                Continue task
-              </label>
-              <textarea
-                ref={textareaRef}
-                id="task-continuation-input"
-                value={input}
-                disabled={!canContinue}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    submit();
-                  }
-                }}
-                rows={1}
-                placeholder={canContinue ? "Steer this task worker" : "Task worker is running"}
-                className="min-h-8 w-full resize-none bg-transparent text-[14px] leading-6 text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:text-ink-muted"
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!input.trim() || !canContinue}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors hover:bg-ink/85 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Continue task"
-            >
-              {isPending ? (
-                <LoaderCircle size={14} strokeWidth={2} className="animate-spin" />
-              ) : (
-                <ArrowUp size={13} strokeWidth={2} />
-              )}
-            </button>
+          <div className="relative min-w-0 flex-1 self-center">
+            <textarea
+              ref={textareaRef}
+              id="task-continuation-input"
+              value={input}
+              disabled={!canContinue}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+              rows={1}
+              placeholder={placeholder}
+              className="block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:text-ink-muted"
+              style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+            />
           </div>
-          {formError ? <p className="mt-2 text-[12px] leading-5 text-danger">{formError}</p> : null}
+          <button
+            type="submit"
+            disabled={!input.trim() || !canContinue}
+            className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="Send message"
+          >
+            {isPending ? (
+              <LoaderCircle size={14} strokeWidth={2} className="animate-spin" />
+            ) : (
+              <ArrowUp size={15} strokeWidth={2.2} />
+            )}
+          </button>
         </form>
+        {formError ? (
+          <p
+            className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+            role="alert"
+          >
+            {formError}
+          </p>
+        ) : null}
       </div>
     </section>
   );

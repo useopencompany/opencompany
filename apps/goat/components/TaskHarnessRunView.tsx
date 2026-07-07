@@ -22,13 +22,11 @@ import type {
   GoatHarnessRunViewModel,
   GoatRunArtifact,
   GoatRunMessage,
+  GoatRunTurn,
+  GoatRunTurnPart,
 } from "@/lib/task-harness-run";
 
 export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
-  const transcriptMessages = run.messages.filter(
-    (message) =>
-      message.role !== "tool" && (message.content.trim() || message.status === "running"),
-  );
   const finalResult = run.task.result || lastCompletedAssistantContent(run.assistantMessages);
 
   if (!run.hasDurableRun) {
@@ -49,59 +47,93 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
   }
 
   return (
-    <div className="flex w-full max-w-[720px] flex-col gap-5">
-      {transcriptMessages.length > 0 ? (
-        <div className="flex flex-col gap-5">
-          {transcriptMessages.map((message) =>
-            message.role === "assistant" ? (
-              <AssistantMessage key={message.id} message={message} />
-            ) : (
-              <TranscriptMessage key={message.id} role="user" content={message.content} />
-            ),
-          )}
-        </div>
+    <div className="flex w-full max-w-[720px] flex-col gap-7">
+      {run.turns.length > 0 ? (
+        run.turns.map((turn) => <TaskTurn key={turn.id} turn={turn} />)
       ) : (
         <TranscriptMessage role="user" content={run.userMessage?.content || run.task.prompt} />
       )}
 
-      {run.toolCalls.length > 0 ? (
-        <div className="space-y-1.5 md:max-w-[72%]">
-          {run.toolCalls.map((toolCall) => (
-            <ToolCallRow key={toolCall.id} toolCall={toolCall} />
-          ))}
-        </div>
-      ) : null}
-
-      {transcriptMessages.every((message) => message.role !== "assistant") &&
+      {run.turns.every((turn) => !turn.assistantMessage) &&
       (run.task.status === "queued" || run.task.status === "running") ? (
         <div className="max-w-full text-[13px] leading-6 text-ink-muted md:max-w-[68%]">
           The runner is preparing the task transcript.
         </div>
       ) : null}
+    </div>
+  );
+}
 
-      {run.task.error ? (
-        <div className="max-w-full rounded-lg border border-danger-border bg-danger-bg px-3 py-2.5 text-[13px] leading-5 text-danger md:max-w-[68%]">
-          {run.task.error}
+function TaskTurn({ turn }: { turn: GoatRunTurn }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <TranscriptMessage role="user" content={turn.userMessage.content} />
+      {turn.parts.length > 0 ? (
+        <div className="flex justify-start">
+          <div className="flex max-w-full flex-col gap-3 break-words text-[14px] leading-6 text-ink/90 md:max-w-[72%]">
+            {turn.parts.map((part) => (
+              <TurnPart key={part.id} part={part} />
+            ))}
+          </div>
+        </div>
+      ) : turn.assistantMessage?.status === "running" ? (
+        <div className="flex justify-start">
+          <div className="flex items-center gap-1.5 text-[13px] leading-6 text-ink-muted">
+            <LoaderCircle size={12} strokeWidth={2} className="animate-spin text-warning" />
+            Assistant is working
+          </div>
         </div>
       ) : null}
+    </div>
+  );
+}
 
-      {run.resultArtifact ? (
-        <section className="mt-2 flex flex-col gap-2 border-border border-t pt-5">
-          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-            Result
-          </h2>
-          <ArtifactCard artifact={run.resultArtifact} />
-        </section>
-      ) : finalResult ? (
-        <section className="mt-2 flex flex-col gap-2 border-border border-t pt-5">
-          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-            Result
-          </h2>
-          <Markdown
-            content={finalResult}
-            className="rounded-lg bg-surface-muted px-3 py-2.5 text-[13px] leading-5 text-ink"
-          />
-        </section>
+function TurnPart({ part }: { part: GoatRunTurnPart }) {
+  if (part.type === "reasoning") return <ReasoningRow text={part.text} />;
+  if (part.type === "tool_call") return <ToolCallRow toolCall={part.toolCall} />;
+  if (part.type === "artifact") return <ArtifactCard artifact={part.artifact} />;
+  if (part.type === "error") {
+    return (
+      <div className="max-w-full rounded-lg border border-danger-border bg-danger-bg px-3 py-2.5 text-[13px] leading-5 text-danger">
+        {part.message}
+      </div>
+    );
+  }
+
+  return (
+    <div className={part.tone === "work" ? "text-[13px] leading-6 text-ink-muted" : ""}>
+      <Markdown content={part.text} />
+    </div>
+  );
+}
+
+function ReasoningRow({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasText = text.trim().length > 0;
+
+  return (
+    <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+        className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
+      >
+        <ChevronRight
+          size={11}
+          strokeWidth={1.9}
+          className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+        <span className="font-medium text-ink/65">Thinking</span>
+      </button>
+      {expanded ? (
+        <div className="ml-4 mt-1 border-l border-border pl-3">
+          {hasText ? (
+            <Markdown content={text} className="text-[12px] leading-5 text-ink-muted" />
+          ) : (
+            <div className="py-1 text-[11px] text-ink-subtle">No reasoning summary available</div>
+          )}
+        </div>
       ) : null}
     </div>
   );
@@ -134,19 +166,6 @@ function ArtifactCard({ artifact }: { artifact: GoatRunArtifact }) {
   );
 }
 
-function AssistantMessage({ message }: { message: GoatRunMessage }) {
-  if (!message.content.trim() && message.status === "running") {
-    return (
-      <div className="flex items-center gap-1.5 text-[13px] leading-6 text-ink-muted">
-        <LoaderCircle size={12} strokeWidth={2} className="animate-spin text-warning" />
-        Assistant is working
-      </div>
-    );
-  }
-
-  return <TranscriptMessage role="assistant" content={message.content} />;
-}
-
 function TranscriptMessage({ role, content }: { role: "user" | "assistant"; content: string }) {
   if (role === "assistant") {
     return (
@@ -157,8 +176,8 @@ function TranscriptMessage({ role, content }: { role: "user" | "assistant"; cont
   }
 
   return (
-    <div className="flex justify-start">
-      <div className="max-w-full break-words rounded-2xl rounded-tl-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink md:max-w-[68%]">
+    <div className="flex justify-end">
+      <div className="max-w-full break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink md:max-w-[62%]">
         {content}
       </div>
     </div>

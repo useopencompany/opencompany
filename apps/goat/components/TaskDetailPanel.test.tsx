@@ -257,15 +257,14 @@ describe("TaskDetailPanel continuation composer", () => {
 
     render(<TaskDetailPanel initialRun={run} />);
 
-    expect(screen.getByPlaceholderText("Steer this task worker")).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Continue task" })).toBeDisabled();
+    expect(screen.getByPlaceholderText("Message this task")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   });
 
   it.each([
     ["running", "running"],
     ["queued", "queued"],
-    ["canceled", "canceled"],
-  ] as const)("does not render the continuation composer for %s tasks", (status, stage) => {
+  ] as const)("renders a disabled composer for %s tasks", (status, stage) => {
     const run = buildGoatHarnessRun({
       task: task({ status, stage }),
       messages: [],
@@ -274,8 +273,8 @@ describe("TaskDetailPanel continuation composer", () => {
 
     render(<TaskDetailPanel initialRun={run} />);
 
-    expect(screen.queryByPlaceholderText("Steer this task worker")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Continue task" })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Task is running")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   });
 
   it("submits continuation input and disables the composer while queued locally", async () => {
@@ -288,13 +287,13 @@ describe("TaskDetailPanel continuation composer", () => {
 
     render(<TaskDetailPanel initialRun={run} />);
 
-    await user.type(screen.getByPlaceholderText("Steer this task worker"), "Make it shorter");
-    await user.click(screen.getByRole("button", { name: "Continue task" }));
+    await user.type(screen.getByPlaceholderText("Message this task"), "Make it shorter");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => {
       expect(mocks.continueGoatTaskAction).toHaveBeenCalledWith("TASK-1", "Make it shorter");
     });
-    expect(screen.getByPlaceholderText("Task worker is running")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Task is not accepting messages")).toBeDisabled();
   });
 
   it("restores input and shows the service error when continuation fails", async () => {
@@ -311,14 +310,14 @@ describe("TaskDetailPanel continuation composer", () => {
 
     render(<TaskDetailPanel initialRun={run} />);
 
-    await user.type(screen.getByPlaceholderText("Steer this task worker"), "Try again");
-    await user.click(screen.getByRole("button", { name: "Continue task" }));
+    await user.type(screen.getByPlaceholderText("Message this task"), "Try again");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => {
       expect(
         screen.getByText("Only completed or failed tasks can be continued."),
       ).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("Steer this task worker")).toHaveValue("Try again");
+      expect(screen.getByPlaceholderText("Message this task")).toHaveValue("Try again");
     });
   });
 });

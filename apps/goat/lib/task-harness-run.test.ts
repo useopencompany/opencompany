@@ -45,6 +45,165 @@ describe("buildGoatHarnessRun", () => {
       inputPreview: expect.stringContaining("Marseille history"),
       outputPreview: expect.stringContaining("Marseille"),
     });
+    expect(run.turns).toHaveLength(1);
+    expect(run.turns[0]?.userMessage.content).toBe("Research Marseille");
+    expect(run.turns[0]?.parts.map((part) => part.type)).toEqual([
+      "tool_call",
+      "assistant_text",
+    ]);
+  });
+
+  it("groups multiple follow-up user turns with their assistant responses", () => {
+    const run = buildGoatHarnessRun({
+      task: task({ status: "succeeded", stage: "completed", result: "Shorter." }),
+      messages: [
+        message({
+          id: "user_msg_1",
+          role: "user",
+          content: "Research Marseille",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+        message({
+          id: "assistant_msg_1",
+          role: "assistant",
+          content: "Long answer.",
+          responseToMessageId: "user_msg_1",
+          createdAt: "2026-01-01T00:00:10.000Z",
+          completedAt: "2026-01-01T00:00:20.000Z",
+        }),
+        message({
+          id: "user_msg_2",
+          role: "user",
+          content: "Make it shorter",
+          createdAt: "2026-01-01T00:01:00.000Z",
+        }),
+        message({
+          id: "assistant_msg_2",
+          role: "assistant",
+          content: "Shorter.",
+          responseToMessageId: "user_msg_2",
+          createdAt: "2026-01-01T00:01:10.000Z",
+          completedAt: "2026-01-01T00:01:20.000Z",
+        }),
+      ],
+      events: [],
+    });
+
+    expect(run.turns.map((turn) => turn.userMessage.content)).toEqual([
+      "Research Marseille",
+      "Make it shorter",
+    ]);
+    expect(
+      run.turns.map((turn) =>
+        turn.parts.find((part) => part.type === "assistant_text" && part.tone === "final"),
+      ),
+    ).toEqual([
+      expect.objectContaining({ text: "Long answer." }),
+      expect.objectContaining({ text: "Shorter." }),
+    ]);
+  });
+
+  it("attaches anchored reasoning tools and artifacts to the matching turn", () => {
+    const run = buildGoatHarnessRun({
+      task: task({
+        status: "succeeded",
+        stage: "completed",
+        result: "Research report saved to Brain: [Market report](/brain/research/market-report).",
+      }),
+      messages: [
+        message({ id: "user_msg", role: "user", content: "Research the market" }),
+        message({
+          id: "assistant_msg",
+          role: "assistant",
+          content:
+            "Research report saved to Brain: [Market report](/brain/research/market-report).",
+          responseToMessageId: "user_msg",
+        }),
+      ],
+      events: [
+        event(
+          1,
+          "reasoning.completed",
+          {
+            text: "Checked the source list.",
+          },
+          "assistant_msg",
+        ),
+        event(
+          2,
+          "tool.completed",
+          {
+            toolCallId: "call_search",
+            toolName: "exa_search",
+            input: { query: "market" },
+            output: { results: [{ title: "Market" }] },
+          },
+          "assistant_msg",
+        ),
+        event(
+          3,
+          "artifact.created",
+          {
+            artifact: {
+              type: "brain_markdown_report",
+              title: "Market report",
+              documentId: "goat_brain_doc_1",
+              brainId: "market-report",
+              folderPath: "research",
+              brainPath: "research/market-report.md",
+              url: "/brain/research/market-report",
+              mimeType: "text/markdown",
+            },
+          },
+          "assistant_msg",
+        ),
+      ],
+    });
+
+    expect(run.turns[0]?.parts.map((part) => part.type)).toEqual([
+      "reasoning",
+      "tool_call",
+      "assistant_text",
+      "artifact",
+    ]);
+  });
+
+  it("infers legacy unanchored tool events into the active turn", () => {
+    const run = buildGoatHarnessRun({
+      task: task({ status: "succeeded", stage: "completed", result: "Done." }),
+      messages: [
+        message({
+          id: "user_msg_1",
+          role: "user",
+          content: "Research Marseille",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+        message({
+          id: "assistant_msg_1",
+          role: "assistant",
+          content: "Done.",
+          createdAt: "2026-01-01T00:00:05.000Z",
+          completedAt: "2026-01-01T00:00:20.000Z",
+        }),
+      ],
+      events: [
+        event(10, "tool.completed", {
+          toolCallId: "call_search",
+          toolName: "exa_search",
+          input: { query: "Marseille history" },
+          output: { results: [{ title: "Marseille" }] },
+        }),
+      ],
+    });
+
+    expect(run.turns[0]?.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool_call",
+          toolCall: expect.objectContaining({ id: "call_search" }),
+        }),
+      ]),
+    );
   });
 
   it("marks failed tool events and keeps the error preview separate", () => {
@@ -561,7 +720,14 @@ function message(overrides: {
   role: "user" | "assistant" | "tool";
   status?: "created" | "running" | "completed" | "failed";
   content?: string;
+  responseToMessageId?: string | null;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  completedAt?: Date | string | null;
 }) {
+  const createdAt = toDate(overrides.createdAt ?? new Date("2026-01-01T00:00:00.000Z"));
+  const updatedAt = toDate(overrides.updatedAt ?? createdAt);
+  const completedAt = overrides.completedAt === undefined ? createdAt : toNullableDate(overrides.completedAt);
   return {
     id: overrides.id,
     taskId: "goat_task_1",
@@ -572,23 +738,32 @@ function message(overrides: {
     modelMessage: null,
     toolName: null,
     toolCallId: null,
-    responseToMessageId: null,
-    createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
-    completedAt: new Date("2026-01-01T00:00:00.000Z"),
+    responseToMessageId: overrides.responseToMessageId ?? null,
+    createdAt,
+    updatedAt,
+    completedAt,
   };
+}
+
+function toDate(value: Date | string) {
+  return value instanceof Date ? value : new Date(value);
+}
+
+function toNullableDate(value: Date | string | null) {
+  return value === null ? null : toDate(value);
 }
 
 function event(
   id: number,
   type: GoatTaskRunEventInput["type"],
   payload: Record<string, unknown>,
+  messageId: string | null = null,
 ): GoatTaskRunEventInput {
   return {
     id,
     taskId: "goat_task_1",
     userWorkosId: "user_1",
-    messageId: null,
+    messageId,
     type,
     payload,
     createdAt: new Date(`2026-01-01T00:00:${String(id).padStart(2, "0")}.000Z`),
