@@ -29,6 +29,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => false,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.cancelGoatTaskAction.mockResolvedValue({ ok: true, error: null });
@@ -128,7 +132,7 @@ describe("TaskDetailPanel harness config", () => {
       task: task({
         harnessSpec: {
           schemaVersion: "goat.harness.v1",
-          engine: "opencompany",
+          engine: "codex",
           model: "openai/gpt-5.4-mini",
           systemPrompt: "",
           initialUserMessage: "Research Marseille",
@@ -151,6 +155,8 @@ describe("TaskDetailPanel harness config", () => {
     render(<TaskDetailPanel initialRun={run} />);
 
     expect(screen.getByText("Harness")).toBeInTheDocument();
+    expect(screen.getByText("Engine")).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Tools")).toBeInTheDocument();
     expect(screen.getByText("Web search")).toBeInTheDocument();
     expect(screen.getByText("Gmail search")).toBeInTheDocument();

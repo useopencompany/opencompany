@@ -340,6 +340,15 @@ async function runGoatTaskCodex(input: {
       : {}),
     ...(input.harnessSpec.codex?.goalMode ? { goalMode: input.harnessSpec.codex.goalMode } : {}),
     onEngineSessionId: input.sink.updateCodexEngineSessionId,
+    onRuntimeEvents: async (events) => {
+      for (const event of codexAppServerEventsToGoatEvents(events)) {
+        await input.sink.appendEvent({
+          type: event.type,
+          messageId: input.assistantMessageId,
+          payload: event.payload,
+        });
+      }
+    },
     onOutput: async (delta) => {
       codexActivity = `${codexActivity}${delta}`;
       await flushCodexActivity(false);
@@ -1030,6 +1039,105 @@ function toolEventPayload(event: GoatToolLifecycleInput) {
   };
 }
 
+function codexAppServerEventsToGoatEvents(events: readonly Record<string, unknown>[]) {
+  return events.flatMap(
+    (
+      event,
+    ): Array<{
+      type: GoatTaskEventType;
+      payload: Record<string, unknown>;
+    }> => {
+      const method = typeof event.method === "string" ? event.method : "";
+      const params = readRecord(event.params);
+
+      const item = readRecord(params?.item);
+      if (method !== "item/completed" || !item) return [];
+
+      if (item.type === "agentMessage") {
+        return [
+          {
+            type: "message.completed",
+            payload: {
+              source: "codex_app_server",
+              role: "assistant",
+              content: readRawString(item.text) ?? "",
+              threadId: readNonEmptyString(params?.threadId),
+              turnId: readNonEmptyString(params?.turnId),
+              itemId: readNonEmptyString(item.id) ?? readNonEmptyString(params?.itemId),
+            },
+          },
+        ];
+      }
+
+      if (isCodexReasoningItem(item)) {
+        return [
+          {
+            type: "reasoning.completed",
+            payload: {
+              source: "codex_app_server",
+              text:
+                readRawString(item.text) ??
+                readRawString(item.summary) ??
+                readRawString(item.content) ??
+                "",
+              threadId: readNonEmptyString(params?.threadId),
+              turnId: readNonEmptyString(params?.turnId),
+              itemId: readNonEmptyString(item.id) ?? readNonEmptyString(params?.itemId),
+            },
+          },
+        ];
+      }
+
+      if (item.type !== "commandExecution") return [];
+
+      const toolCallId =
+        readNonEmptyString(item.id) ??
+        readNonEmptyString(params?.itemId) ??
+        readNonEmptyString(params?.turnId) ??
+        "codex-command";
+      const command = readNonEmptyString(item.command) ?? "command";
+      const basePayload = {
+        source: "codex_app_server",
+        toolCallId,
+        toolName: "codex_command",
+        input: { command },
+        threadId: readNonEmptyString(params?.threadId),
+        turnId: readNonEmptyString(params?.turnId),
+        itemId: readNonEmptyString(item.id) ?? readNonEmptyString(params?.itemId),
+      };
+
+      const status = readNonEmptyString(item.status);
+      if (status === "failed") {
+        return [
+          {
+            type: "tool.failed",
+            payload: {
+              ...basePayload,
+              error: readNonEmptyString(item.error) ?? "Codex command failed.",
+            },
+          },
+        ];
+      }
+      return [
+        {
+          type: "tool.completed",
+          payload: {
+            ...basePayload,
+            output: {
+              status: status ?? "completed",
+              exitCode: typeof item.exitCode === "number" ? item.exitCode : null,
+            },
+          },
+        },
+      ];
+    },
+  );
+}
+
+function isCodexReasoningItem(item: Record<string, unknown>) {
+  return typeof item.type === "string" && item.type.toLowerCase().includes("reasoning");
+}
+
 function augmentSystemPrompt(
   systemPrompt: string,
   resultMode: GoatHarnessSpec["resultMode"],
@@ -1101,6 +1209,16 @@ export class GoatHarnessRunError extends Error {
 
 function readNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readRawString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function clampInteger(value: number, min: number, max: number) {
