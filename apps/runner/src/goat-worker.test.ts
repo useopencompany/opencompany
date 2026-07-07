@@ -134,6 +134,51 @@ describe("runClaimedGoatTask", () => {
     expect(store.fail).not.toHaveBeenCalled();
   });
 
+  it("runs the latest unanswered user message and pairs the assistant response", async () => {
+    const store = createStore();
+    vi.mocked(store.getLatestUserMessageForRun).mockResolvedValueOnce({
+      id: "goat_task_msg_followup",
+      content: "Make this shorter.",
+      modelMessage: {
+        role: "user",
+        content: "Continue the task with this instruction: Make this shorter.",
+      },
+    });
+    const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
+      expect(input.runPrompt).toBe("Continue the task with this instruction: Make this shorter.");
+      const assistant = await input.sink.createAssistantMessage({
+        content: "",
+        modelMessage: { role: "assistant", content: "" },
+      });
+      expect(assistant.id).toBe("goat_task_msg_assistant");
+      return {
+        result: "Shorter.",
+        harnessSpec,
+        debugTrace,
+      };
+    });
+    vi.mocked(store.createMessage).mockResolvedValueOnce({ id: "goat_task_msg_assistant" });
+
+    await runClaimedGoatTask({
+      task: task({ result: "Earlier long answer." }),
+      env: env(),
+      store,
+      executor,
+    });
+
+    expect(store.getLatestUserMessageForRun).toHaveBeenCalledWith({
+      id: "goat_task_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+    });
+    expect(store.createMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "assistant",
+        responseToMessageId: "goat_task_msg_followup",
+      }),
+    );
+  });
+
   it("preserves streamed harness debug when the final result only includes planner debug", async () => {
     const store = createStore();
     const plannerOnlyTrace: GoatTaskDebugTrace = {
@@ -383,7 +428,12 @@ function createStore(): GoatTaskStore {
     updateStage: vi.fn(async () => true),
     updateCodexEngineSessionId: vi.fn(async () => true),
     ensureUserMessage: vi.fn(async () => "goat_task_msg_user"),
-    createMessage: vi.fn(async () => true),
+    getLatestUserMessageForRun: vi.fn(async () => ({
+      id: "goat_task_msg_user",
+      content: "Research Marseille",
+      modelMessage: { role: "user", content: "Research Marseille" },
+    })),
+    createMessage: vi.fn(async (input) => ({ id: input.messageId })),
     updateMessageContent: vi.fn(async () => true),
     completeMessage: vi.fn(async () => true),
     failMessage: vi.fn(async () => true),

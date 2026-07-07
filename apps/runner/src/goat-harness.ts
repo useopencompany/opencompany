@@ -127,6 +127,7 @@ export type GoatTaskRunSink = {
 
 export type GoatTaskExecutorInput = {
   task: GoatTask;
+  runPrompt?: string;
   env: RunnerEnv;
   plannerContext?: {
     githubRepositories?: readonly string[];
@@ -155,6 +156,7 @@ export async function executeGoatTask(
     payload: { status: "running", stage: "planning" },
   });
 
+  const requestedPrompt = input.runPrompt ?? input.task.prompt;
   const taskRequestedEngine = requestedGoatHarnessEngine(input.task.harnessSpec);
   const planned =
     input.task.scheduleId && hasPreplannedHarnessSpec(input.task.harnessSpec)
@@ -167,7 +169,7 @@ export async function executeGoatTask(
           usage: undefined,
         }
       : await planGoatHarnessForTask({
-          prompt: input.task.prompt,
+          prompt: requestedPrompt,
           model: input.task.model,
           ...(taskRequestedEngine ? { requestedEngine: taskRequestedEngine } : {}),
           availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
@@ -176,6 +178,7 @@ export async function executeGoatTask(
           signal: input.signal,
         });
   const harnessSpec = planned.harnessSpec;
+  const executionPrompt = input.runPrompt ?? harnessSpec.initialUserMessage;
   if (planned.usage) {
     await input.sink.recordModelUsage({
       phase: "planner",
@@ -221,7 +224,7 @@ export async function executeGoatTask(
       harnessSpec.engine === "codex"
         ? await runGoatTaskCodex({
             taskId: input.task.id,
-            prompt: input.task.prompt,
+            prompt: executionPrompt,
             env: input.env,
             userWorkosId: input.task.userWorkosId,
             existingEngineSessionId: input.task.codexEngineSessionId,
@@ -234,6 +237,7 @@ export async function executeGoatTask(
             env: input.env,
             taskId: input.task.id,
             userWorkosId: input.task.userWorkosId,
+            prompt: executionPrompt,
             harnessSpec,
             signal: input.signal,
             sink: input.sink,
@@ -319,7 +323,7 @@ async function runGoatTaskCodex(input: {
     userWorkosId: input.userWorkosId,
     taskId: input.taskId,
     messageId: input.assistantMessageId,
-    prompt: input.harnessSpec.initialUserMessage || input.prompt,
+    prompt: input.prompt || input.harnessSpec.initialUserMessage,
     systemPrompt: input.harnessSpec.systemPrompt,
     model: input.harnessSpec.model,
     existingEngineSessionId: input.existingEngineSessionId,
@@ -423,6 +427,7 @@ async function runGoatTaskModelStream(input: {
   env: RunnerEnv;
   taskId: string;
   userWorkosId: string;
+  prompt: string;
   harnessSpec: GoatHarnessSpec;
   signal: AbortSignal;
   sink: GoatTaskRunSink;
@@ -444,6 +449,7 @@ async function runGoatTaskModelStreamInner(input: {
   env: RunnerEnv;
   taskId: string;
   userWorkosId: string;
+  prompt: string;
   harnessSpec: GoatHarnessSpec;
   signal: AbortSignal;
   sink: GoatTaskRunSink;
@@ -528,7 +534,7 @@ async function runGoatTaskModelStreamInner(input: {
     const stream = streamText({
       model: gateway(input.harnessSpec.model),
       system: input.harnessSpec.systemPrompt,
-      messages: [{ role: "user", content: input.harnessSpec.initialUserMessage }],
+      messages: [{ role: "user", content: input.prompt }],
       tools,
       stopWhen: [ai.stepCountIs(input.harnessSpec.maxModelSteps)],
       prepareStep: ({ stepNumber }) =>

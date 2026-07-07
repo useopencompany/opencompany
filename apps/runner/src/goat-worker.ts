@@ -44,6 +44,12 @@ export const GOAT_TASK_HEARTBEAT_INTERVAL_MS = 5_000;
 type GoatTask = typeof goatTasks.$inferSelect;
 type GoatTaskStage = GoatTask["stage"];
 type GoatTaskExecutor = (input: GoatTaskExecutorInput) => Promise<GoatTaskExecutorResult>;
+
+type GoatTaskUserMessageForRun = {
+  id: string;
+  content: string;
+  modelMessage: unknown;
+};
 type GoatUsageCostWrite = {
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
@@ -88,6 +94,11 @@ export type GoatTaskStore = {
     now: Date;
     messageId: string;
   }): Promise<string | null>;
+  getLatestUserMessageForRun(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+  }): Promise<GoatTaskUserMessageForRun | null>;
   createMessage(input: {
     id: string;
     leaseId: string;
@@ -101,7 +112,7 @@ export type GoatTaskStore = {
     toolName?: GoatTaskToolName | null;
     toolCallId?: string | null;
     responseToMessageId?: string | null;
-  }): Promise<boolean>;
+  }): Promise<{ id: string } | null>;
   updateMessageContent(input: {
     id: string;
     leaseId: string;
@@ -335,6 +346,30 @@ export function createDbGoatTaskStore(): GoatTaskStore {
       return rowsFromExecute<{ id: string }>(result)[0]?.id ?? null;
     },
 
+    async getLatestUserMessageForRun(input) {
+      const result = await getDb().execute(sql`
+        SELECT
+          message.id,
+          message.content,
+          message.model_message AS "modelMessage"
+        FROM goat.task_messages AS message
+        INNER JOIN goat.tasks AS task ON task.id = message.task_id
+        LEFT JOIN goat.task_messages AS assistant
+          ON assistant.task_id = message.task_id
+          AND assistant.role = 'assistant'
+          AND assistant.response_to_message_id = message.id
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+          AND message.role = 'user'
+          AND assistant.id IS NULL
+        ORDER BY message.created_at DESC
+        LIMIT 1
+      `);
+      return rowsFromExecute<GoatTaskUserMessageForRun>(result)[0] ?? null;
+    },
+
     async createMessage(input) {
       const modelMessageJson =
         input.modelMessage === undefined ? null : JSON.stringify(input.modelMessage);
@@ -371,9 +406,17 @@ export function createDbGoatTaskStore(): GoatTaskStore {
           AND task.lease_id = ${input.leaseId}
           AND task.lease_owner = ${input.leaseOwner}
           AND task.status = 'running'
+        ON CONFLICT (task_id, response_to_message_id) DO UPDATE
+        SET status = EXCLUDED.status,
+            content = EXCLUDED.content,
+            model_message = EXCLUDED.model_message,
+            tool_name = EXCLUDED.tool_name,
+            tool_call_id = EXCLUDED.tool_call_id,
+            updated_at = EXCLUDED.updated_at
+        WHERE EXCLUDED.response_to_message_id IS NOT NULL
         RETURNING id
       `);
-      return rowsFromExecute<{ id: string }>(result).length > 0;
+      return rowsFromExecute<{ id: string }>(result)[0] ?? null;
     },
 
     async updateMessageContent(input) {
@@ -947,6 +990,12 @@ export async function runClaimedGoatTask(input: {
     handleLeaseLost();
     throw new Error(`Goat task lease lost while trying to ${action}.`);
   };
+  const requireLeaseValue = async <T>(write: Promise<T | null>, action: string): Promise<T> => {
+    const value = await write;
+    if (value) return value;
+    handleLeaseLost();
+    throw new Error(`Goat task lease lost while trying to ${action}.`);
+  };
 
   const heartbeat = async () => {
     const now = new Date();
@@ -988,6 +1037,17 @@ export async function runClaimedGoatTask(input: {
       finishAbortedTelemetry();
       return;
     }
+    const userMessage = await store.getLatestUserMessageForRun({
+      id: input.task.id,
+      leaseId,
+      leaseOwner,
+    });
+    if (!userMessage) {
+      handleLeaseLost();
+      finishAbortedTelemetry();
+      return;
+    }
+    const runPrompt = userMessageModelContent(userMessage.modelMessage) ?? userMessage.content;
 
     const githubRepositories = input.task.harnessSpec.tools.some((tool) =>
       tool.startsWith("github_"),
@@ -998,13 +1058,14 @@ export async function runClaimedGoatTask(input: {
     const result = await runSpan.runInContext(() =>
       executor({
         task: input.task,
+        runPrompt,
         env: input.env,
         plannerContext: { githubRepositories },
         signal: abortController.signal,
         sink: {
           createAssistantMessage: async (messageInput) => {
             const messageId = newGoatTaskMessageId();
-            await requireLeaseWrite(
+            const message = await requireLeaseValue(
               store.createMessage({
                 id: input.task.id,
                 leaseId,
@@ -1015,10 +1076,11 @@ export async function runClaimedGoatTask(input: {
                 status: "running",
                 content: messageInput.content,
                 modelMessage: messageInput.modelMessage,
+                responseToMessageId: userMessage.id,
               }),
               "create assistant message",
             );
-            return { id: messageId };
+            return { id: message.id };
           },
           updateMessageContent: async (messageInput) => {
             await requireLeaseWrite(
@@ -1063,7 +1125,7 @@ export async function runClaimedGoatTask(input: {
           },
           createToolMessage: async (messageInput) => {
             const messageId = newGoatTaskMessageId();
-            await requireLeaseWrite(
+            const message = await requireLeaseValue(
               store.createMessage({
                 id: input.task.id,
                 leaseId,
@@ -1083,7 +1145,7 @@ export async function runClaimedGoatTask(input: {
               }),
               "create tool message",
             );
-            return { id: messageId };
+            return { id: message.id };
           },
           completeToolMessage: async (messageInput) => {
             const content = stringifyToolPayload(messageInput.output);
@@ -1375,6 +1437,13 @@ function mergeGoatTaskDebugTrace(
   if (planner) merged.planner = planner;
   if (harness) merged.harness = harness;
   return merged;
+}
+
+function userMessageModelContent(modelMessage: unknown) {
+  if (!modelMessage || typeof modelMessage !== "object") return null;
+  const role = (modelMessage as { role?: unknown }).role;
+  const content = (modelMessage as { content?: unknown }).content;
+  return role === "user" && typeof content === "string" && content.trim() ? content : null;
 }
 
 export function startGoatTaskWorker(
