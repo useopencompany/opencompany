@@ -658,9 +658,10 @@ function renderComposerInputOverlay(value: string, highlightCodexMention: boolea
   return (
     <>
       {value.slice(0, mentionStart)}
+      {/* Keep inline metrics identical to the textarea; paint-only styles preserve caret alignment. */}
       <span
         data-testid="selected-codex-mention"
-        className="rounded-md bg-ink/8 px-1 py-0.5 font-medium text-ink"
+        className="rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]"
       >
         {value.slice(mentionStart, mentionEnd)}
       </span>
