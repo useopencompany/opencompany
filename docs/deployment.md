@@ -165,6 +165,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (required when Goat tasks are enabled)
+- `RUNNER_GOAT_BROWSER_ENABLED` (optional; set `true` to allow Goat rendered-browser tasks)
+- `BROWSERLESS_API_KEY` (required when Goat Browser is enabled with the production Browserless default)
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`

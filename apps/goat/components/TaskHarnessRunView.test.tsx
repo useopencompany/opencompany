@@ -42,6 +42,20 @@ describe("TaskHarnessRunView", () => {
     expect(within(toolDetails).getByText("Output")).toBeInTheDocument();
   });
 
+  it("renders Browser tool calls with useful details", async () => {
+    const user = userEvent.setup();
+    render(<TaskHarnessRunView run={runWithBrowserEvent()} />);
+
+    const toolDetails = screen.getByTestId("tool-call-call_browser");
+    const toggle = within(toolDetails).getByRole("button", { name: /Browser open/i });
+    expect(toggle).toHaveTextContent("https://example.com/products");
+
+    await user.click(toggle);
+
+    expect(within(toolDetails).getByText("Input")).toBeInTheDocument();
+    expect(within(toolDetails).getByText("Output")).toBeInTheDocument();
+  });
+
   it("renders the legacy new-only detail message when no durable rows exist", () => {
     render(
       <TaskHarnessRunView
@@ -78,6 +92,24 @@ function runWithEvents() {
         toolName: "exa_search",
         input: { query: "Marseille history" },
         output: { results: [{ title: "Marseille" }] },
+      }),
+    ],
+  });
+}
+
+function runWithBrowserEvent() {
+  return buildGoatHarnessRun({
+    task: task({ status: "succeeded", stage: "completed", result: "Done." }),
+    messages: [
+      message({ id: "user_msg", role: "user", content: "Find products" }),
+      message({ id: "assistant_msg", role: "assistant", content: "Done." }),
+    ],
+    events: [
+      event(1, "tool.completed", {
+        toolCallId: "call_browser",
+        toolName: "browser_open",
+        input: { url: "https://example.com/products" },
+        output: { ok: true, output: "Opened https://example.com/products" },
       }),
     ],
   });

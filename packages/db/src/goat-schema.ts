@@ -54,6 +54,17 @@ export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "fai
 
 export type GoatTaskToolName =
   | "exa_search"
+  | "browser_open"
+  | "browser_snapshot"
+  | "browser_click"
+  | "browser_fill"
+  | "browser_wait"
+  | "browser_read"
+  | "browser_get"
+  | "browser_find"
+  | "browser_scroll"
+  | "browser_screenshot"
+  | "browser_close"
   | "x_search_posts"
   | "x_get_profile"
   | "x_get_user_posts"

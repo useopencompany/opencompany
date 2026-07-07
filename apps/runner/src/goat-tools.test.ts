@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { buildGoatTaskTools } from "./goat-tools";
+import { buildGoatTaskToolRuntime, buildGoatTaskTools } from "./goat-tools";
 
 const toolMocks = vi.hoisted(() => ({
   executeHostedTool: vi.fn(),
   executeGoatGoogleTool: vi.fn(),
   executeGoatLinearMcpTool: vi.fn(),
+  browserExecute: vi.fn(),
+  browserCleanup: vi.fn(),
 }));
 
 vi.mock("./hosted-tools", () => ({
@@ -21,6 +23,14 @@ vi.mock("./goat-linear-mcp-tools", () => ({
   executeGoatLinearMcpTool: toolMocks.executeGoatLinearMcpTool,
   isGoatLinearMcpToolName: (name: string) =>
     name === "linear_search_tools" || name === "linear_use_tool",
+}));
+
+vi.mock("./goat-browser-tools", () => ({
+  createGoatBrowserToolSession: vi.fn(() => ({
+    execute: toolMocks.browserExecute,
+    cleanup: toolMocks.browserCleanup,
+  })),
+  isGoatBrowserToolName: (name: string) => name.startsWith("browser_"),
 }));
 
 beforeEach(() => {
@@ -195,6 +205,55 @@ describe("buildGoatTaskTools usage metadata", () => {
       }),
     );
   });
+
+  it("records browser usage and cleans up the browser session", async () => {
+    toolMocks.browserExecute.mockResolvedValueOnce({
+      output: { ok: true, command: "browser_open", output: "compact browser output" },
+      transcriptOutput: { ok: true, command: "browser_open", output: "full transcript output" },
+      usage: {
+        provider: "browser",
+        operation: "open",
+        costUsdMicros: 0,
+        costSource: "subscription",
+        rawUsage: { toolName: "browser_open" },
+      },
+    });
+    const lifecycle = lifecycleMocks();
+    const runtime = buildGoatTaskToolRuntime({
+      selectedTools: ["browser_open"],
+      taskId: "goat_task_1",
+      userWorkosId: "user_1",
+      env: env({ goatBrowserEnabled: true }),
+      signal: new AbortController().signal,
+      lifecycle,
+    });
+
+    const output = await callTool(toExecutableTool(runtime.tools.browser_open), {
+      input: { url: "https://example.com/" },
+      toolCallId: "call_browser",
+    });
+    await runtime.cleanup();
+
+    expect(toolMocks.browserExecute).toHaveBeenCalledWith({
+      name: "browser_open",
+      args: { url: "https://example.com/" },
+    });
+    expect(lifecycle.onToolCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "browser_open",
+        output: { ok: true, command: "browser_open", output: "full transcript output" },
+        modelOutput: { ok: true, command: "browser_open", output: "compact browser output" },
+        usage: expect.objectContaining({
+          provider: "browser",
+          operation: "open",
+          costUsdMicros: 0,
+          costSource: "subscription",
+        }),
+      }),
+    );
+    expect(output).toEqual({ ok: true, command: "browser_open", output: "compact browser output" });
+    expect(toolMocks.browserCleanup).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("buildGoatTaskTools Exa query guard", () => {
@@ -356,6 +415,12 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     llmBrokerEnabled: true,
     integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
     exaApiKey: "exa",
+    goatBrowserEnabled: false,
+    agentBrowserProvider: undefined,
+    browserlessApiKey: undefined,
+    browserlessApiUrl: undefined,
+    browserlessTtl: undefined,
+    browserlessStealth: undefined,
     xApiBearerToken: undefined,
     apifyApiToken: undefined,
     supadataApiKey: undefined,

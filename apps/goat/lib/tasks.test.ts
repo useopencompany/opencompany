@@ -57,7 +57,7 @@ describe("createGoatTaskForUser", () => {
           initialUserMessage: "Research x",
           tools: ["exa_search", "gmail_search"],
           skills: [],
-          maxModelSteps: 8,
+          maxModelSteps: 16,
           resultMode: "assistant_final",
         },
         debugTrace: {},
