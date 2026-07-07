@@ -1945,6 +1945,9 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     await user.type(screen.getByPlaceholderText("Ask this agent to do something"), "Hello there");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(scrollToSpy).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
     scrollToSpy.mockClear();
 
     const streamingDetail = makeDetail({

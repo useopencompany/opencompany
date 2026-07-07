@@ -185,8 +185,10 @@ describe("TaskDetailPanel stop action", () => {
 
     await user.click(screen.getByRole("button", { name: "Stop" }));
 
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Nope."));
-    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    await waitFor(() => {
+      expect(mocks.toastError).toHaveBeenCalledWith("Nope.");
+      expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    });
   });
 
   it("resets the stop button when the cancel action throws", async () => {
@@ -202,8 +204,10 @@ describe("TaskDetailPanel stop action", () => {
 
     await user.click(screen.getByRole("button", { name: "Stop" }));
 
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not stop task."));
-    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    await waitFor(() => {
+      expect(mocks.toastError).toHaveBeenCalledWith("Could not stop task.");
+      expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    });
   });
 
   it.each([

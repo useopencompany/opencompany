@@ -1,5 +1,9 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { GoatChatMessage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type {
+  GoatChatMessage,
+  GoatHarnessEngine,
+  GoatTaskStatus,
+} from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
 
 export const START_TASK_TOOL_NAME = "start_task";
@@ -23,8 +27,14 @@ export type GoatTaskCardMetadata = {
   status?: GoatTaskStatus | null;
 };
 
+export type GoatChatMention = {
+  kind: "engine";
+  id: "codex";
+};
+
 export type GoatChatMessageMetadata = {
   sessionId?: string;
+  mentions?: GoatChatMention[];
   taskId?: string;
   task?: GoatTaskCardMetadata | null;
   error?: string;
@@ -34,6 +44,7 @@ export type GoatChatMessageMetadata = {
 export type StartTaskToolInput = {
   prompt: string;
   name: string;
+  engine?: GoatHarnessEngine;
   reason?: string;
 };
 
