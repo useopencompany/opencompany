@@ -2,6 +2,15 @@
 
 import { useChat } from "@ai-sdk/react";
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from "@opencompany/ui/components/command";
 import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
 import { DefaultChatTransport } from "ai";
@@ -16,6 +25,8 @@ import {
   CircleDotDashed,
   Clock,
   FileText,
+  LoaderCircle,
+  MessageSquarePlus,
   Pause,
   Play,
   Settings,
@@ -74,6 +85,7 @@ import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
 
 export type GoatTaskView = {
   id: string;
@@ -114,10 +126,14 @@ export function GoatSurface({
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(false);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
   const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
+  const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
+  const [newChatPrompt, setNewChatPrompt] = useState("");
+  const [backgroundChatCount, setBackgroundChatCount] = useState(0);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -167,6 +183,17 @@ export function GoatSurface({
   const isGenerating = status === "submitted" || status === "streaming";
   const hasMessages = messages.length > 0;
   const showThinkingBubble = isGenerating && shouldShowThinkingBubble(messages);
+  const trimmedNewChatPrompt = newChatPrompt.trim();
+  const newChatPromptValid =
+    trimmedNewChatPrompt.length > 0 &&
+    trimmedNewChatPrompt.length <= BACKGROUND_CHAT_PROMPT_MAX_LENGTH;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (isGenerating) return;
@@ -241,6 +268,21 @@ export function GoatSurface({
     void updateGoatTimezoneAction(timezone).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key !== "n" || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      event.preventDefault();
+      setNewChatCommandOpen(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const archiveTask = (task: GoatTaskView) => {
     setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
     startArchiveTransition(async () => {
@@ -257,6 +299,43 @@ export function GoatSurface({
       toast.error(result.error ?? "Could not archive task.");
     });
   };
+
+  const startBackgroundChat = useCallback(
+    (prompt: string) => {
+      const trimmedPrompt = prompt.trim();
+      if (!trimmedPrompt) return;
+      if (trimmedPrompt.length > BACKGROUND_CHAT_PROMPT_MAX_LENGTH) {
+        toast.error(
+          `Messages can be at most ${BACKGROUND_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+        );
+        return;
+      }
+
+      setNewChatCommandOpen(false);
+      setNewChatPrompt("");
+      setBackgroundChatCount((count) => count + 1);
+      toast("Started a new chat in the background.");
+
+      void runBackgroundChatTurn({
+        prompt: trimmedPrompt,
+        model: defaultModel,
+      })
+        .then(() => {
+          if (!mountedRef.current) return;
+          router.refresh();
+          toast.success("Background chat is ready.");
+        })
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
+        })
+        .finally(() => {
+          if (!mountedRef.current) return;
+          setBackgroundChatCount((count) => Math.max(0, count - 1));
+        });
+    },
+    [defaultModel, router],
+  );
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -328,6 +407,55 @@ export function GoatSurface({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
+      <CommandDialog
+        open={newChatCommandOpen}
+        onOpenChange={setNewChatCommandOpen}
+        title="New Goat Chat"
+        description="Create a new Goat chat in the background."
+        className="top-[22%] max-w-xl translate-y-0 border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
+      >
+        <CommandInput
+          value={newChatPrompt}
+          onValueChange={setNewChatPrompt}
+          placeholder="Describe the new chat or task..."
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            startBackgroundChat(newChatPrompt);
+          }}
+        />
+        <CommandList>
+          <CommandEmpty>Type what Goat should do.</CommandEmpty>
+          <CommandGroup heading="Actions">
+            <CommandItem
+              value={`Create new chat ${newChatPrompt}`}
+              disabled={!newChatPromptValid}
+              onSelect={() => startBackgroundChat(newChatPrompt)}
+              className="gap-3"
+            >
+              {backgroundChatCount > 0 ? (
+                <LoaderCircle
+                  size={16}
+                  strokeWidth={2}
+                  className="shrink-0 animate-spin text-ink-subtle"
+                />
+              ) : (
+                <MessageSquarePlus size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-ink">
+                  Create new background chat
+                </p>
+                <p className="truncate text-[12px] text-ink-subtle">
+                  {trimmedNewChatPrompt || "Start a chat that can spawn a task"}
+                </p>
+              </div>
+              <CommandShortcut>Enter</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+
       {mode === "home" ? (
         <div className="absolute right-4 top-4 z-20 flex items-center gap-1">
           <Link
@@ -1670,6 +1798,51 @@ function isStartTaskToolOutput(value: unknown): value is StartTaskToolOutput {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function runBackgroundChatTurn(input: { prompt: string; model: string }) {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: null,
+      model: input.model,
+      message: {
+        id: newBackgroundChatMessageId(),
+        role: "user",
+        parts: [{ type: "text", text: input.prompt }],
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const details = (await response.text().catch(() => "")).trim();
+    throw new Error(details || "Could not start that chat.");
+  }
+
+  await consumeResponseBody(response);
+}
+
+async function consumeResponseBody(response: Response) {
+  if (!response.body) return;
+
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done } = await reader.read();
+      if (done) return;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function newBackgroundChatMessageId() {
+  const randomId =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `ui_background_${randomId}`;
 }
 
 function getTaskMeta(task: GoatTaskView): {

@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
@@ -108,6 +108,10 @@ describe("GoatSurface chat streaming UI", () => {
     vi.mocked(closeGoatChatSessionAction).mockClear();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("clears the composer and paints the user message immediately", async () => {
     const user = userEvent.setup();
 
@@ -159,6 +163,66 @@ describe("GoatSurface chat streaming UI", () => {
     const chatLink = screen.getByRole("link", { name: /Market research/ });
     expect(chatLink).toHaveAttribute("href", "/?chat=chat_1");
     expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
+  });
+
+  it("opens the new chat command with Cmd+N and starts a background chat", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (String(input).includes("/api/electric/")) {
+        return new Response("", {
+          headers: {
+            "electric-handle": "test-handle",
+            "electric-offset": "0",
+            "electric-schema": "[]",
+          },
+        });
+      }
+
+      return new Response("done", { status: 200 });
+    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.keyboard("{Meta>}n{/Meta}");
+    await user.type(screen.getByPlaceholderText("Describe the new chat or task..."), "Research Q3");
+    await user.keyboard("{Enter}");
+
+    const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
+    await waitFor(() => expect(chatRequests()).toHaveLength(1));
+    const [, init] = chatRequests()[0]!;
+    expect(init).toBeDefined();
+    const body = JSON.parse(String((init as RequestInit).body));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/chat",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(body).toMatchObject({
+      sessionId: null,
+      model: DEFAULT_GOAT_MODEL,
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "Research Q3" }],
+      },
+    });
+    expect(body.message.id).toMatch(/^ui_background_/);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(
+      screen.queryByPlaceholderText("Describe the new chat or task..."),
+    ).not.toBeInTheDocument();
   });
 
   it("updates the URL when a new chat returns a session id", async () => {
