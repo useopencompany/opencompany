@@ -20,6 +20,10 @@ vi.mock("@opencompany/ui/components/sonner", () => ({
   },
 }));
 
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => false,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.cancelGoatTaskAction.mockResolvedValue({ ok: true, error: null });

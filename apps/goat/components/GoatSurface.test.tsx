@@ -50,6 +50,10 @@ vi.mock("@/lib/user-preferences", () => ({
   updateGoatTimezoneAction: vi.fn(async () => ({ ok: true, timezone: "UTC" })),
 }));
 
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => false,
+}));
+
 vi.mock("@ai-sdk/react", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {
