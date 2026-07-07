@@ -123,25 +123,24 @@ configuration level.
 **Reconsider if:** Search quality, latency, cost, coverage, compliance, or citation needs are better
 served by another search provider or by first-party browser/fetch infrastructure.
 
-## X API
+## X Scraping
 
-**What it is:** Official API for reading public X posts, profiles, timelines, discussions, and
-trends.
+**What it is:** Apify-backed public scraping for X posts, profiles, timelines, and discussions.
 
 **What it does for us:** Powers the optional `@x` hosted agent tool. Agents can search public posts,
-inspect profiles, read recent user timelines, explore a post's replies and quote posts, and fetch
-location-based trends without scraping or browser automation.
+inspect profiles, read recent user timelines, and explore a post's replies/comments for social
+listening and complaint analysis. V1 does not support login-gated/private data or trends.
 
 **Where it is used:**
 
 - `packages/agent-runtime/src/tools.ts`.
 - `apps/runner/src/hosted-tools.ts`.
 - `apps/web/components/agent-editor/tools.ts`.
-- `X_API_BEARER_TOKEN` in `.env.example`.
+- `APIFY_API_TOKEN` in `.env.example`.
 
 **Why we use it:** Agents need direct access to X's public conversation for research and social
-listening. Using the official API keeps the first version stable, auditable, and aligned with X's
-developer terms.
+listening. Apify keeps V1 cost and scope bounded while preserving normalized model-facing outputs so
+providers can be swapped later.
 
 **Status:** Optional. Agents can run without X unless they enable `@x`.
 
@@ -248,7 +247,6 @@ Hosted tools are enabled by agent configuration:
 - `x_get_profile`
 - `x_get_user_posts`
 - `x_get_discussion`
-- `x_get_trends`
 - `youtube_search`
 - `youtube_get_video`
 - `youtube_get_transcript`

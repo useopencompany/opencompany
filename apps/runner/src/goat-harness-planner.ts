@@ -16,6 +16,13 @@ const TOOL_PROVIDER_MAP: Record<string, GoatTaskToolName[]> = {
 };
 
 const PLANNABLE_PROVIDERS = ["gmail", "google_calendar", "linear", "github"] as const;
+const X_TOOLS: GoatTaskToolName[] = [
+  "x_search_posts",
+  "x_get_profile",
+  "x_get_user_posts",
+  "x_get_discussion",
+  "social_get_job",
+];
 
 export async function getGoatAvailableHarnessToolsForRunner(
   userWorkosId: string,
@@ -32,6 +39,9 @@ export async function getGoatAvailableHarnessToolsForRunner(
     );
 
   const tools = new Set<GoatTaskToolName>(["exa_search"]);
+  if (process.env.APIFY_API_TOKEN?.trim()) {
+    for (const toolName of X_TOOLS) tools.add(toolName);
+  }
   for (const row of rows) {
     for (const toolName of TOOL_PROVIDER_MAP[row.provider] ?? []) {
       tools.add(toolName);

@@ -500,39 +500,22 @@ describe("executeHostedTool", () => {
     ).rejects.toThrow("only supports http and https");
   });
 
-  it("searches X posts and records estimated read cost", async () => {
+  it("searches X posts through Apify and normalizes public posts", async () => {
     const fetchMock = vi.fn(
       async (_url: URL, _init: RequestInit) =>
         new Response(
-          JSON.stringify({
-            data: [
-              {
-                id: "111",
-                text: "AI agents are useful",
-                author_id: "42",
-                created_at: "2026-05-31T10:00:00.000Z",
-                conversation_id: "111",
-                public_metrics: {
-                  like_count: 10,
-                  reply_count: 2,
-                  retweet_count: 1,
-                  quote_count: 0,
-                },
-              },
-            ],
-            includes: {
-              users: [
-                {
-                  id: "42",
-                  username: "builder",
-                  name: "Builder",
-                  verified: true,
-                  public_metrics: { followers_count: 100 },
-                },
-              ],
+          JSON.stringify([
+            {
+              id: "111",
+              full_text: "AI agents are useful",
+              screen_name: "builder",
+              name: "Builder",
+              created_at: "2026-05-31T10:00:00.000Z",
+              favorite_count: 10,
+              reply_count: 2,
+              retweet_count: 1,
             },
-            meta: { result_count: 1, next_token: "next" },
-          }),
+          ]),
           { status: 200 },
         ),
     );
@@ -540,47 +523,52 @@ describe("executeHostedTool", () => {
 
     const result = await executeHostedTool({
       name: "x_search_posts",
-      args: { query: "AI agents", mode: "recent", maxResults: 20, paginationToken: "page" },
+      args: { query: "AI agents", maxResults: 20 },
       env: env(),
       enabledTools: ["tool_help", "x_search_posts"],
       signal: new AbortController().signal,
     });
 
-    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    expect(url.toString()).toContain("https://api.x.com/2/tweets/search/recent?");
-    expect(url.searchParams.get("query")).toBe("AI agents");
-    expect(url.searchParams.get("max_results")).toBe("20");
-    expect(url.searchParams.get("next_token")).toBe("page");
-    expect(init.headers).toMatchObject({
-      Authorization: "Bearer x_test",
-      Accept: "application/json",
+    const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
+    if (!firstCall) throw new Error("Expected X search fetch to be called");
+    const [url, init] = firstCall;
+    expect(url.toString()).toContain(
+      "https://api.apify.com/v2/acts/apidojo~tweet-scraper/run-sync-get-dataset-items",
+    );
+    expect(url.searchParams.get("token")).toBe("apify_test");
+    expect(url.searchParams.get("limit")).toBe("20");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      searchTerms: ["AI agents"],
+      maxItems: 20,
+      sort: "Latest",
     });
     expect(result.output).toMatchObject({
+      sourceProvider: "apify",
       posts: [
         {
           id: "111",
           url: "https://x.com/builder/status/111",
-          text: "AI agents are useful",
-          author: { id: "42", username: "builder", name: "Builder", verified: true },
-          metrics: { likeCount: 10, replyCount: 2, retweetCount: 1, quoteCount: 0 },
-          conversationId: "111",
+          caption: "AI agents are useful",
+          author: { username: "builder", displayName: "Builder" },
+          stats: { likes: 10, comments: 2, shares: 1 },
         },
       ],
-      nextToken: "next",
     });
     expect(result.usage).toMatchObject({
       provider: "x",
-      operation: "search_posts",
-      costUsdMicros: 15_000,
-      rawUsage: { estimated: true, postsRead: 1, usersRead: 1 },
+      operation: "search",
+      costUsdMicros: 6_000,
+      rawUsage: {
+        estimated: true,
+        provider: "apify",
+        actorId: "apidojo/tweet-scraper",
+        itemsReturned: 1,
+      },
     });
   });
 
-  it("defaults X post searches to 10 results when maxResults is omitted", async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
-    );
+  it("defaults X post searches to 10 Apify results when maxResults is omitted", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await executeHostedTool({
@@ -591,25 +579,29 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const [url] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
-    expect(url.searchParams.get("max_results")).toBe("10");
+    const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
+    if (!firstCall) throw new Error("Expected X search fetch to be called");
+    const [url, init] = firstCall;
+    expect(url.searchParams.get("limit")).toBe("10");
+    expect(JSON.parse(String(init.body))).toMatchObject({ maxItems: 10 });
   });
 
-  it("gets an X profile by username", async () => {
+  it("gets an X profile by username through Apify", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
-          JSON.stringify({
-            data: {
+          JSON.stringify([
+            {
               id: "42",
-              username: "builder",
+              userName: "builder",
               name: "Builder",
               description: "Building",
+              profilePicture: "https://example.com/avatar.jpg",
               verified: false,
-              is_identity_verified: true,
-              public_metrics: { followers_count: 100, tweet_count: 12 },
+              followers: 100,
+              statusesCount: 12,
             },
-          }),
+          ]),
           { status: 200 },
         ),
     );
@@ -625,43 +617,35 @@ describe("executeHostedTool", () => {
 
     const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
     if (!firstCall) throw new Error("Expected X profile fetch to be called");
-    const [url] = firstCall;
-    expect(url.toString()).toContain("/2/users/by/username/builder?");
+    const [url, init] = firstCall;
+    expect(url.toString()).toContain("/v2/acts/apidojo~tweet-scraper/run-sync-get-dataset-items");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      startUrls: ["https://x.com/builder"],
+      maxItems: 1,
+    });
     expect(result.output).toMatchObject({
-      user: {
+      profile: {
         id: "42",
         username: "builder",
-        description: "Building",
-        isIdentityVerified: true,
-        metrics: { followersCount: 100, postCount: 12 },
+        displayName: "Builder",
+        bio: "Building",
+        stats: { followers: 100, posts: 12 },
       },
     });
     expect(result.usage).toMatchObject({
       provider: "x",
       operation: "get_profile",
-      costUsdMicros: 10_000,
-      rawUsage: { estimated: true, usersRead: 1 },
+      rawUsage: { provider: "apify", actorId: "apidojo/tweet-scraper" },
     });
   });
 
-  it("gets X user posts after resolving the username", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: { id: "42", username: "builder", name: "Builder" } }), {
+  it("gets X user posts by profile handle through Apify", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify([{ id: "222", text: "Shipping", screen_name: "builder" }]), {
           status: 200,
         }),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            data: [{ id: "222", text: "Shipping", author_id: "42" }],
-            includes: { users: [{ id: "42", username: "builder", name: "Builder" }] },
-            meta: { result_count: 1 },
-          }),
-          { status: 200 },
-        ),
-      );
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await executeHostedTool({
@@ -672,32 +656,26 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const [secondUrl, secondInit] = fetchMock.mock.calls[1] as [URL, RequestInit];
-    expect(secondUrl.toString()).toContain("/2/users/42/tweets?");
-    expect(secondUrl.searchParams.get("max_results")).toBe("12");
-    expect(secondUrl.searchParams.get("exclude")).toBe("replies");
-    expect(secondInit.headers).toMatchObject({ Authorization: "Bearer x_test" });
+    const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
+    if (!firstCall) throw new Error("Expected X user posts fetch to be called");
+    const [url, init] = firstCall;
+    expect(url.toString()).toContain("/v2/acts/apidojo~tweet-scraper/run-sync-get-dataset-items");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      twitterHandles: ["builder"],
+      maxItems: 12,
+      sort: "Latest",
+    });
     expect(result.output).toMatchObject({
-      user: { id: "42", username: "builder" },
-      posts: [{ id: "222", text: "Shipping" }],
+      posts: [{ id: "222", caption: "Shipping", author: { username: "builder" } }],
     });
     expect(result.usage).toMatchObject({
-      operation: "get_user_posts",
-      costUsdMicros: 15_000,
+      operation: "list_profile_posts",
+      costUsdMicros: 8_000,
     });
   });
 
-  it("defaults X user timelines to 10 results when maxResults is omitted", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: { id: "42", username: "builder", name: "Builder" } }), {
-          status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
-      );
+  it("defaults X user timelines to 10 Apify results when maxResults is omitted", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await executeHostedTool({
@@ -708,61 +686,36 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const [timelineUrl] = fetchMock.mock.calls[1] as unknown as [URL, RequestInit];
-    expect(timelineUrl.searchParams.get("max_results")).toBe("10");
+    const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
+    if (!firstCall) throw new Error("Expected X user posts fetch to be called");
+    const [url, init] = firstCall;
+    expect(url.searchParams.get("limit")).toBe("10");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      startUrls: ["https://x.com/builder/with_replies"],
+      maxItems: 10,
+    });
   });
 
-  it("gets an X discussion with target post, replies, and quote posts", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
+  it("gets an X discussion with public replies through Apify", async () => {
+    const fetchMock = vi.fn(
+      async () =>
         new Response(
-          JSON.stringify({
-            data: {
-              id: "111",
-              text: "Original",
-              author_id: "42",
-              conversation_id: "111",
-            },
-            includes: { users: [{ id: "42", username: "builder", name: "Builder" }] },
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            data: [
-              { id: "111", text: "Original", author_id: "42", conversation_id: "111" },
-              {
-                id: "112",
-                text: "Reply",
-                author_id: "43",
-                conversation_id: "111",
-                in_reply_to_user_id: "42",
+          JSON.stringify([
+            {
+              id: "112",
+              full_text: "Reply",
+              screen_name: "reply",
+              name: "Reply",
+              favorite_count: 3,
+              metadata: {
+                sourceTweetId: "111",
+                sourceTweetUrl: "https://x.com/builder/status/111",
               },
-            ],
-            includes: {
-              users: [
-                { id: "42", username: "builder", name: "Builder" },
-                { id: "43", username: "reply", name: "Reply" },
-              ],
             },
-            meta: { result_count: 2 },
-          }),
+          ]),
           { status: 200 },
         ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            data: [{ id: "113", text: "Quote", author_id: "44", conversation_id: "113" }],
-            includes: { users: [{ id: "44", username: "quote", name: "Quote" }] },
-            meta: { result_count: 1 },
-          }),
-          { status: 200 },
-        ),
-      );
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await executeHostedTool({
@@ -773,46 +726,36 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const [repliesUrl] = fetchMock.mock.calls[1] as unknown as [URL, RequestInit];
-    const [quotesUrl] = fetchMock.mock.calls[2] as unknown as [URL, RequestInit];
-    expect(repliesUrl.searchParams.get("query")).toBe("conversation_id:111 -is:retweet");
-    expect(quotesUrl.toString()).toContain("/2/tweets/111/quote_tweets?");
+    const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
+    if (!firstCall) throw new Error("Expected X discussion fetch to be called");
+    const [url, init] = firstCall;
+    expect(url.toString()).toContain(
+      "/v2/acts/api-ninja~x-twitter-replies-retweets-scraper/run-sync-get-dataset-items",
+    );
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      urls: ["https://x.com/builder/status/111"],
+      category: "replies",
+      resultsPerCategory: 20,
+      parseAllResults: false,
+    });
     expect(result.output).toMatchObject({
-      targetPost: { id: "111", text: "Original" },
-      conversationId: "111",
-      replies: [{ id: "112", text: "Reply", inReplyToUserId: "42" }],
-      quotePosts: [{ id: "113", text: "Quote" }],
+      post: { id: "111", url: "https://x.com/builder/status/111" },
+      replies: [{ id: "112", caption: "Reply", author: { username: "reply" } }],
+      comments: [{ id: "112", text: "Reply", author: { username: "reply" } }],
     });
     expect(result.usage).toMatchObject({
       operation: "get_discussion",
-      costUsdMicros: 45_000,
-      rawUsage: { postsRead: 3, usersRead: 3 },
+      costUsdMicros: 8_000,
+      rawUsage: {
+        provider: "apify",
+        actorId: "api-ninja/x-twitter-replies-retweets-scraper",
+        itemsReturned: 1,
+      },
     });
   });
 
-  it("defaults X discussion replies and quote posts to 10 results when maxResults is omitted", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            data: {
-              id: "111",
-              text: "Original",
-              author_id: "42",
-              conversation_id: "111",
-            },
-            includes: { users: [{ id: "42", username: "builder", name: "Builder" }] },
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
-      );
+  it("defaults X discussions to 10 Apify replies when maxResults is omitted", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await executeHostedTool({
@@ -823,113 +766,56 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const repliesUrl = fetchMock.mock.calls[1]?.[0] as URL;
-    const quotesUrl = fetchMock.mock.calls[2]?.[0] as URL;
-    expect(repliesUrl.searchParams.get("max_results")).toBe("10");
-    expect(quotesUrl.searchParams.get("max_results")).toBe("10");
+    const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
+    if (!firstCall) throw new Error("Expected X discussion fetch to be called");
+    const [url, init] = firstCall;
+    expect(url.searchParams.get("limit")).toBe("10");
+    expect(JSON.parse(String(init.body))).toMatchObject({ resultsPerCategory: 10 });
   });
 
-  it("gets X trends by WOEID", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              data: [
-                { trend_name: "#AI", tweet_count: 1000 },
-                { trend_name: "OpenCompany", tweet_count: 500 },
-              ],
-            }),
-            { status: 200 },
-          ),
-      ),
-    );
+  it("starts and polls async X social scraping jobs", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: "run_x_1" } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { status: "SUCCEEDED" } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([{ id: "333", text: "Async result", screen_name: "builder" }]),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
 
-    const result = await executeHostedTool({
-      name: "x_get_trends",
-      args: { woeid: 23424977, maxResults: 1 },
+    const started = await executeHostedTool({
+      name: "x_get_user_posts",
+      args: { username: "builder", maxResults: 5, runMode: "async" },
       env: env(),
-      enabledTools: ["tool_help", "x_get_trends"],
+      enabledTools: ["tool_help", "x_get_user_posts", "social_get_job"],
       signal: new AbortController().signal,
     });
 
-    expect(result.output).toEqual({
-      woeid: 23424977,
-      trends: [
-        {
-          name: "#AI",
-          postCount: 1000,
-          url: "https://x.com/search?q=%23AI&src=trend_click",
-        },
-      ],
-    });
-    expect(result.usage).toMatchObject({
-      provider: "x",
-      operation: "get_trends",
-      costUsdMicros: 10_000,
-      rawUsage: { trendsRead: 1, estimated: true },
-    });
-  });
+    expect(started.output).toMatchObject({ status: "processing", jobId: expect.any(String) });
+    const firstCall = fetchMock.mock.calls[0] as unknown as [URL, RequestInit] | undefined;
+    if (!firstCall) throw new Error("Expected async X job start fetch to be called");
+    const [startUrl] = firstCall;
+    expect(startUrl.pathname).toBe("/v2/acts/apidojo~tweet-scraper/runs");
 
-  it("defaults X trends to 10 results when maxResults is omitted", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              data: Array.from({ length: 12 }, (_, index) => ({
-                trend_name: `Trend ${index + 1}`,
-                tweet_count: index + 1,
-              })),
-            }),
-            { status: 200 },
-          ),
-      ),
-    );
-
-    const result = await executeHostedTool({
-      name: "x_get_trends",
-      args: {},
+    const completed = await executeHostedTool({
+      name: "social_get_job",
+      args: { jobId: (started.output as { jobId: string }).jobId },
       env: env(),
-      enabledTools: ["tool_help", "x_get_trends"],
+      enabledTools: ["tool_help", "social_get_job"],
       signal: new AbortController().signal,
     });
 
-    expect(result.output).toMatchObject({
-      woeid: 1,
-      trends: expect.arrayContaining([expect.objectContaining({ name: "Trend 10" })]),
+    expect(completed.output).toMatchObject({
+      status: "completed",
+      posts: [{ id: "333", caption: "Async result" }],
     });
-    expect((result.output as { trends: unknown[] }).trends).toHaveLength(10);
-    expect(result.usage).toMatchObject({
-      provider: "x",
-      operation: "get_trends",
-      costUsdMicros: 100_000,
-      rawUsage: { trendsRead: 10, estimated: true },
-    });
-  });
-
-  it("explains full-archive X search access failures", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ title: "Forbidden" }), {
-            status: 403,
-          }),
-      ),
-    );
-
-    await expect(
-      executeHostedTool({
-        name: "x_search_posts",
-        args: { query: "AI agents", mode: "all" },
-        env: env(),
-        enabledTools: ["tool_help", "x_search_posts"],
-        signal: new AbortController().signal,
-      }),
-    ).rejects.toThrow("full-archive search and requires elevated API access");
   });
 
   it("returns help only for enabled tools", async () => {
@@ -1051,12 +937,12 @@ describe("getHostedToolFailureContext", () => {
     });
   });
 
-  it("classifies X validation, rate-limit, missing-token, and malformed-response failures", () => {
+  it("classifies X Apify validation, rate-limit, missing-token, and malformed-response failures", () => {
     expect(
       getHostedToolFailureContext({
         name: "x_get_profile",
         args: { username: "not valid!" },
-        error: new Error("X username must be 1-15 letters, numbers, or underscores."),
+        error: new Error("X username must be a username, @handle, or profile URL."),
       }),
     ).toMatchObject({
       hosted_provider: "x",
@@ -1068,32 +954,39 @@ describe("getHostedToolFailureContext", () => {
       getHostedToolFailureContext({
         name: "x_search_posts",
         args: { query: "test" },
-        error: new Error("X search_posts failed (429): Too Many Requests"),
+        error: new Error("Apify search failed (429): Too Many Requests"),
       }),
     ).toMatchObject({
       hosted_provider: "x",
-      hosted_operation: "search_posts",
+      hosted_operation: "search",
+      social_provider: "apify",
       tool_error_stage: "provider_response",
       tool_error_code: "x_rate_limited",
       provider_status: 429,
     });
     expect(
       getHostedToolFailureContext({
-        name: "x_get_trends",
-        args: {},
-        error: new Error("X_API_BEARER_TOKEN is required for x_get_trends."),
+        name: "x_get_discussion",
+        args: { postIdOrUrl: "https://x.com/opencompany/status/123" },
+        error: new Error("APIFY_API_TOKEN is required for social scraping."),
       }),
     ).toMatchObject({
+      hosted_provider: "x",
+      hosted_operation: "get_discussion",
+      social_provider: "apify",
       tool_error_stage: "configuration",
-      tool_error_code: "x_missing_bearer_token",
+      tool_error_code: "x_missing_apify_api_token",
     });
     expect(
       getHostedToolFailureContext({
-        name: "x_get_trends",
-        args: {},
-        error: new Error("X get_trends returned an unexpected response shape."),
+        name: "x_get_discussion",
+        args: { postIdOrUrl: "https://x.com/opencompany/status/123" },
+        error: new Error("Apify get_discussion returned an unexpected dataset shape."),
       }),
     ).toMatchObject({
+      hosted_provider: "x",
+      hosted_operation: "get_discussion",
+      social_provider: "apify",
       tool_error_stage: "provider_response",
       tool_error_code: "x_malformed_response",
     });
@@ -1878,23 +1771,35 @@ describe("validateHostedToolEnvironment", () => {
     ).toThrow(MissingEnvError);
   });
 
-  it("requires X_API_BEARER_TOKEN only when an X provider tool is enabled", () => {
+  it("requires APIFY_API_TOKEN when X or Apify-backed social tools are enabled", () => {
     expect(() =>
       validateHostedToolEnvironment({
         enabledTools: ["tool_help"],
-        env: env({ xApiBearerToken: undefined }),
+        env: env({ apifyApiToken: undefined }),
       }),
     ).not.toThrow();
     expect(() =>
       validateHostedToolEnvironment({
         enabledTools: ["tool_help", "x_search_posts"],
-        env: env({ xApiBearerToken: undefined }),
+        env: env({ apifyApiToken: undefined }),
       }),
     ).toThrow(MissingEnvError);
     expect(() =>
       validateHostedToolEnvironment({
         enabledTools: ["tool_help", "x_get_discussion"],
-        env: env({ xApiBearerToken: undefined }),
+        env: env({ apifyApiToken: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "instagram_get_profile"],
+        env: env({ apifyApiToken: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "tiktok_search"],
+        env: env({ apifyApiToken: undefined }),
       }),
     ).toThrow(MissingEnvError);
   });
@@ -2001,7 +1906,7 @@ describe("executeHostedTool (discover_capabilities)", () => {
   });
 
   it("reports a capability as needs_setup when its platform credential is missing", async () => {
-    const output = await discover({ env: env({ xApiBearerToken: undefined }) });
+    const output = await discover({ env: env({ apifyApiToken: undefined }) });
     expect(status(output, "x")).toBe("needs_setup");
     // exa is unaffected — its own credential is still present.
     expect(status(output, "exa")).toBe("available");
