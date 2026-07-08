@@ -3,11 +3,9 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 
 const GOAT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-4.8",
+  "openai/gpt-5.5",
   "moonshotai/kimi-k2.6",
-  "openai/gpt-5.4-mini",
-  "openai/gpt-5.4",
-  "anthropic/claude-sonnet-4.6",
-  "xai/grok-4.3",
 ] as const satisfies readonly AgentModelId[];
 
 const GOAT_MODEL_ID_SET = new Set<string>(GOAT_MODEL_IDS);

@@ -86,7 +86,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -132,7 +132,7 @@ describe("POST /api/chat", () => {
     });
 
     const request = jsonRequest({
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-5.5",
       message: {
         id: "ui_user_1",
         role: "user",
@@ -185,7 +185,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -238,7 +238,7 @@ describe("POST /api/chat", () => {
     });
 
     const request = jsonRequest({
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-5.5",
       message: {
         id: "ui_user_1",
         role: "user",
@@ -323,7 +323,7 @@ describe("POST /api/chat", () => {
 
     try {
       const request = jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -394,7 +394,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -435,7 +435,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         mentions: [{ kind: "engine", id: "codex" }],
         message: {
           id: "ui_user_1",
@@ -452,7 +452,7 @@ describe("POST /api/chat", () => {
       userWorkosId: "user_1",
       name: "Test repo access",
       prompt: "Check repo access and report whether development work can start.",
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-5.5",
       engine: "codex",
     });
   });
@@ -485,7 +485,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         mentions: [
           { kind: "engine", id: "opencompany" },
           { kind: "tool", id: "codex" },
@@ -534,7 +534,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         mentions: [{ kind: "engine", id: "codex" }],
         message: {
           id: "ui_user_1",
@@ -601,7 +601,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -664,7 +664,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -725,7 +725,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -786,7 +786,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -848,7 +848,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(
       jsonRequest({
-        model: "openai/gpt-5.4-mini",
+        model: "openai/gpt-5.5",
         message: {
           id: "ui_user_1",
           role: "user",
@@ -923,7 +923,7 @@ function mockCreateTurn() {
   mockCreateGoatChatUserTurn().mockResolvedValue({
     session: {
       id: "session_1",
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-5.5",
     },
     userMessage: {
       id: "user_message_1",

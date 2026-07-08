@@ -142,6 +142,15 @@ describe("GoatSurface chat streaming UI", () => {
     routerMock.refresh.mockReset();
     routerMock.replace.mockReset();
     vi.mocked(closeGoatChatSessionAction).mockClear();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
   });
 
   afterEach(() => {
@@ -167,6 +176,28 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(await screen.findByText("Hello Goat")).toBeInTheDocument();
+  });
+
+  it("selects from the active goat model list and sends the chosen model", async () => {
+    const user = userEvent.setup();
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+
+    expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
+    expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
+    expect(screen.getByText("Kimi K2.6")).toBeInTheDocument();
+    expect(screen.queryByText("GPT 5.4 Mini")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Kimi K2.6"));
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Compare");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
+      model: "moonshotai/kimi-k2.6",
+    });
   });
 
   it("keeps using the returned chat session id when the AI SDK transport is long-lived", async () => {
