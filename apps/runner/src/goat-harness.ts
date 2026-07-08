@@ -16,6 +16,7 @@ import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import * as ai from "ai";
 import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
 import type { RunnerEnv } from "./env";
+import { buildGoatTaskUserModelMessage } from "./goat-attachments";
 import {
   createGoatBrainMarkdownReportForTask,
   type GoatBrainMarkdownReportArtifact,
@@ -534,10 +535,16 @@ async function runGoatTaskModelStreamInner(input: {
   const tools = toolRuntime.tools;
 
   try {
+    const userMessage = await buildGoatTaskUserModelMessage({
+      taskId: input.taskId,
+      userWorkosId: input.userWorkosId,
+      prompt: input.harnessSpec.initialUserMessage,
+      blobToken: input.env.blobReadWriteToken,
+    });
     const stream = streamText({
       model: gateway(input.harnessSpec.model),
       system: input.harnessSpec.systemPrompt,
-      messages: [{ role: "user", content: input.harnessSpec.initialUserMessage }],
+      messages: [userMessage],
       tools,
       stopWhen: [ai.stepCountIs(input.harnessSpec.maxModelSteps)],
       prepareStep: ({ stepNumber }) =>

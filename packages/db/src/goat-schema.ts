@@ -194,6 +194,7 @@ export type GoatTaskDebugTrace = {
 };
 
 export type GoatChatRole = "user" | "assistant";
+export type GoatMessageAttachmentKind = "image" | "pdf" | "text";
 
 export type GoatChatMessageDebugTrace = {
   schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1";
@@ -1159,6 +1160,52 @@ export const goatChatMessages = goat.table(
   }),
 );
 
+export const goatMessageAttachments = goat.table(
+  "message_attachments",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id").references(() => goatChatSessions.id, {
+      onDelete: "cascade",
+    }),
+    chatMessageId: text("chat_message_id").references(() => goatChatMessages.id, {
+      onDelete: "cascade",
+    }),
+    taskId: text("task_id").references(() => goatTasks.id, { onDelete: "cascade" }),
+    taskMessageId: text("task_message_id").references(() => goatTaskMessages.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").$type<GoatMessageAttachmentKind>().notNull(),
+    mediaType: text("media_type").notNull(),
+    filename: text("filename").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    blobUrl: text("blob_url").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userCreatedIdx: index("goat_message_attachments_user_created_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    chatMessageIdx: index("goat_message_attachments_chat_message_idx").on(table.chatMessageId),
+    chatSessionIdx: index("goat_message_attachments_chat_session_idx").on(table.chatSessionId),
+    taskMessageIdx: index("goat_message_attachments_task_message_idx").on(table.taskMessageId),
+    taskIdx: index("goat_message_attachments_task_idx").on(table.taskId),
+    kindCheck: check(
+      "goat_message_attachments_kind_check",
+      sql`${table.kind} IN ('image', 'pdf', 'text')`,
+    ),
+    parentCheck: check(
+      "goat_message_attachments_parent_check",
+      sql`((${table.chatSessionId} IS NOT NULL AND ${table.chatMessageId} IS NOT NULL AND ${table.taskId} IS NULL AND ${table.taskMessageId} IS NULL) OR (${table.chatSessionId} IS NULL AND ${table.chatMessageId} IS NULL AND ${table.taskId} IS NOT NULL AND ${table.taskMessageId} IS NOT NULL))`,
+    ),
+    sizeCheck: check("goat_message_attachments_size_check", sql`${table.sizeBytes} > 0`),
+  }),
+);
+
 export const goatBrainToolRuns = goat.table(
   "brain_tool_runs",
   {
@@ -1270,6 +1317,7 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskModelUsage: many(goatTaskModelUsage),
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
+  messageAttachments: many(goatMessageAttachments),
   chatSessions: many(goatChatSessions),
   integrations: many(goatIntegrations),
   integrationCredentials: many(goatIntegrationCredentials),
@@ -1439,6 +1487,7 @@ export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
   modelUsage: many(goatTaskModelUsage),
   toolUsage: many(goatTaskToolUsage),
   sandboxUsage: many(goatTaskSandboxUsage),
+  messageAttachments: many(goatMessageAttachments),
   chatMessages: many(goatChatMessages),
   scheduleRuns: many(goatTaskScheduleRuns),
 }));
@@ -1480,6 +1529,7 @@ export const goatTaskMessagesRelations = relations(goatTaskMessages, ({ one, man
   modelUsage: many(goatTaskModelUsage),
   toolUsage: many(goatTaskToolUsage),
   sandboxUsage: many(goatTaskSandboxUsage),
+  messageAttachments: many(goatMessageAttachments),
 }));
 
 export const goatTaskEventsRelations = relations(goatTaskEvents, ({ one }) => ({
@@ -1548,10 +1598,11 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   messages: many(goatChatMessages),
+  messageAttachments: many(goatMessageAttachments),
   brainToolRuns: many(goatBrainToolRuns),
 }));
 
-export const goatChatMessagesRelations = relations(goatChatMessages, ({ one }) => ({
+export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, many }) => ({
   session: one(goatChatSessions, {
     fields: [goatChatMessages.sessionId],
     references: [goatChatSessions.id],
@@ -1559,6 +1610,30 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one }) =
   task: one(goatTasks, {
     fields: [goatChatMessages.taskId],
     references: [goatTasks.id],
+  }),
+  messageAttachments: many(goatMessageAttachments),
+}));
+
+export const goatMessageAttachmentsRelations = relations(goatMessageAttachments, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatMessageAttachments.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  chatSession: one(goatChatSessions, {
+    fields: [goatMessageAttachments.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  chatMessage: one(goatChatMessages, {
+    fields: [goatMessageAttachments.chatMessageId],
+    references: [goatChatMessages.id],
+  }),
+  task: one(goatTasks, {
+    fields: [goatMessageAttachments.taskId],
+    references: [goatTasks.id],
+  }),
+  taskMessage: one(goatTaskMessages, {
+    fields: [goatMessageAttachments.taskMessageId],
+    references: [goatTaskMessages.id],
   }),
 }));
 
@@ -1585,3 +1660,4 @@ export type GoatTaskToolUsage = typeof goatTaskToolUsage.$inferSelect;
 export type GoatTaskSandboxUsage = typeof goatTaskSandboxUsage.$inferSelect;
 export type GoatChatSession = typeof goatChatSessions.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
+export type GoatMessageAttachment = typeof goatMessageAttachments.$inferSelect;

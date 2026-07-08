@@ -242,6 +242,7 @@ function createInMemoryChatStore(
 ) {
   const sessions: GoatChatSession[] = [];
   const messages: StoredChatMessage[] = [];
+  const attachmentsByMessageId = new Map<string, NonNullable<StoredChatMessage["attachments"]>>();
   let sessionCount = 0;
   let messageCount = 0;
 
@@ -281,7 +282,12 @@ function createInMemoryChatStore(
     },
 
     async listMessages(sessionId) {
-      return messages.filter((message) => message.sessionId === sessionId);
+      return messages
+        .filter((message) => message.sessionId === sessionId)
+        .map((message) => ({
+          ...message,
+          attachments: attachmentsByMessageId.get(message.id) ?? [],
+        }));
     },
 
     async insertMessage(input) {
@@ -303,6 +309,18 @@ function createInMemoryChatStore(
       };
       messages.push(message);
       return message;
+    },
+
+    async insertMessageAttachments(input) {
+      const attachments = input.attachments.map((attachment, index) => ({
+        id: `attachment_${input.messageId}_${index}`,
+        kind: attachment.mediaType === "application/pdf" ? ("pdf" as const) : ("image" as const),
+        mediaType: attachment.mediaType,
+        filename: attachment.filename,
+        sizeBytes: attachment.sizeBytes,
+      }));
+      attachmentsByMessageId.set(input.messageId, attachments);
+      return attachments;
     },
 
     async touchSession(input) {

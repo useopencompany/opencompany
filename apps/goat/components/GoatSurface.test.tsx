@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
@@ -25,8 +25,19 @@ const routerMock = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
 
+const uploadMock = vi.hoisted(() =>
+  vi.fn(async (pathname: string) => ({
+    pathname,
+    url: `https://blob.example/${pathname}`,
+  })),
+);
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
+}));
+
+vi.mock("@vercel/blob/client", () => ({
+  upload: uploadMock,
 }));
 
 vi.mock("@/lib/chat-actions", () => ({
@@ -111,7 +122,13 @@ describe("GoatSurface chat streaming UI", () => {
     chatMock.stop.mockReset();
     routerMock.refresh.mockReset();
     routerMock.replace.mockReset();
+    uploadMock.mockClear();
     vi.mocked(closeGoatChatSessionAction).mockClear();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:preview"),
+      revokeObjectURL: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -137,6 +154,82 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(screen.getByText("Hello Goat")).toBeInTheDocument();
+  });
+
+  it("pastes a screenshot attachment and submits it without text", async () => {
+    render(
+      <GoatSurface
+        userWorkosId="user_1"
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    const file = new File(["png-bytes"], "screenshot.png", { type: "image/png" });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ kind: "file", getAsFile: () => file }],
+      },
+    });
+
+    expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
+    await waitFor(() => expect(uploadMock).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "",
+      metadata: {
+        attachments: [
+          {
+            id: expect.any(String),
+            kind: "image",
+            mediaType: "image/png",
+            filename: "screenshot.png",
+            sizeBytes: file.size,
+            previewUrl: "blob:preview",
+          },
+        ],
+      },
+    });
+  });
+
+  it("renders persisted user message attachments", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Report",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "msg_1",
+              role: "user",
+              metadata: {
+                sessionId: "chat_1",
+                attachments: [
+                  {
+                    id: "att_pdf",
+                    kind: "pdf",
+                    mediaType: "application/pdf",
+                    filename: "report.pdf",
+                    sizeBytes: 1234,
+                  },
+                ],
+              },
+              parts: [{ type: "text", text: "Summarize this" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: /report\.pdf/i });
+    expect(link).toHaveAttribute("href", "/api/attachments/att_pdf");
   });
 
   it("shows the Codex mention menu and submits selected mention metadata", async () => {

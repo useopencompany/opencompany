@@ -13,6 +13,7 @@ import {
   goatTaskToolUsage,
 } from "@opencompany/db/goat-schema";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { buildGoatAttachmentRows, type SubmitGoatAttachmentInput } from "@/lib/attachments";
 import { currentGoatUser } from "@/lib/auth";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { normalizeGoatTaskName } from "@/lib/task-display";
@@ -243,6 +244,7 @@ export async function createGoatTaskForUser(input: {
   harnessSpec?: GoatHarnessSpec;
   scheduleId?: string;
   scheduledFor?: Date;
+  attachments?: readonly SubmitGoatAttachmentInput[];
 }) {
   const id = `goat_task_${randomUUID()}`;
   const userMessageId = `goat_task_msg_${randomUUID()}`;
@@ -261,6 +263,15 @@ export async function createGoatTaskForUser(input: {
     resultMode: "assistant_final",
   };
   const modelMessage = { role: "user", content: input.prompt };
+  const attachmentRows = input.attachments?.length
+    ? buildGoatAttachmentRows({
+        userWorkosId: input.userWorkosId,
+        attachments: input.attachments,
+        taskId: id,
+        taskMessageId: userMessageId,
+        now,
+      })
+    : [];
   const task = rowsFromExecute<GoatTaskRow>(
     await getDb().execute(sql`
       WITH created_task AS (
@@ -322,6 +333,48 @@ export async function createGoatTaskForUser(input: {
           ${now}
         FROM created_task AS task
         RETURNING id
+      ),
+      inserted_attachments AS (
+        INSERT INTO goat.message_attachments (
+          id,
+          user_workos_id,
+          task_id,
+          task_message_id,
+          kind,
+          media_type,
+          filename,
+          size_bytes,
+          blob_pathname,
+          blob_url,
+          created_at
+        )
+        SELECT
+          attachment.id,
+          attachment.user_workos_id,
+          attachment.task_id,
+          attachment.task_message_id,
+          attachment.kind,
+          attachment.media_type,
+          attachment.filename,
+          attachment.size_bytes,
+          attachment.blob_pathname,
+          attachment.blob_url,
+          attachment.created_at
+        FROM jsonb_to_recordset(${JSON.stringify(attachmentRows)}::jsonb) AS attachment(
+          id text,
+          user_workos_id text,
+          task_id text,
+          task_message_id text,
+          kind text,
+          media_type text,
+          filename text,
+          size_bytes integer,
+          blob_pathname text,
+          blob_url text,
+          created_at timestamptz
+        )
+        WHERE EXISTS (SELECT 1 FROM inserted_user_message)
+        RETURNING id
       )
       SELECT
         task.id AS "id",
@@ -350,6 +403,7 @@ export async function createGoatTaskForUser(input: {
         task.updated_at AS "updatedAt"
       FROM created_task AS task
       WHERE EXISTS (SELECT 1 FROM inserted_user_message)
+        AND (${attachmentRows.length} = 0 OR (SELECT count(*) FROM inserted_attachments) = ${attachmentRows.length})
     `),
   ).map(goatTaskFromRow)[0];
 

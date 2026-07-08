@@ -28,6 +28,7 @@ import {
   FileText,
   LoaderCircle,
   MessageSquarePlus,
+  Paperclip,
   Pause,
   Play,
   Settings,
@@ -49,7 +50,15 @@ import {
   useState,
   useTransition,
 } from "react";
+import {
+  GOAT_ATTACHMENT_FILE_INPUT_ACCEPT,
+  GoatAttachmentCard,
+  GoatComposerAttachments,
+  GoatComposerDropOverlay,
+  toSubmitGoatAttachments,
+} from "@/components/goat-composer-attachments";
 import { Markdown } from "@/components/Markdown";
+import { useGoatComposerAttachments } from "@/components/useGoatComposerAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
@@ -123,7 +132,9 @@ export function GoatSurface({
   initialChat,
   recentChats = [],
   codexConnected = false,
+  userWorkosId = "goat_user_local",
 }: {
+  userWorkosId?: string;
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
   defaultModel: string;
@@ -133,6 +144,7 @@ export function GoatSurface({
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const lastError = useRef<string | null>(null);
@@ -142,6 +154,7 @@ export function GoatSurface({
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(false);
   const pendingInputCaretRef = useRef<number | null>(null);
+  const submitAttachmentsRef = useRef<ReturnType<typeof toSubmitGoatAttachments>>([]);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
@@ -162,6 +175,15 @@ export function GoatSurface({
   );
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
   const [, startArchiveTransition] = useTransition();
+  const {
+    attachments,
+    setAttachments,
+    acceptFiles,
+    removeAttachment,
+    handlePasteFiles,
+    dragHandlers,
+    isDragActive,
+  } = useGoatComposerAttachments({ userWorkosId, modelName: chatModel });
   const transport = useMemo(
     () =>
       new DefaultChatTransport<GoatChatUiMessage>({
@@ -174,6 +196,7 @@ export function GoatSurface({
               sessionId: chatSessionId,
               model: chatModel,
               message,
+              attachments: submitAttachmentsRef.current,
               ...(mentions.length ? { mentions } : {}),
             },
           };
@@ -194,6 +217,7 @@ export function GoatSurface({
     messages: initialChat?.messages ?? [],
     transport,
     onFinish: ({ message }) => {
+      submitAttachmentsRef.current = [];
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
         locallyHiddenSessionIdsRef.current.delete(sessionId);
@@ -207,6 +231,10 @@ export function GoatSurface({
     },
   });
   const isGenerating = status === "submitted" || status === "streaming";
+  const readyAttachments = attachments.filter(
+    (a) => a.status === "ready" && a.blobPathname && a.blobUrl,
+  );
+  const hasPendingAttachments = attachments.some((a) => a.status !== "ready");
   const hasMessages = messages.length > 0;
   const showThinkingBubble = isGenerating && shouldShowThinkingBubble(messages);
   const trimmedNewChatPrompt = newChatPrompt.trim();
@@ -385,11 +413,22 @@ export function GoatSurface({
     if (isGenerating) return;
 
     const prompt = input.trim();
-    if (!prompt) return;
+    if (!prompt && readyAttachments.length === 0) return;
+    if (hasPendingAttachments) return;
     const mentions =
       activeSelectedMentions.length > 0 && hasCodexMentionToken(prompt)
         ? activeSelectedMentions
         : [];
+    const submittedAttachments = readyAttachments;
+    const attachmentMetadata = submittedAttachments.map((attachment) => ({
+      id: attachment.id,
+      kind: attachment.kind,
+      mediaType: attachment.mediaType,
+      filename: attachment.filename,
+      sizeBytes: attachment.sizeBytes,
+      ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
+    }));
+    submitAttachmentsRef.current = toSubmitGoatAttachments(submittedAttachments);
 
     clearError();
     setMode("chat");
@@ -398,11 +437,18 @@ export function GoatSurface({
     setInput("");
     setMentionToken(null);
     setSelectedMentions([]);
+    setAttachments([]);
+    const metadata = {
+      ...(mentions.length > 0 ? { mentions } : {}),
+      ...(attachmentMetadata.length ? { attachments: attachmentMetadata } : {}),
+    };
     const message =
-      mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
+      Object.keys(metadata).length > 0 ? { text: prompt, metadata } : { text: prompt };
     void sendMessage(message).catch((error) => {
+      submitAttachmentsRef.current = [];
       setInput(prompt);
       setSelectedMentions(mentions);
+      setAttachments(submittedAttachments);
       toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
     });
   };
@@ -662,8 +708,10 @@ export function GoatSurface({
         ref={formRef}
         onSubmit={onSubmit}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
+        {...dragHandlers}
       >
         <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
+          {isDragActive ? <GoatComposerDropOverlay /> : null}
           {chatError ? (
             <p
               className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
@@ -695,44 +743,79 @@ export function GoatSurface({
               </button>
             </div>
           ) : null}
-          <div className="flex items-end gap-2.5 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
-            <div className="relative min-w-0 flex-1 self-center">
-              {input ? (
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                >
-                  {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
-                </div>
-              ) : null}
-              <textarea
-                ref={inputRef}
-                rows={1}
-                id="prompt"
-                name="prompt"
-                value={input}
-                placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
-                onChange={onInputChange}
-                onBlur={() => setMentionToken(null)}
-                onClick={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                onKeyDown={onKeyDown}
-                onSelect={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
+          <div className="rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
+            <GoatComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+            <div className="flex items-end gap-2.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={GOAT_ATTACHMENT_FILE_INPUT_ACCEPT}
+                className="hidden"
+                onChange={(event) => {
+                  const files = Array.from(event.currentTarget.files ?? []);
+                  event.currentTarget.value = "";
+                  if (files.length > 0) acceptFiles(files);
+                }}
+              />
+              <button
+                type="button"
+                aria-label="Attach files"
+                title="Attach files"
                 disabled={isGenerating}
-                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                maxLength={10_000}
-                required
+                onClick={() => fileInputRef.current?.click()}
+                className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none disabled:opacity-40"
+              >
+                <Paperclip size={15} strokeWidth={2} />
+              </button>
+              <div className="relative min-w-0 flex-1 self-center">
+                {input ? (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                  >
+                    {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
+                  </div>
+                ) : null}
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  id="prompt"
+                  name="prompt"
+                  value={input}
+                  placeholder={
+                    mode === "chat" ? "Reply..." : "Ask a question or describe a task..."
+                  }
+                  onChange={onInputChange}
+                  onBlur={() => setMentionToken(null)}
+                  onClick={(event) =>
+                    updateMentionToken(
+                      event.currentTarget.value,
+                      event.currentTarget.selectionStart,
+                    )
+                  }
+                  onKeyDown={onKeyDown}
+                  onPaste={(event) => {
+                    handlePasteFiles(event);
+                  }}
+                  onSelect={(event) =>
+                    updateMentionToken(
+                      event.currentTarget.value,
+                      event.currentTarget.selectionStart,
+                    )
+                  }
+                  disabled={isGenerating}
+                  className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                  maxLength={10_000}
+                />
+              </div>
+              <SubmitButton
+                disabled={(!input.trim() && readyAttachments.length === 0) || hasPendingAttachments}
+                isGenerating={isGenerating}
+                onStop={stopGeneration}
               />
             </div>
-            <SubmitButton
-              disabled={!input.trim()}
-              isGenerating={isGenerating}
-              onStop={stopGeneration}
-            />
           </div>
         </div>
       </form>
@@ -1336,6 +1419,7 @@ function Bubble({
   const isUser = message.role === "user";
   const text = textFromGoatChatUiMessage(message);
   const error = message.metadata?.error;
+  const attachments = message.metadata?.attachments ?? [];
 
   if (!isUser) {
     const items = getOrderedAssistantItems(
@@ -1360,17 +1444,36 @@ function Bubble({
   }
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-3 py-2 text-[13px] leading-5 ${
-          isUser
-            ? "rounded-br-md bg-ink text-canvas"
-            : error
-              ? "rounded-bl-md bg-danger-bg text-danger"
-              : "rounded-bl-md bg-surface-muted text-ink"
-        }`}
-      >
-        {isUser ? text : <Markdown content={text} />}
+    <div className="flex justify-end">
+      <div className="flex max-w-[80%] flex-col items-end gap-2">
+        {attachments.length > 0 ? (
+          <div className="flex flex-wrap justify-end gap-2">
+            {attachments.map((attachment) => (
+              <a
+                key={attachment.id}
+                href={`/api/attachments/${attachment.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="block"
+              >
+                <GoatAttachmentCard
+                  kind={attachment.kind}
+                  filename={attachment.filename}
+                  src={
+                    attachment.kind === "image"
+                      ? (attachment.previewUrl ?? `/api/attachments/${attachment.id}`)
+                      : undefined
+                  }
+                />
+              </a>
+            ))}
+          </div>
+        ) : null}
+        {text ? (
+          <div className="rounded-2xl rounded-br-md bg-ink px-3 py-2 text-[13px] leading-5 text-canvas">
+            {text}
+          </div>
+        ) : null}
       </div>
     </div>
   );

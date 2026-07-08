@@ -2,6 +2,7 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type {
   GoatChatMessage,
   GoatHarnessEngine,
+  GoatMessageAttachmentKind,
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
@@ -32,9 +33,19 @@ export type GoatChatMention = {
   id: "codex";
 };
 
+export type GoatChatAttachment = {
+  id: string;
+  kind: GoatMessageAttachmentKind;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  previewUrl?: string;
+};
+
 export type GoatChatMessageMetadata = {
   sessionId?: string;
   mentions?: GoatChatMention[];
+  attachments?: GoatChatAttachment[];
   taskId?: string;
   task?: GoatTaskCardMetadata | null;
   error?: string;
@@ -245,6 +256,7 @@ export type GoatStoredChatMessage = Pick<
   taskName: string | null;
   taskPrompt: string | null;
   taskStatus: GoatTaskStatus | null;
+  attachments?: GoatChatAttachment[];
 };
 
 export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "parts">) {
@@ -267,7 +279,13 @@ export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiM
 export function toGoatChatMessageMetadata(
   message: Pick<
     GoatStoredChatMessage,
-    "sessionId" | "taskId" | "taskDisplayId" | "taskName" | "taskStatus" | "debugTrace"
+    | "sessionId"
+    | "taskId"
+    | "taskDisplayId"
+    | "taskName"
+    | "taskStatus"
+    | "debugTrace"
+    | "attachments"
   >,
 ): GoatChatMessageMetadata | undefined {
   const task =
@@ -281,10 +299,21 @@ export function toGoatChatMessageMetadata(
       : null;
   const error = message.debugTrace?.error;
   const aborted = message.debugTrace?.aborted === true;
+  const attachments = message.attachments ?? [];
 
-  if (!message.sessionId && !message.taskId && !task && !error && !aborted) return undefined;
+  if (
+    !message.sessionId &&
+    !message.taskId &&
+    !task &&
+    !error &&
+    !aborted &&
+    attachments.length === 0
+  ) {
+    return undefined;
+  }
   return {
     sessionId: message.sessionId,
+    ...(attachments.length ? { attachments } : {}),
     ...(message.taskId ? { taskId: message.taskId } : {}),
     ...(task ? { task } : {}),
     ...(error ? { error } : {}),

@@ -8,9 +8,11 @@ import {
   type GoatChatSession,
   goatChatMessages,
   goatChatSessions,
+  goatMessageAttachments,
   goatTasks,
 } from "@opencompany/db/goat-schema";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { buildGoatAttachmentRows, type SubmitGoatAttachmentInput } from "@/lib/attachments";
 import { currentGoatUser } from "@/lib/auth";
 import {
   type GoatChatSessionView,
@@ -57,6 +59,12 @@ export type GoatChatStore = {
     taskId?: string | null;
     debugTrace?: GoatChatMessageDebugTrace | null;
   }): Promise<GoatChatMessage>;
+  insertMessageAttachments(input: {
+    userWorkosId: string;
+    sessionId: string;
+    messageId: string;
+    attachments: readonly SubmitGoatAttachmentInput[];
+  }): Promise<GoatStoredChatMessage["attachments"]>;
   touchSession(input: { sessionId: string; now: Date }): Promise<void>;
   closeSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
 };
@@ -131,6 +139,7 @@ export async function createGoatChatUserTurn(
     model: AgentModelId;
     sessionId?: string | null;
     messageId?: string | null;
+    attachments?: readonly SubmitGoatAttachmentInput[];
   },
   store: GoatChatStore = createDbGoatChatStore(),
 ) {
@@ -148,6 +157,14 @@ export async function createGoatChatUserTurn(
     role: "user",
     content: input.prompt,
   });
+  const attachments = input.attachments?.length
+    ? await store.insertMessageAttachments({
+        userWorkosId: input.userWorkosId,
+        sessionId: session.id,
+        messageId: userMessage.id,
+        attachments: input.attachments,
+      })
+    : [];
   const now = new Date();
   await store.touchSession({ sessionId: session.id, now });
 
@@ -156,7 +173,7 @@ export async function createGoatChatUserTurn(
     userMessage,
     messages: [
       ...previousMessages.map((message) => toGoatChatUiMessage(message)),
-      toGoatChatUiMessage(toStoredChatMessage(userMessage)),
+      toGoatChatUiMessage(toStoredChatMessage(userMessage, attachments)),
     ],
   };
 }
@@ -250,7 +267,7 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async listMessages(sessionId) {
-      return getDb()
+      const messages = await getDb()
         .select({
           id: goatChatMessages.id,
           sessionId: goatChatMessages.sessionId,
@@ -269,6 +286,7 @@ export function createDbGoatChatStore(): GoatChatStore {
         .leftJoin(goatTasks, eq(goatChatMessages.taskId, goatTasks.id))
         .where(eq(goatChatMessages.sessionId, sessionId))
         .orderBy(asc(goatChatMessages.createdAt));
+      return attachGoatChatMessageAttachments(messages);
     },
 
     async insertMessage(input) {
@@ -288,6 +306,24 @@ export function createDbGoatChatStore(): GoatChatStore {
         .returning();
       if (!message) throw new Error("Unable to create Goat chat message.");
       return message;
+    },
+
+    async insertMessageAttachments(input) {
+      if (input.attachments.length === 0) return [];
+      const rows = buildGoatAttachmentRows({
+        userWorkosId: input.userWorkosId,
+        attachments: input.attachments,
+        chatSessionId: input.sessionId,
+        chatMessageId: input.messageId,
+      });
+      const inserted = await getDb().insert(goatMessageAttachments).values(rows).returning({
+        id: goatMessageAttachments.id,
+        kind: goatMessageAttachments.kind,
+        mediaType: goatMessageAttachments.mediaType,
+        filename: goatMessageAttachments.filename,
+        sizeBytes: goatMessageAttachments.sizeBytes,
+      });
+      return inserted;
     },
 
     async touchSession(input) {
@@ -384,7 +420,54 @@ function titleFromPrompt(prompt: string) {
   return toGoatTaskTitle(title ?? "New chat");
 }
 
-function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
+async function attachGoatChatMessageAttachments(
+  messages: GoatStoredChatMessage[],
+): Promise<GoatStoredChatMessage[]> {
+  const messageIds = messages.map((message) => message.id);
+  if (messageIds.length === 0) return messages;
+
+  const rows = await getDb()
+    .select({
+      id: goatMessageAttachments.id,
+      chatMessageId: goatMessageAttachments.chatMessageId,
+      kind: goatMessageAttachments.kind,
+      mediaType: goatMessageAttachments.mediaType,
+      filename: goatMessageAttachments.filename,
+      sizeBytes: goatMessageAttachments.sizeBytes,
+    })
+    .from(goatMessageAttachments)
+    .where(inArray(goatMessageAttachments.chatMessageId, messageIds))
+    .orderBy(asc(goatMessageAttachments.createdAt));
+  if (rows.length === 0) return messages;
+
+  const byMessageId = new Map<string, NonNullable<GoatStoredChatMessage["attachments"]>>();
+  for (const row of rows) {
+    if (!row.chatMessageId) continue;
+    const existing = byMessageId.get(row.chatMessageId);
+    const attachment = {
+      id: row.id,
+      kind: row.kind,
+      mediaType: row.mediaType,
+      filename: row.filename,
+      sizeBytes: row.sizeBytes,
+    };
+    if (existing) {
+      existing.push(attachment);
+    } else {
+      byMessageId.set(row.chatMessageId, [attachment]);
+    }
+  }
+
+  return messages.map((message) => {
+    const attachments = byMessageId.get(message.id);
+    return attachments ? { ...message, attachments } : message;
+  });
+}
+
+function toStoredChatMessage(
+  message: GoatChatMessage,
+  attachments: GoatStoredChatMessage["attachments"] = [],
+): GoatStoredChatMessage {
   return {
     id: message.id,
     sessionId: message.sessionId,
@@ -398,6 +481,7 @@ function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
     taskName: null,
     taskPrompt: null,
     taskStatus: null,
+    attachments,
   };
 }
 

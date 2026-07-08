@@ -9,6 +9,7 @@ import {
   startGoatSpan,
 } from "@opencompany/goat-observability";
 import { convertToModelMessages, createGateway, stepCountIs, streamText } from "ai";
+import { type SubmitGoatAttachmentInput, validateGoatSubmitAttachments } from "@/lib/attachments";
 import { currentGoatUser } from "@/lib/auth";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
@@ -26,6 +27,7 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
+import { hydrateGoatChatAttachmentsForModel } from "@/lib/chat-attachments";
 import {
   type DeleteTaskScheduleToolOutput,
   type EditTaskScheduleToolOutput,
@@ -54,6 +56,7 @@ type ChatRequestBody = {
   model?: unknown;
   message?: unknown;
   mentions?: unknown;
+  attachments?: unknown;
 };
 
 export async function POST(request: Request): Promise<Response> {
@@ -74,6 +77,14 @@ export async function POST(request: Request): Promise<Response> {
     sessionId: body.value.sessionId,
   });
   if (!parsed.ok) return new Response(parsed.error, { status: 400 });
+  const attachments = readSubmitAttachments(body.value.attachments);
+  if (!attachments.ok) return new Response(attachments.error, { status: 400 });
+  const attachmentCheck = validateGoatSubmitAttachments({
+    attachments: attachments.value,
+    userWorkosId: context.user.workosUserId,
+    modelName: parsed.value.model,
+  });
+  if (!attachmentCheck.ok) return new Response(attachmentCheck.error, { status: 400 });
   const mentionEngine = readGoatChatMentionEngine(body.value.mentions);
   const requestedEngine =
     mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
@@ -133,6 +144,7 @@ export async function POST(request: Request): Promise<Response> {
         model: parsed.value.model,
         sessionId: parsed.value.sessionId,
         messageId: safeClientMessageId(message.id),
+        ...(attachments.value.length ? { attachments: attachments.value } : {}),
       },
       store,
     );
@@ -188,6 +200,7 @@ export async function POST(request: Request): Promise<Response> {
         prompt: task.prompt,
         model: task.model,
         ...(task.engine ? { engine: task.engine } : {}),
+        ...(attachments.value.length ? { attachments: attachments.value } : {}),
       });
       const attributes = {
         ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
@@ -307,7 +320,13 @@ export async function POST(request: Request): Promise<Response> {
       webSearchEnabled: Boolean(exaApiKey),
       recurringSchedules,
     }),
-    messages: await convertToModelMessages(turn.messages),
+    messages: await convertToModelMessages(
+      await hydrateGoatChatAttachmentsForModel({
+        messages: turn.messages,
+        userWorkosId: context.user.workosUserId,
+        blobToken: process.env.BLOB_READ_WRITE_TOKEN,
+      }),
+    ),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     abortSignal: request.signal,
     tools: toolContext.tools,
@@ -604,6 +623,28 @@ function normalizedOptionalString(value: unknown) {
 function readGoatChatMentionEngine(value: unknown) {
   if (!Array.isArray(value)) return undefined;
   return value.some((item) => isCodexEngineMention(item)) ? "codex" : undefined;
+}
+
+function readSubmitAttachments(
+  value: unknown,
+): { ok: true; value: SubmitGoatAttachmentInput[] } | { ok: false; error: string } {
+  if (value === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(value)) return { ok: false, error: "Invalid attachments." };
+  const attachments: SubmitGoatAttachmentInput[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return { ok: false, error: "Invalid attachments." };
+    const blobPathname = normalizedOptionalString(item.blobPathname);
+    const blobUrl = normalizedOptionalString(item.blobUrl);
+    const mediaType = normalizedOptionalString(item.mediaType);
+    const filename = normalizedOptionalString(item.filename);
+    const sizeBytes =
+      typeof item.sizeBytes === "number" && Number.isFinite(item.sizeBytes) ? item.sizeBytes : null;
+    if (!blobPathname || !blobUrl || !mediaType || !filename || sizeBytes === null) {
+      return { ok: false, error: "Invalid attachments." };
+    }
+    attachments.push({ blobPathname, blobUrl, mediaType, filename, sizeBytes });
+  }
+  return { ok: true, value: attachments };
 }
 
 function isCodexEngineMention(value: unknown) {

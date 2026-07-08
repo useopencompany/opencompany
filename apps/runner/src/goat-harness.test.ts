@@ -19,6 +19,12 @@ const goatBrainMock = vi.hoisted(() => ({
 const goatCodexMock = vi.hoisted(() => ({
   runGoatCodexTask: vi.fn(),
 }));
+const goatAttachmentsMock = vi.hoisted(() => ({
+  buildGoatTaskUserModelMessage: vi.fn(async (input: { prompt: string }) => ({
+    role: "user" as const,
+    content: input.prompt,
+  })),
+}));
 
 vi.mock("ai", () => ({
   generateObject: aiMock.generateObject,
@@ -35,6 +41,7 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 
 vi.mock("./goat-brain", () => goatBrainMock);
 vi.mock("./goat-codex", () => goatCodexMock);
+vi.mock("./goat-attachments", () => goatAttachmentsMock);
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
@@ -78,6 +85,12 @@ beforeEach(() => {
     model: "gpt-5.5",
     usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
   });
+  goatAttachmentsMock.buildGoatTaskUserModelMessage.mockImplementation(
+    async (input: { prompt: string }) => ({
+      role: "user" as const,
+      content: input.prompt,
+    }),
+  );
 });
 
 describe("planGoatHarness", () => {

@@ -1,4 +1,5 @@
 import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
+import { currentGoatUser } from "@/lib/auth";
 import { listCurrentUserRecentGoatChats, loadCurrentGoatChatSessionById } from "@/lib/chat";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
@@ -14,7 +15,8 @@ type GoatHomePageProps = {
 export default async function GoatHomePage({ searchParams }: GoatHomePageProps) {
   const params = await searchParams;
   const chatParam = Array.isArray(params.chat) ? params.chat[0] : params.chat;
-  const [tasks, schedules, initialChat, recentChats, codexAuth] = await Promise.all([
+  const [context, tasks, schedules, initialChat, recentChats, codexAuth] = await Promise.all([
+    currentGoatUser(),
     listCurrentUserGoatTasks(),
     listCurrentUserGoatTaskSchedules(),
     loadCurrentGoatChatSessionById(chatParam),
@@ -43,6 +45,7 @@ export default async function GoatHomePage({ searchParams }: GoatHomePageProps) 
   return (
     <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <GoatSurface
+        userWorkosId={context.user.workosUserId}
         tasks={taskViews}
         schedules={schedules}
         defaultModel={DEFAULT_GOAT_MODEL}

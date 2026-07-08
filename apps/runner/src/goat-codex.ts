@@ -32,6 +32,10 @@ import {
 import { getDb } from "./db";
 import { brokerActive, brokerBaseUrl, type RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
+import {
+  formatGoatTaskAttachmentManifest,
+  materializeGoatTaskAttachmentsForCodex,
+} from "./goat-attachments";
 import { withBrokerDelegation } from "./llm-broker-tokens";
 import {
   cloneGitHubRepositoryIntoWorkdir,
@@ -255,7 +259,17 @@ async function runGoatCodexCommand(input: {
     githubAuthHeader,
   ]);
 
-  const task = buildCodexTask(input);
+  const materializedAttachments = await materializeGoatTaskAttachmentsForCodex({
+    sandbox: input.sandbox,
+    taskId: input.taskId,
+    userWorkosId: input.userWorkosId,
+    workdir: CODEX_WORKDIR,
+    blobToken: input.env.blobReadWriteToken,
+  });
+  const task = buildCodexTask({
+    ...input,
+    attachmentManifest: formatGoatTaskAttachmentManifest(materializedAttachments),
+  });
   const envs = {
     CODEX_HOME,
     ...(input.auth.kind === "api" ? { [input.auth.apiKeyEnvVar]: input.auth.apiKeyValue } : {}),
@@ -555,6 +569,7 @@ function buildCodexTask(input: {
   prompt: string;
   repository: unknown;
   goalMode?: CodexGoalModeInput | null;
+  attachmentManifest?: string | null;
 }) {
   return [
     input.systemPrompt,
@@ -573,6 +588,7 @@ function buildCodexTask(input: {
     "<task>",
     input.prompt,
     "</task>",
+    input.attachmentManifest,
     input.repository
       ? "Work in the checked-out repository. Make only changes needed for the task, then summarize the result."
       : "Work in the current sandbox workspace. Create or edit files only when needed for the task.",

@@ -24,6 +24,10 @@ const githubMocks = vi.hoisted(() => ({
   createDraftPullRequest: vi.fn(),
   getGitHubWorkInstallationToken: vi.fn(),
 }));
+const goatAttachmentMocks = vi.hoisted(() => ({
+  materializeGoatTaskAttachmentsForCodex: vi.fn(async () => []),
+  formatGoatTaskAttachmentManifest: vi.fn(() => null),
+}));
 
 const sandboxMocks = vi.hoisted(() => ({
   cloneGitHubRepositoryIntoWorkdir: vi.fn(),
@@ -57,6 +61,8 @@ vi.mock("./github", () => ({
   getGitHubWorkInstallationToken: githubMocks.getGitHubWorkInstallationToken,
 }));
 
+vi.mock("./goat-attachments", () => goatAttachmentMocks);
+
 vi.mock("./sandbox", () => ({
   cloneGitHubRepositoryIntoWorkdir: sandboxMocks.cloneGitHubRepositoryIntoWorkdir,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
@@ -75,6 +81,8 @@ describe("runGoatCodexTask", () => {
     githubMocks.createDraftPullRequest.mockResolvedValue({
       html_url: "https://github.com/octo/repo/pull/123",
     });
+    goatAttachmentMocks.materializeGoatTaskAttachmentsForCodex.mockResolvedValue([]);
+    goatAttachmentMocks.formatGoatTaskAttachmentManifest.mockReturnValue(null);
     sandboxMocks.cloneGitHubRepositoryIntoWorkdir.mockResolvedValue(undefined);
     sandboxMocks.killSandbox.mockResolvedValue(undefined);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox());
@@ -346,6 +354,7 @@ function queryBuilder(rows: unknown[]) {
     from: () => builder,
     innerJoin: () => builder,
     where: () => builder,
+    orderBy: async () => rows,
     limit: async () => rows,
   };
   return builder;
