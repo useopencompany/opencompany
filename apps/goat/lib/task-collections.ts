@@ -66,6 +66,16 @@ export type GoatChatMessageRow = {
   updated_at: string;
 };
 
+export type GoatChatSessionRow = {
+  id: string;
+  user_workos_id: string;
+  title: string;
+  model: string;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type GoatTaskMessageRow = {
   id: string;
   task_id: string;
@@ -312,6 +322,12 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
+  const chatSessions = createGoatElectricCollection<GoatChatSessionRow>({
+    id: "goat:chat_sessions",
+    table: "goat.chat_sessions",
+    getKey: (row) => row.id,
+  });
+
   const integrations = createGoatElectricCollection<GoatIntegrationRow>({
     id: "goat:integrations",
     table: "goat.integrations",
@@ -339,6 +355,7 @@ function buildGoatCollections() {
   return {
     tasks,
     taskSchedules,
+    chatSessions,
     taskRunCollections: getTaskRunCollections,
     chatMessages: getChatMessageCollection,
     integrations,

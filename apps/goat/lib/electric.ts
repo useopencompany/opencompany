@@ -74,6 +74,14 @@ const SHAPE_SCOPES = {
     table: "goat.chat_messages",
     where: scopedChatMessageWhere,
   },
+  chat_sessions: {
+    table: "goat.chat_sessions",
+    where: scopedOpenChatSessionWhere,
+  },
+  "goat.chat_sessions": {
+    table: "goat.chat_sessions",
+    where: scopedOpenChatSessionWhere,
+  },
   integrations: {
     table: "goat.integrations",
     where: scopedUserWhere,
@@ -200,6 +208,13 @@ function scopedChatMessageWhere(
   return {
     clause: `"session_id" = $1`,
     params: [sessionId],
+  };
+}
+
+function scopedOpenChatSessionWhere(userWorkosId: string): ShapeWhere {
+  return {
+    clause: `"user_workos_id" = $1 AND "closed_at" IS NULL`,
+    params: [userWorkosId],
   };
 }
 
