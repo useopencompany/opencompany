@@ -1,7 +1,15 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeft, CircleUserRound, FileText, Mail, UserRound } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  CircleUserRound,
+  FileText,
+  Mail,
+  UserRound,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
@@ -43,7 +51,7 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
 }
 
 export function GoatSettingsRoute() {
-  const { integrations, user } = useGoatAppData();
+  const { integrations, user, workspace } = useGoatAppData();
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
   const initials = getInitials(user.firstName, user.lastName, user.email);
@@ -91,6 +99,32 @@ export function GoatSettingsRoute() {
               label="Last name"
               value={user.lastName?.trim() || "Not set"}
             />
+          </section>
+
+          <section className="flex flex-col gap-1">
+            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+              Workspace
+            </h2>
+            <Link
+              href="/settings/workspace"
+              prefetch
+              className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-surface-hover"
+            >
+              <Users size={14} strokeWidth={1.75} className="shrink-0 text-ink/50" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] leading-tight text-ink/90">
+                  {workspace.name}
+                </span>
+                <span className="block truncate text-[11px] leading-tight text-ink-subtle">
+                  Members, invitations, and brain access
+                </span>
+              </span>
+              <ChevronRight
+                size={14}
+                strokeWidth={1.75}
+                className="shrink-0 text-ink/40 transition-colors group-hover:text-ink/70"
+              />
+            </Link>
           </section>
 
           <section className="flex flex-col gap-1">

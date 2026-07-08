@@ -59,6 +59,7 @@ export function createOpenCompanyChatSystemPrompt(
     currentDate?: Date | string;
     userContext?: OpenCompanyChatUserContext;
     webSearchEnabled?: boolean;
+    activeBrain?: { name: string; workspaceName: string } | null;
     recurringSchedules?: readonly {
       id: string;
       name: string;
@@ -73,6 +74,7 @@ export function createOpenCompanyChatSystemPrompt(
     OPENCOMPANY_CHAT_SYSTEM,
     promptBlock("runtime_context", [
       `Current date: ${formatPromptDate(input.currentDate)}.`,
+      ...formatActiveBrainContext(input.activeBrain),
       ...formatRecurringScheduleContext(input.recurringSchedules),
     ]),
     promptBlock("user_context", formatUserContext(input.userContext)),
@@ -82,6 +84,17 @@ export function createOpenCompanyChatSystemPrompt(
     ]),
     OPENCOMPANY_CHAT_SOUL,
   ].join("\n\n");
+}
+
+function formatActiveBrainContext(
+  activeBrain: { name: string; workspaceName: string } | null | undefined,
+) {
+  if (!activeBrain) {
+    return ["No brain is available: the goat_brain tool will fail until one is accessible."];
+  }
+  return [
+    `The goat_brain tool reads and writes the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace. Saved and recalled context is scoped to that brain.`,
+  ];
 }
 
 function formatRecurringScheduleContext(

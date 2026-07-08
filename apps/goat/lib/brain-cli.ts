@@ -63,6 +63,7 @@ type GoatBrainCliProcessResult = GoatBrainToolOutput & {
 };
 
 export async function runGoatBrainCliForUser(input: {
+  brainRef: string;
   userWorkosId: string;
   args?: string;
   argv?: string[];
@@ -84,7 +85,8 @@ export async function runGoatBrainCliForUser(input: {
 
   const command = normalizeResolvedGoatBrainCommand(resolved.argv[0]);
   if (command && !goatBrainCommandIsReadOnly(command)) {
-    return enqueueGoatBrainMutation(input.userWorkosId, () =>
+    // Queue keyed by brain: shared brains serialize mutations across users.
+    return enqueueGoatBrainMutation(input.brainRef, () =>
       runResolvedGoatBrainCliForUser(input, resolved, command),
     );
   }
@@ -92,6 +94,7 @@ export async function runGoatBrainCliForUser(input: {
 }
 
 export async function runGoatBrainToolForUser(input: {
+  brainRef: string;
   userWorkosId: string;
   toolInput: GoatBrainToolInput;
   gatewayApiKey: string;
@@ -115,6 +118,7 @@ export async function runGoatBrainToolForUser(input: {
     };
   }
   return runGoatBrainCliForUser({
+    brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     argv: invocation.argv,
     gatewayApiKey: input.gatewayApiKey,
@@ -133,6 +137,7 @@ export async function runGoatBrainToolForUser(input: {
 
 async function runResolvedGoatBrainCliForUser(
   input: {
+    brainRef: string;
     userWorkosId: string;
     gatewayApiKey: string;
     stdin?: string;
@@ -154,7 +159,7 @@ async function runResolvedGoatBrainCliForUser(
 
   try {
     materialized = await materializeGoatBrainFilesToRoot({
-      userWorkosId: input.userWorkosId,
+      brainRef: input.brainRef,
       root,
       cliSource: getGoatBrainCliSource(),
     });
@@ -170,6 +175,7 @@ async function runResolvedGoatBrainCliForUser(
     output = publicGoatBrainCliOutput(processResult, resolved);
     if (shouldSync && processResult.ok) {
       const synced = await syncGoatBrainFilesFromRootWithTransactionDb({
+        brainRef: input.brainRef,
         userWorkosId: input.userWorkosId,
         root,
         baseSnapshot: materialized,
@@ -227,6 +233,7 @@ async function runResolvedGoatBrainCliForUser(
 }
 
 async function syncGoatBrainFilesFromRootWithTransactionDb(input: {
+  brainRef: string;
   userWorkosId: string;
   root: string;
   baseSnapshot: MaterializedGoatBrainFile[];
@@ -580,24 +587,21 @@ function goatBrainCommandIsReadOnly(command: GoatBrainCliCommand): boolean {
   return READ_ONLY_GOAT_BRAIN_COMMANDS.has(command);
 }
 
-async function enqueueGoatBrainMutation<T>(
-  userWorkosId: string,
-  run: () => Promise<T>,
-): Promise<T> {
-  const previous = GOAT_BRAIN_MUTATION_QUEUES.get(userWorkosId) ?? Promise.resolve();
+async function enqueueGoatBrainMutation<T>(brainRef: string, run: () => Promise<T>): Promise<T> {
+  const previous = GOAT_BRAIN_MUTATION_QUEUES.get(brainRef) ?? Promise.resolve();
   let release: () => void = () => {};
   const current = previous.then(run, run);
   const parked = current.then(
     () => new Promise<void>((resolve) => (release = resolve)),
     () => new Promise<void>((resolve) => (release = resolve)),
   );
-  GOAT_BRAIN_MUTATION_QUEUES.set(userWorkosId, parked);
+  GOAT_BRAIN_MUTATION_QUEUES.set(brainRef, parked);
   try {
     return await current;
   } finally {
     release();
-    if (GOAT_BRAIN_MUTATION_QUEUES.get(userWorkosId) === parked) {
-      GOAT_BRAIN_MUTATION_QUEUES.delete(userWorkosId);
+    if (GOAT_BRAIN_MUTATION_QUEUES.get(brainRef) === parked) {
+      GOAT_BRAIN_MUTATION_QUEUES.delete(brainRef);
     }
   }
 }

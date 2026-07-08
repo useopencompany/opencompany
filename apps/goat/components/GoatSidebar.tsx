@@ -5,6 +5,7 @@ import { Brain, House, PanelLeft, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
 
 function SidebarNavRow({
   href,
@@ -82,6 +83,14 @@ export function GoatSidebar({
           <SidebarNavRow href="/" icon={House} label="Home" active={homeActive} />
           <SidebarNavRow href="/brain" icon={Brain} label="Brain" active={brainActive} />
         </nav>
+
+        {/* Brains */}
+        <div className="px-2 pt-4">
+          <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+            Brains
+          </div>
+          <GoatBrainSwitcher />
+        </div>
 
         <div className="min-h-0 flex-1" />
 

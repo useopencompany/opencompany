@@ -32,6 +32,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
@@ -120,14 +121,24 @@ function LiveGoatBrainView({
   initialFolderPath,
   initialBrainId,
 }: Props) {
+  const { activeBrain } = useGoatAppData();
   const collections = useMemo(() => createGoatCollections(), []);
-  const { data: fileRows, isLoading: filesLoading } = useLiveQuery((q) =>
-    q.from({ file: collections.brainDocuments }),
+  const brainCollections = useMemo(
+    () => collections.brainCollections(activeBrain?.id ?? "__no-brain__"),
+    [activeBrain?.id, collections],
   );
-  const { data: timelineRows } = useLiveQuery((q) =>
-    q.from({ timeline: collections.brainTimelineEntries }),
+  const { data: fileRows, isLoading: filesLoading } = useLiveQuery(
+    (q) => q.from({ file: brainCollections.documents }),
+    [brainCollections],
   );
-  const { data: edgeRows } = useLiveQuery((q) => q.from({ edge: collections.brainEdges }));
+  const { data: timelineRows } = useLiveQuery(
+    (q) => q.from({ timeline: brainCollections.timelineEntries }),
+    [brainCollections],
+  );
+  const { data: edgeRows } = useLiveQuery(
+    (q) => q.from({ edge: brainCollections.edges }),
+    [brainCollections],
+  );
   const documents = useMemo(() => {
     if (filesLoading && !fileRows?.length) return initialDocuments;
     const timelinesByDocument = groupTimelineRows(

@@ -122,22 +122,54 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url?.searchParams.get("params[2]")).toBe("goat_task_1");
   });
 
-  it.each([
-    "goat.integrations",
-    "goat.brain_folders",
-    "goat.brain_documents",
-    "goat.brain_timeline_entries",
-  ])("scopes %s to the authenticated WorkOS user", (table) => {
+  it("scopes goat.integrations to the authenticated WorkOS user", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
-      requestUrl: new URL(`https://goat.example.com/api/electric/v1/shape?table=${table}`),
+      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.integrations"),
       userWorkosId: "user_123",
     });
 
-    expect(url?.searchParams.get("table")).toBe(table);
+    expect(url?.searchParams.get("table")).toBe("goat.integrations");
     expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
     expect(url?.searchParams.get("params[2]")).toBeNull();
+  });
+
+  it.each([
+    "goat.brain_folders",
+    "goat.brain_documents",
+    "goat.brain_timeline_entries",
+    "goat.brain_edges",
+  ])("scopes %s to the route-authorized brain ref", (table) => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        `https://goat.example.com/api/electric/v1/shape?table=${table}&brain_ref=goat_brain_1&where=1=1`,
+      ),
+      userWorkosId: "user_123",
+      authorizedBrainRef: "goat_brain_1",
+    });
+
+    expect(url?.searchParams.get("table")).toBe(table);
+    expect(url?.searchParams.get("where")).toBe('"brain_ref" = $1');
+    expect(url?.searchParams.get("params[1]")).toBe("goat_brain_1");
+    expect(url?.searchParams.get("params[2]")).toBeNull();
+  });
+
+  it.each([
+    "goat.brain_documents without a route-authorized brain ref",
+    "goat.brain_documents with a mismatched authorized brain ref",
+  ])("rejects %s", (label) => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_documents&brain_ref=goat_brain_1",
+      ),
+      userWorkosId: "user_123",
+      ...(label.includes("mismatched") ? { authorizedBrainRef: "goat_brain_other" } : {}),
+    });
+
+    expect(url).toBeNull();
   });
 
   it("requires Electric Cloud source id and secret together", () => {

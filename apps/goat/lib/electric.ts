@@ -5,7 +5,19 @@ type ShapeWhere = {
 
 type ShapeWhereContext = {
   authorizedChatSessionId?: string | null | undefined;
+  authorizedBrainRef?: string | null | undefined;
 };
+
+const BRAIN_SHAPE_TABLES = new Set([
+  "brain_folders",
+  "goat.brain_folders",
+  "brain_documents",
+  "goat.brain_documents",
+  "brain_timeline_entries",
+  "goat.brain_timeline_entries",
+  "brain_edges",
+  "goat.brain_edges",
+]);
 
 const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"] as const;
 
@@ -92,35 +104,35 @@ const SHAPE_SCOPES = {
   },
   brain_folders: {
     table: "goat.brain_folders",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
   "goat.brain_folders": {
     table: "goat.brain_folders",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
   brain_documents: {
     table: "goat.brain_documents",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
   "goat.brain_documents": {
     table: "goat.brain_documents",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
   brain_timeline_entries: {
     table: "goat.brain_timeline_entries",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
   "goat.brain_timeline_entries": {
     table: "goat.brain_timeline_entries",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
   brain_edges: {
     table: "goat.brain_edges",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
   "goat.brain_edges": {
     table: "goat.brain_edges",
-    where: scopedUserWhere,
+    where: scopedBrainWhere,
   },
 } as const;
 
@@ -140,6 +152,7 @@ export function buildGoatElectricOriginUrl(input: {
   requestUrl: URL;
   userWorkosId: string;
   authorizedChatSessionId?: string | null | undefined;
+  authorizedBrainRef?: string | null | undefined;
   sourceId?: string | null | undefined;
   sourceSecret?: string | null | undefined;
   electricSecret?: string | null | undefined;
@@ -156,6 +169,7 @@ export function buildGoatElectricOriginUrl(input: {
 
   const resolved = scope.where(input.userWorkosId, input.requestUrl, {
     authorizedChatSessionId: input.authorizedChatSessionId,
+    authorizedBrainRef: input.authorizedBrainRef,
   });
   if (!resolved) return null;
 
@@ -208,6 +222,30 @@ function scopedChatMessageWhere(
   return {
     clause: `"session_id" = $1`,
     params: [sessionId],
+  };
+}
+
+export function goatElectricBrainRef(requestUrl: URL) {
+  const table = requestUrl.searchParams.get("table");
+  if (!table || !BRAIN_SHAPE_TABLES.has(table)) return null;
+
+  const brainRef = requestUrl.searchParams.get("brain_ref")?.trim();
+  return brainRef || null;
+}
+
+// Brain shapes are only forwarded when the route authorized the requested
+// brain_ref for this user; the client-supplied value is never trusted here.
+function scopedBrainWhere(
+  _userWorkosId: string,
+  requestUrl: URL,
+  context: ShapeWhereContext,
+): ShapeWhere | null {
+  const brainRef = goatElectricBrainRef(requestUrl);
+  if (!brainRef || context.authorizedBrainRef !== brainRef) return null;
+
+  return {
+    clause: `"brain_ref" = $1`,
+    params: [brainRef],
   };
 }
 

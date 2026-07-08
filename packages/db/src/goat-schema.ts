@@ -108,6 +108,8 @@ export type GoatHarnessSpec = {
   };
 };
 
+export type GoatWorkspaceRole = "admin" | "member";
+export type GoatBrainVisibility = "workspace" | "restricted";
 export type GoatBrainFolderSource = "system" | "custom";
 export type GoatBrainEntityType =
   | "person"
@@ -222,6 +224,107 @@ export const goatUsers = goat.table("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const goatWorkspaces = goat.table(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    workosOrganizationId: text("workos_organization_id"),
+    name: text("name").notNull(),
+    createdByWorkosId: text("created_by_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workosOrganizationIdx: uniqueIndex("goat_workspaces_workos_organization_idx").on(
+      table.workosOrganizationId,
+    ),
+  }),
+);
+
+export const goatWorkspaceMembers = goat.table(
+  "workspace_members",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    role: text("role").$type<GoatWorkspaceRole>().notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceUserIdx: uniqueIndex("goat_workspace_members_workspace_user_idx").on(
+      table.workspaceId,
+      table.userWorkosId,
+    ),
+    userIdx: index("goat_workspace_members_user_idx").on(table.userWorkosId),
+    roleCheck: check(
+      "goat_workspace_members_role_check",
+      sql`${table.role} IN ('admin', 'member')`,
+    ),
+  }),
+);
+
+// Naming convention: on the brain content tables below, `brain_id` is the
+// DOCUMENT slug (legacy name, e.g. "alice-smith"), while `brain_ref` is the
+// FK to `goat.brains.id` — the brain a row belongs to.
+export const goatBrains = goat.table(
+  "brains",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    visibility: text("visibility").$type<GoatBrainVisibility>().notNull().default("workspace"),
+    createdByWorkosId: text("created_by_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceSlugIdx: uniqueIndex("goat_brains_workspace_slug_idx").on(
+      table.workspaceId,
+      table.slug,
+    ),
+    workspaceIdx: index("goat_brains_workspace_idx").on(table.workspaceId),
+    visibilityCheck: check(
+      "goat_brains_visibility_check",
+      sql`${table.visibility} IN ('workspace', 'restricted')`,
+    ),
+  }),
+);
+
+export const goatBrainMembers = goat.table(
+  "brain_members",
+  {
+    id: text("id").primaryKey(),
+    brainId: text("brain_id")
+      .notNull()
+      .references(() => goatBrains.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    addedByWorkosId: text("added_by_workos_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    brainUserIdx: uniqueIndex("goat_brain_members_brain_user_idx").on(
+      table.brainId,
+      table.userWorkosId,
+    ),
+    userIdx: index("goat_brain_members_user_idx").on(table.userWorkosId),
+  }),
+);
+
 export const goatBrainFolders = goat.table(
   "brain_folders",
   {
@@ -229,14 +332,20 @@ export const goatBrainFolders = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    brainRef: text("brain_ref")
+      .notNull()
+      .references(() => goatBrains.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
     source: text("source").$type<GoatBrainFolderSource>().notNull().default("custom"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    userPathIdx: uniqueIndex("goat_brain_folders_user_path_idx").on(table.userWorkosId, table.path),
-    userIdx: index("goat_brain_folders_user_idx").on(table.userWorkosId),
+    brainRefPathIdx: uniqueIndex("goat_brain_folders_brain_ref_path_idx").on(
+      table.brainRef,
+      table.path,
+    ),
+    brainRefIdx: index("goat_brain_folders_brain_ref_idx").on(table.brainRef),
     sourceCheck: check(
       "goat_brain_folders_source_check",
       sql`${table.source} IN ('system', 'custom')`,
@@ -251,6 +360,9 @@ export const goatBrainDocuments = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    brainRef: text("brain_ref")
+      .notNull()
+      .references(() => goatBrains.id, { onDelete: "cascade" }),
     brainId: text("brain_id").notNull(),
     folderPath: text("folder_path").notNull(),
     title: text("title"),
@@ -276,22 +388,22 @@ export const goatBrainDocuments = goat.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    userBrainIdIdx: uniqueIndex("goat_brain_documents_user_brain_id_idx").on(
-      table.userWorkosId,
+    brainRefBrainIdIdx: uniqueIndex("goat_brain_documents_brain_ref_brain_id_idx").on(
+      table.brainRef,
       table.brainId,
     ),
-    userFolderBrainIdx: uniqueIndex("goat_brain_documents_user_folder_brain_idx").on(
-      table.userWorkosId,
+    brainRefFolderBrainIdx: uniqueIndex("goat_brain_documents_brain_ref_folder_brain_idx").on(
+      table.brainRef,
       table.folderPath,
       table.brainId,
     ),
-    userFolderUpdatedIdx: index("goat_brain_documents_user_folder_updated_idx").on(
-      table.userWorkosId,
+    brainRefFolderUpdatedIdx: index("goat_brain_documents_brain_ref_folder_updated_idx").on(
+      table.brainRef,
       table.folderPath,
       table.updatedAt,
     ),
-    userUpdatedIdx: index("goat_brain_documents_user_updated_idx").on(
-      table.userWorkosId,
+    brainRefUpdatedIdx: index("goat_brain_documents_brain_ref_updated_idx").on(
+      table.brainRef,
       table.updatedAt,
     ),
     kindCheck: check(
@@ -350,6 +462,9 @@ export const goatBrainTimelineEntries = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    brainRef: text("brain_ref")
+      .notNull()
+      .references(() => goatBrains.id, { onDelete: "cascade" }),
     brainId: text("brain_id").notNull(),
     evidenceId: text("evidence_id").notNull(),
     at: timestamp("at", { withTimezone: true }).notNull(),
@@ -360,8 +475,8 @@ export const goatBrainTimelineEntries = goat.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    userBrainAtIdx: index("goat_brain_timeline_entries_user_brain_at_idx").on(
-      table.userWorkosId,
+    brainRefBrainAtIdx: index("goat_brain_timeline_entries_brain_ref_brain_at_idx").on(
+      table.brainRef,
       table.brainId,
       table.at,
     ),
@@ -383,6 +498,9 @@ export const goatBrainEdges = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    brainRef: text("brain_ref")
+      .notNull()
+      .references(() => goatBrains.id, { onDelete: "cascade" }),
     documentId: text("document_id")
       .notNull()
       .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
@@ -395,14 +513,17 @@ export const goatBrainEdges = goat.table(
   },
   (table) => ({
     documentIdx: index("goat_brain_edges_document_idx").on(table.documentId),
-    userFromIdx: index("goat_brain_edges_user_from_idx").on(table.userWorkosId, table.fromBrainId),
-    userToIdx: index("goat_brain_edges_user_to_idx").on(table.userWorkosId, table.toBrainId),
-    userRelationIdx: index("goat_brain_edges_user_relation_idx").on(
-      table.userWorkosId,
+    brainRefFromIdx: index("goat_brain_edges_brain_ref_from_idx").on(
+      table.brainRef,
+      table.fromBrainId,
+    ),
+    brainRefToIdx: index("goat_brain_edges_brain_ref_to_idx").on(table.brainRef, table.toBrainId),
+    brainRefRelationIdx: index("goat_brain_edges_brain_ref_relation_idx").on(
+      table.brainRef,
       table.relationType,
     ),
     uniqueEdgeIdx: uniqueIndex("goat_brain_edges_unique_idx").on(
-      table.userWorkosId,
+      table.brainRef,
       table.documentId,
       table.fromBrainId,
       table.toBrainId,
@@ -423,6 +544,7 @@ export const goatBrainDocumentVersions = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    brainRef: text("brain_ref").references(() => goatBrains.id, { onDelete: "set null" }),
     documentId: text("document_id").references(() => goatBrainDocuments.id, {
       onDelete: "set null",
     }),
@@ -1256,6 +1378,8 @@ export const goatCodexDeviceAuthFlows = goat.table(
 );
 
 export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
+  workspaceMemberships: many(goatWorkspaceMembers),
+  brainMemberships: many(goatBrainMembers),
   brainFolders: many(goatBrainFolders),
   brainDocuments: many(goatBrainDocuments),
   brainTimelineEntries: many(goatBrainTimelineEntries),
@@ -1279,10 +1403,59 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   codexDeviceAuthFlows: many(goatCodexDeviceAuthFlows),
 }));
 
+export const goatWorkspacesRelations = relations(goatWorkspaces, ({ one, many }) => ({
+  createdBy: one(goatUsers, {
+    fields: [goatWorkspaces.createdByWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  members: many(goatWorkspaceMembers),
+  brains: many(goatBrains),
+}));
+
+export const goatWorkspaceMembersRelations = relations(goatWorkspaceMembers, ({ one }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatWorkspaceMembers.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  user: one(goatUsers, {
+    fields: [goatWorkspaceMembers.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+}));
+
+export const goatBrainsRelations = relations(goatBrains, ({ one, many }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatBrains.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  createdBy: one(goatUsers, {
+    fields: [goatBrains.createdByWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  members: many(goatBrainMembers),
+  documents: many(goatBrainDocuments),
+  folders: many(goatBrainFolders),
+}));
+
+export const goatBrainMembersRelations = relations(goatBrainMembers, ({ one }) => ({
+  brain: one(goatBrains, {
+    fields: [goatBrainMembers.brainId],
+    references: [goatBrains.id],
+  }),
+  user: one(goatUsers, {
+    fields: [goatBrainMembers.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+}));
+
 export const goatBrainFoldersRelations = relations(goatBrainFolders, ({ one }) => ({
   user: one(goatUsers, {
     fields: [goatBrainFolders.userWorkosId],
     references: [goatUsers.workosUserId],
+  }),
+  brain: one(goatBrains, {
+    fields: [goatBrainFolders.brainRef],
+    references: [goatBrains.id],
   }),
 }));
 
@@ -1290,6 +1463,10 @@ export const goatBrainDocumentsRelations = relations(goatBrainDocuments, ({ one,
   user: one(goatUsers, {
     fields: [goatBrainDocuments.userWorkosId],
     references: [goatUsers.workosUserId],
+  }),
+  brain: one(goatBrains, {
+    fields: [goatBrainDocuments.brainRef],
+    references: [goatBrains.id],
   }),
   timelineEntries: many(goatBrainTimelineEntries),
   edges: many(goatBrainEdges),
@@ -1563,6 +1740,10 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one }) =
 }));
 
 export type GoatUser = typeof goatUsers.$inferSelect;
+export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
+export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
+export type GoatBrain = typeof goatBrains.$inferSelect;
+export type GoatBrainMember = typeof goatBrainMembers.$inferSelect;
 export type GoatBrainFolder = typeof goatBrainFolders.$inferSelect;
 export type GoatBrainDocument = typeof goatBrainDocuments.$inferSelect;
 export type GoatBrainTimelineEntryRecord = typeof goatBrainTimelineEntries.$inferSelect;
