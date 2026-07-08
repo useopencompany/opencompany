@@ -21,6 +21,7 @@ const chatMock = vi.hoisted(() => ({
 }));
 
 const routerMock = vi.hoisted(() => ({
+  prefetch: vi.fn(),
   refresh: vi.fn(),
   replace: vi.fn(),
 }));
@@ -109,6 +110,7 @@ describe("GoatSurface chat streaming UI", () => {
     chatMock.finishSessionId = null;
     chatMock.sendMessage.mockReset();
     chatMock.stop.mockReset();
+    routerMock.prefetch.mockReset();
     routerMock.refresh.mockReset();
     routerMock.replace.mockReset();
     vi.mocked(closeGoatChatSessionAction).mockClear();
@@ -267,6 +269,47 @@ describe("GoatSurface chat streaming UI", () => {
     const chatLink = screen.getByRole("link", { name: /Market research/ });
     expect(chatLink).toHaveAttribute("href", "/?chat=chat_1");
     expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
+  });
+
+  it("prefetches recent chats and task results before navigation", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        tasks={[
+          {
+            id: "task_1",
+            displayId: "TASK-1",
+            name: "Run market report",
+            prompt: "Write a report",
+            model: DEFAULT_GOAT_MODEL,
+            status: "succeeded",
+            stage: "completed",
+            result: "Done",
+            error: null,
+            archivedAt: null,
+            createdAt: "2026-07-02T17:44:00.000Z",
+            updatedAt: "2026-07-02T17:45:00.000Z",
+          },
+        ]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Market research",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Compare the latest pricing.",
+            updatedAt: "2026-07-02T17:44:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("link", { name: /Market research/ }));
+    await user.hover(screen.getByRole("link", { name: /Run market report/ }));
+
+    expect(routerMock.prefetch).toHaveBeenCalledWith("/?chat=chat_1");
+    expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK-1");
   });
 
   it("opens the new chat command with Cmd+N and starts a background chat", async () => {

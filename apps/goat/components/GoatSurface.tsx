@@ -875,37 +875,47 @@ function ChatHistoryList({
   chats: readonly GoatChatSummaryView[];
   onSelect: (chatId: string) => void;
 }) {
+  const router = useRouter();
+
   if (chats.length === 0) {
     return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No chats yet.</p>;
   }
 
   return (
     <div className="flex flex-col">
-      {chats.map((chat) => (
-        <Link
-          key={chat.id}
-          href={`/?chat=${encodeURIComponent(chat.id)}`}
-          onClick={() => onSelect(chat.id)}
-          className="group/chat flex min-h-11 items-center gap-3 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <Clock
-            size={15}
-            strokeWidth={2}
-            className="shrink-0 text-ink-subtle group-hover/chat:text-ink-muted"
-          />
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                {chat.title}
-              </span>
-              <span className="shrink-0 text-[12px] leading-tight text-ink-subtle">
-                {formatRelativeTime(chat.updatedAt)}
-              </span>
+      {chats.map((chat) => {
+        const href = `/?chat=${encodeURIComponent(chat.id)}`;
+        const prefetchChat = () => router.prefetch(href);
+        return (
+          <Link
+            key={chat.id}
+            href={href}
+            prefetch
+            onMouseEnter={prefetchChat}
+            onFocus={prefetchChat}
+            onTouchStart={prefetchChat}
+            onClick={() => onSelect(chat.id)}
+            className="group/chat flex min-h-11 items-center gap-3 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <Clock
+              size={15}
+              strokeWidth={2}
+              className="shrink-0 text-ink-subtle group-hover/chat:text-ink-muted"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate text-[14px] font-medium leading-tight text-ink">
+                  {chat.title}
+                </span>
+                <span className="shrink-0 text-[12px] leading-tight text-ink-subtle">
+                  {formatRelativeTime(chat.updatedAt)}
+                </span>
+              </div>
+              <p className="truncate text-[12.5px] leading-4 text-ink-subtle">{chat.preview}</p>
             </div>
-            <p className="truncate text-[12.5px] leading-4 text-ink-subtle">{chat.preview}</p>
-          </div>
-        </Link>
-      ))}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -1277,15 +1287,22 @@ function ResultRow({
   task: GoatTaskView;
   onArchive: (task: GoatTaskView) => void;
 }) {
+  const router = useRouter();
   const meta = getTaskMeta(task);
   const Icon = meta.icon;
   const title = task.name;
+  const href = `/tasks/${encodeURIComponent(task.displayId)}`;
+  const prefetchTask = () => router.prefetch(href);
   const canArchive =
     task.status === "succeeded" || task.status === "failed" || task.status === "canceled";
   return (
     <div className="group/result relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
       <Link
-        href={`/tasks/${encodeURIComponent(task.displayId)}`}
+        href={href}
+        prefetch
+        onMouseEnter={prefetchTask}
+        onFocus={prefetchTask}
+        onTouchStart={prefetchTask}
         className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <Icon
