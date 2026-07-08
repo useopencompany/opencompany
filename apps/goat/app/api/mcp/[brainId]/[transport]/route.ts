@@ -3,7 +3,7 @@ import { goatBrains } from "@opencompany/db/goat-schema";
 import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
 import { eq } from "drizzle-orm";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
-import { z } from "zod";
+import * as z from "zod/v4-mini";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
   buildGoatMcpResourceMetadataPath,
@@ -24,9 +24,9 @@ type RouteContext = {
 
 type McpBrain = NonNullable<Awaited<ReturnType<typeof getGoatBrainAccess>>>["brain"];
 const queryBrainInputSchema = {
-  text: z.string().min(1),
-  folder: z.string().min(1).optional(),
-  limit: z.number().int().min(1).max(50).optional(),
+  text: z.string().check(z.minLength(1)),
+  folder: z.optional(z.string().check(z.minLength(1))),
+  limit: z.optional(z.number().check(z.int(), z.minimum(1), z.maximum(50))),
 };
 
 type BrainAccessResult =
