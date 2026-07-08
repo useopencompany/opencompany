@@ -7,6 +7,7 @@ import {
   createGoatBrainFolderForUser,
   deleteGoatBrainDocumentForUser,
   moveGoatBrainDocumentForUser,
+  renameGoatBrainDocumentForUser,
   updateGoatBrainDocumentForUser,
 } from "@/lib/brain";
 
@@ -38,6 +39,18 @@ export async function updateGoatBrainDocumentAction(input: {
     documentId: input.documentId,
     body: input.body,
     ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
+  });
+}
+
+export async function renameGoatBrainDocumentAction(input: {
+  documentId: string;
+  title: string;
+}): Promise<BrainMutationResult> {
+  const { user } = await currentGoatUser();
+  return renameGoatBrainDocumentForUser({
+    userWorkosId: user.workosUserId,
+    documentId: input.documentId,
+    title: input.title,
   });
 }
 

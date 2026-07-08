@@ -581,27 +581,6 @@ export function GoatSurface({
       </CommandDialog>
 
       {mode === "home" ? (
-        <div className="absolute right-4 top-4 z-20 flex items-center gap-1">
-          <Link
-            href="/brain"
-            aria-label="Brain"
-            title="Brain"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <BookOpen size={16} strokeWidth={2} />
-          </Link>
-          <Link
-            href="/settings"
-            aria-label="Settings"
-            title="Settings"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Settings size={16} strokeWidth={2} />
-          </Link>
-        </div>
-      ) : null}
-
-      {mode === "home" ? (
         <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
           <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-24">
             <header>
@@ -642,7 +621,7 @@ export function GoatSurface({
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
           <div className="w-full px-6 pb-2 pt-5">
-            <div className="mx-auto flex w-full max-w-[720px] items-center justify-end">
+            <div className="mx-auto flex w-full max-w-[720px] items-center justify-start">
               <button
                 type="button"
                 aria-label="Close chat"
