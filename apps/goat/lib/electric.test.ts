@@ -87,6 +87,22 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url).toBeNull();
   });
 
+  it("scopes goat.chat_sessions to open sessions for the authenticated WorkOS user", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.chat_sessions&where=1=1",
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url?.searchParams.get("table")).toBe("goat.chat_sessions");
+    expect(url?.searchParams.get("where")).toBe(`"user_workos_id" = $1 AND "closed_at" IS NULL`);
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    expect(url?.searchParams.get("params[2]")).toBeNull();
+    expect(url?.searchParams.get("where")).not.toBe("1=1");
+  });
+
   it.each([
     "goat.task_model_usage",
     "goat.task_tool_usage",

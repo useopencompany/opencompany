@@ -75,6 +75,7 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
           </h2>
           <Link
             href={`/tasks/${task.displayId}/run`}
+            prefetch
             className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <TerminalSquare size={12} strokeWidth={1.8} />

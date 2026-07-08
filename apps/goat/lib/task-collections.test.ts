@@ -8,6 +8,7 @@ describe("createGoatCollections", () => {
 
     expect(second).toBe(first);
     expect(second.tasks).toBe(first.tasks);
+    expect(second.chatSessions).toBe(first.chatSessions);
     expect(second.integrations).toBe(first.integrations);
     expect(second.brainDocuments).toBe(first.brainDocuments);
     expect(second.brainTimelineEntries).toBe(first.brainTimelineEntries);
