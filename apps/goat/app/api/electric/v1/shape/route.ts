@@ -1,10 +1,12 @@
 import { getDb } from "@opencompany/db/client";
 import { goatChatSessions } from "@opencompany/db/goat-schema";
+import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
 import { and, eq, isNull } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   buildGoatElectricOriginUrl,
   goatElectricBaseUrl,
+  goatElectricBrainRef,
   goatElectricChatMessagesSessionId,
   hasInvalidElectricCloudSecretPair,
 } from "@/lib/electric";
@@ -32,12 +34,17 @@ export async function GET(request: Request): Promise<Response> {
     requestUrl,
     userWorkosId: context.user.workosUserId,
   });
+  const authorizedBrainRef = await authorizeBrainShape({
+    requestUrl,
+    userWorkosId: context.user.workosUserId,
+  });
 
   const originUrl = buildGoatElectricOriginUrl({
     electricUrl,
     requestUrl,
     userWorkosId: context.user.workosUserId,
     authorizedChatSessionId,
+    authorizedBrainRef,
     sourceId,
     sourceSecret,
     electricSecret,
@@ -86,4 +93,18 @@ async function authorizeChatMessagesShape(input: {
     .limit(1);
 
   return session?.id ?? null;
+}
+
+async function authorizeBrainShape(input: {
+  requestUrl: URL;
+  userWorkosId: string;
+}): Promise<string | null> {
+  const brainRef = goatElectricBrainRef(input.requestUrl);
+  if (!brainRef) return null;
+
+  const access = await getGoatBrainAccess({
+    userWorkosId: input.userWorkosId,
+    brainRef,
+  });
+  return access?.brain.id ?? null;
 }

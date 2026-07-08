@@ -27,6 +27,20 @@ vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getWebDb,
 }));
 
+vi.mock("@opencompany/db/goat-workspaces", () => ({
+  getDefaultGoatBrainForUser: vi.fn(async () => ({
+    id: "goat_brain_user_1",
+    workspaceId: "goat_ws_user_1",
+    name: "General",
+    slug: "general",
+    description: null,
+    visibility: "workspace",
+    createdByWorkosId: "user_1",
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+  })),
+}));
+
 import {
   createGoatBrainMarkdownReportForTask,
   type MaterializedGoatBrainSnapshot,
@@ -621,6 +635,7 @@ function brainRow(input: {
   return {
     id: input.documentId,
     userWorkosId: "user_1",
+    brainRef: "goat_brain_user_1",
     brainId: input.brainId,
     folderPath: input.folderPath,
     title: input.brainId,

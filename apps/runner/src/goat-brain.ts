@@ -7,12 +7,13 @@ import {
   GOAT_BRAIN_FILE_MIME_TYPE,
   type GoatBrainSyncFile,
   goatBrainFilePathFor,
-  listGoatBrainFilesForUser,
+  listGoatBrainFiles,
   materializeGoatBrainFilesToRoot,
   readGoatBrainFilesFromRoot,
-  syncGoatBrainFilesForUser,
-  upsertGoatBrainFileForUser,
+  syncGoatBrainFiles,
+  upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
+import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   formatGoatBrainEvidenceLink,
   type GoatBrainDocument,
@@ -67,7 +68,8 @@ export async function createGoatBrainMarkdownReportForTask(input: {
   }
 
   const title = firstMarkdownHeading(body) || input.title.trim() || "Research report";
-  const brainId = await nextAvailableBrainId(input.userWorkosId, title);
+  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
+  const brainId = await nextAvailableBrainId(brainRef, title);
   const folderPath = GOAT_BRAIN_REPORT_FOLDER;
   const now = new Date().toISOString();
   const evidenceId = normalizeEvidenceId(`ev-created-from-${input.taskId}`) ?? "ev-task-created";
@@ -107,8 +109,9 @@ export async function createGoatBrainMarkdownReportForTask(input: {
   if (Buffer.byteLength(content, "utf8") > MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
     throw new Error("Goat research report is too large to save to the Brain.");
   }
-  const row = await upsertGoatBrainFileForUser(
+  const row = await upsertGoatBrainFile(
     {
+      brainRef,
       userWorkosId: input.userWorkosId,
       path: goatBrainFilePathFor(folderPath, brainId),
       content,
@@ -133,10 +136,14 @@ export async function materializeGoatBrainForTask(input: {
   sandbox: SandboxHandle;
   userWorkosId: string;
 }): Promise<MaterializedGoatBrainSnapshot> {
-  const rows = await listGoatBrainFilesForUser(input.userWorkosId, {
-    includeInvalid: true,
-    db: getDb(),
-  });
+  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
+  const rows = await listGoatBrainFiles(
+    { brainRef },
+    {
+      includeInvalid: true,
+      db: getDb(),
+    },
+  );
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(GOAT_BRAIN_ROOT)} && mkdir -p ${shellQuote(GOAT_BRAIN_ROOT)}`,
     { timeoutMs: 30_000 },
@@ -163,8 +170,9 @@ export async function materializeGoatBrainToLocalRoot(input: {
   root: string;
   userWorkosId: string;
 }): Promise<MaterializedGoatBrainSnapshot & { cliPath: string }> {
+  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
   const files = await materializeGoatBrainFilesToRoot({
-    userWorkosId: input.userWorkosId,
+    brainRef,
     root: input.root,
     cliSource: getGoatBrainCliSource(),
     db: getDb(),
@@ -229,7 +237,9 @@ async function syncFiles(input: {
   baseSnapshot: MaterializedGoatBrainSnapshot;
   taskId?: string | null;
 }) {
-  const result = await syncGoatBrainFilesForUser({
+  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
+  const result = await syncGoatBrainFiles({
+    brainRef,
     userWorkosId: input.userWorkosId,
     files: input.files,
     baseSnapshot: input.baseSnapshot.files.map(dbMaterializedFileFromRunner),
@@ -281,12 +291,25 @@ function dbMaterializedFileFromRunner(
   };
 }
 
-async function nextAvailableBrainId(userWorkosId: string, title: string): Promise<string> {
+// Runner work has no interactive session, so it targets the user's default
+// ("General") brain; the chat surface targets the user's active brain instead.
+async function resolveGoatBrainRefForUser(userWorkosId: string): Promise<string> {
+  const brain = await getDefaultGoatBrainForUser(userWorkosId, { db: getDb() });
+  if (!brain) {
+    throw new Error(`No accessible Goat brain found for user ${userWorkosId}.`);
+  }
+  return brain.id;
+}
+
+async function nextAvailableBrainId(brainRef: string, title: string): Promise<string> {
   const base = normalizeGoatBrainId(title) || "research-report";
-  const rows = await listGoatBrainFilesForUser(userWorkosId, {
-    includeInvalid: true,
-    db: getDb(),
-  });
+  const rows = await listGoatBrainFiles(
+    { brainRef },
+    {
+      includeInvalid: true,
+      db: getDb(),
+    },
+  );
   const used = new Set(rows.map((row) => row.brainId));
   if (!used.has(base)) return base;
   for (let index = 2; index < 1000; index++) {

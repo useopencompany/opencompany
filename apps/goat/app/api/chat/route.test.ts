@@ -144,6 +144,7 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(200);
     expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
+      brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       toolInput: {
         command: "query",
@@ -250,6 +251,7 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(200);
     expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
+      brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       toolInput: {
         command: "create",
@@ -916,8 +918,31 @@ function mockAuth(
       createdAt: new Date(),
       updatedAt: new Date(),
     },
+    workspace: {
+      id: "goat_ws_user_1",
+      workosOrganizationId: null,
+      name: "Test Workspace",
+      createdByWorkosId: "user_1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    role: "admin",
+    brains: [ACTIVE_BRAIN],
+    activeBrain: ACTIVE_BRAIN,
   });
 }
+
+const ACTIVE_BRAIN = {
+  id: "goat_brain_user_1",
+  workspaceId: "goat_ws_user_1",
+  name: "General",
+  slug: "general",
+  description: null,
+  visibility: "workspace",
+  createdByWorkosId: "user_1",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
 
 function mockCreateTurn() {
   mockCreateGoatChatUserTurn().mockResolvedValue({

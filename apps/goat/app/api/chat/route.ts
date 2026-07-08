@@ -152,7 +152,18 @@ export async function POST(request: Request): Promise<Response> {
     ...(requestedEngine ? { requestedEngine } : {}),
     runBrainCli: (toolInput, toolExecutionContext) => {
       const toolCallId = goatBrainToolCallId(toolExecutionContext);
+      const activeBrain = context.activeBrain;
+      if (!activeBrain) {
+        return Promise.resolve({
+          ok: false,
+          exitCode: null,
+          stdout: "",
+          stderr: "",
+          error: "You do not have access to any brain in this workspace.",
+        });
+      }
       return runGoatBrainToolForUser({
+        brainRef: activeBrain.id,
         userWorkosId: context.user.workosUserId,
         toolInput,
         gatewayApiKey,
@@ -358,6 +369,9 @@ export async function POST(request: Request): Promise<Response> {
         timezone: context.user.timezone,
       },
       webSearchEnabled: Boolean(exaApiKey),
+      activeBrain: context.activeBrain
+        ? { name: context.activeBrain.name, workspaceName: context.workspace.name }
+        : null,
       recurringSchedules,
     }),
     messages: await convertToModelMessages(turn.messages),

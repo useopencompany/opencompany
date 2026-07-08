@@ -7,6 +7,14 @@ const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+
+vi.mock("@/lib/workspace-actions", () => ({
+  switchGoatBrainAction: vi.fn(),
+  createGoatBrainAction: vi.fn(),
+  setGoatBrainAccessAction: vi.fn(),
+  getGoatBrainAccessDetailsAction: vi.fn(),
 }));
 
 vi.mock("@/components/GoatAppDataProvider", () => ({
@@ -16,6 +24,23 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       firstName: "Ada",
       lastName: "Lovelace",
       avatarUrl: null,
+    },
+    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
+    brains: [
+      {
+        id: "goat_brain_1",
+        name: "General",
+        slug: "general",
+        description: null,
+        visibility: "workspace",
+      },
+    ],
+    activeBrain: {
+      id: "goat_brain_1",
+      name: "General",
+      slug: "general",
+      description: null,
+      visibility: "workspace",
     },
   }),
 }));

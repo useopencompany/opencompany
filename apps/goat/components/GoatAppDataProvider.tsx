@@ -26,8 +26,25 @@ type GoatUserView = {
   avatarUrl: string | null;
 };
 
+export type GoatWorkspaceView = {
+  id: string;
+  name: string;
+  role: "admin" | "member";
+};
+
+export type GoatBrainSummaryView = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  visibility: "workspace" | "restricted";
+};
+
 export type GoatAppInitialData = {
   user: GoatUserView;
+  workspace: GoatWorkspaceView;
+  brains: GoatBrainSummaryView[];
+  activeBrain: GoatBrainSummaryView | null;
   tasks: GoatTaskView[];
   schedules: GoatTaskScheduleView[];
   recentChats: GoatChatSummaryView[];
@@ -51,6 +68,11 @@ export function GoatAppDataProvider({
   children: ReactNode;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
+  // Switching the active brain swaps the brain shape subscriptions in place.
+  const brainCollections = useMemo(
+    () => collections.brainCollections(initialData.activeBrain?.id ?? "__no-brain__"),
+    [collections, initialData.activeBrain?.id],
+  );
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery((q) =>
     q.from({ task: collections.tasks }),
   );
@@ -63,13 +85,18 @@ export function GoatAppDataProvider({
   const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery((q) =>
     q.from({ integration: collections.integrations }),
   );
-  const { data: brainRows, isLoading: brainLoading } = useLiveQuery((q) =>
-    q.from({ file: collections.brainDocuments }),
+  const { data: brainRows, isLoading: brainLoading } = useLiveQuery(
+    (q) => q.from({ file: brainCollections.documents }),
+    [brainCollections],
   );
-  const { data: timelineRows } = useLiveQuery((q) =>
-    q.from({ timeline: collections.brainTimelineEntries }),
+  const { data: timelineRows } = useLiveQuery(
+    (q) => q.from({ timeline: brainCollections.timelineEntries }),
+    [brainCollections],
   );
-  const { data: edgeRows } = useLiveQuery((q) => q.from({ edge: collections.brainEdges }));
+  const { data: edgeRows } = useLiveQuery(
+    (q) => q.from({ edge: brainCollections.edges }),
+    [brainCollections],
+  );
 
   const tasks = useMemo(() => {
     if (tasksLoading && !taskRows?.length) return initialData.tasks;

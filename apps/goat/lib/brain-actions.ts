@@ -1,6 +1,6 @@
 "use server";
 
-import { currentGoatUser } from "@/lib/auth";
+import { currentGoatBrain, currentGoatUser } from "@/lib/auth";
 import {
   type BrainMutationResult,
   createGoatBrainDocumentForUser,
@@ -11,6 +11,9 @@ import {
   updateGoatBrainDocumentForUser,
 } from "@/lib/brain";
 
+// All mutations run against the active brain from the auth context, which is
+// resolved from the user's accessible brains — that lookup is the access check.
+
 export async function createGoatBrainFolderAction(path: string): Promise<BrainMutationResult> {
   const { user } = await currentGoatUser();
   return createGoatBrainFolderForUser(user.workosUserId, path);
@@ -20,9 +23,10 @@ export async function createGoatBrainDocumentAction(input: {
   folderPath: string;
   title?: string;
 }): Promise<BrainMutationResult> {
-  const { user } = await currentGoatUser();
+  const { context, brain } = await currentGoatBrain();
   return createGoatBrainDocumentForUser({
-    userWorkosId: user.workosUserId,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
     folderPath: input.folderPath,
     ...(input.title ? { title: input.title } : {}),
   });
@@ -33,9 +37,10 @@ export async function updateGoatBrainDocumentAction(input: {
   body: string;
   expectedContentHash?: string;
 }): Promise<BrainMutationResult> {
-  const { user } = await currentGoatUser();
+  const { context, brain } = await currentGoatBrain();
   return updateGoatBrainDocumentForUser({
-    userWorkosId: user.workosUserId,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
     documentId: input.documentId,
     body: input.body,
     ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
@@ -46,9 +51,10 @@ export async function renameGoatBrainDocumentAction(input: {
   documentId: string;
   title: string;
 }): Promise<BrainMutationResult> {
-  const { user } = await currentGoatUser();
+  const { context, brain } = await currentGoatBrain();
   return renameGoatBrainDocumentForUser({
-    userWorkosId: user.workosUserId,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
     documentId: input.documentId,
     title: input.title,
   });
@@ -58,9 +64,10 @@ export async function moveGoatBrainDocumentAction(input: {
   documentId: string;
   folderPath: string;
 }): Promise<BrainMutationResult> {
-  const { user } = await currentGoatUser();
+  const { context, brain } = await currentGoatBrain();
   return moveGoatBrainDocumentForUser({
-    userWorkosId: user.workosUserId,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
     documentId: input.documentId,
     folderPath: input.folderPath,
   });
@@ -69,9 +76,10 @@ export async function moveGoatBrainDocumentAction(input: {
 export async function deleteGoatBrainDocumentAction(
   documentId: string,
 ): Promise<BrainMutationResult> {
-  const { user } = await currentGoatUser();
+  const { context, brain } = await currentGoatBrain();
   return deleteGoatBrainDocumentForUser({
-    userWorkosId: user.workosUserId,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
     documentId,
   });
 }

@@ -10,9 +10,20 @@ describe("createGoatCollections", () => {
     expect(second.tasks).toBe(first.tasks);
     expect(second.chatSessions).toBe(first.chatSessions);
     expect(second.integrations).toBe(first.integrations);
-    expect(second.brainDocuments).toBe(first.brainDocuments);
-    expect(second.brainTimelineEntries).toBe(first.brainTimelineEntries);
-    expect(second.brainEdges).toBe(first.brainEdges);
+  });
+
+  it("reuses brain-scoped Electric collections for the same brain ref", () => {
+    const collections = createGoatCollections();
+
+    const first = collections.brainCollections("goat_brain_1");
+    const second = collections.brainCollections("goat_brain_1");
+    const other = collections.brainCollections("goat_brain_2");
+
+    expect(second).toBe(first);
+    expect(second.documents).toBe(first.documents);
+    expect(second.timelineEntries).toBe(first.timelineEntries);
+    expect(second.edges).toBe(first.edges);
+    expect(other.documents).not.toBe(first.documents);
   });
 
   it("reuses task-scoped Electric collections for the same task id", () => {

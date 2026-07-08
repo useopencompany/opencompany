@@ -36,6 +36,10 @@
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"
     },
+    "./goat-workspaces": {
+      "types": "./src/goat-workspaces.ts",
+      "default": "./src/goat-workspaces.ts"
+    },
     "./schema": {
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"

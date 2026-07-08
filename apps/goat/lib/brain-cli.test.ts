@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderGoatBrainToolCommand, runGoatBrainToolForUser } from "@/lib/brain-cli";
 
 const BASE_INPUT = {
+  brainRef: "goat_brain_user_1",
   userWorkosId: "user_1",
   gatewayApiKey: "gateway_test",
   sourceRef: "goat-chat:user_message_1",

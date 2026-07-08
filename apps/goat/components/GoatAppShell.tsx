@@ -14,7 +14,7 @@ import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
-  const { authUser, user } = await currentGoatUser();
+  const { authUser, user, workspace, role, brains, activeBrain } = await currentGoatUser();
   const [tasks, schedules, recentChats, brain, googleIntegrations, linear, github, jamie, codex] =
     await Promise.all([
       listCurrentUserGoatTasks(),
@@ -35,6 +35,13 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       lastName: authUser.lastName,
       avatarUrl: user.avatarUrl,
     },
+    workspace: {
+      id: workspace.id,
+      name: workspace.name,
+      role,
+    },
+    brains: brains.map(brainSummaryView),
+    activeBrain: activeBrain ? brainSummaryView(activeBrain) : null,
     tasks: tasks.map((task) => ({
       id: task.id,
       displayId: task.displayId,
@@ -71,6 +78,22 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
   };
 
   return <GoatAppDataProvider initialData={initialData}>{children}</GoatAppDataProvider>;
+}
+
+function brainSummaryView(brain: {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  visibility: "workspace" | "restricted";
+}) {
+  return {
+    id: brain.id,
+    name: brain.name,
+    slug: brain.slug,
+    description: brain.description,
+    visibility: brain.visibility,
+  };
 }
 
 function buildIntegrationState(input: {

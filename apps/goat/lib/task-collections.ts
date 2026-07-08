@@ -193,6 +193,7 @@ export type GoatIntegrationRow = {
 export type GoatBrainDocumentRow = {
   id: string;
   user_workos_id: string;
+  brain_ref: string;
   brain_id: string;
   folder_path: string;
   title: string | null;
@@ -219,6 +220,7 @@ export type GoatBrainTimelineEntryRow = {
   id: number;
   document_id: string;
   user_workos_id: string;
+  brain_ref: string;
   brain_id: string;
   evidence_id: string;
   at: string;
@@ -232,6 +234,7 @@ export type GoatBrainTimelineEntryRow = {
 export type GoatBrainEdgeRow = {
   id: string;
   user_workos_id: string;
+  brain_ref: string;
   document_id: string;
   from_brain_id: string;
   to_brain_id: string;
@@ -276,6 +279,31 @@ function createTaskRunCollections(taskId: string) {
   };
 }
 
+// The Electric shape proxy authorizes the brain_ref param against the current
+// user before forwarding, so each brain gets its own shape subscription.
+function createBrainCollections(brainRef: string) {
+  return {
+    documents: createGoatElectricCollection<GoatBrainDocumentRow>({
+      id: `goat:brain_documents:${brainRef}`,
+      table: "goat.brain_documents",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
+    timelineEntries: createGoatElectricCollection<GoatBrainTimelineEntryRow>({
+      id: `goat:brain_timeline_entries:${brainRef}`,
+      table: "goat.brain_timeline_entries",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
+    edges: createGoatElectricCollection<GoatBrainEdgeRow>({
+      id: `goat:brain_edges:${brainRef}`,
+      table: "goat.brain_edges",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
+  };
+}
+
 function createChatMessageCollection(sessionId: string) {
   return createGoatElectricCollection<GoatChatMessageRow>({
     id: `goat:chat_messages:${sessionId}`,
@@ -290,6 +318,7 @@ const chatMessageCollectionsBySessionId = new Map<
   string,
   ReturnType<typeof createChatMessageCollection>
 >();
+const brainCollectionsByBrainRef = new Map<string, ReturnType<typeof createBrainCollections>>();
 
 function getTaskRunCollections(taskId: string) {
   const cached = taskRunCollectionsByTaskId.get(taskId);
@@ -297,6 +326,15 @@ function getTaskRunCollections(taskId: string) {
 
   const collections = createTaskRunCollections(taskId);
   taskRunCollectionsByTaskId.set(taskId, collections);
+  return collections;
+}
+
+function getBrainCollections(brainRef: string) {
+  const cached = brainCollectionsByBrainRef.get(brainRef);
+  if (cached) return cached;
+
+  const collections = createBrainCollections(brainRef);
+  brainCollectionsByBrainRef.set(brainRef, collections);
   return collections;
 }
 
@@ -334,24 +372,6 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
-  const brainDocuments = createGoatElectricCollection<GoatBrainDocumentRow>({
-    id: "goat:brain_documents",
-    table: "goat.brain_documents",
-    getKey: (row) => row.id,
-  });
-
-  const brainTimelineEntries = createGoatElectricCollection<GoatBrainTimelineEntryRow>({
-    id: "goat:brain_timeline_entries",
-    table: "goat.brain_timeline_entries",
-    getKey: (row) => row.id,
-  });
-
-  const brainEdges = createGoatElectricCollection<GoatBrainEdgeRow>({
-    id: "goat:brain_edges",
-    table: "goat.brain_edges",
-    getKey: (row) => row.id,
-  });
-
   return {
     tasks,
     taskSchedules,
@@ -359,9 +379,7 @@ function buildGoatCollections() {
     taskRunCollections: getTaskRunCollections,
     chatMessages: getChatMessageCollection,
     integrations,
-    brainDocuments,
-    brainTimelineEntries,
-    brainEdges,
+    brainCollections: getBrainCollections,
   };
 }
 

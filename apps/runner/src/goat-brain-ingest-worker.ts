@@ -3,7 +3,7 @@ import {
   createGoatBrainMarkdownContent,
   goatBrainFilePathFor,
   MAX_GOAT_BRAIN_FILE_BYTES,
-  upsertGoatBrainFileForUser,
+  upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
 import {
   type GoatBrainIngestJob,
@@ -11,6 +11,7 @@ import {
   type GoatBrainSourceProvider,
   type GoatBrainSourceType,
 } from "@opencompany/db/goat-schema";
+import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   formatGoatBrainEvidenceLink,
   goatBrainTimelineEntryFromParts,
@@ -446,16 +447,23 @@ export async function writeJamieMeetingToBrain(input: {
 }) {
   const writes = buildJamieMeetingBrainWrites(input.item);
   const db = getDb();
-  const evidence = await upsertGoatBrainFileForUser(
+  // Ingest jobs are personal; they land in the user's default ("General") brain.
+  const brain = await getDefaultGoatBrainForUser(input.userWorkosId, { db });
+  if (!brain) {
+    throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
+  }
+  const evidence = await upsertGoatBrainFile(
     {
+      brainRef: brain.id,
       userWorkosId: input.userWorkosId,
       path: goatBrainFilePathFor("evidence/document", writes.evidenceBrainId),
       content: writes.evidenceContent,
     },
     { db },
   );
-  const meeting = await upsertGoatBrainFileForUser(
+  const meeting = await upsertGoatBrainFile(
     {
+      brainRef: brain.id,
       userWorkosId: input.userWorkosId,
       path: goatBrainFilePathFor("meetings", writes.meetingBrainId),
       content: writes.meetingContent,

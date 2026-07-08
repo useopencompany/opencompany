@@ -8,7 +8,7 @@ import {
   hashGoatBrainContent,
   materializeGoatBrainFilesToRoot,
   readGoatBrainFilesFromRoot,
-  syncGoatBrainFilesForUser,
+  syncGoatBrainFiles,
 } from "./goat-brain-files";
 
 let root: string;
@@ -122,6 +122,7 @@ describe("goat brain file sync", () => {
       {
         id: "doc_1",
         userWorkosId: "user_1",
+        brainRef: "goat_brain_user_1",
         brainId: "rivalco-competitor",
         folderPath: "competitors",
         contentHash,
@@ -129,7 +130,8 @@ describe("goat brain file sync", () => {
     ]);
 
     await expect(
-      syncGoatBrainFilesForUser({
+      syncGoatBrainFiles({
+        brainRef: "goat_brain_user_1",
         userWorkosId: "user_1",
         files: [{ path: "competitors/rivalco-competitor.md", content }],
         baseSnapshot: [
@@ -166,6 +168,7 @@ describe("goat brain file sync", () => {
     const current = {
       id: "doc_1",
       userWorkosId: "user_1",
+      brainRef: "goat_brain_user_1",
       brainId: "acme",
       folderPath: "companies",
       content: oldContent,
@@ -177,7 +180,8 @@ describe("goat brain file sync", () => {
     };
     const db = syncMutableDb([current]);
 
-    const result = await syncGoatBrainFilesForUser({
+    const result = await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       files: [{ path: "companies/customers/acme.md", content: newContent }],
       baseSnapshot: [
@@ -203,6 +207,7 @@ describe("goat brain file sync", () => {
       {
         id: "doc_1",
         userWorkosId: "user_1",
+        brainRef: "goat_brain_user_1",
         brainId: "rivalco-competitor",
         folderPath: "competitors",
         content,
@@ -211,7 +216,7 @@ describe("goat brain file sync", () => {
     ]);
 
     await expect(
-      materializeGoatBrainFilesToRoot({ userWorkosId: "user_1", root, db }),
+      materializeGoatBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db }),
     ).resolves.toEqual([
       {
         id: "doc_1",
