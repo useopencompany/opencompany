@@ -7,14 +7,14 @@ describe("validateGoatChatInput", () => {
     expect(
       validateGoatChatInput({
         prompt: "  what do you think of x?  ",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-5.5",
         sessionId: "  goat_chat_123  ",
       }),
     ).toEqual({
       ok: true,
       value: {
         prompt: "what do you think of x?",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-5.5",
         sessionId: "goat_chat_123",
       },
     });
