@@ -30,7 +30,7 @@ jobs:
     name: Migrate and deploy production
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 35
+    timeout-minutes: 20
     environment: production
     env:
       INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
