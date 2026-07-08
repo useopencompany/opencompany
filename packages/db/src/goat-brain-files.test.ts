@@ -22,13 +22,12 @@ afterEach(async () => {
 });
 
 describe("goat brain file sync", () => {
-  it("projects evidence kind from evidence subtype markdown", () => {
+  it("projects evidence kind from the evidence zone folder", () => {
     const content = createGoatBrainMarkdownContent({
       id: "ev-acme-email",
       folderPath: "evidence/email",
       title: "Acme email",
-      type: "evidence",
-      evidenceKind: "email",
+      type: "email",
       status: "active",
       compiledTruth: "Acme asked for enterprise pricing.",
     });
@@ -41,8 +40,26 @@ describe("goat brain file sync", () => {
     ).toMatchObject({
       brainId: "ev-acme-email",
       folderPath: "evidence/email",
-      entityType: "evidence",
-      evidenceKind: "email",
+      kind: "evidence",
+      entityType: "email",
+    });
+  });
+
+  it("projects pages outside the evidence zone with kind page", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "ada",
+      folderPath: "team/gtm",
+      title: "Ada",
+      type: "person",
+      status: "draft",
+      compiledTruth: "Ada leads GTM.",
+    });
+
+    expect(deriveGoatBrainFileProjection({ path: "team/gtm/ada.md", content })).toMatchObject({
+      brainId: "ada",
+      folderPath: "team/gtm",
+      kind: "page",
+      entityType: "person",
     });
   });
 
@@ -51,11 +68,12 @@ describe("goat brain file sync", () => {
       relativePath: "companies/acme.md",
       payload: "Acme now evaluates Goat Brain.",
       sidecar: {
-        schemaVersion: "goat.brain.entry.v1",
+        schemaVersion: "goat.brain.entry.v2",
         id: "acme",
         folder: "companies",
         title: "Acme",
-        kind: "markdown",
+        format: "markdown",
+        kind: "page",
         mimeType: "text/markdown",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -88,11 +106,12 @@ describe("goat brain file sync", () => {
       relativePath: "competitors/rivalco-competitor.md",
       payload: "",
       sidecar: {
-        schemaVersion: "goat.brain.entry.v1",
+        schemaVersion: "goat.brain.entry.v2",
         id: "rivalco-competitor",
         folder: "competitors",
         title: "",
-        kind: "markdown",
+        format: "markdown",
+        kind: "page",
         mimeType: "text/markdown",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",

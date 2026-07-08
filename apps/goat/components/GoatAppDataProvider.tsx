@@ -232,14 +232,14 @@ function documentViewFromRow(
     content: row.content,
     body: row.body,
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
-    kind: normalizeKind(row.kind),
+    format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",
     originalFileName: row.original_file_name,
     assetStorageKey: row.asset_storage_key,
     relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
+    kind: normalizeDocumentKind(row.kind),
     type: normalizeEntityType(row.entity_type),
-    evidenceKind: normalizeEvidenceKind(row.evidence_kind),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
     tags: parseBrainTags(row.content),
@@ -325,10 +325,13 @@ const DEFAULT_BRAIN_FOLDERS = [
   "people",
   "companies",
   "projects",
-  "decisions",
   "meetings",
-  "research",
   "concepts",
+  "media",
+  "writing",
+  "analysis",
+  "emails",
+  "sources",
   "evidence",
 ];
 
@@ -359,35 +362,31 @@ function normalizeTimeline(
     : [];
 }
 
-function normalizeKind(value: string): GoatBrainDocumentView["kind"] {
+function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
   if (value === "pdf" || value === "docx") return value;
   return "markdown";
+}
+
+function normalizeDocumentKind(value: string): GoatBrainDocumentView["kind"] {
+  return value === "evidence" ? "evidence" : "page";
 }
 
 function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
   if (
     value === "person" ||
     value === "company" ||
-    value === "project" ||
-    value === "decision" ||
-    value === "meeting" ||
-    value === "research" ||
+    value === "media" ||
+    value === "analysis" ||
     value === "concept" ||
-    value === "evidence" ||
-    value === "note"
+    value === "email" ||
+    value === "writing" ||
+    value === "note" ||
+    value === "project" ||
+    value === "source"
   ) {
     return value;
   }
   return "note";
-}
-
-function normalizeEvidenceKind(
-  value: string | null | undefined,
-): "chat" | "email" | "correction" | "document" | null {
-  if (value === "chat" || value === "email" || value === "correction" || value === "document") {
-    return value;
-  }
-  return null;
 }
 
 function normalizeStatus(value: string): GoatBrainDocumentView["status"] {

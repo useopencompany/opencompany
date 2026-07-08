@@ -15,7 +15,8 @@ const entry: GoatBrainEntry = {
   id: "launch-plan",
   folder: "concepts",
   title: "Launch plan",
-  kind: "markdown",
+  format: "markdown",
+  kind: "page",
   mimeType: "text/markdown",
   body: "Launch should start with founder-led beta.",
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -44,7 +45,8 @@ describe("goat brain canonical entries", () => {
       id: "launch-plan",
       folder: "concepts",
       title: "Launch plan",
-      kind: "markdown",
+      format: "markdown",
+      kind: "page",
       mimeType: "text/markdown",
       body: "Launch should start with founder-led beta.",
       relations: [{ type: "owner", to: "jane" }],
@@ -72,9 +74,11 @@ describe("goat brain canonical entries", () => {
       "concepts/.brain/launch-plan.json",
     );
     expect(sidecar).toMatchObject({
-      schemaVersion: "goat.brain.entry.v1",
+      schemaVersion: "goat.brain.entry.v2",
       id: "launch-plan",
       folder: "concepts",
+      format: "markdown",
+      kind: "page",
       type: "concept",
       aliases: ["Founder beta"],
       payload: {
@@ -141,8 +145,7 @@ describe("goat brain canonical entries", () => {
       validateGoatBrainSidecar({
         sidecar: {
           ...sidecar,
-          type: "evidence",
-          evidenceKind: "email",
+          kind: "evidence",
           folder: 42,
         } as never,
         payloadContent: entry.body,
@@ -153,8 +156,7 @@ describe("goat brain canonical entries", () => {
       validateGoatBrainSidecar({
         sidecar: {
           ...sidecar,
-          type: "evidence",
-          evidenceKind: "email",
+          kind: "evidence",
           folder: 42,
         } as never,
         payloadContent: entry.body,
@@ -162,15 +164,89 @@ describe("goat brain canonical entries", () => {
       }),
     ).toMatchObject({
       ok: false,
+      errors: expect.arrayContaining(["sidecar.folder must be a safe lowercase folder path."]),
+    });
+  });
+
+  it("rejects sidecar folder/kind mismatches and invalid kinds", () => {
+    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    if (!sidecar) throw new Error("Expected serialized sidecar to parse.");
+
+    expect(
+      validateGoatBrainSidecar({
+        sidecar: { ...sidecar, kind: "evidence" } as never,
+        payloadContent: entry.body,
+        payloadRelativePath: "concepts/launch-plan.md",
+      }),
+    ).toMatchObject({
+      ok: false,
       errors: expect.arrayContaining([
-        "sidecar.evidenceKind must match the evidence folder subtype.",
+        'sidecar.folder/kind mismatch: evidence documents must live under the "evidence/" zone.',
       ]),
+    });
+    expect(
+      validateGoatBrainSidecar({
+        sidecar: { ...sidecar, kind: "markdown" } as never,
+        payloadContent: entry.body,
+        payloadRelativePath: "concepts/launch-plan.md",
+      }),
+    ).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining(['sidecar.kind must be "page" or "evidence".']),
+    });
+    expect(
+      validateGoatBrainSidecar({
+        sidecar: { ...sidecar, format: "text" } as never,
+        payloadContent: entry.body,
+        payloadRelativePath: "concepts/launch-plan.md",
+      }),
+    ).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining(["sidecar.format is invalid."]),
     });
   });
 
   it("rejects malformed legacy markdown at the entry boundary", () => {
     expect(() => goatBrainEntryFromLegacyMarkdown("# Missing frontmatter")).toThrow(
-      "Legacy brain document is missing a valid frontmatter.id.",
+      "Brain document is missing a valid frontmatter.id.",
     );
+    expect(() =>
+      goatBrainEntryFromLegacyMarkdown(
+        [
+          "---",
+          "id: launch-plan",
+          "folder: concepts",
+          "kind: page",
+          "---",
+          "",
+          "# Launch plan",
+          "",
+          "## Compiled truth",
+          "Body.",
+          "",
+          "## Timeline",
+          "",
+        ].join("\n"),
+      ),
+    ).toThrow("Brain document is missing a valid frontmatter.type.");
+    expect(() =>
+      goatBrainEntryFromLegacyMarkdown(
+        [
+          "---",
+          "id: launch-plan",
+          "folder: concepts",
+          "type: concept",
+          "---",
+          "",
+          "# Launch plan",
+          "",
+          "## Compiled truth",
+          "Body.",
+          "",
+          "## Timeline",
+          "",
+        ].join("\n"),
+      ),
+    ).toThrow("Brain document is missing a valid frontmatter.kind.");
   });
 });

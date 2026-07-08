@@ -86,6 +86,7 @@ export function replaceGoatBrainCompiledTruth(
   const header =
     frontmatter.id &&
     frontmatter.folder &&
+    frontmatter.kind &&
     frontmatter.type &&
     frontmatter.status &&
     frontmatter.createdAt &&
@@ -93,9 +94,9 @@ export function replaceGoatBrainCompiledTruth(
       ? `${serializeFrontmatter({
           id: frontmatter.id,
           folder: frontmatter.folder,
+          kind: frontmatter.kind,
           type: frontmatter.type,
           status: frontmatter.status,
-          ...(frontmatter.evidenceKind ? { evidenceKind: frontmatter.evidenceKind } : {}),
           createdAt: frontmatter.createdAt,
           updatedAt: options.updatedAt ?? frontmatter.updatedAt,
           relations: frontmatter.relations ?? [],

@@ -93,7 +93,7 @@ export async function writeGoatBrainEntry(root: string, entry: GoatBrainEntry): 
   const payloadPath = goatBrainPayloadRelativePath(
     entry.folder,
     entry.id,
-    entry.kind,
+    entry.format,
     entry.originalFileName,
   );
   const sidecarPath = goatBrainSidecarRelativePath(entry.folder, entry.id);

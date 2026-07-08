@@ -63,7 +63,7 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
 
   const degreeById = graphDegreeById(byId);
   const evidenceRecordIds = new Set(
-    parsedFiles.filter(({ doc }) => doc.frontmatter.type === "evidence").map(({ file }) => file.id),
+    parsedFiles.filter(({ doc }) => doc.frontmatter.kind === "evidence").map(({ file }) => file.id),
   );
 
   for (const { file, doc } of parsedFiles) {
@@ -134,7 +134,7 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
     }
 
     if (
-      doc.frontmatter.type !== "evidence" &&
+      doc.frontmatter.kind !== "evidence" &&
       doc.compiledTruth.trim() &&
       doc.timeline.length === 0 &&
       !(doc.frontmatter.sources ?? []).length

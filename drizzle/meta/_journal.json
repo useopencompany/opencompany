@@ -680,6 +680,13 @@
       "when": 1783424000000,
       "tag": "0096_goat_workspaces_brains",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1783424400000,
+      "tag": "0097_goat_brain_kind_type_decoupling",
+      "breakpoints": true
     }
   ]
 }

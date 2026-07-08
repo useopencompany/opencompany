@@ -5,8 +5,13 @@ import { parseGoatBrainDocument } from "../document";
 import { goatBrainPayloadHash } from "../entry";
 import { evidenceLinkTargets, pageLinkTargets } from "../inline-links";
 import { goatBrainFolderFromRelativePath } from "../paths";
-import type { GoatBrainEntityType, GoatBrainRelation, GoatBrainStatus } from "../schema";
-import { inferGoatBrainEntityTypeFromFolder } from "../schemas";
+import type {
+  GoatBrainEntityType,
+  GoatBrainKind,
+  GoatBrainRelation,
+  GoatBrainStatus,
+} from "../schema";
+import { goatBrainKindForFolder } from "../schema";
 import { listGoatBrainFiles } from "../store";
 import { validateGoatBrainDocument } from "../validate";
 
@@ -14,6 +19,7 @@ export type IndexRecord = {
   id: string;
   folder: string;
   title: string;
+  kind: GoatBrainKind;
   type: GoatBrainEntityType;
   status: GoatBrainStatus;
   aliases: string[];
@@ -47,9 +53,8 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
         id,
         folder: doc.frontmatter.folder ?? folder,
         title,
-        type:
-          doc.frontmatter.type ??
-          inferGoatBrainEntityTypeFromFolder(doc.frontmatter.folder ?? folder),
+        kind: doc.frontmatter.kind ?? goatBrainKindForFolder(doc.frontmatter.folder ?? folder),
+        type: doc.frontmatter.type ?? "note",
         status: doc.frontmatter.status ?? "draft",
         aliases: doc.frontmatter.aliases ?? [],
         tags: (doc.frontmatter.tags ?? []).join(" "),

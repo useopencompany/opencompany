@@ -94,7 +94,9 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--folder",
-        "people",
+        "evidence/notes",
+        "--kind",
+        "page",
         "--type",
         "company",
         "--id",
@@ -106,7 +108,7 @@ describe("goat-brain cli", () => {
       ]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining('`--folder` "people" does not match type "company"'),
+      stderr: expect.stringContaining('`--folder` "evidence/notes" does not match kind "page"'),
     });
     await expect(
       run([
@@ -132,21 +134,41 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--type",
-        "evidence",
-        "--evidence-kind",
+        "email",
+        "--kind",
         "slack",
         "--id",
         "ev-bad-kind",
         "--title",
         "Bad kind",
         "--truth",
-        "Invalid evidence kind.",
+        "Invalid kind.",
       ]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining(
-        "`--evidence-kind` must be chat, email, correction, or document.",
-      ),
+      stderr: expect.stringContaining('`--kind` must be "page" or "evidence".'),
+    });
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "company",
+        "--kind",
+        "evidence",
+        "--folder",
+        "companies",
+        "--id",
+        "bad-zone",
+        "--title",
+        "Bad zone",
+        "--truth",
+        "Evidence outside the zone.",
+      ]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('`--folder` "companies" does not match kind "evidence"'),
     });
     await expect(
       run([
@@ -154,16 +176,33 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "missing-subject",
-        "--kind",
+        "--type",
         "slack",
         "--body",
-        "Invalid kind.",
+        "Invalid type.",
         "--source-ref",
         "chat:message_1",
       ]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining("`--kind` must be chat, email, correction, or document."),
+      stderr: expect.stringContaining('Unsupported Goat Brain entity type "slack"'),
+    });
+    await expect(
+      run([
+        "append-evidence",
+        "--root",
+        root,
+        "missing-subject",
+        "--folder",
+        "companies",
+        "--body",
+        "Bad folder.",
+        "--source-ref",
+        "chat:message_1",
+      ]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('`--folder` "companies" is invalid.'),
     });
   });
 
@@ -176,7 +215,7 @@ describe("goat-brain cli", () => {
     );
   });
 
-  it("defaults create folders from type and rejects unknown folder roots", async () => {
+  it("defaults create folders from type and kind and accepts free-form folders", async () => {
     await expect(
       run([
         "create",
@@ -195,9 +234,13 @@ describe("goat-brain cli", () => {
     ).resolves.toMatchObject({ exitCode: 0 });
 
     const created = JSON.parse((await run(["get", "--root", root, "acme", "--json"])).stdout) as {
-      doc: { frontmatter: { folder: string; type: string } };
+      doc: { frontmatter: { folder: string; kind: string; type: string } };
     };
-    expect(created.doc.frontmatter).toMatchObject({ folder: "companies", type: "company" });
+    expect(created.doc.frontmatter).toMatchObject({
+      folder: "companies",
+      kind: "page",
+      type: "company",
+    });
 
     await expect(
       run([
@@ -205,6 +248,8 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--type",
+        "email",
+        "--kind",
         "evidence",
         "--id",
         "ev-acme-chat",
@@ -218,19 +263,25 @@ describe("goat-brain cli", () => {
     const evidence = JSON.parse(
       (await run(["get", "--root", root, "ev-acme-chat", "--json"])).stdout,
     ) as {
-      doc: { frontmatter: { folder: string; type: string; evidenceKind: string } };
+      doc: { frontmatter: { folder: string; kind: string; type: string } };
     };
     expect(evidence.doc.frontmatter).toMatchObject({
-      folder: "evidence/chat",
-      type: "evidence",
-      evidenceKind: "chat",
+      folder: "evidence",
+      kind: "evidence",
+      type: "email",
     });
 
     await expect(
       run(["folder", "--root", root, "create", "--path", "random"]),
     ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining('Folder "random" is available.'),
+    });
+    await expect(
+      run(["folder", "--root", root, "create", "--path", "bad_path"]),
+    ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining("must be under a known type folder"),
+      stderr: expect.stringContaining("`--path` must be a safe folder path."),
     });
   });
 
@@ -358,10 +409,10 @@ describe("goat-brain cli", () => {
       run(["link", "--root", root, "launch-plan", "--to", "jane", "--as", "attended"]),
     ).resolves.toMatchObject({ exitCode: 0 });
     await expect(
-      run(["move", "--root", root, "launch-plan", "--folder", "people"]),
+      run(["move", "--root", root, "launch-plan", "--folder", "evidence/plans"]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining('`--folder` "people" does not match type "project"'),
+      stderr: expect.stringContaining('`--folder` "evidence/plans" does not match kind "page"'),
     });
 
     const linked = JSON.parse(
@@ -474,8 +525,10 @@ describe("goat-brain cli", () => {
       "--root",
       root,
       "acme",
-      "--kind",
+      "--type",
       "email",
+      "--folder",
+      "evidence/email",
       "--body",
       "Acme asked for enterprise pricing.",
       "--source-ref",
@@ -486,13 +539,11 @@ describe("goat-brain cli", () => {
     ]);
     const result = JSON.parse(appended.stdout) as {
       evidenceId: string;
-      evidenceKind: string;
       evidencePath: string;
     };
 
     expect(result).toMatchObject({
       evidenceId: expect.stringMatching(/^ev-/),
-      evidenceKind: "email",
       evidencePath: expect.stringMatching(/^evidence\/email\/ev-.*\.md$/),
     });
 
@@ -502,16 +553,16 @@ describe("goat-brain cli", () => {
       doc: {
         frontmatter: {
           folder: string;
+          kind: string;
           type: string;
-          evidenceKind: string;
           relations: Array<{ type: string; to: string }>;
         };
       };
     };
     expect(evidence.doc.frontmatter).toMatchObject({
       folder: "evidence/email",
-      type: "evidence",
-      evidenceKind: "email",
+      kind: "evidence",
+      type: "email",
       relations: [{ type: "about", to: "acme" }],
     });
 
@@ -528,6 +579,109 @@ describe("goat-brain cli", () => {
         body: expect.stringContaining(`[[evidence:${result.evidenceId}|Acme pricing thread]]`),
       }),
     ]);
+
+    const untitled = await run([
+      "append-evidence",
+      "--root",
+      root,
+      "acme",
+      "--body",
+      "Acme signed the order form.",
+      "--source-ref",
+      "gmail:thread_456",
+      "--json",
+    ]);
+    const untitledResult = JSON.parse(untitled.stdout) as {
+      evidenceId: string;
+      evidencePath: string;
+    };
+    expect(untitledResult.evidencePath).toMatch(/^evidence\/ev-.*\.md$/);
+    const untitledEvidence = JSON.parse(
+      (await run(["get", "--root", root, untitledResult.evidenceId, "--json"])).stdout,
+    ) as {
+      doc: { frontmatter: { folder: string; kind: string; type: string; title: string } };
+    };
+    expect(untitledEvidence.doc.frontmatter).toMatchObject({
+      folder: "evidence",
+      kind: "evidence",
+      type: "source",
+      title: "Evidence: Acme signed the order form.",
+    });
+  });
+
+  it("creates pages in free-form folders", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "person",
+        "--folder",
+        "team/gtm",
+        "--id",
+        "ada",
+        "--title",
+        "Ada",
+        "--truth",
+        "Ada leads GTM.",
+        "--json",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const created = JSON.parse((await run(["get", "--root", root, "ada", "--json"])).stdout) as {
+      path: string;
+      doc: { frontmatter: { folder: string; kind: string; type: string } };
+    };
+    expect(created.path).toBe("team/gtm/ada.md");
+    expect(created.doc.frontmatter).toMatchObject({
+      folder: "team/gtm",
+      kind: "page",
+      type: "person",
+    });
+  });
+
+  it("creates evidence-kind docs in the evidence zone that pass doctor", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "email",
+        "--kind",
+        "evidence",
+        "--id",
+        "ev-x",
+        "--title",
+        "Acme email",
+        "--truth",
+        "Acme asked for pricing.",
+        "--json",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const created = JSON.parse((await run(["get", "--root", root, "ev-x", "--json"])).stdout) as {
+      path: string;
+      doc: { frontmatter: { folder: string; kind: string; type: string } };
+    };
+    expect(created.path).toBe("evidence/ev-x.md");
+    expect(created.doc.frontmatter).toMatchObject({
+      folder: "evidence",
+      kind: "evidence",
+      type: "email",
+    });
+
+    const doctor = await run(["doctor", "--root", root, "--json"]);
+    expect(doctor).toMatchObject({ exitCode: 0 });
+    const report = JSON.parse(doctor.stdout) as {
+      errors: number;
+      findings: Array<{ id: string; severity: string }>;
+    };
+    expect(report.errors).toBe(0);
+    expect(
+      report.findings.filter((finding) => finding.id === "ev-x" && finding.severity === "error"),
+    ).toEqual([]);
   });
 
   it("generates unique evidence ids for multiple updates from one chat source", async () => {

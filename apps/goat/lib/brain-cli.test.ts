@@ -35,8 +35,6 @@ describe("runGoatBrainToolForUser", () => {
         "company",
         "--json",
         "--truth-stdin",
-        "--folder",
-        "companies",
         "--source-ref",
         "goat-chat:user_message_1",
       ],
@@ -89,56 +87,57 @@ describe("runGoatBrainToolForUser", () => {
     ).toThrow("goat_brain create requires compiled truth");
   });
 
-  it("rejects create when the folder does not match the type", () => {
-    expect(() =>
+  it("allows create in any free-form folder", () => {
+    expect(
       renderGoatBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "opencompany",
-            folder: "inbox",
+            folder: "accounts/customers",
             title: "OpenCompany",
             type: "company",
             truth: "OpenCompany is a company.",
           },
         },
         "goat-chat:user_message_1",
-      ),
-    ).toThrow('goat_brain create folder "inbox" does not match type "company"');
+      ).argv,
+    ).toContain("accounts/customers");
   });
 
-  it("normalizes and validates evidence subtype folders for create", () => {
+  it("rejects create with an invalid kind", () => {
+    expect(() =>
+      renderGoatBrainToolCommand(
+        {
+          command: "create",
+          flags: {
+            id: "ev-opencompany-chat",
+            kind: "snapshot",
+            title: "OpenCompany chat",
+            type: "source",
+            truth: "OpenCompany was discussed in chat.",
+          },
+        },
+        "goat-chat:user_message_1",
+      ),
+    ).toThrow('goat_brain create kind must be "page" or "evidence"');
+
     expect(
       renderGoatBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "ev-opencompany-chat",
+            kind: "evidence",
             folder: "evidence",
             title: "OpenCompany chat",
-            type: "evidence",
+            type: "source",
             truth: "OpenCompany was discussed in chat.",
           },
         },
         "goat-chat:user_message_1",
       ).argv,
-    ).toContain("evidence/chat");
-
-    expect(() =>
-      renderGoatBrainToolCommand(
-        {
-          command: "create",
-          flags: {
-            id: "ev-opencompany-slack",
-            folder: "evidence/slack",
-            title: "OpenCompany Slack",
-            type: "evidence",
-            truth: "OpenCompany was discussed in Slack.",
-          },
-        },
-        "goat-chat:user_message_1",
-      ),
-    ).toThrow("goat_brain create evidence folders must be under");
+    ).toContain("evidence");
   });
 
   it("renders goat_brain help invocations", () => {
@@ -184,7 +183,7 @@ describe("runGoatBrainToolForUser", () => {
           command: "append-evidence",
           flags: {
             id: "opencompany",
-            kind: "email",
+            type: "email",
             body: "Acme asked for pricing.",
             json: true,
           },
@@ -195,7 +194,7 @@ describe("runGoatBrainToolForUser", () => {
       "append-evidence",
       "--id",
       "opencompany",
-      "--kind",
+      "--type",
       "email",
       "--body",
       "Acme asked for pricing.",
@@ -225,7 +224,7 @@ describe("runGoatBrainToolForUser", () => {
       stdout: "",
       stderr: "",
       error: expect.stringContaining(
-        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, project, decision, meeting, research, concept, evidence, note.',
+        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, media, analysis, concept, email, writing, note, project, source.',
       ),
     });
     expect(output.error).toContain('Relevant help command: { command: "help"');

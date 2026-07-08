@@ -26,8 +26,8 @@ describe("checkGoatBrainHealth", () => {
         frontmatter: {
           id: "ev-acme-email",
           folder: "evidence/email",
-          type: "evidence",
-          evidenceKind: "email",
+          kind: "evidence",
+          type: "email",
           status: "active",
           title: "Acme email",
           createdAt: "2026-01-01T00:00:00.000Z",

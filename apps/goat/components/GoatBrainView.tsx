@@ -802,9 +802,7 @@ function BrainMetadataSidebar({
         </h2>
         <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 text-[12px] leading-5">
           <MetadataRow label="Type" value={document.type} />
-          {document.evidenceKind ? (
-            <MetadataRow label="Evidence" value={document.evidenceKind} />
-          ) : null}
+          {document.kind === "evidence" ? <MetadataRow label="Kind" value="evidence" /> : null}
           <MetadataRow label="Created" value={formatDateTime(document.createdAt)} />
           <MetadataRow label="Updated" value={formatDateTime(document.updatedAt)} />
           <span className="text-ink-subtle">ID</span>
@@ -1034,7 +1032,7 @@ function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }
             {entries.length} {entries.length === 1 ? "entry" : "entries"}
           </span>
         </div>
-        {document.kind !== "markdown" ? (
+        {document.format !== "markdown" ? (
           <p className="text-[12.5px] text-ink-muted">No timeline for this asset type.</p>
         ) : entries.length > 0 ? (
           <ol className="max-h-56 space-y-3 overflow-y-auto pr-2">
@@ -1233,7 +1231,7 @@ function brainLinkMap(documents: GoatBrainDocumentView[]) {
     const href = brainDocumentUrl(document);
     links[document.brainId] = href;
     links[`page:${document.brainId}`] = href;
-    if (document.type === "evidence") links[`evidence:${document.brainId}`] = href;
+    if (document.kind === "evidence") links[`evidence:${document.brainId}`] = href;
   }
   return links;
 }
@@ -1332,14 +1330,14 @@ function documentViewFromRow(
     content: row.content,
     body: row.body,
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
-    kind: normalizeKind(row.kind),
+    format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",
     originalFileName: row.original_file_name,
     assetStorageKey: row.asset_storage_key,
     relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
+    kind: normalizeDocumentKind(row.kind),
     type: normalizeEntityType(row.entity_type),
-    evidenceKind: normalizeEvidenceKind(row.evidence_kind),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
     tags: normalizeStringArray(parsed.tags),
@@ -1442,35 +1440,31 @@ function normalizeTimeline(
     : [];
 }
 
-function normalizeKind(value: string): GoatBrainDocumentView["kind"] {
+function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
   if (value === "pdf" || value === "docx") return value;
   return "markdown";
+}
+
+function normalizeDocumentKind(value: string): GoatBrainDocumentView["kind"] {
+  return value === "evidence" ? "evidence" : "page";
 }
 
 function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
   if (
     value === "person" ||
     value === "company" ||
-    value === "project" ||
-    value === "decision" ||
-    value === "meeting" ||
-    value === "research" ||
+    value === "media" ||
+    value === "analysis" ||
     value === "concept" ||
-    value === "evidence" ||
-    value === "note"
+    value === "email" ||
+    value === "writing" ||
+    value === "note" ||
+    value === "project" ||
+    value === "source"
   ) {
     return value;
   }
   return "note";
-}
-
-function normalizeEvidenceKind(
-  value: string | null | undefined,
-): "chat" | "email" | "correction" | "document" | null {
-  if (value === "chat" || value === "email" || value === "correction" || value === "document") {
-    return value;
-  }
-  return null;
 }
 
 function normalizeStatus(value: string): GoatBrainDocumentView["status"] {

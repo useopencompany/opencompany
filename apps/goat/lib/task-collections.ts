@@ -200,7 +200,7 @@ export type GoatBrainDocumentRow = {
   content: string;
   body: string;
   timeline: Array<{ evidenceId?: string; evidence_id?: string; at: string; body: string }>;
-  kind: string;
+  format: string;
   mime_type: string | null;
   original_file_name: string | null;
   asset_storage_key: string | null;
@@ -208,8 +208,8 @@ export type GoatBrainDocumentRow = {
   sources: Array<{ ref: string; capturedAt?: string; captured_at?: string; title?: string }>;
   content_hash: string;
   size_bytes: number;
+  kind: string;
   entity_type: string;
-  evidence_kind: string | null;
   status: string;
   aliases: string[];
   created_at: string;

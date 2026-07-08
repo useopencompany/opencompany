@@ -6,8 +6,9 @@ import { and, desc, eq, notInArray } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
   deriveGoatBrainEdges,
+  GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
   type GoatBrainEntityType,
-  type GoatBrainEvidenceKind,
+  type GoatBrainKind,
   type GoatBrainRelation,
   type GoatBrainSource,
   type GoatBrainStatus,
@@ -15,12 +16,14 @@ import {
   goatBrainEntryFromLegacyMarkdown,
   goatBrainFolderFromRelativePath,
   goatBrainIdFromRelativePath,
+  goatBrainKindForFolder,
   goatBrainRelativePath,
   goatBrainSidecarRelativePath,
   isBuiltInGoatBrainEntityType,
   isSafeGoatBrainRelativePath,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
+  isValidGoatBrainKind,
   isValidGoatBrainStatus,
   normalizeGoatBrainFolderForV1,
   type GoatBrainDocument as ParsedGoatBrainDocument,
@@ -44,14 +47,14 @@ import {
 } from "./goat-schema";
 
 export const GOAT_BRAIN_FILE_MIME_TYPE = "text/markdown";
-export const GOAT_BRAIN_FILE_KIND = "markdown";
+export const GOAT_BRAIN_FILE_FORMAT = "markdown";
 export const MAX_GOAT_BRAIN_FILE_BYTES = 1_000_000;
 
 export type GoatBrainFileProjection = {
   path: string;
   brainId: string;
   folderPath: string;
-  kind: typeof GOAT_BRAIN_FILE_KIND;
+  format: typeof GOAT_BRAIN_FILE_FORMAT;
   mimeType: typeof GOAT_BRAIN_FILE_MIME_TYPE;
   content: string;
   body: string;
@@ -59,8 +62,8 @@ export type GoatBrainFileProjection = {
   contentHash: string;
   sizeBytes: number;
   title: string;
+  kind: GoatBrainKind;
   entityType: GoatBrainEntityType;
-  evidenceKind?: GoatBrainEvidenceKind;
   status: GoatBrainStatus;
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
@@ -70,8 +73,8 @@ export type GoatBrainFileProjection = {
 
 export type GoatBrainStoredFrontmatter = {
   id?: string;
+  kind?: string;
   type?: string;
-  evidenceKind?: string;
   status?: string;
   title?: string;
   createdAt?: string;
@@ -123,7 +126,6 @@ export function createGoatBrainMarkdownContent(input: {
   folderPath: string;
   title: string;
   type: GoatBrainEntityType;
-  evidenceKind?: GoatBrainEvidenceKind;
   status?: GoatBrainStatus;
   compiledTruth?: string;
   related?: GoatBrainRelation[];
@@ -139,8 +141,9 @@ export function createGoatBrainMarkdownContent(input: {
     frontmatter: {
       id: input.id,
       folder,
+      // Kind is derived from the folder: the evidence/ zone marks evidence docs.
+      kind: goatBrainKindForFolder(folder),
       type: input.type,
-      ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
       status: input.status ?? "draft",
       title: input.title,
       createdAt: input.createdAt ?? now,
@@ -201,21 +204,22 @@ export function deriveGoatBrainFileProjection(input: {
     parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
       ? parsed.frontmatter.type
       : null;
+  const kind = isValidGoatBrainKind(parsed.frontmatter.kind) ? parsed.frontmatter.kind : null;
   const status = isValidGoatBrainStatus(parsed.frontmatter.status)
     ? parsed.frontmatter.status
     : "draft";
-  const evidenceKind = parsed.frontmatter.evidenceKind;
   const title = parsed.title || parsed.frontmatter.title || titleFromId(brainId);
   const validation = validateGoatBrainDocument(parsed, brainId, source);
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
   if (!entityType) throw new Error("frontmatter.type must be a built-in brain entity type.");
+  if (!kind) throw new Error('frontmatter.kind must be "page" or "evidence".');
   const content = canonicalGoatBrainContent({
     parsed,
     brainId,
     folderPath,
     title,
+    kind,
     entityType,
-    ...(evidenceKind ? { evidenceKind } : {}),
     status,
     source,
   });
@@ -228,7 +232,7 @@ export function deriveGoatBrainFileProjection(input: {
     path: normalizedPath,
     brainId,
     folderPath,
-    kind: GOAT_BRAIN_FILE_KIND,
+    format: GOAT_BRAIN_FILE_FORMAT,
     mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
     content,
     body: parsed.compiledTruth,
@@ -236,8 +240,8 @@ export function deriveGoatBrainFileProjection(input: {
     contentHash: hashGoatBrainContent(content),
     sizeBytes,
     title,
+    kind,
     entityType,
-    ...(evidenceKind ? { evidenceKind } : {}),
     status,
     relations: parsed.frontmatter.relations ?? [],
     sources: parsed.frontmatter.sources ?? [],
@@ -251,8 +255,8 @@ function canonicalGoatBrainContent(input: {
   brainId: string;
   folderPath: string;
   title: string;
+  kind: GoatBrainKind;
   entityType: GoatBrainEntityType;
-  evidenceKind?: GoatBrainEvidenceKind;
   status: GoatBrainStatus;
   source: string;
 }): string {
@@ -260,9 +264,9 @@ function canonicalGoatBrainContent(input: {
   if (
     fm.id === input.brainId &&
     fm.folder === input.folderPath &&
+    fm.kind === input.kind &&
     fm.type === input.entityType &&
     fm.status === input.status &&
-    fm.evidenceKind === input.evidenceKind &&
     fm.title === input.title
   ) {
     return input.source;
@@ -274,8 +278,8 @@ function canonicalGoatBrainContent(input: {
     frontmatter: {
       id: input.brainId,
       folder: input.folderPath,
+      kind: input.kind,
       type: input.entityType,
-      ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
       status: input.status,
       title: input.title,
       createdAt: fm.createdAt ?? new Date().toISOString(),
@@ -494,18 +498,18 @@ export async function materializeGoatBrainFilesToRoot(input: {
       sidecarPath,
       JSON.stringify(
         {
-          schemaVersion: "goat.brain.entry.v1",
+          schemaVersion: GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
           id: entry.id,
           folder: entry.folder,
           title: entry.title,
-          kind: entry.kind,
+          format: entry.format,
           mimeType: entry.mimeType,
           createdAt: entry.createdAt,
           updatedAt: entry.updatedAt,
           relations: entry.relations,
           sources: entry.sources,
+          kind: entry.kind,
           type: entry.type,
-          ...(entry.evidenceKind ? { evidenceKind: entry.evidenceKind } : {}),
           status: entry.status,
           ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
           tags: entry.tags,
@@ -721,6 +725,7 @@ async function upsertConflictDocument(input: {
       ...parsed.frontmatter,
       id: conflictId,
       folder: folderPath,
+      kind: parsed.frontmatter.kind ?? goatBrainKindForFolder(folderPath),
       type: parsed.frontmatter.type ?? input.current.entityType,
       title,
       status:
@@ -757,14 +762,14 @@ function documentValues(projection: GoatBrainFileProjection) {
     content: projection.content,
     body: projection.body,
     timeline: projection.timeline,
-    kind: projection.kind,
+    format: projection.format,
     mimeType: projection.mimeType,
     originalFileName: null,
     assetStorageKey: null,
     relations: projection.relations,
     sources: projection.sources,
+    kind: projection.kind,
     entityType: projection.entityType,
-    evidenceKind: projection.evidenceKind ?? null,
     status: projection.status,
     aliases: projection.aliases,
     contentHash: projection.contentHash,
