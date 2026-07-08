@@ -1,0 +1,33 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { GET, OPTIONS } from "./route";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("GET /.well-known/oauth-protected-resource", () => {
+  it("returns path-suffixed OAuth protected resource metadata", async () => {
+    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "https://example.authkit.app");
+
+    const response = GET(
+      new Request(
+        "https://goat.example.com/.well-known/oauth-protected-resource/api/mcp/goat_brain_123/mcp",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({
+      resource: "https://goat.example.com/api/mcp/goat_brain_123/mcp",
+      authorization_servers: ["https://example.authkit.app"],
+      bearer_methods_supported: ["header"],
+    });
+  });
+
+  it("returns CORS headers for metadata preflight requests", () => {
+    const response = OPTIONS();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Access-Control-Allow-Methods")).toBe("GET, OPTIONS");
+  });
+});
