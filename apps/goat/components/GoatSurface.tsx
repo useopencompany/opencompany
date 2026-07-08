@@ -15,11 +15,7 @@ import {
 } from "@opencompany/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
-import {
-  AnthropicIcon,
-  MoonshotIcon,
-  OpenAIIcon,
-} from "@opencompany/ui/icons";
+import { AnthropicIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import { DefaultChatTransport } from "ai";
@@ -83,6 +79,7 @@ import {
   toGoatChatUiMessage,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -90,7 +87,6 @@ import {
   type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
-import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
 import {
   deleteGoatTaskScheduleAction,
   type GoatTaskScheduleView,
