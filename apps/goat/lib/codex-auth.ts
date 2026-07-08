@@ -30,6 +30,12 @@ type RunnerFlowResponse = {
 
 export async function loadCurrentGoatCodexAuthSettings(): Promise<GoatCodexAuthSettings> {
   const { user } = await currentGoatUser();
+  return loadGoatCodexAuthSettingsForUser(user.workosUserId);
+}
+
+export async function loadGoatCodexAuthSettingsForUser(
+  userWorkosId: string,
+): Promise<GoatCodexAuthSettings> {
   const [row] = await getDb()
     .select({
       status: goatCodexCredentials.status,
@@ -38,7 +44,7 @@ export async function loadCurrentGoatCodexAuthSettings(): Promise<GoatCodexAuthS
       lastRotatedAt: goatCodexCredentials.lastRotatedAt,
     })
     .from(goatCodexCredentials)
-    .where(eq(goatCodexCredentials.userWorkosId, user.workosUserId))
+    .where(eq(goatCodexCredentials.userWorkosId, userWorkosId))
     .limit(1);
 
   return {
@@ -47,6 +53,11 @@ export async function loadCurrentGoatCodexAuthSettings(): Promise<GoatCodexAuthS
     lastValidatedAt: row?.lastValidatedAt?.toISOString() ?? null,
     lastRotatedAt: row?.lastRotatedAt?.toISOString() ?? null,
   };
+}
+
+export async function isGoatCodexConnectedForUser(userWorkosId: string) {
+  const settings = await loadGoatCodexAuthSettingsForUser(userWorkosId);
+  return settings.status === "connected";
 }
 
 export async function startGoatCodexDeviceAuth() {

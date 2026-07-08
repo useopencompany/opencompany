@@ -146,6 +146,42 @@ describe("createCodexAppServerAccumulator", () => {
     expect(accumulator.summary().result).toBe("Hello world");
   });
 
+  it("does not return visible activity for agent text deltas", () => {
+    const accumulator = createCodexAppServerAccumulator();
+
+    expect(
+      accumulator.push({
+        method: "item/agentMessage/delta",
+        params: { delta: "I" },
+      }),
+    ).toBeNull();
+    expect(
+      accumulator.push({
+        method: "item/agentMessage/delta",
+        params: { delta: "'ll " },
+      }),
+    ).toBeNull();
+    expect(
+      accumulator.push({
+        method: "item/agentMessage/delta",
+        params: { delta: "clone" },
+      }),
+    ).toBeNull();
+
+    expect(accumulator.summary().result).toBe("I'll clone");
+  });
+
+  it("returns visible activity when an agent message completes", () => {
+    const accumulator = createCodexAppServerAccumulator();
+
+    expect(
+      accumulator.push({
+        method: "item/completed",
+        params: { item: { type: "agentMessage", text: "Done final" } },
+      }),
+    ).toContain("Done final");
+  });
+
   it("uses only the latest agent-message delta item as the fallback final result", async () => {
     const accumulator = createCodexAppServerAccumulator();
 

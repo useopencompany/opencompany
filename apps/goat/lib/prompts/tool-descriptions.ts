@@ -5,10 +5,13 @@ export const GOAT_BRAIN_TOOL_ARGS_DESCRIPTION =
   "CLI-shaped structured invocation. Use { command, flags, stdin? }, where flags are CLI options without leading dashes. Examples: { command: 'help', flags: { topic: 'create' } }, { command: 'create', flags: { id: 'opencompany', title: 'OpenCompany', type: 'company', folder: 'companies', truth: 'OpenCompany is a company building agent infrastructure.', json: true } }, { command: 'append-evidence', flags: { id: 'garry-tan', kind: 'chat', body: 'Met at YC event.', sourceTitle: 'User chat note', json: true } }, { command: 'query', flags: { text: 'hiring', hops: 2, graphDirection: 'both', limit: 5, json: true } }, { command: 'query', flags: { text: 'Sarah Chen', includeMerged: true, json: true } }, { command: 'get', flags: { id: 'garry-tan', json: true } }, or { command: 'delete', flags: { id: 'old-note', dryRun: true, json: true } }. Delete is preview-only in chat. Use camelCase or kebab-case flag names.";
 
 export const START_TASK_TOOL_DESCRIPTION =
-  "Start a task when the user's request should become an asynchronous tracked Result, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent.";
+  "Start a task when the user's request should become an asynchronous tracked Result, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent. If the user explicitly asks for Codex, a Codex task, repository edits, tests, debugging, code review, or pull-request work, preserve that execution intent by setting engine to codex.";
 
 export const START_TASK_PROMPT_DESCRIPTION =
-  "A self-contained task prompt. Preserve the user's goal, relevant context, success criteria, and any constraints needed by the just-in-time agent.";
+  "A self-contained task prompt. Preserve the user's goal, relevant context, success criteria, and any constraints needed by the just-in-time agent. Preserve explicit execution-engine requests such as Codex verbatim instead of paraphrasing them away.";
+
+export const START_TASK_ENGINE_DESCRIPTION =
+  "Optional execution engine hint. Set to codex when the user explicitly asks for Codex or a Codex task, or for repository edits, tests, debugging, code review, or pull-request work where Codex is the requested executor. Omit for ordinary research, writing, connected-account lookup, or analysis tasks.";
 
 export const START_TASK_NAME_DESCRIPTION = "A short 2-7 word task name for the Results list.";
 

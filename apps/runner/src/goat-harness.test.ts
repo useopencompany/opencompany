@@ -41,6 +41,7 @@ type GoatTask = typeof goatTasks.$inferSelect;
 const model = "moonshotai/kimi-k2.6" as AgentModelId;
 const claudeModel = "anthropic/claude-sonnet-5" as AgentModelId;
 const gptModel = "openai/gpt-5.5" as AgentModelId;
+const glmModel = "zai/glm-5.2" as AgentModelId;
 const harnessSpec: GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1",
   engine: "opencompany",
@@ -140,6 +141,12 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("<prompt_contract>");
     expect(request.system).toContain("Always return a non-empty systemPrompt");
     expect(request.system).toContain('Use engine "codex" for coding tasks');
+    expect(request.system).toContain("Cost matters");
+    expect(request.system).toContain("choose Kimi K2.6 by default");
+    expect(request.system).toContain("Do not upgrade deep research to Claude Sonnet");
+    expect(request.system).toContain(
+      "Choose GLM 5.2 when the task likely needs very large context",
+    );
     expect(request.prompt).toContain("<planner_inputs>");
     expect(request.prompt).toContain("<execution_engine_options>");
     expect(request.prompt).toContain("<id>\nopencompany\n</id>");
@@ -147,7 +154,10 @@ describe("planGoatHarness", () => {
     expect(request.prompt).toContain("<execution_model_options>");
     expect(request.prompt).toContain("<id>\nmoonshotai/kimi-k2.6\n</id>");
     expect(request.prompt).toContain("<selection_guidance>\nDefault.");
+    expect(request.prompt).toContain("<id>\nzai/glm-5.2\n</id>");
+    expect(request.prompt).toContain("long source-set synthesis");
     expect(request.prompt).toContain("<id>\nanthropic/claude-sonnet-5\n</id>");
+    expect(request.prompt).toContain("Premium fallback");
     expect(request.prompt).toContain("<id>\nopenai/gpt-5.5\n</id>");
     expect(request.prompt).toContain("<available_operation_tools>");
     expect(request.prompt).toContain("<tool>\nexa_search\n</tool>");
@@ -239,6 +249,34 @@ describe("planGoatHarness", () => {
       }),
     ).resolves.toMatchObject({
       tools: ["linear_search_tools", "linear_use_tool"],
+    });
+  });
+
+  it("accepts GLM 5.2 as a planned large-context execution model", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "opencompany",
+        model: glmModel,
+        systemPrompt: "Synthesize many sources into a structured report.",
+        initialUserMessage: "Research every relevant source and produce a report.",
+        tools: ["exa_search"],
+        skills: [],
+        maxModelSteps: 16,
+        resultMode: "brain_markdown_report",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Deeply research the category across many sources and produce a report.",
+        model,
+        availableTools: ["exa_search"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      model: glmModel,
+      resultMode: "brain_markdown_report",
     });
   });
 
@@ -404,6 +442,41 @@ describe("planGoatHarness", () => {
         reasoningEffort: "high",
       },
     });
+  });
+
+  it("enforces a requested Codex engine even if the planner response downgrades it", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "opencompany",
+        model: claudeModel,
+        systemPrompt: "Inspect the repository and report readiness.",
+        initialUserMessage:
+          "Check out opencompany-experimental and report whether development work can start.",
+        tools: ["github_clone_repository", "github_shell"],
+        skills: [],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+      },
+    });
+
+    await expect(
+      planGoatHarness({
+        prompt: "Check out opencompany-experimental and report whether development work can start.",
+        model,
+        requestedEngine: "codex",
+        availableTools: ["github_clone_repository", "github_shell"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      engine: "codex",
+      model: gptModel,
+      codex: {
+        createPullRequest: false,
+      },
+    });
+    const prompt = aiMock.generateObject.mock.calls[0]?.[0]?.prompt as string;
+    expect(prompt).toContain("<requested_engine>\ncodex\n</requested_engine>");
   });
 
   it("normalizes planner-selected Codex goal mode with a default token budget", async () => {
@@ -733,6 +806,68 @@ describe("executeGoatTask", () => {
       },
     };
     aiMock.generateObject.mockResolvedValueOnce({ object: codexHarnessSpec });
+    goatCodexMock.runGoatCodexTask.mockImplementationOnce(async (input) => {
+      await input.onOutput?.(
+        "Codex command completed: /bin/bash -lc 'git status --short --branch'",
+      );
+      await input.onRuntimeEvents?.([
+        {
+          method: "item/agentMessage/delta",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            itemId: "agent_1",
+            delta: "I'll clone the repository.",
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            item: {
+              id: "agent_1",
+              type: "agentMessage",
+              text: "I'll clone the repository.",
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            item: {
+              id: "reasoning_1",
+              type: "reasoning",
+              text: "Checked the repository state.",
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread_existing",
+            turnId: "turn_1",
+            item: {
+              id: "cmd_1",
+              type: "commandExecution",
+              command: "git log --oneline -10",
+              status: "completed",
+              exitCode: 0,
+            },
+          },
+        },
+      ]);
+      return {
+        content: "Codex completed.",
+        sandboxId: "sbx_codex",
+        sandboxStartedAt: new Date("2026-01-01T00:00:00.000Z"),
+        sandboxEndedAt: new Date("2026-01-01T00:01:00.000Z"),
+        model: "gpt-5.5",
+        usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+      };
+    });
     const sink = createSink();
 
     await expect(
@@ -760,8 +895,49 @@ describe("executeGoatTask", () => {
           tokenBudget: 200_000,
         },
         onEngineSessionId: sink.updateCodexEngineSessionId,
+        onRuntimeEvents: expect.any(Function),
       }),
     );
+    expect(sink.updateMessageContent).toHaveBeenCalledWith({
+      messageId: "assistant_msg_1",
+      content: "I'll clone the repository.",
+    });
+    expect(sink.updateMessageContent).not.toHaveBeenCalledWith({
+      messageId: "assistant_msg_1",
+      content: expect.stringContaining("Codex command completed"),
+    });
+    expect(sink.appendEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "assistant.delta" }),
+    );
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "message.completed",
+      messageId: "assistant_msg_1",
+      payload: expect.objectContaining({
+        source: "codex_app_server",
+        role: "assistant",
+        content: "I'll clone the repository.",
+        itemId: "agent_1",
+      }),
+    });
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "reasoning.completed",
+      messageId: "assistant_msg_1",
+      payload: expect.objectContaining({
+        source: "codex_app_server",
+        text: "Checked the repository state.",
+        itemId: "reasoning_1",
+      }),
+    });
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "tool.completed",
+      messageId: "assistant_msg_1",
+      payload: expect.objectContaining({
+        source: "codex_app_server",
+        toolCallId: "cmd_1",
+        toolName: "codex_command",
+        output: { status: "completed", exitCode: 0 },
+      }),
+    });
     expect(sink.recordSandboxUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         sandboxId: "sbx_codex",

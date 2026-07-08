@@ -414,7 +414,7 @@ function createCodexAppServerNotificationBatcher(input: {
     if (events.length === 0 && activities.length === 0) return flushChain;
 
     const batchEvents = coalesceCodexAppServerNotifications(events);
-    const batchActivity = activities.length > 0 ? activities.join("\n") : null;
+    const batchActivity = activities.length > 0 ? activities.join("") : null;
     events = [];
     activities = [];
     pendingDeltaChars = 0;
@@ -432,7 +432,7 @@ function createCodexAppServerNotificationBatcher(input: {
   return {
     push(notification: JsonRpcNotification, activity: string | null) {
       events.push(notification);
-      if (activity?.trim()) activities.push(activity.trim());
+      if (activity != null && activity.length > 0) activities.push(activity);
 
       const delta = coalescibleDelta(notification);
       if (!delta) {
@@ -764,24 +764,30 @@ export function createCodexAppServerAccumulator(input: { goalMode?: boolean } = 
           agentMessageTextByItemId.set(itemId, next);
           latestAgentMessageText = next;
         }
-        return delta?.trim() ? compactActivity(`Codex: ${delta}`) : null;
+        return null;
       }
 
       if (notification.method === "item/completed") {
         const item = isRecord(params?.item) ? params.item : null;
         if (item?.type === "agentMessage") {
           finalAgentText = firstString(item.text) ?? finalAgentText;
+          return compactActivity(finalAgentText || "Codex message completed");
+        }
+        if (isReasoningItem(item)) {
+          const text = firstString(item?.text, item?.summary, item?.content);
+          return compactActivity(
+            text ? `Codex reasoning completed: ${text}` : "Codex reasoning completed",
+          );
         }
         if (item?.type === "commandExecution") {
-          return compactActivity(`Codex: ${firstString(item.command) ?? "command completed"}`);
+          return compactActivity(
+            `Codex command completed: ${firstString(item.command) ?? "command completed"}`,
+          );
         }
       }
 
       if (notification.method === "item/started") {
-        const item = isRecord(params?.item) ? params.item : null;
-        if (item?.type === "commandExecution") {
-          return compactActivity(`Codex: ${firstString(item.command) ?? "running command"}`);
-        }
+        return null;
       }
 
       if (notification.method === "thread/tokenUsage/updated") {
@@ -1125,7 +1131,12 @@ function numberFrom(value: unknown) {
 }
 
 function compactActivity(value: string) {
-  return `${truncateText(value.replace(/\s+/g, " ").trim(), 500)}\n`;
+  const text = truncateText(value.replace(/\s+/g, " ").trim(), 500);
+  return text ? `\n\n${text}\n` : "";
+}
+
+function isReasoningItem(item: Record<string, unknown> | null) {
+  return typeof item?.type === "string" && item.type.toLowerCase().includes("reasoning");
 }
 
 function hashJson(value: unknown) {

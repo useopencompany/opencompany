@@ -4,13 +4,15 @@ import { currentGoatUser } from "@/lib/auth";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
-import { GOAT_BRAIN_TOOL_PART_TYPE } from "@/lib/chat-ui";
+import { GOAT_BRAIN_TOOL_PART_TYPE, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
+import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   deleteGoatTaskScheduleAction,
   listCurrentUserGoatTaskSchedules,
   updateGoatTaskScheduleAction,
 } from "@/lib/task-schedules";
+import { createGoatTaskForUser } from "@/lib/tasks";
 import { POST } from "./route";
 
 vi.mock("@/lib/auth", () => ({
@@ -26,6 +28,10 @@ vi.mock("@/lib/chat", () => ({
   createGoatChatUserTurn: vi.fn(),
   newGoatChatMessageId: vi.fn(() => "assistant_1"),
   persistGoatChatAssistantMessage: vi.fn(),
+}));
+
+vi.mock("@/lib/codex-auth", () => ({
+  isGoatCodexConnectedForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/tasks", () => ({
@@ -55,6 +61,7 @@ describe("POST /api/chat", () => {
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
     mockListCurrentUserGoatTaskSchedules().mockResolvedValue([]);
+    mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -399,6 +406,151 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(200);
   });
 
+  it("uses structured Codex mention metadata when starting a task", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockIsGoatCodexConnectedForUser().mockResolvedValue(true);
+    mockCreateGoatTaskForUser().mockResolvedValue({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+    } as never);
+    let startTaskToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { [START_TASK_TOOL_NAME]?: { execute?: unknown } } })
+        .tools?.[START_TASK_TOOL_NAME];
+      if (typeof tool?.execute !== "function") {
+        throw new Error("start_task execute function was not configured.");
+      }
+      startTaskToolPromise = tool.execute({
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        reason: "Requires connected source-control access.",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        mentions: [{ kind: "engine", id: "codex" }],
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "@codex check repo access" }],
+        },
+      }),
+    );
+    await startTaskToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(createGoatTaskForUser).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: "openai/gpt-5.4-mini",
+      engine: "codex",
+    });
+  });
+
+  it("ignores malformed mention metadata when starting a task", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockCreateGoatTaskForUser().mockResolvedValue({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+    } as never);
+    let startTaskToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { [START_TASK_TOOL_NAME]?: { execute?: unknown } } })
+        .tools?.[START_TASK_TOOL_NAME];
+      if (typeof tool?.execute !== "function") {
+        throw new Error("start_task execute function was not configured.");
+      }
+      startTaskToolPromise = tool.execute({
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        reason: "Requires connected source-control access.",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        mentions: [
+          { kind: "engine", id: "opencompany" },
+          { kind: "tool", id: "codex" },
+        ],
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "@codex check repo access" }],
+        },
+      }),
+    );
+    await startTaskToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(isGoatCodexConnectedForUser).not.toHaveBeenCalled();
+    const taskInput = mockCreateGoatTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(taskInput).not.toHaveProperty("engine");
+  });
+
+  it("ignores structured Codex mention metadata when Codex is not connected", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
+    mockCreateGoatTaskForUser().mockResolvedValue({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+    } as never);
+    let startTaskToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { [START_TASK_TOOL_NAME]?: { execute?: unknown } } })
+        .tools?.[START_TASK_TOOL_NAME];
+      if (typeof tool?.execute !== "function") {
+        throw new Error("start_task execute function was not configured.");
+      }
+      startTaskToolPromise = tool.execute({
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        reason: "Requires connected source-control access.",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        mentions: [{ kind: "engine", id: "codex" }],
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "@codex check repo access" }],
+        },
+      }),
+    );
+    await startTaskToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    const taskInput = mockCreateGoatTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(taskInput).not.toHaveProperty("engine");
+  });
+
   it("wires recurring schedule edits into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
@@ -598,6 +750,133 @@ describe("POST /api/chat", () => {
       expect.anything(),
     );
   });
+
+  it("persists a fallback assistant message when the stream errors after tool activity", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockRunGoatBrainToolForUser().mockResolvedValue({
+      ok: true,
+      exitCode: 0,
+      stdout: "[]",
+      stderr: "",
+    });
+    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    let brainToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { goat_brain?: { execute?: unknown } } }).tools
+        ?.goat_brain;
+      if (typeof tool?.execute !== "function") {
+        throw new Error("goat_brain execute function was not configured.");
+      }
+      brainToolPromise = tool.execute({
+        command: "query",
+        flags: { text: "board meeting", json: true },
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(
+          async (responseOptions: { onError: (error: unknown) => string }) => {
+            await brainToolPromise;
+            responseOptions.onError(new Error("stream closed"));
+            await Promise.resolve();
+            return new Response(null, { status: 200 });
+          },
+        ),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "check my board meeting notes" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      {
+        sessionId: "session_1",
+        content: "Goat stopped before it could finish.",
+        taskId: null,
+        debugTrace: expect.objectContaining({
+          error: "stream closed",
+          finishReason: "error",
+        }),
+      },
+      expect.anything(),
+    );
+  });
+
+  it("retries final assistant persistence with a server id when the streamed id write fails", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockPersistGoatChatAssistantMessage()
+      .mockRejectedValueOnce(new Error("duplicate key value violates unique constraint"))
+      .mockResolvedValueOnce({} as never);
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            async (options: {
+              onFinish: (event: {
+                responseMessage: {
+                  id: string;
+                  role: "assistant";
+                  parts: Array<{ type: "text"; text: string }>;
+                };
+                finishReason: string;
+                isAborted: boolean;
+              }) => Promise<void>;
+            }) => {
+              await options.onFinish({
+                responseMessage: {
+                  id: "assistant_1",
+                  role: "assistant",
+                  parts: [{ type: "text", text: "Final answer." }],
+                },
+                finishReason: "stop",
+                isAborted: false,
+              });
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "answer me" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        sessionId: "session_1",
+        messageId: "assistant_1",
+        content: "Final answer.",
+      }),
+      expect.anything(),
+    );
+    expect(persistGoatChatAssistantMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionId: "session_1",
+        messageId: null,
+        content: "Final answer.",
+      }),
+      expect.anything(),
+    );
+  });
 });
 
 function jsonRequest(body: unknown) {
@@ -661,8 +940,20 @@ function mockCreateGoatChatUserTurn() {
   return vi.mocked(createGoatChatUserTurn as unknown as () => Promise<unknown>);
 }
 
+function mockPersistGoatChatAssistantMessage() {
+  return vi.mocked(persistGoatChatAssistantMessage as unknown as () => Promise<unknown>);
+}
+
 function mockRunGoatBrainToolForUser() {
   return vi.mocked(runGoatBrainToolForUser);
+}
+
+function mockIsGoatCodexConnectedForUser() {
+  return vi.mocked(isGoatCodexConnectedForUser);
+}
+
+function mockCreateGoatTaskForUser() {
+  return vi.mocked(createGoatTaskForUser);
 }
 
 function mockListCurrentUserGoatTaskSchedules() {

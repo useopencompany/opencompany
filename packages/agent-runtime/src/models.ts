@@ -623,9 +623,10 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "zai/glm-5.2",
     type: "model",
-    contextWindowTokens: 256_000,
+    contextWindowTokens: 1_000_000,
     label: "GLM 5.2",
-    description: "Latest GLM model with improved reasoning and coding capabilities.",
+    description:
+      "Latest GLM model with 1M context, improved reasoning, and long-horizon coding capabilities.",
     category: "Deep",
     supportsReasoning: true,
     supportsImages: false,

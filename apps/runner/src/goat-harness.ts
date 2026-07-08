@@ -155,6 +155,7 @@ export async function executeGoatTask(
     payload: { status: "running", stage: "planning" },
   });
 
+  const taskRequestedEngine = requestedGoatHarnessEngine(input.task.harnessSpec);
   const planned =
     input.task.scheduleId && hasPreplannedHarnessSpec(input.task.harnessSpec)
       ? {
@@ -168,6 +169,7 @@ export async function executeGoatTask(
       : await planGoatHarnessForTask({
           prompt: input.task.prompt,
           model: input.task.model,
+          ...(taskRequestedEngine ? { requestedEngine: taskRequestedEngine } : {}),
           availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
           githubRepositories: input.plannerContext?.githubRepositories ?? [],
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
@@ -301,16 +303,19 @@ async function runGoatTaskCodex(input: {
   sink: GoatTaskRunSink;
   assistantMessageId: string;
 }): Promise<{ assistantContent: string; usage?: LanguageModelUsage }> {
-  let codexActivity = "";
-  let lastCodexActivityFlushAt = 0;
-  const flushCodexActivity = async (force = false) => {
-    if (!codexActivity) return;
+  let codexAssistantContent = "";
+  let lastCodexAssistantContentFlushAt = 0;
+  const agentTextByItemId = new Map<string, string>();
+  const flushCodexAssistantContent = async (force = false) => {
+    if (!codexAssistantContent) return;
     const now = Date.now();
-    if (!force && now - lastCodexActivityFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) return;
-    lastCodexActivityFlushAt = now;
+    if (!force && now - lastCodexAssistantContentFlushAt < ASSISTANT_CONTENT_FLUSH_INTERVAL_MS) {
+      return;
+    }
+    lastCodexAssistantContentFlushAt = now;
     await input.sink.updateMessageContent({
       messageId: input.assistantMessageId,
-      content: codexActivity,
+      content: codexAssistantContent,
     });
   };
   const result = await runGoatCodexTask({
@@ -334,12 +339,24 @@ async function runGoatTaskCodex(input: {
       : {}),
     ...(input.harnessSpec.codex?.goalMode ? { goalMode: input.harnessSpec.codex.goalMode } : {}),
     onEngineSessionId: input.sink.updateCodexEngineSessionId,
-    onOutput: async (delta) => {
-      codexActivity = `${codexActivity}${delta}`;
-      await flushCodexActivity(false);
+    onRuntimeEvents: async (events) => {
+      for (const event of events) {
+        const agentText = codexAgentTextFromAppServerEvent(event, agentTextByItemId);
+        if (agentText != null) {
+          codexAssistantContent = agentText;
+          await flushCodexAssistantContent(false);
+        }
+      }
+      for (const event of codexAppServerEventsToGoatEvents(events)) {
+        await input.sink.appendEvent({
+          type: event.type,
+          messageId: input.assistantMessageId,
+          payload: event.payload,
+        });
+      }
     },
   });
-  await flushCodexActivity(true);
+  await flushCodexAssistantContent(true);
 
   await input.sink.recordSandboxUsage({
     messageId: input.assistantMessageId,
@@ -608,6 +625,7 @@ async function runGoatTaskModelStreamInner(input: {
 export async function planGoatHarness(input: {
   prompt: string;
   model: GoatHarnessSpec["model"];
+  requestedEngine?: GoatHarnessSpec["engine"];
   gatewayApiKey: string;
   availableTools?: readonly GoatTaskToolName[];
   githubRepositories?: readonly string[];
@@ -625,6 +643,7 @@ export async function planGoatHarness(input: {
 export async function planGoatHarnessForTask(input: {
   prompt: string;
   model: GoatHarnessSpec["model"];
+  requestedEngine?: GoatHarnessSpec["engine"];
   gatewayApiKey: string;
   availableTools: readonly GoatTaskToolName[];
   githubRepositories?: readonly string[];
@@ -638,6 +657,7 @@ export async function planGoatHarnessForTask(input: {
   const availableEngines = GOAT_HARNESS_ENGINE_OPTIONS.map((option) => option.id);
   const availableModels = GOAT_HARNESS_MODEL_OPTIONS.map((option) => option.id);
   const availableSkills = GOAT_HARNESS_SKILL_OPTIONS.map((option) => option.id);
+  const requestedEngine = readRequestedHarnessEngine(input.requestedEngine, availableEngines);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
   const schema = goatHarnessSpecResponseSchema(
@@ -649,6 +669,7 @@ export async function planGoatHarnessForTask(input: {
   const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
   const userPrompt = buildGoatHarnessCreationPrompt({
     taskPrompt: input.prompt,
+    ...(requestedEngine ? { requestedEngine } : {}),
     executionEngineOptions: GOAT_HARNESS_ENGINE_OPTIONS,
     executionModelOptions: GOAT_HARNESS_MODEL_OPTIONS,
     availableOperationTools: availableTools,
@@ -677,7 +698,10 @@ export async function planGoatHarnessForTask(input: {
   );
   const harnessSpec = normalizeHarnessSpec(
     result.object,
-    input,
+    {
+      prompt: input.prompt,
+      ...(requestedEngine ? { requestedEngine } : {}),
+    },
     availableTools,
     availableEngines,
     availableModels,
@@ -784,6 +808,7 @@ function normalizeHarnessSpec(
   value: unknown,
   fallback: {
     prompt: string;
+    requestedEngine?: GoatHarnessSpec["engine"];
   },
   availableTools: readonly GoatTaskToolName[],
   availableEngines: readonly GoatHarnessSpec["engine"][],
@@ -792,8 +817,8 @@ function normalizeHarnessSpec(
   githubRepositories: readonly string[],
 ): GoatHarnessSpec {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  const engine = readHarnessEngine(record.engine, availableEngines);
-  const model = readHarnessModel(record.model, availableModels);
+  const engine = fallback.requestedEngine ?? readHarnessEngine(record.engine, availableEngines);
+  const model = readHarnessModel(record.model, availableModels, engine);
   if (!model) {
     throw new Error("Goat harness planner must choose a supported execution model.");
   }
@@ -848,6 +873,22 @@ function readHarnessEngine(
     : "opencompany";
 }
 
+function requestedGoatHarnessEngine(
+  harnessSpec: GoatHarnessSpec,
+): GoatHarnessSpec["engine"] | undefined {
+  return harnessSpec.engine === "codex" ? "codex" : undefined;
+}
+
+function readRequestedHarnessEngine(
+  value: unknown,
+  availableEngines: readonly GoatHarnessSpec["engine"][],
+): GoatHarnessSpec["engine"] | undefined {
+  const engine = readNonEmptyString(value);
+  return engine && availableEngines.includes(engine as GoatHarnessSpec["engine"])
+    ? (engine as GoatHarnessSpec["engine"])
+    : undefined;
+}
+
 function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
   if (!Array.isArray(value)) return [];
   const ids = value.filter((item): item is GoatTaskSkillId =>
@@ -859,8 +900,13 @@ function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
 function readHarnessModel(
   value: unknown,
   availableModels: readonly GoatHarnessSpec["model"][],
+  engine: GoatHarnessSpec["engine"],
 ): GoatHarnessSpec["model"] | null {
   const model = readNonEmptyString(value);
+  if (engine === "codex") {
+    const codexModel = availableModels.find((candidate) => candidate.startsWith("openai/"));
+    return codexModel ?? null;
+  }
   return model && availableModels.includes(model as GoatHarnessSpec["model"])
     ? (model as GoatHarnessSpec["model"])
     : null;
@@ -993,6 +1039,134 @@ function toolEventPayload(event: GoatToolLifecycleInput) {
   };
 }
 
+function codexAppServerEventsToGoatEvents(events: readonly Record<string, unknown>[]) {
+  return events.flatMap(
+    (
+      event,
+    ): Array<{
+      type: GoatTaskEventType;
+      payload: Record<string, unknown>;
+    }> => {
+      const method = typeof event.method === "string" ? event.method : "";
+      const params = readRecord(event.params);
+
+      const item = readRecord(params?.item);
+      if (method !== "item/completed" || !item) return [];
+
+      if (item.type === "agentMessage") {
+        return [
+          {
+            type: "message.completed",
+            payload: {
+              source: "codex_app_server",
+              role: "assistant",
+              content: readRawString(item.text) ?? "",
+              threadId: readNonEmptyString(params?.threadId),
+              turnId: readNonEmptyString(params?.turnId),
+              itemId: readNonEmptyString(item.id) ?? readNonEmptyString(params?.itemId),
+            },
+          },
+        ];
+      }
+
+      if (isCodexReasoningItem(item)) {
+        return [
+          {
+            type: "reasoning.completed",
+            payload: {
+              source: "codex_app_server",
+              text:
+                readRawString(item.text) ??
+                readRawString(item.summary) ??
+                readRawString(item.content) ??
+                "",
+              threadId: readNonEmptyString(params?.threadId),
+              turnId: readNonEmptyString(params?.turnId),
+              itemId: readNonEmptyString(item.id) ?? readNonEmptyString(params?.itemId),
+            },
+          },
+        ];
+      }
+
+      if (item.type !== "commandExecution") return [];
+
+      const toolCallId =
+        readNonEmptyString(item.id) ??
+        readNonEmptyString(params?.itemId) ??
+        readNonEmptyString(params?.turnId) ??
+        "codex-command";
+      const command = readNonEmptyString(item.command) ?? "command";
+      const basePayload = {
+        source: "codex_app_server",
+        toolCallId,
+        toolName: "codex_command",
+        input: { command },
+        threadId: readNonEmptyString(params?.threadId),
+        turnId: readNonEmptyString(params?.turnId),
+        itemId: readNonEmptyString(item.id) ?? readNonEmptyString(params?.itemId),
+      };
+
+      const status = readNonEmptyString(item.status);
+      if (status === "failed") {
+        return [
+          {
+            type: "tool.failed",
+            payload: {
+              ...basePayload,
+              error: readNonEmptyString(item.error) ?? "Codex command failed.",
+            },
+          },
+        ];
+      }
+      return [
+        {
+          type: "tool.completed",
+          payload: {
+            ...basePayload,
+            output: {
+              status: status ?? "completed",
+              exitCode: typeof item.exitCode === "number" ? item.exitCode : null,
+            },
+          },
+        },
+      ];
+    },
+  );
+}
+
+function codexAgentTextFromAppServerEvent(
+  event: Record<string, unknown>,
+  agentTextByItemId: Map<string, string>,
+) {
+  const method = typeof event.method === "string" ? event.method : "";
+  const params = readRecord(event.params);
+  const itemId = readNonEmptyString(params?.itemId) ?? "__default_agent_message";
+
+  if (method === "item/agentMessage/delta") {
+    const delta = readRawString(params?.delta);
+    if (delta == null) return null;
+    const next = `${agentTextByItemId.get(itemId) ?? ""}${delta}`;
+    agentTextByItemId.set(itemId, next);
+    return next;
+  }
+
+  if (method !== "item/completed") return null;
+
+  const item = readRecord(params?.item);
+  if (item?.type !== "agentMessage") return null;
+
+  const completedText = readRawString(item.text) ?? readRawString(item.content);
+  if (completedText == null) return null;
+
+  const completedItemId = readNonEmptyString(item.id) ?? itemId;
+  agentTextByItemId.set(completedItemId, completedText);
+  return completedText;
+}
+
+function isCodexReasoningItem(item: Record<string, unknown>) {
+  return typeof item.type === "string" && item.type.toLowerCase().includes("reasoning");
+}
+
 function augmentSystemPrompt(
   systemPrompt: string,
   resultMode: GoatHarnessSpec["resultMode"],
@@ -1064,6 +1238,16 @@ export class GoatHarnessRunError extends Error {
 
 function readNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readRawString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function clampInteger(value: number, min: number, max: number) {

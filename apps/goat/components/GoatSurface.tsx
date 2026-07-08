@@ -2,6 +2,15 @@
 
 import { useChat } from "@ai-sdk/react";
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from "@opencompany/ui/components/command";
 import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
 import { DefaultChatTransport } from "ai";
@@ -15,7 +24,10 @@ import {
   ChevronRight,
   CircleDotDashed,
   Clock,
+  Code2,
   FileText,
+  LoaderCircle,
+  MessageSquarePlus,
   Pause,
   Play,
   Settings,
@@ -44,6 +56,8 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolOutput,
+  type GoatChatMention,
+  type GoatChatMessageMetadata,
   type GoatChatSessionView,
   type GoatChatSummaryView,
   type GoatChatUiMessage,
@@ -76,6 +90,14 @@ import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
+const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
+
+type ActiveMentionToken = {
+  start: number;
+  end: number;
+  query: string;
+};
 
 export type GoatTaskView = {
   id: string;
@@ -100,12 +122,14 @@ export function GoatSurface({
   defaultModel,
   initialChat,
   recentChats = [],
+  codexConnected = false,
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
   defaultModel: string;
   initialChat: GoatChatSessionView | null;
   recentChats?: readonly GoatChatSummaryView[];
+  codexConnected?: boolean;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -116,10 +140,20 @@ export function GoatSurface({
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(false);
+  const pendingInputCaretRef = useRef<number | null>(null);
   const [input, setInput] = useState("");
+  const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
+  const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
   const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
+  const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
+  const [newChatPrompt, setNewChatPrompt] = useState("");
+  const [backgroundChatCount, setBackgroundChatCount] = useState(0);
+  const activeSelectedMentions = codexConnected ? selectedMentions : [];
+  const shouldHighlightCodexMention =
+    activeSelectedMentions.length > 0 && hasCodexMentionToken(input);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -128,19 +162,38 @@ export function GoatSurface({
   );
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
   const [, startArchiveTransition] = useTransition();
+
+  const prepareSendMessagesRequest = useCallback(
+    ({
+      body,
+      messages,
+    }: {
+      body: Record<string, unknown> | undefined;
+      messages: GoatChatUiMessage[];
+    }) => {
+      const message = messages.at(-1);
+      const mentions = mentionsFromMessageMetadata(message?.metadata);
+      const requestSessionId = typeof body?.sessionId === "string" ? body.sessionId : null;
+      const requestModel = typeof body?.model === "string" ? body.model : undefined;
+      return {
+        body: {
+          sessionId: requestSessionId,
+          ...(requestModel ? { model: requestModel } : {}),
+          message,
+          ...(mentions.length ? { mentions } : {}),
+        },
+      };
+    },
+    [],
+  );
+
   const transport = useMemo(
     () =>
       new DefaultChatTransport<GoatChatUiMessage>({
         api: "/api/chat",
-        prepareSendMessagesRequest: ({ messages }) => ({
-          body: {
-            sessionId: chatSessionId,
-            model: chatModel,
-            message: messages.at(-1),
-          },
-        }),
+        prepareSendMessagesRequest,
       }),
-    [chatModel, chatSessionId],
+    [prepareSendMessagesRequest],
   );
   const {
     messages,
@@ -170,6 +223,17 @@ export function GoatSurface({
   const isGenerating = status === "submitted" || status === "streaming";
   const hasMessages = messages.length > 0;
   const showThinkingBubble = isGenerating && shouldShowThinkingBubble(messages);
+  const trimmedNewChatPrompt = newChatPrompt.trim();
+  const newChatPromptValid =
+    trimmedNewChatPrompt.length > 0 &&
+    trimmedNewChatPrompt.length <= BACKGROUND_CHAT_PROMPT_MAX_LENGTH;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const chatTaskLookup = useMemo(
     () =>
       buildChatTaskLookup({
@@ -219,6 +283,14 @@ export function GoatSurface({
   }, [input]);
 
   useLayoutEffect(() => {
+    const caret = pendingInputCaretRef.current;
+    if (caret === null) return;
+    pendingInputCaretRef.current = null;
+    inputRef.current?.focus();
+    inputRef.current?.setSelectionRange(caret, caret);
+  }, [input]);
+
+  useLayoutEffect(() => {
     if (mode !== "chat" || !hasMessages) return;
     const thread = threadRef.current;
     if (!thread || typeof thread.scrollTo !== "function") return;
@@ -253,6 +325,21 @@ export function GoatSurface({
     void updateGoatTimezoneAction(timezone).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key !== "n" || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      event.preventDefault();
+      setNewChatCommandOpen(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const archiveTask = (task: GoatTaskView) => {
     setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
     startArchiveTransition(async () => {
@@ -270,22 +357,72 @@ export function GoatSurface({
     });
   };
 
+  const startBackgroundChat = useCallback(
+    (prompt: string) => {
+      const trimmedPrompt = prompt.trim();
+      if (!trimmedPrompt) return;
+      if (trimmedPrompt.length > BACKGROUND_CHAT_PROMPT_MAX_LENGTH) {
+        toast.error(
+          `Messages can be at most ${BACKGROUND_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+        );
+        return;
+      }
+
+      setNewChatCommandOpen(false);
+      setNewChatPrompt("");
+      setBackgroundChatCount((count) => count + 1);
+      toast("Started a new chat in the background.");
+
+      void runBackgroundChatTurn({
+        prompt: trimmedPrompt,
+        model: defaultModel,
+      })
+        .then(() => {
+          if (!mountedRef.current) return;
+          router.refresh();
+          toast.success("Background chat is ready.");
+        })
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
+        })
+        .finally(() => {
+          if (!mountedRef.current) return;
+          setBackgroundChatCount((count) => Math.max(0, count - 1));
+        });
+    },
+    [defaultModel, router],
+  );
+
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isGenerating) return;
 
     const prompt = input.trim();
     if (!prompt) return;
+    const mentions =
+      activeSelectedMentions.length > 0 && hasCodexMentionToken(prompt)
+        ? activeSelectedMentions
+        : [];
 
     clearError();
     setMode("chat");
     isPinnedAtBottomRef.current = true;
     setLocallyStoppedAssistantMessageIds(new Set());
     setInput("");
-    void sendMessage({ text: prompt }).catch((error) => {
-      setInput(prompt);
-      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
-    });
+    setMentionToken(null);
+    setSelectedMentions([]);
+    const message =
+      mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
+    void sendMessage(message, { body: { sessionId: chatSessionId, model: chatModel } }).catch(
+      (error) => {
+        setInput(prompt);
+        setSelectedMentions(mentions);
+        toast.error(
+          error instanceof Error ? error.message : "Goat could not answer that right now.",
+        );
+      },
+    );
   };
 
   const closeChat = useCallback(() => {
@@ -324,10 +461,53 @@ export function GoatSurface({
   }, [closeChat, mode]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionToken) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setMentionToken(null);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        selectCodexMention();
+        return;
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       formRef.current?.requestSubmit();
     }
+  };
+
+  const updateMentionToken = (value: string, selectionStart: number | null) => {
+    if (selectionStart === null) {
+      setMentionToken(null);
+      return;
+    }
+    setMentionToken(codexConnected ? findActiveMentionToken(value, selectionStart) : null);
+  };
+
+  const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextInput = event.target.value;
+    setInput(nextInput);
+    setSelectedMentions((current) =>
+      current.length > 0 && !hasCodexMentionToken(nextInput) ? [] : current,
+    );
+    updateMentionToken(nextInput, event.target.selectionStart);
+  };
+
+  const selectCodexMention = () => {
+    if (!codexConnected || !mentionToken) return;
+    const before = input.slice(0, mentionToken.start);
+    const after = input.slice(mentionToken.end);
+    const nextInput = `${before}@codex ${after}`;
+    const nextCaret = before.length + "@codex ".length;
+    pendingInputCaretRef.current = nextCaret;
+    setInput(nextInput);
+    setSelectedMentions([CODEX_MENTION]);
+    setMentionToken(null);
   };
 
   const markUserScrollIntent = () => {
@@ -340,6 +520,55 @@ export function GoatSurface({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
+      <CommandDialog
+        open={newChatCommandOpen}
+        onOpenChange={setNewChatCommandOpen}
+        title="New Goat Chat"
+        description="Create a new Goat chat in the background."
+        className="top-[22%] max-w-xl translate-y-0 border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
+      >
+        <CommandInput
+          value={newChatPrompt}
+          onValueChange={setNewChatPrompt}
+          placeholder="Describe the new chat or task..."
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            startBackgroundChat(newChatPrompt);
+          }}
+        />
+        <CommandList>
+          <CommandEmpty>Type what Goat should do.</CommandEmpty>
+          <CommandGroup heading="Actions">
+            <CommandItem
+              value={`Create new chat ${newChatPrompt}`}
+              disabled={!newChatPromptValid}
+              onSelect={() => startBackgroundChat(newChatPrompt)}
+              className="gap-3"
+            >
+              {backgroundChatCount > 0 ? (
+                <LoaderCircle
+                  size={16}
+                  strokeWidth={2}
+                  className="shrink-0 animate-spin text-ink-subtle"
+                />
+              ) : (
+                <MessageSquarePlus size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-ink">
+                  Create new background chat
+                </p>
+                <p className="truncate text-[12px] text-ink-subtle">
+                  {trimmedNewChatPrompt || "Start a chat that can spawn a task"}
+                </p>
+              </div>
+              <CommandShortcut>Enter</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+
       {mode === "home" ? (
         <div className="absolute right-4 top-4 z-20 flex items-center gap-1">
           <Link
@@ -452,7 +681,7 @@ export function GoatSurface({
         onSubmit={onSubmit}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
       >
-        <div className="pointer-events-auto flex w-full max-w-[720px] flex-col gap-2">
+        <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
           {chatError ? (
             <p
               className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
@@ -461,22 +690,62 @@ export function GoatSurface({
               {chatError.message || "Goat could not answer that right now."}
             </p>
           ) : null}
+          {mentionToken ? (
+            <div
+              role="listbox"
+              aria-label="Mention menu"
+              className="absolute bottom-full left-3 z-20 mb-2 w-56 rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+            >
+              <button
+                type="button"
+                role="option"
+                aria-selected="true"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  selectCodexMention();
+                }}
+                onClick={selectCodexMention}
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none"
+              >
+                <Code2 size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                <span className="text-[13px] font-medium leading-4 text-ink">@codex</span>
+                <span className="ml-auto text-[12px] leading-4 text-ink-subtle">Codex</span>
+              </button>
+            </div>
+          ) : null}
           <div className="flex items-end gap-2.5 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              id="prompt"
-              name="prompt"
-              value={input}
-              placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={onKeyDown}
-              disabled={isGenerating}
-              className="max-h-32 flex-1 resize-none self-center bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
-              style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-              maxLength={10_000}
-              required
-            />
+            <div className="relative min-w-0 flex-1 self-center">
+              {input ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                >
+                  {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
+                </div>
+              ) : null}
+              <textarea
+                ref={inputRef}
+                rows={1}
+                id="prompt"
+                name="prompt"
+                value={input}
+                placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
+                onChange={onInputChange}
+                onBlur={() => setMentionToken(null)}
+                onClick={(event) =>
+                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                onKeyDown={onKeyDown}
+                onSelect={(event) =>
+                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                disabled={isGenerating}
+                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                maxLength={10_000}
+                required
+              />
+            </div>
             <SubmitButton
               disabled={!input.trim()}
               isGenerating={isGenerating}
@@ -486,6 +755,64 @@ export function GoatSurface({
         </div>
       </form>
     </div>
+  );
+}
+
+function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefined) {
+  const mentions = metadata?.mentions ?? [];
+  return mentions.filter(isSupportedMention);
+}
+
+function isSupportedMention(mention: GoatChatMention): mention is GoatChatMention {
+  return mention.kind === "engine" && mention.id === "codex";
+}
+
+function hasCodexMentionToken(value: string) {
+  return /(^|\s)@codex(?=\s|$)/i.test(value);
+}
+
+function findActiveMentionToken(value: string, caret: number): ActiveMentionToken | null {
+  const beforeCaret = value.slice(0, caret);
+  const boundary = Math.max(
+    beforeCaret.lastIndexOf(" "),
+    beforeCaret.lastIndexOf("\n"),
+    beforeCaret.lastIndexOf("\t"),
+  );
+  const start = boundary + 1;
+  const suffix = value.slice(caret);
+  const nextWhitespace = suffix.search(/\s/);
+  const end = nextWhitespace === -1 ? value.length : caret + nextWhitespace;
+  const token = value.slice(start, end);
+  if (!token.startsWith("@")) return null;
+
+  const query = token.slice(1).toLowerCase();
+  if (!query || "codex".startsWith(query)) {
+    return { start, end, query };
+  }
+  return null;
+}
+
+function renderComposerInputOverlay(value: string, highlightCodexMention: boolean) {
+  if (!highlightCodexMention) return value;
+  const match = /(^|\s)(@codex)(?=\s|$)/i.exec(value);
+  if (!match || match.index === undefined) return value;
+
+  const leadingWhitespace = match[1] ?? "";
+  const mention = match[2] ?? "@codex";
+  const mentionStart = match.index + leadingWhitespace.length;
+  const mentionEnd = mentionStart + mention.length;
+  return (
+    <>
+      {value.slice(0, mentionStart)}
+      {/* Keep inline metrics identical to the textarea; paint-only styles preserve caret alignment. */}
+      <span
+        data-testid="selected-codex-mention"
+        className="rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]"
+      >
+        {value.slice(mentionStart, mentionEnd)}
+      </span>
+      {value.slice(mentionEnd)}
+    </>
   );
 }
 
@@ -1802,6 +2129,51 @@ function isStartTaskToolOutput(value: unknown): value is StartTaskToolOutput {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function runBackgroundChatTurn(input: { prompt: string; model: string }) {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: null,
+      model: input.model,
+      message: {
+        id: newBackgroundChatMessageId(),
+        role: "user",
+        parts: [{ type: "text", text: input.prompt }],
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const details = (await response.text().catch(() => "")).trim();
+    throw new Error(details || "Could not start that chat.");
+  }
+
+  await consumeResponseBody(response);
+}
+
+async function consumeResponseBody(response: Response) {
+  if (!response.body) return;
+
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done } = await reader.read();
+      if (done) return;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function newBackgroundChatMessageId() {
+  const randomId =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `ui_background_${randomId}`;
 }
 
 function getTaskMeta(task: GoatTaskView): {

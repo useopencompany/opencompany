@@ -223,6 +223,7 @@ describe("buildGoatHarnessRun", () => {
 
     expect(run.hasDurableRun).toBe(false);
     expect(run.task.result).toBe("Stored result.");
+    expect(run.task.engine).toBe("opencompany");
     expect(run.legacyDetailText).toBe("Detailed run events are available for new tasks only.");
     expect(run.models).toEqual([
       {
@@ -267,6 +268,7 @@ describe("buildGoatHarnessRun", () => {
       events: [],
     });
 
+    expect(run.task.engine).toBe("codex");
     expect(run.harnessConfig?.codexGoalMode).toEqual({
       objective: "Fix tests and verify they pass.",
       tokenBudget: 200_000,
