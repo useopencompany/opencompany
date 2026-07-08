@@ -1,19 +1,13 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import {
-  ArrowLeft,
-  CircleUserRound,
-  FileText,
-  Mail,
-  UserRound,
-} from "lucide-react";
+import { ArrowLeft, CircleUserRound, FileText, Mail, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { GoatBrainView } from "@/components/GoatBrainView";
-import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSurface } from "@/components/GoatSurface";
+import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";

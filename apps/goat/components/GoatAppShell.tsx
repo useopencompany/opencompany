@@ -1,17 +1,11 @@
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import type { ReactNode } from "react";
-import {
-  GoatAppDataProvider,
-  type GoatAppInitialData,
-} from "@/components/GoatAppDataProvider";
+import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
 import { listCurrentUserGoatBrain } from "@/lib/brain";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
-import {
-  type GoatCodexProviderState,
-  type GoatIntegrationState,
-} from "@/lib/integration-state";
+import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
@@ -21,27 +15,18 @@ import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user } = await currentGoatUser();
-  const [
-    tasks,
-    schedules,
-    recentChats,
-    brain,
-    googleIntegrations,
-    linear,
-    github,
-    jamie,
-    codex,
-  ] = await Promise.all([
-    listCurrentUserGoatTasks(),
-    listCurrentUserGoatTaskSchedules(),
-    listCurrentUserRecentGoatChats(),
-    listCurrentUserGoatBrain(),
-    getGoatGoogleIntegrationState(user.workosUserId),
-    getGoatLinearIntegrationState(user.workosUserId),
-    getGoatGitHubIntegrationState(user.workosUserId),
-    getGoatJamieIntegrationState(user.workosUserId),
-    loadCurrentGoatCodexAuthSettings(),
-  ]);
+  const [tasks, schedules, recentChats, brain, googleIntegrations, linear, github, jamie, codex] =
+    await Promise.all([
+      listCurrentUserGoatTasks(),
+      listCurrentUserGoatTaskSchedules(),
+      listCurrentUserRecentGoatChats(),
+      listCurrentUserGoatBrain(),
+      getGoatGoogleIntegrationState(user.workosUserId),
+      getGoatLinearIntegrationState(user.workosUserId),
+      getGoatGitHubIntegrationState(user.workosUserId),
+      getGoatJamieIntegrationState(user.workosUserId),
+      loadCurrentGoatCodexAuthSettings(),
+    ]);
 
   const initialData: GoatAppInitialData = {
     user: {

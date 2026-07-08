@@ -1,15 +1,12 @@
 "use client";
 
-import { useLiveQuery } from "@tanstack/react-db";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { useLiveQuery } from "@tanstack/react-db";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
+import type { GoatTaskView } from "@/components/GoatSurface";
 import type { GoatBrainDocumentView, GoatBrainFolderView, GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
-import {
-  goatIntegrationStateFromRows,
-  type GoatIntegrationState,
-} from "@/lib/integration-state";
-import type { GoatTaskScheduleView } from "@/lib/task-schedules";
+import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import {
   createGoatCollections,
   type GoatBrainDocumentRow,
@@ -20,7 +17,7 @@ import {
   type GoatTaskRow,
   type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
-import type { GoatTaskView } from "@/components/GoatSurface";
+import type { GoatTaskScheduleView } from "@/lib/task-schedules";
 
 type GoatUserView = {
   email: string;
@@ -124,7 +121,9 @@ export function GoatAppDataProvider({
 
   const brain = useMemo(() => {
     if (brainLoading && !brainRows?.length) return initialData.brain;
-    const timelinesByDocument = groupTimelineRows((timelineRows ?? []) as GoatBrainTimelineEntryRow[]);
+    const timelinesByDocument = groupTimelineRows(
+      (timelineRows ?? []) as GoatBrainTimelineEntryRow[],
+    );
     const documents = ((brainRows ?? []) as GoatBrainDocumentRow[])
       .map((row) => documentViewFromRow(row, timelinesByDocument.get(row.id)))
       .toSorted(compareBrainDocuments);
@@ -241,7 +240,9 @@ function groupTimelineRows(rows: GoatBrainTimelineEntryRow[]) {
   return byDocument;
 }
 
-function timelineRowsFromRows(rows: GoatBrainTimelineEntryRow[]): GoatBrainDocumentView["timeline"] {
+function timelineRowsFromRows(
+  rows: GoatBrainTimelineEntryRow[],
+): GoatBrainDocumentView["timeline"] {
   return rows.map((row) => ({
     evidenceId: row.evidence_id,
     at: row.at,

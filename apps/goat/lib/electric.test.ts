@@ -97,9 +97,7 @@ describe("buildGoatElectricOriginUrl", () => {
     });
 
     expect(url?.searchParams.get("table")).toBe("goat.chat_sessions");
-    expect(url?.searchParams.get("where")).toBe(
-      `"user_workos_id" = $1 AND "closed_at" IS NULL`,
-    );
+    expect(url?.searchParams.get("where")).toBe(`"user_workos_id" = $1 AND "closed_at" IS NULL`);
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
     expect(url?.searchParams.get("params[2]")).toBeNull();
     expect(url?.searchParams.get("where")).not.toBe("1=1");
