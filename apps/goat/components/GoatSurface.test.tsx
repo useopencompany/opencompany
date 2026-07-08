@@ -18,6 +18,7 @@ const chatMock = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   stop: vi.fn(),
   finishSessionId: null as string | null,
+  preparedRequestBodies: [] as unknown[],
 }));
 
 const routerMock = vi.hoisted(() => ({
@@ -62,10 +63,24 @@ vi.mock("@ai-sdk/react", async () => {
     useChat: (options: {
       messages?: GoatChatUiMessage[];
       onFinish?: (event: { message: GoatChatUiMessage }) => void;
+      transport?: {
+        prepareSendMessagesRequest?: (request: {
+          id: string;
+          messages: GoatChatUiMessage[];
+          requestMetadata: unknown;
+          body: Record<string, unknown> | undefined;
+          credentials: RequestCredentials | undefined;
+          headers: HeadersInit | undefined;
+          api: string;
+          trigger: "submit-message";
+          messageId: string | undefined;
+        }) => { body: object } | PromiseLike<{ body: object }>;
+      };
     }) => {
       const [messages, setMessages] = React.useState<GoatChatUiMessage[]>(
         () => options.messages ?? [],
       );
+      const transportRef = React.useRef(options.transport);
 
       return {
         id: "test-chat",
@@ -77,17 +92,31 @@ vi.mock("@ai-sdk/react", async () => {
         stop: () => {
           chatMock.stop();
         },
-        sendMessage: async (message: { text: string; metadata?: GoatChatMessageMetadata }) => {
+        sendMessage: async (
+          message: { text: string; metadata?: GoatChatMessageMetadata },
+          requestOptions?: { body?: Record<string, unknown> },
+        ) => {
           chatMock.sendMessage(message);
-          setMessages((current) => [
-            ...current,
-            {
-              id: "ui_user_1",
-              role: "user",
-              ...(message.metadata ? { metadata: message.metadata } : {}),
-              parts: [{ type: "text", text: message.text }],
-            },
-          ]);
+          const userMessage: GoatChatUiMessage = {
+            id: `ui_user_${messages.length + 1}`,
+            role: "user",
+            ...(message.metadata ? { metadata: message.metadata } : {}),
+            parts: [{ type: "text", text: message.text }],
+          };
+          const nextMessages = [...messages, userMessage];
+          setMessages(nextMessages);
+          const preparedRequest = await transportRef.current?.prepareSendMessagesRequest?.({
+            id: "test-chat",
+            messages: nextMessages,
+            requestMetadata: undefined,
+            body: requestOptions?.body,
+            credentials: undefined,
+            headers: undefined,
+            api: "/api/chat",
+            trigger: "submit-message",
+            messageId: userMessage.id,
+          });
+          if (preparedRequest) chatMock.preparedRequestBodies.push(preparedRequest.body);
           if (chatMock.finishSessionId) {
             options.onFinish?.({
               message: {
@@ -111,6 +140,7 @@ describe("GoatSurface chat streaming UI", () => {
     chatMock.sendMessage.mockReset();
     chatMock.stop.mockReset();
     routerMock.prefetch.mockReset();
+    chatMock.preparedRequestBodies = [];
     routerMock.refresh.mockReset();
     routerMock.replace.mockReset();
     vi.mocked(closeGoatChatSessionAction).mockClear();
@@ -138,7 +168,42 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
-    expect(screen.getByText("Hello Goat")).toBeInTheDocument();
+    expect(await screen.findByText("Hello Goat")).toBeInTheDocument();
+  });
+
+  it("keeps using the returned chat session id when the AI SDK transport is long-lived", async () => {
+    const user = userEvent.setup();
+    chatMock.finishSessionId = "chat_1";
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "First message");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(routerMock.replace).toHaveBeenCalledWith("/?chat=chat_1");
+    });
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Second message");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies).toHaveLength(2);
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
+      sessionId: null,
+      model: DEFAULT_GOAT_MODEL,
+    });
+    expect(chatMock.preparedRequestBodies[1]).toMatchObject({
+      sessionId: "chat_1",
+      model: DEFAULT_GOAT_MODEL,
+    });
   });
 
   it("shows the Codex mention menu and submits selected mention metadata", async () => {
@@ -242,9 +307,8 @@ describe("GoatSurface chat streaming UI", () => {
       "Hello Goat",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await nextAnimationFrame();
 
-    expect(screen.getByText("Hello Goat")).toBeInTheDocument();
+    expect(await screen.findByText("Hello Goat")).toBeInTheDocument();
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
@@ -381,7 +445,9 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(routerMock.replace).toHaveBeenCalledWith("/?chat=goat_chat_123");
+    await waitFor(() => {
+      expect(routerMock.replace).toHaveBeenCalledWith("/?chat=goat_chat_123");
+    });
     expect(routerMock.refresh).toHaveBeenCalled();
   });
 

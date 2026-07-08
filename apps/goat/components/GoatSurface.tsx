@@ -162,24 +162,38 @@ export function GoatSurface({
   );
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
   const [, startArchiveTransition] = useTransition();
+
+  const prepareSendMessagesRequest = useCallback(
+    ({
+      body,
+      messages,
+    }: {
+      body: Record<string, unknown> | undefined;
+      messages: GoatChatUiMessage[];
+    }) => {
+      const message = messages.at(-1);
+      const mentions = mentionsFromMessageMetadata(message?.metadata);
+      const requestSessionId = typeof body?.sessionId === "string" ? body.sessionId : null;
+      const requestModel = typeof body?.model === "string" ? body.model : undefined;
+      return {
+        body: {
+          sessionId: requestSessionId,
+          ...(requestModel ? { model: requestModel } : {}),
+          message,
+          ...(mentions.length ? { mentions } : {}),
+        },
+      };
+    },
+    [],
+  );
+
   const transport = useMemo(
     () =>
       new DefaultChatTransport<GoatChatUiMessage>({
         api: "/api/chat",
-        prepareSendMessagesRequest: ({ messages }) => {
-          const message = messages.at(-1);
-          const mentions = mentionsFromMessageMetadata(message?.metadata);
-          return {
-            body: {
-              sessionId: chatSessionId,
-              model: chatModel,
-              message,
-              ...(mentions.length ? { mentions } : {}),
-            },
-          };
-        },
+        prepareSendMessagesRequest,
       }),
-    [chatModel, chatSessionId],
+    [prepareSendMessagesRequest],
   );
   const {
     messages,
@@ -400,11 +414,15 @@ export function GoatSurface({
     setSelectedMentions([]);
     const message =
       mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
-    void sendMessage(message).catch((error) => {
-      setInput(prompt);
-      setSelectedMentions(mentions);
-      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
-    });
+    void sendMessage(message, { body: { sessionId: chatSessionId, model: chatModel } }).catch(
+      (error) => {
+        setInput(prompt);
+        setSelectedMentions(mentions);
+        toast.error(
+          error instanceof Error ? error.message : "Goat could not answer that right now.",
+        );
+      },
+    );
   };
 
   const closeChat = useCallback(() => {

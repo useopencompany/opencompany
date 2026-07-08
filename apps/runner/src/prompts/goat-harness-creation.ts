@@ -44,14 +44,21 @@ export const GOAT_HARNESS_MODEL_OPTIONS = [
   {
     id: "moonshotai/kimi-k2.6",
     label: "Kimi K2.6",
-    guidance: "Default. Use for most basic tasks and ordinary work.",
+    guidance:
+      "Default. Use for most tasks, deep web research, multi-source reports, ordinary tool work, and cost-conscious long-horizon execution.",
     default: true,
+  },
+  {
+    id: "zai/glm-5.2",
+    label: "GLM 5.2",
+    guidance:
+      "Use for deep research or analysis that likely needs very large context, long source-set synthesis, or stronger structured reasoning than the default while staying cost-conscious.",
   },
   {
     id: "anthropic/claude-sonnet-5",
     label: "Claude Sonnet 5",
     guidance:
-      "Use for tasks that need stronger thinking, execution, complex work, or high-quality writing.",
+      "Premium fallback. Use when the user asks for Claude/Sonnet, explicitly prioritizes maximum quality over cost, or needs premium polished writing/editorial judgment, vision, or file-input strengths. Do not choose merely because research is deep.",
   },
   {
     id: "openai/gpt-5.5",
@@ -148,7 +155,11 @@ export const GOAT_HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selectio
   'Use engine "opencompany" for non-coding tasks and for coding-adjacent explanation that does not need a sandboxed coding agent.',
   "Choose the execution model from the provided execution_model_options.",
   'When engine is "codex", choose an OpenAI Codex-capable model from the execution model options.',
-  "Prefer the default model unless the task clearly benefits from a stronger specialized model.",
+  "Cost matters. Prefer the cheapest capable default unless a premium or specialized model is clearly justified.",
+  "For deep web research, market research, literature research, landscape research, and brain_markdown_report tasks, choose Kimi K2.6 by default.",
+  "Do not upgrade deep research to Claude Sonnet merely because the task is deep, multi-source, or report-shaped.",
+  "Choose GLM 5.2 when the task likely needs very large context, long source-set synthesis, or long-horizon structured reasoning and does not need premium multimodal/file-input behavior.",
+  "Choose Claude Sonnet 5 only when the user requests Claude/Sonnet, explicitly prioritizes maximum quality over cost, or the task needs premium polished writing/editorial judgment, vision, or file-input strengths.",
 ]);
 
 export const GOAT_HARNESS_CREATION_PROMPT_CONTRACT = promptBlock("prompt_contract", [

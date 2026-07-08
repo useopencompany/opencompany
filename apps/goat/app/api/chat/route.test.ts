@@ -750,6 +750,133 @@ describe("POST /api/chat", () => {
       expect.anything(),
     );
   });
+
+  it("persists a fallback assistant message when the stream errors after tool activity", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockRunGoatBrainToolForUser().mockResolvedValue({
+      ok: true,
+      exitCode: 0,
+      stdout: "[]",
+      stderr: "",
+    });
+    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    let brainToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { goat_brain?: { execute?: unknown } } }).tools
+        ?.goat_brain;
+      if (typeof tool?.execute !== "function") {
+        throw new Error("goat_brain execute function was not configured.");
+      }
+      brainToolPromise = tool.execute({
+        command: "query",
+        flags: { text: "board meeting", json: true },
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(
+          async (responseOptions: { onError: (error: unknown) => string }) => {
+            await brainToolPromise;
+            responseOptions.onError(new Error("stream closed"));
+            await Promise.resolve();
+            return new Response(null, { status: 200 });
+          },
+        ),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "check my board meeting notes" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      {
+        sessionId: "session_1",
+        content: "Goat stopped before it could finish.",
+        taskId: null,
+        debugTrace: expect.objectContaining({
+          error: "stream closed",
+          finishReason: "error",
+        }),
+      },
+      expect.anything(),
+    );
+  });
+
+  it("retries final assistant persistence with a server id when the streamed id write fails", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockPersistGoatChatAssistantMessage()
+      .mockRejectedValueOnce(new Error("duplicate key value violates unique constraint"))
+      .mockResolvedValueOnce({} as never);
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            async (options: {
+              onFinish: (event: {
+                responseMessage: {
+                  id: string;
+                  role: "assistant";
+                  parts: Array<{ type: "text"; text: string }>;
+                };
+                finishReason: string;
+                isAborted: boolean;
+              }) => Promise<void>;
+            }) => {
+              await options.onFinish({
+                responseMessage: {
+                  id: "assistant_1",
+                  role: "assistant",
+                  parts: [{ type: "text", text: "Final answer." }],
+                },
+                finishReason: "stop",
+                isAborted: false,
+              });
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.4-mini",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "answer me" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        sessionId: "session_1",
+        messageId: "assistant_1",
+        content: "Final answer.",
+      }),
+      expect.anything(),
+    );
+    expect(persistGoatChatAssistantMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionId: "session_1",
+        messageId: null,
+        content: "Final answer.",
+      }),
+      expect.anything(),
+    );
+  });
 });
 
 function jsonRequest(body: unknown) {
@@ -811,6 +938,10 @@ function mockCurrentGoatUser() {
 
 function mockCreateGoatChatUserTurn() {
   return vi.mocked(createGoatChatUserTurn as unknown as () => Promise<unknown>);
+}
+
+function mockPersistGoatChatAssistantMessage() {
+  return vi.mocked(persistGoatChatAssistantMessage as unknown as () => Promise<unknown>);
 }
 
 function mockRunGoatBrainToolForUser() {
