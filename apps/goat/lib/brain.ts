@@ -214,6 +214,56 @@ export async function updateGoatBrainDocumentForUser(input: {
   };
 }
 
+export async function renameGoatBrainDocumentForUser(input: {
+  userWorkosId: string;
+  documentId: string;
+  title: string;
+}): Promise<BrainMutationResult> {
+  const title = input.title.trim();
+  if (!title) return { ok: false, message: "Title cannot be empty." };
+  const existing = await getGoatBrainFileForUser({
+    userWorkosId: input.userWorkosId,
+    fileId: input.documentId,
+  });
+  if (!existing) return { ok: false, message: "Brain file not found." };
+  const parsed = parseGoatBrainDocument(existing.content);
+  const type =
+    parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
+      ? parsed.frontmatter.type
+      : existing.entityType;
+  const evidenceKind = parsed.frontmatter.evidenceKind ?? existing.evidenceKind;
+  const content = serializeGoatBrainDocument({
+    title,
+    compiledTruth: parsed.compiledTruth,
+    timeline: parsed.timeline,
+    frontmatter: {
+      id: existing.brainId,
+      folder: existing.folderPath,
+      type,
+      ...(type === "evidence" && evidenceKind ? { evidenceKind } : {}),
+      status: parsed.frontmatter.status ?? existing.status,
+      title,
+      createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
+      updatedAt: nowIso(),
+      relations: parsed.frontmatter.relations ?? [],
+      ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+      ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
+      ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
+      ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
+    },
+  });
+  const row = await updateGoatBrainFileContentForUser({
+    userWorkosId: input.userWorkosId,
+    fileId: input.documentId,
+    content,
+  });
+  return {
+    ok: true,
+    path: goatBrainFilePathFor(row.folderPath, row.brainId),
+    document: documentViewFromFileRow(row),
+  };
+}
+
 export async function moveGoatBrainDocumentForUser(input: {
   userWorkosId: string;
   documentId: string;

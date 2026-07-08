@@ -3,6 +3,7 @@ import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { and, desc, eq, notInArray } from "drizzle-orm";
+import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
   deriveGoatBrainEdges,
   type GoatBrainEntityType,
@@ -104,6 +105,14 @@ export type GoatBrainSyncConflict = {
 
 type DbClient = any;
 type DbLike = any;
+
+// The default web-app client (`./client`) is neon-http, which has no interactive
+// transactions (one HTTPS request per query). Run the mutation steps sequentially
+// there; pooled callers (`./pool`, the runner) keep a real transaction.
+function runAtomically<T>(db: DbClient, fn: (tx: DbLike) => Promise<T>): Promise<T> {
+  if (db instanceof NeonHttpDatabase) return fn(db);
+  return db.transaction(fn);
+}
 
 export function hashGoatBrainContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -321,7 +330,7 @@ export async function upsertGoatBrainFileForUser(
   options: { db?: DbClient } = {},
 ): Promise<GoatBrainDocument> {
   const db = options.db ?? getDb();
-  return db.transaction(async (tx: DbLike) => {
+  return runAtomically(db, async (tx: DbLike) => {
     const projection = deriveGoatBrainFileProjection({ path: input.path, content: input.content });
     const now = new Date();
     const existing = await findDocumentForUpsert(tx, input.userWorkosId, projection.path);
@@ -356,7 +365,7 @@ export async function updateGoatBrainFileContentForUser(
   options: { db?: DbClient } = {},
 ): Promise<GoatBrainDocument> {
   const db = options.db ?? getDb();
-  return db.transaction(async (tx: DbLike) => {
+  return runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.userWorkosId, input.fileId);
     if (!existing) throw new Error("Brain document not found.");
     if (input.expectedContentHash && existing.contentHash !== input.expectedContentHash) {
@@ -391,7 +400,7 @@ export async function moveGoatBrainFileForUser(
   options: { db?: DbClient } = {},
 ): Promise<GoatBrainDocument> {
   const db = options.db ?? getDb();
-  return db.transaction(async (tx: DbLike) => {
+  return runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.userWorkosId, input.fileId);
     if (!existing) throw new Error("Brain document not found.");
     const projection = deriveGoatBrainFileProjection({ path: input.path, content: input.content });
@@ -423,7 +432,7 @@ export async function deleteGoatBrainFileForUser(
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
-  await db.transaction(async (tx: DbLike) => {
+  await runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.userWorkosId, input.fileId);
     if (existing)
       await insertVersion(tx, input.userWorkosId, existing, "delete", input.taskId ?? null);

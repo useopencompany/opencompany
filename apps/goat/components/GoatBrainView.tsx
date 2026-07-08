@@ -5,15 +5,17 @@ import {
   formatGoatBrainEvidenceLink,
   pageLinkTargets,
 } from "@opencompany/goat-brain/inline-links";
+import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
-  ArrowLeft,
   BookOpen,
   BriefcaseBusiness,
   Building2,
   ChevronDown,
   ChevronRight,
+  Copy,
+  Ellipsis,
   FileCode2,
   FilePlus2,
   FileText,
@@ -21,16 +23,16 @@ import {
   FolderPlus,
   History,
   Inbox,
-  Info,
   Lightbulb,
-  Save,
+  PanelRight,
   Search,
   Trash2,
   Users,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
@@ -38,7 +40,7 @@ import {
   createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
   deleteGoatBrainDocumentAction,
-  moveGoatBrainDocumentAction,
+  renameGoatBrainDocumentAction,
   updateGoatBrainDocumentAction,
 } from "@/lib/brain-actions";
 import {
@@ -77,6 +79,7 @@ const ROOT_FOLDER_GROUPS = [
   ["decisions", "concepts"],
 ];
 const HIDDEN_EMPTY_ROOT_FOLDERS = new Set<string>();
+const AUTOSAVE_DELAY_MS = 1200;
 const DEFAULT_BRAIN_FOLDERS = [
   "inbox",
   "people",
@@ -158,6 +161,7 @@ function GoatBrainEditor({
   initialBrainId,
 }: Props & { edgeRows?: GoatBrainEdgeRow[] }) {
   const router = useRouter();
+  const navInset = useGoatNavInset();
   const initialDocument = useMemo(
     () => resolveInitialDocument(documents, initialFolderPath, initialBrainId),
     [documents, initialBrainId, initialFolderPath],
@@ -171,14 +175,54 @@ function GoatBrainEditor({
     () => new Set(ancestorFolderPaths(initialDocument?.folderPath ?? initialSelectedFolder)),
   );
   const [query, setQuery] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderPath, setNewFolderPath] = useState("");
-  const [newDocumentTitle, setNewDocumentTitle] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isDocPending, startDocTransition] = useTransition();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [docPanelState, setDocPanelState] = useState<{
+    docId: string | null;
+    value: string;
+    detailsOpen: boolean;
+    timelineOpen: boolean;
+  }>({
+    docId: initialDocument?.id ?? null,
+    value: initialDocument?.body ?? "",
+    detailsOpen: false,
+    timelineOpen: false,
+  });
+  // Autosave bookkeeping that must survive re-renders without triggering them:
+  // savedValue/savedHash come from our own last successful save (fresher than the
+  // live collection right after saving), failedValue stops retry loops until the
+  // draft changes again. Resets lazily on first access for a different document —
+  // refs must not be written during render.
+  const autosaveRef = useRef<{
+    docId: string | null;
+    savedValue: string | null;
+    savedHash: string | null;
+    failedValue: string | null;
+  }>({ docId: initialDocument?.id ?? null, savedValue: null, savedHash: null, failedValue: null });
+  const autosaveFor = useCallback((docId: string | null) => {
+    if (autosaveRef.current.docId !== docId) {
+      autosaveRef.current = { docId, savedValue: null, savedHash: null, failedValue: null };
+    }
+    return autosaveRef.current;
+  }, []);
 
   const selectedDocument = useMemo(() => {
     if (!selectedDocumentId) return null;
     return documents.find((document) => document.id === selectedDocumentId) ?? null;
   }, [documents, selectedDocumentId]);
+  if (docPanelState.docId !== (selectedDocument?.id ?? null)) {
+    setDocPanelState({
+      docId: selectedDocument?.id ?? null,
+      value: selectedDocument?.body ?? "",
+      detailsOpen: false,
+      timelineOpen: false,
+    });
+  }
+  const editorValue = docPanelState.value;
+  const dirty = Boolean(selectedDocument && editorValue !== selectedDocument.body);
   const activeFolder = selectedDocument?.folderPath ?? selectedFolder;
   const activePath = selectedDocument ? brainDocumentTreePath(selectedDocument) : activeFolder;
   const tree = useMemo(
@@ -196,6 +240,7 @@ function GoatBrainEditor({
   );
 
   const selectDocument = (document: GoatBrainDocumentView) => {
+    saveRef.current(); // flush pending edits on the outgoing document
     setSelectedFolder(document.folderPath);
     setSelectedDocumentId(document.id);
     setExpandedPaths((current) => withAncestorFolders(current, document.folderPath));
@@ -223,6 +268,7 @@ function GoatBrainEditor({
       }
       const folderPath = result.path ?? path;
       setNewFolderPath("");
+      setCreatingFolder(false);
       setSelectedFolder(folderPath);
       setExpandedPaths((current) => withAncestorFolders(current, folderPath, true));
       router.replace(`/brain/${folderUrlSegments(folderPath)}`);
@@ -231,10 +277,8 @@ function GoatBrainEditor({
 
   const createDocument = () => {
     startTransition(async () => {
-      const title = newDocumentTitle.trim();
       const result = await createGoatBrainDocumentAction({
         folderPath: activeFolder,
-        ...(title ? { title } : {}),
       });
       if (!result.ok) {
         toast.error(result.message);
@@ -246,132 +290,340 @@ function GoatBrainEditor({
         setSelectedDocumentId(document.id);
         setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
       }
-      setNewDocumentTitle("");
       if (document) router.replace(brainDocumentUrl(document));
       else if (result.path) router.replace(brainFilePathUrl(result.path));
     });
   };
 
+  // Saves never reseed the editor draft: keystrokes made while a save is in flight
+  // must survive, and the live collection brings the fresh body/contentHash after.
+  const saveDocument = () => {
+    if (!selectedDocument || !dirty || isDocPending) return;
+    const autosave = autosaveFor(selectedDocument.id);
+    if (editorValue === autosave.savedValue) return;
+    const documentId = selectedDocument.id;
+    const body = editorValue;
+    const expectedContentHash = autosave.savedHash ?? selectedDocument.contentHash;
+    startDocTransition(async () => {
+      const result = await updateGoatBrainDocumentAction({
+        documentId,
+        body,
+        expectedContentHash,
+      });
+      if (autosaveRef.current.docId !== documentId) return;
+      if (!result.ok) {
+        autosaveRef.current.failedValue = body;
+        toast.error(result.message);
+        return;
+      }
+      autosaveRef.current.savedValue = body;
+      autosaveRef.current.failedValue = null;
+      if (result.document) autosaveRef.current.savedHash = result.document.contentHash;
+    });
+  };
+  const saveRef = useRef(saveDocument);
+  useEffect(() => {
+    saveRef.current = saveDocument;
+  });
+
+  // Debounced autosave: fires once typing pauses; when an in-flight save finishes
+  // (isDocPending flips), the effect re-arms so newer edits get their own save.
+  useEffect(() => {
+    if (!dirty || isDocPending) return;
+    const autosave = autosaveFor(selectedDocumentId);
+    if (editorValue === autosave.savedValue || editorValue === autosave.failedValue) return;
+    const timer = setTimeout(() => saveRef.current(), AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [autosaveFor, dirty, editorValue, isDocPending, selectedDocumentId]);
+
+  // Rename deliberately does NOT reseed the editor draft (applyDocumentResult), so unsaved
+  // body edits survive a title change; the live collection syncs title + contentHash after.
+  const renameDocument = (title: string) => {
+    if (!selectedDocument) return;
+    const currentTitle = selectedDocument.title ?? selectedDocument.brainId;
+    if (title === currentTitle) return;
+    startDocTransition(async () => {
+      const result = await renameGoatBrainDocumentAction({
+        documentId: selectedDocument.id,
+        title,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      toast.success("Renamed");
+    });
+  };
+
+  const copyDocument = async () => {
+    if (!selectedDocument) return;
+    try {
+      await navigator.clipboard.writeText(editorValue);
+      toast.success("Copied markdown");
+    } catch {
+      toast.error("Could not copy to clipboard.");
+    }
+  };
+
+  const deleteDocument = () => {
+    if (!selectedDocument) return;
+    if (!confirm(`Delete "${selectedDocument.title ?? selectedDocument.brainId}"?`)) return;
+    startDocTransition(async () => {
+      const deletedId = selectedDocument.id;
+      const result = await deleteGoatBrainDocumentAction(deletedId);
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      const remaining = documents.filter((document) => document.id !== deletedId);
+      const next =
+        remaining.find((document) => document.folderPath === activeFolder) ?? remaining[0] ?? null;
+      setSelectedDocumentId(next?.id ?? null);
+      if (next) {
+        setSelectedFolder(next.folderPath);
+        setExpandedPaths((current) => withAncestorFolders(current, next.folderPath, true));
+        router.replace(brainDocumentUrl(next));
+      } else {
+        router.replace(`/brain/${folderUrlSegments(activeFolder)}`);
+      }
+    });
+  };
+
   return (
-    <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border-subtle px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <Link
-            href="/"
-            aria-label="Back"
-            title="Back"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-          </Link>
-          <div className="min-w-0">
-            <h1 className="truncate text-[15px] font-semibold leading-tight">Brain</h1>
-            <p className="truncate text-[12px] leading-tight text-ink-subtle">
-              {documents.length} docs / {folders.length} folders
-            </p>
+    <main
+      className="flex h-full min-h-0 w-full overflow-hidden bg-canvas text-ink"
+      onKeyDown={(event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          autosaveFor(selectedDocument?.id ?? null).failedValue = null;
+          saveDocument();
+        }
+      }}
+    >
+      <aside className="flex w-60 shrink-0 flex-col border-r border-border-subtle bg-surface-muted">
+        <div
+          className={`flex h-9 shrink-0 items-center justify-between gap-2 ${navInset ? "pl-12" : "pl-4"} pr-2 pt-1`}
+        >
+          <span className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            Brain
+          </span>
+          <div className="flex shrink-0 items-center">
+            <button
+              type="button"
+              aria-label="Create brain file"
+              title="New file"
+              onClick={createDocument}
+              disabled={isPending}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
+            >
+              <FilePlus2 size={15} strokeWidth={1.8} />
+            </button>
+            <button
+              type="button"
+              aria-label="Create brain folder"
+              title="New folder"
+              aria-pressed={creatingFolder}
+              onClick={() => setCreatingFolder((creating) => !creating)}
+              disabled={isPending}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45 ${
+                creatingFolder
+                  ? "bg-surface-active text-ink"
+                  : "text-ink-subtle hover:bg-surface-hover hover:text-ink"
+              }`}
+            >
+              <FolderPlus size={15} strokeWidth={1.8} />
+            </button>
           </div>
         </div>
-      </header>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside className="flex w-[292px] shrink-0 flex-col border-r border-border bg-surface-muted">
-          <div className="border-b border-border px-3 py-3">
-            <label className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-2.5 text-[12.5px] text-ink-muted shadow-[0_1px_0_rgba(0,0,0,0.02)]">
-              <Search size={13} strokeWidth={1.75} />
+        <div className="px-3 pb-1 pt-1">
+          <label className="flex h-7 items-center gap-2 rounded-md border border-border bg-surface px-2 text-ink-muted transition-colors duration-150 focus-within:border-border-strong">
+            <Search size={13} strokeWidth={1.8} className="shrink-0" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search brain"
+              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
+            />
+          </label>
+        </div>
+
+        <div role="tree" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+          {creatingFolder ? (
+            <form
+              className="mb-1 flex h-7 items-center gap-1.5 rounded-[5px] bg-surface pl-[25px] pr-2 ring-1 ring-border-strong"
+              onSubmit={(event) => {
+                event.preventDefault();
+                createFolder();
+              }}
+            >
+              <Folder size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
               <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search brain"
-                className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
-              />
-            </label>
-            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">
-              <input
-                value={newDocumentTitle}
-                onChange={(event) => setNewDocumentTitle(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") createDocument();
-                }}
-                placeholder={`new file in ${activeFolder}`}
-                className="h-8 min-w-0 rounded-md border border-border bg-surface px-2.5 text-[12.5px] text-ink outline-none transition-colors duration-150 placeholder:text-ink-subtle focus:border-border-strong"
-              />
-              <button
-                type="button"
-                aria-label="Create brain file"
-                title="Create brain file"
-                onClick={createDocument}
-                disabled={isPending}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink disabled:opacity-45"
-              >
-                <FilePlus2 size={15} strokeWidth={1.8} />
-              </button>
-              <input
+                autoFocus
                 value={newFolderPath}
                 onChange={(event) => setNewFolderPath(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") createFolder();
+                  if (event.key === "Escape") {
+                    setNewFolderPath("");
+                    setCreatingFolder(false);
+                  }
                 }}
-                placeholder="new folder"
-                className="h-8 min-w-0 rounded-md border border-border bg-surface px-2.5 text-[12.5px] text-ink outline-none transition-colors duration-150 placeholder:text-ink-subtle focus:border-border-strong"
-              />
-              <button
-                type="button"
-                aria-label="Create brain folder"
-                title="Create brain folder"
-                onClick={createFolder}
+                onBlur={() => {
+                  if (!newFolderPath.trim()) setCreatingFolder(false);
+                }}
+                placeholder="New folder"
+                aria-label="New brain folder name"
                 disabled={isPending}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink disabled:opacity-45"
-              >
-                <FolderPlus size={15} strokeWidth={1.8} />
-              </button>
+                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-subtle"
+              />
+            </form>
+          ) : null}
+          {hasRootNodes ? (
+            <div>
+              {rootGroups.map((group, groupIndex) =>
+                group.length > 0 ? (
+                  <div key={group.map((node) => node.path).join("|")}>
+                    {groupIndex > firstNonEmptyGroupIndex(rootGroups) ? (
+                      <div className="h-2" />
+                    ) : null}
+                    {group.map((node) => (
+                      <TreeItem
+                        key={node.path}
+                        node={node}
+                        depth={0}
+                        activePath={activePath}
+                        expandedPaths={visibleExpandedPaths}
+                        onSelect={selectDocument}
+                        onToggleFolder={toggleFolder}
+                      />
+                    ))}
+                  </div>
+                ) : null,
+              )}
             </div>
-          </div>
+          ) : (
+            <div className="px-2 py-8 text-[12.5px] leading-5 text-ink-muted">
+              {documents.length === 0 ? "No brain files yet." : "No files match that search."}
+            </div>
+          )}
+        </div>
+      </aside>
 
-          <div role="tree" className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
-            {hasRootNodes ? (
-              <div className="space-y-px">
-                {rootGroups.map((group, groupIndex) =>
-                  group.length > 0 ? (
-                    <div key={group.map((node) => node.path).join("|")}>
-                      {groupIndex > firstNonEmptyGroupIndex(rootGroups) ? (
-                        <div className="my-2 border-t border-border" />
-                      ) : null}
-                      {group.map((node) => (
-                        <TreeItem
-                          key={node.path}
-                          node={node}
-                          depth={0}
-                          activePath={activePath}
-                          expandedPaths={visibleExpandedPaths}
-                          onSelect={selectDocument}
-                          onToggleFolder={toggleFolder}
-                        />
-                      ))}
-                    </div>
-                  ) : null,
-                )}
-              </div>
-            ) : (
-              <div className="px-2 py-8 text-[12.5px] leading-5 text-ink-muted">
-                {documents.length === 0 ? "No brain files yet." : "No files match that search."}
-              </div>
-            )}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center border-b border-border-subtle">
+          <div className="flex min-w-0 flex-1 items-center gap-2 pl-5">
+            {selectedDocument ? (
+              <>
+                <FileText size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
+                <span
+                  title={brainDocumentTreePath(selectedDocument)}
+                  className="min-w-0 truncate text-[12.5px] font-medium text-ink"
+                >
+                  {selectedDocument.folderPath}/{selectedDocument.brainId}.md
+                </span>
+                <span className="hidden shrink-0 text-[12px] text-ink-subtle md:inline">
+                  Updated {formatRelativeTime(selectedDocument.updatedAt)}
+                </span>
+              </>
+            ) : null}
           </div>
-        </aside>
+          <div className="flex shrink-0 items-center justify-end gap-1 pr-3">
+            {selectedDocument ? (
+              <>
+                {isDocPending || dirty ? (
+                  <span
+                    role="status"
+                    className="mr-1 shrink-0 text-[12px] text-ink-subtle transition-opacity duration-150"
+                  >
+                    {isDocPending ? "Saving…" : "Unsaved"}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  aria-label="Copy markdown"
+                  title="Copy markdown"
+                  onClick={copyDocument}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                >
+                  <Copy size={14} strokeWidth={1.9} />
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={docPanelState.detailsOpen}
+                  aria-label="Toggle file details"
+                  title="Toggle file details"
+                  onClick={() =>
+                    setDocPanelState((state) => ({ ...state, detailsOpen: !state.detailsOpen }))
+                  }
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                    docPanelState.detailsOpen
+                      ? "bg-surface-active text-ink"
+                      : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+                  }`}
+                >
+                  <PanelRight size={14} strokeWidth={1.9} />
+                </button>
+                <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+                  <PopoverTrigger
+                    aria-label="More actions"
+                    title="More actions"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 data-[popup-open]:bg-surface-active data-[popup-open]:text-ink"
+                  >
+                    <Ellipsis size={15} strokeWidth={1.9} />
+                  </PopoverTrigger>
+                  <PopoverContent align="end" sideOffset={4} className="w-48 p-1">
+                    <button
+                      type="button"
+                      aria-label="Toggle timeline"
+                      onClick={() => {
+                        setDocPanelState((state) => ({
+                          ...state,
+                          timelineOpen: !state.timelineOpen,
+                        }));
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors duration-150 hover:bg-surface-hover"
+                    >
+                      <History size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+                      <span className="flex-1">
+                        {docPanelState.timelineOpen ? "Hide timeline" : "Timeline"}
+                      </span>
+                      <span className="text-[11.5px] text-ink-subtle">
+                        {selectedDocument.timeline.length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Delete document"
+                      disabled={isDocPending}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        deleteDocument();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-danger transition-colors duration-150 hover:bg-danger-bg disabled:opacity-45"
+                    >
+                      <Trash2 size={14} strokeWidth={1.9} className="shrink-0" />
+                      Delete
+                    </button>
+                  </PopoverContent>
+                </Popover>
+              </>
+            ) : null}
+          </div>
+        </header>
 
         <BrainDocumentPanel
           key={selectedDocument?.id ?? "empty"}
           selectedDocument={selectedDocument}
           documents={documents}
-          folders={folders}
           brainLinks={brainLinks}
           graphLinks={graphLinks}
-          selectedFolder={activeFolder}
-          onSelectFolder={setSelectedFolder}
-          onSelectDocumentId={setSelectedDocumentId}
-          onExpandFolder={(folderPath) =>
-            setExpandedPaths((current) => withAncestorFolders(current, folderPath, true))
-          }
+          editorValue={editorValue}
+          detailsOpen={docPanelState.detailsOpen}
+          timelineOpen={docPanelState.timelineOpen}
+          isDocPending={isDocPending}
+          onEditorChange={(value) => setDocPanelState((state) => ({ ...state, value }))}
+          onRenameTitle={renameDocument}
         />
       </div>
     </main>
@@ -409,24 +661,24 @@ function TreeItem({
           if (node.type === "folder") onToggleFolder(node.path);
           else if (node.document) onSelect(node.document);
         }}
-        className={`group flex w-full items-center gap-1.5 rounded-md py-[5px] pr-2 text-left text-[12.5px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+        className={`group flex h-7 w-full items-center gap-1.5 rounded-[5px] pr-2 text-left text-[13px] leading-5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
           active
             ? "bg-surface-active text-ink"
-            : "text-ink/85 hover:bg-surface-subtle hover:text-ink"
+            : "text-ink/85 hover:bg-surface-hover hover:text-ink"
         }`}
         style={paddingStyle}
       >
         {node.type === "folder" ? (
           expanded ? (
-            <ChevronDown size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
+            <ChevronDown size={13} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
           ) : (
-            <ChevronRight size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
+            <ChevronRight size={13} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
           )
         ) : (
           <span className="h-[13px] w-[13px] shrink-0" />
         )}
         {node.type === "folder" ? <FolderIcon path={node.path} /> : <FileIcon path={node.path} />}
-        <span className="min-w-0 truncate tracking-[-0.005em]">{node.name}</span>
+        <span className="min-w-0 truncate">{node.name}</span>
       </button>
       {showChildren
         ? node.children.map((child) => (
@@ -448,222 +700,71 @@ function TreeItem({
 function BrainDocumentPanel({
   selectedDocument,
   documents,
-  folders,
   brainLinks,
   graphLinks,
-  selectedFolder,
-  onSelectFolder,
-  onSelectDocumentId,
-  onExpandFolder,
+  editorValue,
+  detailsOpen,
+  timelineOpen,
+  isDocPending,
+  onEditorChange,
+  onRenameTitle,
 }: {
   selectedDocument: GoatBrainDocumentView | null;
   documents: GoatBrainDocumentView[];
-  folders: GoatBrainFolderView[];
   brainLinks: Record<string, string>;
   graphLinks: BrainGraphLink[];
-  selectedFolder: string;
-  onSelectFolder: (folderPath: string) => void;
-  onSelectDocumentId: (documentId: string | null) => void;
-  onExpandFolder: (folderPath: string) => void;
+  editorValue: string;
+  detailsOpen: boolean;
+  timelineOpen: boolean;
+  isDocPending: boolean;
+  onEditorChange: (value: string) => void;
+  onRenameTitle: (title: string) => void;
 }) {
-  const router = useRouter();
-  const initialBody = useMemo(() => selectedDocument?.body ?? "", [selectedDocument]);
-  const [editorValue, setEditorValue] = useState(initialBody);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [timelineOpen, setTimelineOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
-  const dirty = Boolean(selectedDocument && editorValue !== initialBody);
-
-  const saveDocument = () => {
-    if (!selectedDocument || !dirty) return;
-    startTransition(async () => {
-      const result = await updateGoatBrainDocumentAction({
-        documentId: selectedDocument.id,
-        body: editorValue,
-        expectedContentHash: selectedDocument.contentHash,
-      });
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
-      const document = result.document;
-      if (document) {
-        onSelectFolder(document.folderPath);
-        onSelectDocumentId(document.id);
-        onExpandFolder(document.folderPath);
-        setEditorValue(document.body);
-      }
-      toast.success("Saved");
-      if (document) router.replace(brainDocumentUrl(document));
-      else if (result.path) router.replace(brainFilePathUrl(result.path));
-    });
-  };
-
-  const moveDocument = (folderPath: string) => {
-    if (!selectedDocument || folderPath === selectedDocument.folderPath) return;
-    startTransition(async () => {
-      const result = await moveGoatBrainDocumentAction({
-        documentId: selectedDocument.id,
-        folderPath,
-      });
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
-      const document = result.document;
-      if (document) {
-        onSelectFolder(document.folderPath);
-        onSelectDocumentId(document.id);
-        onExpandFolder(document.folderPath);
-        setEditorValue(document.body);
-      }
-      if (document) router.replace(brainDocumentUrl(document));
-      else if (result.path) router.replace(brainFilePathUrl(result.path));
-    });
-  };
-
-  const deleteDocument = () => {
-    if (!selectedDocument) return;
-    if (!confirm(`Delete "${selectedDocument.title ?? selectedDocument.brainId}"?`)) return;
-    startTransition(async () => {
-      const deletedId = selectedDocument.id;
-      const result = await deleteGoatBrainDocumentAction(deletedId);
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
-      const remaining = documents.filter((document) => document.id !== deletedId);
-      const next =
-        remaining.find((document) => document.folderPath === selectedFolder) ??
-        remaining[0] ??
-        null;
-      onSelectDocumentId(next?.id ?? null);
-      if (next) {
-        onSelectFolder(next.folderPath);
-        onExpandFolder(next.folderPath);
-        router.replace(brainDocumentUrl(next));
-      } else {
-        router.replace(`/brain/${folderUrlSegments(selectedFolder)}`);
-      }
-    });
-  };
-
-  return (
-    <section className="flex min-w-0 flex-1 flex-col bg-canvas">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
-        {selectedDocument ? (
-          <>
-            <div className="flex min-w-0 flex-1 items-center gap-2 text-[12.5px]">
-              <FileText size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
-              <span
-                title={brainDocumentTreePath(selectedDocument)}
-                className="min-w-0 truncate font-medium text-ink"
-              >
-                {selectedDocument.title ?? selectedDocument.brainId}
-              </span>
-              <span className="shrink-0 text-ink-subtle">
-                {selectedDocument.folderPath}/{selectedDocument.brainId}.md
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={selectedDocument.folderPath}
-                onChange={(event) => moveDocument(event.target.value)}
-                disabled={isPending}
-                className="h-8 max-w-[180px] rounded-md border border-border bg-surface px-2 text-[12.5px] outline-none focus:border-border-strong"
-              >
-                {folders.map((folder) => (
-                  <option key={folder.path} value={folder.path}>
-                    {folder.path}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                aria-pressed={detailsOpen}
-                aria-label="Toggle file details"
-                title="Toggle file details"
-                onClick={() => setDetailsOpen((open) => !open)}
-                className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors duration-150 ${
-                  detailsOpen
-                    ? "bg-surface-active text-ink"
-                    : "text-ink-muted hover:bg-surface-subtle hover:text-ink"
-                }`}
-              >
-                <Info size={15} strokeWidth={2} />
-              </button>
-              <button
-                type="button"
-                aria-pressed={timelineOpen}
-                aria-label="Toggle timeline"
-                title="Toggle timeline"
-                onClick={() => setTimelineOpen((open) => !open)}
-                className={`flex h-8 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium transition-colors duration-150 ${
-                  timelineOpen
-                    ? "bg-surface-active text-ink"
-                    : "text-ink-muted hover:bg-surface-subtle hover:text-ink"
-                }`}
-              >
-                <History size={14} strokeWidth={2} />
-                <span>Timeline</span>
-                <span className="text-ink-subtle">{selectedDocument.timeline.length}</span>
-              </button>
-              <button
-                type="button"
-                onClick={saveDocument}
-                disabled={!dirty || isPending}
-                className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Save size={14} strokeWidth={2} />
-                Save
-              </button>
-              <button
-                type="button"
-                aria-label="Delete document"
-                title="Delete document"
-                onClick={deleteDocument}
-                disabled={isPending}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-danger transition-colors duration-150 hover:bg-danger-bg disabled:opacity-45"
-              >
-                <Trash2 size={15} strokeWidth={2} />
-              </button>
-            </div>
-          </>
-        ) : (
-          <span className="text-[12.5px] text-ink-muted">No file selected</span>
-        )}
-      </div>
-      {selectedDocument && detailsOpen ? (
-        <BrainDocumentDetails
-          document={selectedDocument}
-          documents={documents}
-          graphLinks={graphLinks}
-        />
-      ) : null}
-      {selectedDocument && timelineOpen ? (
-        <BrainDocumentTimeline document={selectedDocument} />
-      ) : null}
-
-      {selectedDocument ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[860px] px-8 pb-16 pt-6">
-            <MarkdownGoatBrainEditor
-              content={editorValue}
-              onChange={setEditorValue}
-              brainLinks={brainLinks}
-            />
-          </div>
-        </div>
-      ) : (
+  if (!selectedDocument) {
+    return (
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
         <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-ink-muted">
           Create or select a brain file to edit it.
         </div>
-      )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
+      {timelineOpen ? <BrainDocumentTimeline document={selectedDocument} /> : null}
+
+      <div className="flex min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[760px] px-8 pb-24 pt-12">
+            <BrainTitleEditor
+              document={selectedDocument}
+              disabled={isDocPending}
+              onRename={onRenameTitle}
+            />
+            <div className="mt-6">
+              <MarkdownGoatBrainEditor
+                content={editorValue}
+                onChange={onEditorChange}
+                brainLinks={brainLinks}
+              />
+            </div>
+          </div>
+        </div>
+
+        {detailsOpen ? (
+          <BrainMetadataSidebar
+            document={selectedDocument}
+            documents={documents}
+            graphLinks={graphLinks}
+          />
+        ) : null}
+      </div>
     </section>
   );
 }
 
-function BrainDocumentDetails({
+function BrainMetadataSidebar({
   document,
   documents,
   graphLinks,
@@ -680,48 +781,171 @@ function BrainDocumentDetails({
   const backlinks = graphLinks.filter((link) => link.to === document.brainId);
 
   return (
-    <aside className="shrink-0 border-b border-border-subtle bg-surface-muted px-5 py-3">
-      <div className="grid gap-4 text-[12px] leading-5 text-ink-muted lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-1">
-          <div className="min-w-0 space-y-1">
-            <DetailsRow label="Kind" value={document.kind} />
-            <DetailsRow label="Type" value={document.type} />
-            {document.evidenceKind ? (
-              <DetailsRow label="Evidence" value={document.evidenceKind} />
-            ) : null}
-            <DetailsRow label="MIME" value={document.mimeType ?? "text/markdown"} />
-            <DetailsRow label="Created" value={formatDateTime(document.createdAt)} />
-            <DetailsRow label="Updated" value={formatDateTime(document.updatedAt)} />
-          </div>
-          <div className="min-w-0 space-y-1">
-            <DetailsRow label="ID" value={document.brainId} />
-            <DetailsRow label="Folder" value={document.folderPath} />
-            <DetailsRow label="Aliases" value={document.aliases.join(", ") || "-"} />
-            <DetailsRow
-              label="Sources"
-              value={document.sources?.map((item) => item.ref).join(", ") || "-"}
-            />
-            <DetailsRow label="Timeline" value={`${document.timeline.length} entries`} />
-          </div>
-        </div>
-        <div className="grid min-w-0 gap-3 md:grid-cols-2">
-          <GraphLinksList
-            title="Outgoing"
-            links={outgoingLinks}
-            documentsByBrainId={documentsByBrainId}
-            empty="No outgoing links."
-            direction="out"
-          />
-          <GraphLinksList
-            title="Backlinks"
-            links={backlinks}
-            documentsByBrainId={documentsByBrainId}
-            empty="No backlinks."
-            direction="in"
+    <aside
+      aria-label="File details"
+      className="flex w-72 shrink-0 flex-col gap-6 overflow-y-auto border-l border-border-subtle px-4 py-5"
+    >
+      <section className="flex flex-col gap-2.5">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+          Properties
+        </h2>
+        <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 text-[12px] leading-5">
+          <MetadataRow label="Type" value={document.type} />
+          {document.evidenceKind ? (
+            <MetadataRow label="Evidence" value={document.evidenceKind} />
+          ) : null}
+          <MetadataRow label="Created" value={formatDateTime(document.createdAt)} />
+          <MetadataRow label="Updated" value={formatDateTime(document.updatedAt)} />
+          <span className="text-ink-subtle">ID</span>
+          <code
+            title={document.brainId}
+            className="min-w-0 truncate rounded-sm bg-surface-muted px-1 py-0.5 text-[11px] text-ink-muted"
+          >
+            {document.brainId}
+          </code>
+          <MetadataRow label="Aliases" value={document.aliases.join(", ") || "-"} />
+          <MetadataRow
+            label="Sources"
+            value={document.sources?.map((item) => item.ref).join(", ") || "-"}
           />
         </div>
-      </div>
+      </section>
+
+      <SidebarTimelineSection document={document} />
+
+      <GraphLinksList
+        title="Outgoing"
+        links={outgoingLinks}
+        documentsByBrainId={documentsByBrainId}
+        empty="No outgoing links."
+        direction="out"
+      />
+      <GraphLinksList
+        title="Backlinks"
+        links={backlinks}
+        documentsByBrainId={documentsByBrainId}
+        empty="No backlinks."
+        direction="in"
+      />
     </aside>
+  );
+}
+
+function MetadataRow({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <span className="text-ink-subtle">{label}</span>
+      <span title={value} className="min-w-0 truncate text-ink">
+        {value}
+      </span>
+    </>
+  );
+}
+
+// The page title as an in-place editor: commit on Enter/blur, revert on Escape. Resyncs when
+// the document's title changes underneath it (live collection updates after a rename).
+function BrainTitleEditor({
+  document,
+  disabled,
+  onRename,
+}: {
+  document: GoatBrainDocumentView;
+  disabled: boolean;
+  onRename: (title: string) => void;
+}) {
+  const title = document.title ?? document.brainId;
+  const [draft, setDraft] = useState(title);
+  const [prevTitle, setPrevTitle] = useState(title);
+  const skipCommitRef = useRef(false);
+  if (prevTitle !== title) {
+    setPrevTitle(title);
+    setDraft(title);
+  }
+
+  const commit = () => {
+    if (skipCommitRef.current) {
+      skipCommitRef.current = false;
+      return;
+    }
+    const next = draft.trim();
+    if (!next || next === title) {
+      setDraft(title);
+      return;
+    }
+    onRename(next);
+  };
+
+  return (
+    <input
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          skipCommitRef.current = true;
+          setDraft(title);
+          event.currentTarget.blur();
+        }
+      }}
+      disabled={disabled}
+      aria-label="Page title"
+      placeholder="Untitled"
+      className="w-full bg-transparent text-[32px] font-bold leading-[1.15] tracking-tight text-ink outline-none placeholder:text-ink-subtle disabled:opacity-60"
+    />
+  );
+}
+
+// Collapsible timeline in the file-details sidebar: what happened on this document, newest first.
+function SidebarTimelineSection({ document }: { document: GoatBrainDocumentView }) {
+  const [open, setOpen] = useState(false);
+  const entries = useMemo(
+    () =>
+      [...document.timeline].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
+    [document.timeline],
+  );
+
+  return (
+    <section className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="mb-1 flex w-full items-center justify-between gap-2 rounded-sm text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <h2 className="text-[12px] font-semibold text-ink">Timeline</h2>
+        <span className="flex items-center gap-1 text-[12px] text-ink-subtle">
+          {entries.length}
+          <ChevronDown
+            size={12}
+            strokeWidth={2}
+            className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`}
+          />
+        </span>
+      </button>
+      {open ? (
+        entries.length > 0 ? (
+          <ol className="max-h-72 space-y-3 overflow-y-auto pr-1">
+            {entries.map((entry, index) => (
+              <li
+                key={`${entry.evidenceId}:${entry.at}:${index}:${entry.body.slice(0, 24)}`}
+                className="min-w-0 text-[12px] leading-5"
+              >
+                <time dateTime={entry.at} className="block text-ink-subtle">
+                  {formatDateTime(entry.at)}
+                </time>
+                <p className="mt-0.5 min-w-0 whitespace-pre-wrap text-ink-muted">{entry.body}</p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-[12px] text-ink-subtle">No timeline entries.</p>
+        )
+      ) : null}
+    </section>
   );
 }
 
@@ -828,15 +1052,6 @@ function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }
   );
 }
 
-function DetailsRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2">
-      <span className="text-ink-subtle">{label}</span>
-      <span className="truncate text-ink">{value}</span>
-    </div>
-  );
-}
-
 function groupRootNodes(nodes: BrainTreeNode[]) {
   const visibleNodes = nodes.filter(
     (node) => !HIDDEN_EMPTY_ROOT_FOLDERS.has(node.path) || hasDocumentDescendant(node),
@@ -939,29 +1154,29 @@ function FolderIcon({ path }: { path: string }) {
   const className = "shrink-0 text-ink-muted";
   switch (root) {
     case "inbox":
-      return <Inbox size={13} strokeWidth={1.75} className={className} />;
+      return <Inbox size={14} strokeWidth={1.8} className={className} />;
     case "companies":
-      return <Building2 size={13} strokeWidth={1.75} className={className} />;
+      return <Building2 size={14} strokeWidth={1.8} className={className} />;
     case "decisions":
-      return <BookOpen size={13} strokeWidth={1.75} className={className} />;
+      return <BookOpen size={14} strokeWidth={1.8} className={className} />;
     case "concepts":
-      return <Lightbulb size={13} strokeWidth={1.75} className={className} />;
+      return <Lightbulb size={14} strokeWidth={1.8} className={className} />;
     case "people":
-      return <Users size={13} strokeWidth={1.75} className={className} />;
+      return <Users size={14} strokeWidth={1.8} className={className} />;
     case "projects":
-      return <BriefcaseBusiness size={13} strokeWidth={1.75} className={className} />;
+      return <BriefcaseBusiness size={14} strokeWidth={1.8} className={className} />;
     case "evidence":
-      return <History size={13} strokeWidth={1.75} className={className} />;
+      return <History size={14} strokeWidth={1.8} className={className} />;
     default:
-      return <Folder size={13} strokeWidth={1.75} className={className} />;
+      return <Folder size={14} strokeWidth={1.8} className={className} />;
   }
 }
 
 function FileIcon({ path }: { path: string }) {
   if (/\.(ts|tsx|js|jsx|json|css|sql|sh|py|rs|go)$/i.test(path)) {
-    return <FileCode2 size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />;
+    return <FileCode2 size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
   }
-  return <FileText size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />;
+  return <FileText size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
 }
 
 function resolveInitialDocument(
@@ -1306,4 +1521,24 @@ function formatDateTime(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatRelativeTime(value: string) {
+  const timestamp = new Date(value).getTime();
+  const elapsedMs = Date.now() - timestamp;
+  if (!Number.isFinite(timestamp) || elapsedMs < 30_000) return "just now";
+
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays}d ago`;
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+  }).format(timestamp);
 }

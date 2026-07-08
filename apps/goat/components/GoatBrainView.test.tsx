@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
-import { updateGoatBrainDocumentAction } from "@/lib/brain-actions";
+import { renameGoatBrainDocumentAction, updateGoatBrainDocumentAction } from "@/lib/brain-actions";
 import { GoatBrainView } from "./GoatBrainView";
 
 const routerMock = vi.hoisted(() => ({
@@ -39,6 +39,7 @@ vi.mock("@/lib/brain-actions", () => ({
   createGoatBrainFolderAction: vi.fn(),
   deleteGoatBrainDocumentAction: vi.fn(),
   moveGoatBrainDocumentAction: vi.fn(),
+  renameGoatBrainDocumentAction: vi.fn(),
   updateGoatBrainDocumentAction: vi.fn(),
 }));
 
@@ -59,6 +60,7 @@ describe("GoatBrainView", () => {
       screen.queryByText("Met Ada during the platform planning chat."),
     ).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "More actions" }));
     await user.click(screen.getByRole("button", { name: "Toggle timeline" }));
 
     expect(screen.getByRole("heading", { name: "Timeline" })).toBeInTheDocument();
@@ -107,7 +109,65 @@ describe("GoatBrainView", () => {
     );
   });
 
-  it("passes the selected content hash when saving a document", async () => {
+  it("expands the timeline inside the details sidebar", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Toggle file details" }));
+    const details = screen.getByRole("complementary", { name: "File details" });
+
+    expect(within(details).queryByText("Folder")).not.toBeInTheDocument();
+    expect(within(details).queryByText("Kind")).not.toBeInTheDocument();
+    expect(within(details).queryByText("MIME")).not.toBeInTheDocument();
+    expect(
+      within(details).queryByText(/Met Ada during the platform planning chat/),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(details).getByRole("button", { name: /Timeline/ }));
+
+    expect(
+      within(details).getByText(/Met Ada during the platform planning chat/),
+    ).toBeInTheDocument();
+  });
+
+  it("renames a document from the page title", async () => {
+    const user = userEvent.setup();
+    vi.mocked(renameGoatBrainDocumentAction).mockResolvedValueOnce({
+      ok: true,
+      path: "people/ada-lovelace.md",
+      document: { ...documentWithTimeline, title: "Ada King" },
+    });
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    const title = screen.getByRole("textbox", { name: "Page title" });
+    await user.clear(title);
+    await user.type(title, "Ada King{Enter}");
+
+    await waitFor(() => {
+      expect(renameGoatBrainDocumentAction).toHaveBeenCalledWith({
+        documentId: "doc_ada",
+        title: "Ada King",
+      });
+    });
+  });
+
+  it("autosaves the body with the selected content hash after typing pauses", async () => {
     const user = userEvent.setup();
     vi.mocked(updateGoatBrainDocumentAction).mockResolvedValueOnce({
       ok: true,
@@ -126,16 +186,21 @@ describe("GoatBrainView", () => {
 
     await user.clear(screen.getByRole("textbox", { name: "Brain body" }));
     await user.type(screen.getByRole("textbox", { name: "Brain body" }), "Updated truth.");
-    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => {
-      expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
-        documentId: "doc_ada",
-        body: "Updated truth.",
-        expectedContentHash: "hash",
-      });
-    });
-    expect(routerMock.replace).toHaveBeenCalledWith("/brain/people/ada-lovelace");
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Unsaved");
+
+    await waitFor(
+      () => {
+        expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
+          documentId: "doc_ada",
+          body: "Updated truth.",
+          expectedContentHash: "hash",
+        });
+      },
+      { timeout: 4000 },
+    );
+    expect(updateGoatBrainDocumentAction).toHaveBeenCalledTimes(1);
   });
 });
 

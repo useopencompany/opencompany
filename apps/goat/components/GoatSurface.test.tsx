@@ -916,9 +916,11 @@ describe("GoatSurface chat streaming UI", () => {
     const intro = screen.getByText("I'll check your Brain.");
     const toolRow = screen.getByTestId("chat-tool-call-goat_brain");
 
-    expect(screen.getByText("Brain")).toBeInTheDocument();
-    expect(screen.getByText("running")).toBeInTheDocument();
-    expect(screen.getByText("goat_brain query --text hiring --limit 5")).toBeInTheDocument();
+    expect(within(toolRow).getByText("Brain")).toBeInTheDocument();
+    expect(within(toolRow).getByText("running")).toBeInTheDocument();
+    expect(
+      within(toolRow).getByText("goat_brain query --text hiring --limit 5"),
+    ).toBeInTheDocument();
     expect(intro.compareDocumentPosition(toolRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

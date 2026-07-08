@@ -29,7 +29,7 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
   }, [chatId, data.recentChats]);
 
   return (
-    <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <GoatSurface
         tasks={data.tasks}
         schedules={data.schedules}
@@ -49,11 +49,9 @@ export function GoatSettingsRoute() {
   const initials = getInitials(user.firstName, user.lastName, user.email);
 
   return (
-    <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[560px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/" label="Goat" />
-
           <header className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
               {user.avatarUrl ? (
@@ -111,7 +109,7 @@ export function GoatJamieSettingsRoute() {
   const { integrations } = useGoatAppData();
 
   return (
-    <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[560px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
           <BackLink href="/settings" label="Settings" />
@@ -161,7 +159,7 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
 
   return (
-    <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[720px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
           <BackLink href="/" label="Results" />
@@ -177,7 +175,7 @@ export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
   const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/";
 
   return (
-    <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-5">
         <div className="flex w-full max-w-[880px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
           <nav className="flex flex-wrap items-center gap-2">
