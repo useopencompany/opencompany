@@ -1,8 +1,10 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import type { AgentModelId, ModelRatingTier } from "@opencompany/agent-runtime";
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -11,7 +13,10 @@ import {
   CommandList,
   CommandShortcut,
 } from "@opencompany/ui/components/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
+import { AnthropicIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
+import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import { DefaultChatTransport } from "ai";
 import {
@@ -20,7 +25,9 @@ import {
   ArrowUp,
   BookOpen,
   CalendarClock,
+  Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleDotDashed,
   Clock,
@@ -31,6 +38,7 @@ import {
   Pause,
   Play,
   Settings,
+  Sparkles,
   Square,
   Trash2,
   X,
@@ -71,6 +79,7 @@ import {
   toGoatChatUiMessage,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -147,7 +156,9 @@ export function GoatSurface({
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
-  const [chatModel, setChatModel] = useState(initialChat?.model ?? defaultModel);
+  const [chatModel, setChatModel] = useState(() =>
+    normalizeGoatModel(initialChat?.model ?? defaultModel),
+  );
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [newChatPrompt, setNewChatPrompt] = useState("");
   const [backgroundChatCount, setBackgroundChatCount] = useState(0);
@@ -264,7 +275,7 @@ export function GoatSurface({
 
     const frame = requestAnimationFrame(() => {
       setChatSessionId(initialChat?.id ?? null);
-      setChatModel(initialChat?.model ?? defaultModel);
+      setChatModel(normalizeGoatModel(initialChat?.model ?? defaultModel));
       setMessages(initialChat?.messages ?? []);
       setMode(initialChat ? "chat" : "home");
     });
@@ -746,6 +757,7 @@ export function GoatSurface({
                 required
               />
             </div>
+            <GoatModelPicker value={chatModel} onChange={setChatModel} disabled={isGenerating} />
             <SubmitButton
               disabled={!input.trim()}
               isGenerating={isGenerating}
@@ -1593,6 +1605,168 @@ function shouldShowThinkingBubble(messages: readonly GoatChatUiMessage[]) {
   const lastMessage = messages.at(-1);
   if (!lastMessage || lastMessage.role === "user") return true;
   return getOrderedAssistantItems(lastMessage, new Map<string, ChatTaskCardView>()).length === 0;
+}
+
+function GoatModelPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (modelId: AgentModelId) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedModel = findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        aria-label="Model"
+        disabled={disabled}
+        className="mb-px flex h-7 max-w-[170px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
+      >
+        <GoatModelProviderIcon
+          modelId={selectedModel?.id ?? DEFAULT_GOAT_MODEL}
+          size={13}
+          strokeWidth={1.9}
+          className="shrink-0"
+        />
+        <span className="truncate">{selectedModel?.label ?? "Model"}</span>
+        <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={10}
+        className="w-[360px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-0 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        <Command className="bg-surface text-ink">
+          <CommandInput placeholder="Search models..." />
+          <div className="flex items-center justify-end px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Capability / Speed / Cost
+          </div>
+          <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
+            <CommandEmpty>No models found.</CommandEmpty>
+            <CommandGroup heading="Models">
+              {GOAT_MODELS.map((model) => {
+                const isSelected = model.id === selectedModel?.id;
+                return (
+                  <CommandItem
+                    key={model.id}
+                    value={model.id}
+                    keywords={[model.label, modelProviderLabel(model.id)]}
+                    onSelect={() => {
+                      onChange(model.id);
+                      setOpen(false);
+                    }}
+                    title={model.description}
+                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                  >
+                    <Check
+                      size={13}
+                      strokeWidth={2}
+                      className={cn("shrink-0 text-ink", isSelected ? "opacity-100" : "opacity-0")}
+                    />
+                    <GoatModelProviderIcon
+                      modelId={model.id}
+                      size={14}
+                      strokeWidth={1.85}
+                      className="shrink-0 text-ink-muted"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium leading-4">{model.label}</div>
+                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                        {modelProviderLabel(model.id)}
+                      </div>
+                    </div>
+                    <ModelRatingMeters
+                      capability={model.ratings.capability}
+                      speed={model.ratings.speed}
+                      cost={model.ratings.cost}
+                      className="shrink-0"
+                    />
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function findGoatModel(id: string) {
+  return GOAT_MODELS.find((model) => model.id === id);
+}
+
+function GoatModelProviderIcon({
+  modelId,
+  size,
+  strokeWidth,
+  className,
+}: {
+  modelId: string;
+  size: number;
+  strokeWidth: number;
+  className?: string;
+}) {
+  const provider = modelId.split("/")[0] ?? "";
+  if (provider === "anthropic") {
+    return <AnthropicIcon size={size} strokeWidth={strokeWidth} className={className} />;
+  }
+  if (provider === "moonshotai") {
+    return <MoonshotIcon size={size} strokeWidth={strokeWidth} className={className} />;
+  }
+  if (provider === "openai") {
+    return <OpenAIIcon size={size} strokeWidth={strokeWidth} className={className} />;
+  }
+  return <Sparkles size={size} strokeWidth={strokeWidth} className={className} />;
+}
+
+function modelProviderLabel(id: string) {
+  const provider = id.split("/")[0] ?? "";
+  if (provider === "anthropic") return "Anthropic";
+  if (provider === "moonshotai") return "Moonshot";
+  if (provider === "openai") return "OpenAI";
+  return provider;
+}
+
+function ModelRatingMeters({
+  capability,
+  speed,
+  cost,
+  className,
+}: {
+  capability: ModelRatingTier;
+  speed: ModelRatingTier;
+  cost: ModelRatingTier;
+  className?: string;
+}) {
+  return (
+    <div className={cn("grid grid-cols-3 gap-1 text-ink-muted", className)} aria-hidden="true">
+      <RatingDots value={capability} />
+      <RatingDots value={speed} />
+      <RatingDots value={cost} />
+    </div>
+  );
+}
+
+function RatingDots({ value }: { value: ModelRatingTier }) {
+  return (
+    <span className="flex items-center gap-0.5">
+      {[1, 2, 3].map((dot) => (
+        <span
+          key={dot}
+          className={cn(
+            "h-1 w-1 rounded-full",
+            dot <= value ? "bg-ink-muted" : "bg-surface-active",
+          )}
+        />
+      ))}
+    </span>
+  );
 }
 
 function SubmitButton({

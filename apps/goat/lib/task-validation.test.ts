@@ -4,10 +4,10 @@ import { GOAT_TASK_PROMPT_MAX_LENGTH, validateGoatTaskInput } from "@/lib/task-v
 
 describe("validateGoatTaskInput", () => {
   it("trims prompts and accepts supported models", () => {
-    expect(validateGoatTaskInput({ prompt: "  research this  ", model: "openai/gpt-5.4" })).toEqual(
+    expect(validateGoatTaskInput({ prompt: "  research this  ", model: "openai/gpt-5.5" })).toEqual(
       {
         ok: true,
-        value: { prompt: "research this", model: "openai/gpt-5.4" },
+        value: { prompt: "research this", model: "openai/gpt-5.5" },
       },
     );
   });
