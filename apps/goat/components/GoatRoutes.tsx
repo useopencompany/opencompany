@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
+import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSurface } from "@/components/GoatSurface";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
@@ -172,6 +173,11 @@ export function GoatBrainRoute({ path }: { path: string[] }) {
   const routeBrain = path[0] ? brains.find((brain) => brain.id === path[0]) : null;
   const routeBrainId = routeBrain?.id ?? null;
   const brainPath = routeBrainId ? path.slice(1) : path;
+  // "settings" is a reserved segment directly after an explicit brain id
+  // (brain ids contain underscores, so they can never collide with folder names).
+  if (routeBrain && brainPath[0] === "settings") {
+    return <GoatBrainSettingsRoute brain={routeBrain} />;
+  }
   const requestedPath = brainPath.join("/");
   const requestedFolderExists = brain.folders.some((folder) => folder.path === requestedPath);
   const initialBrainId =
@@ -191,6 +197,27 @@ export function GoatBrainRoute({ path }: { path: string[] }) {
       initialBrainId={initialBrainId}
       routeBrainId={routeBrainId}
     />
+  );
+}
+
+function GoatBrainSettingsRoute({ brain }: { brain: GoatBrainSummaryView }) {
+  const { workspace } = useGoatAppData();
+
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[560px] flex-col gap-6 pb-24 pt-16 sm:pt-24">
+          <BackLink href={`/brain/${encodeURIComponent(brain.id)}`} label={brain.name} />
+          {workspace.role === "admin" ? (
+            <GoatBrainSettings brain={brain} workspace={workspace} />
+          ) : (
+            <p className="text-[13px] leading-5 text-ink-subtle">
+              Only workspace admins can manage brain settings.
+            </p>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
 
