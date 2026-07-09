@@ -109,6 +109,25 @@ describe("goat brain file sync", () => {
     expect(projection.content).not.toContain("id: nested-note");
   });
 
+  it("projects compiled truth without a duplicate leading title heading", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "# Acme\n\nAcme evaluates Goat Brain.",
+    });
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "companies/acme.md",
+      content,
+    });
+
+    expect(projection.body).toBe("Acme evaluates Goat Brain.");
+    expect(parseGoatBrainDocument(projection.content).compiledTruth).toBe(projection.body);
+  });
+
   it("recovers sidecar-backed markdown when only the payload hash is stale", async () => {
     await writeSidecarBackedPayload({
       relativePath: "companies/acme.md",

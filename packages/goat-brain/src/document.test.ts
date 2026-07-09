@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeGoatBrainBody,
+  normalizeGoatBrainCompiledTruth,
   parseGoatBrainDocument,
   replaceGoatBrainCompiledTruth,
   serializeGoatBrainDocument,
@@ -133,6 +134,21 @@ Original timeline body.
     });
 
     expect(normalizeGoatBrainBody(nested)).toBe("Only this truth belongs in the editable body.");
+  });
+
+  it("removes a leading duplicate title heading from compiled truth", () => {
+    expect(
+      normalizeGoatBrainCompiledTruth(
+        "# Acme\n\nAcme evaluates Goat Brain.\n\n## Notes\nKeep this section.",
+        "Acme",
+      ),
+    ).toBe("Acme evaluates Goat Brain.\n\n## Notes\nKeep this section.");
+    expect(
+      normalizeGoatBrainCompiledTruth("## **Acme**\n\nAcme evaluates Goat Brain.", "Acme"),
+    ).toBe("Acme evaluates Goat Brain.");
+    expect(normalizeGoatBrainCompiledTruth("# Acme overview\n\nBody.", "Acme")).toBe(
+      "# Acme overview\n\nBody.",
+    );
   });
 
   it("preserves ordinary markdown that starts with a frontmatter-like fence", () => {

@@ -285,6 +285,49 @@ describe("goat-brain cli", () => {
     });
   });
 
+  it("does not store the document title as the first compiled-truth heading", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "company",
+        "--id",
+        "acme",
+        "--title",
+        "Acme",
+        "--truth",
+        "# Acme\n\nAcme evaluates Goat Brain.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(run(["get", "--root", root, "acme", "--section", "truth"])).resolves.toMatchObject(
+      {
+        exitCode: 0,
+        stdout: "Acme evaluates Goat Brain.\n",
+      },
+    );
+
+    await expect(
+      run([
+        "rewrite",
+        "--root",
+        root,
+        "acme",
+        "--truth",
+        "## Acme\n\nAcme is evaluating a second workflow.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(run(["get", "--root", root, "acme", "--section", "truth"])).resolves.toMatchObject(
+      {
+        exitCode: 0,
+        stdout: "Acme is evaluating a second workflow.\n",
+      },
+    );
+  });
+
   it("lists brain docs without retrieval", async () => {
     await expect(
       run([
