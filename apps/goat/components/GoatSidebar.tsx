@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { Brain, House, PanelLeft, Settings } from "lucide-react";
+import { House, PanelLeft, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
@@ -81,7 +81,6 @@ export function GoatSidebar({
         {/* Primary nav */}
         <nav aria-label="Goat primary" className="flex flex-col gap-px px-2 pt-2">
           <SidebarNavRow href="/" icon={House} label="Home" active={homeActive} />
-          <SidebarNavRow href="/brain" icon={Brain} label="Brain" active={brainActive} />
         </nav>
 
         {/* Brains */}

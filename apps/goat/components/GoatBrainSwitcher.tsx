@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { Brain, Lock, Plus, Settings2 } from "lucide-react";
+import { Brain, Lock, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
@@ -18,21 +18,24 @@ import {
 } from "@/lib/workspace-actions";
 
 export function GoatBrainSwitcher() {
-  const { workspace, brains, activeBrain } = useGoatAppData();
+  const { brains, activeBrain } = useGoatAppData();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
-  const [accessBrain, setAccessBrain] = useState<GoatBrainSummaryView | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const switchBrain = (brainId: string) => {
-    if (brainId === activeBrain?.id) return;
+    const href = goatBrainHref(brainId);
+    if (brainId === activeBrain?.id) {
+      router.push(href);
+      return;
+    }
     startTransition(async () => {
       const result = await switchGoatBrainAction(brainId);
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      router.refresh();
+      router.push(href);
     });
   };
 
@@ -64,16 +67,6 @@ export function GoatBrainSwitcher() {
                   <Lock size={11} strokeWidth={1.75} className="shrink-0 text-ink/40" />
                 ) : null}
               </button>
-              {workspace.role === "admin" ? (
-                <button
-                  type="button"
-                  aria-label={`Manage access to ${brain.name}`}
-                  onClick={() => setAccessBrain(brain)}
-                  className="rounded-md p-1.5 text-ink/0 transition-colors hover:bg-surface-hover hover:text-ink/80 group-hover/brain:text-ink/50"
-                >
-                  <Settings2 size={13} strokeWidth={1.75} />
-                </button>
-              ) : null}
             </div>
           );
         })}
@@ -92,13 +85,6 @@ export function GoatBrainSwitcher() {
         </button>
       </div>
       {creating ? <CreateBrainDialog onClose={() => setCreating(false)} /> : null}
-      {accessBrain ? (
-        <BrainAccessDialog
-          brain={accessBrain}
-          workspace={workspace}
-          onClose={() => setAccessBrain(null)}
-        />
-      ) : null}
     </>
   );
 }
@@ -121,7 +107,8 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
         return;
       }
       onClose();
-      router.refresh();
+      if (result.brainId) router.push(goatBrainHref(result.brainId));
+      else router.refresh();
     });
   };
 
@@ -178,7 +165,7 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function BrainAccessDialog({
+export function BrainAccessDialog({
   brain,
   workspace,
   onClose,
@@ -292,6 +279,10 @@ function BrainAccessDialog({
       </div>
     </DialogFrame>
   );
+}
+
+function goatBrainHref(brainId: string) {
+  return `/brain/${encodeURIComponent(brainId)}`;
 }
 
 function VisibilityOption({
