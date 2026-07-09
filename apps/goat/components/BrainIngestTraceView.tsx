@@ -24,11 +24,13 @@ import { Markdown } from "@/components/Markdown";
 
 export function BrainIngestTraceDialog({
   trace,
+  traceId,
   sourceTitle,
   open,
   onOpenChange,
 }: {
   trace: GoatBrainIngestTrace | null;
+  traceId: string;
   sourceTitle: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,7 +48,7 @@ export function BrainIngestTraceDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto px-5 py-4">
-          <BrainIngestTraceView trace={trace} sourceTitle={sourceTitle} />
+          <BrainIngestTraceView trace={trace} traceId={traceId} sourceTitle={sourceTitle} />
         </div>
       </DialogContent>
     </Dialog>
@@ -55,14 +57,17 @@ export function BrainIngestTraceDialog({
 
 export function BrainIngestTraceView({
   trace,
+  traceId,
   sourceTitle,
 }: {
   trace: GoatBrainIngestTrace;
+  traceId: string;
   sourceTitle: string;
 }) {
   return (
     <div className="flex flex-col gap-5">
       <SourceContextBubble sourceTitle={sourceTitle} />
+      <TraceIdBlock traceId={traceId} />
 
       {trace.toolCalls.length > 0 ? (
         <div className="space-y-1.5">
@@ -88,6 +93,19 @@ export function BrainIngestTraceView({
       ) : null}
 
       <RawJsonDisclosure trace={trace} />
+    </div>
+  );
+}
+
+function TraceIdBlock({ traceId }: { traceId: string }) {
+  if (!traceId) return null;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px] leading-4 text-ink-subtle">
+      <span className="font-medium uppercase tracking-[0.06em]">Trace ID</span>
+      <code className="max-w-full break-all rounded bg-ink/5 px-1.5 py-0.5 font-mono text-[10.5px] text-ink-muted">
+        {traceId}
+      </code>
     </div>
   );
 }

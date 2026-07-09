@@ -112,6 +112,22 @@ describe("GoatBrainActivity", () => {
     expect(screen.getByText("+2 more")).toBeInTheDocument();
   });
 
+  it("shows the trace id while an ingest job is running", () => {
+    queryRows.jobs = [
+      job({
+        status: "running",
+        updated_at: "2026-07-09T10:00:30.000Z",
+      }),
+    ];
+    queryRows.items = [item()];
+
+    render(<GoatBrainActivity brainRef="goat_brain_1" />);
+
+    expect(screen.getByText("Filing into brain…")).toBeInTheDocument();
+    expect(screen.getAllByText("Trace ID")).toHaveLength(2);
+    expect(screen.getAllByText("gbjob_1")).toHaveLength(2);
+  });
+
   it("opens a completed agent trace with collapsed details and raw JSON", async () => {
     const user = userEvent.setup();
     queryRows.jobs = [
@@ -133,6 +149,8 @@ describe("GoatBrainActivity", () => {
     expect(screen.getByText("Agent run trace")).toBeInTheDocument();
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Pricing teardown reference")).toBeInTheDocument();
+    expect(within(dialog).getByText("Trace ID")).toBeInTheDocument();
+    expect(within(dialog).getByText("gbjob_1")).toBeInTheDocument();
     const toolRow = screen.getByTestId("brain-ingest-trace-tool-goat_brain_call_1");
     expect(within(toolRow).queryByText("Stdout")).not.toBeInTheDocument();
     expect(screen.queryByText(/"schemaVersion"/)).not.toBeInTheDocument();

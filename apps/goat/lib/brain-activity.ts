@@ -17,6 +17,7 @@ export type GoatBrainActivityPage = {
 
 export type GoatBrainActivityEvent = {
   id: string;
+  traceId: string;
   kind: GoatBrainActivityKind;
   at: string;
   title: string;
@@ -59,6 +60,7 @@ export function buildGoatBrainActivityEvents(
 
     events.push({
       id: `${job.id}:captured`,
+      traceId: job.id,
       kind: "captured",
       at: item?.created_at ?? job.created_at,
       title: capturedTitle(provider),
@@ -72,6 +74,7 @@ export function buildGoatBrainActivityEvents(
     if (job.status === "running") {
       events.push({
         id: `${job.id}:filing`,
+        traceId: job.id,
         kind: "filing",
         at: job.updated_at,
         title: "Filing into brain…",
@@ -85,6 +88,7 @@ export function buildGoatBrainActivityEvents(
       const skipped = jobResultSkipped(job);
       events.push({
         id: `${job.id}:filed`,
+        traceId: job.id,
         kind: "filed",
         at: job.completed_at ?? job.updated_at,
         title: skipped ? "Skipped filing" : "Filed into brain",
@@ -97,6 +101,7 @@ export function buildGoatBrainActivityEvents(
     } else if (job.status === "failed") {
       events.push({
         id: `${job.id}:failed`,
+        traceId: job.id,
         kind: "failed",
         at: job.completed_at ?? job.updated_at,
         title: `Filing failed after ${job.attempts} ${job.attempts === 1 ? "attempt" : "attempts"}`,
@@ -109,6 +114,7 @@ export function buildGoatBrainActivityEvents(
     } else if (job.status === "queued" && job.attempts > 0) {
       events.push({
         id: `${job.id}:retrying`,
+        traceId: job.id,
         kind: "retrying",
         at: job.updated_at,
         title: "Filing failed — will retry",

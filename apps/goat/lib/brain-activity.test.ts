@@ -58,6 +58,7 @@ describe("buildGoatBrainActivityEvents", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
+      traceId: "gbjob_1",
       kind: "captured",
       title: "Captured to inbox",
       sourceTitle: "Pricing teardown reference",
@@ -73,7 +74,7 @@ describe("buildGoatBrainActivityEvents", () => {
 
     expect(events.map((event) => event.kind)).toEqual(["filing", "captured"]);
     expect(events[1]).toMatchObject({ title: "Meeting received", sourceTitle: "Roadmap review" });
-    expect(events[0]).toMatchObject({ title: "Filing into brain…" });
+    expect(events[0]).toMatchObject({ traceId: "gbjob_1", title: "Filing into brain…" });
   });
 
   it("summarizes a succeeded job with the result's first line and brain id", () => {
