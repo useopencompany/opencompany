@@ -18,24 +18,22 @@ returns `evidence` iff the folder is `evidence` or starts with `evidence/`
 (`GOAT_BRAIN_EVIDENCE_ZONE = "evidence"`). The database enforces the same invariant with a check
 constraint on `goat.brain_documents`.
 
-## Entity types (the 10-type contract)
+## Entity types (the 8-type contract)
 
 `GOAT_BRAIN_ENTITY_TYPES` — a **closed set**. Types are tags for what a document *is*; folders are
 free-form navigation for where it *lives*. Don't add a type without updating schema.ts, the DB
-check constraint, and this page.
+check constraint, and this page. Retired v1 names still parse through legacy aliases:
+`media` and `email` normalize to `source`, and `writing` normalizes to `analysis`.
 
 | Type | Typical use | Suggested default folder |
 | --- | --- | --- |
 | `person` | A human — colleague, contact, participant | `people/` |
 | `company` | An organization | `companies/` |
-| `media` | Video, podcast, article, image reference | `media/` |
 | `analysis` | Research output, synthesis, report | `analysis/` |
 | `concept` | Idea, framework, definition | `concepts/` |
-| `email` | Email summary or snapshot | `emails/` (snapshot: `evidence/`) |
-| `writing` | The user's own writing | `writing/` |
 | `note` | Unstructured note, quick capture | `inbox/` |
 | `project` | An initiative with a lifecycle | `projects/` |
-| `source` | A generic external source record | `sources/` (snapshot: `evidence/`) |
+| `source` | External artifact/reference: article, video, email thread, repo, document, source record | `sources/` (snapshot: `evidence/`) |
 
 Validation: `isValidGoatBrainEntityType` (set membership).
 Normalization: `normalizeGoatBrainEntityType` (lowercase, `[^a-z0-9]` → `_`, max 64 chars).
@@ -55,13 +53,13 @@ the closed set above is what validators actually accept.
 
 ## Default folders
 
-`DEFAULT_GOAT_BRAIN_FOLDERS` — the 12 system folders seeded per brain (rows in
+`DEFAULT_GOAT_BRAIN_FOLDERS` — the 9 system folders seeded per brain (rows in
 `goat.brain_folders` with `source: "system"`); users and agents can create free-form custom
 folders beyond these:
 
 ```
 inbox/  people/  companies/  projects/  meetings/  concepts/
-media/  writing/  analysis/  emails/  sources/  evidence/
+analysis/  sources/  evidence/
 ```
 
 Folder paths match `GOAT_BRAIN_FOLDER_PATTERN`: lowercase `a-z0-9-` segments separated by `/`,
