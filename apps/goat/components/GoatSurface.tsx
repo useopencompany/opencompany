@@ -59,6 +59,7 @@ import {
 } from "react";
 import { Markdown } from "@/components/Markdown";
 import { useHydrated } from "@/components/useHydrated";
+import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
@@ -80,6 +81,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
+import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
 import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
 import {
@@ -195,6 +197,9 @@ export function GoatSurface({
   const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [optimisticallyArchivedChatIds, setOptimisticallyArchivedChatIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
   const [, startArchiveTransition] = useTransition();
 
@@ -441,6 +446,24 @@ export function GoatSurface({
         return next;
       });
       toast.error(result.error ?? "Could not archive task.");
+    });
+  };
+
+  const archiveChat = (chat: GoatChatSummaryView) => {
+    setOptimisticallyArchivedChatIds((current) => new Set(current).add(chat.id));
+    startArchiveTransition(async () => {
+      const result = await closeGoatChatSessionAction(chat.id);
+      if (result.ok) {
+        router.refresh();
+        return;
+      }
+
+      setOptimisticallyArchivedChatIds((current) => {
+        const next = new Set(current);
+        next.delete(chat.id);
+        return next;
+      });
+      toast.error(result.error ?? "Could not archive chat.");
     });
   };
 
@@ -714,18 +737,17 @@ export function GoatSurface({
 
       {mode === "home" ? (
         <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-          <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-24">
-            <header>
-              <h1 className="text-[42px] font-semibold leading-none tracking-normal text-ink">
-                Goat
-              </h1>
-            </header>
-
+          <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
             <section className="flex flex-col gap-1">
               <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
                 Chats
               </h2>
-              <ChatHistoryList chats={recentChats} onSelect={openChat} />
+              <ChatHistoryList
+                chats={recentChats}
+                optimisticallyArchivedChatIds={optimisticallyArchivedChatIds}
+                onSelect={openChat}
+                onArchive={archiveChat}
+              />
             </section>
 
             <section className="flex flex-col gap-1">
@@ -1133,50 +1155,71 @@ function LiveChatTaskSubscriber({
 
 function ChatHistoryList({
   chats,
+  optimisticallyArchivedChatIds,
   onSelect,
+  onArchive,
 }: {
   chats: readonly GoatChatSummaryView[];
+  optimisticallyArchivedChatIds: ReadonlySet<string>;
   onSelect: (chat: GoatChatSummaryView) => void;
+  onArchive: (chat: GoatChatSummaryView) => void;
 }) {
   const router = useRouter();
+  const visibleChats = chats
+    .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
+    .filter((chat) => isRecentGoatHomeActivity(chat.updatedAt))
+    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
-  if (chats.length === 0) {
+  if (visibleChats.length === 0) {
     return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No chats yet.</p>;
   }
 
   return (
     <div className="flex flex-col">
-      {chats.map((chat) => {
+      {visibleChats.map((chat) => {
         const href = `/?chat=${encodeURIComponent(chat.id)}`;
         const prefetchChat = () => router.prefetch(href);
         return (
-          <Link
+          <div
             key={chat.id}
-            href={href}
-            prefetch
-            onMouseEnter={prefetchChat}
-            onFocus={prefetchChat}
-            onTouchStart={prefetchChat}
-            onClick={() => onSelect(chat)}
-            className="group/chat flex min-h-11 items-center gap-3 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            className="group/chat relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover"
           >
-            <Clock
-              size={15}
-              strokeWidth={2}
-              className="shrink-0 text-ink-subtle group-hover/chat:text-ink-muted"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-baseline gap-2">
-                <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                  {chat.title}
-                </span>
-                <span className="shrink-0 text-[12px] leading-tight text-ink-subtle">
-                  {formatRelativeTime(chat.updatedAt)}
-                </span>
+            <Link
+              href={href}
+              prefetch
+              onMouseEnter={prefetchChat}
+              onFocus={prefetchChat}
+              onTouchStart={prefetchChat}
+              onClick={() => onSelect(chat)}
+              className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <Clock
+                size={15}
+                strokeWidth={2}
+                className="shrink-0 text-ink-subtle group-hover/chat:text-ink-muted"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate text-[14px] font-medium leading-tight text-ink">
+                    {chat.title}
+                  </span>
+                  <span className="shrink-0 text-[12px] leading-tight text-ink-subtle transition-opacity duration-150 group-hover/chat:opacity-0 group-focus-within/chat:opacity-0">
+                    {formatRelativeTime(chat.updatedAt)}
+                  </span>
+                </div>
+                <p className="truncate text-[12.5px] leading-4 text-ink-subtle">{chat.preview}</p>
               </div>
-              <p className="truncate text-[12.5px] leading-4 text-ink-subtle">{chat.preview}</p>
-            </div>
-          </Link>
+            </Link>
+            <button
+              type="button"
+              aria-label={`Archive ${chat.title}`}
+              title="Archive"
+              onClick={() => onArchive(chat)}
+              className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/chat:opacity-100 group-focus-within/chat:opacity-100"
+            >
+              <Archive size={14} strokeWidth={2} />
+            </button>
+          </div>
         );
       })}
     </div>
@@ -1497,7 +1540,12 @@ function ResultRows({
   onArchive: (task: GoatTaskView) => void;
 }) {
   const sortedTasks = tasks
-    .filter((task) => !optimisticallyArchivedIds.has(task.id) && !task.archivedAt)
+    .filter(
+      (task) =>
+        !optimisticallyArchivedIds.has(task.id) &&
+        !task.archivedAt &&
+        isRecentGoatHomeActivity(task.createdAt),
+    )
     .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   if (sortedTasks.length === 0) {

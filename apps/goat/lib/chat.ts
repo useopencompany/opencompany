@@ -10,7 +10,7 @@ import {
   goatChatSessions,
   goatTasks,
 } from "@opencompany/db/goat-schema";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   type GoatChatSessionView,
@@ -18,6 +18,7 @@ import {
   type GoatStoredChatMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
+import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { toGoatTaskTitle } from "@/lib/task-display";
 
 const GOAT_RECENT_CHAT_LIMIT = 8;
@@ -42,7 +43,11 @@ export type GoatChatStore = {
     userWorkosId: string;
     sessionId?: string | null;
   }): Promise<GoatChatSession | null>;
-  listOpenSessions(input: { userWorkosId: string; limit: number }): Promise<GoatChatSession[]>;
+  listOpenSessions(input: {
+    userWorkosId: string;
+    limit: number;
+    updatedAfter?: Date;
+  }): Promise<GoatChatSession[]>;
   createSession(input: {
     userWorkosId: string;
     model: AgentModelId;
@@ -114,7 +119,11 @@ export async function listRecentGoatChatsForUser(
     1,
     Math.min(input.limit ?? GOAT_RECENT_CHAT_LIMIT, GOAT_RECENT_CHAT_LIMIT),
   );
-  const sessions = await store.listOpenSessions({ userWorkosId: input.userWorkosId, limit });
+  const sessions = await store.listOpenSessions({
+    userWorkosId: input.userWorkosId,
+    limit,
+    updatedAfter: goatHomeActivityCutoff(),
+  });
   const summaries = await Promise.all(
     sessions.map(async (session) => {
       const messages = await store.listMessages(session.id);
@@ -226,6 +235,7 @@ export function createDbGoatChatStore(): GoatChatStore {
           and(
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
             isNull(goatChatSessions.closedAt),
+            ...(input.updatedAfter ? [gte(goatChatSessions.updatedAt, input.updatedAfter)] : []),
           ),
         )
         .orderBy(desc(goatChatSessions.updatedAt))

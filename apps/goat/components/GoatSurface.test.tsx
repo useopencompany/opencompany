@@ -427,7 +427,7 @@ describe("GoatSurface chat streaming UI", () => {
             title: "Market research",
             model: DEFAULT_GOAT_MODEL,
             preview: "Compare the latest pricing.",
-            updatedAt: "2026-07-02T17:44:00.000Z",
+            updatedAt: currentTimestamp(),
           },
         ]}
       />,
@@ -454,8 +454,8 @@ describe("GoatSurface chat streaming UI", () => {
             result: "Done",
             error: null,
             archivedAt: null,
-            createdAt: "2026-07-02T17:44:00.000Z",
-            updatedAt: "2026-07-02T17:45:00.000Z",
+            createdAt: currentTimestamp(),
+            updatedAt: currentTimestamp(),
           },
         ]}
         defaultModel={DEFAULT_GOAT_MODEL}
@@ -466,7 +466,7 @@ describe("GoatSurface chat streaming UI", () => {
             title: "Market research",
             model: DEFAULT_GOAT_MODEL,
             preview: "Compare the latest pricing.",
-            updatedAt: "2026-07-02T17:44:00.000Z",
+            updatedAt: currentTimestamp(),
           },
         ]}
       />,
@@ -477,6 +477,83 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(routerMock.prefetch).toHaveBeenCalledWith("/?chat=chat_1");
     expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK-1");
+  });
+
+  it("hides home chats and results older than one day", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
+    try {
+      render(
+        <GoatSurface
+          tasks={[
+            taskView({
+              id: "recent_task",
+              displayId: "TASK-1",
+              name: "Recent result",
+              createdAt: "2026-07-04T10:00:00.000Z",
+              updatedAt: "2026-07-04T10:00:00.000Z",
+            }),
+            taskView({
+              id: "old_task",
+              displayId: "TASK-2",
+              name: "Old result",
+              createdAt: "2026-07-02T10:00:00.000Z",
+              updatedAt: "2026-07-02T10:00:00.000Z",
+            }),
+          ]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          recentChats={[
+            {
+              id: "recent_chat",
+              title: "Recent chat",
+              model: DEFAULT_GOAT_MODEL,
+              preview: "Visible",
+              updatedAt: "2026-07-04T10:00:00.000Z",
+            },
+            {
+              id: "old_chat",
+              title: "Old chat",
+              model: DEFAULT_GOAT_MODEL,
+              preview: "Hidden",
+              updatedAt: "2026-07-02T10:00:00.000Z",
+            },
+          ]}
+        />,
+      );
+
+      expect(screen.getByText("Recent chat")).toBeInTheDocument();
+      expect(screen.queryByText("Old chat")).not.toBeInTheDocument();
+      expect(screen.getByText("Recent result")).toBeInTheDocument();
+      expect(screen.queryByText("Old result")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("archives a chat from the home list", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Market research",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Compare the latest pricing.",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Archive Market research" }));
+
+    expect(closeGoatChatSessionAction).toHaveBeenCalledWith("chat_1");
+    expect(screen.queryByText("Market research")).not.toBeInTheDocument();
   });
 
   it("opens the new chat command with Cmd+K and starts a background chat", async () => {
@@ -1278,6 +1355,7 @@ describe("GoatSurface chat streaming UI", () => {
 });
 
 function taskView(overrides: Partial<GoatTaskView> = {}): GoatTaskView {
+  const now = currentTimestamp();
   return {
     id: "goat_task_1",
     displayId: "TASK-1",
@@ -1289,10 +1367,14 @@ function taskView(overrides: Partial<GoatTaskView> = {}): GoatTaskView {
     result: "Done.",
     error: null,
     archivedAt: null,
-    createdAt: "2026-07-02T17:44:00.000Z",
-    updatedAt: "2026-07-02T17:44:00.000Z",
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
+}
+
+function currentTimestamp() {
+  return new Date().toISOString();
 }
 
 async function nextAnimationFrame() {
