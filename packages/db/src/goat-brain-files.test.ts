@@ -1,7 +1,12 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { appendGoatBrainAssetTextBlock, parseGoatBrainDocument } from "@opencompany/goat-brain";
+import {
+  appendGoatBrainAssetTextBlock,
+  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+  parseGoatBrainDocument,
+  parseGoatBrainFolderManifest,
+} from "@opencompany/goat-brain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createGoatBrainMarkdownContent,
@@ -312,6 +317,59 @@ describe("goat brain file sync", () => {
       { path: "competitors/rivalco-competitor.md", content },
     ]);
   });
+
+  it("materializes persistent folder rows into the folder manifest", async () => {
+    const db = queuedSelectDb([
+      [],
+      [
+        folderRow({ path: "research", source: "custom" }),
+        folderRow({ path: "people", source: "system" }),
+      ],
+    ]);
+
+    await materializeGoatBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
+
+    const folders = parseGoatBrainFolderManifest(
+      await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8"),
+    );
+    expect(folders).toEqual(
+      expect.arrayContaining([
+        { path: "inbox", source: "system" },
+        { path: "research", source: "custom" },
+        { path: "people", source: "system" },
+        { path: "companies", source: "system" },
+        { path: "evidence", source: "system" },
+      ]),
+    );
+    expect(folders.map((folder) => folder.path)).not.toContain("analysis");
+  });
+
+  it("syncs folder manifest rows and normalizes adjustable sources", async () => {
+    const db = folderSyncDb();
+
+    await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      files: [],
+      baseSnapshot: [],
+      folders: [
+        { path: "research", source: "system" },
+        { path: "partners", source: "custom" },
+      ],
+      db: db as never,
+    });
+
+    expect(db.insertedFolders()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "inbox", source: "system" }),
+        expect.objectContaining({ path: "research", source: "custom" }),
+        expect.objectContaining({ path: "partners", source: "custom" }),
+        expect.objectContaining({ path: "people", source: "system" }),
+        expect.objectContaining({ path: "companies", source: "system" }),
+        expect.objectContaining({ path: "evidence", source: "system" }),
+      ]),
+    );
+  });
 });
 
 async function writeSidecarBackedPayload(input: {
@@ -390,6 +448,67 @@ function materializeSelectDb(rows: unknown[]) {
       }),
     }),
   } as never;
+}
+
+function queuedSelectDb(results: unknown[][]) {
+  const queue = [...results];
+  return {
+    select: () => {
+      const rows = queue.shift() ?? [];
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        orderBy: async () => rows,
+        then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      };
+      return chain;
+    },
+  } as never;
+}
+
+function folderSyncDb() {
+  let selectCount = 0;
+  const insertedFolders: Record<string, unknown>[] = [];
+  return {
+    select: () => {
+      selectCount += 1;
+      const rows = selectCount === 1 ? [] : insertedFolders;
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      };
+      return chain;
+    },
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        insertedFolders.push(values);
+        return {
+          onConflictDoUpdate: async () => undefined,
+          onConflictDoNothing: async () => undefined,
+        };
+      },
+    }),
+    delete: () => ({
+      where: async () => undefined,
+    }),
+    insertedFolders: () => insertedFolders,
+  };
+}
+
+function folderRow(input: { path: string; source: "system" | "custom" }) {
+  const now = new Date("2026-01-01T00:00:00.000Z");
+  return {
+    id: `folder_${input.path}`,
+    userWorkosId: "user_1",
+    brainRef: "goat_brain_user_1",
+    path: input.path,
+    source: input.source,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 describe("goat brain asset projections", () => {

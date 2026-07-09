@@ -15,6 +15,10 @@
       "types": "./src/document.ts",
       "default": "./src/document.ts"
     },
+    "./folders": {
+      "types": "./src/folders.ts",
+      "default": "./src/folders.ts"
+    },
     "./cli-bundle": {
       "types": "./src/generated/cli-bundle.ts",
       "default": "./src/generated/cli-bundle.ts"

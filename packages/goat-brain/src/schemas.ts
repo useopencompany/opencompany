@@ -39,8 +39,8 @@ const DEFAULT_FOLDER_BY_ENTITY_TYPE: Record<GoatBrainEntityType, string> = {
   project: "projects",
   meeting: "meetings",
   concept: "concepts",
-  source: "sources",
-  analysis: "analysis",
+  source: "research",
+  analysis: "research",
   note: "inbox",
 };
 

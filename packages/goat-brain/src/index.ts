@@ -1,6 +1,7 @@
 export * from "./document";
 export * from "./edges";
 export * from "./entry";
+export * from "./folders";
 export * from "./frontmatter";
 export * from "./health";
 export * from "./ingest";

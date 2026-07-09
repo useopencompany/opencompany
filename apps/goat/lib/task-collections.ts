@@ -1,4 +1,5 @@
 import type {
+  GoatBrainFolderSource,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
   GoatTaskEventType,
@@ -72,6 +73,16 @@ export type GoatChatSessionRow = {
   title: string;
   model: string;
   closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatBrainFolderRow = {
+  id: string;
+  user_workos_id: string;
+  brain_ref: string;
+  path: string;
+  source: GoatBrainFolderSource;
   created_at: string;
   updated_at: string;
 };
@@ -326,6 +337,12 @@ function createTaskRunCollections(taskId: string) {
 // user before forwarding, so each brain gets its own shape subscription.
 function createBrainCollections(brainRef: string) {
   return {
+    folders: createGoatElectricCollection<GoatBrainFolderRow>({
+      id: `goat:brain_folders:${brainRef}`,
+      table: "goat.brain_folders",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
     documents: createGoatElectricCollection<GoatBrainDocumentRow>({
       id: `goat:brain_documents:${brainRef}`,
       table: "goat.brain_documents",

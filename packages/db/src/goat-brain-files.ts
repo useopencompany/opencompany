@@ -2,14 +2,17 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { and, desc, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, like, notInArray, or } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
   appendGoatBrainAssetTextBlock,
+  defaultGoatBrainFolderManifestEntries,
   deriveGoatBrainEdges,
   GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
+  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
   type GoatBrainDocumentFormat,
   type GoatBrainEntityType,
+  type GoatBrainFolderManifestEntry,
   type GoatBrainKind,
   type GoatBrainRelation,
   type GoatBrainSource,
@@ -17,24 +20,30 @@ import {
   type GoatBrainTimelineEntry,
   goatBrainEntryFromLegacyMarkdown,
   goatBrainFolderFromRelativePath,
+  goatBrainFolderSourceForPath,
   goatBrainIdFromRelativePath,
   goatBrainKindForFolder,
   goatBrainRelativePath,
   goatBrainSidecarRelativePath,
   isBuiltInGoatBrainEntityType,
+  isHardDefaultGoatBrainFolder,
   isSafeGoatBrainRelativePath,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainKind,
   isValidGoatBrainStatus,
   normalizeGoatBrainCompiledTruth,
+  normalizeGoatBrainFolder,
+  normalizeGoatBrainFolderEntries,
   normalizeGoatBrainFolderForV1,
   type GoatBrainDocument as ParsedGoatBrainDocument,
   parseGoatBrainDocument,
+  parseGoatBrainFolderManifest,
   parseGoatBrainSidecar,
   recoverLegacyGoatBrainEntryFromSidecar,
   replaceGoatBrainCompiledTruth,
   serializeGoatBrainDocument,
+  serializeGoatBrainFolderManifest,
   serializeLegacyGoatBrainEntry,
   stripGoatBrainAssetTextBlock,
   validateGoatBrainDocument,
@@ -43,6 +52,7 @@ import {
 import { getDb } from "./client";
 import {
   type GoatBrainDocument,
+  type GoatBrainFolder,
   goatBrainDocuments,
   goatBrainDocumentVersions,
   goatBrainEdges,
@@ -123,6 +133,7 @@ type DbLike = any;
 // there; pooled callers (`./pool`, the runner) keep a real transaction.
 function runAtomically<T>(db: DbClient, fn: (tx: DbLike) => Promise<T>): Promise<T> {
   if (db instanceof NeonHttpDatabase) return fn(db);
+  if (typeof db.transaction !== "function") return fn(db);
   return db.transaction(fn);
 }
 
@@ -327,6 +338,164 @@ export async function listGoatBrainFiles(
     .from(goatBrainDocuments)
     .where(eq(goatBrainDocuments.brainRef, input.brainRef))
     .orderBy(desc(goatBrainDocuments.updatedAt));
+}
+
+export async function listGoatBrainFolderRows(
+  input: { brainRef: string },
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainFolder[]> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .select()
+    .from(goatBrainFolders)
+    .where(eq(goatBrainFolders.brainRef, input.brainRef));
+  return normalizeStoredFolderRows(Array.isArray(rows) ? rows : []).toSorted((a, b) =>
+    a.path.localeCompare(b.path),
+  );
+}
+
+export async function seedDefaultGoatBrainFolders(
+  input: GoatBrainScope,
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  await upsertFolderRows(db, input, defaultGoatBrainFolderManifestEntries());
+}
+
+export async function createGoatBrainFolderRow(
+  input: GoatBrainScope & { path: string },
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainFolder> {
+  const db = options.db ?? getDb();
+  const folderPath = normalizeGoatBrainFolderForV1(input.path);
+  if (!isValidGoatBrainFolder(folderPath)) throw new Error("Folder path must be safe.");
+  if (isHardDefaultGoatBrainFolder(folderPath)) {
+    throw new Error(`Folder "${folderPath}" is required and already exists.`);
+  }
+  const rows = await db
+    .insert(goatBrainFolders)
+    .values(folderRowValues(input, folderPath, goatBrainFolderSourceForPath(folderPath)))
+    .onConflictDoUpdate({
+      target: [goatBrainFolders.brainRef, goatBrainFolders.path],
+      set: {
+        userWorkosId: input.userWorkosId,
+        source: goatBrainFolderSourceForPath(folderPath),
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("Failed to create Goat Brain folder.");
+  return row;
+}
+
+export async function deleteGoatBrainFolderRow(
+  input: GoatBrainScope & { path: string },
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  const folderPath = normalizeGoatBrainFolderForV1(input.path);
+  if (!isValidGoatBrainFolder(folderPath)) throw new Error("Folder path must be safe.");
+  if (isHardDefaultGoatBrainFolder(folderPath)) {
+    throw new Error(`Folder "${folderPath}" is required and cannot be removed.`);
+  }
+  const [docs, childFolders] = await Promise.all([
+    documentsUnderFolder(db, input.brainRef, folderPath),
+    foldersUnderFolder(db, input.brainRef, folderPath, { includeSelf: false }),
+  ]);
+  if (docs.length > 0 || childFolders.length > 0) {
+    throw new Error(`Folder "${folderPath}" is not empty.`);
+  }
+  await db
+    .delete(goatBrainFolders)
+    .where(
+      and(eq(goatBrainFolders.brainRef, input.brainRef), eq(goatBrainFolders.path, folderPath)),
+    );
+}
+
+export async function renameGoatBrainFolderRow(
+  input: GoatBrainScope & { fromPath: string; toPath: string },
+  options: { db?: DbClient } = {},
+): Promise<{ movedDocuments: number; movedFolders: number }> {
+  const db = options.db ?? getDb();
+  return runAtomically(db, async (tx: DbLike) => {
+    const fromPath = normalizeGoatBrainFolderForV1(input.fromPath);
+    const toPath = normalizeGoatBrainFolderForV1(input.toPath);
+    if (!isValidGoatBrainFolder(fromPath) || !isValidGoatBrainFolder(toPath)) {
+      throw new Error("Folder paths must be safe.");
+    }
+    if (fromPath === toPath) return { movedDocuments: 0, movedFolders: 0 };
+    if (isHardDefaultGoatBrainFolder(fromPath) || isHardDefaultGoatBrainFolder(toPath)) {
+      throw new Error("Required folders cannot be renamed.");
+    }
+    if (toPath.startsWith(`${fromPath}/`)) {
+      throw new Error("Cannot rename a folder into one of its own children.");
+    }
+    if (goatBrainKindForFolder(fromPath) !== goatBrainKindForFolder(toPath)) {
+      throw new Error("Cannot rename folders across the evidence boundary.");
+    }
+    const [targetDocs, targetFolders, sourceDocs, sourceFolders] = await Promise.all([
+      documentsUnderFolder(tx, input.brainRef, toPath),
+      foldersUnderFolder(tx, input.brainRef, toPath, { includeSelf: true }),
+      documentsUnderFolder(tx, input.brainRef, fromPath),
+      foldersUnderFolder(tx, input.brainRef, fromPath, { includeSelf: true }),
+    ]);
+    if (targetDocs.length > 0 || targetFolders.length > 0) {
+      throw new Error(`Folder "${toPath}" already exists.`);
+    }
+    if (sourceDocs.length === 0 && sourceFolders.length === 0) {
+      throw new Error(`Folder "${fromPath}" does not exist.`);
+    }
+
+    let movedDocuments = 0;
+    for (const row of sourceDocs) {
+      const nextFolder = replaceFolderPrefix(row.folderPath, fromPath, toPath);
+      const parsed = parseGoatBrainDocument(row.content);
+      const content = serializeGoatBrainDocument({
+        title: parsed.title || row.title || row.brainId,
+        compiledTruth: parsed.compiledTruth,
+        timeline: parsed.timeline,
+        frontmatter: {
+          id: row.brainId,
+          folder: nextFolder,
+          kind: row.kind,
+          type: row.entityType,
+          status: parsed.frontmatter.status ?? row.status,
+          title: parsed.frontmatter.title ?? row.title ?? row.brainId,
+          createdAt: parsed.frontmatter.createdAt ?? row.createdAt.toISOString(),
+          updatedAt: new Date().toISOString(),
+          relations: parsed.frontmatter.relations ?? [],
+          ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+          ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
+          ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
+        },
+      });
+      await moveGoatBrainFile(
+        {
+          brainRef: input.brainRef,
+          userWorkosId: input.userWorkosId,
+          fileId: row.id,
+          path: goatBrainFilePathFor(nextFolder, row.brainId),
+          content,
+        },
+        { db: tx },
+      );
+      movedDocuments += 1;
+    }
+
+    const renamedFolders = sourceFolders.map((folder) => ({
+      ...folder,
+      path: replaceFolderPrefix(folder.path, fromPath, toPath),
+      source: goatBrainFolderSourceForPath(replaceFolderPrefix(folder.path, fromPath, toPath)),
+    }));
+    await upsertFolderRows(tx, input, renamedFolders);
+    await deleteFolderRows(
+      tx,
+      input.brainRef,
+      sourceFolders.map((folder) => folder.path),
+    );
+    return { movedDocuments, movedFolders: renamedFolders.length };
+  });
 }
 
 export async function getGoatBrainFile(
@@ -655,6 +824,17 @@ export async function materializeGoatBrainFilesToRoot(input: {
       includeInvalid: true,
     },
   );
+  const folderRows = await listGoatBrainFolderRows(
+    { brainRef: input.brainRef },
+    {
+      ...(input.db ? { db: input.db } : {}),
+    },
+  );
+  await writeRootFile(
+    input.root,
+    GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+    serializeGoatBrainFolderManifest(folderRows),
+  );
   const materializedHashByPath = new Map<string, string>();
   for (const row of rows) {
     const payloadPath = goatBrainFilePathFor(row.folderPath, row.brainId);
@@ -742,6 +922,18 @@ export async function readGoatBrainFilesFromRoot(root: string): Promise<GoatBrai
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+export async function readGoatBrainFolderManifestFromRoot(
+  root: string,
+): Promise<GoatBrainFolderManifestEntry[] | null> {
+  try {
+    const source = await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8");
+    return parseGoatBrainFolderManifest(source);
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
 export async function syncGoatBrainFiles(input: {
   brainRef: string;
   userWorkosId: string;
@@ -749,6 +941,7 @@ export async function syncGoatBrainFiles(input: {
   baseSnapshot: MaterializedGoatBrainFile[];
   db?: DbClient;
   taskId?: string | null;
+  folders?: GoatBrainFolderManifestEntry[] | null;
 }): Promise<{ upserted: number; deleted: number; conflicts: GoatBrainSyncConflict[] }> {
   const db = input.db ?? getDb();
   const currentRows: GoatBrainDocument[] = await db
@@ -874,6 +1067,13 @@ export async function syncGoatBrainFiles(input: {
       { db },
     );
   }
+  if (input.folders) {
+    await syncGoatBrainFolderRows({
+      db,
+      scope: { brainRef: input.brainRef, userWorkosId: input.userWorkosId },
+      folders: input.folders,
+    });
+  }
   return { upserted, deleted: deleteIds.length, conflicts: [] };
 }
 
@@ -886,6 +1086,7 @@ export async function syncGoatBrainFilesFromRoot(input: {
   taskId?: string | null;
 }): Promise<{ upserted: number; deleted: number; conflicts: GoatBrainSyncConflict[] }> {
   const files = await readGoatBrainFilesFromRoot(input.root);
+  const folders = await readGoatBrainFolderManifestFromRoot(input.root);
   return syncGoatBrainFiles({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
@@ -893,6 +1094,7 @@ export async function syncGoatBrainFilesFromRoot(input: {
     baseSnapshot: input.baseSnapshot,
     ...(input.db ? { db: input.db } : {}),
     taskId: input.taskId ?? null,
+    folders,
   });
 }
 
@@ -1074,15 +1276,143 @@ async function ensureFolderPath(db: DbLike, scope: GoatBrainScope, folderPath: s
     const pathName = parts.slice(0, index + 1).join("/");
     await db
       .insert(goatBrainFolders)
-      .values({
-        id: `goat_brain_folder_${hashGoatBrainContent(`${scope.brainRef}:${pathName}`).slice(0, 24)}`,
-        userWorkosId: scope.userWorkosId,
-        brainRef: scope.brainRef,
-        path: pathName,
-        source: "system",
-      })
+      .values(folderRowValues(scope, pathName, goatBrainFolderSourceForPath(pathName)))
       .onConflictDoNothing();
   }
+}
+
+async function upsertFolderRows(
+  db: DbLike,
+  scope: GoatBrainScope,
+  folders: Iterable<Partial<GoatBrainFolderManifestEntry> & { path?: unknown; source?: unknown }>,
+) {
+  const entries = normalizeGoatBrainFolderEntries(folders);
+  for (const entry of entries) {
+    await db
+      .insert(goatBrainFolders)
+      .values(folderRowValues(scope, entry.path, entry.source))
+      .onConflictDoUpdate({
+        target: [goatBrainFolders.brainRef, goatBrainFolders.path],
+        set: {
+          userWorkosId: scope.userWorkosId,
+          source: entry.source,
+          updatedAt: new Date(),
+        },
+      });
+  }
+}
+
+async function syncGoatBrainFolderRows(input: {
+  db: DbLike;
+  scope: GoatBrainScope;
+  folders: GoatBrainFolderManifestEntry[];
+}) {
+  const desired = normalizeGoatBrainFolderEntries(input.folders);
+  await upsertFolderRows(input.db, input.scope, desired);
+  const desiredPaths = new Set(desired.map((folder) => folder.path));
+  const current = await listGoatBrainFolderRows(
+    { brainRef: input.scope.brainRef },
+    { db: input.db },
+  );
+  const removable = current
+    .filter((folder) => !desiredPaths.has(folder.path) && folder.source !== "system")
+    .toSorted((a, b) => b.path.length - a.path.length);
+  for (const folder of removable) {
+    try {
+      await deleteGoatBrainFolderRow(
+        {
+          brainRef: input.scope.brainRef,
+          userWorkosId: input.scope.userWorkosId,
+          path: folder.path,
+        },
+        { db: input.db },
+      );
+    } catch (error) {
+      if (!errorMessage(error).includes("not empty")) throw error;
+    }
+  }
+}
+
+async function deleteFolderRows(db: DbLike, brainRef: string, paths: string[]) {
+  for (const pathName of paths.toSorted((a, b) => b.length - a.length)) {
+    await db
+      .delete(goatBrainFolders)
+      .where(and(eq(goatBrainFolders.brainRef, brainRef), eq(goatBrainFolders.path, pathName)));
+  }
+}
+
+async function documentsUnderFolder(
+  db: DbLike,
+  brainRef: string,
+  folderPath: string,
+): Promise<GoatBrainDocument[]> {
+  return db
+    .select()
+    .from(goatBrainDocuments)
+    .where(
+      and(
+        eq(goatBrainDocuments.brainRef, brainRef),
+        or(
+          eq(goatBrainDocuments.folderPath, folderPath),
+          like(goatBrainDocuments.folderPath, `${folderPath}/%`),
+        ),
+      ),
+    );
+}
+
+async function foldersUnderFolder(
+  db: DbLike,
+  brainRef: string,
+  folderPath: string,
+  options: { includeSelf: boolean },
+): Promise<GoatBrainFolder[]> {
+  const condition = options.includeSelf
+    ? or(eq(goatBrainFolders.path, folderPath), like(goatBrainFolders.path, `${folderPath}/%`))
+    : like(goatBrainFolders.path, `${folderPath}/%`);
+  const rows = await db
+    .select()
+    .from(goatBrainFolders)
+    .where(and(eq(goatBrainFolders.brainRef, brainRef), condition));
+  return normalizeStoredFolderRows(rows);
+}
+
+function normalizeStoredFolderRows(rows: GoatBrainFolder[]): GoatBrainFolder[] {
+  return rows.flatMap((row) => {
+    if (typeof row.path !== "string") return [];
+    const folderPath = normalizeGoatBrainFolder(row.path);
+    if (!isValidGoatBrainFolder(folderPath)) return [];
+    return [
+      {
+        ...row,
+        path: folderPath,
+        source:
+          row.source === "system" && isHardDefaultGoatBrainFolder(folderPath)
+            ? "system"
+            : goatBrainFolderSourceForPath(folderPath),
+      },
+    ];
+  });
+}
+
+function folderRowValues(
+  scope: GoatBrainScope,
+  folderPath: string,
+  source: GoatBrainFolder["source"],
+) {
+  return {
+    id: `goat_brain_folder_${hashGoatBrainContent(`${scope.brainRef}:${folderPath}`).slice(0, 24)}`,
+    userWorkosId: scope.userWorkosId,
+    brainRef: scope.brainRef,
+    path: folderPath,
+    source,
+  };
+}
+
+function replaceFolderPrefix(pathName: string, fromPath: string, toPath: string) {
+  if (pathName === fromPath) return toPath;
+  return pathName.startsWith(`${fromPath}/`)
+    ? `${toPath}/${pathName.slice(fromPath.length + 1)}`
+    : pathName;
 }
 
 async function insertVersion(
@@ -1245,6 +1575,10 @@ function isNotFound(error: unknown): boolean {
   return Boolean(
     error && typeof error === "object" && (error as { code?: string }).code === "ENOENT",
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function titleFromId(id: string): string {
