@@ -9,6 +9,7 @@ import {
 } from "./codex-auth";
 import type { RunnerEnv } from "./env";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
 import { planGoatHarnessForTask } from "./goat-harness";
 import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
@@ -103,6 +104,16 @@ export function createServer(
       task_id: taskId,
     });
     wakeGoatTaskWorker();
+    reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/goat/codex-chat/wake", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat workers are disabled." });
+      return;
+    }
+    wakeGoatCodexChatWorker();
     reply.status(202).send({ ok: true });
   });
 

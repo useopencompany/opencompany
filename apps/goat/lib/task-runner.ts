@@ -131,6 +131,29 @@ export async function triggerGoatTaskRun(
   });
 }
 
+export async function triggerGoatCodexChatWake() {
+  const baseUrl = runnerInternalBaseUrl();
+  const token = runnerToken();
+  if (!baseUrl || !token) {
+    console.warn("Goat codex chat wake skipped because the runner is not configured.", {
+      event: "goat.codex_chat_wake_unconfigured",
+    });
+    return;
+  }
+
+  const response = await fetch(`${baseUrl}/internal/goat/codex-chat/wake`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Goat codex chat wake failed with ${response.status}: ${details}`);
+  }
+}
+
 export async function triggerGoatBrainIngestWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();

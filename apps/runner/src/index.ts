@@ -18,6 +18,7 @@ import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./del
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { setGoatCodexChatWakeup, startGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
@@ -91,6 +92,7 @@ const jobWorker = startRunnerJobWorker(env, {
   },
 });
 const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
+const goatCodexChatWorker = env.goatTaskWorkerEnabled ? startGoatCodexChatWorker(env) : null;
 const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
 const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
 const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
@@ -112,6 +114,9 @@ setGoatTaskWakeup(() => {
 });
 setGoatBrainIngestWakeup(() => {
   goatBrainIngestWorker?.notify();
+});
+setGoatCodexChatWakeup(() => {
+  goatCodexChatWorker?.notify();
 });
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
@@ -148,6 +153,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       }),
       goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
       goatTaskWorker?.stop() ?? Promise.resolve(),
+      goatCodexChatWorker?.stop() ?? Promise.resolve(),
       goatBrainIngestWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),

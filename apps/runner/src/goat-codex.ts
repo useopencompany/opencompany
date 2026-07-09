@@ -435,7 +435,7 @@ async function collectGitDiffSummary(input: {
   };
 }
 
-async function loadGoatCodexCliAuth(userWorkosId: string): Promise<CodexCliAuth | null> {
+export async function loadGoatCodexCliAuth(userWorkosId: string): Promise<CodexCliAuth | null> {
   let credential: Awaited<ReturnType<typeof loadGoatCodexCredential>>;
   try {
     credential = await loadGoatCodexCredential({ db: getDb(), userWorkosId });
@@ -451,15 +451,16 @@ async function loadGoatCodexCliAuth(userWorkosId: string): Promise<CodexCliAuth 
   return { kind: "chatgpt", authJson: credential.authJson, brokered: false };
 }
 
-async function persistRefreshedGoatCodexAuth(input: {
+export async function persistRefreshedGoatCodexAuth(input: {
   sandbox: SandboxHandle;
   userWorkosId: string;
   auth: CodexCliAuth;
+  codexHome?: string;
 }) {
   if (input.auth.kind !== "chatgpt") return;
   let content: string;
   try {
-    const raw = await input.sandbox.files.read(`${CODEX_HOME}/auth.json`);
+    const raw = await input.sandbox.files.read(`${input.codexHome ?? CODEX_HOME}/auth.json`);
     content = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
   } catch {
     await markGoatCodexCredentialNeedsReauth({

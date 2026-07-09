@@ -23,12 +23,10 @@ import {
   AlertCircle,
   Archive,
   ArrowUp,
-  BookOpen,
   CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
-  ChevronRight,
   CircleDotDashed,
   Clock,
   Code2,
@@ -57,29 +55,22 @@ import {
   useState,
   useTransition,
 } from "react";
-import { Markdown } from "@/components/Markdown";
+import { buildChatTaskLookup, shouldShowThinkingBubble } from "@/components/chat/assistant-items";
+import { MessageBubble } from "@/components/chat/MessageBubble";
+import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
-  GOAT_BRAIN_TOOL_NAME,
-  type GoatBrainToolOutput,
   type GoatChatMention,
   type GoatChatMessageMetadata,
   type GoatChatSessionView,
   type GoatChatSummaryView,
   type GoatChatUiMessage,
   type GoatStoredChatMessage,
-  type GoatTaskCardMetadata,
-  SCHEDULE_TASK_TOOL_NAME,
-  START_TASK_TOOL_NAME,
-  START_TASK_TOOL_PART_TYPE,
-  type StartTaskToolOutput,
   textFromGoatChatUiMessage,
   toGoatChatUiMessage,
-  WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
@@ -87,6 +78,7 @@ import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model
 import {
   createGoatCollections,
   type GoatChatMessageRow,
+  type GoatCodexChatSessionRow,
   type GoatLocalCodexSessionRow,
   type GoatTaskRow,
   type GoatTaskScheduleRow,
@@ -113,7 +105,39 @@ type ActiveMentionToken = {
   query: string;
 };
 
-type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue;
+type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue | CodexPickerValue;
+
+// Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
+// engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
+type GoatEngineChatKind = "local_codex" | "codex";
+
+const ENGINE_CHAT_CONFIG: Record<
+  GoatEngineChatKind,
+  { label: string; messagesEndpoint: string; interruptEndpoint: (chatSessionId: string) => string }
+> = {
+  local_codex: {
+    label: "Local Codex",
+    messagesEndpoint: "/api/local-codex/messages",
+    interruptEndpoint: (chatSessionId) =>
+      `/api/local-codex/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
+  },
+  codex: {
+    label: "Codex",
+    messagesEndpoint: "/api/codex-chat/messages",
+    interruptEndpoint: (chatSessionId) =>
+      `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
+  },
+};
+
+function engineChatKindFromChat(
+  chat: { engine?: GoatChatEngine } | null | undefined,
+  localCodexBetaEnabled: boolean,
+): GoatEngineChatKind | null {
+  if (!chat) return null;
+  if (chat.engine === "codex") return "codex";
+  if (chat.engine === "local_codex" && localCodexBetaEnabled) return "local_codex";
+  return null;
+}
 
 export type GoatTaskView = {
   id: string;
@@ -175,16 +199,21 @@ export function GoatSurface({
     sessionId: string;
     messages: GoatChatUiMessage[];
   } | null>(null);
-  const [chatModel, setChatModel] = useState<GoatChatModelSelection>(() =>
-    localCodexBetaEnabled && initialChat?.engine === "local_codex"
-      ? LOCAL_CODEX_PICKER_VALUE
-      : normalizeGoatModel(initialChat?.model ?? defaultModel),
-  );
-  const [localCodexChatSessionId, setLocalCodexChatSessionId] = useState<string | null>(() =>
-    localCodexBetaEnabled && initialChat?.engine === "local_codex" ? initialChat.id : null,
-  );
-  const [localCodexRunning, setLocalCodexRunning] = useState(false);
-  const [localCodexSubmitting, setLocalCodexSubmitting] = useState(false);
+  const [chatModel, setChatModel] = useState<GoatChatModelSelection>(() => {
+    const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
+    if (engine === "codex") return CODEX_PICKER_VALUE;
+    if (engine === "local_codex") return LOCAL_CODEX_PICKER_VALUE;
+    return normalizeGoatModel(initialChat?.model ?? defaultModel);
+  });
+  const [engineChatSession, setEngineChatSession] = useState<{
+    engine: GoatEngineChatKind;
+    chatSessionId: string;
+  } | null>(() => {
+    const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
+    return engine && initialChat ? { engine, chatSessionId: initialChat.id } : null;
+  });
+  const [engineRunning, setEngineRunning] = useState(false);
+  const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [newChatPrompt, setNewChatPrompt] = useState("");
   const [backgroundChatCount, setBackgroundChatCount] = useState(0);
@@ -247,7 +276,10 @@ export function GoatSurface({
     id: chatInstanceKey,
     // useChat holds only this surface's in-flight overlay; persisted history
     // comes from the Electric-synced liveChat state and is merged below.
-    resume: chatResumeEnabled && Boolean(initialChat) && initialChat?.engine !== "local_codex",
+    resume:
+      chatResumeEnabled &&
+      Boolean(initialChat) &&
+      (initialChat?.engine ?? "opencompany") === "opencompany",
     // Batch stream chunks into ~20fps UI updates instead of rendering the
     // whole thread on every token.
     experimental_throttle: 50,
@@ -265,19 +297,26 @@ export function GoatSurface({
     },
   });
   const isGenerating = status === "submitted" || status === "streaming";
-  const activeInitialChatIsLocalCodex = Boolean(
-    initialChat &&
-      localCodexBetaEnabled &&
-      mode === "chat" &&
-      chatSessionId === initialChat.id &&
-      initialChat.engine === "local_codex",
-  );
-  const activeLocalCodexSessionId =
-    chatSessionId && (activeInitialChatIsLocalCodex || localCodexChatSessionId === chatSessionId)
-      ? chatSessionId
+  const activeInitialChatEngine =
+    initialChat && mode === "chat" && chatSessionId === initialChat.id
+      ? engineChatKindFromChat(initialChat, localCodexBetaEnabled)
       : null;
+  const activeEngineChat = chatSessionId
+    ? activeInitialChatEngine
+      ? { engine: activeInitialChatEngine, chatSessionId }
+      : engineChatSession?.chatSessionId === chatSessionId
+        ? engineChatSession
+        : null
+    : null;
   const isLocalCodexMode = localCodexBetaEnabled && chatModel === LOCAL_CODEX_PICKER_VALUE;
-  const isLocalCodexChat = isLocalCodexMode || Boolean(activeLocalCodexSessionId);
+  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
+  const selectedEngine: GoatEngineChatKind | null = isLocalCodexMode
+    ? "local_codex"
+    : isCodexMode
+      ? "codex"
+      : null;
+  const activeEngine = activeEngineChat?.engine ?? selectedEngine;
+  const isEngineChat = activeEngine !== null;
   const localCodexFeatureDisabledForChat = Boolean(
     initialChat &&
       !localCodexBetaEnabled &&
@@ -302,8 +341,7 @@ export function GoatSurface({
   }, [messages, persistedMessages]);
   const hasMessages = chatMessages.length > 0;
   const showThinkingBubble =
-    (isGenerating || (isLocalCodexChat && localCodexRunning)) &&
-    shouldShowThinkingBubble(chatMessages);
+    (isGenerating || (isEngineChat && engineRunning)) && shouldShowThinkingBubble(chatMessages);
   const trimmedNewChatPrompt = newChatPrompt.trim();
   const newChatPromptValid =
     trimmedNewChatPrompt.length > 0 &&
@@ -335,26 +373,29 @@ export function GoatSurface({
   const activeChatModel =
     activeChatSummary?.model ??
     (initialChat?.id === chatSessionId ? initialChat.model : null) ??
-    (isLocalCodexChat ? DEFAULT_GOAT_MODEL : chatModel);
+    (isEngineChat ? DEFAULT_GOAT_MODEL : chatModel);
   const activeChatEngine =
     activeChatSummary?.engine ??
     (initialChat?.id === chatSessionId ? initialChat.engine : null) ??
-    (isLocalCodexChat ? "local_codex" : "opencompany");
+    activeEngine ??
+    "opencompany";
 
   const openChat = useCallback(
     (chat: { id: string; model: string; engine?: GoatChatEngine } | null) => {
-      const isLocalCodexTarget = Boolean(
-        chat && localCodexBetaEnabled && chat.engine === "local_codex",
-      );
+      const engineTarget = engineChatKindFromChat(chat, localCodexBetaEnabled);
       setChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? "goat-chat-main");
       setChatModel(
-        isLocalCodexTarget
+        engineTarget === "local_codex"
           ? LOCAL_CODEX_PICKER_VALUE
-          : normalizeGoatModel(chat?.model ?? defaultModel),
+          : engineTarget === "codex"
+            ? CODEX_PICKER_VALUE
+            : normalizeGoatModel(chat?.model ?? defaultModel),
       );
-      setLocalCodexChatSessionId(chat && isLocalCodexTarget ? chat.id : null);
-      setLocalCodexRunning(false);
+      setEngineChatSession(
+        chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
+      );
+      setEngineRunning(false);
       setMessages([]);
       setLocallyStoppedAssistantMessageIds(new Set());
       clearError();
@@ -522,7 +563,7 @@ export function GoatSurface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isGenerating || localCodexSubmitting) return;
+    if (isGenerating || engineSubmitting) return;
 
     const prompt = input.trim();
     if (!prompt) return;
@@ -542,21 +583,25 @@ export function GoatSurface({
     setInput("");
     setMentionToken(null);
     setSelectedMentions([]);
-    if (isLocalCodexChat) {
+    if (activeEngine) {
+      const engine = activeEngine;
+      const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
-      const existingLocalSessionId = activeLocalCodexSessionId;
-      setLocalCodexSubmitting(true);
-      void sendLocalCodexMessage({
+      const existingEngineSessionId = activeEngineChat?.chatSessionId ?? null;
+      setEngineSubmitting(true);
+      void sendEngineChatMessage({
+        endpoint: config.messagesEndpoint,
+        errorLabel: config.label,
         prompt,
-        sessionId: existingLocalSessionId,
+        sessionId: existingEngineSessionId,
         userMessageId,
       })
         .then((result) => {
           setChatSessionId(result.sessionId);
-          setLocalCodexChatSessionId(result.sessionId);
-          setLocalCodexRunning(true);
+          setEngineChatSession({ engine, chatSessionId: result.sessionId });
+          setEngineRunning(true);
           setMessages((current) =>
-            appendLocalCodexOptimisticMessages(existingLocalSessionId ? current : [], {
+            appendEngineOptimisticMessages(existingEngineSessionId ? current : [], {
               sessionId: result.sessionId,
               userMessageId: result.userMessageId,
               assistantMessageId: result.assistantMessageId,
@@ -569,12 +614,12 @@ export function GoatSurface({
         .catch((error) => {
           setInput(prompt);
           toast.error(
-            error instanceof Error ? error.message : "Local Codex could not start that turn.",
+            error instanceof Error ? error.message : `${config.label} could not start that turn.`,
           );
         })
         .finally(() => {
           if (!mountedRef.current) return;
-          setLocalCodexSubmitting(false);
+          setEngineSubmitting(false);
         });
       return;
     }
@@ -597,15 +642,13 @@ export function GoatSurface({
   }, [isGenerating, openChat, router, stop]);
 
   const stopGeneration = useCallback(() => {
-    if (activeLocalCodexSessionId) {
-      setLocalCodexRunning(false);
-      void fetch(
-        `/api/local-codex/sessions/${encodeURIComponent(activeLocalCodexSessionId)}/interrupt`,
-        {
-          method: "POST",
-        },
-      ).catch(() => {
-        toast.error("Could not interrupt Local Codex.");
+    if (activeEngineChat) {
+      const config = ENGINE_CHAT_CONFIG[activeEngineChat.engine];
+      setEngineRunning(false);
+      void fetch(config.interruptEndpoint(activeEngineChat.chatSessionId), {
+        method: "POST",
+      }).catch(() => {
+        toast.error(`Could not interrupt ${config.label}.`);
       });
       return;
     }
@@ -627,7 +670,7 @@ export function GoatSurface({
       }
     }
     void stop();
-  }, [activeLocalCodexSessionId, chatResumeEnabled, chatSessionId, messages, stop]);
+  }, [activeEngineChat, chatResumeEnabled, chatSessionId, messages, stop]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -811,14 +854,16 @@ export function GoatSurface({
           >
             <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
               {chatMessages.map((message) => (
-                <Bubble
+                <MessageBubble
                   key={message.id}
                   message={message}
                   taskLookup={chatTaskLookup}
                   stopped={locallyStoppedAssistantMessageIds.has(message.id)}
                 />
               ))}
-              {showThinkingBubble ? <ThinkingBubble /> : null}
+              {showThinkingBubble ? (
+                <ThinkingIndicator {...(isEngineChat ? { label: "Codex is working" } : {})} />
+              ) : null}
             </div>
           </div>
         </div>
@@ -827,10 +872,16 @@ export function GoatSurface({
       {mode === "chat" && chatSessionId ? (
         <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
       ) : null}
-      {mode === "chat" && activeLocalCodexSessionId ? (
+      {mode === "chat" && activeEngineChat?.engine === "local_codex" ? (
         <LiveLocalCodexSessionStatus
-          chatSessionId={activeLocalCodexSessionId}
-          setRunning={setLocalCodexRunning}
+          chatSessionId={activeEngineChat.chatSessionId}
+          setRunning={setEngineRunning}
+        />
+      ) : null}
+      {mode === "chat" && activeEngineChat?.engine === "codex" ? (
+        <LiveCodexChatSessionStatus
+          chatSessionId={activeEngineChat.chatSessionId}
+          setRunning={setEngineRunning}
         />
       ) : null}
       {mode === "chat" ? <LiveChatTasks setTasks={setLiveChatTasks} /> : null}
@@ -916,14 +967,13 @@ export function GoatSurface({
             <GoatModelPicker
               value={chatModel}
               onChange={setChatModel}
-              disabled={isGenerating || Boolean(activeLocalCodexSessionId)}
+              disabled={isGenerating || Boolean(activeEngineChat)}
               localCodexBetaEnabled={localCodexBetaEnabled}
+              codexConnected={codexConnected}
             />
-            {isLocalCodexChat && localCodexRunning ? (
-              <LocalCodexStopButton onStop={stopGeneration} />
-            ) : null}
+            {isEngineChat && engineRunning ? <EngineStopButton onStop={stopGeneration} /> : null}
             <SubmitButton
-              disabled={!input.trim() || localCodexSubmitting || localCodexFeatureDisabledForChat}
+              disabled={!input.trim() || engineSubmitting || localCodexFeatureDisabledForChat}
               isGenerating={isGenerating}
               onStop={stopGeneration}
             />
@@ -954,20 +1004,22 @@ function titleFromChatMessages(messages: readonly GoatChatUiMessage[]) {
   return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57).trimEnd()}...`;
 }
 
-type LocalCodexMessageResponse = {
+type EngineChatMessageResponse = {
   ok: true;
   sessionId: string;
   userMessageId: string;
   assistantMessageId: string | null;
-  mode: "started" | "steered";
+  mode: "started" | "steered" | "queued";
 };
 
-async function sendLocalCodexMessage(input: {
+async function sendEngineChatMessage(input: {
+  endpoint: string;
+  errorLabel: string;
   prompt: string;
   sessionId: string | null;
   userMessageId: string;
-}): Promise<LocalCodexMessageResponse> {
-  const response = await fetch("/api/local-codex/messages", {
+}): Promise<EngineChatMessageResponse> {
+  const response = await fetch(input.endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -981,12 +1033,12 @@ async function sendLocalCodexMessage(input: {
   });
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(error || "Local Codex could not start that turn.");
+    throw new Error(error || `${input.errorLabel} could not start that turn.`);
   }
-  return response.json() as Promise<LocalCodexMessageResponse>;
+  return response.json() as Promise<EngineChatMessageResponse>;
 }
 
-function appendLocalCodexOptimisticMessages(
+function appendEngineOptimisticMessages(
   current: GoatChatUiMessage[],
   input: {
     sessionId: string;
@@ -1082,6 +1134,8 @@ function ChatTitleHeader({
     <div className="flex min-w-0 items-center gap-2 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-ink shadow-[0_1px_3px_rgba(15,15,15,0.04)]">
       {engine === "local_codex" ? (
         <Code2 size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+      ) : engine === "codex" ? (
+        <OpenAIIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : (
         <GoatModelProviderIcon
           modelId={model}
@@ -1173,6 +1227,45 @@ function LiveLocalCodexSessionStatusSubscriber({
     q.from({ localCodexSession: localCodexSessionCollection }),
   );
   const status = ((rows ?? []) as GoatLocalCodexSessionRow[])[0]?.status ?? null;
+
+  useEffect(() => {
+    if (!status) return;
+    setRunning(status === "starting" || status === "running");
+  }, [setRunning, status]);
+
+  return null;
+}
+
+function LiveCodexChatSessionStatus({
+  chatSessionId,
+  setRunning,
+}: {
+  chatSessionId: string;
+  setRunning: Dispatch<SetStateAction<boolean>>;
+}) {
+  const hydrated = useHydrated();
+  if (!hydrated) return null;
+  return (
+    <LiveCodexChatSessionStatusSubscriber chatSessionId={chatSessionId} setRunning={setRunning} />
+  );
+}
+
+function LiveCodexChatSessionStatusSubscriber({
+  chatSessionId,
+  setRunning,
+}: {
+  chatSessionId: string;
+  setRunning: Dispatch<SetStateAction<boolean>>;
+}) {
+  const collections = useMemo(() => createGoatCollections(), []);
+  const codexChatSessionCollection = useMemo(
+    () => collections.codexChatSessions(chatSessionId),
+    [chatSessionId, collections],
+  );
+  const { data: rows } = useLiveQuery((q) =>
+    q.from({ codexChatSession: codexChatSessionCollection }),
+  );
+  const status = ((rows ?? []) as GoatCodexChatSessionRow[])[0]?.status ?? null;
 
   useEffect(() => {
     if (!status) return;
@@ -1707,256 +1800,24 @@ function ResultRow({
   );
 }
 
-function Bubble({
-  message,
-  taskLookup,
-  stopped = false,
-}: {
-  message: GoatChatUiMessage;
-  taskLookup: ChatTaskLookup;
-  stopped?: boolean;
-}) {
-  const isUser = message.role === "user";
-  const text = textFromGoatChatUiMessage(message);
-  const error = message.metadata?.error;
-
-  if (!isUser) {
-    const items = getOrderedAssistantItems(
-      message,
-      taskLookup,
-      stopped || message.metadata?.aborted === true,
-    );
-
-    return (
-      <div className="flex flex-col gap-2">
-        {items.map((item) => {
-          if (item.type === "text") {
-            return (
-              <AssistantTextBubble key={item.key} text={item.text} {...(error ? { error } : {})} />
-            );
-          }
-          if (item.type === "task") return <TaskCard key={item.key} task={item.task} />;
-          return <ToolCallRow key={item.key} tool={item.tool} />;
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-3 py-2 text-[13px] leading-5 ${
-          isUser
-            ? "rounded-br-md bg-ink text-canvas"
-            : error
-              ? "rounded-bl-md bg-danger-bg text-danger"
-              : "rounded-bl-md bg-surface-muted text-ink"
-        }`}
-      >
-        {isUser ? text : <Markdown content={text} />}
-      </div>
-    </div>
-  );
-}
-
-function AssistantTextBubble({ text, error }: { text: string; error?: string | undefined }) {
-  return (
-    <div className="flex justify-start">
-      <div
-        className={`max-w-[80%] text-[13px] leading-5 ${
-          error ? "rounded-2xl rounded-bl-md bg-danger-bg px-3 py-2 text-danger" : "text-ink"
-        }`}
-      >
-        <Markdown content={text} />
-      </div>
-    </div>
-  );
-}
-
-function TaskCard({ task }: { task: ChatTaskCardView }) {
-  const meta = getChatTaskCardMeta(task.status);
-  const Icon = meta.icon;
-  const linkId = task.displayId ?? task.id;
-  const displayLabel = task.displayId ?? "Task";
-  const title = task.title ?? "Task";
-  return (
-    <Link
-      href={`/tasks/${encodeURIComponent(linkId)}`}
-      className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
-      <Icon
-        size={16}
-        strokeWidth={2}
-        className={`${meta.className} shrink-0 ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[13.5px] font-medium leading-tight text-ink">{title}</span>
-        <span className="text-[12px] leading-tight text-ink-subtle">
-          {displayLabel} · {meta.label}
-        </span>
-      </div>
-      <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-ink-muted">
-        {displayLabel}
-      </span>
-    </Link>
-  );
-}
-
-function ToolCallRow({ tool }: { tool: ToolCallView }) {
-  if (tool.name === GOAT_BRAIN_TOOL_NAME) {
-    return <BrainToolCallRow tool={tool} />;
-  }
-
-  const meta = getToolCallMeta(tool);
-  const Icon = meta.icon;
-  return (
-    <div
-      data-testid={`chat-tool-call-${tool.name}`}
-      className="flex max-w-[80%] items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 text-[12px] shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-    >
-      <Icon
-        size={14}
-        strokeWidth={2}
-        className={`shrink-0 ${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          <span className="truncate font-medium leading-4 text-ink">{tool.label}</span>
-          <span className={`${meta.className} shrink-0 text-[11px] leading-4`}>
-            {tool.statusText}
-          </span>
-        </div>
-        {tool.detail ? <p className="truncate leading-4 text-ink-subtle">{tool.detail}</p> : null}
-      </div>
-    </div>
-  );
-}
-
-function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
-  const [expanded, setExpanded] = useState(false);
-  const detail = tool.detail ?? "goat_brain";
-  const commandPreview = brainOutputCommand(tool.output);
-  const stdoutPreview = brainOutputStdout(tool.output);
-  const parsedPreview = brainOutputParsed(tool.output);
-  const stderrPreview = brainOutputStderr(tool.output);
-  const errorPreview = brainOutputError(tool.output, tool.errorText);
-  return (
-    <div
-      data-testid={`chat-tool-call-${tool.name}`}
-      className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted"
-    >
-      <div className="flex min-w-0 max-w-full items-center gap-1">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <ChevronRight
-            size={11}
-            strokeWidth={1.9}
-            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
-          />
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-            <BookOpen size={11} strokeWidth={1.75} />
-          </span>
-          <span className="shrink-0 font-medium text-ink/65">Brain</span>
-          <span
-            title={detail}
-            className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
-          >
-            <span className="min-w-0 truncate">{detail}</span>
-          </span>
-          <BrainStatusText status={tool.status} />
-        </button>
-      </div>
-      {expanded ? (
-        <div className="ml-6 mt-1 border-l border-border pl-3">
-          <BrainPreviewBlock label="Input" value={formatDebugValue(tool.input)} />
-          {commandPreview ? <BrainPreviewBlock label="Command" value={commandPreview} /> : null}
-          {stdoutPreview ? <BrainPreviewBlock label="Stdout" value={stdoutPreview} /> : null}
-          {parsedPreview ? <BrainPreviewBlock label="Parsed" value={parsedPreview} /> : null}
-          {stderrPreview ? <BrainPreviewBlock label="Stderr" value={stderrPreview} /> : null}
-          {errorPreview ? <BrainPreviewBlock label="Error" value={errorPreview} /> : null}
-          {!isGoatBrainToolOutput(tool.output) && !tool.errorText ? (
-            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function BrainStatusText({ status }: { status: ToolCallView["status"] }) {
-  if (status === "completed") return null;
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
-        status === "failed" ? "text-danger" : "text-ink-subtle"
-      }`}
-    >
-      {status === "failed" ? (
-        <AlertCircle size={9} strokeWidth={1.9} />
-      ) : (
-        <CircleDotDashed
-          size={9}
-          strokeWidth={2}
-          className="animate-[spin_3s_linear_infinite] text-warning"
-        />
-      )}
-      {status}
-    </span>
-  );
-}
-
-function BrainPreviewBlock({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="py-1 first:pt-0">
-      <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">{label}</div>
-      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-ink/60">
-        {value}
-      </pre>
-    </div>
-  );
-}
-
-function ThinkingBubble() {
-  return (
-    <div className="flex justify-start">
-      <div
-        role="status"
-        aria-live="polite"
-        aria-label="Goat is thinking"
-        className="rounded-2xl rounded-bl-md bg-surface-muted px-3 py-2"
-      >
-        <span className="inline-block animate-[goat-thinking-shimmer_1.45s_ease-in-out_infinite] bg-[linear-gradient(100deg,var(--color-ink-subtle)_0%,var(--color-ink)_45%,var(--color-ink-subtle)_90%)] bg-[length:220%_100%] bg-clip-text text-[13px] font-medium leading-5 text-transparent">
-          Thinking
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function shouldShowThinkingBubble(messages: readonly GoatChatUiMessage[]) {
-  const lastMessage = messages.at(-1);
-  if (!lastMessage || lastMessage.role === "user") return true;
-  return getOrderedAssistantItems(lastMessage, new Map<string, ChatTaskCardView>()).length === 0;
-}
-
 function GoatModelPicker({
   value,
   onChange,
   disabled,
   localCodexBetaEnabled,
+  codexConnected = false,
 }: {
   value: GoatChatModelSelection;
   onChange: (modelId: GoatChatModelSelection) => void;
   disabled: boolean;
   localCodexBetaEnabled: boolean;
+  codexConnected?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isLocalCodexSelected = localCodexBetaEnabled && value === LOCAL_CODEX_PICKER_VALUE;
-  const selectedModel = !isLocalCodexSelected
+  const isCodexSelected = value === CODEX_PICKER_VALUE;
+  const isEngineSelected = isLocalCodexSelected || isCodexSelected;
+  const selectedModel = !isEngineSelected
     ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
     : null;
 
@@ -1970,6 +1831,8 @@ function GoatModelPicker({
       >
         {isLocalCodexSelected ? (
           <Code2 size={13} strokeWidth={1.9} className="shrink-0" />
+        ) : isCodexSelected ? (
+          <OpenAIIcon size={13} strokeWidth={1.9} className="shrink-0" />
         ) : (
           <GoatModelProviderIcon
             modelId={selectedModel?.id ?? DEFAULT_GOAT_MODEL}
@@ -1979,7 +1842,11 @@ function GoatModelPicker({
           />
         )}
         <span className="truncate">
-          {isLocalCodexSelected ? "Local Codex" : (selectedModel?.label ?? "Model")}
+          {isLocalCodexSelected
+            ? "Local Codex"
+            : isCodexSelected
+              ? "Codex"
+              : (selectedModel?.label ?? "Model")}
         </span>
         <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
       </PopoverTrigger>
@@ -1992,34 +1859,64 @@ function GoatModelPicker({
           <CommandInput placeholder="Search models..." />
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
-            {localCodexBetaEnabled ? (
+            {codexConnected || localCodexBetaEnabled ? (
               <CommandGroup heading="Engines">
-                <CommandItem
-                  value={LOCAL_CODEX_PICKER_VALUE}
-                  keywords={["Local Codex", "Codex", "local repo", "worktree"]}
-                  onSelect={() => {
-                    onChange(LOCAL_CODEX_PICKER_VALUE);
-                    setOpen(false);
-                  }}
-                  title="Run Codex locally in a clean session folder."
-                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                >
-                  <Check
-                    size={13}
-                    strokeWidth={2}
-                    className={cn(
-                      "shrink-0 text-ink",
-                      isLocalCodexSelected ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  <Code2 size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium leading-4">Local Codex</div>
-                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                      Local session bridge
+                {codexConnected ? (
+                  <CommandItem
+                    value={CODEX_PICKER_VALUE}
+                    keywords={["Codex", "cloud", "sandbox", "engine"]}
+                    onSelect={() => {
+                      onChange(CODEX_PICKER_VALUE);
+                      setOpen(false);
+                    }}
+                    title="Chat with Codex in a persistent cloud sandbox."
+                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                  >
+                    <Check
+                      size={13}
+                      strokeWidth={2}
+                      className={cn(
+                        "shrink-0 text-ink",
+                        isCodexSelected ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium leading-4">Codex</div>
+                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                        Cloud Codex sandbox
+                      </div>
                     </div>
-                  </div>
-                </CommandItem>
+                  </CommandItem>
+                ) : null}
+                {localCodexBetaEnabled ? (
+                  <CommandItem
+                    value={LOCAL_CODEX_PICKER_VALUE}
+                    keywords={["Local Codex", "Codex", "local repo", "worktree"]}
+                    onSelect={() => {
+                      onChange(LOCAL_CODEX_PICKER_VALUE);
+                      setOpen(false);
+                    }}
+                    title="Run Codex locally in a clean session folder."
+                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                  >
+                    <Check
+                      size={13}
+                      strokeWidth={2}
+                      className={cn(
+                        "shrink-0 text-ink",
+                        isLocalCodexSelected ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    <Code2 size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium leading-4">Local Codex</div>
+                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                        Local session bridge
+                      </div>
+                    </div>
+                  </CommandItem>
+                ) : null}
               </CommandGroup>
             ) : null}
             <CommandGroup heading="Models">
@@ -2136,7 +2033,7 @@ function SubmitButton({
   );
 }
 
-function LocalCodexStopButton({ onStop }: { onStop: () => void }) {
+function EngineStopButton({ onStop }: { onStop: () => void }) {
   return (
     <button
       type="button"
@@ -2148,524 +2045,6 @@ function LocalCodexStopButton({ onStop }: { onStop: () => void }) {
       <Square size={11} strokeWidth={2.2} fill="currentColor" />
     </button>
   );
-}
-
-type AssistantRenderItem =
-  | { type: "text"; key: string; text: string }
-  | { type: "task"; key: string; task: ChatTaskCardView }
-  | { type: "tool"; key: string; tool: ToolCallView };
-
-type ChatTaskCardView = {
-  id: string;
-  displayId: string | null;
-  title: string | null;
-  status: GoatTaskStatus | null;
-};
-
-type ChatTaskLookup = ReadonlyMap<string, ChatTaskCardView>;
-
-type ToolCallView = {
-  name: string;
-  label: string;
-  status: "running" | "completed" | "failed" | "waiting" | "stopped";
-  statusText: string;
-  detail: string | null;
-  input: unknown;
-  output: unknown;
-  errorText: string | null;
-};
-
-function getOrderedAssistantItems(
-  message: GoatChatUiMessage,
-  taskLookup: ChatTaskLookup,
-  stopped = false,
-) {
-  const items: AssistantRenderItem[] = [];
-  let textBuffer = "";
-
-  const flushText = (key: string) => {
-    const text = textBuffer.trim();
-    textBuffer = "";
-    if (!text) return;
-    items.push({ type: "text", key, text });
-  };
-
-  for (const [index, part] of message.parts.entries()) {
-    if (part.type === "text") {
-      textBuffer += part.text;
-      continue;
-    }
-    if (!isToolPartRecord(part)) continue;
-    const tool = toolCallViewFromPart(part, stopped);
-    if (!tool) continue;
-    flushText(`text-${index}`);
-    if (
-      part.type === START_TASK_TOOL_PART_TYPE &&
-      part.state === "output-available" &&
-      isStartTaskToolOutput(part.output)
-    ) {
-      items.push({
-        type: "task",
-        key: `task-${index}`,
-        task: resolveChatTaskCard(taskFromOutput(part.output), taskLookup),
-      });
-      continue;
-    }
-    items.push({
-      type: "tool",
-      key: `tool-${index}`,
-      tool,
-    });
-  }
-
-  flushText("text-end");
-
-  const metadataTask = metadataTaskCard(message.metadata);
-  if (!items.some((item) => item.type === "task") && metadataTask) {
-    items.push({
-      type: "task",
-      key: "task-metadata",
-      task: resolveChatTaskCard(metadataTask, taskLookup),
-    });
-  }
-
-  return items;
-}
-
-function metadataTaskCard(metadata: GoatChatUiMessage["metadata"]): GoatTaskCardMetadata | null {
-  if (metadata?.task) return metadata.task;
-  if (metadata?.taskId) return { id: metadata.taskId };
-  return null;
-}
-
-function toolCallViewFromPart(
-  part: Record<string, unknown> & { type: string },
-  stopped = false,
-): ToolCallView | null {
-  const name = toolNameFromPart(part);
-  if (!name) return null;
-  const state = typeof part.state === "string" ? part.state : "";
-  const output = part.output;
-  const failedGoatBrain =
-    name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
-      ? !goatBrainToolOutputSucceeded(output)
-      : false;
-  const status = failedGoatBrain ? "failed" : toolStatusFromState(state, stopped);
-  return {
-    name,
-    label: toolLabel(name),
-    status,
-    statusText: toolStatusText(status, state),
-    detail: toolDetail(name, part, status),
-    input: part.input,
-    output: part.output,
-    errorText: typeof part.errorText === "string" ? part.errorText : null,
-  };
-}
-
-function isToolPartRecord(value: unknown): value is Record<string, unknown> & { type: string } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const type = (value as { type?: unknown }).type;
-  return typeof type === "string" && (type.startsWith("tool-") || type === "dynamic-tool");
-}
-
-function toolNameFromPart(part: Record<string, unknown> & { type: string }) {
-  if (part.type === "dynamic-tool") {
-    return typeof part.toolName === "string" ? part.toolName : null;
-  }
-  return part.type.slice("tool-".length);
-}
-
-function toolStatusFromState(state: string, stopped = false): ToolCallView["status"] {
-  if (state === "output-error" || state === "output-denied") return "failed";
-  if (state === "output-available") return "completed";
-  if (state === "approval-requested" || state === "approval-responded") return "waiting";
-  if (stopped) return "stopped";
-  return "running";
-}
-
-function toolStatusText(status: ToolCallView["status"], state: string) {
-  if (state === "output-denied") return "Denied";
-  if (state === "approval-requested") return "Waiting";
-  if (state === "approval-responded") return "Approved";
-  if (status === "completed") return "Done";
-  if (status === "failed") return "Failed";
-  if (status === "stopped") return "Stopped";
-  return "Running";
-}
-
-function toolLabel(name: string) {
-  if (name === GOAT_BRAIN_TOOL_NAME) return "Brain";
-  if (name === START_TASK_TOOL_NAME) return "Task";
-  if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
-  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
-  if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
-  if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
-  return name
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
-
-function toolDetail(
-  name: string,
-  part: Record<string, unknown> & { type: string },
-  status: ToolCallView["status"],
-) {
-  if (part.state === "output-error" && typeof part.errorText === "string") {
-    return truncateToolPreview(part.errorText);
-  }
-
-  if (name === GOAT_BRAIN_TOOL_NAME) {
-    return goatBrainToolDetail(part, status);
-  }
-
-  if (name === START_TASK_TOOL_NAME) {
-    return startTaskToolDetail(part);
-  }
-
-  if (name === SCHEDULE_TASK_TOOL_NAME) {
-    return scheduleTaskToolDetail(part);
-  }
-  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
-    return taskScheduleMutationToolDetail(part);
-  }
-
-  return formatToolInput(part.input);
-}
-
-function goatBrainToolDetail(
-  part: Record<string, unknown> & { type: string },
-  status: ToolCallView["status"],
-) {
-  if (part.state === "output-available" && isGoatBrainToolOutput(part.output)) {
-    if (!goatBrainToolOutputSucceeded(part.output)) {
-      return truncateToolPreview(
-        firstNonEmptyLine(part.output.error, part.output.stderr, part.output.stdout) ??
-          formatToolInput(part.input),
-      );
-    }
-    return truncateToolPreview(
-      firstNonEmptyLine(
-        goatBrainCliSuccessSummary(part.output.stdout),
-        part.output.stdout,
-        part.output.stderr,
-      ) ?? formatToolInput(part.input),
-    );
-  }
-
-  const inputPreview = formatToolInput(part.input);
-  if (inputPreview) return inputPreview;
-  return status === "running" ? "Running goat_brain" : null;
-}
-
-function startTaskToolDetail(part: Record<string, unknown>) {
-  if (isRecord(part.input)) {
-    const name = typeof part.input.name === "string" ? part.input.name : null;
-    const prompt = typeof part.input.prompt === "string" ? part.input.prompt : null;
-    return truncateToolPreview(name ?? prompt);
-  }
-  return formatToolInput(part.input);
-}
-
-function scheduleTaskToolDetail(part: Record<string, unknown>) {
-  if (isRecord(part.output)) {
-    const name = typeof part.output.scheduleName === "string" ? part.output.scheduleName : null;
-    const cron = typeof part.output.cron === "string" ? part.output.cron : null;
-    const timezone = typeof part.output.timezone === "string" ? part.output.timezone : null;
-    return truncateToolPreview([name, cron, timezone].filter(Boolean).join(" - "));
-  }
-  if (isRecord(part.input)) {
-    const source =
-      typeof part.input.sourceDescription === "string" ? part.input.sourceDescription : null;
-    const cron = typeof part.input.cron === "string" ? part.input.cron : null;
-    return truncateToolPreview([source, cron].filter(Boolean).join(" - "));
-  }
-  return formatToolInput(part.input);
-}
-
-function taskScheduleMutationToolDetail(part: Record<string, unknown>) {
-  if (isRecord(part.output)) {
-    const ok = part.output.ok === true;
-    const name =
-      typeof part.output.scheduleName === "string"
-        ? part.output.scheduleName
-        : typeof part.output.error === "string"
-          ? part.output.error
-          : null;
-    return truncateToolPreview([ok ? "Done" : "Issue", name].filter(Boolean).join(" - "));
-  }
-  if (isRecord(part.input)) {
-    const scheduleName =
-      typeof part.input.scheduleName === "string"
-        ? part.input.scheduleName
-        : typeof part.input.scheduleId === "string"
-          ? part.input.scheduleId
-          : null;
-    return truncateToolPreview(scheduleName ?? formatToolInput(part.input));
-  }
-  return formatToolInput(part.input);
-}
-
-function formatToolInput(value: unknown) {
-  if (typeof value === "string") return truncateToolPreview(value);
-  if (!isRecord(value)) return null;
-  if (typeof value.args === "string") return truncateToolPreview(`goat_brain ${value.args}`);
-  if (typeof value.command === "string") {
-    return truncateToolPreview(`goat_brain ${formatGoatBrainCommandInput(value)}`);
-  }
-  if (typeof value.action === "string") {
-    const detail =
-      typeof value.text === "string"
-        ? value.text
-        : typeof value.id === "string"
-          ? value.id
-          : undefined;
-    return truncateToolPreview(detail ? `${value.action}: ${detail}` : value.action);
-  }
-  if (typeof value.query === "string") return truncateToolPreview(`query: ${value.query}`);
-  if (typeof value.prompt === "string") return truncateToolPreview(value.prompt);
-  try {
-    return truncateToolPreview(JSON.stringify(value));
-  } catch {
-    return null;
-  }
-}
-
-function formatGoatBrainCommandInput(input: Record<string, unknown>) {
-  const command = input.command;
-  const flags = isRecord(input.flags) ? input.flags : {};
-  const parts = [String(command)];
-  for (const [rawName, value] of Object.entries(flags)) {
-    const name = rawName
-      .replace(/_/g, "-")
-      .replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)
-      .replace(/^-+/, "")
-      .replace(/-+/g, "-");
-    if (typeof value === "boolean") {
-      if (value) parts.push(`--${name}`);
-      continue;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === "string") parts.push(`--${name}`, formatToolArg(item));
-      }
-      continue;
-    }
-    if (typeof value === "string" || typeof value === "number") {
-      parts.push(`--${name}`, formatToolArg(String(value)));
-    }
-  }
-  return parts.join(" ");
-}
-
-function formatToolArg(value: string) {
-  if (/^[a-zA-Z0-9._/:=@,+-]+$/.test(value)) return value;
-  return `"${value.replace(/["\\]/g, "\\$&")}"`;
-}
-
-function formatDebugValue(value: unknown) {
-  if (typeof value === "string") return value;
-  if (value === undefined) return "";
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function brainOutputCommand(value: unknown) {
-  if (!isGoatBrainToolOutput(value)) return null;
-  const lines: string[] = [];
-  if (value.command) lines.push(`goat_brain ${value.command}`);
-  if (Array.isArray(value.argv)) lines.push(`argv: ${JSON.stringify(value.argv)}`);
-  return lines.length > 0 ? lines.join("\n") : null;
-}
-
-function brainOutputStdout(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stdout.trim() ? value.stdout : null;
-}
-
-function brainOutputStderr(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stderr.trim() ? value.stderr : null;
-}
-
-function brainOutputParsed(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.parsed !== undefined
-    ? formatDebugValue(value.parsed)
-    : null;
-}
-
-function brainOutputError(value: unknown, errorText: string | null) {
-  if (errorText?.trim()) return errorText;
-  return isGoatBrainToolOutput(value) && value.error?.trim() ? value.error : null;
-}
-
-function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOutput {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.ok === "boolean" &&
-    (typeof value.stdout === "string" || value.stdout === undefined) &&
-    (typeof value.stderr === "string" || value.stderr === undefined) &&
-    (typeof value.error === "string" || value.error === undefined)
-  );
-}
-
-function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput) {
-  if (output.ok) return true;
-  return parseGoatBrainCliJson(output.stdout)?.ok === true;
-}
-
-function goatBrainCliSuccessSummary(stdout: string | undefined) {
-  const parsed = parseGoatBrainCliJson(stdout);
-  if (!parsed || parsed.ok !== true) return null;
-  const appliedCount = Array.isArray(parsed.applied) ? parsed.applied.length : null;
-  if (typeof appliedCount === "number" && appliedCount > 0) {
-    return `Ingested ${appliedCount} brain change${appliedCount === 1 ? "" : "s"}.`;
-  }
-  const planCount = Array.isArray(parsed.plan) ? parsed.plan.length : null;
-  if (parsed.dryRun === true && typeof planCount === "number") {
-    return `Dry run planned ${planCount} brain change${planCount === 1 ? "" : "s"}.`;
-  }
-  return null;
-}
-
-function parseGoatBrainCliJson(stdout: string | undefined): Record<string, unknown> | null {
-  if (!stdout?.trim()) return null;
-  try {
-    const parsed = JSON.parse(stdout.trim());
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function firstNonEmptyLine(...values: Array<string | null | undefined>) {
-  for (const value of values) {
-    const line = value?.trim().split(/\r?\n/, 1)[0]?.trim();
-    if (line) return line;
-  }
-  return null;
-}
-
-function truncateToolPreview(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  if (!trimmed) return null;
-  return trimmed.length > 160 ? `${trimmed.slice(0, 157).trimEnd()}...` : trimmed;
-}
-
-function getToolCallMeta(tool: ToolCallView): {
-  icon: typeof FileText;
-  className: string;
-  spin: boolean;
-} {
-  if (tool.status === "failed") {
-    return { icon: AlertCircle, className: "text-danger", spin: false };
-  }
-  if (tool.status === "completed") {
-    return { icon: CheckCircle2, className: "text-emerald-600", spin: false };
-  }
-  if (tool.status === "waiting") {
-    return { icon: Clock, className: "text-ink-subtle", spin: false };
-  }
-  if (tool.status === "stopped") {
-    return { icon: Square, className: "text-ink-subtle", spin: false };
-  }
-  return {
-    icon:
-      tool.name === GOAT_BRAIN_TOOL_NAME
-        ? BookOpen
-        : tool.name === SCHEDULE_TASK_TOOL_NAME ||
-            tool.name === EDIT_TASK_SCHEDULE_TOOL_NAME ||
-            tool.name === DELETE_TASK_SCHEDULE_TOOL_NAME
-          ? CalendarClock
-          : CircleDotDashed,
-    className: "text-amber-500",
-    spin:
-      tool.name !== GOAT_BRAIN_TOOL_NAME &&
-      tool.name !== SCHEDULE_TASK_TOOL_NAME &&
-      tool.name !== EDIT_TASK_SCHEDULE_TOOL_NAME &&
-      tool.name !== DELETE_TASK_SCHEDULE_TOOL_NAME,
-  };
-}
-
-function buildChatTaskLookup(input: {
-  messages: readonly GoatChatUiMessage[];
-  tasks: readonly GoatTaskView[];
-  liveTasks: readonly GoatTaskView[] | null;
-}): ChatTaskLookup {
-  const lookup = new Map<string, ChatTaskCardView>();
-
-  for (const message of input.messages) {
-    const task = metadataTaskCard(message.metadata);
-    if (task) setChatTaskLookupValue(lookup, task);
-  }
-
-  for (const task of input.tasks) {
-    setChatTaskLookupValue(lookup, taskCardFromTask(task));
-  }
-
-  for (const task of input.liveTasks ?? []) {
-    setChatTaskLookupValue(lookup, taskCardFromTask(task));
-  }
-
-  return lookup;
-}
-
-function setChatTaskLookupValue(lookup: Map<string, ChatTaskCardView>, task: GoatTaskCardMetadata) {
-  const existing = lookup.get(task.id);
-  lookup.set(task.id, {
-    id: task.id,
-    displayId: task.displayId ?? existing?.displayId ?? null,
-    title: task.title ?? existing?.title ?? null,
-    status: task.status ?? existing?.status ?? null,
-  });
-}
-
-function taskCardFromTask(task: GoatTaskView): ChatTaskCardView {
-  return {
-    id: task.id,
-    displayId: task.displayId,
-    title: task.name,
-    status: task.status,
-  };
-}
-
-function resolveChatTaskCard(
-  fallback: GoatTaskCardMetadata,
-  lookup: ChatTaskLookup,
-): ChatTaskCardView {
-  const resolved = lookup.get(fallback.id);
-  return {
-    id: fallback.id,
-    displayId: resolved?.displayId ?? fallback.displayId ?? null,
-    title: resolved?.title ?? fallback.title ?? null,
-    status: resolved?.status ?? fallback.status ?? null,
-  };
-}
-
-function taskFromOutput(output: StartTaskToolOutput): GoatTaskCardMetadata {
-  return {
-    id: output.taskId,
-    displayId: output.taskDisplayId,
-    title: output.taskName,
-    status: output.status === "queued" ? "queued" : null,
-  };
-}
-
-function isStartTaskToolOutput(value: unknown): value is StartTaskToolOutput {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const output = value as Record<string, unknown>;
-  return (
-    typeof output.taskId === "string" &&
-    typeof output.taskDisplayId === "string" &&
-    typeof output.taskName === "string"
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function runBackgroundChatTurn(input: { prompt: string; model: string }) {
@@ -2757,60 +2136,6 @@ function getTaskMeta(task: GoatTaskView): {
     className: "text-amber-500",
     detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
     spin: true,
-  };
-}
-
-function getChatTaskCardMeta(status: GoatTaskStatus | null): {
-  icon: typeof FileText;
-  className: string;
-  label: string;
-  spin: boolean;
-} {
-  if (status === "failed") {
-    return {
-      icon: AlertCircle,
-      className: "text-danger",
-      label: GOAT_STATUS_COPY.failed,
-      spin: false,
-    };
-  }
-  if (status === "canceled") {
-    return {
-      icon: X,
-      className: "text-ink-subtle",
-      label: GOAT_STATUS_COPY.canceled,
-      spin: false,
-    };
-  }
-  if (status === "succeeded") {
-    return {
-      icon: CheckCircle2,
-      className: "text-emerald-600",
-      label: GOAT_STATUS_COPY.succeeded,
-      spin: false,
-    };
-  }
-  if (status === "running") {
-    return {
-      icon: CircleDotDashed,
-      className: "text-amber-500",
-      label: GOAT_STATUS_COPY.running,
-      spin: true,
-    };
-  }
-  if (status === "queued") {
-    return {
-      icon: Clock,
-      className: "text-ink-subtle",
-      label: GOAT_STATUS_COPY.queued,
-      spin: false,
-    };
-  }
-  return {
-    icon: Clock,
-    className: "text-ink-subtle",
-    label: "Status pending",
-    spin: false,
   };
 }
 
