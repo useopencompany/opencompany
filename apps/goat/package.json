@@ -17,6 +17,7 @@
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.44",
     "@ai-sdk/react": "3.0.191",
+    "@modelcontextprotocol/sdk": "1.26.0",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
@@ -36,12 +37,15 @@
     "drizzle-orm": "^0.45.2",
     "fumadocs-core": "^16.9.0",
     "fumadocs-mdx": "^15.0.7",
+    "jose": "^5.10.0",
     "lucide-react": "^1.16.0",
+    "mcp-handler": "^1.1.0",
     "next": "16.2.10",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

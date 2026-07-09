@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { AgentModelId, ModelRatingTier } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime";
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import {
   Command,
@@ -1622,9 +1622,6 @@ function GoatModelPicker({
       >
         <Command className="bg-surface text-ink">
           <CommandInput placeholder="Search models..." />
-          <div className="flex items-center justify-end px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-            Capability / Speed / Cost
-          </div>
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
             <CommandGroup heading="Models">
@@ -1659,12 +1656,6 @@ function GoatModelPicker({
                         {modelProviderLabel(model.id)}
                       </div>
                     </div>
-                    <ModelRatingMeters
-                      capability={model.ratings.capability}
-                      speed={model.ratings.speed}
-                      cost={model.ratings.cost}
-                      className="shrink-0"
-                    />
                   </CommandItem>
                 );
               })}
@@ -1710,42 +1701,6 @@ function modelProviderLabel(id: string) {
   if (provider === "moonshotai") return "Moonshot";
   if (provider === "openai") return "OpenAI";
   return provider;
-}
-
-function ModelRatingMeters({
-  capability,
-  speed,
-  cost,
-  className,
-}: {
-  capability: ModelRatingTier;
-  speed: ModelRatingTier;
-  cost: ModelRatingTier;
-  className?: string;
-}) {
-  return (
-    <div className={cn("grid grid-cols-3 gap-1 text-ink-muted", className)} aria-hidden="true">
-      <RatingDots value={capability} />
-      <RatingDots value={speed} />
-      <RatingDots value={cost} />
-    </div>
-  );
-}
-
-function RatingDots({ value }: { value: ModelRatingTier }) {
-  return (
-    <span className="flex items-center gap-0.5">
-      {[1, 2, 3].map((dot) => (
-        <span
-          key={dot}
-          className={cn(
-            "h-1 w-1 rounded-full",
-            dot <= value ? "bg-ink-muted" : "bg-surface-active",
-          )}
-        />
-      ))}
-    </span>
-  );
 }
 
 function SubmitButton({

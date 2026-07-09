@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { Brain, Lock, Plus } from "lucide-react";
+import { Brain, Check, Copy, Lock, Plus, Settings2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
@@ -9,6 +9,7 @@ import {
   type GoatWorkspaceView,
   useGoatAppData,
 } from "@/components/GoatAppDataProvider";
+import { useHydrated } from "@/components/useHydrated";
 import {
   createGoatBrainAction,
   type GoatWorkspaceMemberView,
@@ -18,9 +19,10 @@ import {
 } from "@/lib/workspace-actions";
 
 export function GoatBrainSwitcher() {
-  const { brains, activeBrain } = useGoatAppData();
+  const { workspace, brains, activeBrain } = useGoatAppData();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [accessBrain, setAccessBrain] = useState<GoatBrainSummaryView | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const switchBrain = (brainId: string) => {
@@ -67,6 +69,16 @@ export function GoatBrainSwitcher() {
                   <Lock size={11} strokeWidth={1.75} className="shrink-0 text-ink/40" />
                 ) : null}
               </button>
+              {workspace.role === "admin" ? (
+                <button
+                  type="button"
+                  aria-label={`Manage access to ${brain.name}`}
+                  onClick={() => setAccessBrain(brain)}
+                  className="rounded-md p-1.5 text-ink/0 transition-colors hover:bg-surface-hover hover:text-ink/80 group-hover/brain:text-ink/50"
+                >
+                  <Settings2 size={13} strokeWidth={1.75} />
+                </button>
+              ) : null}
             </div>
           );
         })}
@@ -85,6 +97,13 @@ export function GoatBrainSwitcher() {
         </button>
       </div>
       {creating ? <CreateBrainDialog onClose={() => setCreating(false)} /> : null}
+      {accessBrain ? (
+        <BrainAccessDialog
+          brain={accessBrain}
+          workspace={workspace}
+          onClose={() => setAccessBrain(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -260,6 +279,7 @@ export function BrainAccessDialog({
           )}
         </div>
       ) : null}
+      <ClaudeConnectorBlock brainId={brain.id} />
       <div className="flex justify-end gap-2 pt-1">
         <button
           type="button"
@@ -283,6 +303,52 @@ export function BrainAccessDialog({
 
 function goatBrainHref(brainId: string) {
   return `/brain/${encodeURIComponent(brainId)}`;
+}
+
+function ClaudeConnectorBlock({ brainId }: { brainId: string }) {
+  const [copied, setCopied] = useState(false);
+  const hydrated = useHydrated();
+  const origin = hydrated ? window.location.origin.replace(/\/+$/, "") : "";
+  const connectorPath = `/api/mcp/${encodeURIComponent(brainId)}/mcp`;
+  const connectorUrl = origin ? `${origin}${connectorPath}` : connectorPath;
+
+  const copyConnectorUrl = async () => {
+    if (!origin) return;
+    try {
+      await navigator.clipboard.writeText(connectorUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      toast.error("Could not copy connector URL.");
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-ink/10 p-2.5">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <span className="block text-[12px] font-medium text-ink">Connect to Claude</span>
+          <code className="block truncate text-[12px] leading-5 text-ink-subtle">
+            {connectorUrl}
+          </code>
+        </div>
+        <button
+          type="button"
+          onClick={copyConnectorUrl}
+          disabled={!origin}
+          aria-label="Copy Claude connector URL"
+          title="Copy Claude connector URL"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {copied ? <Check size={15} strokeWidth={2} /> : <Copy size={15} strokeWidth={2} />}
+        </button>
+      </div>
+      <p className="text-[11.5px] leading-4 text-ink-subtle">
+        Claude -&gt; Settings -&gt; Connectors -&gt; Add custom connector, then sign in with your
+        Goat account.
+      </p>
+    </div>
+  );
 }
 
 function VisibilityOption({

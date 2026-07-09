@@ -49,7 +49,7 @@ jobs:
       github.event.action != 'unlabeled' &&
       contains(github.event.pull_request.labels.*.name, 'preview')
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    timeout-minutes: 20
     continue-on-error: true
     permissions:
       checks: read
@@ -140,7 +140,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'preview') &&
       needs.await-ci.outputs.passed == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    timeout-minutes: 20
     continue-on-error: true
     environment: preview
     permissions:

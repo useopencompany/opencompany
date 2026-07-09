@@ -175,6 +175,7 @@ Set these in the separate Vercel project for Goat:
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls for the default Goat chat agent. Same key the runner uses for Goat tasks. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes | Goat domain origin, for example `https://goat.example.com`. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Goat callback URL, for example `https://goat.example.com/auth/callback`. |
+| `GOAT_AUTHKIT_DOMAIN` | MCP only | AuthKit issuer origin used to verify Goat MCP connector bearer tokens, for example `https://example.authkit.app`. The WorkOS environment also needs Client ID Metadata Documents and Dynamic Client Registration enabled. |
 | `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` | Yes | Server-to-server runner URL. `RUNNER_INTERNAL_URL` wins when set. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Bearer token for the runner wake route. Must match Render. |
 | `ELECTRIC_URL` | Yes | Electric shape service base URL. The Goat proxy exposes only `goat.tasks` scoped to the signed-in WorkOS user. |
