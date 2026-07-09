@@ -1,4 +1,5 @@
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
@@ -28,6 +29,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     jamie,
     slack,
     codex,
+    workspaceMembers,
   ] = await Promise.all([
     listCurrentUserGoatTasks(),
     listCurrentUserGoatTaskSchedules(),
@@ -39,6 +41,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatJamieIntegrationState(user.workosUserId),
     getGoatSlackIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
+    listGoatWorkspaceMembers(workspace.id),
   ]);
 
   const initialData: GoatAppInitialData = {
@@ -53,6 +56,13 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       name: workspace.name,
       role,
     },
+    workspaceMembers: workspaceMembers.map(({ user: member }) => ({
+      workosUserId: member.workosUserId,
+      email: member.email,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      avatarUrl: member.avatarUrl,
+    })),
     brains: brains.map(brainSummaryView),
     activeBrain: activeBrain ? brainSummaryView(activeBrain) : null,
     tasks: tasks.map((task) => ({

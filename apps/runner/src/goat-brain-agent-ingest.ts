@@ -353,6 +353,10 @@ async function runBrainAgentIngestSession(input: {
   buildPrompt: () => string;
   commands?: readonly string[];
   prepareRoot?: (root: string) => Promise<void>;
+  // Attribution for documents this session creates. Defaults to the acting
+  // user (the human whose capture/meeting/upload this is); Slack passes null
+  // because the integration owner did not author the channel's content.
+  createdByWorkosId?: string | null;
   signal?: AbortSignal;
   deps?: GoatBrainAgentIngestDeps;
 }): Promise<BrainAgentIngestSessionResult> {
@@ -407,6 +411,9 @@ async function runBrainAgentIngestSession(input: {
       root,
       baseSnapshot: materialized,
       db,
+      ...(input.createdByWorkosId !== undefined
+        ? { createdByWorkosId: input.createdByWorkosId }
+        : {}),
     });
     if (synced.conflicts.length > 0) {
       throw new Error(
@@ -516,6 +523,7 @@ export async function runSlackConversationAgentIngest(
     env: input.env,
     system: SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT,
     buildPrompt: () => buildSlackConversationAgentIngestPrompt(input.item),
+    createdByWorkosId: null,
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });

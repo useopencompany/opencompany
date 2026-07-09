@@ -33,6 +33,16 @@ type GoatUserView = {
   avatarUrl: string | null;
 };
 
+// Directory of workspace members used to render attribution (brain document
+// "created by", etc.) from a workos user id.
+export type GoatWorkspaceMemberView = {
+  workosUserId: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  avatarUrl: string | null;
+};
+
 export type GoatWorkspaceView = {
   id: string;
   name: string;
@@ -50,6 +60,7 @@ export type GoatBrainSummaryView = {
 export type GoatAppInitialData = {
   user: GoatUserView;
   workspace: GoatWorkspaceView;
+  workspaceMembers: GoatWorkspaceMemberView[];
   brains: GoatBrainSummaryView[];
   activeBrain: GoatBrainSummaryView | null;
   tasks: GoatTaskView[];
@@ -264,6 +275,7 @@ function documentViewFromRow(
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
     parseError: null,
+    createdByWorkosId: row.created_by_workos_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

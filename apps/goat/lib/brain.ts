@@ -72,6 +72,9 @@ export type GoatBrainDocumentView = {
   contentHash: string;
   sizeBytes: number;
   parseError?: string | null;
+  // Who originally put the document in the brain; null when no human did
+  // (e.g. Slack ingestion) or when history made the creator unrecoverable.
+  createdByWorkosId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -407,6 +410,7 @@ export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDoc
     contentHash: row.contentHash,
     sizeBytes: row.sizeBytes,
     parseError: null,
+    createdByWorkosId: row.createdByWorkosId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

@@ -221,6 +221,7 @@ export type GoatIntegrationRow = {
 export type GoatBrainDocumentRow = {
   id: string;
   user_workos_id: string;
+  created_by_workos_id: string | null;
   brain_ref: string;
   brain_id: string;
   folder_path: string;

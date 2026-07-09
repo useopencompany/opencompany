@@ -47,6 +47,7 @@ const BRAIN_SOURCE_ITEM_COLUMNS = [
 const BRAIN_DOCUMENT_COLUMNS = [
   "id",
   "user_workos_id",
+  "created_by_workos_id",
   "brain_ref",
   "brain_id",
   "folder_path",
