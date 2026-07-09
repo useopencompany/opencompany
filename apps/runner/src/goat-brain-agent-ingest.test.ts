@@ -263,6 +263,46 @@ describe("runGoatChatCaptureAgentIngest", () => {
     expect(okCli).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
   });
+
+  it("counts folder creation as a brain mutation", async () => {
+    mockAgentRun({
+      finalText: "Created the launch folder.",
+      toolInvocations: [{ command: "folder", args: ["create", "--path", "projects/launch"] }],
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({ toolCalls: 1, mutations: 1 });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
+  });
+
+  it("keeps folder list read-only for no-write detection", async () => {
+    mockAgentRun({
+      finalText: "Listed folders.",
+      toolInvocations: [{ command: "folder", args: ["list"] }],
+    });
+
+    await expect(
+      runGoatChatCaptureAgentIngest(
+        {
+          userWorkosId: "user_123",
+          brainRef: "gbrain_123",
+          item: captureItem(),
+          env: { vercelAiGatewayApiKey: "gw_test" },
+        },
+        { runCli: okCli },
+      ),
+    ).rejects.toThrow("finished without writing");
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
+  });
 });
 
 describe("runJamieMeetingAgentIngest", () => {

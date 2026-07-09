@@ -78,9 +78,9 @@ const READ_ONLY_AGENT_CLI_COMMANDS = new Set([
   "get",
   "timeline",
   "query",
-  "folder",
   "doctor",
 ]);
+const READ_ONLY_AGENT_FOLDER_SUBCOMMANDS = new Set(["list"]);
 
 export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> & {
   // Needed only by handlers that fetch blob bytes (uploaded assets); optional
@@ -607,7 +607,7 @@ async function runIngestAgentLoop(input: {
           ...(args.stdin ? { stdin: args.stdin } : {}),
           signal: abort.signal,
         });
-        if (result.ok && !READ_ONLY_AGENT_CLI_COMMANDS.has(args.command)) {
+        if (result.ok && isMutatingGoatBrainAgentInvocation(args)) {
           mutations += 1;
         }
         return {
@@ -668,6 +668,14 @@ export function validateGoatBrainAgentInvocation(
     return "The --root flag is not allowed; the brain root is fixed for this job.";
   }
   return null;
+}
+
+function isMutatingGoatBrainAgentInvocation(args: { command: string; args?: string[] }): boolean {
+  if (args.command === "folder") {
+    const subcommand = args.args?.[0] ?? "list";
+    return !READ_ONLY_AGENT_FOLDER_SUBCOMMANDS.has(subcommand);
+  }
+  return !READ_ONLY_AGENT_CLI_COMMANDS.has(args.command);
 }
 
 const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
