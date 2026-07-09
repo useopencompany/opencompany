@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { goatBrainFilePathFor, upsertGoatBrainFile } from "@opencompany/db/goat-brain-files";
+import {
+  goatBrainFilePathFor,
+  listGoatBrainFiles,
+  upsertGoatBrainFile,
+} from "@opencompany/db/goat-brain-files";
 import {
   type GoatBrainIngestJob,
   type GoatBrainIngestJobKind,
@@ -506,6 +510,8 @@ export async function writeJamieMeetingToBrain(input: {
   if (!brainRef) {
     throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
   }
+  const existingRows = await listGoatBrainFiles({ brainRef }, { db });
+  const meetingAlreadyExists = existingRows.some((row) => row.brainId === writes.meetingBrainId);
   const evidence = await upsertGoatBrainFile(
     {
       brainRef,
@@ -530,6 +536,17 @@ export async function writeJamieMeetingToBrain(input: {
     evidenceBrainId: writes.evidenceBrainId,
     meetingDocumentId: meeting.id,
     evidenceDocumentId: evidence.id,
+    pages:
+      meeting.kind === "page"
+        ? [
+            {
+              brainId: meeting.brainId,
+              folderPath: meeting.folderPath,
+              title: meeting.title || meeting.brainId,
+              action: meetingAlreadyExists ? "updated" : "created",
+            },
+          ]
+        : [],
     truncatedTranscript: writes.truncatedTranscript,
   };
 }
