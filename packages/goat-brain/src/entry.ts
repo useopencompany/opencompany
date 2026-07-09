@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   type ParsedGoatBrainDocument,
+  normalizeGoatBrainBody,
   parseGoatBrainDocument,
   serializeGoatBrainDocument,
 } from "./document";
@@ -200,7 +201,7 @@ export function serializeLegacyGoatBrainEntry(entry: GoatBrainEntry): string {
 }
 
 export function serializeGoatBrainPayload(entry: GoatBrainEntry): string {
-  return entry.body;
+  return normalizeGoatBrainBody(entry.body);
 }
 
 export function serializeGoatBrainSidecar(entry: GoatBrainEntry): string {

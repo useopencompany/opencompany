@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { normalizeGoatBrainBody } from "@opencompany/goat-brain/document";
 import { useLiveQuery } from "@tanstack/react-db";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
@@ -230,7 +231,7 @@ function documentViewFromRow(
     path,
     title: row.title ?? row.brain_id,
     content: row.content,
-    body: row.body,
+    body: normalizeGoatBrainBody(row.body),
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
     format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",

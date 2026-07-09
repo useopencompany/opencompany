@@ -240,6 +240,50 @@ describe("GoatBrainView", () => {
     );
     expect(updateGoatBrainDocumentAction).toHaveBeenCalledTimes(1);
   });
+
+  it("renders nested legacy frontmatter as body text and autosaves the normalized value", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoatBrainDocumentAction).mockResolvedValueOnce({
+      ok: true,
+      path: "people/ada-lovelace.md",
+      document: {
+        ...documentWithTimeline,
+        body: "Nested truth. Updated.",
+        contentHash: "hash-next",
+      },
+    });
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[
+          {
+            ...documentWithTimeline,
+            body: nestedLegacyBrainBody,
+            contentHash: "polluted-hash",
+          },
+        ]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    const body = screen.getByRole("textbox", { name: "Brain body" });
+    expect(body).toHaveValue("Nested truth.");
+
+    await user.type(body, " Updated.");
+
+    await waitFor(
+      () => {
+        expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
+          documentId: "doc_ada",
+          body: "Nested truth. Updated.",
+          expectedContentHash: "polluted-hash",
+        });
+      },
+      { timeout: 4000 },
+    );
+  });
 });
 
 const folders: GoatBrainFolderView[] = [
@@ -336,3 +380,25 @@ const evidenceDocument: GoatBrainDocumentView = {
   createdAt: "2026-07-06T12:00:00.000Z",
   updatedAt: "2026-07-06T12:00:00.000Z",
 };
+
+const nestedLegacyBrainBody = `---
+id: nested-note
+folder: inbox
+kind: page
+type: note
+status: draft
+title: Nested note
+createdAt: 2026-01-01T00:00:00.000Z
+updatedAt: 2026-01-01T00:00:00.000Z
+related: []
+---
+
+# Nested note
+
+## Compiled truth
+Nested truth.
+
+<!-- TIMELINE:BELOW - append only past this marker -->
+
+## Timeline
+`;

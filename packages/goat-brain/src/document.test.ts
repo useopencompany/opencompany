@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeGoatBrainBody,
   parseGoatBrainDocument,
   replaceGoatBrainCompiledTruth,
   serializeGoatBrainDocument,
@@ -106,6 +107,90 @@ Original timeline body.
         body: "Original timeline body.",
       },
     ]);
+  });
+
+  it("unwraps a nested legacy brain document body to compiled truth", () => {
+    const nested = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "nested-note",
+        folder: "inbox",
+        kind: "page",
+        type: "note",
+        status: "draft",
+        title: "Nested note",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Nested note",
+      compiledTruth: "Only this truth belongs in the editable body.",
+      timeline: [
+        {
+          evidenceId: "ev-nested",
+          at: "2026-01-01T00:00:00.000Z",
+          body: "Nested timeline.",
+        },
+      ],
+    });
+
+    expect(normalizeGoatBrainBody(nested)).toBe("Only this truth belongs in the editable body.");
+  });
+
+  it("preserves ordinary markdown that starts with a frontmatter-like fence", () => {
+    const markdown = `---
+title: Example
+---
+
+This is a user-authored Markdown note, not a full Goat Brain document.`;
+
+    expect(normalizeGoatBrainBody(markdown)).toBe(markdown);
+  });
+
+  it("does not nest frontmatter when replacing compiled truth with a legacy document", () => {
+    const source = `---
+id: acme
+folder: companies
+kind: page
+type: company
+status: draft
+title: Acme
+createdAt: 2026-01-01T00:00:00.000Z
+updatedAt: 2026-01-01T00:00:00.000Z
+related: []
+---
+
+# Acme
+
+## Compiled truth
+Old truth.
+
+<!-- TIMELINE:BELOW - append only past this marker -->
+
+## Timeline
+`;
+    const nested = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "nested-note",
+        folder: "inbox",
+        kind: "page",
+        type: "note",
+        status: "draft",
+        title: "Nested note",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Nested note",
+      compiledTruth: "Replacement truth.",
+      timeline: [],
+    });
+
+    const updated = replaceGoatBrainCompiledTruth(source, nested);
+    const parsed = parseGoatBrainDocument(updated);
+
+    expect(parsed.compiledTruth).toBe("Replacement truth.");
+    expect(parsed.compiledTruth).not.toContain("---");
+    expect(updated.match(/^---$/gm)).toHaveLength(2);
   });
 
   it("rejects documents whose folder does not match the kind", () => {
