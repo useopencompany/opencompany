@@ -230,17 +230,20 @@ export async function claimLocalCodexCommandsForBridge(input: {
     WITH candidate AS (
       SELECT id
       FROM goat.local_codex_commands
-      WHERE (
-          status = 'queued'
-          AND (bridge_id = ${input.bridge.id} OR bridge_id IS NULL)
-        )
-        OR (
-          status = 'claimed'
-          AND claimed_at < ${staleClaimedBefore}
-          AND (
-            bridge_id = ${input.bridge.id}
-            OR claimed_by_bridge_id = ${input.bridge.id}
-            OR bridge_id IS NULL
+      WHERE user_workos_id = ${input.bridge.userWorkosId}
+        AND (
+          (
+            status = 'queued'
+            AND (bridge_id = ${input.bridge.id} OR bridge_id IS NULL)
+          )
+          OR (
+            status = 'claimed'
+            AND claimed_at < ${staleClaimedBefore}
+            AND (
+              bridge_id = ${input.bridge.id}
+              OR claimed_by_bridge_id = ${input.bridge.id}
+              OR bridge_id IS NULL
+            )
           )
         )
       ORDER BY created_at ASC
@@ -302,10 +305,9 @@ export async function completeLocalCodexCommand(input: {
     .where(
       and(
         eq(goatLocalCodexCommands.id, input.commandId),
-        or(
-          eq(goatLocalCodexCommands.claimedByBridgeId, input.bridge.id),
-          eq(goatLocalCodexCommands.bridgeId, input.bridge.id),
-        ),
+        eq(goatLocalCodexCommands.userWorkosId, input.bridge.userWorkosId),
+        eq(goatLocalCodexCommands.status, "claimed"),
+        eq(goatLocalCodexCommands.claimedByBridgeId, input.bridge.id),
       ),
     )
     .returning();
@@ -331,16 +333,28 @@ export async function completeLocalCodexCommand(input: {
   await getDb()
     .update(goatLocalCodexSessions)
     .set(sessionPatch)
-    .where(eq(goatLocalCodexSessions.id, command.localCodexSessionId));
+    .where(
+      and(
+        eq(goatLocalCodexSessions.id, command.localCodexSessionId),
+        eq(goatLocalCodexSessions.userWorkosId, input.bridge.userWorkosId),
+      ),
+    );
 
   if (command.localCodexTurnId) {
+    const turn = await loadLocalCodexTurnForSession({
+      userWorkosId: input.bridge.userWorkosId,
+      localCodexSessionId: command.localCodexSessionId,
+      turnId: command.localCodexTurnId,
+    });
+    if (!turn) return { ok: true, status: 200, error: null };
+
     const turnPatch: Partial<typeof goatLocalCodexTurns.$inferInsert> = { updatedAt: now };
     if (input.codexTurnId) turnPatch.codexTurnId = input.codexTurnId;
     if (input.status === "failed") {
       turnPatch.status = "failed";
       turnPatch.error = input.error ?? "Local Codex command failed.";
       turnPatch.completedAt = now;
-      await appendAssistantActivity(command.localCodexTurnId, `Codex error: ${turnPatch.error}`);
+      await appendAssistantActivity(turn, `Codex error: ${turnPatch.error}`);
     } else if (command.kind === "interrupt" || command.kind === "close") {
       turnPatch.status = "interrupted";
       turnPatch.error = null;
@@ -349,7 +363,13 @@ export async function completeLocalCodexCommand(input: {
     await getDb()
       .update(goatLocalCodexTurns)
       .set(turnPatch)
-      .where(eq(goatLocalCodexTurns.id, command.localCodexTurnId));
+      .where(
+        and(
+          eq(goatLocalCodexTurns.id, command.localCodexTurnId),
+          eq(goatLocalCodexTurns.userWorkosId, input.bridge.userWorkosId),
+          eq(goatLocalCodexTurns.localCodexSessionId, command.localCodexSessionId),
+        ),
+      );
   }
 
   return { ok: true, status: 200, error: null };
@@ -368,13 +388,31 @@ export async function recordLocalCodexBridgeEvents(input: {
   });
   if (!localSession) return { ok: false, status: 404, error: "Local Codex session not found." };
 
+  const command = input.commandId
+    ? await loadLocalCodexCommandForBridgeSession({
+        bridge: input.bridge,
+        localCodexSessionId: localSession.id,
+        commandId: input.commandId,
+      })
+    : null;
+  if (input.commandId && !command) {
+    return { ok: false, status: 404, error: "Local Codex command not found." };
+  }
+
+  const localTurn = await resolveLocalCodexTurnForEvent({
+    userWorkosId: input.bridge.userWorkosId,
+    localSession,
+    localCodexTurnId: input.localCodexTurnId ?? null,
+  });
+  if (!localTurn.ok) return localTurn;
+
   const normalized = input.events.flatMap(normalizeCodexAppServerEvent);
   for (const event of normalized) {
     await persistLocalCodexEvent({
       bridge: input.bridge,
       localSession,
-      localCodexTurnId: input.localCodexTurnId ?? localSession.activeTurnId,
-      commandId: input.commandId ?? null,
+      localTurn: localTurn.turn,
+      commandId: command?.id ?? null,
       event,
     });
   }
@@ -456,6 +494,30 @@ async function loadLocalCodexSessionForBridge(input: {
     )
     .limit(1);
   return session ?? null;
+}
+
+async function loadLocalCodexCommandForBridgeSession(input: {
+  bridge: GoatLocalBridge;
+  localCodexSessionId: string;
+  commandId: string;
+}) {
+  const [command] = await getDb()
+    .select()
+    .from(goatLocalCodexCommands)
+    .where(
+      and(
+        eq(goatLocalCodexCommands.id, input.commandId),
+        eq(goatLocalCodexCommands.userWorkosId, input.bridge.userWorkosId),
+        eq(goatLocalCodexCommands.localCodexSessionId, input.localCodexSessionId),
+        or(
+          eq(goatLocalCodexCommands.bridgeId, input.bridge.id),
+          eq(goatLocalCodexCommands.claimedByBridgeId, input.bridge.id),
+          isNull(goatLocalCodexCommands.bridgeId),
+        ),
+      ),
+    )
+    .limit(1);
+  return command ?? null;
 }
 
 async function createFirstLocalCodexTurn(input: {
@@ -854,18 +916,17 @@ async function enqueueLocalCodexCommand(input: {
 async function persistLocalCodexEvent(input: {
   bridge: GoatLocalBridge;
   localSession: GoatLocalCodexSession;
-  localCodexTurnId?: string | null;
+  localTurn?: LocalCodexTurnRow | null;
   commandId?: string | null;
   event: CodexAppServerNormalizedEvent;
 }) {
   const now = new Date();
-  const turnId = input.localCodexTurnId ?? input.localSession.activeTurnId;
   await getDb()
     .insert(goatLocalCodexEvents)
     .values({
       userWorkosId: input.bridge.userWorkosId,
       localCodexSessionId: input.localSession.id,
-      localCodexTurnId: turnId ?? null,
+      localCodexTurnId: input.localTurn?.id ?? null,
       bridgeId: input.bridge.id,
       commandId: input.commandId ?? null,
       type: input.event.type,
@@ -874,11 +935,10 @@ async function persistLocalCodexEvent(input: {
       createdAt: now,
     });
 
-  const turn = turnId ? await loadLocalCodexTurn(turnId) : null;
-  if (turn) {
+  if (input.localTurn) {
     await applyLocalCodexEventToChat({
       localSession: input.localSession,
-      turn,
+      turn: input.localTurn,
       event: input.event,
       now,
     });
@@ -903,7 +963,7 @@ async function applyLocalCodexEventToChat(input: {
 
   const activity = activityFromLocalCodexEvent(input.event);
   if (activity) {
-    await appendAssistantActivity(input.turn.id, activity);
+    await appendAssistantActivity(input.turn, activity);
   }
 
   if (input.event.type === "turn.started") {
@@ -915,7 +975,13 @@ async function applyLocalCodexEventToChat(input: {
         status: "running",
         updatedAt: input.now,
       })
-      .where(eq(goatLocalCodexTurns.id, input.turn.id));
+      .where(
+        and(
+          eq(goatLocalCodexTurns.id, input.turn.id),
+          eq(goatLocalCodexTurns.userWorkosId, input.localSession.userWorkosId),
+          eq(goatLocalCodexTurns.localCodexSessionId, input.localSession.id),
+        ),
+      );
     await getDb()
       .update(goatLocalCodexSessions)
       .set({
@@ -924,7 +990,12 @@ async function applyLocalCodexEventToChat(input: {
         error: null,
         updatedAt: input.now,
       })
-      .where(eq(goatLocalCodexSessions.id, input.localSession.id));
+      .where(
+        and(
+          eq(goatLocalCodexSessions.id, input.localSession.id),
+          eq(goatLocalCodexSessions.userWorkosId, input.localSession.userWorkosId),
+        ),
+      );
     return;
   }
 
@@ -945,7 +1016,13 @@ async function applyLocalCodexEventToChat(input: {
         completedAt: input.now,
         updatedAt: input.now,
       })
-      .where(eq(goatLocalCodexTurns.id, input.turn.id));
+      .where(
+        and(
+          eq(goatLocalCodexTurns.id, input.turn.id),
+          eq(goatLocalCodexTurns.userWorkosId, input.localSession.userWorkosId),
+          eq(goatLocalCodexTurns.localCodexSessionId, input.localSession.id),
+        ),
+      );
     await getDb()
       .update(goatLocalCodexSessions)
       .set({
@@ -954,27 +1031,65 @@ async function applyLocalCodexEventToChat(input: {
         error: error || null,
         updatedAt: input.now,
       })
-      .where(eq(goatLocalCodexSessions.id, input.localSession.id));
+      .where(
+        and(
+          eq(goatLocalCodexSessions.id, input.localSession.id),
+          eq(goatLocalCodexSessions.userWorkosId, input.localSession.userWorkosId),
+        ),
+      );
     await getDb()
       .update(goatChatSessions)
       .set({ updatedAt: input.now })
-      .where(eq(goatChatSessions.id, input.localSession.chatSessionId));
+      .where(
+        and(
+          eq(goatChatSessions.id, input.localSession.chatSessionId),
+          eq(goatChatSessions.userWorkosId, input.localSession.userWorkosId),
+        ),
+      );
     await setAssistantContentFromCompletedEvent(input.turn.id, input.turn.assistantMessageId);
   }
 }
 
-async function loadLocalCodexTurn(turnId: string) {
+async function resolveLocalCodexTurnForEvent(input: {
+  userWorkosId: string;
+  localSession: GoatLocalCodexSession;
+  localCodexTurnId?: string | null;
+}): Promise<
+  { ok: true; turn: LocalCodexTurnRow | null } | { ok: false; status: 404; error: string }
+> {
+  const turnId = input.localCodexTurnId ?? input.localSession.activeTurnId;
+  if (!turnId) return { ok: true, turn: null };
+
+  const turn = await loadLocalCodexTurnForSession({
+    userWorkosId: input.userWorkosId,
+    localCodexSessionId: input.localSession.id,
+    turnId,
+  });
+  if (!turn) return { ok: false, status: 404, error: "Local Codex turn not found." };
+
+  return { ok: true, turn };
+}
+
+async function loadLocalCodexTurnForSession(input: {
+  userWorkosId: string;
+  localCodexSessionId: string;
+  turnId: string;
+}) {
   const [turn] = await getDb()
     .select()
     .from(goatLocalCodexTurns)
-    .where(eq(goatLocalCodexTurns.id, turnId))
+    .where(
+      and(
+        eq(goatLocalCodexTurns.id, input.turnId),
+        eq(goatLocalCodexTurns.userWorkosId, input.userWorkosId),
+        eq(goatLocalCodexTurns.localCodexSessionId, input.localCodexSessionId),
+      ),
+    )
     .limit(1);
   return turn ?? null;
 }
 
-async function appendAssistantActivity(turnId: string, activity: string) {
-  const turn = await loadLocalCodexTurn(turnId);
-  if (!turn) return;
+async function appendAssistantActivity(turn: LocalCodexTurnRow, activity: string) {
   const text = `\n\n${activity}`;
   await appendAssistantContent(turn.assistantMessageId, text);
 }
