@@ -8,7 +8,7 @@ import {
   recordGoatCounter,
   startGoatSpan,
 } from "@opencompany/goat-observability";
-import { convertToModelMessages, createGateway, stepCountIs, streamText } from "ai";
+import { convertToModelMessages, createGateway, smoothStream, stepCountIs, streamText } from "ai";
 import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
@@ -426,6 +426,9 @@ export async function POST(request: Request): Promise<Response> {
     }),
     messages: await convertToModelMessages(turn.messages),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
+    // Providers deliver tokens in bursts; re-chunk to word-level with a small
+    // delay so streamed text reads as a steady flow instead of jumps.
+    experimental_transform: smoothStream(),
     abortSignal: generationSignal,
     tools: toolContext.tools,
     onFinish(event) {

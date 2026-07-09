@@ -243,6 +243,9 @@ export function GoatSurface({
     // useChat holds only this surface's in-flight overlay; persisted history
     // comes from the Electric-synced liveChat state and is merged below.
     resume: chatResumeEnabled && Boolean(initialChat) && initialChat?.engine !== "local_codex",
+    // Batch stream chunks into ~20fps UI updates instead of rendering the
+    // whole thread on every token.
+    experimental_throttle: 50,
     transport,
     onFinish: ({ message }) => {
       const sessionId = message.metadata?.sessionId;
