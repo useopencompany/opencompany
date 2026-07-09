@@ -28,7 +28,7 @@ describe("goat brain file sync", () => {
       id: "ev-acme-email",
       folderPath: "evidence/email",
       title: "Acme email",
-      type: "email",
+      type: "source",
       status: "active",
       compiledTruth: "Acme asked for enterprise pricing.",
     });
@@ -42,7 +42,7 @@ describe("goat brain file sync", () => {
       brainId: "ev-acme-email",
       folderPath: "evidence/email",
       kind: "evidence",
-      entityType: "email",
+      entityType: "source",
     });
   });
 
@@ -127,7 +127,6 @@ describe("goat brain file sync", () => {
         sources: [],
         type: "company",
         status: "draft",
-        tags: [],
         timeline: [],
         payload: {
           path: "companies/acme.md",
@@ -165,7 +164,6 @@ describe("goat brain file sync", () => {
         sources: [],
         type: "company",
         status: "draft",
-        tags: [],
         timeline: [],
         payload: {
           path: "competitors/rivalco-competitor.md",

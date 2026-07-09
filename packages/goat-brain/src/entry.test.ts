@@ -26,7 +26,6 @@ const entry: GoatBrainEntry = {
   type: "concept",
   status: "draft",
   aliases: ["Founder beta"],
-  tags: ["launch"],
   timeline: [
     {
       evidenceId: "ev-launch-meeting",
@@ -53,7 +52,6 @@ describe("goat brain canonical entries", () => {
       sources: [{ ref: "meeting:launch", title: "Launch meeting" }],
       type: "concept",
       aliases: ["Founder beta"],
-      tags: ["launch"],
       timeline: [
         {
           evidenceId: "ev-launch-meeting",

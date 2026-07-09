@@ -85,7 +85,6 @@ export async function createGoatBrainMarkdownReportForTask(input: {
       createdAt: now,
       updatedAt: now,
       relations: [],
-      tags: ["research-report"],
       sources: [
         {
           ref: `goat-task:${input.taskId}`,

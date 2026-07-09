@@ -19,10 +19,8 @@ import {
   Copy,
   Ellipsis,
   FileCode2,
-  FilePlus2,
   FileText,
   Folder,
-  FolderPlus,
   History,
   Inbox,
   Lightbulb,
@@ -45,8 +43,6 @@ import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
-  createGoatBrainDocumentAction,
-  createGoatBrainFolderAction,
   deleteGoatBrainDocumentAction,
   renameGoatBrainDocumentAction,
   updateGoatBrainDocumentAction,
@@ -87,11 +83,13 @@ type BrainGraphLink = {
   sourceKind: "relation" | "wiki_link";
 };
 
+// "research" is not a default folder but task reports land there
+// (GOAT_BRAIN_REPORT_FOLDER); keep it grouped near analysis when it exists.
 const ROOT_FOLDER_GROUPS = [
   ["inbox"],
   ["people", "companies", "projects"],
-  ["meetings", "research", "evidence"],
-  ["decisions", "concepts"],
+  ["meetings", "concepts", "analysis", "research"],
+  ["sources", "evidence"],
 ];
 const HIDDEN_EMPTY_ROOT_FOLDERS = new Set<string>();
 const AUTOSAVE_DELAY_MS = 1200;
@@ -100,10 +98,10 @@ const DEFAULT_BRAIN_FOLDERS = [
   "people",
   "companies",
   "projects",
-  "decisions",
   "meetings",
-  "research",
   "concepts",
+  "analysis",
+  "sources",
   "evidence",
 ];
 const EMPTY_DRAFT_INGEST_STATES: ReadonlyMap<string, GoatBrainDraftIngestState> = new Map();
@@ -235,9 +233,7 @@ function GoatBrainEditor({
     () => new Set(ancestorFolderPaths(initialDocument?.folderPath ?? initialSelectedFolder)),
   );
   const [query, setQuery] = useState("");
-  const [creatingFolder, setCreatingFolder] = useState(false);
-  const [newFolderPath, setNewFolderPath] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const [isDocPending, startDocTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const [accessDialogOpen, setAccessDialogOpen] = useState(false);
@@ -301,6 +297,18 @@ function GoatBrainEditor({
   const graphLinks = useMemo(() => buildGraphLinks(documents, edgeRows), [documents, edgeRows]);
   const rootGroups = useMemo(() => groupRootNodes(tree.children), [tree.children]);
   const hasRootNodes = rootGroups.some((group) => group.length > 0);
+  const archivedDocuments = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return documents
+      .filter((document) => document.status === "archived")
+      .filter(
+        (document) =>
+          !normalizedQuery ||
+          brainDocumentTreePath(document).toLowerCase().includes(normalizedQuery) ||
+          (document.title?.toLowerCase() ?? "").includes(normalizedQuery),
+      )
+      .toSorted((a, b) => (a.title ?? a.brainId).localeCompare(b.title ?? b.brainId));
+  }, [documents, query]);
   const isSearching = Boolean(query.trim());
   const visibleExpandedPaths = useMemo(
     () => (isSearching ? new Set(collectFolderPaths(tree)) : expandedPaths),
@@ -322,44 +330,6 @@ function GoatBrainEditor({
       if (next.has(path)) next.delete(path);
       else next.add(path);
       return next;
-    });
-  };
-
-  const createFolder = () => {
-    const path = newFolderPath.trim();
-    if (!path) return;
-    startTransition(async () => {
-      const result = await createGoatBrainFolderAction(path);
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
-      const folderPath = result.path ?? path;
-      setNewFolderPath("");
-      setCreatingFolder(false);
-      setSelectedFolder(folderPath);
-      setExpandedPaths((current) => withAncestorFolders(current, folderPath, true));
-      router.replace(brainFolderUrl(folderPath, selectedBrainId));
-    });
-  };
-
-  const createDocument = () => {
-    startTransition(async () => {
-      const result = await createGoatBrainDocumentAction({
-        folderPath: activeFolder,
-      });
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
-      const document = result.document;
-      if (document) {
-        setSelectedFolder(document.folderPath);
-        setSelectedDocumentId(document.id);
-        setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
-      }
-      if (document) router.replace(brainDocumentUrl(document, selectedBrainId));
-      else if (result.path) router.replace(brainFilePathUrl(result.path, selectedBrainId));
     });
   };
 
@@ -476,31 +446,6 @@ function GoatBrainEditor({
             Brain
           </span>
           <div className="flex shrink-0 items-center">
-            <button
-              type="button"
-              aria-label="Create brain file"
-              title="New file"
-              onClick={createDocument}
-              disabled={isPending}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
-            >
-              <FilePlus2 size={15} strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              aria-label="Create brain folder"
-              title="New folder"
-              aria-pressed={creatingFolder}
-              onClick={() => setCreatingFolder((creating) => !creating)}
-              disabled={isPending}
-              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45 ${
-                creatingFolder
-                  ? "bg-surface-active text-ink"
-                  : "text-ink-subtle hover:bg-surface-hover hover:text-ink"
-              }`}
-            >
-              <FolderPlus size={15} strokeWidth={1.8} />
-            </button>
             {activeBrain ? <GoatBrainActivity brainRef={activeBrain.id} /> : null}
             {workspace.role === "admin" && activeBrain ? (
               <button
@@ -529,35 +474,6 @@ function GoatBrainEditor({
         </div>
 
         <div role="tree" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {creatingFolder ? (
-            <form
-              className="mb-1 flex h-7 items-center gap-1.5 rounded-[5px] bg-surface pl-[25px] pr-2 ring-1 ring-border-strong"
-              onSubmit={(event) => {
-                event.preventDefault();
-                createFolder();
-              }}
-            >
-              <Folder size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
-              <input
-                autoFocus
-                value={newFolderPath}
-                onChange={(event) => setNewFolderPath(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setNewFolderPath("");
-                    setCreatingFolder(false);
-                  }
-                }}
-                onBlur={() => {
-                  if (!newFolderPath.trim()) setCreatingFolder(false);
-                }}
-                placeholder="New folder"
-                aria-label="New brain folder name"
-                disabled={isPending}
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-subtle"
-              />
-            </form>
-          ) : null}
           {hasRootNodes ? (
             <div>
               {rootGroups.map((group, groupIndex) =>
@@ -587,6 +503,43 @@ function GoatBrainEditor({
               {documents.length === 0 ? "No brain files yet." : "No files match that search."}
             </div>
           )}
+          {archivedDocuments.length > 0 ? (
+            <div className="mt-2">
+              <button
+                type="button"
+                aria-expanded={archivedOpen}
+                onClick={() => setArchivedOpen((open) => !open)}
+                className="group flex h-7 w-full items-center gap-1.5 rounded-[5px] pl-[6px] pr-2 text-left text-[13px] leading-5 text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                {archivedOpen ? (
+                  <ChevronDown size={13} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+                ) : (
+                  <ChevronRight size={13} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+                )}
+                <History size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
+                <span className="min-w-0 truncate">Archived ({archivedDocuments.length})</span>
+              </button>
+              {archivedOpen
+                ? archivedDocuments.map((document) => (
+                    <button
+                      key={document.id}
+                      type="button"
+                      aria-selected={document.id === selectedDocument?.id}
+                      onClick={() => selectDocument(document)}
+                      className={`group flex h-7 w-full items-center gap-1.5 rounded-[5px] pl-[20px] pr-2 text-left text-[13px] leading-5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                        document.id === selectedDocument?.id
+                          ? "bg-surface-active text-ink"
+                          : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+                      }`}
+                    >
+                      <span className="h-[13px] w-[13px] shrink-0" />
+                      <FileText size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
+                      <span className="min-w-0 truncate">{document.title ?? document.brainId}</span>
+                    </button>
+                  ))
+                : null}
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -904,6 +857,7 @@ function BrainMetadataSidebar({
         </h2>
         <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 text-[12px] leading-5">
           <MetadataRow label="Type" value={document.type} />
+          <MetadataRow label="Status" value={document.status} />
           {document.kind === "evidence" ? <MetadataRow label="Kind" value="evidence" /> : null}
           <MetadataRow label="Created" value={formatDateTime(document.createdAt)} />
           <MetadataRow label="Updated" value={formatDateTime(document.updatedAt)} />
@@ -1200,7 +1154,10 @@ function buildBrainTree(
   const normalizedQuery = query.trim().toLowerCase();
   // Merged docs are tombstones whose content lives in the page they were
   // merged into; hide them from the tree like the CLI's default list does.
-  const listedDocuments = documents.filter((document) => document.status !== "merged");
+  // Archived docs are retired and render in their own collapsed section.
+  const listedDocuments = documents.filter(
+    (document) => document.status !== "merged" && document.status !== "archived",
+  );
   const visibleDocuments = normalizedQuery
     ? listedDocuments.filter((document) => {
         const path = brainDocumentTreePath(document).toLowerCase();
@@ -1368,12 +1325,6 @@ function brainFolderUrl(folderPath: string, routeBrainId?: string | null) {
   return brainPathUrl(folderPathSegments(folderPath), routeBrainId);
 }
 
-function brainFilePathUrl(path: string, routeBrainId?: string | null) {
-  if (path.startsWith("/brain/")) return path;
-  const withoutExtension = path.replace(/\.md$/i, "");
-  return brainPathUrl(folderPathSegments(withoutExtension), routeBrainId);
-}
-
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
   return `${document.folderPath}/${document.brainId}.md`;
 }
@@ -1498,7 +1449,6 @@ function documentViewFromRow(
   row: GoatBrainDocumentRow,
   timelineRows?: GoatBrainTimelineEntryRow[],
 ): GoatBrainDocumentView {
-  const parsed = parseBrainFrontmatter(row.content);
   const path = `${row.folder_path}/${row.brain_id}.md`;
   return {
     id: row.id,
@@ -1519,7 +1469,6 @@ function documentViewFromRow(
     type: normalizeEntityType(row.entity_type),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
-    tags: normalizeStringArray(parsed.tags),
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
     parseError: null,
@@ -1632,14 +1581,12 @@ function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
   if (
     value === "person" ||
     value === "company" ||
-    value === "media" ||
-    value === "analysis" ||
-    value === "concept" ||
-    value === "email" ||
-    value === "writing" ||
-    value === "note" ||
     value === "project" ||
-    value === "source"
+    value === "meeting" ||
+    value === "concept" ||
+    value === "source" ||
+    value === "analysis" ||
+    value === "note"
   ) {
     return value;
   }
@@ -1685,19 +1632,6 @@ function normalizeSources(value: unknown) {
       },
     ];
   });
-}
-
-function parseBrainFrontmatter(content: string): Record<string, unknown> {
-  const match = /^---\n([\s\S]*?)\n---/.exec(content.replace(/\r\n/g, "\n"));
-  if (!match?.[1]) return {};
-  const tagsMatch = /^tags:\n((?:\s+- .+\n?)+)/m.exec(match[1]);
-  if (!tagsMatch?.[1]) return {};
-  return {
-    tags: tagsMatch[1]
-      .split("\n")
-      .map((line) => line.replace(/^\s+-\s+/, "").trim())
-      .filter(Boolean),
-  };
 }
 
 function formatDateTime(value: string) {

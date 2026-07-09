@@ -27,7 +27,7 @@ import type {
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
 const GOAT_BRAIN_TOOL_HELP =
-  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records.';
+  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
 
 const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
   "help",
@@ -270,7 +270,6 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "truth",
     "truth-stdin",
     "alias",
-    "tag",
     "relation",
     "source-ref",
     "source-title",
@@ -290,6 +289,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "lexical-only",
     "include-invalid",
     "include-merged",
+    "include-archived",
     "json",
   ],
   timeline: ["id", "limit", "since", "json"],

@@ -42,11 +42,11 @@ describe("Goat Brain ingest worker", () => {
     expect(second.meetingBrainId).toBe(first.meetingBrainId);
     expect(second.evidenceBrainId).toBe(first.evidenceBrainId);
     expect(first.meetingContent).toContain("kind: page");
-    expect(first.meetingContent).toContain("type: note");
+    expect(first.meetingContent).toContain("type: meeting");
     expect(first.meetingContent).toContain("folder: meetings");
     expect(first.meetingContent).toContain("[[evidence:");
     expect(first.evidenceContent).toContain("kind: evidence");
-    expect(first.evidenceContent).toContain("type: source");
+    expect(first.evidenceContent).toContain("type: meeting");
     expect(first.evidenceContent).toContain("folder: evidence/document");
     expect(first.evidenceContent).toContain("Transcript segment 0");
     expect(first.truncatedTranscript).toBe(false);

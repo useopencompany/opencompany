@@ -5,10 +5,7 @@ export const DEFAULT_GOAT_BRAIN_FOLDERS = [
   "projects",
   "meetings",
   "concepts",
-  "media",
-  "writing",
   "analysis",
-  "emails",
   "sources",
   "evidence",
 ] as const;
@@ -22,17 +19,19 @@ export const GOAT_BRAIN_RELATION_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/;
 export const GOAT_BRAIN_ENTITY_TYPE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 export const DEFAULT_GOAT_BRAIN_RELATION_TYPE = "related";
 
+// One question decides the type: what does this record represent?
+// External artifacts of any format (articles, videos, email threads, repos)
+// are `source` — the source ref's provider already carries the format nuance.
+// Synthesized prose (research reports, drafts) is `analysis`.
 export const GOAT_BRAIN_ENTITY_TYPES = [
   "person",
   "company",
-  "media",
-  "analysis",
-  "concept",
-  "email",
-  "writing",
-  "note",
   "project",
+  "meeting",
+  "concept",
   "source",
+  "analysis",
+  "note",
 ] as const;
 
 export type GoatBrainEntityType = (typeof GOAT_BRAIN_ENTITY_TYPES)[number];
@@ -94,7 +93,6 @@ export type GoatBrainFrontmatter = {
   relations: GoatBrainRelation[];
   title?: string;
   aliases?: string[];
-  tags?: string[];
   sources?: GoatBrainSource[];
   mergedInto?: string;
   legacyKeys?: string[];

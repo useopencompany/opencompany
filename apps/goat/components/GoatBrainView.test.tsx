@@ -65,8 +65,6 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
 }));
 
 vi.mock("@/lib/brain-actions", () => ({
-  createGoatBrainDocumentAction: vi.fn(),
-  createGoatBrainFolderAction: vi.fn(),
   deleteGoatBrainDocumentAction: vi.fn(),
   moveGoatBrainDocumentAction: vi.fn(),
   renameGoatBrainDocumentAction: vi.fn(),
@@ -389,7 +387,6 @@ const documentWithTimeline: GoatBrainDocumentView = {
   type: "person",
   status: "draft",
   aliases: [],
-  tags: [],
   contentHash: "hash",
   sizeBytes: 128,
   createdAt: "2026-07-06T12:00:00.000Z",
@@ -415,7 +412,6 @@ const documentLinkingToAda: GoatBrainDocumentView = {
   type: "project",
   status: "draft",
   aliases: [],
-  tags: [],
   contentHash: "hash",
   sizeBytes: 128,
   createdAt: "2026-07-06T12:00:00.000Z",
@@ -441,7 +437,6 @@ const evidenceDocument: GoatBrainDocumentView = {
   type: "source",
   status: "active",
   aliases: [],
-  tags: [],
   contentHash: "hash",
   sizeBytes: 128,
   createdAt: "2026-07-06T12:00:00.000Z",

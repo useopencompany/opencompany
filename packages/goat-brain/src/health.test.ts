@@ -27,7 +27,7 @@ describe("checkGoatBrainHealth", () => {
           id: "ev-acme-email",
           folder: "evidence/email",
           kind: "evidence",
-          type: "email",
+          type: "source",
           status: "active",
           title: "Acme email",
           createdAt: "2026-01-01T00:00:00.000Z",

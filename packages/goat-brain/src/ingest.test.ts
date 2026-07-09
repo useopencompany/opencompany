@@ -27,7 +27,7 @@ describe("goat brain entity types and wiki links", () => {
     expect(defaultGoatBrainFolder("company", "page")).toBe("companies");
     expect(defaultGoatBrainFolder("note", "page")).toBe("inbox");
     expect(defaultGoatBrainFolder("source", "page")).toBe("sources");
-    expect(defaultGoatBrainFolder("email", "evidence")).toBe("evidence");
+    expect(defaultGoatBrainFolder("source", "evidence")).toBe("evidence");
     expect(goatBrainKindForFolder("evidence")).toBe("evidence");
     expect(goatBrainKindForFolder("evidence/email")).toBe("evidence");
     expect(goatBrainKindForFolder("team/gtm")).toBe("page");
@@ -78,7 +78,6 @@ describe("goat brain ingest", () => {
             body: "Acme is evaluating Goat Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
-            tags: [],
           },
         ],
         schemaSuggestion: null,
@@ -115,7 +114,6 @@ describe("goat brain ingest", () => {
                 body: "Jane Doe is a founder.",
                 timelineBody: "User asked Goat to remember Jane.",
                 relations: [],
-                tags: [],
               },
             ],
             schemaSuggestion: null,
@@ -156,7 +154,6 @@ describe("goat brain ingest", () => {
             body: "Acme is evaluating Goat Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
-            tags: [],
           },
         ],
       }),
@@ -183,7 +180,6 @@ describe("goat brain ingest", () => {
           body: "Acme is evaluating Goat Brain.",
           timelineBody: "User mentioned Acme.",
           relations: [],
-          tags: [],
         },
       ],
     });
@@ -215,7 +211,6 @@ describe("goat brain ingest", () => {
             body: "Acme is evaluating Goat Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
-            tags: [],
           },
           {
             action: "create",
@@ -226,7 +221,6 @@ describe("goat brain ingest", () => {
             body: "This should fail when the existing malformed file is loaded.",
             timelineBody: "User mentioned a bad entry.",
             relations: [],
-            tags: [],
           },
         ],
       }),
@@ -275,7 +269,7 @@ async function writeDoc(
   input: {
     id: string;
     folder: string;
-    type: "person" | "company" | "project" | "concept" | "note" | "analysis" | "source" | "email";
+    type: "person" | "company" | "project" | "meeting" | "concept" | "source" | "analysis" | "note";
     title: string;
     truth: string;
   },

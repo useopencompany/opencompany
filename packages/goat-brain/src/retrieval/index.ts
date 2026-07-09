@@ -14,6 +14,7 @@ export type GoatBrainQueryOptions = {
   graphDirection?: GoatBrainGraphDirection;
   includeInvalid?: boolean;
   includeMerged?: boolean;
+  includeArchived?: boolean;
 };
 
 export type RetrievalProviders = {
@@ -166,6 +167,7 @@ function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): I
   return records.filter((record) => {
     if (!options.includeInvalid && !record.valid) return false;
     if (!options.includeMerged && record.status === "merged") return false;
+    if (!options.includeArchived && record.status === "archived") return false;
     if (
       options.folder &&
       record.folder !== options.folder &&
