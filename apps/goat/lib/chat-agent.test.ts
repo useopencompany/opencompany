@@ -12,7 +12,11 @@ import {
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { OPENCOMPANY_CHAT_SOUL, OPENCOMPANY_CHAT_SYSTEM } from "@/lib/prompts";
+import {
+  OPENCOMPANY_CHAT_SOUL,
+  OPENCOMPANY_CHAT_SYSTEM,
+  START_TASK_PROMPT_DESCRIPTION,
+} from "@/lib/prompts";
 
 describe("runOpenCompanyChatAgent", () => {
   it("instructs the model to delegate latest-email checks", async () => {
@@ -31,6 +35,8 @@ describe("runOpenCompanyChatAgent", () => {
         expect(system).toContain("Decide from the user's intent");
         expect(system).not.toContain("Use the web_search tool inside chat");
         expect(system).toContain("still call the task tool instead of refusing");
+        expect(system).toContain("keep the task prompt close to the user's actual request");
+        expect(system).toContain("Do not expand it into a detailed plan");
         expect(system).toContain("inbox");
         expect(system).toContain("Gmail");
         expect(system).toContain("goat_brain");
@@ -39,6 +45,10 @@ describe("runOpenCompanyChatAgent", () => {
         expect(extractStartTaskToolDescription(options)).toContain(
           "specialized just-in-time agent",
         );
+        expect(START_TASK_PROMPT_DESCRIPTION).toContain(
+          "Use the user's own request as the backbone",
+        );
+        expect(START_TASK_PROMPT_DESCRIPTION).toContain("Do not expand into a detailed plan");
         return {
           text: "I'll start a task for that.",
           finishReason: "stop",

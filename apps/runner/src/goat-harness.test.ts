@@ -129,6 +129,7 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("<skill_policy>");
     expect(request.system).toContain("<codex_goal_policy>");
     expect(request.system).toContain("set codex.goalMode only");
+    expect(request.system).toContain("grounded in task_prompt");
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
     expect(request.system).toContain('resultMode "brain_markdown_report"');
@@ -140,6 +141,9 @@ describe("planGoatHarness", () => {
     expect(request.system).toContain("never infer slugs from titles");
     expect(request.system).toContain("<prompt_contract>");
     expect(request.system).toContain("Always return a non-empty systemPrompt");
+    expect(request.system).toContain("Treat task_prompt as the source of truth");
+    expect(request.system).toContain("Keep initialUserMessage close to task_prompt");
+    expect(request.system).toContain("Put execution guidance, tool-use sequencing");
     expect(request.system).toContain('Use engine "codex" for coding tasks');
     expect(request.system).toContain("Cost matters");
     expect(request.system).toContain("choose Kimi K2.6 by default");
