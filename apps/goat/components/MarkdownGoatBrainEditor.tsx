@@ -135,7 +135,7 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
                 decorations.push(
                   Decoration.inline(pos + link.index, pos + link.index + link.raw.length, {
                     class: href ? "wiki-brain-link" : "wiki-brain-link wiki-brain-link-unresolved",
-                    title: href ? "Command-click to open brain link" : "Unresolved brain link",
+                    title: href ? "Open brain link" : "Unresolved brain link",
                     ...(href ? { "data-brain-href": href } : {}),
                   }),
                 );
@@ -144,7 +144,6 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
             return DecorationSet.create(state.doc, decorations);
           },
           handleClick(_view, _pos, event) {
-            if (!(event.metaKey || event.ctrlKey)) return false;
             const target = event.target instanceof Element ? event.target : null;
             const href = target?.closest("[data-brain-href]")?.getAttribute("data-brain-href");
             if (!href) return false;
