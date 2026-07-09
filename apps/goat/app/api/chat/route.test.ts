@@ -220,9 +220,8 @@ describe("POST /api/chat", () => {
     });
     let saveToolPromise: Promise<unknown> | null = null;
     mockStreamText().mockImplementation((options: unknown) => {
-      const tool = (
-        options as { tools?: { [SAVE_TO_BRAIN_TOOL_NAME]?: { execute?: unknown } } }
-      ).tools?.[SAVE_TO_BRAIN_TOOL_NAME];
+      const tool = (options as { tools?: { [SAVE_TO_BRAIN_TOOL_NAME]?: { execute?: unknown } } })
+        .tools?.[SAVE_TO_BRAIN_TOOL_NAME];
       if (typeof tool?.execute !== "function") {
         throw new Error("save_to_brain execute function was not configured.");
       }
