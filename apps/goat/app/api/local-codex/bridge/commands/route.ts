@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
+import { isLocalCodexBridgeBetaEnabledForUser } from "@/lib/feature-flags-server";
 import {
   authenticateLocalCodexBridgeToken,
   claimLocalCodexCommandsForBridge,
@@ -19,6 +21,9 @@ type ClaimCommandsBody = {
 export async function POST(request: Request) {
   const bridge = await authenticateLocalCodexBridgeToken(request.headers.get("authorization"));
   if (!bridge) return new Response("Unauthorized", { status: 401 });
+  if (!(await isLocalCodexBridgeBetaEnabledForUser(bridge.userWorkosId))) {
+    return new Response(LOCAL_CODEX_BETA_DISABLED_MESSAGE, { status: 403 });
+  }
 
   try {
     const body = await readJsonBody<ClaimCommandsBody>(request);

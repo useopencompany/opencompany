@@ -5,13 +5,15 @@ import {
   ArrowLeft,
   ChevronRight,
   CircleUserRound,
+  Code2,
   FileText,
   Mail,
   UserRound,
   Users,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSurface } from "@/components/GoatSurface";
@@ -22,6 +24,7 @@ import { TaskRunPanel } from "@/components/TaskRunPanel";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
+import { updateGoatLocalCodexBetaAction } from "@/lib/user-preferences";
 
 export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
   const data = useGoatAppData();
@@ -46,13 +49,14 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
         initialChat={initialChat}
         recentChats={data.recentChats}
         codexConnected={data.codexConnected}
+        localCodexBetaEnabled={data.featureFlags.localCodexBridge}
       />
     </main>
   );
 }
 
 export function GoatSettingsRoute() {
-  const { integrations, user, workspace } = useGoatAppData();
+  const { featureFlags, integrations, user, workspace } = useGoatAppData();
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
   const initials = getInitials(user.firstName, user.lastName, user.email);
@@ -133,6 +137,18 @@ export function GoatSettingsRoute() {
               Personal integrations
             </h2>
             <IntegrationRows integrations={integrations} />
+          </section>
+
+          <section className="flex flex-col gap-1">
+            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+              Beta features
+            </h2>
+            <BetaFeatureSwitch
+              icon={Code2}
+              label="Local Codex bridge"
+              description="Local Codex engine mode"
+              checked={featureFlags.localCodexBridge}
+            />
           </section>
         </div>
       </div>
@@ -324,6 +340,72 @@ function AccountRow({
       <div className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="w-20 shrink-0 text-[12.5px] leading-tight text-ink-subtle">{label}</span>
         <span className="truncate text-[14px] font-medium leading-tight text-ink">{value}</span>
+      </div>
+    </div>
+  );
+}
+
+function BetaFeatureSwitch({
+  icon: Icon,
+  label,
+  description,
+  checked,
+}: {
+  icon: LucideIcon;
+  label: string;
+  description: string;
+  checked: boolean;
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const toggle = () => {
+    const nextEnabled = !checked;
+    setError(null);
+    startTransition(async () => {
+      const result = await updateGoatLocalCodexBetaAction(nextEnabled);
+      if (result.ok) {
+        router.refresh();
+        return;
+      }
+
+      setError("Could not update this beta.");
+    });
+  };
+
+  return (
+    <div className="flex items-start gap-3 rounded-lg px-2 py-2">
+      <Icon size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0">
+            <span className="block truncate text-[14px] font-medium leading-tight text-ink">
+              {label}
+            </span>
+            <span className="block truncate text-[12px] leading-4 text-ink-subtle">
+              {description}
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            aria-label={label}
+            disabled={isPending}
+            onClick={toggle}
+            className={`ml-auto inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60 ${
+              checked ? "border-ink bg-ink" : "border-border bg-surface-muted"
+            }`}
+          >
+            <span
+              className={`block h-4 w-4 rounded-full bg-canvas shadow-sm transition-transform duration-150 ${
+                checked ? "translate-x-[18px]" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
+        {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
       </div>
     </div>
   );

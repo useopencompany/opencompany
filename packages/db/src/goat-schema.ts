@@ -250,6 +250,7 @@ export const goatUsers = goat.table("users", {
   lastName: text("last_name"),
   avatarUrl: text("avatar_url"),
   timezone: text("timezone").notNull().default("UTC"),
+  localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

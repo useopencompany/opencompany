@@ -694,6 +694,13 @@
       "when": 1783424600000,
       "tag": "0098_goat_local_codex_empty_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1783424900000,
+      "tag": "0099_goat_local_codex_beta_flag",
+      "breakpoints": true
     }
   ]
 }

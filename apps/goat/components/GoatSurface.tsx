@@ -79,6 +79,7 @@ import {
   toGoatChatUiMessage,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
 import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
 import {
@@ -136,6 +137,7 @@ export function GoatSurface({
   initialChat,
   recentChats = [],
   codexConnected = false,
+  localCodexBetaEnabled = false,
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
@@ -143,6 +145,7 @@ export function GoatSurface({
   initialChat: GoatChatSessionView | null;
   recentChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
+  localCodexBetaEnabled?: boolean;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -161,12 +164,12 @@ export function GoatSurface({
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
   const [chatModel, setChatModel] = useState<GoatChatModelSelection>(() =>
-    initialChat?.engine === "local_codex"
+    localCodexBetaEnabled && initialChat?.engine === "local_codex"
       ? LOCAL_CODEX_PICKER_VALUE
       : normalizeGoatModel(initialChat?.model ?? defaultModel),
   );
   const [localCodexChatSessionId, setLocalCodexChatSessionId] = useState<string | null>(() =>
-    initialChat?.engine === "local_codex" ? initialChat.id : null,
+    localCodexBetaEnabled && initialChat?.engine === "local_codex" ? initialChat.id : null,
   );
   const [localCodexRunning, setLocalCodexRunning] = useState(false);
   const [localCodexSubmitting, setLocalCodexSubmitting] = useState(false);
@@ -245,6 +248,7 @@ export function GoatSurface({
   const isGenerating = status === "submitted" || status === "streaming";
   const activeInitialChatIsLocalCodex = Boolean(
     initialChat &&
+      localCodexBetaEnabled &&
       mode === "chat" &&
       chatSessionId === initialChat.id &&
       initialChat.engine === "local_codex",
@@ -253,8 +257,15 @@ export function GoatSurface({
     chatSessionId && (activeInitialChatIsLocalCodex || localCodexChatSessionId === chatSessionId)
       ? chatSessionId
       : null;
-  const isLocalCodexMode = chatModel === LOCAL_CODEX_PICKER_VALUE;
+  const isLocalCodexMode = localCodexBetaEnabled && chatModel === LOCAL_CODEX_PICKER_VALUE;
   const isLocalCodexChat = isLocalCodexMode || Boolean(activeLocalCodexSessionId);
+  const localCodexFeatureDisabledForChat = Boolean(
+    initialChat &&
+      !localCodexBetaEnabled &&
+      mode === "chat" &&
+      chatSessionId === initialChat.id &&
+      initialChat.engine === "local_codex",
+  );
   const hasMessages = messages.length > 0;
   const showThinkingBubble =
     (isGenerating || (isLocalCodexChat && localCodexRunning)) && shouldShowThinkingBubble(messages);
@@ -300,11 +311,13 @@ export function GoatSurface({
     const frame = requestAnimationFrame(() => {
       setChatSessionId(initialChat?.id ?? null);
       setChatModel(
-        initialChat?.engine === "local_codex"
+        localCodexBetaEnabled && initialChat?.engine === "local_codex"
           ? LOCAL_CODEX_PICKER_VALUE
           : normalizeGoatModel(initialChat?.model ?? defaultModel),
       );
-      setLocalCodexChatSessionId(initialChat?.engine === "local_codex" ? initialChat.id : null);
+      setLocalCodexChatSessionId(
+        localCodexBetaEnabled && initialChat?.engine === "local_codex" ? initialChat.id : null,
+      );
       setMessages(initialChat?.messages ?? []);
       setMode(initialChat ? "chat" : "home");
     });
@@ -314,6 +327,7 @@ export function GoatSurface({
     defaultModel,
     initialChat,
     isGenerating,
+    localCodexBetaEnabled,
     localCodexSubmitting,
     messages.length,
     mode,
@@ -449,6 +463,10 @@ export function GoatSurface({
 
     const prompt = input.trim();
     if (!prompt) return;
+    if (localCodexFeatureDisabledForChat) {
+      toast.error(LOCAL_CODEX_BETA_DISABLED_MESSAGE);
+      return;
+    }
     const mentions =
       activeSelectedMentions.length > 0 && hasCodexMentionToken(prompt)
         ? activeSelectedMentions
@@ -773,6 +791,14 @@ export function GoatSurface({
               {chatError.message || "Goat could not answer that right now."}
             </p>
           ) : null}
+          {localCodexFeatureDisabledForChat ? (
+            <p
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+              role="status"
+            >
+              {LOCAL_CODEX_BETA_DISABLED_MESSAGE}
+            </p>
+          ) : null}
           {mentionToken ? (
             <div
               role="listbox"
@@ -822,7 +848,7 @@ export function GoatSurface({
                 onSelect={(event) =>
                   updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
-                disabled={isGenerating}
+                disabled={isGenerating || localCodexFeatureDisabledForChat}
                 className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                 maxLength={10_000}
@@ -833,12 +859,13 @@ export function GoatSurface({
               value={chatModel}
               onChange={setChatModel}
               disabled={isGenerating || Boolean(activeLocalCodexSessionId)}
+              localCodexBetaEnabled={localCodexBetaEnabled}
             />
             {isLocalCodexChat && localCodexRunning ? (
               <LocalCodexStopButton onStop={stopGeneration} />
             ) : null}
             <SubmitButton
-              disabled={!input.trim() || localCodexSubmitting}
+              disabled={!input.trim() || localCodexSubmitting || localCodexFeatureDisabledForChat}
               isGenerating={isGenerating}
               onStop={stopGeneration}
             />
@@ -1803,13 +1830,15 @@ function GoatModelPicker({
   value,
   onChange,
   disabled,
+  localCodexBetaEnabled,
 }: {
   value: GoatChatModelSelection;
   onChange: (modelId: GoatChatModelSelection) => void;
   disabled: boolean;
+  localCodexBetaEnabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const isLocalCodexSelected = value === LOCAL_CODEX_PICKER_VALUE;
+  const isLocalCodexSelected = localCodexBetaEnabled && value === LOCAL_CODEX_PICKER_VALUE;
   const selectedModel = !isLocalCodexSelected
     ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
     : null;
@@ -1849,34 +1878,36 @@ function GoatModelPicker({
           </div>
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
-            <CommandGroup heading="Engines">
-              <CommandItem
-                value={LOCAL_CODEX_PICKER_VALUE}
-                keywords={["Local Codex", "Codex", "local repo", "worktree"]}
-                onSelect={() => {
-                  onChange(LOCAL_CODEX_PICKER_VALUE);
-                  setOpen(false);
-                }}
-                title="Run Codex locally in a clean session folder."
-                className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-              >
-                <Check
-                  size={13}
-                  strokeWidth={2}
-                  className={cn(
-                    "shrink-0 text-ink",
-                    isLocalCodexSelected ? "opacity-100" : "opacity-0",
-                  )}
-                />
-                <Code2 size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium leading-4">Local Codex</div>
-                  <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                    Local session bridge
+            {localCodexBetaEnabled ? (
+              <CommandGroup heading="Engines">
+                <CommandItem
+                  value={LOCAL_CODEX_PICKER_VALUE}
+                  keywords={["Local Codex", "Codex", "local repo", "worktree"]}
+                  onSelect={() => {
+                    onChange(LOCAL_CODEX_PICKER_VALUE);
+                    setOpen(false);
+                  }}
+                  title="Run Codex locally in a clean session folder."
+                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                >
+                  <Check
+                    size={13}
+                    strokeWidth={2}
+                    className={cn(
+                      "shrink-0 text-ink",
+                      isLocalCodexSelected ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <Code2 size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium leading-4">Local Codex</div>
+                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                      Local session bridge
+                    </div>
                   </div>
-                </div>
-              </CommandItem>
-            </CommandGroup>
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
             <CommandGroup heading="Models">
               {GOAT_MODELS.map((model) => {
                 const isSelected = !isLocalCodexSelected && model.id === selectedModel?.id;

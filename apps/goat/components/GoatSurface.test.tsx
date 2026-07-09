@@ -192,6 +192,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
     expect(screen.getByText("Kimi K2.6")).toBeInTheDocument();
     expect(screen.queryByText("GPT 5.4 Mini")).not.toBeInTheDocument();
+    expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("Kimi K2.6"));
     await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Compare");
@@ -200,6 +201,76 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       model: "moonshotai/kimi-k2.6",
     });
+  });
+
+  it("shows Local Codex only when the beta flag is enabled and submits to the local endpoint", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: "goat_chat_local_1",
+          userMessageId: "goat_chat_msg_local_user",
+          assistantMessageId: "goat_chat_msg_local_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        localCodexBetaEnabled
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Local Codex"));
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Inspect");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/local-codex/messages", expect.any(Object)),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      message: {
+        id: expect.stringMatching(/^goat_chat_msg_/),
+        role: "user",
+        parts: [{ type: "text", text: "Inspect" }],
+      },
+    });
+  });
+
+  it("keeps existing local Codex chats read-only when the beta flag is disabled", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_local_1",
+          title: "Local Codex",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "local_codex",
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "Local Codex beta is disabled. Enable it in Goat Settings to use Local Codex.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   });
 
   it("keeps using the returned chat session id when the AI SDK transport is long-lived", async () => {

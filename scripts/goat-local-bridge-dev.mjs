@@ -84,19 +84,26 @@ async function waitForGoatUser(sql) {
       const configuredUser = process.env.GOAT_LOCAL_BRIDGE_USER_WORKOS_ID?.trim();
       const rows = configuredUser
         ? await sql`
-            SELECT workos_user_id, email
+            SELECT workos_user_id, email, local_codex_beta_enabled
             FROM goat.users
             WHERE workos_user_id = ${configuredUser}
             LIMIT 1
           `
         : await sql`
-            SELECT workos_user_id, email
+            SELECT workos_user_id, email, local_codex_beta_enabled
             FROM goat.users
             ORDER BY updated_at DESC, created_at DESC
             LIMIT 1
           `;
       const user = rows[0];
       if (user) {
+        if (user.local_codex_beta_enabled !== true) {
+          await wait(
+            `Waiting for Local Codex beta to be enabled in Goat Settings for ${user.email || user.workos_user_id}.`,
+            USER_WAIT_MS,
+          );
+          continue;
+        }
         lastWaitMessage = null;
         return user;
       }

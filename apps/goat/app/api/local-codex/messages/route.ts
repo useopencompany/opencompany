@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
+import { goatFeatureFlagsFromUser, LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { createOrSteerLocalCodexMessage } from "@/lib/local-codex";
 
 export const runtime = "nodejs";
@@ -14,6 +15,9 @@ type LocalCodexMessageBody = {
 export async function POST(request: Request) {
   const context = await currentGoatUser({ optional: true });
   if (!context) return new Response("Unauthorized", { status: 401 });
+  if (!goatFeatureFlagsFromUser(context.user).localCodexBridge) {
+    return new Response(LOCAL_CODEX_BETA_DISABLED_MESSAGE, { status: 403 });
+  }
 
   const body = await readJsonBody<LocalCodexMessageBody>(request);
   if (!body.ok) return new Response(body.error, { status: 400 });

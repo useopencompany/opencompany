@@ -138,13 +138,16 @@ Entry points:
 - `apps/goat-local-bridge/src/index.ts`
 - `packages/agent-runtime/src/codex-app-server-events.ts`
 
-`Local Codex` is a composer engine mode, not a normal model id. First messages do not need a repo
-path for the MVP. Goat persists a `local_codex` chat session, creates user and assistant chat rows,
-and queues a `start_turn` command for the most recent active bridge for that user. The bridge starts
-Codex in a new local session folder at `~/.opencompany/goat/sessions/<session-id>`.
+`Local Codex` is a beta-gated composer engine mode, not a normal model id. Users enable the `Local
+Codex bridge` beta in Goat Settings before the picker option, pairing API, message API, or bridge
+token APIs are available. First messages do not need a repo path for the MVP. Goat persists a
+`local_codex` chat session, creates user and assistant chat rows, and queues a `start_turn` command
+for the most recent active bridge for that user. The bridge starts Codex in a new local session
+folder at `~/.opencompany/goat/sessions/<session-id>`.
 
-In local development, `bun run dev:goat` starts the bridge as part of the Turbo dev stack. The
-bridge dev launcher creates or reuses a gitignored token at
+In local development, `bun run dev:goat` starts the bridge launcher as part of the Turbo dev stack.
+The launcher waits until the selected Goat user has enabled the `Local Codex bridge` beta, then
+creates or reuses a gitignored token at
 `.context/goat-local-bridge/dev-token.json` for the most recent Goat user, waits for the Goat app,
 then runs the bridge against `http://127.0.0.1:3002` by default. Set
 `GOAT_LOCAL_BRIDGE_DISABLED=1` to skip this, or `GOAT_LOCAL_BRIDGE_USER_WORKOS_ID` to pin the dev
@@ -391,7 +394,7 @@ Goat-specific tables live in `packages/db/src/goat-schema.ts`.
 
 Important tables:
 
-- `goat.users`: WorkOS-backed Goat user profile.
+- `goat.users`: WorkOS-backed Goat user profile, including the `local_codex_beta_enabled` beta flag.
 - `goat.chat_sessions`: one open or closed chat thread per user.
 - `goat.chat_messages`: persisted user and assistant chat messages. Assistant messages can point
   at a `taskId` so the UI can render a task card. Task completion notifications are also persisted

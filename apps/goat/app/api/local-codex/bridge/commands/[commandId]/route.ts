@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
+import { isLocalCodexBridgeBetaEnabledForUser } from "@/lib/feature-flags-server";
 import { authenticateLocalCodexBridgeToken, completeLocalCodexCommand } from "@/lib/local-codex";
 
 export const runtime = "nodejs";
@@ -17,6 +19,9 @@ export async function POST(
 ) {
   const bridge = await authenticateLocalCodexBridgeToken(request.headers.get("authorization"));
   if (!bridge) return new Response("Unauthorized", { status: 401 });
+  if (!(await isLocalCodexBridgeBetaEnabledForUser(bridge.userWorkosId))) {
+    return new Response(LOCAL_CODEX_BETA_DISABLED_MESSAGE, { status: 403 });
+  }
 
   const body = await readJsonBody<AckCommandBody>(request);
   if (!body.ok) return new Response(body.error, { status: 400 });

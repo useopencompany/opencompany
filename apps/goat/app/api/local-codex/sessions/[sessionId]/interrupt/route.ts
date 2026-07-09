@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { goatFeatureFlagsFromUser, LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { interruptLocalCodexSessionForUser } from "@/lib/local-codex";
 
 export const runtime = "nodejs";
@@ -10,6 +11,9 @@ export async function POST(
 ) {
   const context = await currentGoatUser({ optional: true });
   if (!context) return new Response("Unauthorized", { status: 401 });
+  if (!goatFeatureFlagsFromUser(context.user).localCodexBridge) {
+    return new Response(LOCAL_CODEX_BETA_DISABLED_MESSAGE, { status: 403 });
+  }
 
   const { sessionId } = await params;
   const result = await interruptLocalCodexSessionForUser({

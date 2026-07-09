@@ -10,7 +10,6 @@ import {
   type GoatLocalCodexCommandKind,
   type GoatLocalCodexCommandStatus,
   type GoatLocalCodexSession,
-  goatChatMessages,
   goatChatSessions,
   goatLocalBridges,
   goatLocalCodexCommands,
