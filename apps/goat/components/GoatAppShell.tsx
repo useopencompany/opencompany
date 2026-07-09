@@ -2,7 +2,6 @@ import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema"
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
-import { listCurrentUserGoatBrain } from "@/lib/brain";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
 import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
@@ -18,29 +17,18 @@ import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, brains, activeBrain } = await currentGoatUser();
-  const [
-    tasks,
-    schedules,
-    recentChats,
-    brain,
-    googleIntegrations,
-    linear,
-    github,
-    jamie,
-    slack,
-    codex,
-  ] = await Promise.all([
-    listCurrentUserGoatTasks(),
-    listCurrentUserGoatTaskSchedules(),
-    listCurrentUserRecentGoatChats(),
-    listCurrentUserGoatBrain(),
-    getGoatGoogleIntegrationState(user.workosUserId),
-    getGoatLinearIntegrationState(user.workosUserId),
-    getGoatGitHubIntegrationState(user.workosUserId),
-    getGoatJamieIntegrationState(user.workosUserId),
-    getGoatSlackIntegrationState(user.workosUserId),
-    loadCurrentGoatCodexAuthSettings(),
-  ]);
+  const [tasks, schedules, recentChats, googleIntegrations, linear, github, jamie, slack, codex] =
+    await Promise.all([
+      listCurrentUserGoatTasks(),
+      listCurrentUserGoatTaskSchedules(),
+      listCurrentUserRecentGoatChats(),
+      getGoatGoogleIntegrationState(user.workosUserId),
+      getGoatLinearIntegrationState(user.workosUserId),
+      getGoatGitHubIntegrationState(user.workosUserId),
+      getGoatJamieIntegrationState(user.workosUserId),
+      getGoatSlackIntegrationState(user.workosUserId),
+      loadCurrentGoatCodexAuthSettings(),
+    ]);
 
   const initialData: GoatAppInitialData = {
     user: {
@@ -89,7 +77,6 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       },
     }),
     featureFlags: goatFeatureFlagsFromUser(user),
-    brain,
     codexConnected: codex.status === "connected",
     chatResumeEnabled: isGoatChatResumeEnabled(),
   };
