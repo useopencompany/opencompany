@@ -204,6 +204,7 @@ export type GoatBrainDocumentRow = {
   mime_type: string | null;
   original_file_name: string | null;
   asset_storage_key: string | null;
+  asset_size_bytes: number | null;
   relations: Array<{ type: string; to: string }>;
   sources: Array<{ ref: string; capturedAt?: string; captured_at?: string; title?: string }>;
   content_hash: string;

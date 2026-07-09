@@ -127,8 +127,29 @@ meeting [[evidence:ev-jamie-abc123]].
 - **Timeline** — append-only dated entries, each with an `ev-*` id and optionally a source ref.
   History is never rewritten; the truth section is recompiled *from* it.
 
-Binary formats: `format` on the document row is `markdown` (default), `pdf`, or `docx`
-(`GoatBrainDocumentFormat`).
+## Binary assets (PDF)
+
+`format` on the document row is `markdown` (default), `pdf`, or `docx`
+(`GoatBrainDocumentFormat`). A binary-backed document is **one row, one folder entry, one
+artifact** — there is no sibling "stub page":
+
+- The bytes live in the private Vercel Blob store behind `asset_storage_key`;
+  `original_file_name`, `mime_type`, `asset_size_bytes`, and `asset_content_hash` (sha256 of the
+  bytes) describe them. The UI serves them through `/api/brain-assets/[documentId]` and renders
+  the file first-class, with metadata and the agent's summary in the details sidebar.
+- The `content` column still holds a normal markdown projection (frontmatter + compiled truth +
+  timeline), so metadata, relations, wiki links, versioning, and sync work identically to
+  markdown pages. The asset linkage is a `sources` entry with the `upload:<documentId>` ref.
+- `asset_extracted_text` carries the machine-extracted text (capped at 200KB), written by the
+  upload ingestion worker. Materialization appends it to the projection file as a generated
+  block between `ASSET-TEXT:BEGIN/END` sentinels; the document parser strips that block, so the
+  CLI and sync ignore it and edits inside it are discarded. Retrieval indexes it as the
+  low-boost `assetText` field.
+- Uploads enter via drag-drop / the upload button in the brain tree
+  (`uploadGoatBrainAssetAction`), which creates the draft row and enqueues a
+  `brain_agent_ingest` job (provider `upload`, type `asset`). The runner extracts the text, then
+  the standard ingestion agent rewrites the page's compiled truth and wires backlinks. Deleting
+  the document best-effort deletes the blob; version rows keep the page, not the bytes.
 
 ## Database tables
 

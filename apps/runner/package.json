@@ -29,7 +29,8 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "e2b": "^2.21.0",
-    "fastify": "^5.6.2"
+    "fastify": "^5.6.2",
+    "unpdf": "^1.4.0"
   },
   "devDependencies": {
     "@durable-streams/server": "^0.3.7",

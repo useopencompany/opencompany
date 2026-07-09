@@ -8,6 +8,55 @@ export const GOAT_BRAIN_TIMELINE_HEADING = "## Timeline";
 export const GOAT_BRAIN_TIMELINE_SENTINEL =
   "<!-- TIMELINE:BELOW - append only past this marker -->";
 
+// Binary-backed documents (pdf/docx rows) materialize with a generated
+// "extracted text" block appended after the timeline. The block is derived
+// from the DB row on every materialization and is never authoritative: the
+// parser strips it, so edits inside it are discarded on sync.
+export const GOAT_BRAIN_ASSET_TEXT_BEGIN =
+  "<!-- ASSET-TEXT:BEGIN generated from the source file; edits below are discarded -->";
+export const GOAT_BRAIN_ASSET_TEXT_END = "<!-- ASSET-TEXT:END -->";
+export const GOAT_BRAIN_ASSET_TEXT_HEADING = "## Extracted text";
+
+export function stripGoatBrainAssetTextBlock(source: string): string {
+  let result = source;
+  while (true) {
+    const begin = result.indexOf(GOAT_BRAIN_ASSET_TEXT_BEGIN);
+    if (begin === -1) break;
+    const end = result.indexOf(GOAT_BRAIN_ASSET_TEXT_END, begin);
+    let sliceEnd = end === -1 ? result.length : end + GOAT_BRAIN_ASSET_TEXT_END.length;
+    if (result[sliceEnd] === "\n") sliceEnd += 1;
+    result = result.slice(0, begin) + result.slice(sliceEnd);
+  }
+  return result;
+}
+
+export function extractGoatBrainAssetText(source: string): string {
+  const begin = source.indexOf(GOAT_BRAIN_ASSET_TEXT_BEGIN);
+  if (begin === -1) return "";
+  const contentStart = begin + GOAT_BRAIN_ASSET_TEXT_BEGIN.length;
+  const end = source.indexOf(GOAT_BRAIN_ASSET_TEXT_END, contentStart);
+  const raw = source.slice(contentStart, end === -1 ? source.length : end);
+  return raw.replace(GOAT_BRAIN_ASSET_TEXT_HEADING, "").trim();
+}
+
+export function appendGoatBrainAssetTextBlock(content: string, assetText: string): string {
+  const text = assetText.trim();
+  if (!text) return content;
+  const separator = content.endsWith("\n") ? "" : "\n";
+  // Purely additive so stripGoatBrainAssetTextBlock restores the input
+  // byte-for-byte — sync relies on that to keep content hashes stable.
+  return `${content}${separator}${[
+    GOAT_BRAIN_ASSET_TEXT_BEGIN,
+    "",
+    GOAT_BRAIN_ASSET_TEXT_HEADING,
+    "",
+    text,
+    "",
+    GOAT_BRAIN_ASSET_TEXT_END,
+    "",
+  ].join("\n")}`;
+}
+
 export type ParsedGoatBrainDocument = {
   frontmatter: Partial<GoatBrainFrontmatter>;
   title: string;
@@ -16,7 +65,7 @@ export type ParsedGoatBrainDocument = {
 };
 
 export function parseGoatBrainDocument(source: string): ParsedGoatBrainDocument {
-  const { yaml, body } = splitFrontmatter(source);
+  const { yaml, body } = splitFrontmatter(stripGoatBrainAssetTextBlock(source));
   const frontmatter = parseFrontmatter(yaml);
   const parsedBody = parseGoatBrainBody(body);
   return { frontmatter, ...parsedBody };
