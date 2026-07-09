@@ -117,7 +117,7 @@ function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: st
     "How the brain works:",
     "- Every document has compiled truth (the current synthesis) and an append-only timeline of dated evidence entries.",
     "- Types (person, company, project, meeting, concept, source, analysis, note) classify what a record represents. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
-    "- Required folders are inbox, people, companies, and evidence. The core work folders projects, meetings, research, decisions, and concepts are adjustable; if a workflow needs one and it is missing, recreate it with `folder create --path <folder>` before moving pages there. evidence/ is a reserved zone for raw captures.",
+    "- Required folders are inbox, people, companies, and evidence. The core work folders thoughts, projects, meetings, research, decisions, and concepts are adjustable; if a workflow needs one and it is missing, recreate it with `folder create --path <folder>` before moving pages there. evidence/ is a reserved zone for raw captures.",
     "- Inline links are typed: [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence records, [[source:provider:id|Label]] for external source pointers.",
     "",
     "Working discipline:",
