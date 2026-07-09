@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import type { AgentModelId } from "@opencompany/agent-runtime";
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type { GoatChatEngine, GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import {
   Command,
   CommandDialog,
@@ -138,6 +138,7 @@ export function GoatSurface({
   recentChats = [],
   codexConnected = false,
   localCodexBetaEnabled = false,
+  chatResumeEnabled = false,
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
@@ -146,13 +147,13 @@ export function GoatSurface({
   recentChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
   localCodexBetaEnabled?: boolean;
+  chatResumeEnabled?: boolean;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const lastError = useRef<string | null>(null);
-  const locallyHiddenSessionIdsRef = useRef<Set<string>>(new Set());
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,6 +164,15 @@ export function GoatSurface({
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
+  // Keyed useChat instance: changes only when the user opens a different chat,
+  // NOT when a new session gets its server id mid-turn (that would discard the
+  // in-flight stream state).
+  const [chatInstanceKey, setChatInstanceKey] = useState(() => initialChat?.id ?? "goat-chat-main");
+  // Persisted messages for the active session, synced live from Electric.
+  const [liveChat, setLiveChat] = useState<{
+    sessionId: string;
+    messages: GoatChatUiMessage[];
+  } | null>(null);
   const [chatModel, setChatModel] = useState<GoatChatModelSelection>(() =>
     localCodexBetaEnabled && initialChat?.engine === "local_codex"
       ? LOCAL_CODEX_PICKER_VALUE
@@ -229,13 +239,17 @@ export function GoatSurface({
     error: chatError,
     clearError,
   } = useChat<GoatChatUiMessage>({
-    id: initialChat?.id ?? "goat-chat-main",
-    messages: initialChat?.messages ?? [],
+    id: chatInstanceKey,
+    // useChat holds only this surface's in-flight overlay; persisted history
+    // comes from the Electric-synced liveChat state and is merged below.
+    resume: chatResumeEnabled && Boolean(initialChat) && initialChat?.engine !== "local_codex",
+    // Batch stream chunks into ~20fps UI updates instead of rendering the
+    // whole thread on every token.
+    experimental_throttle: 50,
     transport,
     onFinish: ({ message }) => {
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
-        locallyHiddenSessionIdsRef.current.delete(sessionId);
         setChatSessionId(sessionId);
         router.replace(`/?chat=${encodeURIComponent(sessionId)}`);
       }
@@ -266,9 +280,25 @@ export function GoatSurface({
       chatSessionId === initialChat.id &&
       initialChat.engine === "local_codex",
   );
-  const hasMessages = messages.length > 0;
+  // Render list: Electric-synced rows are the source of truth for persisted
+  // messages; the useChat overlay contributes only entries Electric has not
+  // delivered yet (the in-flight turn and optimistic sends).
+  const persistedMessages = useMemo(() => {
+    if (!chatSessionId) return [];
+    if (liveChat && liveChat.sessionId === chatSessionId) return liveChat.messages;
+    if (initialChat && initialChat.id === chatSessionId) return initialChat.messages;
+    return [];
+  }, [chatSessionId, initialChat, liveChat]);
+  const chatMessages = useMemo(() => {
+    if (persistedMessages.length === 0) return messages;
+    const persistedIds = new Set(persistedMessages.map((message) => message.id));
+    const overlay = messages.filter((message) => !persistedIds.has(message.id));
+    return overlay.length > 0 ? [...persistedMessages, ...overlay] : persistedMessages;
+  }, [messages, persistedMessages]);
+  const hasMessages = chatMessages.length > 0;
   const showThinkingBubble =
-    (isGenerating || (isLocalCodexChat && localCodexRunning)) && shouldShowThinkingBubble(messages);
+    (isGenerating || (isLocalCodexChat && localCodexRunning)) &&
+    shouldShowThinkingBubble(chatMessages);
   const trimmedNewChatPrompt = newChatPrompt.trim();
   const newChatPromptValid =
     trimmedNewChatPrompt.length > 0 &&
@@ -283,56 +313,50 @@ export function GoatSurface({
   const chatTaskLookup = useMemo(
     () =>
       buildChatTaskLookup({
-        messages,
+        messages: chatMessages,
         tasks,
         liveTasks: liveChatTasks,
       }),
-    [liveChatTasks, messages, tasks],
+    [chatMessages, liveChatTasks, tasks],
   );
 
-  useEffect(() => {
-    if (isGenerating || localCodexSubmitting) return;
-    // router.refresh() can lag one render behind local useChat state. Keep local
-    // turns visible until the server props catch up for both new and existing chats.
-    const localHasChat = mode === "chat" && (messages.length > 0 || Boolean(chatSessionId));
-    const serverMessageCount = initialChat?.messages.length ?? 0;
-    const serverIsSameChat = Boolean(
-      initialChat && chatSessionId && initialChat.id === chatSessionId,
-    );
-    const serverIsBehindLocal =
-      localHasChat &&
-      ((!initialChat && messages.length > 0) ||
-        (serverIsSameChat && messages.length > serverMessageCount));
-    if (serverIsBehindLocal) return;
-    if (initialChat && locallyHiddenSessionIdsRef.current.has(initialChat.id)) {
-      return;
-    }
-
-    const frame = requestAnimationFrame(() => {
-      setChatSessionId(initialChat?.id ?? null);
+  const openChat = useCallback(
+    (chat: { id: string; model: string; engine?: GoatChatEngine } | null) => {
+      const isLocalCodexTarget = Boolean(
+        chat && localCodexBetaEnabled && chat.engine === "local_codex",
+      );
+      setChatSessionId(chat?.id ?? null);
+      setChatInstanceKey(chat?.id ?? "goat-chat-main");
       setChatModel(
-        localCodexBetaEnabled && initialChat?.engine === "local_codex"
+        isLocalCodexTarget
           ? LOCAL_CODEX_PICKER_VALUE
-          : normalizeGoatModel(initialChat?.model ?? defaultModel),
+          : normalizeGoatModel(chat?.model ?? defaultModel),
       );
-      setLocalCodexChatSessionId(
-        localCodexBetaEnabled && initialChat?.engine === "local_codex" ? initialChat.id : null,
-      );
-      setMessages(initialChat?.messages ?? []);
-      setMode(initialChat ? "chat" : "home");
+      setLocalCodexChatSessionId(chat && isLocalCodexTarget ? chat.id : null);
+      setLocalCodexRunning(false);
+      setMessages([]);
+      setLocallyStoppedAssistantMessageIds(new Set());
+      clearError();
+      setMode(chat ? "chat" : "home");
+    },
+    [clearError, defaultModel, localCodexBetaEnabled, setMessages],
+  );
+
+  // Adopt URL-driven chat changes (history links, back/forward). This reacts
+  // to prop *transitions* rather than prop/state mismatches, so server props
+  // that lag behind local navigation (e.g. a new session adopted from stream
+  // metadata before router.refresh lands) never clobber local state.
+  const initialChatId = initialChat?.id ?? null;
+  const lastInitialChatIdRef = useRef(initialChatId);
+  useEffect(() => {
+    if (lastInitialChatIdRef.current === initialChatId) return;
+    const frame = requestAnimationFrame(() => {
+      lastInitialChatIdRef.current = initialChatId;
+      if (initialChatId === chatSessionId) return;
+      openChat(initialChat ?? null);
     });
     return () => cancelAnimationFrame(frame);
-  }, [
-    chatSessionId,
-    defaultModel,
-    initialChat,
-    isGenerating,
-    localCodexBetaEnabled,
-    localCodexSubmitting,
-    messages.length,
-    mode,
-    setMessages,
-  ]);
+  }, [chatSessionId, initialChat, initialChatId, openChat]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -363,11 +387,11 @@ export function GoatSurface({
 
   useEffect(() => {
     if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
-    if (messages.length === 0 && status !== "submitted" && status !== "streaming") return;
+    if (chatMessages.length === 0 && status !== "submitted" && status !== "streaming") return;
     const thread = threadRef.current;
     if (!thread || typeof thread.scrollTo !== "function") return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
-  }, [messages, mode, status]);
+  }, [chatMessages, mode, status]);
 
   useEffect(() => {
     if (!chatError || chatError.message === lastError.current) return;
@@ -527,18 +551,11 @@ export function GoatSurface({
   };
 
   const closeChat = useCallback(() => {
-    const hidingSessionId = chatSessionId;
     if (isGenerating) void stop();
-    if (hidingSessionId) locallyHiddenSessionIdsRef.current.add(hidingSessionId);
-    setMode("home");
-    setMessages([]);
-    setChatSessionId(null);
-    setLocalCodexChatSessionId(null);
-    setLocalCodexRunning(false);
-    clearError();
+    openChat(null);
     router.replace("/");
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [chatSessionId, clearError, isGenerating, router, setMessages, stop]);
+  }, [isGenerating, openChat, router, stop]);
 
   const stopGeneration = useCallback(() => {
     if (activeLocalCodexSessionId) {
@@ -560,8 +577,18 @@ export function GoatSurface({
         new Set(current).add(lastAssistantMessage.id),
       );
     }
+    // With resumable streams, aborting the connection is only a disconnect;
+    // the stop endpoint cancels the server-side generation itself.
+    if (chatResumeEnabled) {
+      const stopSessionId = chatSessionId ?? lastAssistantMessage?.metadata?.sessionId ?? null;
+      if (stopSessionId) {
+        void fetch(`/api/chat/${encodeURIComponent(stopSessionId)}/stop`, {
+          method: "POST",
+        }).catch(() => undefined);
+      }
+    }
     void stop();
-  }, [activeLocalCodexSessionId, messages, stop]);
+  }, [activeLocalCodexSessionId, chatResumeEnabled, chatSessionId, messages, stop]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -698,10 +725,7 @@ export function GoatSurface({
               <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
                 Chats
               </h2>
-              <ChatHistoryList
-                chats={recentChats}
-                onSelect={(chatId) => locallyHiddenSessionIdsRef.current.delete(chatId)}
-              />
+              <ChatHistoryList chats={recentChats} onSelect={openChat} />
             </section>
 
             <section className="flex flex-col gap-1">
@@ -752,7 +776,7 @@ export function GoatSurface({
             }}
           >
             <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
-              {messages.map((message) => (
+              {chatMessages.map((message) => (
                 <Bubble
                   key={message.id}
                   message={message}
@@ -767,7 +791,7 @@ export function GoatSurface({
       )}
 
       {mode === "chat" && chatSessionId ? (
-        <LiveChatMessages sessionId={chatSessionId} setMessages={setMessages} />
+        <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
       ) : null}
       {mode === "chat" && activeLocalCodexSessionId ? (
         <LiveLocalCodexSessionStatus
@@ -996,31 +1020,38 @@ function renderComposerInputOverlay(value: string, highlightCodexMention: boolea
   );
 }
 
+type LiveChatMessagesChange = Dispatch<
+  SetStateAction<{ sessionId: string; messages: GoatChatUiMessage[] } | null>
+>;
+
 function LiveChatMessages({
   sessionId,
-  setMessages,
+  onChange,
 }: {
   sessionId: string;
-  setMessages: React.Dispatch<React.SetStateAction<GoatChatUiMessage[]>>;
+  onChange: LiveChatMessagesChange;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) return null;
-  return <LiveChatMessageSubscriber sessionId={sessionId} setMessages={setMessages} />;
+  return <LiveChatMessageSubscriber sessionId={sessionId} onChange={onChange} />;
 }
 
 function LiveChatMessageSubscriber({
   sessionId,
-  setMessages,
+  onChange,
 }: {
   sessionId: string;
-  setMessages: React.Dispatch<React.SetStateAction<GoatChatUiMessage[]>>;
+  onChange: LiveChatMessagesChange;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const messagesCollection = useMemo(
     () => collections.chatMessages(sessionId),
     [collections, sessionId],
   );
-  const { data: rows } = useLiveQuery((q) => q.from({ message: messagesCollection }));
+  const { data: rows, isLoading } = useLiveQuery(
+    (q) => q.from({ message: messagesCollection }),
+    [messagesCollection],
+  );
   const liveMessages = useMemo(() => {
     return ((rows ?? []) as GoatChatMessageRow[])
       .toSorted((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
@@ -1028,14 +1059,9 @@ function LiveChatMessageSubscriber({
   }, [rows]);
 
   useEffect(() => {
-    if (liveMessages.length === 0) return;
-    setMessages((current) => {
-      const liveById = new Map(liveMessages.map((message) => [message.id, message]));
-      const optimisticMessages = current.filter((message) => !liveById.has(message.id));
-      const merged = [...liveMessages, ...optimisticMessages];
-      return messagesEqualByRenderableContent(current, merged) ? current : merged;
-    });
-  }, [liveMessages, setMessages]);
+    if (isLoading) return;
+    onChange({ sessionId, messages: liveMessages });
+  }, [isLoading, liveMessages, onChange, sessionId]);
 
   return null;
 }
@@ -1079,18 +1105,6 @@ function LiveLocalCodexSessionStatusSubscriber({
   return null;
 }
 
-function messagesEqualByRenderableContent(
-  left: readonly GoatChatUiMessage[],
-  right: readonly GoatChatUiMessage[],
-) {
-  if (left.length !== right.length) return false;
-  return left.every((message, index) => {
-    const other = right[index];
-    if (!other || message.id !== other.id || message.role !== other.role) return false;
-    return JSON.stringify(message.parts) === JSON.stringify(other.parts);
-  });
-}
-
 function LiveChatTasks({
   setTasks,
 }: {
@@ -1122,7 +1136,7 @@ function ChatHistoryList({
   onSelect,
 }: {
   chats: readonly GoatChatSummaryView[];
-  onSelect: (chatId: string) => void;
+  onSelect: (chat: GoatChatSummaryView) => void;
 }) {
   const router = useRouter();
 
@@ -1143,7 +1157,7 @@ function ChatHistoryList({
             onMouseEnter={prefetchChat}
             onFocus={prefetchChat}
             onTouchStart={prefetchChat}
-            onClick={() => onSelect(chat.id)}
+            onClick={() => onSelect(chat)}
             className="group/chat flex min-h-11 items-center gap-3 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <Clock

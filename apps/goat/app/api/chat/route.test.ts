@@ -58,6 +58,7 @@ vi.mock("ai", () => ({
   convertToModelMessages: vi.fn(async () => []),
   createGateway: vi.fn(() => (model: string) => ({ model })),
   jsonSchema: vi.fn((schema: unknown) => schema),
+  smoothStream: vi.fn(() => (chunks: unknown) => chunks),
   stepCountIs: vi.fn((count: number) => ({ count })),
   streamText: vi.fn(),
   tool: vi.fn((definition: unknown) => definition),
