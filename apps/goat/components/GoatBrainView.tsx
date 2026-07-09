@@ -1030,7 +1030,7 @@ function GraphLinksList({
         <span className="text-[12px] text-ink-subtle">{links.length}</span>
       </div>
       {links.length > 0 ? (
-        <ol className="max-h-32 space-y-1 overflow-y-auto pr-1">
+        <ol className="max-h-32 space-y-1 overflow-y-auto pr-1 text-[12px] leading-5">
           {links.map((link) => {
             const peerId = direction === "out" ? link.to : link.from;
             const peer = documentsByBrainId.get(peerId);
