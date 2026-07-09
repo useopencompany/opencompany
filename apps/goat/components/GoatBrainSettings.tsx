@@ -662,6 +662,22 @@ function selectionFromSaved(saved: SlackConfigSelection) {
 }
 
 type LinearTeamSelection = { id: string; name: string; key?: string };
+type LinearEventSelection =
+  | "issue_created"
+  | "issue_updated"
+  | "issue_status_changed"
+  | "issue_removed"
+  | "comment_created"
+  | "comment_updated";
+
+const LINEAR_EVENT_OPTIONS: Array<{ id: LinearEventSelection; label: string }> = [
+  { id: "issue_created", label: "Issue created" },
+  { id: "issue_status_changed", label: "Status changed" },
+  { id: "issue_updated", label: "Issue updated" },
+  { id: "issue_removed", label: "Issue removed" },
+  { id: "comment_created", label: "Comment added" },
+  { id: "comment_updated", label: "Comment updated" },
+];
 
 function linearTeamsFromConfig(config: Record<string, unknown> | undefined): LinearTeamSelection[] {
   const value = config?.teams;
@@ -680,6 +696,26 @@ function linearTeamsFromConfig(config: Record<string, unknown> | undefined): Lin
   });
 }
 
+function linearEventsFromConfig(
+  config: Record<string, unknown> | undefined,
+): LinearEventSelection[] {
+  const value = config?.events;
+  if (!Array.isArray(value)) return LINEAR_EVENT_OPTIONS.map((option) => option.id);
+  const allowed = new Set(LINEAR_EVENT_OPTIONS.map((option) => option.id));
+  const seen = new Set<LinearEventSelection>();
+  for (const entry of value) {
+    const id =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : null;
+    if (typeof id !== "string" || !allowed.has(id as LinearEventSelection)) continue;
+    seen.add(id as LinearEventSelection);
+  }
+  return [...seen];
+}
+
 function LinearTeamPicker({
   brainRef,
   integrationId,
@@ -692,6 +728,7 @@ function LinearTeamPicker({
   onChanged: () => Promise<void>;
 }) {
   const saved = useMemo(() => linearTeamsFromConfig(source?.config), [source]);
+  const savedEvents = useMemo(() => linearEventsFromConfig(source?.config), [source]);
   const [expanded, setExpanded] = useState(false);
   const [teams, setTeams] = useState<GoatLinearTeamListResult | null>(null);
   const [search, setSearch] = useState("");
@@ -700,6 +737,9 @@ function LinearTeamPicker({
       new Map(
         saved.map((team) => [team.id, { name: team.name, ...(team.key ? { key: team.key } : {}) }]),
       ),
+  );
+  const [eventSelection, setEventSelection] = useState<Set<LinearEventSelection>>(
+    () => new Set(savedEvents),
   );
   const [dirty, setDirty] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -728,6 +768,19 @@ function LinearTeamPicker({
     });
   };
 
+  const toggleEvent = (eventId: LinearEventSelection) => {
+    setDirty(true);
+    setEventSelection((current) => {
+      const next = new Set(current);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  };
+
   const save = () => {
     startTransition(async () => {
       const result = await setGoatBrainLinearSourceAction({
@@ -739,6 +792,7 @@ function LinearTeamPicker({
           name: entry.name,
           ...(entry.key ? { key: entry.key } : {}),
         })),
+        events: [...eventSelection].map((id) => ({ id })),
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -751,10 +805,13 @@ function LinearTeamPicker({
   };
 
   const selectedCount = selection.size;
+  const selectedEventCount = eventSelection.size;
   const summary =
     selectedCount === 0
       ? "No teams selected yet — nothing is ingested until you choose some."
-      : `${selectedCount} team${selectedCount === 1 ? "" : "s"} selected.`;
+      : `${selectedCount} team${selectedCount === 1 ? "" : "s"} and ${selectedEventCount} event${
+          selectedEventCount === 1 ? "" : "s"
+        } selected.`;
 
   if (!expanded) {
     return (
@@ -765,7 +822,7 @@ function LinearTeamPicker({
           onClick={() => setExpanded(true)}
           className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
         >
-          Choose teams
+          Choose teams and events
         </button>
       </div>
     );
@@ -833,9 +890,28 @@ function LinearTeamPicker({
               ))
             )}
           </div>
+          <div className="flex flex-col gap-1 rounded-md border border-ink/10 p-1">
+            <div className="px-1 py-0.5 text-[12px] font-medium text-ink">Events</div>
+            <div className="grid grid-cols-1 gap-px sm:grid-cols-2">
+              {LINEAR_EVENT_OPTIONS.map((option) => (
+                <label
+                  key={option.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+                >
+                  <input
+                    type="checkbox"
+                    checked={eventSelection.has(option.id)}
+                    onChange={() => toggleEvent(option.id)}
+                    className="accent-ink"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
           <p className="text-[11.5px] leading-4 text-ink-subtle">
-            Issue and comment activity in the teams you select is ingested into this brain and
-            visible to everyone with access to it.
+            Selected Linear activity in the teams you choose is ingested into this brain and visible
+            to everyone with access to it.
           </p>
           {teams.partial ? (
             <p className="text-[11.5px] leading-4 text-ink-subtle">
@@ -852,7 +928,7 @@ function LinearTeamPicker({
             onClick={save}
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >
-            {isPending ? "Saving…" : "Save teams"}
+            {isPending ? "Saving…" : "Save Linear source"}
           </button>
         </div>
       ) : null}

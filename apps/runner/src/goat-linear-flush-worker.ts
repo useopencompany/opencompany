@@ -4,6 +4,8 @@ import {
 } from "@opencompany/db/goat-brain-ingest";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
+  goatLinearEventTypeFor,
+  goatLinearRouteMatchesEvent,
   goatLinearSelectedTeamIds,
   listEnabledGoatLinearBrainSourceRoutes,
   newGoatLinearIssueWindowId,
@@ -147,6 +149,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       .filter((route) => {
         const selected = goatLinearSelectedTeamIds(route.config);
         if (selected.size === 0) return false;
+        if (!eventsMatchLinearRoute(route.config, claimed)) return false;
         // Without a resolvable team (deleted issue with team-less buffered
         // comments) the window cannot be routed confidently; persist it with
         // no jobs rather than fan out to the wrong brain.
@@ -398,6 +401,20 @@ function toNormalizedActivity(row: BufferedLinearEventRow): NormalizedLinearIssu
     ...(commentId ? { commentId } : {}),
     ...(commentBody ? { commentBody } : {}),
   };
+}
+
+function eventsMatchLinearRoute(
+  config: Parameters<typeof goatLinearRouteMatchesEvent>[0],
+  events: readonly BufferedLinearEventRow[],
+) {
+  return events.some((row) => {
+    const eventType = goatLinearEventTypeFor({
+      entityType: row.entityType,
+      action: row.action,
+      updatedFrom: asRecord(row.payload.updatedFrom),
+    });
+    return eventType ? goatLinearRouteMatchesEvent(config, eventType) : false;
+  });
 }
 
 // Fallback when the live snapshot is unavailable: reconstruct the comments the

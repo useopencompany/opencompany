@@ -7,7 +7,13 @@ import {
   upsertGoatBrainSource,
 } from "@opencompany/db/goat-brain-sources";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
-import { GOAT_LINEAR_MCP_EXTERNAL_ID, type GoatLinearTeamRef } from "@opencompany/db/goat-linear";
+import {
+  GOAT_LINEAR_EVENT_TYPES,
+  GOAT_LINEAR_MCP_EXTERNAL_ID,
+  type GoatLinearEventRef,
+  type GoatLinearEventType,
+  type GoatLinearTeamRef,
+} from "@opencompany/db/goat-linear";
 import {
   type GoatBrainSourceConfigProvider,
   type GoatIntegrationProvider,
@@ -417,6 +423,7 @@ export async function setGoatBrainLinearSourceAction(input: {
   integrationId: string;
   enabled: boolean;
   teams: GoatLinearTeamRef[];
+  events: GoatLinearEventRef[];
 }): Promise<GoatWorkspaceActionResult> {
   const context = await requireAdminBrainContext(input.brainRef);
   if (!context) {
@@ -449,6 +456,7 @@ export async function setGoatBrainLinearSourceAction(input: {
       enabled: input.enabled,
       config: {
         teams: sanitizeTeamRefs(input.teams),
+        events: sanitizeLinearEventRefs(input.events),
       },
     });
 
@@ -497,6 +505,19 @@ function sanitizeTeamRefs(refs: GoatLinearTeamRef[]): GoatLinearTeamRef[] {
     const name = typeof ref.name === "string" ? ref.name.trim() : "";
     const key = typeof ref.key === "string" ? ref.key.trim() : "";
     sanitized.push({ id, name: name || id, ...(key ? { key } : {}) });
+  }
+  return sanitized;
+}
+
+function sanitizeLinearEventRefs(refs: GoatLinearEventRef[]): GoatLinearEventRef[] {
+  const allowed = new Set<GoatLinearEventType>(GOAT_LINEAR_EVENT_TYPES);
+  const seen = new Set<GoatLinearEventType>();
+  const sanitized: GoatLinearEventRef[] = [];
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id : "";
+    if (!allowed.has(id as GoatLinearEventType) || seen.has(id as GoatLinearEventType)) continue;
+    seen.add(id as GoatLinearEventType);
+    sanitized.push({ id: id as GoatLinearEventType });
   }
   return sanitized;
 }

@@ -23,11 +23,29 @@ export type GoatLinearTeamRef = {
   name: string;
 };
 
+export const GOAT_LINEAR_EVENT_TYPES = [
+  "issue_created",
+  "issue_updated",
+  "issue_status_changed",
+  "issue_removed",
+  "comment_created",
+  "comment_updated",
+  "comment_removed",
+] as const;
+
+export type GoatLinearEventType = (typeof GOAT_LINEAR_EVENT_TYPES)[number];
+
+export type GoatLinearEventRef = {
+  id: GoatLinearEventType;
+};
+
 // The routing contract between the team picker, the events webhook, and the
 // flush worker: issue activity is buffered/ingested only when its team id
-// appears in the enabled brain-source config for the integration.
+// and derived event type appear in the enabled brain-source config for the
+// integration.
 export type GoatLinearBrainSourceConfig = {
   teams?: GoatLinearTeamRef[];
+  events?: GoatLinearEventRef[];
 };
 
 export type GoatLinearIntegrationForOrganization = {
@@ -61,13 +79,54 @@ export function parseGoatLinearBrainSourceConfig(value: unknown): GoatLinearBrai
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const teams = parseTeamRefs(record.teams);
-  return teams ? { teams } : {};
+  const events = parseEventRefs(record.events);
+  return {
+    ...(teams ? { teams } : {}),
+    ...(events ? { events } : {}),
+  };
 }
 
 export function goatLinearSelectedTeamIds(config: GoatLinearBrainSourceConfig): Set<string> {
   const ids = new Set<string>();
   for (const ref of config.teams ?? []) ids.add(ref.id);
   return ids;
+}
+
+export function goatLinearSelectedEventTypes(
+  config: GoatLinearBrainSourceConfig,
+): Set<GoatLinearEventType> | null {
+  if (!config.events) return null;
+  return new Set(config.events.map((ref) => ref.id));
+}
+
+export function goatLinearRouteMatchesEvent(
+  config: GoatLinearBrainSourceConfig,
+  eventType: GoatLinearEventType,
+) {
+  const selected = goatLinearSelectedEventTypes(config);
+  return selected === null || selected.has(eventType);
+}
+
+export function goatLinearEventTypeFor(input: {
+  entityType: GoatLinearEventEntityType;
+  action: GoatLinearEventAction;
+  updatedFrom?: Record<string, unknown> | null;
+}): GoatLinearEventType | null {
+  if (input.entityType === "comment") {
+    if (input.action === "create") return "comment_created";
+    if (input.action === "update") return "comment_updated";
+    if (input.action === "remove") return "comment_removed";
+    return null;
+  }
+
+  if (input.action === "create") return "issue_created";
+  if (input.action === "remove") return "issue_removed";
+  if (input.action === "update") {
+    return linearUpdatedFromHasStatusChange(input.updatedFrom)
+      ? "issue_status_changed"
+      : "issue_updated";
+  }
+  return null;
 }
 
 export async function listGoatLinearIntegrationsForOrganization(
@@ -169,4 +228,32 @@ function parseTeamRefs(value: unknown): GoatLinearTeamRef[] | undefined {
     return [{ id, name: name || id, ...(key ? { key } : {}) }];
   });
   return refs.length > 0 ? refs : undefined;
+}
+
+function parseEventRefs(value: unknown): GoatLinearEventRef[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<GoatLinearEventType>();
+  const refs = value.flatMap((entry) => {
+    const id =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : null;
+    if (!isGoatLinearEventType(id) || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id }];
+  });
+  return refs;
+}
+
+function isGoatLinearEventType(value: unknown): value is GoatLinearEventType {
+  return (
+    typeof value === "string" && (GOAT_LINEAR_EVENT_TYPES as readonly string[]).includes(value)
+  );
+}
+
+function linearUpdatedFromHasStatusChange(updatedFrom: Record<string, unknown> | null | undefined) {
+  if (!updatedFrom) return false;
+  return ["stateId", "state", "status", "statusId", "stateType"].some((key) => key in updatedFrom);
 }

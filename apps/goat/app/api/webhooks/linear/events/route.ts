@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import {
   type GoatLinearIssueEventInsert,
+  goatLinearEventTypeFor,
+  goatLinearRouteMatchesEvent,
   goatLinearSelectedTeamIds,
   insertGoatLinearIssueEvents,
   listEnabledGoatLinearBrainSourceRoutes,
@@ -90,6 +92,12 @@ async function handleLinearEvent(
   if (entityType === "issue" && action === "update" && isNoiseIssueUpdate(envelope.updatedFrom)) {
     return { ok: true, dropped: true };
   }
+  const eventType = goatLinearEventTypeFor({
+    entityType,
+    action,
+    updatedFrom: envelope.updatedFrom ?? null,
+  });
+  if (!eventType) return { ok: true, ignored: true };
 
   const issueId =
     entityType === "issue"
@@ -119,6 +127,7 @@ async function handleLinearEvent(
       .filter((route) => {
         const selected = goatLinearSelectedTeamIds(route.config);
         if (selected.size === 0) return false;
+        if (!goatLinearRouteMatchesEvent(route.config, eventType)) return false;
         return teamId ? selected.has(teamId) : true;
       })
       .map((route) => route.integrationId),
