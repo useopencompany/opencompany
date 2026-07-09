@@ -391,7 +391,7 @@ export function GoatSurface({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
-      if (key !== "n" || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
+      if (key !== "k" || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
         return;
       }
 

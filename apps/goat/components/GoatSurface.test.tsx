@@ -479,7 +479,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK-1");
   });
 
-  it("opens the new chat command with Cmd+N and starts a background chat", async () => {
+  it("opens the new chat command with Cmd+K and starts a background chat", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
@@ -507,7 +507,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    await user.keyboard("{Meta>}n{/Meta}");
+    await user.keyboard("{Meta>}k{/Meta}");
     await user.type(screen.getByPlaceholderText("Describe the new chat or task..."), "Research Q3");
     await user.keyboard("{Enter}");
 
