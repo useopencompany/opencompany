@@ -239,6 +239,117 @@ export async function connectGoatSlackIntegration(input: {
   return { integrationId: integration.id };
 }
 
+export type GoatLinearOAuthCredentialPayload = {
+  access_token: string;
+  organization_id: string;
+  organization_name?: string;
+  organization_url_key?: string;
+  viewer_id?: string;
+  viewer_name?: string;
+  scope?: string;
+};
+
+// The Linear ingestion connection. Distinct from the Linear MCP connector,
+// which shares provider "linear" but keys external_id on the "linear_mcp"
+// sentinel; ingestion rows key on the Linear organization id so inbound
+// webhooks can route by payload organizationId.
+export async function connectGoatLinearIngestIntegration(input: {
+  userWorkosId: string;
+  organizationId: string;
+  organizationName: string | null;
+  organizationUrlKey: string | null;
+  viewerId: string | null;
+  viewerName: string | null;
+  viewerEmail: string | null;
+  accessToken: string;
+  scopes: string[];
+  db?: GoatIntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = input.organizationName?.trim() || "Linear";
+
+  const [integration] = await db
+    .insert(goatIntegrations)
+    .values({
+      id: newGoatIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      provider: "linear",
+      // The Linear organization id is the routing key for inbound webhooks.
+      externalId: input.organizationId,
+      connectionLabel,
+      accountName: input.viewerName,
+      accountEmail: input.viewerEmail,
+      accountType: "linear_user",
+      status: "connected",
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+        goatIntegrations.externalId,
+      ],
+      set: {
+        connectionLabel,
+        accountName: input.viewerName,
+        accountEmail: input.viewerEmail,
+        accountType: "linear_user",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: goatIntegrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist Goat Linear integration.");
+  }
+
+  const payload: GoatLinearOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    organization_id: input.organizationId,
+    ...(input.organizationName ? { organization_name: input.organizationName } : {}),
+    ...(input.organizationUrlKey ? { organization_url_key: input.organizationUrlKey } : {}),
+    ...(input.viewerId ? { viewer_id: input.viewerId } : {}),
+    ...(input.viewerName ? { viewer_name: input.viewerName } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(",") } : {}),
+  };
+
+  try {
+    await saveGoatIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "linear",
+      kind: "oauth_token",
+      payload,
+      // Linear OAuth access tokens do not expire.
+      expiresAt: null,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markGoatIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "linear",
+      status: "sync_failed",
+      statusReason: "Failed to persist Linear integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
 export async function saveGoatIntegrationCredential(
   input: GoatIntegrationCredentialContext & {
     payload: Record<string, unknown>;

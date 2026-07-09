@@ -9,9 +9,12 @@ import { useHydrated } from "@/components/useHydrated";
 import {
   type GoatBrainSourcesDetails,
   type GoatBrainSourceView,
+  type GoatLinearTeamListResult,
   type GoatSlackConversationListResult,
   getGoatBrainSourcesAction,
+  listGoatLinearTeamsAction,
   listGoatSlackConversationsAction,
+  setGoatBrainLinearSourceAction,
   setGoatBrainSlackSourceAction,
   setGoatBrainSourceEnabledAction,
 } from "@/lib/brain-source-actions";
@@ -295,12 +298,15 @@ function SourceProviderCard({
 
   const jamie = provider.id === "jamie" ? details?.jamie : undefined;
   const slack = provider.id === "slack" ? details?.slack : undefined;
+  const linear = provider.id === "linear" ? details?.linear : undefined;
   const connected =
     provider.id === "jamie"
       ? Boolean(jamie?.integration.connected)
       : provider.id === "slack"
         ? Boolean(slack?.integration.connected)
-        : false;
+        : provider.id === "linear"
+          ? Boolean(linear?.integration.connected)
+          : false;
   // Before any per-brain rows exist, Jamie deliveries follow legacy routing to
   // the user's default brain — surface that as an implicit "on" there.
   const legacyEnabled = Boolean(
@@ -312,7 +318,10 @@ function SourceProviderCard({
 
   const toggle = () => {
     const integrationId =
-      source?.integrationId ?? jamie?.integration.integrationId ?? slack?.integration.integrationId;
+      source?.integrationId ??
+      jamie?.integration.integrationId ??
+      slack?.integration.integrationId ??
+      linear?.integration.integrationId;
     if (!integrationId) return;
     startTransition(async () => {
       const result = await setGoatBrainSourceEnabledAction({
@@ -385,6 +394,17 @@ function SourceProviderCard({
         <SlackChannelPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? slack.integration.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {provider.id === "linear" &&
+      linear?.integration.integrationId &&
+      (connected || source) &&
+      (source ? source.isOwnIntegration : true) ? (
+        <LinearTeamPicker
+          brainRef={brainRef}
+          integrationId={source?.integrationId ?? linear.integration.integrationId}
           source={source}
           onChanged={onChanged}
         />
@@ -639,6 +659,205 @@ function selectionFromSaved(saved: SlackConfigSelection) {
     map.set(channel.id, { name: channel.name, kind: "channel" });
   for (const dm of saved.dms) map.set(dm.id, { name: dm.name, kind: "dm" });
   return map;
+}
+
+type LinearTeamSelection = { id: string; name: string; key?: string };
+
+function linearTeamsFromConfig(config: Record<string, unknown> | undefined): LinearTeamSelection[] {
+  const value = config?.teams;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.id !== "string" || !record.id) return [];
+    return [
+      {
+        id: record.id,
+        name: typeof record.name === "string" ? record.name : record.id,
+        ...(typeof record.key === "string" && record.key ? { key: record.key } : {}),
+      },
+    ];
+  });
+}
+
+function LinearTeamPicker({
+  brainRef,
+  integrationId,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  integrationId: string;
+  source: GoatBrainSourceView | null;
+  onChanged: () => Promise<void>;
+}) {
+  const saved = useMemo(() => linearTeamsFromConfig(source?.config), [source]);
+  const [expanded, setExpanded] = useState(false);
+  const [teams, setTeams] = useState<GoatLinearTeamListResult | null>(null);
+  const [search, setSearch] = useState("");
+  const [selection, setSelection] = useState<Map<string, { name: string; key?: string }>>(
+    () =>
+      new Map(
+        saved.map((team) => [team.id, { name: team.name, ...(team.key ? { key: team.key } : {}) }]),
+      ),
+  );
+  const [dirty, setDirty] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (!expanded || teams) return;
+    let cancelled = false;
+    void listGoatLinearTeamsAction(integrationId).then((result) => {
+      if (!cancelled) setTeams(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, teams, integrationId]);
+
+  const toggleTeam = (id: string, name: string, key?: string) => {
+    setDirty(true);
+    setSelection((current) => {
+      const next = new Map(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.set(id, { name, ...(key ? { key } : {}) });
+      }
+      return next;
+    });
+  };
+
+  const save = () => {
+    startTransition(async () => {
+      const result = await setGoatBrainLinearSourceAction({
+        brainRef,
+        integrationId,
+        enabled: source ? source.enabled : true,
+        teams: [...selection].map(([id, entry]) => ({
+          id,
+          name: entry.name,
+          ...(entry.key ? { key: entry.key } : {}),
+        })),
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setDirty(false);
+      toast.success("Linear teams updated.");
+      await onChanged();
+    });
+  };
+
+  const selectedCount = selection.size;
+  const summary =
+    selectedCount === 0
+      ? "No teams selected yet — nothing is ingested until you choose some."
+      : `${selectedCount} team${selectedCount === 1 ? "" : "s"} selected.`;
+
+  if (!expanded) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-t border-ink/10 pt-2">
+        <p className="text-[11.5px] leading-4 text-ink-subtle">{summary}</p>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+        >
+          Choose teams
+        </button>
+      </div>
+    );
+  }
+
+  const query = search.trim().toLowerCase();
+  const teamOptions = (teams?.ok ? teams.teams : []).filter(
+    (team) =>
+      !query ||
+      team.name.toLowerCase().includes(query) ||
+      (team.key ?? "").toLowerCase().includes(query),
+  );
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search
+            size={13}
+            strokeWidth={2}
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-subtle"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search teams"
+            className="w-full rounded-md border border-ink/10 bg-transparent py-1 pl-7 pr-2 text-[12.5px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          Collapse
+        </button>
+      </div>
+      {teams === null ? (
+        <div className="px-1 py-1.5 text-[12px] text-ink-subtle">Loading teams…</div>
+      ) : !teams.ok ? (
+        <div className="px-1 py-1.5 text-[12px] text-warning">{teams.error}</div>
+      ) : (
+        <>
+          <div className="flex max-h-[220px] flex-col gap-px overflow-y-auto rounded-md border border-ink/10 p-1">
+            {teamOptions.length === 0 ? (
+              <div className="px-2 py-1.5 text-[12px] text-ink-subtle">No teams found.</div>
+            ) : (
+              teamOptions.map((team) => (
+                <label
+                  key={team.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selection.has(team.id)}
+                    onChange={() => toggleTeam(team.id, team.name, team.key)}
+                    className="accent-ink"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{team.name}</span>
+                  {team.key ? (
+                    <span className="shrink-0 text-[11px] text-ink-subtle">{team.key}</span>
+                  ) : null}
+                </label>
+              ))
+            )}
+          </div>
+          <p className="text-[11.5px] leading-4 text-ink-subtle">
+            Issue and comment activity in the teams you select is ingested into this brain and
+            visible to everyone with access to it.
+          </p>
+          {teams.partial ? (
+            <p className="text-[11.5px] leading-4 text-ink-subtle">
+              Some teams could not be loaded from Linear — try again in a minute.
+            </p>
+          ) : null}
+        </>
+      )}
+      {dirty ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={save}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {isPending ? "Saving…" : "Save teams"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SourceToggle({

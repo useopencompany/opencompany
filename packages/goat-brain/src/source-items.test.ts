@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   BrainSourceNormalizationError,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
+  normalizeLinearIssueWindow,
   normalizeSlackConversationWindow,
   normalizeUploadAsset,
   slackTsToIso,
@@ -400,5 +402,109 @@ describe("Slack conversation window normalization", () => {
   it("guards against other item shapes", () => {
     expect(isNormalizedSlackConversationSourceItem({ sourceProvider: "slack" })).toBe(false);
     expect(isNormalizedSlackConversationSourceItem(null)).toBe(false);
+  });
+});
+
+describe("Linear issue window normalization", () => {
+  const input = {
+    windowId: "glinwin_abc123",
+    organizationId: "org_9f2c",
+    issueId: "issue_1234",
+    identifier: "ENG-42",
+    url: "https://linear.app/acme/issue/ENG-42",
+    title: "Checkout crashes on retry",
+    teamId: "team_77",
+    teamKey: "ENG",
+    teamName: "Engineering",
+    state: "In Progress",
+    stateType: "started",
+    assigneeName: "Ada",
+    activity: [
+      {
+        occurredAt: "2026-07-13T10:05:00.000Z",
+        entityType: "comment" as const,
+        action: "create" as const,
+        actorName: "Ada",
+        commentId: "cmt_2",
+        commentBody: "Root cause is a double-submit race.",
+      },
+      {
+        occurredAt: "2026-07-13T10:00:00.000Z",
+        entityType: "issue" as const,
+        action: "update" as const,
+        actorName: "Ada",
+        changedFields: ["state"],
+      },
+    ],
+    comments: [
+      {
+        id: "cmt_2",
+        body: "Root cause is a double-submit race.",
+        authorName: "Ada",
+        createdAt: "2026-07-13T10:05:00.000Z",
+      },
+    ],
+    flushedAt: "2026-07-13T10:30:00.000Z",
+  };
+
+  it("normalizes a window and sorts activity by time", () => {
+    const item = normalizeLinearIssueWindow(input);
+
+    expect(item.sourceProvider).toBe("linear");
+    expect(item.sourceType).toBe("issue");
+    expect(item.externalId).toBe("glinwin_abc123");
+    expect(item.sourceRef).toBe("linear:issue:ENG-42");
+    expect(item.title).toBe("ENG-42 Checkout crashes on retry");
+    expect(item.content.issue.windowStart).toBe("2026-07-13T10:00:00.000Z");
+    expect(item.content.issue.windowEnd).toBe("2026-07-13T10:05:00.000Z");
+    expect(item.content.issue.activity.map((entry) => entry.entityType)).toEqual([
+      "issue",
+      "comment",
+    ]);
+    expect(item.occurredAt).toBe("2026-07-13T10:00:00.000Z");
+    expect(item.capturedAt).toBe("2026-07-13T10:30:00.000Z");
+    expect(item.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(isNormalizedLinearIssueSourceItem(item)).toBe(true);
+  });
+
+  it("hashes activity identity and state, not enrichment", () => {
+    const base = normalizeLinearIssueWindow(input);
+    const enriched = normalizeLinearIssueWindow({
+      ...input,
+      assigneeName: "Grace",
+      description: "New description that should not affect the hash.",
+    });
+    expect(enriched.contentHash).toBe(base.contentHash);
+    const stateChanged = normalizeLinearIssueWindow({ ...input, state: "Done" });
+    expect(stateChanged.contentHash).not.toBe(base.contentHash);
+  });
+
+  it("falls back to the issue id when the live snapshot is unavailable", () => {
+    const item = normalizeLinearIssueWindow({
+      windowId: "glinwin_stale",
+      organizationId: "org_9f2c",
+      issueId: "issue_1234",
+      title: "Checkout crashes on retry",
+      activity: input.activity,
+      snapshotStale: true,
+      flushedAt: "2026-07-13T10:30:00.000Z",
+    });
+    expect(item.sourceRef).toBe("linear:issue:issue_1234");
+    expect(item.title).toBe("Checkout crashes on retry");
+    expect(item.content.issue.snapshotStale).toBe(true);
+    expect(isNormalizedLinearIssueSourceItem(item)).toBe(true);
+  });
+
+  it("rejects empty windows and malformed input", () => {
+    expect(() => normalizeLinearIssueWindow({ ...input, activity: [] })).toThrow(
+      BrainSourceNormalizationError,
+    );
+    expect(() => normalizeLinearIssueWindow({ ...input, windowId: " " })).toThrow(/windowId/);
+    expect(() => normalizeLinearIssueWindow({ ...input, flushedAt: "nope" })).toThrow(/timestamp/);
+  });
+
+  it("guards against other item shapes", () => {
+    expect(isNormalizedLinearIssueSourceItem({ sourceProvider: "linear" })).toBe(false);
+    expect(isNormalizedLinearIssueSourceItem(null)).toBe(false);
   });
 });
