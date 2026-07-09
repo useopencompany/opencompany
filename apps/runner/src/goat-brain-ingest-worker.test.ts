@@ -130,6 +130,7 @@ describe("Goat Brain ingest worker", () => {
     });
 
     expect(run).toHaveBeenCalledWith({
+      jobId: "gbjob_123",
       userWorkosId: "user_123",
       brainRef: "gbrain_123",
       item: normalizedPayload,
