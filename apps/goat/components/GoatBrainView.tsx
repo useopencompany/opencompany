@@ -259,8 +259,8 @@ function GoatBrainEditor({
     [documents, folders, query],
   );
   const brainLinks = useMemo(
-    () => brainLinkMap(documents, selectedBrainId),
-    [documents, selectedBrainId],
+    () => brainLinkMap(folders, documents, selectedBrainId),
+    [documents, folders, selectedBrainId],
   );
   const graphLinks = useMemo(() => buildGraphLinks(documents, edgeRows), [documents, edgeRows]);
   const rootGroups = useMemo(() => groupRootNodes(tree.children), [tree.children]);
@@ -1278,15 +1278,34 @@ function brainDocumentTreePath(document: GoatBrainDocumentView) {
   return `${document.folderPath}/${document.brainId}.md`;
 }
 
-function brainLinkMap(documents: GoatBrainDocumentView[], routeBrainId?: string | null) {
+function brainLinkMap(
+  folders: GoatBrainFolderView[],
+  documents: GoatBrainDocumentView[],
+  routeBrainId?: string | null,
+) {
   const links: Record<string, string> = {};
+  for (const folder of folders) {
+    const href = brainFolderUrl(folder.path, routeBrainId);
+    addBrainLinkTarget(links, folder.path, href);
+    addBrainLinkTarget(links, `folder:${folder.path}`, href);
+    addBrainLinkTarget(links, `wiki/${folder.path}`, href);
+  }
   for (const document of documents) {
     const href = brainDocumentUrl(document, routeBrainId);
-    links[document.brainId] = href;
-    links[`page:${document.brainId}`] = href;
+    const folderTarget = `${document.folderPath}/${document.brainId}`;
+    addBrainLinkTarget(links, document.brainId, href);
+    addBrainLinkTarget(links, folderTarget, href);
+    addBrainLinkTarget(links, `${folderTarget}.md`, href);
+    addBrainLinkTarget(links, `wiki/${folderTarget}`, href);
+    addBrainLinkTarget(links, `wiki/${folderTarget}.md`, href);
     if (document.kind === "evidence") links[`evidence:${document.brainId}`] = href;
   }
   return links;
+}
+
+function addBrainLinkTarget(links: Record<string, string>, target: string, href: string) {
+  links[target] = href;
+  links[`page:${target}`] = href;
 }
 
 function brainPathUrl(pathSegments: string[], routeBrainId?: string | null) {
