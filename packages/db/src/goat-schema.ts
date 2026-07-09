@@ -416,6 +416,13 @@ export const goatBrainDocuments = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    // Who originally put this document in the brain (set once at insert, never
+    // on update — unlike userWorkosId, which tracks the last actor). Null when
+    // no human originated it, e.g. Slack-window ingestion: the integration
+    // owner connected the channel but did not author its content.
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
     brainRef: text("brain_ref")
       .notNull()
       .references(() => goatBrains.id, { onDelete: "cascade" }),

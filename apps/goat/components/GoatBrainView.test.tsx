@@ -34,6 +34,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       visibility: "workspace",
     },
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
+    workspaceMembers: [],
   }),
 }));
 

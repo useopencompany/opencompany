@@ -1,4 +1,5 @@
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
@@ -17,18 +18,29 @@ import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, brains, activeBrain } = await currentGoatUser();
-  const [tasks, schedules, recentChats, googleIntegrations, linear, github, jamie, slack, codex] =
-    await Promise.all([
-      listCurrentUserGoatTasks(),
-      listCurrentUserGoatTaskSchedules(),
-      listCurrentUserRecentGoatChats(),
-      getGoatGoogleIntegrationState(user.workosUserId),
-      getGoatLinearIntegrationState(user.workosUserId),
-      getGoatGitHubIntegrationState(user.workosUserId),
-      getGoatJamieIntegrationState(user.workosUserId),
-      getGoatSlackIntegrationState(user.workosUserId),
-      loadCurrentGoatCodexAuthSettings(),
-    ]);
+  const [
+    tasks,
+    schedules,
+    recentChats,
+    googleIntegrations,
+    linear,
+    github,
+    jamie,
+    slack,
+    codex,
+    workspaceMembers,
+  ] = await Promise.all([
+    listCurrentUserGoatTasks(),
+    listCurrentUserGoatTaskSchedules(),
+    listCurrentUserRecentGoatChats(),
+    getGoatGoogleIntegrationState(user.workosUserId),
+    getGoatLinearIntegrationState(user.workosUserId),
+    getGoatGitHubIntegrationState(user.workosUserId),
+    getGoatJamieIntegrationState(user.workosUserId),
+    getGoatSlackIntegrationState(user.workosUserId),
+    loadCurrentGoatCodexAuthSettings(),
+    listGoatWorkspaceMembers(workspace.id),
+  ]);
 
   const initialData: GoatAppInitialData = {
     user: {
@@ -42,6 +54,13 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       name: workspace.name,
       role,
     },
+    workspaceMembers: workspaceMembers.map(({ user: member }) => ({
+      workosUserId: member.workosUserId,
+      email: member.email,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      avatarUrl: member.avatarUrl,
+    })),
     brains: brains.map(brainSummaryView),
     activeBrain: activeBrain ? brainSummaryView(activeBrain) : null,
     tasks: tasks.map((task) => ({

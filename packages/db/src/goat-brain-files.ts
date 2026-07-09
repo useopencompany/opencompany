@@ -535,6 +535,10 @@ export async function upsertGoatBrainFile(
     content: string;
     id?: string;
     taskId?: string | null;
+    // Recorded only when the row is created; conflicting upserts never touch
+    // it. Defaults to the acting user; pass null when no human originated the
+    // content (e.g. Slack-window ingestion).
+    createdByWorkosId?: string | null;
   },
   options: { db?: DbClient } = {},
 ): Promise<GoatBrainDocument> {
@@ -553,6 +557,8 @@ export async function upsertGoatBrainFile(
       .values({
         id: documentId,
         userWorkosId: input.userWorkosId,
+        createdByWorkosId:
+          input.createdByWorkosId === undefined ? input.userWorkosId : input.createdByWorkosId,
         brainRef: input.brainRef,
         ...documentValues(projection),
         format: GOAT_BRAIN_FILE_FORMAT,
@@ -726,6 +732,7 @@ export async function createGoatBrainAssetDocument(
       .values({
         id: input.id ?? `goat_brain_doc_${randomUUID()}`,
         userWorkosId: input.userWorkosId,
+        createdByWorkosId: input.userWorkosId,
         brainRef: input.brainRef,
         ...documentValues(projection),
         format: input.format,
@@ -958,6 +965,10 @@ export async function syncGoatBrainFiles(input: {
   db?: DbClient;
   taskId?: string | null;
   folders?: GoatBrainFolderManifestEntry[] | null;
+  // Attribution for documents this sync *creates* (existing rows keep theirs).
+  // Defaults to the acting user; pass null when no human originated the
+  // content (e.g. Slack-window ingestion).
+  createdByWorkosId?: string | null;
 }): Promise<GoatBrainSyncResult> {
   const db = input.db ?? getDb();
   const currentRows: GoatBrainDocument[] = await db
@@ -1037,6 +1048,8 @@ export async function syncGoatBrainFiles(input: {
       content: file.content,
       current,
       taskId: input.taskId ?? null,
+      createdByWorkosId:
+        input.createdByWorkosId === undefined ? input.userWorkosId : input.createdByWorkosId,
       db,
     });
     addSyncPage(pages, row, "conflict_created");
@@ -1056,6 +1069,9 @@ export async function syncGoatBrainFiles(input: {
         content: file.content,
         ...(existing?.id ? { id: existing.id } : {}),
         taskId: input.taskId ?? null,
+        ...(input.createdByWorkosId !== undefined
+          ? { createdByWorkosId: input.createdByWorkosId }
+          : {}),
       },
       { db },
     );
@@ -1103,6 +1119,7 @@ export async function syncGoatBrainFilesFromRoot(input: {
   baseSnapshot: MaterializedGoatBrainFile[];
   db?: DbClient;
   taskId?: string | null;
+  createdByWorkosId?: string | null;
 }): Promise<GoatBrainSyncResult> {
   const files = await readGoatBrainFilesFromRoot(input.root);
   const folders = await readGoatBrainFolderManifestFromRoot(input.root);
@@ -1114,6 +1131,9 @@ export async function syncGoatBrainFilesFromRoot(input: {
     ...(input.db ? { db: input.db } : {}),
     taskId: input.taskId ?? null,
     folders,
+    ...(input.createdByWorkosId !== undefined
+      ? { createdByWorkosId: input.createdByWorkosId }
+      : {}),
   });
 }
 
@@ -1124,6 +1144,7 @@ async function upsertConflictDocument(input: {
   content: string;
   current: GoatBrainDocument;
   taskId: string | null;
+  createdByWorkosId: string | null;
   db: DbClient;
 }): Promise<GoatBrainDocument> {
   const parsed = parseGoatBrainDocument(input.content);
@@ -1159,6 +1180,7 @@ async function upsertConflictDocument(input: {
       path: goatBrainFilePathFor(folderPath, conflictId),
       content: conflictContent,
       taskId: input.taskId,
+      createdByWorkosId: input.createdByWorkosId,
     },
     { db: input.db },
   );

@@ -325,6 +325,7 @@ function GoatBrainEditor({
   const selectedDraftIngestState = selectedDocument
     ? (draftIngestStatesByBrainId.get(selectedDocument.brainId) ?? null)
     : null;
+  const selectedCreatorName = useWorkspaceMemberName(selectedDocument?.createdByWorkosId ?? null);
   if (docPanelState.docId !== (selectedDocument?.id ?? null)) {
     setDocPanelState({
       docId: selectedDocument?.id ?? null,
@@ -798,6 +799,9 @@ function GoatBrainEditor({
                   {brainDocumentTreePath(selectedDocument)}
                 </span>
                 <span className="hidden shrink-0 text-[12px] text-ink-subtle md:inline">
+                  {selectedCreatorName && documentShowsAttribution(selectedDocument)
+                    ? `Added by ${selectedCreatorName} · `
+                    : ""}
                   Updated {formatRelativeTime(selectedDocument.updatedAt)}
                 </span>
               </>
@@ -1249,6 +1253,32 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Resolves a workos user id to a display name via the workspace member
+// directory; null when unknown (user left, or no human originated the doc).
+function useWorkspaceMemberName(workosUserId: string | null): string | null {
+  const { workspaceMembers } = useGoatAppData();
+  return useMemo(() => {
+    if (!workosUserId) return null;
+    const member = workspaceMembers.find((item) => item.workosUserId === workosUserId);
+    if (!member) return null;
+    const name = [member.firstName, member.lastName].filter(Boolean).join(" ");
+    return name || member.email;
+  }, [workosUserId, workspaceMembers]);
+}
+
+// Header attribution appears only where a single originator is meaningful —
+// inbox captures, evidence records, and uploaded files. Compiled pages
+// accumulate many people's contributions, so a single "added by" would
+// overstate ownership there (the Properties panel still shows Created by).
+function documentShowsAttribution(document: GoatBrainDocumentView) {
+  return (
+    document.kind === "evidence" ||
+    document.folderPath === "inbox" ||
+    document.folderPath.startsWith("inbox/") ||
+    document.format !== "markdown"
+  );
+}
+
 function BrainMetadataSidebar({
   document,
   documents,
@@ -1264,6 +1294,7 @@ function BrainMetadataSidebar({
     () => new Map(documents.map((item) => [item.brainId, item])),
     [documents],
   );
+  const createdByName = useWorkspaceMemberName(document.createdByWorkosId ?? null);
   const outgoingLinks = useMemo(
     () =>
       resolveGraphLinks(
@@ -1305,6 +1336,7 @@ function BrainMetadataSidebar({
           <MetadataRow label="Status" value={document.status} />
           {document.kind === "evidence" ? <MetadataRow label="Kind" value="evidence" /> : null}
           <MetadataRow label="Created" value={formatDateTime(document.createdAt)} />
+          {createdByName ? <MetadataRow label="Created by" value={createdByName} /> : null}
           <MetadataRow label="Updated" value={formatDateTime(document.updatedAt)} />
           <span className="text-ink-subtle">ID</span>
           <code
@@ -1995,6 +2027,7 @@ function documentViewFromRow(
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
     parseError: null,
+    createdByWorkosId: row.created_by_workos_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
