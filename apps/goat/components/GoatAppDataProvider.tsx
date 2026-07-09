@@ -70,6 +70,7 @@ export type GoatAppInitialData = {
   featureFlags: GoatFeatureFlags;
   brain: GoatBrainSnapshot;
   codexConnected: boolean;
+  chatResumeEnabled: boolean;
 };
 
 type GoatAppData = GoatAppInitialData & {

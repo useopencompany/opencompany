@@ -58,6 +58,15 @@ const DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small";
 // in type identity, so the module accepts either.
 type DbClient = any;
 
+type ReadPlaneGraphEdge = {
+  from: string;
+  to: string;
+  type: string;
+  sourceKind: string;
+  neighborId: string;
+  direction: "out" | "in";
+};
+
 export type GoatBrainReadContext = {
   brainRef: string; // already access-checked by the caller's authz layer
   gatewayApiKey?: string; // absent → lexical-only ranking
@@ -98,7 +107,12 @@ export type GoatBrainSearchHit = {
 export type GoatBrainDocumentLink = {
   id: string;
   title: string;
+  kind: string;
+  type: string;
+  folder: string;
+  status: string;
   relationType: string;
+  sourceKind: string;
   direction: "out" | "in";
 };
 
@@ -159,7 +173,16 @@ export async function searchGoatBrain(
   // gets relevance 1 and the recency blend decides).
   if (!text) {
     const rows = await fetchDocumentMetaWhere(db, and(...conditions), limit);
-    return rows.map((row) => hitFromMeta(row, blendScore(1, 1, row.updatedAt, now)));
+    const neighborsById = await fetchNeighbors(
+      db,
+      ctx.brainRef,
+      rows.map((row) => row.brainId),
+      null,
+    );
+    return rows.map((row) => ({
+      ...hitFromMeta(row, blendScore(1, 1, row.updatedAt, now)),
+      neighbors: neighborsById.get(row.brainId) ?? [],
+    }));
   }
 
   const [ftsIds, nameIds, vectorIds] = await Promise.all([
@@ -178,7 +201,7 @@ export async function searchGoatBrain(
   addSignal(signalsById, vectorIds, "vector");
 
   const graphPaths = new Map<string, GoatBrainGraphHop[]>();
-  let adjacency: Map<string, GoatBrainGraphHop[]> | null = null;
+  let adjacency: Map<string, ReadPlaneGraphEdge[]> | null = null;
   if (hops > 0 && relevance.size > 0) {
     adjacency = await loadAdjacency(db, ctx.brainRef);
     const allowed = await filteredIdSet(db, conditions);
@@ -598,26 +621,27 @@ function embeddingTextFor(title: string, aliases: string[], body: string): strin
 async function loadAdjacency(
   db: DbClient,
   brainRef: string,
-): Promise<Map<string, GoatBrainGraphHop[]>> {
-  const rows: Array<{ from: string; to: string; type: string }> = await db
+): Promise<Map<string, ReadPlaneGraphEdge[]>> {
+  const rows: Array<{ from: string; to: string; type: string; sourceKind: string }> = await db
     .select({
       from: goatBrainEdges.fromBrainId,
       to: goatBrainEdges.toBrainId,
       type: goatBrainEdges.relationType,
+      sourceKind: goatBrainEdges.sourceKind,
     })
     .from(goatBrainEdges)
     .where(eq(goatBrainEdges.brainRef, brainRef));
 
-  const adjacency = new Map<string, GoatBrainGraphHop[]>();
-  const push = (key: string, hop: GoatBrainGraphHop) => {
+  const adjacency = new Map<string, ReadPlaneGraphEdge[]>();
+  const push = (key: string, hop: ReadPlaneGraphEdge) => {
     const existing = adjacency.get(key);
     if (existing) existing.push(hop);
     else adjacency.set(key, [hop]);
   };
   for (const edge of rows) {
     if (edge.from === edge.to) continue;
-    push(edge.from, { from: edge.from, type: edge.type, to: edge.to });
-    push(edge.to, { from: edge.to, type: edge.type, to: edge.from });
+    push(edge.from, { ...edge, neighborId: edge.to, direction: "out" });
+    push(edge.to, { ...edge, neighborId: edge.from, direction: "in" });
   }
   return adjacency;
 }
@@ -625,7 +649,7 @@ async function loadAdjacency(
 function expandAlongGraph(
   relevance: Map<string, number>,
   graphPaths: Map<string, GoatBrainGraphHop[]>,
-  adjacency: Map<string, GoatBrainGraphHop[]>,
+  adjacency: Map<string, ReadPlaneGraphEdge[]>,
   allowed: Set<string>,
   hops: number,
 ): void {
@@ -639,12 +663,12 @@ function expandAlongGraph(
     for (const { id, score, path } of frontier) {
       const boosted = score * HOP_DECAY;
       for (const edge of adjacency.get(id) ?? []) {
-        if (!allowed.has(edge.to)) continue;
-        if (boosted > (relevance.get(edge.to) ?? 0)) {
-          const nextPath = [...path, edge];
-          relevance.set(edge.to, boosted);
-          graphPaths.set(edge.to, nextPath);
-          next.push({ id: edge.to, score: boosted, path: nextPath });
+        if (!allowed.has(edge.neighborId)) continue;
+        if (boosted > (relevance.get(edge.neighborId) ?? 0)) {
+          const nextPath = [...path, { from: id, type: edge.type, to: edge.neighborId }];
+          relevance.set(edge.neighborId, boosted);
+          graphPaths.set(edge.neighborId, nextPath);
+          next.push({ id: edge.neighborId, score: boosted, path: nextPath });
         }
       }
     }
@@ -664,17 +688,18 @@ async function fetchNeighbors(
   db: DbClient,
   brainRef: string,
   hitIds: string[],
-  preloaded: Map<string, GoatBrainGraphHop[]> | null,
+  preloaded: Map<string, ReadPlaneGraphEdge[]> | null,
 ): Promise<Map<string, GoatBrainDocumentLink[]>> {
   if (hitIds.length === 0) return new Map();
   const adjacency =
     preloaded ??
     (await (async () => {
-      const rows: Array<{ from: string; to: string; type: string }> = await db
+      const rows: Array<{ from: string; to: string; type: string; sourceKind: string }> = await db
         .select({
           from: goatBrainEdges.fromBrainId,
           to: goatBrainEdges.toBrainId,
           type: goatBrainEdges.relationType,
+          sourceKind: goatBrainEdges.sourceKind,
         })
         .from(goatBrainEdges)
         .where(
@@ -686,13 +711,19 @@ async function fetchNeighbors(
             ),
           ),
         );
-      const map = new Map<string, GoatBrainGraphHop[]>();
+      const map = new Map<string, ReadPlaneGraphEdge[]>();
       for (const edge of rows) {
         if (edge.from === edge.to) continue;
-        const forward = { from: edge.from, type: edge.type, to: edge.to };
-        const reverse = { from: edge.to, type: edge.type, to: edge.from };
-        (map.get(edge.from) ?? map.set(edge.from, []).get(edge.from))?.push(forward);
-        (map.get(edge.to) ?? map.set(edge.to, []).get(edge.to))?.push(reverse);
+        pushReadPlaneGraphEdge(map, edge.from, {
+          ...edge,
+          neighborId: edge.to,
+          direction: "out",
+        });
+        pushReadPlaneGraphEdge(map, edge.to, {
+          ...edge,
+          neighborId: edge.from,
+          direction: "in",
+        });
       }
       return map;
     })());
@@ -707,11 +738,12 @@ async function fetchLinks(
   limitPerDoc: number,
 ): Promise<Map<string, GoatBrainDocumentLink[]>> {
   if (ids.length === 0) return new Map();
-  const rows: Array<{ from: string; to: string; type: string }> = await db
+  const rows: Array<{ from: string; to: string; type: string; sourceKind: string }> = await db
     .select({
       from: goatBrainEdges.fromBrainId,
       to: goatBrainEdges.toBrainId,
       type: goatBrainEdges.relationType,
+      sourceKind: goatBrainEdges.sourceKind,
     })
     .from(goatBrainEdges)
     .where(
@@ -720,15 +752,31 @@ async function fetchLinks(
         or(inArray(goatBrainEdges.fromBrainId, ids), inArray(goatBrainEdges.toBrainId, ids)),
       ),
     );
-  const adjacency = new Map<string, GoatBrainGraphHop[]>();
+  const adjacency = new Map<string, ReadPlaneGraphEdge[]>();
   for (const edge of rows) {
     if (edge.from === edge.to) continue;
-    const forward = { from: edge.from, type: edge.type, to: edge.to };
-    const reverse = { from: edge.to, type: edge.type, to: edge.from };
-    (adjacency.get(edge.from) ?? adjacency.set(edge.from, []).get(edge.from))?.push(forward);
-    (adjacency.get(edge.to) ?? adjacency.set(edge.to, []).get(edge.to))?.push(reverse);
+    pushReadPlaneGraphEdge(adjacency, edge.from, {
+      ...edge,
+      neighborId: edge.to,
+      direction: "out",
+    });
+    pushReadPlaneGraphEdge(adjacency, edge.to, {
+      ...edge,
+      neighborId: edge.from,
+      direction: "in",
+    });
   }
   return linksFromAdjacency(db, brainRef, ids, adjacency, limitPerDoc);
+}
+
+function pushReadPlaneGraphEdge(
+  adjacency: Map<string, ReadPlaneGraphEdge[]>,
+  key: string,
+  edge: ReadPlaneGraphEdge,
+) {
+  const existing = adjacency.get(key);
+  if (existing) existing.push(edge);
+  else adjacency.set(key, [edge]);
 }
 
 // Resolve adjacency rows into links: direction from the hit's perspective, titles joined in, and
@@ -737,15 +785,29 @@ async function linksFromAdjacency(
   db: DbClient,
   brainRef: string,
   ids: string[],
-  adjacency: Map<string, GoatBrainGraphHop[]>,
+  adjacency: Map<string, ReadPlaneGraphEdge[]>,
   limitPerDoc: number,
 ): Promise<Map<string, GoatBrainDocumentLink[]>> {
   const targetIds = new Set<string>();
-  for (const id of ids) for (const hop of adjacency.get(id) ?? []) targetIds.add(hop.to);
+  for (const id of ids) for (const hop of adjacency.get(id) ?? []) targetIds.add(hop.neighborId);
   if (targetIds.size === 0) return new Map();
 
-  const titleRows: Array<{ id: string; title: string | null }> = await db
-    .select({ id: goatBrainDocuments.brainId, title: goatBrainDocuments.title })
+  const targetRows: Array<{
+    id: string;
+    title: string | null;
+    kind: string;
+    type: string;
+    folder: string;
+    status: string;
+  }> = await db
+    .select({
+      id: goatBrainDocuments.brainId,
+      title: goatBrainDocuments.title,
+      kind: goatBrainDocuments.kind,
+      type: goatBrainDocuments.entityType,
+      folder: goatBrainDocuments.folderPath,
+      status: goatBrainDocuments.status,
+    })
     .from(goatBrainDocuments)
     .where(
       and(
@@ -753,23 +815,28 @@ async function linksFromAdjacency(
         inArray(goatBrainDocuments.brainId, [...targetIds]),
       ),
     );
-  const titles = new Map(titleRows.map((row) => [row.id, row.title ?? row.id]));
+  const targets = new Map(targetRows.map((row) => [row.id, row]));
 
   const links = new Map<string, GoatBrainDocumentLink[]>();
   for (const id of ids) {
     const seen = new Set<string>();
     const entries: GoatBrainDocumentLink[] = [];
     for (const hop of adjacency.get(id) ?? []) {
-      const title = titles.get(hop.to);
-      if (title === undefined) continue;
-      const key = `${hop.type}:${hop.to}`;
+      const target = targets.get(hop.neighborId);
+      if (!target) continue;
+      const key = `${hop.type}:${hop.sourceKind}:${hop.neighborId}`;
       if (seen.has(key)) continue;
       seen.add(key);
       entries.push({
-        id: hop.to,
-        title,
+        id: hop.neighborId,
+        title: target.title ?? target.id,
+        kind: target.kind,
+        type: target.type,
+        folder: target.folder,
+        status: target.status,
         relationType: hop.type,
-        direction: hop.from === id ? "out" : "in",
+        sourceKind: hop.sourceKind,
+        direction: hop.direction,
       });
       if (entries.length >= limitPerDoc) break;
     }

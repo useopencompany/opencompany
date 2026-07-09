@@ -284,7 +284,30 @@ describe("read plane commands", () => {
     score: 0.91,
     signals: ["lexical", "vector"],
     snippet: "Ada leads GTM.",
-    neighbors: [{ id: "acme", title: "Acme", relationType: "works_at", direction: "out" as const }],
+    neighbors: [
+      {
+        id: "acme",
+        title: "Acme",
+        kind: "page",
+        type: "company",
+        folder: "companies",
+        status: "active",
+        relationType: "works_at",
+        sourceKind: "relation",
+        direction: "out" as const,
+      },
+      {
+        id: "ev-acme-email",
+        title: "Acme email",
+        kind: "evidence",
+        type: "source",
+        folder: "evidence/email",
+        status: "active",
+        relationType: "cites",
+        sourceKind: "wiki_link",
+        direction: "out" as const,
+      },
+    ],
   };
 
   it("serves query from the read module with mapped options", async () => {
@@ -319,7 +342,8 @@ describe("read plane commands", () => {
     );
     expect(output.ok).toBe(true);
     expect(output.stdout).toContain("1. [team/gtm] Ada (ada, person, score 0.91");
-    expect(output.stdout).toContain("Linked: → works_at acme (Acme)");
+    expect(output.stdout).toContain("Linked: → works_at acme (Acme, page/company)");
+    expect(output.stdout).toContain("→ cites ev-acme-email (Acme email, evidence/source)");
     expect(output.stdout).toContain("Next: get ada");
     expect(output.parsed).toEqual({ hits: [HIT] });
     expect(output.traceId).toMatch(/^goat_brain_run_/);
@@ -344,7 +368,19 @@ describe("read plane commands", () => {
           timeline: [{ at: "2026-06-01T00:00:00.000Z", evidenceId: "ev-1", body: "Joined." }],
           timelineTotal: 1,
           sources: [],
-          links: [{ id: "acme", title: "Acme", relationType: "works_at", direction: "out" }],
+          links: [
+            {
+              id: "acme",
+              title: "Acme",
+              kind: "page",
+              type: "company",
+              folder: "companies",
+              status: "active",
+              relationType: "works_at",
+              sourceKind: "relation",
+              direction: "out",
+            },
+          ],
         },
       ] as never,
       missing: ["ghost"],
@@ -365,7 +401,7 @@ describe("read plane commands", () => {
     expect(output.ok).toBe(true);
     expect(output.stdout).toContain('# Ada (ada) (resolved from "ada lovelace" via alias)');
     expect(output.stdout).toContain("## Compiled truth");
-    expect(output.stdout).toContain("→ works_at acme (Acme)");
+    expect(output.stdout).toContain("→ works_at acme (Acme, page/company)");
     expect(output.stdout).toContain("Not found: ghost");
   });
 
