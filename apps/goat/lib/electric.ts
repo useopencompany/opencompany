@@ -166,12 +166,12 @@ const SHAPE_SCOPES = {
   },
   brain_source_items: {
     table: "goat.brain_source_items",
-    where: scopedUserWhere,
+    where: scopedBrainSourceItemWhere,
     columns: BRAIN_SOURCE_ITEM_COLUMNS,
   },
   "goat.brain_source_items": {
     table: "goat.brain_source_items",
-    where: scopedUserWhere,
+    where: scopedBrainSourceItemWhere,
     columns: BRAIN_SOURCE_ITEM_COLUMNS,
   },
 } as const;
@@ -303,9 +303,76 @@ function scopedOpenChatSessionWhere(userWorkosId: string): ShapeWhere {
   };
 }
 
+function scopedBrainSourceItemWhere(userWorkosId: string, requestUrl: URL): ShapeWhere | null {
+  const params = [userWorkosId];
+  const clauses = [`"user_workos_id" = $1`];
+
+  const sourceProvider = optionalEnumFilter(requestUrl, "source_provider", ["goat-chat", "jamie"]);
+  if (sourceProvider === false) return null;
+  if (sourceProvider) {
+    params.push(sourceProvider);
+    clauses.push(`"source_provider" = $${params.length}`);
+  }
+
+  const sourceType = optionalEnumFilter(requestUrl, "source_type", ["capture", "meeting"]);
+  if (sourceType === false) return null;
+  if (sourceType) {
+    params.push(sourceType);
+    clauses.push(`"source_type" = $${params.length}`);
+  }
+
+  const ingestStatuses = optionalEnumListFilter(requestUrl, "last_ingest_status", [
+    "pending",
+    "succeeded",
+    "failed",
+  ]);
+  if (ingestStatuses === false) return null;
+  if (ingestStatuses.length === 1) {
+    params.push(ingestStatuses[0]!);
+    clauses.push(`"last_ingest_status" = $${params.length}`);
+  } else if (ingestStatuses.length > 1) {
+    const placeholders = ingestStatuses.map((status) => {
+      params.push(status);
+      return `$${params.length}`;
+    });
+    clauses.push(`"last_ingest_status" IN (${placeholders.join(", ")})`);
+  }
+
+  return {
+    clause: clauses.join(" AND "),
+    params,
+  };
+}
+
 function scopedUserWhere(userWorkosId: string): ShapeWhere {
   return {
     clause: `"user_workos_id" = $1`,
     params: [userWorkosId],
   };
+}
+
+function optionalEnumFilter<T extends string>(
+  requestUrl: URL,
+  key: string,
+  allowed: readonly T[],
+): T | false | null {
+  const value = requestUrl.searchParams.get(key)?.trim();
+  if (!value) return null;
+  return allowed.includes(value as T) ? (value as T) : false;
+}
+
+function optionalEnumListFilter<T extends string>(
+  requestUrl: URL,
+  key: string,
+  allowed: readonly T[],
+): T[] | false {
+  const value = requestUrl.searchParams.get(key)?.trim();
+  if (!value) return [];
+  const values = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (values.length === 0) return [];
+  if (values.some((item) => !allowed.includes(item as T))) return false;
+  return Array.from(new Set(values as T[]));
 }

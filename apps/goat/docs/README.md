@@ -3,6 +3,9 @@
 This is the current-state map of how Goat answers chat messages and runs durable LLM tasks. It is
 intended as a baseline before changing the system.
 
+For the Brain (Goat's knowledge store — data model, ingestion, tools, contracts), see the
+[brain section](./brain/README.md).
+
 ## Current Shape
 
 Goat has two LLM paths:

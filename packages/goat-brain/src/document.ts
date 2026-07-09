@@ -22,6 +22,14 @@ export function parseGoatBrainDocument(source: string): ParsedGoatBrainDocument 
   return { frontmatter, ...parsedBody };
 }
 
+export function normalizeGoatBrainBody(value: string): string {
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  if (!looksLikeLegacyGoatBrainDocument(normalized)) return value;
+  const parsed = parseGoatBrainDocument(normalized);
+  if (!isNestedLegacyGoatBrainDocument(parsed)) return value;
+  return parsed.compiledTruth;
+}
+
 export function parseGoatBrainBody(body: string): {
   title: string;
   compiledTruth: string;
@@ -30,11 +38,21 @@ export function parseGoatBrainBody(body: string): {
   const normalized = body.replace(/\r\n/g, "\n");
   const title = readTitle(normalized);
   const truthStart = sectionStart(normalized, GOAT_BRAIN_TRUTH_HEADING);
-  const timelineStart = sectionStart(normalized, GOAT_BRAIN_TIMELINE_HEADING);
+  const lastSentinelStart = normalized.lastIndexOf(GOAT_BRAIN_TIMELINE_SENTINEL);
+  const sentinelStart =
+    truthStart !== -1 && lastSentinelStart > truthStart ? lastSentinelStart : -1;
+  const timelineStart =
+    sentinelStart !== -1
+      ? sectionStartFrom(normalized, GOAT_BRAIN_TIMELINE_HEADING, sentinelStart)
+      : sectionStart(normalized, GOAT_BRAIN_TIMELINE_HEADING);
   let compiledTruth = "";
   if (truthStart !== -1) {
     const truthEnd =
-      timelineStart !== -1 && timelineStart > truthStart ? timelineStart : normalized.length;
+      sentinelStart !== -1
+        ? sentinelStart
+        : timelineStart !== -1 && timelineStart > truthStart
+          ? timelineStart
+          : normalized.length;
     compiledTruth = stripSentinel(
       normalized.slice(truthStart + GOAT_BRAIN_TRUTH_HEADING.length, truthEnd),
     ).trim();
@@ -48,6 +66,7 @@ export function parseGoatBrainBody(body: string): {
 
 export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
   const title = doc.title.trim() || doc.frontmatter.title?.trim() || doc.frontmatter.id;
+  const compiledTruth = normalizeGoatBrainBody(doc.compiledTruth);
   const timeline = [...doc.timeline].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const timelineBody = timeline
     .map((entry) => {
@@ -66,7 +85,7 @@ export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
     `# ${title}`,
     "",
     GOAT_BRAIN_TRUTH_HEADING,
-    doc.compiledTruth.trim() || "_No compiled truth yet._",
+    compiledTruth.trim() || "_No compiled truth yet._",
     "",
     GOAT_BRAIN_TIMELINE_SENTINEL,
     "",
@@ -83,6 +102,7 @@ export function replaceGoatBrainCompiledTruth(
 ): string {
   const { yaml, body } = splitFrontmatter(source);
   const frontmatter = parseFrontmatter(yaml);
+  const normalizedCompiledTruth = normalizeGoatBrainBody(compiledTruth);
   const header =
     frontmatter.id &&
     frontmatter.folder &&
@@ -108,7 +128,26 @@ export function replaceGoatBrainCompiledTruth(
       : yaml
         ? `---\n${yaml.trim()}\n---\n\n`
         : "";
-  return `${header}${replaceCompiledTruthInBody(body, compiledTruth)}`;
+  return `${header}${replaceCompiledTruthInBody(body, normalizedCompiledTruth)}`;
+}
+
+function looksLikeLegacyGoatBrainDocument(value: string): boolean {
+  return (
+    value.startsWith("---\n") &&
+    value.includes("\n---") &&
+    value.includes(GOAT_BRAIN_TRUTH_HEADING) &&
+    value.includes(GOAT_BRAIN_TIMELINE_HEADING)
+  );
+}
+
+function isNestedLegacyGoatBrainDocument(parsed: ParsedGoatBrainDocument): boolean {
+  return Boolean(
+    parsed.frontmatter.id &&
+      parsed.frontmatter.folder &&
+      parsed.frontmatter.kind &&
+      parsed.frontmatter.type &&
+      parsed.compiledTruth.trim(),
+  );
 }
 
 function readTitle(body: string): string {
@@ -124,6 +163,12 @@ function sectionStart(body: string, heading: string): number {
   const re = new RegExp(`^${escapeRegExp(heading)}\\s*$`, "m");
   const match = re.exec(body);
   return match ? match.index : -1;
+}
+
+function sectionStartFrom(body: string, heading: string, start: number): number {
+  const offset = Math.max(0, start);
+  const index = sectionStart(body.slice(offset), heading);
+  return index === -1 ? -1 : offset + index;
 }
 
 function replaceCompiledTruthInBody(body: string, compiledTruth: string): string {

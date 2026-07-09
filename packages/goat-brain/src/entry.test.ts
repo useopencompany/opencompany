@@ -86,6 +86,12 @@ describe("goat brain canonical entries", () => {
     });
   });
 
+  it("serializes nested legacy markdown payloads as body-only text", () => {
+    const nested = serializeLegacyGoatBrainEntry(entry);
+
+    expect(serializeGoatBrainPayload({ ...entry, body: nested })).toBe(entry.body);
+  });
+
   it("validates sidecar payload path, size, and hash", () => {
     const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
     const valid = validateGoatBrainSidecar({

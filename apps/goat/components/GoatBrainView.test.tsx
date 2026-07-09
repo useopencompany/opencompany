@@ -39,16 +39,29 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
   MarkdownGoatBrainEditor: ({
     content,
     onChange,
+    brainLinks,
   }: {
     content: string;
     onChange: (content: string) => void;
-  }) => (
-    <textarea
-      aria-label="Brain body"
-      value={content}
-      onChange={(event) => onChange(event.currentTarget.value)}
-    />
-  ),
+    brainLinks?: Record<string, string>;
+  }) => {
+    return (
+      <div>
+        <textarea
+          aria-label="Brain body"
+          value={content}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+        <div aria-hidden>
+          {Object.entries(brainLinks ?? {}).map(([target, href]) => (
+            <a key={target} data-testid={`brain-link:${target}`} href={href}>
+              {target}
+            </a>
+          ))}
+        </div>
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/lib/brain-actions", () => ({
@@ -124,6 +137,31 @@ describe("GoatBrainView", () => {
     );
   });
 
+  it("keeps outgoing sidebar links at the compact sidebar text size", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline, evidenceDocument]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Toggle file details" }));
+
+    const outgoingSection = screen.getByRole("heading", { name: "Outgoing" }).closest("section");
+    expect(outgoingSection).not.toBeNull();
+
+    const outgoingList = within(outgoingSection as HTMLElement).getByRole("list");
+    expect(outgoingList).toHaveClass("text-[12px]", "leading-5");
+    expect(screen.getByRole("link", { name: /Platform planning chat.*cites/ })).toHaveAttribute(
+      "href",
+      "/brain/evidence/chat/ev-platform-planning-chat",
+    );
+  });
+
   it("keeps the route brain id in generated document links", async () => {
     const user = userEvent.setup();
 
@@ -142,6 +180,35 @@ describe("GoatBrainView", () => {
     expect(screen.getByRole("link", { name: /Roadmap.*wiki_link/ })).toHaveAttribute(
       "href",
       "/brain/goat_brain_1/projects/roadmap",
+    );
+  });
+
+  it("resolves editor wiki links for folders and folder-qualified files", () => {
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+        routeBrainId="goat_brain_1"
+      />,
+    );
+
+    expect(screen.getByTestId("brain-link:page:people")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people",
+    );
+    expect(screen.getByTestId("brain-link:page:people/ada-lovelace")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people/ada-lovelace",
+    );
+    expect(screen.getByTestId("brain-link:page:wiki/people/ada-lovelace")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people/ada-lovelace",
+    );
+    expect(screen.getByTestId("brain-link:folder:people")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people",
     );
   });
 
@@ -238,6 +305,50 @@ describe("GoatBrainView", () => {
     );
     expect(updateGoatBrainDocumentAction).toHaveBeenCalledTimes(1);
   });
+
+  it("renders nested legacy frontmatter as body text and autosaves the normalized value", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoatBrainDocumentAction).mockResolvedValueOnce({
+      ok: true,
+      path: "people/ada-lovelace.md",
+      document: {
+        ...documentWithTimeline,
+        body: "Nested truth. Updated.",
+        contentHash: "hash-next",
+      },
+    });
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[
+          {
+            ...documentWithTimeline,
+            body: nestedLegacyBrainBody,
+            contentHash: "polluted-hash",
+          },
+        ]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    const body = screen.getByRole("textbox", { name: "Brain body" });
+    expect(body).toHaveValue("Nested truth.");
+
+    await user.type(body, " Updated.");
+
+    await waitFor(
+      () => {
+        expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
+          documentId: "doc_ada",
+          body: "Nested truth. Updated.",
+          expectedContentHash: "polluted-hash",
+        });
+      },
+      { timeout: 4000 },
+    );
+  });
 });
 
 const folders: GoatBrainFolderView[] = [
@@ -331,3 +442,25 @@ const evidenceDocument: GoatBrainDocumentView = {
   createdAt: "2026-07-06T12:00:00.000Z",
   updatedAt: "2026-07-06T12:00:00.000Z",
 };
+
+const nestedLegacyBrainBody = `---
+id: nested-note
+folder: inbox
+kind: page
+type: note
+status: draft
+title: Nested note
+createdAt: 2026-01-01T00:00:00.000Z
+updatedAt: 2026-01-01T00:00:00.000Z
+related: []
+---
+
+# Nested note
+
+## Compiled truth
+Nested truth.
+
+<!-- TIMELINE:BELOW - append only past this marker -->
+
+## Timeline
+`;

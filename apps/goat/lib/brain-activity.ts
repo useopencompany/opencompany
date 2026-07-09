@@ -12,6 +12,17 @@ export type GoatBrainActivityEvent = {
   brainId: string | null;
 };
 
+export type GoatBrainDraftIngestStateKind = "queued" | "running" | "retrying" | "failed";
+
+export type GoatBrainDraftIngestState = {
+  kind: GoatBrainDraftIngestStateKind;
+  jobId: string;
+  title: string;
+  detail: string | null;
+  updatedAt: string;
+  attempts: number;
+};
+
 const MAX_ACTIVITY_EVENTS = 50;
 const MAX_DETAIL_LENGTH = 180;
 
@@ -88,10 +99,75 @@ export function buildGoatBrainActivityEvents(
     .slice(0, MAX_ACTIVITY_EVENTS);
 }
 
+export function buildGoatBrainDraftIngestStates(
+  jobs: readonly GoatBrainIngestJobRow[],
+  sourceItems: readonly GoatBrainSourceItemRow[],
+): ReadonlyMap<string, GoatBrainDraftIngestState> {
+  const captureItemsById = new Map(
+    sourceItems
+      .filter((item) => item.source_provider === "goat-chat" && item.source_type === "capture")
+      .map((item) => [item.id, item]),
+  );
+  const states = new Map<string, GoatBrainDraftIngestState>();
+
+  for (const job of jobs) {
+    if (job.kind !== "brain_agent_ingest" || job.source_provider !== "goat-chat") continue;
+    if (job.status === "succeeded") continue;
+
+    const item = captureItemsById.get(job.source_item_id);
+    if (!item) continue;
+    const draftBrainId = item.external_id.trim();
+    if (!draftBrainId) continue;
+
+    const state = draftIngestStateForJob(job, item);
+    const current = states.get(draftBrainId);
+    if (!current || new Date(state.updatedAt).getTime() > new Date(current.updatedAt).getTime()) {
+      states.set(draftBrainId, state);
+    }
+  }
+
+  return states;
+}
+
 function capturedTitle(provider: string) {
   if (provider === "goat-chat") return "Captured to inbox";
   if (provider === "jamie") return "Meeting received";
   return "Received";
+}
+
+function draftIngestStateForJob(
+  job: GoatBrainIngestJobRow,
+  item: GoatBrainSourceItemRow,
+): GoatBrainDraftIngestState {
+  const title = item.title?.trim() || "Untitled";
+  if (job.status === "failed") {
+    return {
+      kind: "failed",
+      jobId: job.id,
+      title,
+      detail: truncateDetail(job.last_error ?? item.last_ingest_error),
+      updatedAt: job.completed_at ?? job.updated_at,
+      attempts: job.attempts,
+    };
+  }
+  if (job.status === "running") {
+    return {
+      kind: "running",
+      jobId: job.id,
+      title,
+      detail: null,
+      updatedAt: job.updated_at,
+      attempts: job.attempts,
+    };
+  }
+  return {
+    kind: job.attempts > 0 ? "retrying" : "queued",
+    jobId: job.id,
+    title,
+    detail: job.attempts > 0 ? truncateDetail(job.last_error ?? item.last_ingest_error) : null,
+    updatedAt: job.updated_at,
+    attempts: job.attempts,
+  };
 }
 
 function jobResultSummary(job: GoatBrainIngestJobRow): string | null {
