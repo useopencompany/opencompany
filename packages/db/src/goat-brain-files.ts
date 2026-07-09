@@ -115,6 +115,22 @@ export type GoatBrainSyncConflict = {
   reason: "changed_since_materialize" | "created_since_materialize";
 };
 
+export type GoatBrainSyncPageAction = "created" | "updated" | "conflict_created";
+
+export type GoatBrainSyncPage = {
+  brainId: string;
+  folderPath: string;
+  title: string;
+  action: GoatBrainSyncPageAction;
+};
+
+export type GoatBrainSyncResult = {
+  upserted: number;
+  deleted: number;
+  conflicts: GoatBrainSyncConflict[];
+  pages: GoatBrainSyncPage[];
+};
+
 type DbClient = any;
 type DbLike = any;
 
@@ -749,7 +765,7 @@ export async function syncGoatBrainFiles(input: {
   baseSnapshot: MaterializedGoatBrainFile[];
   db?: DbClient;
   taskId?: string | null;
-}): Promise<{ upserted: number; deleted: number; conflicts: GoatBrainSyncConflict[] }> {
+}): Promise<GoatBrainSyncResult> {
   const db = input.db ?? getDb();
   const currentRows: GoatBrainDocument[] = await db
     .select()
@@ -813,14 +829,15 @@ export async function syncGoatBrainFiles(input: {
     (conflict) => !handledConflictPaths.has(conflict.path),
   );
   if (unhandledConflicts.length > 0)
-    return { upserted: 0, deleted: 0, conflicts: unhandledConflicts };
+    return { upserted: 0, deleted: 0, conflicts: unhandledConflicts, pages: [] };
 
   let upserted = 0;
+  const pages: GoatBrainSyncPage[] = [];
   for (const pathName of handledConflictPaths) {
     const file = nextByPath.get(pathName);
     const current = currentByPath.get(pathName);
     if (!file || file.skip || !current) continue;
-    await upsertConflictDocument({
+    const row = await upsertConflictDocument({
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
       path: pathName,
@@ -829,6 +846,7 @@ export async function syncGoatBrainFiles(input: {
       taskId: input.taskId ?? null,
       db,
     });
+    addSyncPage(pages, row, "conflict_created");
     upserted += 1;
   }
 
@@ -837,7 +855,7 @@ export async function syncGoatBrainFiles(input: {
     const brainId = goatBrainIdFromRelativePath(pathName);
     const existing =
       currentByPath.get(pathName) ?? (brainId ? currentByBrainId.get(brainId) : undefined);
-    await upsertGoatBrainFile(
+    const row = await upsertGoatBrainFile(
       {
         brainRef: input.brainRef,
         userWorkosId: input.userWorkosId,
@@ -848,6 +866,7 @@ export async function syncGoatBrainFiles(input: {
       },
       { db },
     );
+    addSyncPage(pages, row, existing ? "updated" : "created");
     upserted += 1;
   }
 
@@ -874,7 +893,7 @@ export async function syncGoatBrainFiles(input: {
       { db },
     );
   }
-  return { upserted, deleted: deleteIds.length, conflicts: [] };
+  return { upserted, deleted: deleteIds.length, conflicts: [], pages };
 }
 
 export async function syncGoatBrainFilesFromRoot(input: {
@@ -884,7 +903,7 @@ export async function syncGoatBrainFilesFromRoot(input: {
   baseSnapshot: MaterializedGoatBrainFile[];
   db?: DbClient;
   taskId?: string | null;
-}): Promise<{ upserted: number; deleted: number; conflicts: GoatBrainSyncConflict[] }> {
+}): Promise<GoatBrainSyncResult> {
   const files = await readGoatBrainFilesFromRoot(input.root);
   return syncGoatBrainFiles({
     brainRef: input.brainRef,
@@ -904,7 +923,7 @@ async function upsertConflictDocument(input: {
   current: GoatBrainDocument;
   taskId: string | null;
   db: DbClient;
-}) {
+}): Promise<GoatBrainDocument> {
   const parsed = parseGoatBrainDocument(input.content);
   const originalId = goatBrainIdFromRelativePath(input.path) ?? input.current.brainId;
   const folderPath = goatBrainFolderFromRelativePath(input.path) ?? input.current.folderPath;
@@ -931,7 +950,7 @@ async function upsertConflictDocument(input: {
       updatedAt: now,
     },
   });
-  await upsertGoatBrainFile(
+  return upsertGoatBrainFile(
     {
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
@@ -941,6 +960,20 @@ async function upsertConflictDocument(input: {
     },
     { db: input.db },
   );
+}
+
+function addSyncPage(
+  pages: GoatBrainSyncPage[],
+  row: GoatBrainDocument,
+  action: GoatBrainSyncPageAction,
+) {
+  if (row.kind !== "page") return;
+  pages.push({
+    brainId: row.brainId,
+    folderPath: row.folderPath,
+    title: row.title || row.brainId,
+    action,
+  });
 }
 
 export function goatBrainFilePathFor(folderPath: string, brainId: string): string {

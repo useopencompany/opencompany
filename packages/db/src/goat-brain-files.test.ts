@@ -227,7 +227,41 @@ describe("goat brain file sync", () => {
         ],
         db,
       }),
-    ).resolves.toEqual({ upserted: 0, deleted: 0, conflicts: [] });
+    ).resolves.toEqual({ upserted: 0, deleted: 0, conflicts: [], pages: [] });
+  });
+
+  it("reports newly created page descriptors from sync", async () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Acme is evaluating Goat Brain.",
+    });
+    const db = syncMutableDb([]);
+
+    const result = await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      files: [{ path: "companies/acme.md", content }],
+      baseSnapshot: [],
+      db,
+    });
+
+    expect(result).toMatchObject({
+      upserted: 1,
+      deleted: 0,
+      conflicts: [],
+      pages: [
+        {
+          brainId: "acme",
+          folderPath: "companies",
+          title: "Acme",
+          action: "created",
+        },
+      ],
+    });
   });
 
   it("keeps a moved brain file by matching on stable brain id", async () => {
@@ -278,9 +312,91 @@ describe("goat brain file sync", () => {
       db,
     });
 
-    expect(result).toEqual({ upserted: 1, deleted: 0, conflicts: [] });
+    expect(result).toEqual({
+      upserted: 1,
+      deleted: 0,
+      conflicts: [],
+      pages: [
+        {
+          brainId: "acme",
+          folderPath: "companies/customers",
+          title: "Acme",
+          action: "updated",
+        },
+      ],
+    });
 
     expect(db.transactionCount()).toBe(1);
+  });
+
+  it("reports conflict-created page descriptors from handled sync conflicts", async () => {
+    const baseContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Base.",
+    });
+    const currentContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Current changed independently.",
+    });
+    const nextContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Agent changed the same page.",
+    });
+    const db = syncMutableDb([
+      {
+        id: "doc_1",
+        userWorkosId: "user_1",
+        brainRef: "goat_brain_user_1",
+        brainId: "acme",
+        folderPath: "companies",
+        content: currentContent,
+        contentHash: hashGoatBrainContent(currentContent),
+        sizeBytes: Buffer.byteLength(currentContent, "utf8"),
+        title: "Acme",
+        kind: "page",
+        entityType: "company",
+        status: "draft",
+      },
+    ]);
+
+    const result = await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      files: [{ path: "companies/acme.md", content: nextContent }],
+      baseSnapshot: [
+        {
+          id: "doc_1",
+          brainId: "acme",
+          folderPath: "companies",
+          path: "companies/acme.md",
+          contentHash: hashGoatBrainContent(baseContent),
+        },
+      ],
+      db,
+    });
+
+    expect(result.upserted).toBe(1);
+    expect(result.deleted).toBe(0);
+    expect(result.conflicts).toEqual([]);
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0]).toMatchObject({
+      folderPath: "companies",
+      title: "Acme conflict",
+      action: "conflict_created",
+    });
+    expect(result.pages[0]?.brainId).toMatch(/^acme-conflict-/);
   });
 
   it("materializes invalid stored markdown as a raw file that can be deleted", async () => {

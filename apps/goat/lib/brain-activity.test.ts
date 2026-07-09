@@ -85,6 +85,23 @@ describe("buildGoatBrainActivityEvents", () => {
           result: {
             summary: "Promoted the capture into concepts.\n\nDetails follow.",
             draftBrainId: "pricing-teardown-reference",
+            pages: [
+              {
+                brainId: "pricing-teardown",
+                folderPath: "concepts",
+                title: "Pricing teardown",
+                action: "created",
+              },
+              {
+                brainId: "acme",
+                folderPath: "companies",
+                title: "Acme",
+                action: "updated",
+              },
+              { brainId: "", folderPath: "companies", title: "Broken", action: "created" },
+              { brainId: "ignored", folderPath: "companies", title: "Ignored", action: "bad" },
+              "not a page",
+            ],
           },
         }),
       ],
@@ -96,7 +113,38 @@ describe("buildGoatBrainActivityEvents", () => {
       at: "2026-07-09T10:01:20.000Z",
       detail: "Promoted the capture into concepts.",
       brainId: "pricing-teardown-reference",
+      pages: [
+        {
+          brainId: "pricing-teardown",
+          folderPath: "concepts",
+          title: "Pricing teardown",
+          action: "created",
+        },
+        {
+          brainId: "acme",
+          folderPath: "companies",
+          title: "Acme",
+          action: "updated",
+        },
+      ],
     });
+  });
+
+  it("falls back to an empty page list for legacy succeeded jobs", () => {
+    const events = buildGoatBrainActivityEvents(
+      [
+        job({
+          status: "succeeded",
+          result: {
+            summary: "Filed.",
+            draftBrainId: "pricing-reference",
+          },
+        }),
+      ],
+      [item()],
+    );
+
+    expect(events.find((event) => event.kind === "filed")).toMatchObject({ pages: [] });
   });
 
   it("reports failures and retries with the last error", () => {
