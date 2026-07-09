@@ -2,7 +2,7 @@ import { extractGoatBrainCitations, parseGoatBrainDocument } from "./document";
 import { deriveGoatBrainEdges } from "./edges";
 import { parseGoatBrainInlineLinks } from "./inline-links";
 import { goatBrainRelativePath } from "./paths";
-import { isValidGoatBrainFolder, isValidGoatBrainId } from "./schema";
+import { isValidGoatBrainFolder, isValidGoatBrainId, isValidGoatBrainSourceRef } from "./schema";
 import { listGoatBrainFiles, type StoredGoatBrainFile } from "./store";
 import { validateGoatBrainDocument } from "./validate";
 
@@ -131,6 +131,18 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
         id: file.id,
         message: "Document has no incoming or outgoing valid graph edges.",
       });
+    }
+
+    for (const sourceEntry of doc.frontmatter.sources ?? []) {
+      const ref = sourceEntry.ref.trim();
+      if (ref && !isValidGoatBrainSourceRef(ref)) {
+        findings.push({
+          severity: "warn",
+          code: "nonstandard_source_ref",
+          id: file.id,
+          message: `Source ref "${ref}" is not provider:id shaped.`,
+        });
+      }
     }
 
     if (

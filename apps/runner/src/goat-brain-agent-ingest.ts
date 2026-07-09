@@ -7,7 +7,10 @@ import {
   syncGoatBrainFilesFromRoot,
 } from "@opencompany/db/goat-brain-files";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
-import type { NormalizedJamieMeetingSourceItem } from "@opencompany/goat-brain";
+import {
+  GOAT_BRAIN_POINTER_COPY_RULE,
+  type NormalizedJamieMeetingSourceItem,
+} from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
@@ -104,7 +107,7 @@ export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = [
   "- Compiled truth is a rewrite, not a log: when a page's state of play changes, use rewrite to replace it with the current durable synthesis. Do not append updates to the bottom of compiled truth.",
   "- Timeline entries are concise dated evidence: use timeline-add with what happened and why it matters, always with --source-ref (and --evidence-id when an evidence record exists).",
   "- Backlink iron law: every mention of an entity that has a brain page must be written as a [[page:...]] link — in compiled truth and in timeline entries.",
-  "- Pointers over copies: claims cite a source pointer. Snapshot content into evidence/ only when the source is ephemeral or has no canonical live home (transcripts: snapshot; tracked issues: pointer plus a one-line state summary, never a body copy). Never copy raw transcripts into pages; link the evidence record instead.",
+  `- ${GOAT_BRAIN_POINTER_COPY_RULE.split("\n").join("\n  ")}`,
   "- No fabrication: write only what the source or the brain supports. If the source does not say it, it does not go in.",
   `- If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
   "",

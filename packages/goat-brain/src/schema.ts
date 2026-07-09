@@ -70,6 +70,19 @@ export type GoatBrainSource = {
 
 export const GOAT_BRAIN_EVIDENCE_ID_PATTERN = /^ev-[a-z0-9][a-z0-9-]{0,76}$/;
 
+// Source refs are `provider:id` — a lowercase provider slug, a colon, then the
+// provider's own identifier (which may itself contain colons or slashes, e.g.
+// `jamie:meeting:calendar_event_123`). No whitespace, brackets, or pipes so the
+// ref stays inline-link safe.
+export const GOAT_BRAIN_SOURCE_REF_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}:[^\s[\]|]+$/;
+export const GOAT_BRAIN_SOURCE_REF_MAX_LENGTH = 256;
+
+export type ParsedGoatBrainSourceRef = {
+  raw: string;
+  provider: string;
+  id: string;
+};
+
 export type GoatBrainFrontmatter = {
   id: string;
   folder: string;
@@ -139,6 +152,22 @@ export function isValidGoatBrainStatus(value: unknown): value is GoatBrainStatus
 
 export function isValidGoatBrainEvidenceId(value: unknown): value is string {
   return typeof value === "string" && GOAT_BRAIN_EVIDENCE_ID_PATTERN.test(value);
+}
+
+export function isValidGoatBrainSourceRef(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= GOAT_BRAIN_SOURCE_REF_MAX_LENGTH &&
+    GOAT_BRAIN_SOURCE_REF_PATTERN.test(value)
+  );
+}
+
+export function parseGoatBrainSourceRef(value: unknown): ParsedGoatBrainSourceRef | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!isValidGoatBrainSourceRef(raw)) return null;
+  const separator = raw.indexOf(":");
+  return { raw, provider: raw.slice(0, separator), id: raw.slice(separator + 1) };
 }
 
 export function goatBrainRelated(frontmatter: Partial<GoatBrainFrontmatter>): GoatBrainRelation[] {

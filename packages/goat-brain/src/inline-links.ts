@@ -1,4 +1,8 @@
-import { isValidGoatBrainEvidenceId, isValidGoatBrainId } from "./schema";
+import {
+  isValidGoatBrainEvidenceId,
+  isValidGoatBrainId,
+  isValidGoatBrainSourceRef,
+} from "./schema";
 
 const BRACKET_LINK_PATTERN = /\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g;
 const LEGACY_EVIDENCE_CITATION_PATTERN = /(?<!\\)\[\^ev:([^\]\n]+)\]/g;
@@ -132,12 +136,8 @@ function isValidInlineLinkTarget(kind: GoatBrainInlineLinkKind, target: string):
     case "evidence":
       return isValidGoatBrainEvidenceId(target);
     case "source":
-      return isValidSourceTarget(target);
+      return isValidGoatBrainSourceRef(target);
   }
-}
-
-function isValidSourceTarget(target: string): boolean {
-  return target.trim().length > 0 && !/[\]\n]/.test(target);
 }
 
 function isValidInlineLinkLabel(label: string): boolean {

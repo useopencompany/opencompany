@@ -43,6 +43,42 @@ describe("checkGoatBrainHealth", () => {
       expect.arrayContaining([expect.objectContaining({ code: "weak_provenance" })]),
     );
   });
+
+  it("warns on frontmatter source refs that are not provider:id shaped", async () => {
+    await writeDoc(
+      "people/ada.md",
+      serializeGoatBrainDocument({
+        title: "Ada",
+        compiledTruth: "",
+        timeline: [],
+        frontmatter: {
+          id: "ada",
+          folder: "people",
+          kind: "page",
+          type: "person",
+          status: "active",
+          title: "Ada",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          relations: [],
+          sources: [{ ref: "manual" }, { ref: "jamie:meeting:calendar_event_123" }],
+        },
+      }),
+    );
+
+    const report = await checkGoatBrainHealth(root);
+
+    const refFindings = report.findings.filter(
+      (finding) => finding.code === "nonstandard_source_ref",
+    );
+    expect(refFindings).toEqual([
+      expect.objectContaining({
+        severity: "warn",
+        id: "ada",
+        message: 'Source ref "manual" is not provider:id shaped.',
+      }),
+    ]);
+  });
 });
 
 async function writeDoc(relativePath: string, content: string) {

@@ -4,6 +4,7 @@ import {
   goatBrainEntryFromLegacyMarkdown,
 } from "./entry";
 import { checkGoatBrainHealth, type GoatBrainHealthReport } from "./health";
+import { GOAT_BRAIN_POINTER_COPY_RULE } from "./pointer-copy";
 import type { Gateway } from "./retrieval/gateway";
 import {
   type GoatBrainEntityType,
@@ -174,7 +175,8 @@ function buildIngestPrompt(input: {
     "Use existing ids when information belongs to an existing entity. Create a new entry only when no existing entry is the primary home.",
     "Use only these types: person, company, media, analysis, concept, email, writing, note, project, source.",
     "Prefer relations over extra structured fields. People, companies, projects, and sources should connect through relations.",
-    "Use inline links like [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence, and [[source:ref|Label]] for source refs. Legacy [[brain-id|Label]] page links are accepted but new content should use typed links.",
+    "Use inline links like [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence, and [[source:provider:id|Label]] for source refs. Legacy [[brain-id|Label]] page links are accepted but new content should use typed links.",
+    GOAT_BRAIN_POINTER_COPY_RULE,
     "Compiled truth is the current synthesis for the entity. Rewrite it as the durable state of play, not as a chronological log.",
     "Timeline entries are append-only evidence. `timelineBody` must be a concise factual event from this source, not a restatement of the full source text.",
     "Every timeline entry must preserve source context; the system will attach the source ref, so make `timelineBody` say what happened and why it matters.",
