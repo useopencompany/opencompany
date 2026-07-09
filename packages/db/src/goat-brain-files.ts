@@ -774,7 +774,28 @@ function documentValues(projection: GoatBrainFileProjection) {
     aliases: projection.aliases,
     contentHash: projection.contentHash,
     sizeBytes: projection.sizeBytes,
+    searchText: goatBrainSearchText(projection),
+    nameText: goatBrainNameText(projection),
   };
+}
+
+// Retrieval projections consumed by goat-brain-read.ts: `search_text` feeds the generated FTS
+// tsvector, `name_text` feeds trigram entity lookup. Migration 0102 backfills the same
+// composition in SQL for pre-existing rows.
+function goatBrainSearchText(projection: GoatBrainFileProjection): string {
+  return [
+    projection.title,
+    projection.aliases.join(" "),
+    projection.body,
+    projection.timeline.map((entry) => entry.body).join("\n"),
+    projection.relations.map((relation) => `${relation.type} ${relation.to}`).join("\n"),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function goatBrainNameText(projection: GoatBrainFileProjection): string {
+  return [projection.title, ...projection.aliases].filter(Boolean).join(" ").trim();
 }
 
 async function replaceDerivedRows(
