@@ -59,6 +59,7 @@ import {
 } from "react";
 import { Markdown } from "@/components/Markdown";
 import { useHydrated } from "@/components/useHydrated";
+import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
@@ -79,7 +80,6 @@ import {
   toGoatChatUiMessage,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
-import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
