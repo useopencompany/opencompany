@@ -147,6 +147,44 @@ describe("buildGoatBrainActivityEvents", () => {
     expect(events.find((event) => event.kind === "filed")).toMatchObject({ pages: [] });
   });
 
+  it("attaches valid completed traces and ignores malformed legacy traces", () => {
+    const events = buildGoatBrainActivityEvents(
+      [
+        job({
+          id: "gbjob_traced",
+          status: "succeeded",
+          completed_at: "2026-07-09T10:01:20.000Z",
+          result: {
+            skipped: true,
+            summary: "No durable brain material.",
+            trace: trace(),
+          },
+        }),
+        job({
+          id: "gbjob_legacy",
+          status: "succeeded",
+          completed_at: "2026-07-09T10:01:10.000Z",
+          result: {
+            summary: "Filed.",
+            trace: { schemaVersion: "old" },
+          },
+        }),
+      ],
+      [item()],
+    );
+
+    const traced = events.find((event) => event.id === "gbjob_traced:filed");
+    const legacy = events.find((event) => event.id === "gbjob_legacy:filed");
+    expect(traced).toMatchObject({
+      title: "Skipped filing",
+      trace: {
+        schemaVersion: "goat.brain_ingest_trace.v1",
+        toolCallCount: 1,
+      },
+    });
+    expect(legacy).toMatchObject({ trace: null });
+  });
+
   it("reports failures and retries with the last error", () => {
     const failed = buildGoatBrainActivityEvents(
       [job({ status: "failed", attempts: 5, last_error: "Gateway timed out." })],
@@ -184,6 +222,37 @@ describe("buildGoatBrainActivityEvents", () => {
     expect(events[1]?.sourceTitle).toBe("Untitled");
   });
 });
+
+function trace() {
+  return {
+    schemaVersion: "goat.brain_ingest_trace.v1",
+    model: "anthropic/claude-sonnet-4.6",
+    steps: 2,
+    toolCallCount: 1,
+    mutations: 0,
+    usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+    finalText: "No durable brain material.",
+    toolCalls: [
+      {
+        id: "goat_brain_call_1",
+        toolName: "goat_brain",
+        command: "query",
+        args: ["Pricing"],
+        stdinPreview: null,
+        status: "completed",
+        mutating: false,
+        exitCode: 0,
+        stdoutPreview: "[]",
+        stderrPreview: "",
+        errorPreview: "",
+        startedAt: "2026-07-09T10:00:00.000Z",
+        completedAt: "2026-07-09T10:00:01.000Z",
+      },
+    ],
+    truncatedToolCalls: 0,
+    createdAt: "2026-07-09T10:00:02.000Z",
+  };
+}
 
 describe("buildGoatBrainDraftIngestStates", () => {
   it("maps pending chat capture jobs to their inbox draft id", () => {

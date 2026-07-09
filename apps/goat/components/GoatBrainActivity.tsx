@@ -1,10 +1,20 @@
 "use client";
 
+import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { useLiveQuery } from "@tanstack/react-db";
-import { Activity, CircleAlert, CircleCheck, Inbox, Loader2, RotateCw } from "lucide-react";
+import {
+  Activity,
+  CircleAlert,
+  CircleCheck,
+  Inbox,
+  Loader2,
+  RotateCw,
+  TerminalSquare,
+} from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { BrainIngestTraceDialog } from "@/components/BrainIngestTraceView";
 import { buildGoatBrainActivityEvents, type GoatBrainActivityKind } from "@/lib/brain-activity";
 import {
   createGoatCollections,
@@ -12,28 +22,50 @@ import {
   type GoatBrainSourceItemRow,
 } from "@/lib/task-collections";
 
+type SelectedBrainIngestTrace = {
+  trace: GoatBrainIngestTrace;
+  sourceTitle: string;
+};
+
 export function GoatBrainActivity({ brainRef }: { brainRef: string }) {
   const [open, setOpen] = useState(false);
+  const [selectedTrace, setSelectedTrace] = useState<SelectedBrainIngestTrace | null>(null);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        aria-label="Brain activity"
-        title="Activity"
-        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 data-[popup-open]:bg-surface-active data-[popup-open]:text-ink"
-      >
-        <Activity size={15} strokeWidth={1.8} />
-      </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={4} className="w-[340px] p-0">
-        <GoatBrainActivityFeed brainRef={brainRef} />
-      </PopoverContent>
-    </Popover>
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          aria-label="Brain activity"
+          title="Activity"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 data-[popup-open]:bg-surface-active data-[popup-open]:text-ink"
+        >
+          <Activity size={15} strokeWidth={1.8} />
+        </PopoverTrigger>
+        <PopoverContent align="start" sideOffset={4} className="w-[340px] p-0">
+          <GoatBrainActivityFeed brainRef={brainRef} onOpenTrace={setSelectedTrace} />
+        </PopoverContent>
+      </Popover>
+      <BrainIngestTraceDialog
+        trace={selectedTrace?.trace ?? null}
+        sourceTitle={selectedTrace?.sourceTitle ?? ""}
+        open={Boolean(selectedTrace)}
+        onOpenChange={(dialogOpen) => {
+          if (!dialogOpen) setSelectedTrace(null);
+        }}
+      />
+    </>
   );
 }
 
 // Only mounted while the popover is open, so the ingest-job and source-item
 // shapes start syncing on first use instead of on page load.
-function GoatBrainActivityFeed({ brainRef }: { brainRef: string }) {
+function GoatBrainActivityFeed({
+  brainRef,
+  onOpenTrace,
+}: {
+  brainRef: string;
+  onOpenTrace: (trace: SelectedBrainIngestTrace) => void;
+}) {
   const collections = useMemo(() => createGoatCollections(), []);
   const brainCollections = useMemo(
     () => collections.brainCollections(brainRef),
@@ -74,6 +106,7 @@ function GoatBrainActivityFeed({ brainRef }: { brainRef: string }) {
           events.map((event) => {
             const icon = ACTIVITY_ICONS[event.kind];
             const Icon = icon.component;
+            const trace = event.trace;
             return (
               <div key={event.id} className="flex items-start gap-2.5 rounded-[5px] px-2 py-1.5">
                 <Icon size={14} strokeWidth={1.9} className={`mt-0.5 shrink-0 ${icon.className}`} />
@@ -94,6 +127,16 @@ function GoatBrainActivityFeed({ brainRef }: { brainRef: string }) {
                   ) : null}
                   {event.kind === "filed" && event.pages.length > 0 ? (
                     <ActivityPageLinks brainRef={brainRef} pages={event.pages} />
+                  ) : null}
+                  {trace ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenTrace({ trace, sourceTitle: event.sourceTitle })}
+                      className="mt-1 inline-flex w-fit items-center gap-1 rounded-[4px] border border-border-subtle bg-surface px-1.5 py-0.5 text-[11px] leading-4 text-ink-muted transition-colors duration-150 hover:border-border hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                    >
+                      <TerminalSquare size={11} strokeWidth={1.8} />
+                      Trace
+                    </button>
                   ) : null}
                 </div>
               </div>

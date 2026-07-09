@@ -10,6 +10,17 @@ import {
   syncGoatBrainFilesFromRoot,
   updateGoatBrainAssetExtraction,
 } from "@opencompany/db/goat-brain-files";
+import {
+  GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
+  GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS,
+  GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+  GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+  GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
+  type GoatBrainIngestTrace,
+  type GoatBrainIngestTraceToolCall,
+  goatBrainIngestTracePreview,
+  sanitizeGoatBrainIngestTraceArgs,
+} from "@opencompany/db/goat-brain-ingest-trace";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
@@ -478,6 +489,7 @@ type BrainAgentIngestSessionResult = {
   pages: GoatBrainSyncPage[];
   usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
   summary: string;
+  trace: GoatBrainIngestTrace;
 };
 
 // Shared scaffolding for every agent ingest profile: resolve the target brain,
@@ -574,6 +586,7 @@ async function runBrainAgentIngestSession(input: {
       pages: synced.pages,
       usage: loop.usage,
       summary: loop.finalText.slice(0, RESULT_SUMMARY_LIMIT),
+      trace: loop.trace,
     };
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -849,6 +862,7 @@ async function runIngestAgentLoop(input: {
 
   let toolCalls = 0;
   let mutations = 0;
+  const traceToolCalls: GoatBrainIngestTraceToolCall[] = [];
   const runCli = input.runCli ?? runGoatBrainAgentCli;
   const commands = input.commands ?? AGENT_CLI_COMMANDS;
   const tools = {
@@ -883,8 +897,36 @@ async function runIngestAgentLoop(input: {
       }),
       execute: async (args) => {
         toolCalls += 1;
+        const traceId = `goat_brain_call_${toolCalls}`;
+        const startedAt = new Date().toISOString();
+        const sanitizedArgs = sanitizeGoatBrainIngestTraceArgs(args.args ?? []);
+        const stdinPreview =
+          typeof args.stdin === "string" && args.stdin
+            ? goatBrainIngestTracePreview(args.stdin, GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
+            : null;
         const invalid = validateGoatBrainAgentInvocation(args, commands);
-        if (invalid) return { ok: false, error: invalid };
+        if (invalid) {
+          appendTraceToolCall(traceToolCalls, {
+            id: traceId,
+            toolName: "goat_brain",
+            command: args.command,
+            args: sanitizedArgs,
+            stdinPreview,
+            status: "blocked",
+            mutating: false,
+            exitCode: null,
+            stdoutPreview: "",
+            stderrPreview: "",
+            errorPreview: goatBrainIngestTracePreview(
+              invalid,
+              GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+            ),
+            startedAt,
+            completedAt: new Date().toISOString(),
+          });
+          return { ok: false, error: invalid };
+        }
+        const mutating = isMutatingGoatBrainAgentInvocation(args);
         const result = await runCli({
           cliPath: input.cliPath,
           root: input.root,
@@ -893,9 +935,33 @@ async function runIngestAgentLoop(input: {
           ...(args.stdin ? { stdin: args.stdin } : {}),
           signal: abort.signal,
         });
-        if (result.ok && isMutatingGoatBrainAgentInvocation(args)) {
+        if (result.ok && mutating) {
           mutations += 1;
         }
+        appendTraceToolCall(traceToolCalls, {
+          id: traceId,
+          toolName: "goat_brain",
+          command: args.command,
+          args: sanitizedArgs,
+          stdinPreview,
+          status: result.ok ? "completed" : "failed",
+          mutating,
+          exitCode: result.exitCode,
+          stdoutPreview: goatBrainIngestTracePreview(
+            result.stdout,
+            GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+          ),
+          stderrPreview: goatBrainIngestTracePreview(
+            result.stderr,
+            GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+          ),
+          errorPreview: goatBrainIngestTracePreview(
+            result.error ?? "",
+            GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+          ),
+          startedAt,
+          completedAt: new Date().toISOString(),
+        });
         return {
           ok: result.ok,
           exitCode: result.exitCode,
@@ -917,21 +983,44 @@ async function runIngestAgentLoop(input: {
       abortSignal: abort.signal,
     });
     const usage = result.totalUsage;
+    const finalText = result.text.trim();
+    const normalizedUsage = {
+      inputTokens: usage?.inputTokens ?? null,
+      outputTokens: usage?.outputTokens ?? null,
+      totalTokens: usage?.totalTokens ?? null,
+    };
+    const trace: GoatBrainIngestTrace = {
+      schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+      model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+      steps: result.steps.length,
+      toolCallCount: toolCalls,
+      mutations,
+      usage: normalizedUsage,
+      finalText: goatBrainIngestTracePreview(finalText, GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH),
+      toolCalls: traceToolCalls,
+      truncatedToolCalls: Math.max(0, toolCalls - traceToolCalls.length),
+      createdAt: new Date().toISOString(),
+    };
     return {
-      finalText: result.text.trim(),
+      finalText,
       steps: result.steps.length,
       toolCalls,
       mutations,
-      usage: {
-        inputTokens: usage?.inputTokens ?? null,
-        outputTokens: usage?.outputTokens ?? null,
-        totalTokens: usage?.totalTokens ?? null,
-      },
+      usage: normalizedUsage,
+      trace,
     };
   } finally {
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", onParentAbort);
   }
+}
+
+function appendTraceToolCall(
+  toolCalls: GoatBrainIngestTraceToolCall[],
+  toolCall: GoatBrainIngestTraceToolCall,
+) {
+  if (toolCalls.length >= GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS) return;
+  toolCalls.push(toolCall);
 }
 
 export function validateGoatBrainAgentInvocation(

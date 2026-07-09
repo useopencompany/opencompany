@@ -1,3 +1,7 @@
+import {
+  type GoatBrainIngestTrace,
+  normalizeGoatBrainIngestTrace,
+} from "@opencompany/db/goat-brain-ingest-trace";
 import type { GoatBrainIngestJobRow, GoatBrainSourceItemRow } from "@/lib/task-collections";
 
 export type GoatBrainActivityKind = "captured" | "filing" | "filed" | "retrying" | "failed";
@@ -20,6 +24,7 @@ export type GoatBrainActivityEvent = {
   sourceTitle: string;
   brainId: string | null;
   pages: GoatBrainActivityPage[];
+  trace: GoatBrainIngestTrace | null;
 };
 
 export type GoatBrainDraftIngestStateKind = "queued" | "running" | "retrying" | "failed";
@@ -61,6 +66,7 @@ export function buildGoatBrainActivityEvents(
       sourceTitle,
       brainId: null,
       pages: [],
+      trace: null,
     });
 
     if (job.status === "running") {
@@ -73,17 +79,20 @@ export function buildGoatBrainActivityEvents(
         sourceTitle,
         brainId: null,
         pages: [],
+        trace: null,
       });
     } else if (job.status === "succeeded") {
+      const skipped = jobResultSkipped(job);
       events.push({
         id: `${job.id}:filed`,
         kind: "filed",
         at: job.completed_at ?? job.updated_at,
-        title: "Filed into brain",
+        title: skipped ? "Skipped filing" : "Filed into brain",
         detail: truncateDetail(firstLine(jobResultSummary(job))),
         sourceTitle,
         brainId,
         pages: jobResultPages(job),
+        trace: jobResultTrace(job),
       });
     } else if (job.status === "failed") {
       events.push({
@@ -95,6 +104,7 @@ export function buildGoatBrainActivityEvents(
         sourceTitle,
         brainId: null,
         pages: [],
+        trace: null,
       });
     } else if (job.status === "queued" && job.attempts > 0) {
       events.push({
@@ -106,6 +116,7 @@ export function buildGoatBrainActivityEvents(
         sourceTitle,
         brainId: null,
         pages: [],
+        trace: null,
       });
     }
   }
@@ -195,6 +206,14 @@ function jobResultBrainId(job: GoatBrainIngestJobRow): string | null {
   // Capture jobs report draftBrainId; meeting jobs report meetingBrainId.
   const value = job.result?.draftBrainId ?? job.result?.meetingBrainId;
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function jobResultSkipped(job: GoatBrainIngestJobRow): boolean {
+  return job.result?.skipped === true;
+}
+
+function jobResultTrace(job: GoatBrainIngestJobRow): GoatBrainIngestTrace | null {
+  return normalizeGoatBrainIngestTrace(job.result?.trace);
 }
 
 function jobResultPages(job: GoatBrainIngestJobRow): GoatBrainActivityPage[] {
