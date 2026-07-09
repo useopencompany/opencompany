@@ -1,6 +1,7 @@
 import {
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
+  normalizeSlackConversationWindow,
 } from "@opencompany/goat-brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -53,9 +54,11 @@ vi.mock("./goat-brain", () => ({ writeLocalBrainFile: localBrainMock.writeLocalB
 import {
   buildGoatChatCaptureAgentIngestPrompt,
   buildJamieMeetingAgentIngestPrompt,
+  buildSlackConversationAgentIngestPrompt,
   type GoatBrainAgentCliRunner,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
+  runSlackConversationAgentIngest,
   validateGoatBrainAgentInvocation,
 } from "./goat-brain-agent-ingest";
 import { buildJamieMeetingIds } from "./goat-brain-jamie-writes";
@@ -91,6 +94,33 @@ function captureItem() {
     draftBrainId: "pricing-teardown-reference",
     draftFolder: "inbox",
     capturedAt: "2026-07-09T10:00:00.000Z",
+  });
+}
+
+function slackItem() {
+  return normalizeSlackConversationWindow({
+    windowId: "gslkwin_test1",
+    teamId: "T012345",
+    teamDomain: "acme",
+    channelId: "C09ABC",
+    channelName: "product",
+    channelType: "channel",
+    messages: [
+      {
+        ts: "1783950060.000100",
+        userId: "U01",
+        userName: "Jamie",
+        text: "Where did we land on onboarding?",
+      },
+      {
+        ts: "1783950120.000200",
+        threadTs: "1783950060.000100",
+        userId: "U02",
+        userName: "Ada",
+        text: "We decided to ship the new flow next week.",
+      },
+    ],
+    flushedAt: "2026-07-13T10:30:00.000Z",
   });
 }
 
@@ -197,6 +227,82 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     expect(prompt).toContain("reference for the pricing page rework");
     expect(prompt).toContain("https://example.com/pricing-teardown");
     expect(prompt).toContain("merge --from pricing-teardown-reference");
+  });
+});
+
+describe("buildSlackConversationAgentIngestPrompt", () => {
+  it("carries the transcript, per-message refs, permalinks, and thread markers", () => {
+    const item = slackItem();
+    const prompt = buildSlackConversationAgentIngestPrompt(item);
+
+    expect(prompt).toContain("#product");
+    expect(prompt).toContain(item.sourceRef);
+    expect(prompt).toContain("slack:message:T012345:C09ABC:<message ts>");
+    expect(prompt).toContain("https://acme.slack.com/archives/C09ABC/p");
+    expect(prompt).toContain("Jamie (ts 1783950060.000100): Where did we land on onboarding?");
+    expect(prompt).toContain("↳ [");
+    expect(prompt).toContain("We decided to ship the new flow next week.");
+  });
+
+  it("omits the permalink hint without a team domain", () => {
+    const item = normalizeSlackConversationWindow({
+      windowId: "gslkwin_test2",
+      teamId: "T012345",
+      channelId: "D09DM",
+      channelName: "Ada",
+      channelType: "im",
+      messages: [{ ts: "1783950060.000100", userId: "U02", text: "hi" }],
+      flushedAt: "2026-07-13T10:30:00.000Z",
+    });
+    const prompt = buildSlackConversationAgentIngestPrompt(item);
+    expect(prompt).not.toContain("permalinks");
+    expect(prompt).toContain("the DM with Ada");
+  });
+});
+
+describe("runSlackConversationAgentIngest", () => {
+  it("runs the ingest loop and reports window metadata", async () => {
+    mockAgentRun({
+      finalText: "Updated onboarding page.",
+      toolInvocations: [
+        { command: "timeline-add", args: ["onboarding", "--body", "Ship decision."] },
+      ],
+    });
+
+    const result = await runSlackConversationAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: slackItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      brainRef: "gbrain_123",
+      skipped: false,
+      channelId: "C09ABC",
+      messageCount: 2,
+      windowStartTs: "1783950060.000100",
+      windowEndTs: "1783950120.000200",
+    });
+  });
+
+  it("treats a SKIP reply with no writes as a clean skip", async () => {
+    mockAgentRun({ finalText: "SKIP" });
+
+    const result = await runSlackConversationAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: slackItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({ skipped: true, mutations: 0 });
   });
 });
 

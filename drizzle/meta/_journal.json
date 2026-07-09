@@ -729,6 +729,13 @@
       "when": 1783710000000,
       "tag": "0103_goat_brain_retrieval_plane",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1783980000000,
+      "tag": "0104_goat_slack_source",
+      "breakpoints": true
     }
   ]
 }

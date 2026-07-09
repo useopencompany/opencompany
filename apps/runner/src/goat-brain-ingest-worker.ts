@@ -10,6 +10,7 @@ import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedJamieMeetingSourceItem,
+  isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   type NormalizedBrainSourceItem,
   type NormalizedJamieMeetingSourceItem,
@@ -22,6 +23,7 @@ import {
   type GoatBrainAgentIngestEnv,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
+  runSlackConversationAgentIngest,
   runUploadAssetAgentIngest,
 } from "./goat-brain-agent-ingest";
 import {
@@ -92,6 +94,12 @@ const UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "asset",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "slack",
+  sourceType: "conversation",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -112,6 +120,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedUploadAssetSourceItem,
     run: runUploadAssetAgentIngest,
+  },
+  {
+    descriptor: SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedSlackConversationSourceItem,
+    run: runSlackConversationAgentIngest,
   },
 ];
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-export type BrainSourceProvider = "jamie" | "goat-chat" | "upload";
-export type BrainSourceType = "meeting" | "capture" | "asset";
+export type BrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack";
+export type BrainSourceType = "meeting" | "capture" | "asset" | "conversation";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
   sourceProvider: BrainSourceProvider;
@@ -270,6 +270,149 @@ export function isNormalizedUploadAssetSourceItem(
     typeof asset.originalFileName === "string" &&
     typeof asset.sizeBytes === "number"
   );
+}
+
+export type NormalizedSlackConversationMessage = {
+  ts: string;
+  threadTs?: string;
+  userId: string;
+  userName?: string;
+  text: string;
+  subtype?: string;
+  files?: Array<{ name: string; mimetype?: string }>;
+};
+
+export type NormalizedSlackConversationContent = {
+  conversation: {
+    teamId: string;
+    teamDomain?: string;
+    channelId: string;
+    channelName: string;
+    channelType: "channel" | "group" | "im" | "mpim";
+    windowStartTs: string;
+    windowEndTs: string;
+    messages: NormalizedSlackConversationMessage[];
+  };
+};
+
+export type NormalizedSlackConversationSourceItem =
+  NormalizedBrainSourceItem<NormalizedSlackConversationContent> & {
+    sourceProvider: "slack";
+    sourceType: "conversation";
+  };
+
+export function normalizeSlackConversationWindow(input: {
+  // Minted per flush, so it doubles as the stable external id for dedupe.
+  windowId: string;
+  teamId: string;
+  teamDomain?: string;
+  channelId: string;
+  channelName: string;
+  channelType: "channel" | "group" | "im" | "mpim";
+  messages: NormalizedSlackConversationMessage[];
+  flushedAt: string;
+}): NormalizedSlackConversationSourceItem {
+  const windowId = input.windowId.trim();
+  if (!windowId) throw invalid("conversation windowId must not be empty", "invalid_conversation");
+  const teamId = input.teamId.trim();
+  if (!teamId) throw invalid("conversation teamId must not be empty", "invalid_conversation");
+  const channelId = input.channelId.trim();
+  if (!channelId) {
+    throw invalid("conversation channelId must not be empty", "invalid_conversation");
+  }
+  if (input.messages.length === 0) {
+    throw invalid("conversation messages must not be empty", "invalid_conversation");
+  }
+  const flushedAt = optionalIsoString(input.flushedAt);
+  if (!flushedAt)
+    throw invalid("conversation flushedAt must be a timestamp", "invalid_conversation");
+
+  const messages = [...input.messages].sort((a, b) => Number(a.ts) - Number(b.ts));
+  const windowStartTs = messages[0]!.ts;
+  const windowEndTs = messages[messages.length - 1]!.ts;
+  const teamDomain = optionalString(input.teamDomain);
+  const channelName = optionalString(input.channelName) ?? channelId;
+
+  const conversation = {
+    teamId,
+    ...(teamDomain ? { teamDomain } : {}),
+    channelId,
+    channelName,
+    channelType: input.channelType,
+    windowStartTs,
+    windowEndTs,
+    messages,
+  };
+  const contentHashInput = {
+    sourceProvider: "slack",
+    sourceType: "conversation",
+    teamId,
+    channelId,
+    messages: messages.map((message) => ({
+      ts: message.ts,
+      userId: message.userId,
+      text: message.text,
+    })),
+  };
+
+  const title =
+    input.channelType === "im"
+      ? `DM with ${channelName} — ${slackTsToIso(windowStartTs).slice(0, 10)}`
+      : `#${channelName} — ${slackTsToIso(windowStartTs).slice(0, 10)}`;
+
+  return {
+    sourceProvider: "slack",
+    sourceType: "conversation",
+    externalId: windowId,
+    sourceRef: `slack:conversation:${teamId}:${channelId}:${windowEndTs}`,
+    title,
+    occurredAt: slackTsToIso(windowStartTs),
+    capturedAt: flushedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { conversation },
+  };
+}
+
+export function isNormalizedSlackConversationSourceItem(
+  value: unknown,
+): value is NormalizedSlackConversationSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedSlackConversationSourceItem>;
+  if (
+    item.sourceProvider !== "slack" ||
+    item.sourceType !== "conversation" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const conversation = (item.content as Partial<NormalizedSlackConversationContent>).conversation;
+  return (
+    !!conversation &&
+    typeof conversation === "object" &&
+    typeof conversation.teamId === "string" &&
+    typeof conversation.channelId === "string" &&
+    typeof conversation.channelName === "string" &&
+    typeof conversation.channelType === "string" &&
+    Array.isArray(conversation.messages) &&
+    conversation.messages.length > 0
+  );
+}
+
+// Slack ts values are epoch seconds with a fractional suffix ("1720000000.000200").
+export function slackTsToIso(ts: string): string {
+  const seconds = Number(ts);
+  if (!Number.isFinite(seconds)) {
+    throw invalid(`slack ts must be numeric, got ${ts}`, "invalid_conversation");
+  }
+  return new Date(seconds * 1000).toISOString();
 }
 
 export class BrainSourceNormalizationError extends Error {

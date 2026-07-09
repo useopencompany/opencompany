@@ -48,7 +48,13 @@ export type GoatTaskStage =
   | "canceled";
 export type GoatTaskScheduleRunStatus = "pending" | "created" | "failed";
 
-export type GoatIntegrationProvider = "gmail" | "google_calendar" | "linear" | "github" | "jamie";
+export type GoatIntegrationProvider =
+  | "gmail"
+  | "google_calendar"
+  | "linear"
+  | "github"
+  | "jamie"
+  | "slack";
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
 export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
@@ -64,9 +70,10 @@ export type GoatIntegrationResourceStatus =
   | "permission_lost"
   | "archived"
   | "sync_failed";
-export type GoatBrainSourceProvider = "jamie" | "goat-chat" | "upload";
+export type GoatBrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack";
 export type GoatBrainSourceConfigProvider = "jamie" | "gmail" | "github" | "slack";
-export type GoatBrainSourceType = "meeting" | "capture" | "asset";
+export type GoatBrainSourceType = "meeting" | "capture" | "asset" | "conversation";
+export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -653,9 +660,13 @@ export const goatIntegrations = goat.table(
       table.userWorkosId,
       table.provider,
     ),
+    providerExternalIdx: index("goat_integrations_provider_external_idx").on(
+      table.provider,
+      table.externalId,
+    ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie', 'slack')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -704,7 +715,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie', 'slack')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -758,7 +769,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie', 'slack')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -872,11 +883,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'capture', 'asset')`,
+      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -937,7 +948,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -946,6 +957,54 @@ export const goatBrainIngestJobs = goat.table(
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",
       sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed')`,
+    ),
+  }),
+);
+
+// Raw Slack message buffer: the events webhook inserts one row per relevant
+// message; the runner's flush sweeper batches unflushed rows per channel into a
+// conversation-window source item after a quiet period (source_item_id NULL =
+// unflushed).
+export const goatSlackMessageEvents = goat.table(
+  "slack_message_events",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    channelType: text("channel_type").$type<GoatSlackChannelType>().notNull(),
+    messageTs: text("message_ts").notNull(),
+    threadTs: text("thread_ts"),
+    slackUserId: text("slack_user_id"),
+    subtype: text("subtype"),
+    text: text("text").notNull().default(""),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Slack redelivers events on retry; ts is unique per channel.
+    integrationChannelTsIdx: uniqueIndex("goat_slack_message_events_integration_channel_ts_idx").on(
+      table.integrationId,
+      table.channelId,
+      table.messageTs,
+    ),
+    pendingIdx: index("goat_slack_message_events_pending_idx")
+      .on(table.integrationId, table.channelId, table.receivedAt)
+      .where(sql`${table.sourceItemId} IS NULL`),
+    sourceItemIdx: index("goat_slack_message_events_source_item_idx").on(table.sourceItemId),
+    channelTypeCheck: check(
+      "goat_slack_message_events_channel_type_check",
+      sql`${table.channelType} IN ('channel', 'group', 'im', 'mpim')`,
     ),
   }),
 );

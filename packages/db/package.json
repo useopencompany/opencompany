@@ -44,6 +44,10 @@
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"
     },
+    "./goat-slack": {
+      "types": "./src/goat-slack.ts",
+      "default": "./src/goat-slack.ts"
+    },
     "./goat-workspaces": {
       "types": "./src/goat-workspaces.ts",
       "default": "./src/goat-workspaces.ts"
