@@ -292,6 +292,13 @@ export type NormalizedSlackConversationContent = {
     windowStartTs: string;
     windowEndTs: string;
     messages: NormalizedSlackConversationMessage[];
+    context?: {
+      previousMessages?: NormalizedSlackConversationMessage[];
+      threads?: Array<{
+        threadTs: string;
+        messages: NormalizedSlackConversationMessage[];
+      }>;
+    };
   };
 };
 
@@ -310,6 +317,7 @@ export function normalizeSlackConversationWindow(input: {
   channelName: string;
   channelType: "channel" | "group" | "im" | "mpim";
   messages: NormalizedSlackConversationMessage[];
+  context?: NormalizedSlackConversationContent["conversation"]["context"];
   flushedAt: string;
 }): NormalizedSlackConversationSourceItem {
   const windowId = input.windowId.trim();
@@ -332,6 +340,7 @@ export function normalizeSlackConversationWindow(input: {
   const windowEndTs = messages[messages.length - 1]!.ts;
   const teamDomain = optionalString(input.teamDomain);
   const channelName = optionalString(input.channelName) ?? channelId;
+  const context = normalizeSlackConversationContext(input.context);
 
   const conversation = {
     teamId,
@@ -342,6 +351,7 @@ export function normalizeSlackConversationWindow(input: {
     windowStartTs,
     windowEndTs,
     messages,
+    ...(context ? { context } : {}),
   };
   const contentHashInput = {
     sourceProvider: "slack",
@@ -404,6 +414,31 @@ export function isNormalizedSlackConversationSourceItem(
     Array.isArray(conversation.messages) &&
     conversation.messages.length > 0
   );
+}
+
+function normalizeSlackConversationContext(
+  context: NormalizedSlackConversationContent["conversation"]["context"] | undefined,
+): NormalizedSlackConversationContent["conversation"]["context"] | undefined {
+  const previousMessages = sortSlackMessages(context?.previousMessages ?? []);
+  const threads = (context?.threads ?? [])
+    .flatMap((thread) => {
+      const threadTs = thread.threadTs.trim();
+      if (!threadTs) return [];
+      const messages = sortSlackMessages(thread.messages);
+      if (messages.length === 0) return [];
+      return [{ threadTs, messages }];
+    })
+    .sort((a, b) => Number(a.threadTs) - Number(b.threadTs));
+
+  if (previousMessages.length === 0 && threads.length === 0) return undefined;
+  return {
+    ...(previousMessages.length > 0 ? { previousMessages } : {}),
+    ...(threads.length > 0 ? { threads } : {}),
+  };
+}
+
+function sortSlackMessages(messages: readonly NormalizedSlackConversationMessage[]) {
+  return [...messages].sort((a, b) => Number(a.ts) - Number(b.ts));
 }
 
 // Slack ts values are epoch seconds with a fractional suffix ("1720000000.000200").

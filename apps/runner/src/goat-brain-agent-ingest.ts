@@ -16,6 +16,7 @@ import {
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedSlackConversationContent,
+  type NormalizedSlackConversationMessage,
   type NormalizedSlackConversationSourceItem,
   type NormalizedUploadAssetSourceItem,
   slackTsToIso,
@@ -51,6 +52,7 @@ const PROMPT_SUMMARY_BYTES = 60_000;
 const PROMPT_CAPTURE_BYTES = 64_000;
 const PROMPT_ASSET_TEXT_BYTES = 100_000;
 const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
+const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 
 // The ingestion agent gets the full working surface of the CLI except the
@@ -174,17 +176,24 @@ export function buildSlackConversationAgentIngestPrompt(
     formatSlackConversationTranscript(conversation),
     PROMPT_SLACK_TRANSCRIPT_BYTES,
   );
+  const contextText = formatSlackConversationContext(conversation);
+  const context = contextText ? truncateByBytes(contextText, PROMPT_SLACK_CONTEXT_BYTES) : "";
   const truncated =
     Buffer.byteLength(transcript, "utf8") <
     Buffer.byteLength(formatSlackConversationTranscript(conversation), "utf8");
+  const contextTruncated =
+    contextText && Buffer.byteLength(context, "utf8") < Buffer.byteLength(contextText, "utf8");
   return [
     `Ingest this batch of Slack messages from ${label} into the brain. It is one conversation window: everything posted there since the last ingested batch.`,
+    "The current window is the primary ingest target. Prior channel and thread context, when present, is only interpretive context to resolve references, pronouns, decisions, and long-gap replies.",
     "",
     "Required outcome, all scoped to this brain:",
-    "1. Judge the whole window first: extract only durable knowledge — decisions, plans, commitments, facts about people, companies, or projects, and substantive shared content. Ignore chit-chat around it.",
-    `2. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite individual messages with --source-ref slack:message:${conversation.teamId}:${conversation.channelId}:<message ts>.`,
-    "3. Snapshot with append-evidence only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.",
-    "4. Create or update person, company, or project pages for entities central to the conversation, with backlinks per the iron law. Do not create pages for people who merely posted a message.",
+    "1. Query the brain first for likely existing pages and facts before writing, so you update existing knowledge instead of duplicating it.",
+    "2. Judge the current window first: extract only durable knowledge — decisions, plans, commitments, facts about people, companies, or projects, and substantive shared content. Ignore chit-chat around it.",
+    `3. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite individual messages with --source-ref slack:message:${conversation.teamId}:${conversation.channelId}:<message ts>.`,
+    "4. You may cite context messages only when they materially support a durable point from the current window. Do not ingest context-only chatter by itself.",
+    "5. Snapshot with append-evidence only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.",
+    "6. Create or update person, company, or project pages for entities central to the conversation, with backlinks per the iron law. Do not create pages for people who merely posted a message.",
     "",
     `Source ref: ${item.sourceRef}`,
     `Window: ${slackTsToIso(conversation.windowStartTs)} to ${slackTsToIso(conversation.windowEndTs)}`,
@@ -192,9 +201,11 @@ export function buildSlackConversationAgentIngestPrompt(
       ? `Message permalinks: https://${conversation.teamDomain}.slack.com/archives/${conversation.channelId}/p<message ts without the dot>`
       : null,
     truncated ? "The transcript below was truncated to fit the prompt size limit." : null,
+    contextTruncated ? "The context below was truncated to fit the prompt size limit." : null,
     "",
     `## Conversation\n- Channel: ${label}\n- Type: ${conversation.channelType}\n- Messages: ${conversation.messages.length}`,
-    `## Transcript\n${transcript}`,
+    context ? `## Prior context\n${context}` : null,
+    `## Current window transcript\n${transcript}`,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -203,7 +214,37 @@ export function buildSlackConversationAgentIngestPrompt(
 function formatSlackConversationTranscript(
   conversation: NormalizedSlackConversationContent["conversation"],
 ) {
-  return conversation.messages
+  return formatSlackMessages(conversation.messages);
+}
+
+function formatSlackConversationContext(
+  conversation: NormalizedSlackConversationContent["conversation"],
+) {
+  const blocks: string[] = [];
+  const previousMessages = conversation.context?.previousMessages ?? [];
+  if (previousMessages.length > 0) {
+    blocks.push(
+      [
+        "### Previous channel messages",
+        "Messages immediately before the current window; use only to interpret the current window.",
+        formatSlackMessages(previousMessages),
+      ].join("\n"),
+    );
+  }
+  for (const thread of conversation.context?.threads ?? []) {
+    blocks.push(
+      [
+        `### Thread context for ${thread.threadTs}`,
+        "Earlier messages in the Slack thread; use only to interpret the current window.",
+        formatSlackMessages(thread.messages),
+      ].join("\n"),
+    );
+  }
+  return blocks.join("\n\n");
+}
+
+function formatSlackMessages(messages: readonly NormalizedSlackConversationMessage[]) {
+  return messages
     .map((message) => {
       const time = slackTsToIso(message.ts).slice(0, 16).replace("T", " ");
       const author = message.userName ?? message.userId;
