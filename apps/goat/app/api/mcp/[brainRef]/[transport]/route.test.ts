@@ -5,13 +5,13 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("GET /api/mcp/[brainId]/mcp", () => {
+describe("GET /api/mcp/[brainRef]/mcp", () => {
   it("challenges missing bearer tokens with MCP resource metadata", async () => {
     vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "https://example.authkit.app");
 
     const response = await GET(new Request("https://goat.example.com/api/mcp/goat_brain_123/mcp"), {
       params: Promise.resolve({
-        brainId: "goat_brain_123",
+        brainRef: "goat_brain_123",
         transport: "mcp",
       }),
     });
@@ -25,7 +25,7 @@ describe("GET /api/mcp/[brainId]/mcp", () => {
   it("rejects unsupported transports before authentication", async () => {
     const response = await GET(new Request("https://goat.example.com/api/mcp/goat_brain_123/sse"), {
       params: Promise.resolve({
-        brainId: "goat_brain_123",
+        brainRef: "goat_brain_123",
         transport: "sse",
       }),
     });

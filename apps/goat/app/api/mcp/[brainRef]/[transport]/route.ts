@@ -17,7 +17,7 @@ export const maxDuration = 120;
 
 type RouteContext = {
   params: Promise<{
-    brainId: string;
+    brainRef: string;
     transport: string;
   }>;
 };
@@ -41,7 +41,7 @@ type BrainAccessResult =
     };
 
 async function handleMcpRequest(request: Request, context: RouteContext) {
-  const { brainId, transport } = await context.params;
+  const { brainRef, transport } = await context.params;
   if (transport !== "mcp") {
     return Response.json({ error: "MCP transport not found." }, { status: 404 });
   }
@@ -58,7 +58,7 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
         return Response.json({ error: "Invalid MCP authentication context." }, { status: 401 });
       }
 
-      const access = await loadMcpBrainAccess({ userWorkosId, brainId });
+      const access = await loadMcpBrainAccess({ userWorkosId, brainRef });
       if (!access.ok) {
         return Response.json({ error: access.error }, { status: access.status });
       }
@@ -79,7 +79,7 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
             },
             async ({ text, folder, limit }) => {
               const output = await runGoatBrainToolForUser({
-                brainRef: brainId,
+                brainRef,
                 userWorkosId,
                 toolInput: {
                   command: "query",
@@ -91,7 +91,7 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
                   },
                 },
                 gatewayApiKey,
-                sourceRef: `mcp:${brainId}`,
+                sourceRef: `mcp:${brainRef}`,
                 signal: authenticatedRequest.signal,
               });
               const body = output.parsed ? JSON.stringify(output.parsed, null, 2) : output.stdout;
@@ -119,7 +119,7 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
           },
         },
         {
-          basePath: `/api/mcp/${brainId}`,
+          basePath: `/api/mcp/${brainRef}`,
           disableSse: true,
           maxDuration,
         },
@@ -130,7 +130,7 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
     verifyGoatMcpBearerToken,
     {
       required: true,
-      resourceMetadataPath: buildGoatMcpResourceMetadataPath(brainId),
+      resourceMetadataPath: buildGoatMcpResourceMetadataPath(brainRef),
     },
   );
 
@@ -139,11 +139,11 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
 
 async function loadMcpBrainAccess(input: {
   userWorkosId: string;
-  brainId: string;
+  brainRef: string;
 }): Promise<BrainAccessResult> {
   const access = await getGoatBrainAccess({
     userWorkosId: input.userWorkosId,
-    brainRef: input.brainId,
+    brainRef: input.brainRef,
   });
   if (access) return { ok: true, brain: access.brain };
 
@@ -151,7 +151,7 @@ async function loadMcpBrainAccess(input: {
   const [brain] = await db
     .select({ id: goatBrains.id })
     .from(goatBrains)
-    .where(eq(goatBrains.id, input.brainId))
+    .where(eq(goatBrains.id, input.brainRef))
     .limit(1);
 
   if (!brain) {

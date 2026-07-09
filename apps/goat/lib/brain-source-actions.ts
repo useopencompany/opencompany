@@ -54,25 +54,25 @@ function integrationProviderFor(
   }
 }
 
-async function requireAdminBrainContext(brainId: string) {
+async function requireAdminBrainContext(brainRef: string) {
   const context = await currentGoatUser();
   if (context.role !== "admin") return null;
   const access = await getGoatBrainAccess({
     userWorkosId: context.user.workosUserId,
-    brainRef: brainId,
+    brainRef,
   });
   if (!access || access.brain.workspaceId !== context.workspace.id) return null;
   return context;
 }
 
 export async function getGoatBrainSourcesAction(
-  brainId: string,
+  brainRef: string,
 ): Promise<GoatBrainSourcesDetails | null> {
-  const context = await requireAdminBrainContext(brainId);
+  const context = await requireAdminBrainContext(brainRef);
   if (!context) return null;
 
   const [sources, jamieState, defaultBrain] = await Promise.all([
-    listGoatBrainSourcesForBrain(brainId),
+    listGoatBrainSourcesForBrain(brainRef),
     getGoatJamieIntegrationState(context.user.workosUserId),
     getDefaultGoatBrainForUser(context.user.workosUserId),
   ]);
@@ -93,18 +93,18 @@ export async function getGoatBrainSourcesAction(
     jamie: {
       integration: jamieState,
       legacyDefaultDelivery: jamieState.connected && !jamieConfigured,
-      isDefaultBrain: defaultBrain?.id === brainId,
+      isDefaultBrain: defaultBrain?.id === brainRef,
     },
   };
 }
 
 export async function setGoatBrainSourceEnabledAction(input: {
-  brainId: string;
+  brainRef: string;
   provider: GoatBrainSourceConfigProvider;
   integrationId: string;
   enabled: boolean;
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await requireAdminBrainContext(input.brainId);
+  const context = await requireAdminBrainContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "Only workspace admins can configure brain sources." };
   }
@@ -143,9 +143,9 @@ export async function setGoatBrainSourceEnabledAction(input: {
     // silently stop.
     if (!hadExplicitConfig) {
       const defaultBrain = await getDefaultGoatBrainForUser(context.user.workosUserId);
-      if (defaultBrain && defaultBrain.id !== input.brainId) {
+      if (defaultBrain && defaultBrain.id !== input.brainRef) {
         await upsertGoatBrainSource({
-          brainId: defaultBrain.id,
+          brainRef: defaultBrain.id,
           provider: input.provider,
           integrationId: input.integrationId,
           userWorkosId: context.user.workosUserId,
@@ -156,7 +156,7 @@ export async function setGoatBrainSourceEnabledAction(input: {
     }
 
     await upsertGoatBrainSource({
-      brainId: input.brainId,
+      brainRef: input.brainRef,
       provider: input.provider,
       integrationId: input.integrationId,
       userWorkosId: context.user.workosUserId,

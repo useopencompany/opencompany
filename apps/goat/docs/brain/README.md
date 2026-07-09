@@ -14,7 +14,7 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 
 | Page | What it answers |
 | --- | --- |
-| [data-model.md](./data-model.md) | **Source of truth for all enums and grammars**: kinds, the 10 entity types, statuses, default folders, id/folder/source-ref patterns, document anatomy, DB tables. |
+| [data-model.md](./data-model.md) | **Reference for all enums and grammars**: kinds, the 8 entity types, statuses, default folders, id/folder/source-ref patterns, document anatomy, DB tables. `packages/goat-brain/src/schema.ts` remains the code-level source of truth. |
 | [ingestion.md](./ingestion.md) | How content enters the brain: source items, the ingest job queue, and the three pipelines (Jamie meetings, chat captures, legacy template writes). |
 | [tools-and-cli.md](./tools-and-cli.md) | Every surface that touches a brain: the `goat-brain` CLI commands, chat tools (`goat_brain`, `save_to_brain`), and the per-brain MCP connector. |
 | [pointer-copy-contract.md](./pointer-copy-contract.md) | How brain writers cite external sources: pointer vs. snapshot rules per source class, source-ref grammar, enforcement. |
@@ -27,7 +27,7 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 2. Every document is either a **page** (kind `page`, editable knowledge) or an **evidence record**
    (kind `evidence`, immutable sourced snapshot). Kind is determined by folder: anything under
    `evidence/` is evidence, everything else is a page.
-3. **Types are tags, folders are navigation.** A document has exactly one of 10 entity types
+3. **Types are tags, folders are navigation.** A document has exactly one of 8 entity types
    (`person`, `company`, …) and lives in exactly one free-form folder path.
 4. Each document is frontmatter + `## Compiled truth` (current state) + `## Timeline`
    (append-only dated evidence entries).
@@ -52,7 +52,7 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 | Chat tools | `apps/goat/lib/brain-cli.ts` (`goat_brain`), `apps/goat/lib/brain-capture.ts` (`save_to_brain`) |
 | Ingestion worker + handlers | `apps/runner/src/goat-brain-ingest-worker.ts`, `goat-brain-agent-ingest.ts`, `goat-brain-jamie-writes.ts` |
 | Source item normalization | `packages/goat-brain/src/source-items.ts` |
-| Per-brain MCP connector | `apps/goat/app/api/mcp/[brainId]/[transport]/route.ts` |
+| Per-brain MCP connector | `apps/goat/app/api/mcp/[brainRef]/[transport]/route.ts` |
 
 ## Invariants worth memorizing
 
