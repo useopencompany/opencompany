@@ -677,9 +677,6 @@ const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
       ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
         ? { GOAT_BRAIN_GATEWAY_BASE_URL: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
         : {}),
-      ...(process.env.GOAT_BRAIN_RETRIEVAL_MODEL
-        ? { GOAT_BRAIN_RETRIEVAL_MODEL: process.env.GOAT_BRAIN_RETRIEVAL_MODEL }
-        : {}),
       ...(process.env.GOAT_BRAIN_EMBEDDING_MODEL
         ? { GOAT_BRAIN_EMBEDDING_MODEL: process.env.GOAT_BRAIN_EMBEDDING_MODEL }
         : {}),

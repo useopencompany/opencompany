@@ -29,6 +29,10 @@ const queryBrainInputSchema = {
   limit: z.optional(z.number().check(z.int(), z.minimum(1), z.maximum(50))),
 };
 
+const getDocumentInputSchema = {
+  ids: z.array(z.string().check(z.minLength(1))).check(z.minLength(1), z.maxLength(20)),
+};
+
 type BrainAccessResult =
   | {
       ok: true;
@@ -103,6 +107,42 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
                     text: output.ok
                       ? body
                       : `Query failed: ${
+                          output.error || output.stderr || output.stdout || "Unknown error."
+                        }`,
+                  },
+                ],
+                isError: !output.ok,
+              };
+            },
+          );
+          server.registerTool(
+            "get_document",
+            {
+              title: "Get brain document",
+              description: `Fetch full documents from the "${access.brain.name}" knowledge brain by id (aliases resolve too): compiled truth, recent timeline, and linked pages. Use after query_brain to read a hit in full or follow its links.`,
+              inputSchema: getDocumentInputSchema,
+            },
+            async ({ ids }) => {
+              const output = await runGoatBrainToolForUser({
+                brainRef,
+                userWorkosId,
+                toolInput: {
+                  command: "get",
+                  flags: { id: ids, json: true },
+                },
+                gatewayApiKey,
+                sourceRef: `mcp:${brainRef}`,
+                signal: authenticatedRequest.signal,
+              });
+              const body = output.parsed ? JSON.stringify(output.parsed, null, 2) : output.stdout;
+
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: output.ok
+                      ? body
+                      : `Get failed: ${
                           output.error || output.stderr || output.stdout || "Unknown error."
                         }`,
                   },

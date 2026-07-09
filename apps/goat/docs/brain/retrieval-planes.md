@@ -1,161 +1,247 @@
-# Goat Brain Retrieval Planes (design)
+# Goat Brain Retrieval (v2 design)
 
-Step 4 of issue #597. This is a design doc, not an implementation plan with dates —
-implementation gets its own issues. It defines how anything that is not a brain writer reads the
-brain: a fast **deterministic read plane** and an **agentic synthesis plane** (the librarian) on
-top, and how external consumers address a brain at all.
+Rework of the read plane. The consumer of retrieval is an **agent in a tool loop** — every design
+choice below follows from that. Agents reformulate queries themselves, read snippets before
+acting, and chain point reads; the retrieval layer's job is to be *fast, cheap, and predictable*,
+not clever. This replaces the plane-1 mechanics of the previous version of this doc; plane 2 (the
+librarian) and per-brain addressing are unchanged and summarized at the end.
 
-Design principle recap (from #597): the brain is operated by agents — writes and curation are
-always agent-mediated — but reads get two tiers. Everything here operates strictly within a
-single brain (`brain_ref`); cross-brain routing is out of scope.
+## Why rework: cost anatomy of one read today
 
-## What exists today
+Every consumer (chat `goat_brain` tool, MCP `query_brain`, ingestion agent) reads the brain the
+same way (`apps/goat/lib/brain-cli.ts`, `apps/runner/src/goat-brain-agent-ingest.ts`):
 
-The retrieval machinery is already good; the *surface* is the problem.
+| Step | Cost | Notes |
+| --- | --- | --- |
+| Materialize brain to temp dir | read ALL `goat.brain_documents` rows, write 2 files per doc + CLI bundle | per call |
+| Spawn Node CLI | ~100–300ms | per call |
+| `buildCorpus`: re-parse + re-validate every file | O(N) | per call |
+| Build MiniSearch index in-memory | O(N) | per call |
+| Query expansion (chat LLM call, 3 rewrites) | ~0.5–1.5s | per query |
+| Embed **entire corpus** | O(N) tokens, ~1–5s | cache lives in the temp dir → always cold in the web path |
+| LLM rerank of top 20 (chat call, JSON id array) | ~0.5–2s | fragile parse, discards scores |
+| Delete temp dir | — | embedding cache thrown away |
 
-- `queryGoatBrain` (`packages/goat-brain/src/retrieval/`) is a hybrid ranker: BM25 lexical
-  search, optional query expansion + embeddings + rerank through the Vercel AI Gateway
-  (`gateway.ts`), reciprocal-rank fusion, graph expansion along relations/wiki-links (`hops`,
-  `graphDirection`, decay 0.5), title/alias name boost, and a recency blend. Filters: `folder`,
-  `since`, `includeInvalid`, `includeMerged`.
-- But every consumer reaches it the same expensive way: materialize the **entire brain** from
-  `goat.brain_documents` into a temp dir (`materializeGoatBrainFilesToRoot`), spawn the bundled
-  CLI against that root, then throw the root away. Chat does this per `goat_brain` tool call
-  (`apps/goat/lib/brain-cli.ts`), the ingestion agent does it per job
-  (`apps/runner/src/goat-brain-agent-ingest.ts`).
-- The embedding cache lives at `.brain/embedding-cache.json` **inside the root**, so it is
-  discarded with the temp dir: every model-assisted query re-embeds the corpus from scratch.
-- The chat `goat_brain` tool exposes the full CLI, including mutations. That predates principle
-  3 (external agents never mutate the brain directly); the read planes below are how chat and
-  every other consumer eventually stop needing raw CLI access for reads, and mutations narrow to
-  brain agents.
+A single `query` costs ~3–9s and O(corpus) embedding tokens. `get` — reading **one page** —
+also materializes the whole brain and spawns the CLI (~0.5–1.5s to read one row). Meanwhile the
+DB already stores everything retrieval needs, precomputed at write time: parsed columns on
+`goat.brain_documents` (title, body, timeline, relations, aliases, kind, type, status,
+contentHash), `goat.brain_edges` (indexed by brain_ref × from/to/relation), and
+`goat.brain_timeline_entries`. Retrieval just never looks at them.
 
-## Plane 1 — deterministic read plane
+## Principles
 
-A fast search/read API any agent can call, with **no LLM generation in the loop**. Two layers:
-an in-process module (the only place retrieval logic lives) and thin transport wrappers.
+1. **The database is the index.** Anything derivable from a document is computed once at write
+   time (the projection in `packages/db/src/goat-brain-files.ts` already works this way) and
+   queried via indexed SQL. Nothing is re-derived per query.
+2. **LLM calls only where they pay.** The agent consumer already does query reformulation (it
+   retries with better phrasings) and reranking (it reads snippets and picks what to `get`).
+   Query expansion and chat-model reranking are deleted, not moved.
+3. **One retrieval implementation.** A single in-process read module serves chat, MCP, the
+   ingestion agent's reads, and any future HTTP surface. The CLI keeps its filesystem retrieval
+   only for genuinely local roots (dev, offline); it stops being the transport for DB-backed
+   reads.
+4. **Reads never touch the write machinery.** No materialize, no sync-back, no conflict
+   detection, no process spawn.
 
-### Core module
+## The read module
 
-New `packages/db/src/goat-brain-read.ts` (needs DB access, so it sits next to
-`goat-brain-files.ts`, importing ranking from `@opencompany/goat-brain`):
+`packages/db/src/goat-brain-read.ts` (needs DB; imports fusion/blend helpers from
+`@opencompany/goat-brain`). Callers do authz first (`requireGoatBrainAccess`), then:
 
 ```ts
 type GoatBrainReadContext = {
-  brainRef: string;           // already access-checked by the caller's authz layer
-  gatewayApiKey?: string;     // absent → strictly lexical ranking
+  brainRef: string;
+  gatewayApiKey?: string;   // absent → lexical-only ranking
+  db?: DbClient;            // neon-http (web) or pooled (runner)
 };
 
-// Search: queryGoatBrain semantics, minus filesystem.
-function searchGoatBrain(ctx: GoatBrainReadContext, options: GoatBrainQueryOptions):
-  Promise<GoatBrainQueryHit[]>;
+function searchGoatBrain(ctx, opts: {
+  text: string;
+  folder?: string;          // prefix match, as today
+  type?: string;            // entity type filter (person, company, ...) — new
+  kind?: "page" | "evidence";
+  since?: string;
+  limit?: number;           // default 10
+  hops?: number;            // default 0; explicit graph expansion
+  includeMerged?: boolean;
+  includeArchived?: boolean;
+  lexicalOnly?: boolean;    // reproducibility switch, as today
+}): Promise<GoatBrainSearchHit[]>;
 
-// Point reads. Parsed document, not raw markdown, so callers never re-implement parsing.
-function getGoatBrainDocument(ctx, id: string):
-  Promise<{ doc: GoatBrainDocument; folder: string; kind: GoatBrainKind } | null>;
+// Point reads. Batch-first: after a search an agent typically wants 2–5 pages.
+function getGoatBrainDocuments(ctx, ids: string[]): Promise<GoatBrainDocumentRead[]>;
 function getGoatBrainTimeline(ctx, id: string, opts?: { since?: string; limit?: number }):
   Promise<GoatBrainTimelineEntry[]>;
 function listGoatBrainDocuments(ctx, opts?: { folder?: string; type?: string; limit?: number }):
   Promise<GoatBrainDocumentSummary[]>;
 ```
 
-Properties:
+### Hit shape (built for the agent's next move)
 
-- **Read-only by construction.** No sync-back, no conflict detection, no mutation queue. The
-  corpus is built directly from `goat.brain_documents` rows for the `brain_ref` (adapting
-  `buildCorpus` to take records instead of a filesystem root); no temp dir, no CLI spawn, no
-  bundle. This is the latency win that makes the plane callable from a chat turn.
-- **Determinism is a mode, not a promise.** `lexicalOnly` (no gateway key, or explicitly set) is
-  fully deterministic. With a key, expansion/embeddings/rerank are allowed — they are ranking
-  assists, never generation, and failures already degrade silently to lexical. Callers that need
-  reproducibility pass `lexicalOnly: true`.
-- **Durable embedding cache.** Move the cache from `.brain/embedding-cache.json` to a table
-  (`goat.brain_embeddings`: `brain_ref`, `content_hash`, `model`, `vector`), keyed exactly like
-  today's in-root cache (`corpus.ts` already keys by namespace + content hash). Write-through on
-  query. The CLI keeps its file cache for local roots; the read plane never touches it.
-- **Snippet discipline.** Hits return compiled-truth snippets capped as today (~1200 chars) with
-  the existing "run `goat-brain get <id>`" truncation marker replaced by a plane-appropriate one
-  ("fetch the document"). Full documents only via `getGoatBrainDocument`.
+```ts
+type GoatBrainSearchHit = {
+  id: string; title: string; type: string; kind: string;
+  folder: string; status: string; updatedAt: string;
+  score: number;
+  signals: Array<"lexical" | "name" | "vector" | "graph">;
+  snippet: string;               // compiled truth, capped ~1200 chars
+  neighbors: Array<{ id: string; title: string; relationType: string; direction: "out" | "in" }>;
+  via?: GoatBrainGraphHop[];     // only for hop-expanded hits
+};
+```
 
-### Transports
+`neighbors` (top ~5 edges per hit, titles joined in) is the key addition: it gives the agent one
+hop of *metadata* on every hit so it can decide what to `get` next, which covers most of what
+score-polluting graph expansion was doing.
 
-Thin wrappers that do authz, then call the module:
+## Index plane (precomputed at write time)
 
-1. **In-process (Goat web + runner):** call the module directly after
-   `requireGoatBrainAccess(userWorkosId, brainRef)` (`packages/db/src/goat-workspaces.ts`).
-   Chat's `goat_brain` read commands and the runner's read paths migrate here over time.
-2. **HTTP (`apps/goat/app/api/brains/[brainRef]/...`):** `POST search`, `GET documents/:id`,
-   `GET documents/:id/timeline`. Session-cookie authed for the Goat UI; token-authed for
-   machines (below). This is the surface other OpenCompany products call.
-3. **MCP:** the per-brain MCP connector (separate branch; OAuth via AuthKit) exposes
-   `query_brain` / `get_document` tools that are these same module calls. The MCP server is a
-   transport, not a second implementation.
+Migration `0103` (hand-authored SQL + journal entry, per the 0100 precedent):
 
-## Plane 2 — the librarian (agentic synthesis)
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;   -- pg_trgm already enabled (0042)
 
-For questions a ranked hit list can't answer: "what's the state of our Acme relationship and
-who owns it?" requires walking links, merging timelines across pages, and composing an answer.
+ALTER TABLE goat.brain_documents
+  ADD COLUMN search_text text NOT NULL DEFAULT '',
+  ADD COLUMN name_text  text NOT NULL DEFAULT '',
+  ADD COLUMN search_tsv tsvector GENERATED ALWAYS AS
+    (to_tsvector('english', coalesce(search_text, '') || ' ' ||
+                 coalesce(asset_extracted_text, ''))) STORED;  -- asset text (0102) folded in
+CREATE INDEX ... ON goat.brain_documents USING gin (search_tsv);
+CREATE INDEX ... ON goat.brain_documents USING gin (name_text gin_trgm_ops);
 
-- **Same harness as the ingestion agent.** Reuse the `runIngestAgentLoop` pattern from
-  `apps/runner/src/goat-brain-agent-ingest.ts` — an AI SDK tool loop over a single `goat_brain`
-  tool — but with the tool allow-list cut to the read-only set (`query`, `get`, `timeline`,
-  `list`, `folder`, `help`) and, once plane 1 lands, backed by the read module instead of a
-  materialized CLI root. Step ceiling ~16 (reads, not writes), timeout well under the ingestion
-  agent's 10 minutes.
-- **Opinionated system prompt:** brain-first (answer only from what `query`/`get` return; say
-  "the brain doesn't know" rather than guess); walk `via` graph paths and merge timelines
-  chronologically when the question spans entities; keep the pointer discipline — every claim in
-  the answer carries a typed inline citation (`[[page:...]]`, `[[evidence:...]]`,
-  `[[source:provider:id]]`, per `GOAT_BRAIN_POINTER_COPY_RULE`); flag stale compiled truth
-  (old `updatedAt`) instead of presenting it as current.
-- **Output contract:** markdown answer + structured metadata `{ pagesRead: string[],
-  citations: InlineLink[], confidence: "grounded" | "partial" | "not_in_brain" }`. Citations are
-  machine-checkable against the brain — an eval harness can verify every cited id exists, which
-  is the regression test for librarian quality. When source resolvers land
-  (`packages/goat-brain/src/source-resolvers.ts`), `[[source:...]]` citations hydrate to live
-  links at render time.
-- **Two invocation modes:**
-  - *Bounded sync* — an `ask_brain` tool for Goat chat and the MCP connector. The chat agent
-    delegates synthesis questions instead of running many raw `goat_brain` calls itself.
-  - *Durable* — a `brain_agent_answer` job kind on the existing `brain_ingest_jobs` queue
-    (leases, heartbeat, backoff for free) for deep synthesis invoked from background tasks.
-- The librarian never mutates. If it discovers gaps worth fixing (broken links, missing pages),
-  it reports them in metadata; curation is the nightly cycle's job, not the librarian's.
+CREATE TABLE goat.brain_document_embeddings (
+  document_id  text PRIMARY KEY REFERENCES goat.brain_documents(id) ON DELETE CASCADE,
+  brain_ref    text NOT NULL REFERENCES goat.brains(id) ON DELETE CASCADE,
+  content_hash text NOT NULL,       -- hash of the embedded text; staleness check
+  model        text NOT NULL,       -- mismatch ⇒ treated as missing (model migration for free)
+  embedding    vector(1536) NOT NULL,
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ... ON goat.brain_document_embeddings (brain_ref);
+```
 
-## Addressing the brain (per-brain surface)
+- `search_text` = title + aliases + compiled truth + timeline summaries + relation text, composed
+  in `documentValues()` (`goat-brain-files.ts`) — the projection already computes every part.
+  The migration backfills it from existing columns. `name_text` = title + aliases, for trigram
+  entity lookup. `asset_extracted_text` (binary assets, 0102) joins the tsvector directly rather
+  than via `search_text` because extraction updates bypass `documentValues()`.
+- One weight class, one tsvector. Title emphasis comes from the name-boost stage (below), not
+  from `setweight` gymnastics over jsonb columns.
+- **One embedding per document**, over title + aliases + compiled truth (capped ~8k chars). No
+  chunking: compiled truth is curated and short by design; if a page is too long to embed whole,
+  that's a curation bug, not a retrieval feature gap. No ANN index initially — per-brain corpora
+  are ≤ low thousands of rows, and the `brain_ref` btree filter runs first; add HNSW only if a
+  brain crosses ~50k docs.
+- Validity is enforced at write (`deriveGoatBrainFileProjection` throws), so the read plane drops
+  `includeInvalid` and per-query re-validation entirely.
 
-How external agents — Goat chat, OpenCompany workspace agents, cron jobs, other products — name
-and reach a brain, per principle 7:
+### Embedding lifecycle: query-time write-through
 
-- **`brain_ref` is the only address.** Every read-plane call, librarian invocation, and
-  ingestion job carries exactly one. Nothing accepts a user id and "figures out" a brain
-  server-side except at the edge: v1 routing (webhooks, chat default) resolves
-  `getDefaultGoatBrainForUser` **at enqueue/callsite**, and everything downstream is pinned —
-  the same shape step 2 already established for ingestion jobs.
-- **Three authz paths, one check.** (a) Human sessions: WorkOS session →
-  `requireGoatBrainAccess`. (b) First-party machines (runner jobs): the job row's `brain_ref`
-  was access-checked at enqueue; the runner trusts it. (c) External agents: per-brain OAuth
-  tokens from the MCP connector (AuthKit), where the token's grant *is* the brain — a token for
-  brain A cannot form a request about brain B. All three converge on the same access predicate
-  over `goat.brains` / workspace membership.
-- **Capability tiers per consumer:** external consumers get read plane + librarian only. Write
-  access is not part of this surface at all — external content enters through ingestion jobs
-  (which run the brain's own agent), never through a document-write API. This is what "the brain
-  is operated by agents" means at the boundary.
-- **No cross-brain calls.** An agent holding access to two brains makes two scoped calls and
-  does its own joining. The brain never joins across `brain_ref`s on a caller's behalf.
+Same cache semantics as today, but durable. At query time (semantic mode only): join documents ↔
+embeddings; rows whose `content_hash`/`model` don't match current are "missing"; embed missing
+docs in one batched gateway call (cap ~64/query; log and degrade to lexical for the remainder)
+and upsert. Steady state after the first query is warm forever — a rewrite re-embeds exactly the
+changed page. One mechanism, self-healing, no write-path coupling; opportunistic write-time
+warming can be added later behind the same table without API change.
+
+## Query pipeline
+
+```
+parse filters ─► [ FTS candidates ]  [ trigram name candidates ]  [ vector candidates ]   (parallel)
+                        └──────────────────┬──────────────────────────┘
+                                     RRF fusion (k=60)
+                                     name boost (exact/substring on title+aliases)
+                                     optional hop expansion over brain_edges (decay 0.5)
+                                     freshness blend (0.85 relevance / 0.15, 90d half-life)
+                                     top-limit ─► join neighbors ─► hits
+```
+
+1. **Lexical** — one SQL: `ts_rank_cd(search_tsv, websearch_to_tsquery('english', $q))` with all
+   filters as WHERE clauses (folder prefix, type, kind, since, status), `LIMIT 50`.
+2. **Name** — one SQL: `similarity(name_text, $q)` where `name_text % $q`, `LIMIT 20`.
+   Typo-tolerant entity lookup ("acme corp" → *Acme Corporation*), the single most common agent
+   query shape. Same pattern as `recall.ts`.
+3. **Vector** — only when a gateway key is present and not `lexicalOnly`: embed the query (one
+   short gateway call), backfill missing doc embeddings (see above), then
+   `embedding <=> $vec LIMIT 50` filtered by `brain_ref` + the same filters via join.
+4. **Fusion & blend** — reciprocal-rank fusion of the ranked lists, then the existing name boost
+   and recency blend, unchanged (`fuse.ts`, `blend.ts` logic moves in; the constants carry over).
+5. **Hops (opt-in, default 0)** — one SQL pulls the brain's edges for the seed set from
+   `goat.brain_edges` (both directions; `graphDirection` is dropped — no consumer needed it),
+   walk in-memory with decay 0.5 from the top-20 seeds exactly as today, `via` paths preserved.
+6. **Neighbors** — one SQL fetches edges + titles for the final hit ids.
+
+Per search: 3–4 DB roundtrips + at most 2 gateway calls (query embed, occasional backfill batch).
+No LLM chat calls anywhere in the pipeline.
+
+**Deleted, deliberately:**
+- *Query expansion* (chat call → 3 rewrites). The agent is the query expander; it sees results
+  and reformulates with actual context, which beats blind paraphrase.
+- *LLM rerank* (chat call → JSON id array over top 20). The agent reranks by reading snippets.
+  The provider seam stays (`RetrievalProviders`-shaped), so if evals later show a precision gap
+  we slot in a dedicated reranker model — not a chat model parsing JSON.
+- *`graphDirection`*, *`includeInvalid`* options.
+
+## Point reads
+
+`getGoatBrainDocuments(ctx, ids)` — one SQL over `brain_ref + brainId IN (...)`, with:
+
+- **Alias + merge resolution.** An id that doesn't match `brainId` resolves via `aliases`
+  containment, then via `mergedInto` (returns the merge target with `resolvedFrom` noted). Agents
+  address pages by the names they saw in prose; today's CLI `get` only matches exact ids.
+- **Parsed sections, not raw markdown**: frontmatter, compiled truth, timeline (capped at the
+  most recent ~20 entries; full history via `getGoatBrainTimeline`, which reads the already-derived
+  `goat.brain_timeline_entries` with `since`/`limit` in SQL), and a `links` block — all edges in
+  both directions with titles. `get` becomes the graph-navigation primitive.
+
+A point read is one indexed SQL roundtrip (~30–80ms) instead of full-brain materialize + spawn.
+
+## Consumer migration
+
+| Consumer | Today | Target |
+| --- | --- | --- |
+| Chat `goat_brain` reads (`query`, `get`, `timeline`, `list`, `folder`) | materialize + CLI spawn | read module in-process; tool run tracing stays at the transport layer (`goatBrainToolRuns`) |
+| Chat `goat_brain` mutations | materialize + CLI + sync-back | unchanged (write mediation is a separate track) |
+| MCP `query_brain` (`app/api/mcp/[brainId]`) | CLI spawn per call | read module directly; add a `get_document` tool |
+| Ingestion agent reads (runner tool loop) | CLI against per-job root | **stays on the CLI, deliberately**: the loop writes to its materialized root mid-job and syncs to the DB only at job end, so DB reads would miss the agent's own uncommitted writes (create page → get page would 404). It still gains from the expansion/rerank deletion; priming its embedding cache from `brain_document_embeddings` at materialize time is a possible follow-up |
+| CLI on a local filesystem root (dev/offline) | `queryGoatBrain(root, ...)` | unchanged — `corpus.ts`/`bm25.ts` and the file embedding cache stay for this mode only, minus expansion/rerank (delete from `providers.ts` too) |
+| `doctor` | CLI | unchanged (integrity checks legitimately want the full corpus) |
+
+## Budget (typical brain, warm embeddings)
+
+| Operation | Today | v2 |
+| --- | --- | --- |
+| `query` (semantic) | ~3–9s, O(corpus) embed tokens + 2 chat calls | ~300–600ms, 1 query-embed call |
+| `query` (lexical) | ~1–2.5s | ~150–300ms |
+| `get` one page | ~0.5–1.5s | ~30–80ms |
+| Embedding spend | re-embed corpus per web query | once per content change, ever |
+
+A fixed, deterministic pipeline also makes retrieval evaluable: a small golden-query set per test
+brain (query → expected ids in top-k) becomes a cheap regression test, which was meaningless when
+two chat-model calls sat mid-pipeline.
+
+## Unchanged from v1 of this doc
+
+- **Plane 2 (librarian):** read-only agent loop for synthesis questions, same harness as the
+  ingestion agent, citations machine-checked against the brain. It now sits on the read module
+  like every other consumer. Deferred until plane 1 lands.
+- **Addressing & authz:** `brain_ref` is the only address; human sessions via
+  `requireGoatBrainAccess`, runner jobs pinned at enqueue, external agents via per-brain MCP
+  OAuth. External consumers get reads only; writes enter through ingestion jobs.
+- **No cross-brain calls.**
 
 ## Implementation slices (each its own issue)
 
-1. Read module + corpus-from-rows + durable embedding cache table; migrate chat `goat_brain`
-   read commands onto it (mutations keep the CLI path until brain-agent mediation lands).
-2. HTTP read surface under `apps/goat/app/api/brains/[brainRef]/`; wire the MCP connector's
-   tools to it.
-3. Librarian v1: read-only tool loop in the runner + `ask_brain` in chat; citation-validity
-   eval.
-4. `brain_agent_answer` durable job kind.
+1. Migration 0103 (extension, columns, indexes, embeddings table, `search_text` backfill) +
+   projection writes `search_text`/`name_text`.
+2. Read module: search pipeline (FTS + trgm + vector + fusion/blend/hops/neighbors) + point
+   reads; port `retrieval.test.ts` invariants against a test DB.
+3. Migrate chat read commands + MCP tools onto it; delete expansion/rerank from `providers.ts`.
+4. Golden-query retrieval eval.
 
-## Non-goals here
+## Non-goals
 
-Nightly curation, cross-brain routing, source-resolver implementation, embedding model
-migration, and any change to how brain *writes* happen (that contract is steps 2–3).
+Write-path changes, nightly curation, cross-brain routing, chunked/section embeddings, ANN
+indexes, source-resolver hydration, and the librarian itself.
