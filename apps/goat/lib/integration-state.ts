@@ -34,6 +34,16 @@ export type GoatJamieProviderState = {
   webhookUrl: string | null;
 };
 
+export type GoatSlackProviderState = {
+  provider: "slack";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  teamName: string | null;
+  statusReason: string | null;
+};
+
 export type GoatCodexProviderState = {
   provider: "codex";
   connected: boolean;
@@ -48,15 +58,19 @@ export type GoatIntegrationState = {
   linear: GoatLinearProviderState;
   github: GoatGitHubProviderState;
   jamie: GoatJamieProviderState;
+  slack: GoatSlackProviderState;
   codex: GoatCodexProviderState;
 };
 
 type IntegrationStateRow = {
+  id?: string;
   provider: GoatIntegrationProvider;
   accountEmail?: string | null;
   account_email?: string | null;
   accountName?: string | null;
   account_name?: string | null;
+  connectionLabel?: string | null;
+  connection_label?: string | null;
   statusReason?: string | null;
   status_reason?: string | null;
   status: GoatIntegrationStatus;
@@ -75,6 +89,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     linear: linearProviderState(byProvider.get("linear")),
     github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
+    slack: slackProviderState(byProvider.get("slack")),
     codex: {
       provider: "codex",
       connected: false,
@@ -146,6 +161,30 @@ function githubProviderState(row: IntegrationStateRow | undefined): GoatGitHubPr
     connected: row.status === "connected",
     status: row.status,
     accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function slackProviderState(row: IntegrationStateRow | undefined): GoatSlackProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "slack",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      teamName: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "slack",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    teamName: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }

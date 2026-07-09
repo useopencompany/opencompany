@@ -134,6 +134,111 @@ export async function connectGoatGoogleIntegration(input: {
   return { integrationId: integration.id };
 }
 
+export type GoatSlackOAuthCredentialPayload = {
+  access_token: string;
+  authed_user_id: string;
+  team_id: string;
+  team_name?: string;
+  team_domain?: string;
+  scope?: string;
+};
+
+export async function connectGoatSlackIntegration(input: {
+  userWorkosId: string;
+  teamId: string;
+  teamName: string | null;
+  teamDomain: string | null;
+  authedUserId: string;
+  accountName: string | null;
+  accountEmail: string | null;
+  accessToken: string;
+  scopes: string[];
+  db?: GoatIntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = input.teamName?.trim() || "Slack";
+
+  const [integration] = await db
+    .insert(goatIntegrations)
+    .values({
+      id: newGoatIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      provider: "slack",
+      // The Slack team id is the routing key for inbound events.
+      externalId: input.teamId,
+      connectionLabel,
+      accountName: input.accountName,
+      accountEmail: input.accountEmail,
+      accountType: "slack_user",
+      status: "connected",
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+        goatIntegrations.externalId,
+      ],
+      set: {
+        connectionLabel,
+        accountName: input.accountName,
+        accountEmail: input.accountEmail,
+        accountType: "slack_user",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: goatIntegrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist Goat Slack integration.");
+  }
+
+  const payload: GoatSlackOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    authed_user_id: input.authedUserId,
+    team_id: input.teamId,
+    ...(input.teamName ? { team_name: input.teamName } : {}),
+    ...(input.teamDomain ? { team_domain: input.teamDomain } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(",") } : {}),
+  };
+
+  try {
+    await saveGoatIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "slack",
+      kind: "oauth_token",
+      payload,
+      // Slack user tokens do not expire unless token rotation is opted in.
+      expiresAt: null,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markGoatIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "slack",
+      status: "sync_failed",
+      statusReason: "Failed to persist Slack integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
 export async function saveGoatIntegrationCredential(
   input: GoatIntegrationCredentialContext & {
     payload: Record<string, unknown>;

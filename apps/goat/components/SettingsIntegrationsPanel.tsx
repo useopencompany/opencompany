@@ -1,7 +1,7 @@
 "use client";
 
+import { type LucideIcon as IconComponent, SlackIcon } from "@opencompany/ui/icons";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { LucideIcon } from "lucide-react";
 import { CalendarDays, Code2, FileText, GitBranch, ListTodo, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
@@ -19,6 +19,7 @@ import {
   type GoatIntegrationState,
   type GoatJamieProviderState,
   type GoatLinearProviderState,
+  type GoatSlackProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
 import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-collections";
@@ -65,6 +66,7 @@ function IntegrationRows({ integrations }: { integrations: GoatIntegrationState 
       <IntegrationRow icon={ListTodo} label="Linear" integration={integrations.linear} />
       <IntegrationRow icon={GitBranch} label="GitHub" integration={integrations.github} />
       <IntegrationRow icon={FileText} label="Jamie" integration={integrations.jamie} />
+      <IntegrationRow icon={SlackIcon} label="Slack" integration={integrations.slack} />
       <CodexIntegrationRow integration={integrations.codex} />
     </>
   );
@@ -75,13 +77,15 @@ function IntegrationRow({
   label,
   integration,
 }: {
-  icon: LucideIcon;
+  // Lucide icons and @opencompany/ui brand icons share this prop surface.
+  icon: IconComponent;
   label: string;
   integration:
     | GoatGoogleProviderState
     | GoatLinearProviderState
     | GoatGitHubProviderState
-    | GoatJamieProviderState;
+    | GoatJamieProviderState
+    | GoatSlackProviderState;
 }) {
   const status = integrationStatus(integration);
   const connectHref = integrationConnectHref(integration.provider);
@@ -92,7 +96,9 @@ function IntegrationRow({
         ? integration.accountName
         : integration.provider === "jamie"
           ? integration.accountName
-          : (integration.accountEmail ?? integration.accountName);
+          : integration.provider === "slack"
+            ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
+            : (integration.accountEmail ?? integration.accountName);
 
   return (
     <div className="flex items-center gap-3 rounded-lg px-2 py-2">
@@ -276,7 +282,8 @@ function integrationStatus(
     | GoatGoogleProviderState
     | GoatLinearProviderState
     | GoatGitHubProviderState
-    | GoatJamieProviderState,
+    | GoatJamieProviderState
+    | GoatSlackProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
   if (integration.provider === "jamie" && integration.status === "needs_reauth")
@@ -288,7 +295,7 @@ function integrationStatus(
 }
 
 function integrationConnectHref(
-  provider: GoatGoogleProviderState["provider"] | "linear" | "github" | "jamie",
+  provider: GoatGoogleProviderState["provider"] | "linear" | "github" | "jamie" | "slack",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings";
   if (provider === "google_calendar") {
@@ -296,6 +303,7 @@ function integrationConnectHref(
   }
   if (provider === "github") return "/api/integrations/github/start?returnTo=/settings";
   if (provider === "jamie") return "/settings/jamie";
+  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings";
   return "/api/integrations/linear/start?returnTo=/settings";
 }
 

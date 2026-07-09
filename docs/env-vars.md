@@ -176,6 +176,9 @@ Set these in the separate Vercel project for Goat:
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes | Goat domain origin, for example `https://goat.example.com`. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Goat callback URL, for example `https://goat.example.com/auth/callback`. |
 | `GOAT_AUTHKIT_DOMAIN` | MCP only | AuthKit issuer origin used to verify Goat MCP connector bearer tokens, for example `https://example.authkit.app`. The WorkOS environment also needs Client ID Metadata Documents and Dynamic Client Registration enabled. |
+| `GOAT_SLACK_CLIENT_ID` / `GOAT_SLACK_CLIENT_SECRET` | Slack only | Goat Slack ingestion app OAuth credentials (user-token app, `user_scope` only — no bot token). Distinct from `SLACK_MCP_*` and `SLACK_SUPPORT_*`. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`. |
+| `GOAT_SLACK_SIGNING_SECRET` | Slack only | Slack app signing secret used to verify Events API deliveries at `/api/webhooks/slack/events`. |
+| `GOAT_SLACK_STATE_SECRET` | Slack only | Dedicated secret used to sign Goat Slack OAuth setup state. Generate with `openssl rand -base64 32`. |
 | `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` | Yes | Server-to-server runner URL. `RUNNER_INTERNAL_URL` wins when set. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Bearer token for the runner wake route. Must match Render. |
 | `ELECTRIC_URL` | Yes | Electric shape service base URL. The Goat proxy exposes only `goat.tasks` scoped to the signed-in WorkOS user. |
@@ -190,6 +193,23 @@ Goat main chat uses `EXA_API_KEY` for optional lightweight public-web search. Th
 `EXA_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `E2B_API_KEY`,
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`, and Google OAuth client credentials for Goat tasks that use
 Gmail or Google Calendar. Goat does not introduce a separate chat model key.
+
+Goat Slack ingestion app setup checklist (api.slack.com/apps → From scratch):
+
+1. OAuth & Permissions → **User Token Scopes** (no bot scopes): `channels:history`,
+   `groups:history`, `im:history`, `mpim:history`, `channels:read`, `groups:read`, `im:read`,
+   `mpim:read`, `users:read`, `team:read`. Do not opt into token rotation.
+2. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`.
+3. Event Subscriptions → Request URL `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/slack/events`,
+   then under **Subscribe to events on behalf of users** add `message.channels`,
+   `message.groups`, `message.im`, `message.mpim`. Slack sends `url_verification` when the URL
+   is saved, so the deployment must be live first.
+4. Copy Client ID/Secret/Signing Secret into `GOAT_SLACK_*`; the state secret is generated, not
+   from Slack. The runner flushes buffered messages and needs no Slack env of its own — it reads
+   the per-user token via `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`.
+5. Local dev: the events URL must be public — use a second "dev" Slack app whose Request URL
+   points at a tunnel (for example `cloudflared tunnel --url http://localhost:3443`) in front of
+   the local Goat app.
 
 ## Slack support channel (Slack Connect)
 

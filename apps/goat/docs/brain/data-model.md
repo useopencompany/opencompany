@@ -18,6 +18,10 @@ returns `evidence` iff the folder is `evidence` or starts with `evidence/`
 (`GOAT_BRAIN_EVIDENCE_ZONE = "evidence"`). The database enforces the same invariant with a check
 constraint on `goat.brain_documents`.
 
+Ideas and thoughts are not kinds. A saved idea is still a mutable `page`; curation decides whether
+it becomes a `concept`, updates a `project`, lands under `decisions/`, moves to `thoughts/` as a
+raw `note`, stays in `inbox/` as an uncurated draft, or merges into an existing subject page.
+
 ## Entity types (the 8-type contract)
 
 `GOAT_BRAIN_ENTITY_TYPES` — a **closed set**. Types are tags for what a document *is*; folders are
@@ -53,13 +57,13 @@ the closed set above is what validators actually accept.
 
 ## Default folders
 
-`DEFAULT_GOAT_BRAIN_FOLDERS` — the 9 system folders seeded per brain (rows in
-`goat.brain_folders` with `source: "system"`); users and agents can create free-form custom
-folders beyond these:
+`DEFAULT_GOAT_BRAIN_FOLDERS` — the 10 folders seeded per brain. `inbox`, `people`, `companies`,
+and `evidence` are required system folders; the rest are adjustable custom defaults. Users and
+agents can create free-form custom folders beyond these:
 
 ```
-inbox/  people/  companies/  projects/  meetings/  concepts/
-analysis/  sources/  evidence/
+inbox/  thoughts/  projects/  meetings/  research/  decisions/
+concepts/  people/  companies/  evidence/
 ```
 
 Folder paths match `GOAT_BRAIN_FOLDER_PATTERN`: lowercase `a-z0-9-` segments separated by `/`,

@@ -1,14 +1,18 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { Brain, Check, Copy } from "lucide-react";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { Brain, Check, ChevronDown, ChevronRight, Copy, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import type { GoatBrainSummaryView, GoatWorkspaceView } from "@/components/GoatAppDataProvider";
 import { VisibilityOption } from "@/components/GoatBrainSwitcher";
 import { useHydrated } from "@/components/useHydrated";
 import {
   type GoatBrainSourcesDetails,
+  type GoatBrainSourceView,
+  type GoatSlackConversationListResult,
   getGoatBrainSourcesAction,
+  listGoatSlackConversationsAction,
+  setGoatBrainSlackSourceAction,
   setGoatBrainSourceEnabledAction,
 } from "@/lib/brain-source-actions";
 import {
@@ -290,7 +294,13 @@ function SourceProviderCard({
   const source = details?.sources.find((entry) => entry.provider === provider.id) ?? null;
 
   const jamie = provider.id === "jamie" ? details?.jamie : undefined;
-  const connected = provider.id === "jamie" ? Boolean(jamie?.integration.connected) : false;
+  const slack = provider.id === "slack" ? details?.slack : undefined;
+  const connected =
+    provider.id === "jamie"
+      ? Boolean(jamie?.integration.connected)
+      : provider.id === "slack"
+        ? Boolean(slack?.integration.connected)
+        : false;
   // Before any per-brain rows exist, Jamie deliveries follow legacy routing to
   // the user's default brain — surface that as an implicit "on" there.
   const legacyEnabled = Boolean(
@@ -301,7 +311,8 @@ function SourceProviderCard({
     provider.available && (source ? source.isOwnIntegration : connected) && !isPending;
 
   const toggle = () => {
-    const integrationId = source?.integrationId ?? jamie?.integration.integrationId;
+    const integrationId =
+      source?.integrationId ?? jamie?.integration.integrationId ?? slack?.integration.integrationId;
     if (!integrationId) return;
     startTransition(async () => {
       const result = await setGoatBrainSourceEnabledAction({
@@ -367,8 +378,267 @@ function SourceProviderCard({
           Delivering here as your default brain. Toggling any brain makes routing explicit.
         </p>
       ) : null}
+      {provider.id === "slack" &&
+      slack?.integration.integrationId &&
+      (connected || source) &&
+      (source ? source.isOwnIntegration : true) ? (
+        <SlackChannelPicker
+          brainRef={brainRef}
+          integrationId={source?.integrationId ?? slack.integration.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
     </div>
   );
+}
+
+type SlackConfigSelection = {
+  channels: { id: string; name: string }[];
+  dms: { id: string; name: string }[];
+};
+
+function slackSelectionFromConfig(
+  config: Record<string, unknown> | undefined,
+): SlackConfigSelection {
+  const parse = (value: unknown) =>
+    Array.isArray(value)
+      ? value.flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          const record = entry as Record<string, unknown>;
+          if (typeof record.id !== "string" || !record.id) return [];
+          return [
+            { id: record.id, name: typeof record.name === "string" ? record.name : record.id },
+          ];
+        })
+      : [];
+  return { channels: parse(config?.channels), dms: parse(config?.dms) };
+}
+
+function SlackChannelPicker({
+  brainRef,
+  integrationId,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  integrationId: string;
+  source: GoatBrainSourceView | null;
+  onChanged: () => Promise<void>;
+}) {
+  const saved = useMemo(() => slackSelectionFromConfig(source?.config), [source]);
+  const [expanded, setExpanded] = useState(false);
+  const [conversations, setConversations] = useState<GoatSlackConversationListResult | null>(null);
+  const [search, setSearch] = useState("");
+  const [selection, setSelection] = useState<Map<string, { name: string; kind: "channel" | "dm" }>>(
+    () => selectionFromSaved(saved),
+  );
+  const [dmsOpen, setDmsOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (!expanded || conversations) return;
+    let cancelled = false;
+    void listGoatSlackConversationsAction(integrationId).then((result) => {
+      if (!cancelled) setConversations(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, conversations, integrationId]);
+
+  const toggleConversation = (id: string, name: string, kind: "channel" | "dm") => {
+    setDirty(true);
+    setSelection((current) => {
+      const next = new Map(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.set(id, { name, kind });
+      }
+      return next;
+    });
+  };
+
+  const save = () => {
+    startTransition(async () => {
+      const channels: { id: string; name: string }[] = [];
+      const dms: { id: string; name: string }[] = [];
+      for (const [id, entry] of selection) {
+        (entry.kind === "dm" ? dms : channels).push({ id, name: entry.name });
+      }
+      const result = await setGoatBrainSlackSourceAction({
+        brainRef,
+        integrationId,
+        enabled: source ? source.enabled : true,
+        channels,
+        dms,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setDirty(false);
+      toast.success("Slack channels updated.");
+      await onChanged();
+    });
+  };
+
+  const selectedCount = selection.size;
+  const summary =
+    selectedCount === 0
+      ? "No channels selected yet — nothing is ingested until you choose some."
+      : `${selectedCount} conversation${selectedCount === 1 ? "" : "s"} selected.`;
+
+  if (!expanded) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-t border-ink/10 pt-2">
+        <p className="text-[11.5px] leading-4 text-ink-subtle">{summary}</p>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+        >
+          Choose channels
+        </button>
+      </div>
+    );
+  }
+
+  const query = search.trim().toLowerCase();
+  const channelOptions = (conversations?.ok ? conversations.channels : []).filter(
+    (channel) => !query || channel.name.toLowerCase().includes(query),
+  );
+  const dmOptions = (conversations?.ok ? conversations.dms : []).filter(
+    (dm) => !query || dm.name.toLowerCase().includes(query),
+  );
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search
+            size={13}
+            strokeWidth={2}
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-subtle"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search channels"
+            className="w-full rounded-md border border-ink/10 bg-transparent py-1 pl-7 pr-2 text-[12.5px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          Collapse
+        </button>
+      </div>
+      {conversations === null ? (
+        <div className="px-1 py-1.5 text-[12px] text-ink-subtle">Loading conversations…</div>
+      ) : !conversations.ok ? (
+        <div className="px-1 py-1.5 text-[12px] text-warning">{conversations.error}</div>
+      ) : (
+        <>
+          <div className="flex max-h-[220px] flex-col gap-px overflow-y-auto rounded-md border border-ink/10 p-1">
+            {channelOptions.length === 0 ? (
+              <div className="px-2 py-1.5 text-[12px] text-ink-subtle">No channels found.</div>
+            ) : (
+              channelOptions.map((channel) => (
+                <label
+                  key={channel.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selection.has(channel.id)}
+                    onChange={() => toggleConversation(channel.id, channel.name, "channel")}
+                    className="accent-ink"
+                  />
+                  <span className="min-w-0 flex-1 truncate">#{channel.name}</span>
+                  {channel.isPrivate ? (
+                    <span className="shrink-0 text-[11px] text-ink-subtle">private</span>
+                  ) : null}
+                </label>
+              ))
+            )}
+          </div>
+          <div className="rounded-md border border-ink/10">
+            <button
+              type="button"
+              onClick={() => setDmsOpen((open) => !open)}
+              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[12.5px] font-medium text-ink transition-colors hover:bg-surface-hover"
+            >
+              {dmsOpen ? (
+                <ChevronDown size={13} strokeWidth={2} />
+              ) : (
+                <ChevronRight size={13} strokeWidth={2} />
+              )}
+              Direct messages
+            </button>
+            {dmsOpen ? (
+              <div className="flex flex-col gap-1 px-2 pb-2">
+                <p className="text-[11.5px] leading-4 text-ink-subtle">
+                  Messages in the DMs you select — including what other people write to you — are
+                  ingested into this brain and visible to everyone with access to it.
+                </p>
+                <div className="flex max-h-[180px] flex-col gap-px overflow-y-auto">
+                  {dmOptions.length === 0 ? (
+                    <div className="px-1 py-1 text-[12px] text-ink-subtle">No DMs found.</div>
+                  ) : (
+                    dmOptions.map((dm) => (
+                      <label
+                        key={dm.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selection.has(dm.id)}
+                          onChange={() => toggleConversation(dm.id, dm.name, "dm")}
+                          className="accent-ink"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{dm.name}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+          {conversations.partial ? (
+            <p className="text-[11.5px] leading-4 text-ink-subtle">
+              Some conversations could not be loaded from Slack — try again in a minute.
+            </p>
+          ) : null}
+        </>
+      )}
+      {dirty ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={save}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {isPending ? "Saving…" : "Save channels"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function selectionFromSaved(saved: SlackConfigSelection) {
+  const map = new Map<string, { name: string; kind: "channel" | "dm" }>();
+  for (const channel of saved.channels)
+    map.set(channel.id, { name: channel.name, kind: "channel" });
+  for (const dm of saved.dms) map.set(dm.id, { name: dm.name, kind: "dm" });
+  return map;
 }
 
 function SourceToggle({

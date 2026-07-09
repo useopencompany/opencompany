@@ -6,6 +6,7 @@ export const HARD_DEFAULT_GOAT_BRAIN_FOLDERS = [
 ] as const;
 
 export const ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS = [
+  "thoughts",
   "projects",
   "meetings",
   "research",

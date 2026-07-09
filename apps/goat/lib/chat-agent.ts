@@ -91,7 +91,6 @@ type DeleteTaskScheduleRunner = (
 
 const GOAT_BRAIN_CLI_COMMANDS = [
   "help",
-  "create",
   "list",
   "get",
   "timeline",
@@ -106,7 +105,6 @@ const GOAT_BRAIN_CLI_COMMANDS = [
   "merge",
   "move",
   "delete",
-  "folder",
   "doctor",
 ] as const satisfies readonly GoatBrainCliCommand[];
 
@@ -638,6 +636,7 @@ export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput 
   const command = normalizeGoatBrainCommand(record.command);
   if (!command) throw new Error("goat_brain command is invalid.");
   const flags = normalizeGoatBrainFlags(record.flags);
+  validateGoatBrainMainChatFlags(command, flags);
   const stdin = typeof record.stdin === "string" ? record.stdin : "";
   return {
     command,
@@ -679,6 +678,19 @@ function normalizeGoatBrainFlags(value: unknown): Record<string, GoatBrainToolFl
     }
   }
   return out;
+}
+
+function validateGoatBrainMainChatFlags(
+  command: GoatBrainCliCommand,
+  flags: Record<string, GoatBrainToolFlagValue>,
+) {
+  if (command !== "help") return;
+  const topic = typeof flags.topic === "string" ? flags.topic : flags.command;
+  if (topic === "create" || topic === "folder") {
+    throw new Error(
+      `goat_brain ${topic} is not available from main chat. Use save_to_brain for new content.`,
+    );
+  }
 }
 
 function toStartTaskToolOutput(

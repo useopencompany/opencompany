@@ -43,7 +43,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 
 | Tool | Where | Capability |
 | --- | --- | --- |
-| `goat_brain` | `apps/goat/lib/brain-cli.ts` (schema in `chat-ui.ts`) | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Mutations still run the CLI against a per-call materialized root; that surface predates the "writes are agent-mediated" rule and narrows separately. |
+| `goat_brain` | `apps/goat/lib/brain-cli.ts` (schema in `chat-ui.ts`) | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Main chat allows only recall plus explicit edits to known existing records; it does not expose `create` or `folder`. |
 | `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only: instant draft page in `inbox/` + durable curation job. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-chat-captures-agentic). |
 
 ## Runner ingestion agents
@@ -66,6 +66,6 @@ plane. External consumers never get write tools; external content enters via ing
 | Consumer | Read | Write |
 | --- | --- | --- |
 | Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
-| Goat chat `goat_brain` | ✓ (read plane) | ✓ today, narrowing to capture-only |
+| Goat chat `goat_brain` | ✓ (read plane) | Explicit edits to known existing records only; no direct entity or folder creation |
 | Goat chat `save_to_brain` | — | capture → curation job only |
 | External agents (MCP) | ✓ (read plane: `query_brain`, `get_document`) | never |

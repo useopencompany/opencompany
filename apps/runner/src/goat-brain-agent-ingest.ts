@@ -15,7 +15,10 @@ import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
+  type NormalizedSlackConversationContent,
+  type NormalizedSlackConversationSourceItem,
   type NormalizedUploadAssetSourceItem,
+  slackTsToIso,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { createLogger } from "@opencompany/observability";
@@ -47,6 +50,7 @@ const PROMPT_TRANSCRIPT_BYTES = 100_000;
 const PROMPT_SUMMARY_BYTES = 60_000;
 const PROMPT_CAPTURE_BYTES = 64_000;
 const PROMPT_ASSET_TEXT_BYTES = 100_000;
+const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 
 // The ingestion agent gets the full working surface of the CLI except the
@@ -78,9 +82,9 @@ const READ_ONLY_AGENT_CLI_COMMANDS = new Set([
   "get",
   "timeline",
   "query",
-  "folder",
   "doctor",
 ]);
+const READ_ONLY_AGENT_FOLDER_SUBCOMMANDS = new Set(["list"]);
 
 export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> & {
   // Needed only by handlers that fetch blob bytes (uploaded assets); optional
@@ -117,7 +121,8 @@ function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: st
     "How the brain works:",
     "- Every document has compiled truth (the current synthesis) and an append-only timeline of dated evidence entries.",
     "- Types (person, company, project, meeting, concept, source, analysis, note) classify what a record represents. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
-    "- Required folders are inbox, people, companies, and evidence. The core work folders projects, meetings, research, decisions, and concepts are adjustable; if a workflow needs one and it is missing, recreate it with `folder create --path <folder>` before moving pages there. evidence/ is a reserved zone for raw captures.",
+    "- Ideas and thoughts are not their own kind. A user-authored idea can be durable brain material, but it is still a page; classify it with the existing types and folders.",
+    "- Required folders are inbox, people, companies, and evidence. The core work folders thoughts, projects, meetings, research, decisions, and concepts are adjustable; if a workflow needs one and it is missing, recreate it with `folder create --path <folder>` before moving pages there. evidence/ is a reserved zone for raw captures.",
     "- Inline links are typed: [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence records, [[source:provider:id|Label]] for external source pointers.",
     "",
     "Working discipline:",
@@ -150,6 +155,69 @@ export const UPLOAD_ASSET_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPromp
     "curates one file the user uploaded into a single brain of Markdown knowledge documents. The file already exists as a document page in the brain (its bytes live outside the markdown plane); your job is to turn that page into a durable synthesis and wire it into the graph.",
   skipRule: `The user explicitly uploaded this file, so it is almost always brain-worthy. Only if its content is literally empty or unreadable AND the file name carries no meaning, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}; the page then stays as an unenriched draft.`,
 });
+
+export const SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one batch of Slack conversation messages into a single brain of Markdown knowledge documents.",
+  skipRule: `Slack is high-noise: most batches are chit-chat, scheduling logistics, or banter that carries no durable knowledge. If nothing in the batch is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, plans, facts about people/companies/projects, and substantive shared content belong in the brain.`,
+});
+
+export function buildSlackConversationAgentIngestPrompt(
+  item: NormalizedSlackConversationSourceItem,
+) {
+  const conversation = item.content.conversation;
+  const label =
+    conversation.channelType === "im"
+      ? `the DM with ${conversation.channelName}`
+      : `#${conversation.channelName}`;
+  const transcript = truncateByBytes(
+    formatSlackConversationTranscript(conversation),
+    PROMPT_SLACK_TRANSCRIPT_BYTES,
+  );
+  const truncated =
+    Buffer.byteLength(transcript, "utf8") <
+    Buffer.byteLength(formatSlackConversationTranscript(conversation), "utf8");
+  return [
+    `Ingest this batch of Slack messages from ${label} into the brain. It is one conversation window: everything posted there since the last ingested batch.`,
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Judge the whole window first: extract only durable knowledge — decisions, plans, commitments, facts about people, companies, or projects, and substantive shared content. Ignore chit-chat around it.",
+    `2. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite individual messages with --source-ref slack:message:${conversation.teamId}:${conversation.channelId}:<message ts>.`,
+    "3. Snapshot with append-evidence only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.",
+    "4. Create or update person, company, or project pages for entities central to the conversation, with backlinks per the iron law. Do not create pages for people who merely posted a message.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Window: ${slackTsToIso(conversation.windowStartTs)} to ${slackTsToIso(conversation.windowEndTs)}`,
+    conversation.teamDomain
+      ? `Message permalinks: https://${conversation.teamDomain}.slack.com/archives/${conversation.channelId}/p<message ts without the dot>`
+      : null,
+    truncated ? "The transcript below was truncated to fit the prompt size limit." : null,
+    "",
+    `## Conversation\n- Channel: ${label}\n- Type: ${conversation.channelType}\n- Messages: ${conversation.messages.length}`,
+    `## Transcript\n${transcript}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function formatSlackConversationTranscript(
+  conversation: NormalizedSlackConversationContent["conversation"],
+) {
+  return conversation.messages
+    .map((message) => {
+      const time = slackTsToIso(message.ts).slice(0, 16).replace("T", " ");
+      const author = message.userName ?? message.userId;
+      const isThreadReply = Boolean(message.threadTs && message.threadTs !== message.ts);
+      const prefix = isThreadReply ? "  ↳ " : "";
+      const files =
+        message.files && message.files.length > 0
+          ? ` [files: ${message.files.map((file) => file.name).join(", ")}]`
+          : "";
+      const text = message.text.replaceAll("\n", `\n${prefix}  `);
+      return `${prefix}[${time}] ${author} (ts ${message.ts}): ${text}${files}`;
+    })
+    .join("\n");
+}
 
 export function buildJamieMeetingAgentIngestPrompt(
   item: NormalizedJamieMeetingSourceItem,
@@ -211,7 +279,8 @@ export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCa
     "1. Find the capture's home: query the brain for pages that already cover this content and for the entities it mentions.",
     `2. If an existing page is the natural home, fold the capture into it (rewrite its compiled truth or timeline-add with --source-ref ${item.sourceRef}), then retire the draft with merge --from ${capture.draftBrainId} --into <that-page>. Do not leave the same content living in two places.`,
     "3. Otherwise curate the draft in place, in this order: use append-evidence to snapshot the raw capture text as a sourced evidence record linked to the draft; rewrite the draft's compiled truth into a durable synthesis that cites that evidence record with [[evidence:...]] and links entities with [[page:...]]; use set to give it a clear title and the right type; move it out of the inbox to the folder where it belongs; then set --status active. Leave it in the inbox as a draft only when it genuinely fits nowhere yet.",
-    "4. Create or update person, company, or project pages for entities central to the capture, with backlinks per the iron law. Do not create pages for entities that are merely mentioned in passing.",
+    "4. Apply the small-team idea rule: user-authored ideas and thoughts belong in Brain even when rough, but they do not get a new kind. If the capture is a reusable abstraction, file it as type concept in concepts. If it is a concrete initiative or product bet, update or create the relevant project page. If it records a choice or rationale, update the natural subject or file the draft in decisions with the best existing type. If it is a durable reflection, take, or raw idea with no better home yet, file it as type note in thoughts. If it is still uncurated raw capture, keep it as a draft note in inbox.",
+    "5. Create or update person, company, or project pages for entities central to the capture, with backlinks per the iron law. Do not create pages for entities that are merely mentioned in passing.",
     "",
     `If the draft page no longer exists (the user may have deleted or edited it), work from the capture text below and apply the same judgment: fold it into an existing page or create the right page directly.`,
     "",
@@ -429,6 +498,39 @@ export async function runGoatChatCaptureAgentIngest(
   };
 }
 
+export async function runSlackConversationAgentIngest(
+  input: {
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedSlackConversationSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const conversation = input.item.content.conversation;
+  const session = await runBrainAgentIngestSession({
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildSlackConversationAgentIngestPrompt(input.item),
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    channelId: conversation.channelId,
+    channelType: conversation.channelType,
+    messageCount: conversation.messages.length,
+    windowStartTs: conversation.windowStartTs,
+    windowEndTs: conversation.windowEndTs,
+  };
+}
+
 export async function runUploadAssetAgentIngest(
   input: {
     userWorkosId: string;
@@ -607,7 +709,7 @@ async function runIngestAgentLoop(input: {
           ...(args.stdin ? { stdin: args.stdin } : {}),
           signal: abort.signal,
         });
-        if (result.ok && !READ_ONLY_AGENT_CLI_COMMANDS.has(args.command)) {
+        if (result.ok && isMutatingGoatBrainAgentInvocation(args)) {
           mutations += 1;
         }
         return {
@@ -668,6 +770,14 @@ export function validateGoatBrainAgentInvocation(
     return "The --root flag is not allowed; the brain root is fixed for this job.";
   }
   return null;
+}
+
+function isMutatingGoatBrainAgentInvocation(args: { command: string; args?: string[] }): boolean {
+  if (args.command === "folder") {
+    const subcommand = args.args?.[0] ?? "list";
+    return !READ_ONLY_AGENT_FOLDER_SUBCOMMANDS.has(subcommand);
+  }
+  return !READ_ONLY_AGENT_CLI_COMMANDS.has(args.command);
 }
 
 const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
