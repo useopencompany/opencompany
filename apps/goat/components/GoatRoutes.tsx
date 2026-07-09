@@ -51,6 +51,7 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
         recentChats={data.recentChats}
         codexConnected={data.codexConnected}
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
+        chatResumeEnabled={data.chatResumeEnabled}
       />
     </main>
   );

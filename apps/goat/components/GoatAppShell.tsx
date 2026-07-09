@@ -4,6 +4,7 @@ import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatA
 import { currentGoatUser } from "@/lib/auth";
 import { listCurrentUserGoatBrain } from "@/lib/brain";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
+import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
 import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
@@ -90,6 +91,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     featureFlags: goatFeatureFlagsFromUser(user),
     brain,
     codexConnected: codex.status === "connected",
+    chatResumeEnabled: isGoatChatResumeEnabled(),
   };
 
   return <GoatAppDataProvider initialData={initialData}>{children}</GoatAppDataProvider>;

@@ -8,7 +8,8 @@ import {
   recordGoatCounter,
   startGoatSpan,
 } from "@opencompany/goat-observability";
-import { convertToModelMessages, createGateway, stepCountIs, streamText } from "ai";
+import { convertToModelMessages, createGateway, smoothStream, stepCountIs, streamText } from "ai";
+import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
@@ -27,6 +28,14 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
+import {
+  clearActiveGoatChatStream,
+  getGoatChatStreamContext,
+  isGoatChatResumeEnabled,
+  newGoatChatStreamId,
+  setActiveGoatChatStream,
+  watchGoatChatStop,
+} from "@/lib/chat-streams";
 import {
   type DeleteTaskScheduleToolOutput,
   type EditTaskScheduleToolOutput,
@@ -147,6 +156,25 @@ export async function POST(request: Request): Promise<Response> {
     throw error;
   }
 
+  // With resumable streams, a client disconnect (refresh, tab close, stop())
+  // is just a dropped connection: generation keeps running and the client can
+  // reattach. Explicit stops arrive via the stop endpoint, which aborts this
+  // controller through the Redis stop signal. Without Redis, the request
+  // signal keeps its old meaning: disconnect cancels generation.
+  const resumeEnabled = isGoatChatResumeEnabled();
+  const stopController = new AbortController();
+  const generationSignal = resumeEnabled ? stopController.signal : request.signal;
+  let stopWatcherCleanup: (() => void) | null = null;
+  let activeStreamId: string | null = null;
+  const releaseStreamCoordination = () => {
+    stopWatcherCleanup?.();
+    stopWatcherCleanup = null;
+    if (activeStreamId) {
+      void clearActiveGoatChatStream(turn.session.id, activeStreamId);
+      activeStreamId = null;
+    }
+  };
+
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
     latestUserMessage: parsed.value.prompt,
@@ -172,7 +200,7 @@ export async function POST(request: Request): Promise<Response> {
         chatSessionId: turn.session.id,
         userMessageId: turn.userMessage.id,
         ...(toolCallId ? { toolCallId } : {}),
-        signal: request.signal,
+        signal: generationSignal,
       });
     },
     saveToBrain: async (toolInput) => {
@@ -207,7 +235,7 @@ export async function POST(request: Request): Promise<Response> {
             executeChatWebSearch({
               toolInput,
               apiKey: exaApiKey,
-              signal: request.signal,
+              signal: generationSignal,
               currentDate,
               attributes: {
                 ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
@@ -340,11 +368,11 @@ export async function POST(request: Request): Promise<Response> {
 
     const fallbackTrace = {
       ...debugTrace,
-      ...(request.signal.aborted ? { aborted: true } : {}),
+      ...(generationSignal.aborted ? { aborted: true } : {}),
       error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
       finishReason,
     };
-    finishChatTelemetry(request.signal.aborted ? "aborted" : "failure", {
+    finishChatTelemetry(generationSignal.aborted ? "aborted" : "failure", {
       "goat.chat_session_id": turn.session.id,
       "goat.chat_message_id": turn.userMessage.id,
       "goat.model": turn.session.model,
@@ -376,14 +404,9 @@ export async function POST(request: Request): Promise<Response> {
       });
     return assistantPersistPromise;
   };
-  request.signal.addEventListener(
-    "abort",
-    () => {
-      void persistFallbackAssistantMessage(new Error("Goat chat request aborted."), "abort");
-    },
-    { once: true },
-  );
-
+  // No request-abort fallback here: aborts flow through the UI message stream
+  // as an abort chunk, so the stream onFinish below persists the real partial
+  // response (text included) instead of a placeholder.
   const gateway = createGateway({ apiKey: gatewayApiKey });
   const result = streamText({
     model: gateway(turn.session.model),
@@ -403,7 +426,10 @@ export async function POST(request: Request): Promise<Response> {
     }),
     messages: await convertToModelMessages(turn.messages),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
-    abortSignal: request.signal,
+    // Providers deliver tokens in bursts; re-chunk to word-level with a small
+    // delay so streamed text reads as a steady flow instead of jumps.
+    experimental_transform: smoothStream(),
+    abortSignal: generationSignal,
     tools: toolContext.tools,
     onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
@@ -437,6 +463,36 @@ export async function POST(request: Request): Promise<Response> {
     originalMessages: turn.messages,
     generateMessageId: newGoatChatMessageId,
     messageMetadata: () => toStreamMessageMetadata(turn.session.id, toolContext.getStartedTask()),
+    consumeSseStream({ stream }) {
+      // This copy of the SSE stream keeps the turn alive independently of the
+      // client connection: it drives generation and the onFinish persistence
+      // below even when the browser disconnects mid-stream.
+      if (!resumeEnabled) {
+        after(stream.pipeTo(new WritableStream()).catch(() => undefined));
+        return;
+      }
+      const streamId = newGoatChatStreamId();
+      activeStreamId = streamId;
+      const streamContext = getGoatChatStreamContext();
+      after(
+        (async () => {
+          try {
+            await setActiveGoatChatStream(turn.session.id, streamId);
+            stopWatcherCleanup = watchGoatChatStop(streamId, () => stopController.abort());
+            await streamContext.createNewResumableStream(streamId, () => stream);
+          } catch (error) {
+            console.warn("Goat chat resumable stream setup failed.", {
+              event: "goat.chat_resumable_stream_failed",
+              session_id: turn.session.id,
+              error,
+            });
+            // Resume is unavailable, but persistence still needs the copy to
+            // be drained to completion.
+            await stream.pipeTo(new WritableStream()).catch(() => undefined);
+          }
+        })(),
+      );
+    },
     onError(error) {
       console.warn("Goat chat stream failed.", {
         event: "goat.chat_stream_failed",
@@ -447,6 +503,7 @@ export async function POST(request: Request): Promise<Response> {
       return "Goat could not answer that right now.";
     },
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
+      releaseStreamCoordination();
       if (assistantPersistPromise) await assistantPersistPromise;
       if (assistantPersisted) return;
 
