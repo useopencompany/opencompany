@@ -177,7 +177,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
-    expect(await screen.findByText("Hello Goat")).toBeInTheDocument();
+    expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
   });
 
   it("selects from the active goat model list and sends the chosen model", async () => {
@@ -292,7 +292,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => {
-      expect(routerMock.replace).toHaveBeenCalledWith("/?chat=chat_1");
+      expect(routerMock.replace).toHaveBeenCalledWith("/chat/chat_1");
     });
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Second message");
@@ -411,7 +411,7 @@ describe("GoatSurface chat streaming UI", () => {
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByText("Hello Goat")).toBeInTheDocument();
+    expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
@@ -434,7 +434,7 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     const chatLink = screen.getByRole("link", { name: /Market research/ });
-    expect(chatLink).toHaveAttribute("href", "/?chat=chat_1");
+    expect(chatLink).toHaveAttribute("href", "/chat/chat_1");
     expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
   });
 
@@ -475,7 +475,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.hover(screen.getByRole("link", { name: /Market research/ }));
     await user.hover(screen.getByRole("link", { name: /Run market report/ }));
 
-    expect(routerMock.prefetch).toHaveBeenCalledWith("/?chat=chat_1");
+    expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/chat_1");
     expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK-1");
   });
 
@@ -626,7 +626,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => {
-      expect(routerMock.replace).toHaveBeenCalledWith("/?chat=goat_chat_123");
+      expect(routerMock.replace).toHaveBeenCalledWith("/chat/goat_chat_123");
     });
     expect(routerMock.refresh).toHaveBeenCalled();
   });
@@ -662,7 +662,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Follow-up")).toBeInTheDocument();
   });
 
-  it("keeps chat closed while server props refresh", async () => {
+  it("keeps chat closed while server props refresh after Escape", async () => {
     const user = userEvent.setup();
 
     render(
@@ -685,7 +685,10 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Close chat" }));
+    expect(screen.getByText("Chat")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close chat" })).not.toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
     await nextAnimationFrame();
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();

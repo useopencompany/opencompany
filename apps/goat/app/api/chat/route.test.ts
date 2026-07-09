@@ -5,6 +5,7 @@ import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
+import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   SAVE_TO_BRAIN_TOOL_NAME,
@@ -37,6 +38,14 @@ vi.mock("@/lib/chat", () => ({
   createGoatChatUserTurn: vi.fn(),
   newGoatChatMessageId: vi.fn(() => "assistant_1"),
   persistGoatChatAssistantMessage: vi.fn(),
+}));
+
+vi.mock("@/lib/chat-title", () => ({
+  generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
+}));
+
+vi.mock("next/server", () => ({
+  after: vi.fn((work: Promise<unknown>) => work),
 }));
 
 vi.mock("@/lib/codex-auth", () => ({
@@ -153,6 +162,11 @@ describe("POST /api/chat", () => {
     await brainToolPromise;
 
     expect(response.status).toBe(200);
+    expect(mockGenerateGoatChatTitleForMessage()).toHaveBeenCalledWith({
+      sessionId: "session_1",
+      messageId: "user_message_1",
+      apiKey: "test-key",
+    });
     expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
@@ -1007,6 +1021,10 @@ function mockCreateGoatChatUserTurn() {
 
 function mockPersistGoatChatAssistantMessage() {
   return vi.mocked(persistGoatChatAssistantMessage as unknown as () => Promise<unknown>);
+}
+
+function mockGenerateGoatChatTitleForMessage() {
+  return vi.mocked(generateGoatChatTitleForMessage);
 }
 
 function mockRunGoatBrainToolForUser() {

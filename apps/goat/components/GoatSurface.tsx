@@ -256,7 +256,7 @@ export function GoatSurface({
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
         setChatSessionId(sessionId);
-        router.replace(`/?chat=${encodeURIComponent(sessionId)}`);
+        router.replace(chatHref(sessionId));
       }
       router.refresh();
     },
@@ -324,6 +324,22 @@ export function GoatSurface({
       }),
     [chatMessages, liveChatTasks, tasks],
   );
+  const activeChatSummary = chatSessionId
+    ? (recentChats.find((chat) => chat.id === chatSessionId) ?? null)
+    : null;
+  const activeChatTitle =
+    activeChatSummary?.title ??
+    (initialChat?.id === chatSessionId ? initialChat.title : null) ??
+    titleFromChatMessages(chatMessages) ??
+    "Chat";
+  const activeChatModel =
+    activeChatSummary?.model ??
+    (initialChat?.id === chatSessionId ? initialChat.model : null) ??
+    (isLocalCodexChat ? DEFAULT_GOAT_MODEL : chatModel);
+  const activeChatEngine =
+    activeChatSummary?.engine ??
+    (initialChat?.id === chatSessionId ? initialChat.engine : null) ??
+    (isLocalCodexChat ? "local_codex" : "opencompany");
 
   const openChat = useCallback(
     (chat: { id: string; model: string; engine?: GoatChatEngine } | null) => {
@@ -547,7 +563,7 @@ export function GoatSurface({
               prompt,
             }),
           );
-          router.replace(`/?chat=${encodeURIComponent(result.sessionId)}`);
+          router.replace(chatHref(result.sessionId));
           router.refresh();
         })
         .catch((error) => {
@@ -773,15 +789,11 @@ export function GoatSurface({
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
           <div className="w-full px-6 pb-2 pt-5">
             <div className="mx-auto flex w-full max-w-[720px] items-center justify-start">
-              <button
-                type="button"
-                aria-label="Close chat"
-                onClick={closeChat}
-                className="flex items-center gap-1 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:border-ink/15 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              >
-                Close
-                <X size={14} strokeWidth={2} />
-              </button>
+              <ChatTitleHeader
+                title={activeChatTitle}
+                model={activeChatModel}
+                engine={activeChatEngine}
+              />
             </div>
           </div>
 
@@ -927,6 +939,21 @@ function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefin
   return mentions.filter(isSupportedMention);
 }
 
+function chatHref(sessionId: string) {
+  return `/chat/${encodeURIComponent(sessionId)}`;
+}
+
+function titleFromChatMessages(messages: readonly GoatChatUiMessage[]) {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const text = firstUserMessage ? textFromGoatChatUiMessage(firstUserMessage) : "";
+  const firstLine = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return null;
+  return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57).trimEnd()}...`;
+}
+
 type LocalCodexMessageResponse = {
   ok: true;
   sessionId: string;
@@ -1039,6 +1066,34 @@ function renderComposerInputOverlay(value: string, highlightCodexMention: boolea
       </span>
       {value.slice(mentionEnd)}
     </>
+  );
+}
+
+function ChatTitleHeader({
+  title,
+  model,
+  engine,
+}: {
+  title: string;
+  model: string;
+  engine: GoatChatEngine;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-ink shadow-[0_1px_3px_rgba(15,15,15,0.04)]">
+      {engine === "local_codex" ? (
+        <Code2 size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+      ) : (
+        <GoatModelProviderIcon
+          modelId={model}
+          size={14}
+          strokeWidth={1.9}
+          className="shrink-0 text-ink-muted"
+        />
+      )}
+      <span className="max-w-[min(420px,calc(100vw-7rem))] truncate text-[12.5px] font-medium leading-4">
+        {title}
+      </span>
+    </div>
   );
 }
 
@@ -1177,7 +1232,7 @@ function ChatHistoryList({
   return (
     <div className="flex flex-col">
       {visibleChats.map((chat) => {
-        const href = `/?chat=${encodeURIComponent(chat.id)}`;
+        const href = chatHref(chat.id);
         const prefetchChat = () => router.prefetch(href);
         return (
           <div

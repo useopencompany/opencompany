@@ -46,9 +46,8 @@ export function GoatSidebar({
 }) {
   const { user } = useGoatAppData();
   const pathname = usePathname();
-  const brainActive = pathname === "/brain" || pathname.startsWith("/brain/");
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
-  const homeActive = !brainActive && !settingsActive;
+  const homeActive = pathname === "/";
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;

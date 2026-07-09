@@ -82,6 +82,14 @@ describe("GoatSidebar", () => {
     expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "true");
   });
 
+  it("does not mark home active on chat subroutes", () => {
+    pathnameMock.value = "/chat/goat_chat_123";
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
+  });
+
   it("opens the active brain route from the brain list", async () => {
     const user = userEvent.setup();
     pathnameMock.value = "/";

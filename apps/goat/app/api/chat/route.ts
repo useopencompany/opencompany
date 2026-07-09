@@ -36,6 +36,7 @@ import {
   setActiveGoatChatStream,
   watchGoatChatStop,
 } from "@/lib/chat-streams";
+import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
   type DeleteTaskScheduleToolOutput,
   type EditTaskScheduleToolOutput,
@@ -155,6 +156,13 @@ export async function POST(request: Request): Promise<Response> {
     finishChatTelemetry("failure", {}, error);
     throw error;
   }
+  after(
+    generateGoatChatTitleForMessage({
+      sessionId: turn.session.id,
+      messageId: turn.userMessage.id,
+      apiKey: gatewayApiKey,
+    }).catch(() => undefined),
+  );
 
   // With resumable streams, a client disconnect (refresh, tab close, stop())
   // is just a dropped connection: generation keeps running and the client can
