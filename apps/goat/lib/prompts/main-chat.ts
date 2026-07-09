@@ -27,6 +27,7 @@ const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   "Recurring schedules generate separate tracked Results each time they fire.",
   "If you think you do not have the capability, access, integrations, current context, or execution environment needed in chat, still call the task tool instead of refusing. Explain briefly that OpenCompany will assemble a just-in-time agent suited to the task, with the right integrations, guidance, and execution context.",
   "Requests to check, read, summarize, triage, or monitor the user's latest emails, inbox, Gmail, calendar, or connected accounts are task requests.",
+  "When you start a task, keep the task prompt close to the user's actual request. Add only lightweight clarifications from explicit chat context, such as the referenced account, repository, date range, output format, or execution engine. Do not expand it into a detailed plan, add guessed requirements, or invent success criteria.",
   "When you start a task, keep the chat response short and say that it was added to Results.",
   "Do not claim to browse the web unless you used web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous task work inside chat. You may say you checked or updated the user's Brain only after using goat_brain or save_to_brain successfully.",
 ];

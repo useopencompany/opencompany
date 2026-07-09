@@ -20,7 +20,7 @@ export const START_TASK_TOOL_DESCRIPTION =
   "Start a task when the user's request should become an asynchronous tracked Result, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent. If the user explicitly asks for Codex, a Codex task, repository edits, tests, debugging, code review, or pull-request work, preserve that execution intent by setting engine to codex.";
 
 export const START_TASK_PROMPT_DESCRIPTION =
-  "A self-contained task prompt. Preserve the user's goal, relevant context, success criteria, and any constraints needed by the just-in-time agent. Preserve explicit execution-engine requests such as Codex verbatim instead of paraphrasing them away.";
+  "A brief task prompt for the just-in-time agent. Use the user's own request as the backbone and keep it close to what they said. Add only light clarifications from explicit chat context, such as referenced accounts, repositories, date ranges, output format, or execution engine. Do not expand into a detailed plan, invent requirements, or add guessed success criteria. Preserve explicit execution-engine requests such as Codex verbatim instead of paraphrasing them away.";
 
 export const START_TASK_ENGINE_DESCRIPTION =
   "Optional execution engine hint. Set to codex when the user explicitly asks for Codex or a Codex task, or for repository edits, tests, debugging, code review, or pull-request work where Codex is the requested executor. Omit for ordinary research, writing, connected-account lookup, or analysis tasks.";
@@ -34,7 +34,7 @@ export const SCHEDULE_TASK_TOOL_DESCRIPTION =
   "Create a recurring Goat task schedule from the user's request. Use only when the user clearly asks for repeated, recurring, scheduled, or cron-like work. Convert the recurrence to a valid 5-field cron expression and save directly; if the recurrence is ambiguous or not cron-expressible, ask a short follow-up instead of calling this tool.";
 
 export const SCHEDULE_TASK_PROMPT_DESCRIPTION =
-  "A self-contained prompt for every generated task run. Preserve the recurring goal, relevant context, success criteria, and constraints.";
+  "A brief prompt for every generated task run. Use the user's recurring request as the backbone and add only light clarifications from explicit chat context, such as cadence, referenced accounts, date ranges, output format, or execution engine. Do not expand into a detailed plan, invent requirements, or add guessed success criteria.";
 
 export const SCHEDULE_TASK_NAME_DESCRIPTION =
   "A short 2-7 word recurring task name for the Routines list and generated Results.";
