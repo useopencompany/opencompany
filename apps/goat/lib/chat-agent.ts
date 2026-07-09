@@ -1,5 +1,9 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
+import {
+  createGoatGatewayAttribution,
+  goatGatewayProviderOptions,
+} from "@opencompany/goat-observability";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
@@ -151,6 +155,9 @@ export async function runOpenCompanyChatAgent(input: {
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
   recurringSchedules?: OpenCompanyChatSystemPromptInput["recurringSchedules"];
+  userWorkosId?: string | null;
+  chatSessionId?: string | null;
+  brainRef?: string | null;
   generateTextImpl?: GenerateTextLike;
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
@@ -160,6 +167,12 @@ export async function runOpenCompanyChatAgent(input: {
 
   const generate = input.generateTextImpl ?? generateText;
   const gateway = createGateway({ apiKey: gatewayApiKey });
+  const attribution = createGoatGatewayAttribution({
+    userWorkosId: input.userWorkosId,
+    feature: "chat",
+    ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
+    ...(input.brainRef ? { brainRef: input.brainRef } : {}),
+  });
   const latestUserMessage = latestUserMessageContent(input.messages);
   const toolContext = createOpenCompanyChatToolContext({
     model: input.model,
@@ -190,6 +203,7 @@ export async function runOpenCompanyChatAgent(input: {
     })),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     tools: toolContext.tools,
+    providerOptions: goatGatewayProviderOptions(attribution),
   });
 
   const startedTask = toolContext.getStartedTask();

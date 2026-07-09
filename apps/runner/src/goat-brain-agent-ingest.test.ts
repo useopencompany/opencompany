@@ -426,9 +426,35 @@ describe("runGoatChatCaptureAgentIngest", () => {
     // No deterministic pre-write for captures: the inbox draft was created at
     // capture time.
     expect(localBrainMock.writeLocalBrainFile).not.toHaveBeenCalled();
+    expect(aiMock.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: {
+          gateway: {
+            user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
+            tags: expect.arrayContaining([
+              "app:goat",
+              "env:test",
+              "feature:brain-ingest",
+              "brain:gbrain_123",
+              "ingest:goat-chat:goat_chat_msg_1",
+            ]),
+          },
+        },
+      }),
+    );
     expect(okCli).toHaveBeenCalledWith(
       expect.objectContaining({
         argv: ["set", "pricing-teardown-reference", "--type", "concept", "--status", "active"],
+        reporting: {
+          user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
+          tags: expect.arrayContaining([
+            "app:goat",
+            "env:test",
+            "feature:brain-query",
+            "brain:gbrain_123",
+            "ingest:goat-chat:goat_chat_msg_1",
+          ]),
+        },
       }),
     );
   });

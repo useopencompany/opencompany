@@ -696,6 +696,36 @@ describe("executeGoatTask", () => {
         usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
       }),
     );
+    expect(aiMock.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: {
+          gateway: {
+            user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
+            tags: expect.arrayContaining([
+              "app:goat",
+              "env:test",
+              "feature:task",
+              "task:goat_task_1",
+            ]),
+          },
+        },
+      }),
+    );
+    expect(aiMock.streamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: {
+          gateway: {
+            user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
+            tags: expect.arrayContaining([
+              "app:goat",
+              "env:test",
+              "feature:task",
+              "task:goat_task_1",
+            ]),
+          },
+        },
+      }),
+    );
   });
 
   it("records planner usage and every execution finish-step", async () => {

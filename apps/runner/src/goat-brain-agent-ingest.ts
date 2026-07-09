@@ -35,6 +35,10 @@ import {
   slackTsToIso,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
+import {
+  createGoatGatewayAttribution,
+  goatGatewayProviderOptions,
+} from "@opencompany/goat-observability";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import * as ai from "ai";
@@ -122,6 +126,7 @@ export type GoatBrainAgentCliRunner = (input: {
   root: string;
   argv: string[];
   gatewayApiKey: string;
+  reporting?: { user?: string; tags: string[] };
   stdin?: string;
   signal?: AbortSignal;
 }) => Promise<GoatBrainAgentCliResult>;
@@ -497,6 +502,7 @@ type BrainAgentIngestSessionResult = {
 // conflict detection. Profiles differ in system prompt, prompt, command
 // surface, and optional deterministic pre-writes.
 async function runBrainAgentIngestSession(input: {
+  jobId: string;
   userWorkosId: string;
   brainRef: string | null;
   sourceRef: string;
@@ -533,6 +539,9 @@ async function runBrainAgentIngestSession(input: {
       root,
       cliPath: path.join(root, "goat-brain.mjs"),
       gatewayApiKey: input.env.vercelAiGatewayApiKey,
+      userWorkosId: input.userWorkosId,
+      brainRef,
+      ingestJobId: input.jobId,
       system: input.system,
       prompt: input.buildPrompt(),
       ...(input.commands ? { commands: input.commands } : {}),
@@ -595,6 +604,7 @@ async function runBrainAgentIngestSession(input: {
 
 export async function runJamieMeetingAgentIngest(
   input: {
+    jobId?: string;
     userWorkosId: string;
     brainRef: string | null;
     item: NormalizedJamieMeetingSourceItem;
@@ -608,6 +618,7 @@ export async function runJamieMeetingAgentIngest(
   // through model tool calls.
   const evidence = buildJamieMeetingEvidenceWrite(input.item);
   const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
     userWorkosId: input.userWorkosId,
     brainRef: input.brainRef,
     sourceRef: input.item.sourceRef,
@@ -631,6 +642,7 @@ export async function runJamieMeetingAgentIngest(
 
 export async function runGoatChatCaptureAgentIngest(
   input: {
+    jobId?: string;
     userWorkosId: string;
     brainRef: string | null;
     item: NormalizedGoatChatCaptureSourceItem;
@@ -640,6 +652,7 @@ export async function runGoatChatCaptureAgentIngest(
   deps: GoatBrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
   const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
     userWorkosId: input.userWorkosId,
     brainRef: input.brainRef,
     sourceRef: input.item.sourceRef,
@@ -660,6 +673,7 @@ export async function runGoatChatCaptureAgentIngest(
 
 export async function runSlackConversationAgentIngest(
   input: {
+    jobId?: string;
     userWorkosId: string;
     brainRef: string | null;
     item: NormalizedSlackConversationSourceItem;
@@ -670,6 +684,7 @@ export async function runSlackConversationAgentIngest(
 ): Promise<Record<string, unknown>> {
   const conversation = input.item.content.conversation;
   const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
     userWorkosId: input.userWorkosId,
     brainRef: input.brainRef,
     sourceRef: input.item.sourceRef,
@@ -694,6 +709,7 @@ export async function runSlackConversationAgentIngest(
 
 export async function runLinearIssueAgentIngest(
   input: {
+    jobId?: string;
     userWorkosId: string;
     brainRef: string | null;
     item: NormalizedLinearIssueSourceItem;
@@ -704,6 +720,7 @@ export async function runLinearIssueAgentIngest(
 ): Promise<Record<string, unknown>> {
   const issue = input.item.content.issue;
   const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
     userWorkosId: input.userWorkosId,
     brainRef: input.brainRef,
     sourceRef: input.item.sourceRef,
@@ -730,6 +747,7 @@ export async function runLinearIssueAgentIngest(
 
 export async function runUploadAssetAgentIngest(
   input: {
+    jobId?: string;
     userWorkosId: string;
     brainRef: string | null;
     item: NormalizedUploadAssetSourceItem;
@@ -774,6 +792,7 @@ export async function runUploadAssetAgentIngest(
 
   const truncatedText = Buffer.byteLength(extractedText, "utf8") > PROMPT_ASSET_TEXT_BYTES;
   const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
     userWorkosId: input.userWorkosId,
     brainRef,
     sourceRef: input.item.sourceRef,
@@ -842,6 +861,9 @@ async function runIngestAgentLoop(input: {
   root: string;
   cliPath: string;
   gatewayApiKey: string;
+  userWorkosId: string;
+  brainRef: string;
+  ingestJobId: string;
   system: string;
   prompt: string;
   commands?: readonly string[];
@@ -850,6 +872,18 @@ async function runIngestAgentLoop(input: {
 }) {
   const { generateText } = getBraintrustAISDK(ai);
   const gateway = ai.createGateway({ apiKey: input.gatewayApiKey });
+  const attribution = createGoatGatewayAttribution({
+    userWorkosId: input.userWorkosId,
+    feature: "brain-ingest",
+    brainRef: input.brainRef,
+    ingestJobId: input.ingestJobId,
+  });
+  const brainQueryAttribution = createGoatGatewayAttribution({
+    userWorkosId: input.userWorkosId,
+    feature: "brain-query",
+    brainRef: input.brainRef,
+    ingestJobId: input.ingestJobId,
+  });
   const abort = new AbortController();
   const onParentAbort = () => abort.abort(input.signal?.reason);
   if (input.signal?.aborted) onParentAbort();
@@ -932,6 +966,7 @@ async function runIngestAgentLoop(input: {
           root: input.root,
           argv: [args.command, ...(args.args ?? [])],
           gatewayApiKey: input.gatewayApiKey,
+          reporting: brainQueryAttribution,
           ...(args.stdin ? { stdin: args.stdin } : {}),
           signal: abort.signal,
         });
@@ -981,6 +1016,7 @@ async function runIngestAgentLoop(input: {
       tools,
       stopWhen: [ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS)],
       abortSignal: abort.signal,
+      providerOptions: goatGatewayProviderOptions(attribution),
     });
     const usage = result.totalUsage;
     const finalText = result.text.trim();
@@ -1066,6 +1102,10 @@ const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
         : {}),
       ...(process.env.GOAT_BRAIN_EMBEDDING_MODEL
         ? { GOAT_BRAIN_EMBEDDING_MODEL: process.env.GOAT_BRAIN_EMBEDDING_MODEL }
+        : {}),
+      ...(input.reporting?.user ? { GOAT_GATEWAY_REPORTING_USER: input.reporting.user } : {}),
+      ...(input.reporting?.tags.length
+        ? { GOAT_GATEWAY_REPORTING_TAGS: input.reporting.tags.join(",") }
         : {}),
     },
     stdio: [input.stdin ? "pipe" : "ignore", "pipe", "pipe"],

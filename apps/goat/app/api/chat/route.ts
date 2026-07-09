@@ -1,8 +1,10 @@
 import { executeExaSearchRequest } from "@opencompany/agent-runtime";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import {
+  createGoatGatewayAttribution,
   GOAT_METRICS,
   GOAT_SPANS,
+  goatGatewayProviderOptions,
   hashGoatUserId,
   recordGoatChatTurn,
   recordGoatCounter,
@@ -416,6 +418,12 @@ export async function POST(request: Request): Promise<Response> {
   // as an abort chunk, so the stream onFinish below persists the real partial
   // response (text included) instead of a placeholder.
   const gateway = createGateway({ apiKey: gatewayApiKey });
+  const gatewayAttribution = createGoatGatewayAttribution({
+    userWorkosId: context.user.workosUserId,
+    feature: "chat",
+    chatSessionId: turn.session.id,
+    ...(context.activeBrain ? { brainRef: context.activeBrain.id } : {}),
+  });
   const result = streamText({
     model: gateway(turn.session.model),
     system: createOpenCompanyChatSystemPrompt({
@@ -439,6 +447,7 @@ export async function POST(request: Request): Promise<Response> {
     experimental_transform: smoothStream(),
     abortSignal: generationSignal,
     tools: toolContext.tools,
+    providerOptions: goatGatewayProviderOptions(gatewayAttribution),
     onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
       debugTrace = createOpenCompanyChatDebugTrace({

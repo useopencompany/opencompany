@@ -167,6 +167,22 @@ describe("POST /api/chat", () => {
       messageId: "user_message_1",
       apiKey: "test-key",
     });
+    expect(mockStreamText()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: {
+          gateway: {
+            user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
+            tags: expect.arrayContaining([
+              "app:goat",
+              "env:test",
+              "feature:chat",
+              "chat:session_1",
+              "brain:goat_brain_user_1",
+            ]),
+          },
+        },
+      }),
+    );
     expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",

@@ -19,6 +19,10 @@ export type GatewayConfig = {
   timeoutMs?: number;
   fetch?: FetchLike;
   onUsage?: (entry: GoatBrainUsageEntry) => void;
+  reporting?: {
+    user?: string;
+    tags?: readonly string[];
+  };
 };
 
 export type Gateway = {
@@ -35,6 +39,7 @@ export function createGateway(config: GatewayConfig): Gateway {
   const headers = {
     "content-type": "application/json",
     authorization: `Bearer ${config.apiKey}`,
+    ...reportingHeaders(config.reporting),
   };
 
   const report = (model: string, operation: GoatBrainUsageEntry["operation"], body: unknown) => {
@@ -129,6 +134,15 @@ export function parseJsonStringArray(text: string): string[] {
   } catch {
     return [];
   }
+}
+
+function reportingHeaders(reporting: GatewayConfig["reporting"]): Record<string, string> {
+  return {
+    ...(reporting?.user ? { "ai-reporting-user": reporting.user } : {}),
+    ...(reporting?.tags && reporting.tags.length > 0
+      ? { "ai-reporting-tags": reporting.tags.join(",") }
+      : {}),
+  };
 }
 
 function parseUsage(
