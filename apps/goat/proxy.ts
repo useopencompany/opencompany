@@ -4,6 +4,7 @@ import { isInitialDocumentRequest, localGoatHttpsRedirectUrl } from "@/lib/local
 import { getGoatWorkOSRedirectUri } from "@/lib/workos";
 
 const UNAUTHENTICATED_PATHS = new Set(["/auth/callback", "/auth/sign-in", "/api/healthz"]);
+const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/api/mcp/"];
 
 export default async function proxy(request: NextRequest) {
   const localHttpsRedirect = localGoatHttpsRedirectUrl(request);
@@ -15,7 +16,7 @@ export default async function proxy(request: NextRequest) {
     redirectUri: getGoatWorkOSRedirectUri(),
   });
 
-  if (UNAUTHENTICATED_PATHS.has(request.nextUrl.pathname) || session.user) {
+  if (isUnauthenticatedPath(request.nextUrl.pathname) || session.user) {
     return handleAuthkitHeaders(request, headers);
   }
 
@@ -33,3 +34,10 @@ export const config = {
     "/((?!_next/static|_next/image|favicon.ico|favicon.svg|icon(?:/.*)?|apple-icon(?:/.*)?).*)",
   ],
 };
+
+function isUnauthenticatedPath(pathname: string) {
+  return (
+    UNAUTHENTICATED_PATHS.has(pathname) ||
+    UNAUTHENTICATED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}
