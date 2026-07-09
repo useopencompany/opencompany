@@ -25,7 +25,7 @@ import {
   isValidGoatBrainId,
   isValidGoatBrainKind,
   isValidGoatBrainStatus,
-  normalizeGoatBrainBody,
+  normalizeGoatBrainCompiledTruth,
   normalizeGoatBrainFolderForV1,
   type GoatBrainDocument as ParsedGoatBrainDocument,
   parseGoatBrainDocument,
@@ -212,7 +212,7 @@ export function deriveGoatBrainFileProjection(input: {
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
   if (!entityType) throw new Error("frontmatter.type must be a built-in brain entity type.");
   if (!kind) throw new Error('frontmatter.kind must be "page" or "evidence".');
-  const body = normalizeGoatBrainBody(parsed.compiledTruth);
+  const body = normalizeGoatBrainCompiledTruth(parsed.compiledTruth, title);
   const content = canonicalGoatBrainContent({
     parsed,
     brainId,

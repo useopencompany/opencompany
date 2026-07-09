@@ -154,7 +154,7 @@ describe("createGoatBrainMarkdownReportForTask", () => {
           brainId: "market-report",
           folderPath: "research",
           title: "Market Report",
-          body: "# Market Report\n\nFindings.\n\nEvidence: [[evidence:ev-created-from-goat-task-1|Task goat_task_1]]",
+          body: "Findings.\n\nEvidence: [[evidence:ev-created-from-goat-task-1|Task goat_task_1]]",
           format: "markdown",
           kind: "page",
           mimeType: "text/markdown",

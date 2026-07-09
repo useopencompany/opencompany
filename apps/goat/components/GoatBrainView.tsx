@@ -1,6 +1,6 @@
 "use client";
 
-import { normalizeGoatBrainBody } from "@opencompany/goat-brain/document";
+import { normalizeGoatBrainCompiledTruth } from "@opencompany/goat-brain/document";
 import {
   evidenceLinkTargets,
   formatGoatBrainEvidenceLink,
@@ -1419,7 +1419,7 @@ function documentInlineLinkText(document: GoatBrainDocumentView) {
 }
 
 function documentEditorBody(document: GoatBrainDocumentView | null | undefined) {
-  return document ? normalizeGoatBrainBody(document.body) : "";
+  return document ? normalizeGoatBrainCompiledTruth(document.body, document.title) : "";
 }
 
 function ancestorFolderPaths(path: string) {
@@ -1441,14 +1441,15 @@ function documentViewFromRow(
   timelineRows?: GoatBrainTimelineEntryRow[],
 ): GoatBrainDocumentView {
   const path = `${row.folder_path}/${row.brain_id}.md`;
+  const title = row.title ?? row.brain_id;
   return {
     id: row.id,
     brainId: row.brain_id,
     folderPath: row.folder_path,
     path,
-    title: row.title ?? row.brain_id,
+    title,
     content: row.content,
-    body: normalizeGoatBrainBody(row.body),
+    body: normalizeGoatBrainCompiledTruth(row.body, title),
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
     format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",

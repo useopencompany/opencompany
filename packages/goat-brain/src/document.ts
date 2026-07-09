@@ -30,6 +30,19 @@ export function normalizeGoatBrainBody(value: string): string {
   return parsed.compiledTruth;
 }
 
+export function normalizeGoatBrainCompiledTruth(value: string, title?: string): string {
+  const body = normalizeGoatBrainBody(value);
+  const trimmed = body.replace(/\r\n/g, "\n").trim();
+  const normalizedTitle = comparableTitle(title ?? "");
+  if (!normalizedTitle) return trimmed;
+
+  const firstHeading = /^(#{1,6})[ \t]+(.+?)[ \t]*(?:\n|$)/.exec(trimmed);
+  if (!firstHeading?.[2]) return trimmed;
+  const headingText = firstHeading[2].replace(/[ \t]+#+[ \t]*$/, "");
+  if (comparableTitle(headingText) !== normalizedTitle) return trimmed;
+  return trimmed.slice(firstHeading[0].length).replace(/^\n+/, "");
+}
+
 export function parseGoatBrainBody(body: string): {
   title: string;
   compiledTruth: string;
@@ -66,7 +79,7 @@ export function parseGoatBrainBody(body: string): {
 
 export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
   const title = doc.title.trim() || doc.frontmatter.title?.trim() || doc.frontmatter.id;
-  const compiledTruth = normalizeGoatBrainBody(doc.compiledTruth);
+  const compiledTruth = normalizeGoatBrainCompiledTruth(doc.compiledTruth, title);
   const timeline = [...doc.timeline].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const timelineBody = timeline
     .map((entry) => {
@@ -102,7 +115,8 @@ export function replaceGoatBrainCompiledTruth(
 ): string {
   const { yaml, body } = splitFrontmatter(source);
   const frontmatter = parseFrontmatter(yaml);
-  const normalizedCompiledTruth = normalizeGoatBrainBody(compiledTruth);
+  const title = frontmatter.title ?? readTitle(body) ?? "Untitled";
+  const normalizedCompiledTruth = normalizeGoatBrainCompiledTruth(compiledTruth, title);
   const header =
     frontmatter.id &&
     frontmatter.folder &&
@@ -213,6 +227,15 @@ function stripSentinel(text: string): string {
   return text
     .replace(GOAT_BRAIN_TIMELINE_SENTINEL, "")
     .replace(/<!--\s*TIMELINE:BELOW[\s\S]*?-->/g, "");
+}
+
+function comparableTitle(value: string): string {
+  return value
+    .trim()
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 function parseTimeline(text: string): GoatBrainTimelineEntry[] {
