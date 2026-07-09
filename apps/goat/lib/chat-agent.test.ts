@@ -352,7 +352,11 @@ describe("runOpenCompanyChatAgent", () => {
       generateTextImpl: (async (options: unknown) => {
         expect(extractGoatBrainToolDescription(options)).toContain("personal Goat Brain");
         expect(extractGoatBrainToolDescription(options)).not.toContain("ingest");
+        expect(extractGoatBrainToolDescription(options)).not.toContain("create only");
         expect(extractGoatBrainToolDescription(options)).toContain("append-evidence");
+        const commandEnum = extractGoatBrainCommandEnum(options);
+        expect(commandEnum).not.toContain("create");
+        expect(commandEnum).not.toContain("folder");
         const toolResult = await executeGoatBrainTool(options, {
           command: "query",
           flags: {
@@ -389,6 +393,48 @@ describe("runOpenCompanyChatAgent", () => {
     expect(result.task).toBeNull();
     expect(result.content).toBe("Your Brain has a hiring note in inbox.");
     expect(result.debugTrace.toolResults).toHaveLength(1);
+  });
+
+  it("rejects direct brain entity creation inside the chat loop", async () => {
+    const startTask = vi.fn();
+    const runBrainCli = vi.fn();
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "remember Acme is building billing tools" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      runBrainCli,
+      generateTextImpl: (async (options: unknown) => {
+        await expect(
+          executeGoatBrainTool(options, {
+            command: "create",
+            flags: {
+              id: "acme",
+              folder: "companies",
+              title: "Acme",
+              type: "company",
+              truth: "Acme is building billing tools.",
+              json: true,
+            },
+          }),
+        ).rejects.toThrow("goat_brain command is invalid");
+        await expect(
+          executeGoatBrainTool(options, {
+            command: "help",
+            flags: { topic: "create" },
+          }),
+        ).rejects.toThrow("goat_brain create is not available from main chat");
+
+        return {
+          text: "I need to save new Brain content through the inbox capture path.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+
+    expect(runBrainCli).not.toHaveBeenCalled();
   });
 
   it("allows listing personal brain docs without semantic search", async () => {
@@ -625,6 +671,19 @@ function extractStartTaskToolDescription(options: unknown) {
 function extractGoatBrainToolDescription(options: unknown) {
   type ToolOptions = { tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { description?: string }> };
   return (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME]?.description ?? "";
+}
+
+function extractGoatBrainCommandEnum(options: unknown) {
+  type ToolOptions = {
+    tools?: Record<
+      typeof GOAT_BRAIN_TOOL_NAME,
+      { inputSchema?: { properties?: { command?: { enum?: string[] } } } }
+    >;
+  };
+  return (
+    (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME]?.inputSchema?.properties?.command
+      ?.enum ?? []
+  );
 }
 
 function extractWebSearchToolDescription(options: unknown) {
