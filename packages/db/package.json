@@ -32,6 +32,10 @@
       "types": "./src/goat-brain-ingest.ts",
       "default": "./src/goat-brain-ingest.ts"
     },
+    "./goat-brain-sources": {
+      "types": "./src/goat-brain-sources.ts",
+      "default": "./src/goat-brain-sources.ts"
+    },
     "./goat-schema": {
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"

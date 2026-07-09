@@ -1,22 +1,11 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { Brain, Check, Copy, Lock, Plus } from "lucide-react";
+import { Brain, Lock, Plus } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
-import {
-  type GoatBrainSummaryView,
-  type GoatWorkspaceView,
-  useGoatAppData,
-} from "@/components/GoatAppDataProvider";
-import { useHydrated } from "@/components/useHydrated";
-import {
-  createGoatBrainAction,
-  type GoatWorkspaceMemberView,
-  getGoatBrainAccessDetailsAction,
-  setGoatBrainAccessAction,
-  switchGoatBrainAction,
-} from "@/lib/workspace-actions";
+import { useState, useTransition } from "react";
+import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { createGoatBrainAction, switchGoatBrainAction } from "@/lib/workspace-actions";
 
 export function GoatBrainSwitcher() {
   const { brains, activeBrain } = useGoatAppData();
@@ -173,174 +162,11 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function BrainAccessDialog({
-  brain,
-  workspace,
-  onClose,
-}: {
-  brain: GoatBrainSummaryView;
-  workspace: GoatWorkspaceView;
-  onClose: () => void;
-}) {
-  const router = useRouter();
-  const [visibility, setVisibility] = useState<"workspace" | "restricted">(brain.visibility);
-  const [members, setMembers] = useState<GoatWorkspaceMemberView[] | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [isPending, startTransition] = useTransition();
-
-  useEffect(() => {
-    let cancelled = false;
-    void getGoatBrainAccessDetailsAction(brain.id).then((details) => {
-      if (cancelled || !details) return;
-      setVisibility(details.visibility);
-      setMembers(details.workspaceMembers);
-      setSelected(new Set(details.memberWorkosIds));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [brain.id]);
-
-  const toggleMember = (userWorkosId: string) => {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(userWorkosId)) {
-        next.delete(userWorkosId);
-      } else {
-        next.add(userWorkosId);
-      }
-      return next;
-    });
-  };
-
-  const save = () => {
-    startTransition(async () => {
-      const result = await setGoatBrainAccessAction({
-        brainId: brain.id,
-        visibility,
-        memberWorkosIds: [...selected],
-      });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      onClose();
-      router.refresh();
-    });
-  };
-
-  return (
-    <DialogFrame title={`Access to ${brain.name}`} onClose={onClose}>
-      <div className="flex flex-col gap-1">
-        <VisibilityOption
-          checked={visibility === "workspace"}
-          onSelect={() => setVisibility("workspace")}
-          title={`Everyone in ${workspace.name}`}
-          description="All current and future members can view and edit."
-        />
-        <VisibilityOption
-          checked={visibility === "restricted"}
-          onSelect={() => setVisibility("restricted")}
-          title="Only specific members"
-          description="Pick who can view and edit this brain."
-        />
-      </div>
-      {visibility === "restricted" ? (
-        <div className="flex max-h-[200px] flex-col gap-px overflow-y-auto rounded-md border border-ink/10 p-1">
-          {members === null ? (
-            <div className="px-2 py-1.5 text-[12px] text-ink-subtle">Loading members…</div>
-          ) : (
-            members.map((member) => (
-              <label
-                key={member.userWorkosId}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(member.userWorkosId)}
-                  onChange={() => toggleMember(member.userWorkosId)}
-                  className="accent-ink"
-                />
-                <span className="min-w-0 flex-1 truncate">{member.name}</span>
-                <span className="shrink-0 text-[11px] text-ink-subtle">{member.role}</span>
-              </label>
-            ))
-          )}
-        </div>
-      ) : null}
-      <ClaudeConnectorBlock brainId={brain.id} />
-      <div className="flex justify-end gap-2 pt-1">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md px-3 py-1.5 text-[13px] text-ink/70 transition-colors hover:bg-surface-hover"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          disabled={isPending}
-          onClick={save}
-          className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
-        >
-          {isPending ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </DialogFrame>
-  );
-}
-
 function goatBrainHref(brainId: string) {
   return `/brain/${encodeURIComponent(brainId)}`;
 }
 
-function ClaudeConnectorBlock({ brainId }: { brainId: string }) {
-  const [copied, setCopied] = useState(false);
-  const hydrated = useHydrated();
-  const origin = hydrated ? window.location.origin.replace(/\/+$/, "") : "";
-  const connectorPath = `/api/mcp/${encodeURIComponent(brainId)}/mcp`;
-  const connectorUrl = origin ? `${origin}${connectorPath}` : connectorPath;
-
-  const copyConnectorUrl = async () => {
-    if (!origin) return;
-    try {
-      await navigator.clipboard.writeText(connectorUrl);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      toast.error("Could not copy connector URL.");
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-ink/10 p-2.5">
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <span className="block text-[12px] font-medium text-ink">Connect to Claude</span>
-          <code className="block truncate text-[12px] leading-5 text-ink-subtle">
-            {connectorUrl}
-          </code>
-        </div>
-        <button
-          type="button"
-          onClick={copyConnectorUrl}
-          disabled={!origin}
-          aria-label="Copy Claude connector URL"
-          title="Copy Claude connector URL"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {copied ? <Check size={15} strokeWidth={2} /> : <Copy size={15} strokeWidth={2} />}
-        </button>
-      </div>
-      <p className="text-[11.5px] leading-4 text-ink-subtle">
-        Claude -&gt; Settings -&gt; Connectors -&gt; Add custom connector, then sign in with your
-        Goat account.
-      </p>
-    </div>
-  );
-}
-
-function VisibilityOption({
+export function VisibilityOption({
   checked,
   onSelect,
   title,

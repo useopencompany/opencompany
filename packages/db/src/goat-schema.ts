@@ -47,6 +47,7 @@ export type GoatIntegrationResourceStatus =
   | "archived"
   | "sync_failed";
 export type GoatBrainSourceProvider = "jamie" | "goat-chat";
+export type GoatBrainSourceConfigProvider = "jamie" | "gmail" | "github" | "slack";
 export type GoatBrainSourceType = "meeting" | "capture";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
@@ -700,6 +701,50 @@ export const goatIntegrationResources = goat.table(
   }),
 );
 
+// Per-brain source configuration: which user-owned integration feeds which brain.
+export const goatBrainSources = goat.table(
+  "brain_sources",
+  {
+    id: text("id").primaryKey(),
+    brainId: text("brain_id")
+      .notNull()
+      .references(() => goatBrains.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<GoatBrainSourceConfigProvider>().notNull(),
+    integrationId: text("integration_id").notNull(),
+    // Owner of the referenced integration (integrations are user-scoped;
+    // brains are workspace-shared, so the row records whose connection feeds the brain).
+    userWorkosId: text("user_workos_id").notNull(),
+    createdByWorkosId: text("created_by_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    brainIntegrationIdx: uniqueIndex("goat_brain_sources_brain_integration_idx").on(
+      table.brainId,
+      table.integrationId,
+    ),
+    integrationIdx: index("goat_brain_sources_integration_idx").on(table.integrationId),
+    brainIdx: index("goat_brain_sources_brain_idx").on(table.brainId),
+    integrationUserProviderFk: foreignKey({
+      name: "goat_brain_sources_integration_user_provider_fk",
+      columns: [table.integrationId, table.userWorkosId, table.provider],
+      foreignColumns: [
+        goatIntegrations.id,
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+      ],
+    }).onDelete("cascade"),
+    providerCheck: check(
+      "goat_brain_sources_provider_check",
+      sql`${table.provider} IN ('jamie', 'gmail', 'github', 'slack')`,
+    ),
+  }),
+);
+
 export const goatBrainSourceItems = goat.table(
   "brain_source_items",
   {
@@ -805,11 +850,14 @@ export const goatBrainIngestJobs = goat.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    sourceItemHashKindIdx: uniqueIndex("goat_brain_ingest_jobs_source_item_hash_kind_idx").on(
-      table.sourceItemId,
-      table.contentHash,
-      table.kind,
-    ),
+    // Dedup is per target brain: one source item may fan out to several brains,
+    // but repeated deliveries must not enqueue duplicate jobs for the same brain.
+    sourceItemHashKindBrainIdx: uniqueIndex("goat_brain_ingest_jobs_item_hash_kind_brain_idx")
+      .on(table.sourceItemId, table.contentHash, table.kind, table.brainRef)
+      .where(sql`${table.brainRef} IS NOT NULL`),
+    sourceItemHashKindNoBrainIdx: uniqueIndex("goat_brain_ingest_jobs_item_hash_kind_nobrain_idx")
+      .on(table.sourceItemId, table.contentHash, table.kind)
+      .where(sql`${table.brainRef} IS NULL`),
     statusNextRunIdx: index("goat_brain_ingest_jobs_status_next_run_idx").on(
       table.status,
       table.nextRunAt,

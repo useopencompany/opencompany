@@ -37,7 +37,6 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainActivity } from "@/components/GoatBrainActivity";
-import { BrainAccessDialog } from "@/components/GoatBrainSwitcher";
 import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
@@ -236,7 +235,6 @@ function GoatBrainEditor({
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [isDocPending, startDocTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [docPanelState, setDocPanelState] = useState<{
     docId: string | null;
     value: string;
@@ -450,9 +448,9 @@ function GoatBrainEditor({
             {workspace.role === "admin" && activeBrain ? (
               <button
                 type="button"
-                aria-label={`Manage access to ${activeBrain.name}`}
-                title="Brain access"
-                onClick={() => setAccessDialogOpen(true)}
+                aria-label={`Open settings for ${activeBrain.name}`}
+                title="Brain settings"
+                onClick={() => router.push(`/brain/${encodeURIComponent(activeBrain.id)}/settings`)}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <Settings2 size={15} strokeWidth={1.8} />
@@ -664,13 +662,6 @@ function GoatBrainEditor({
           onRenameTitle={renameDocument}
         />
       </div>
-      {accessDialogOpen && activeBrain ? (
-        <BrainAccessDialog
-          brain={activeBrain}
-          workspace={workspace}
-          onClose={() => setAccessDialogOpen(false)}
-        />
-      ) : null}
     </main>
   );
 }

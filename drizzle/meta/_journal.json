@@ -708,6 +708,13 @@
       "when": 1783425600000,
       "tag": "0100_goat_brain_type_consolidation",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1783590493000,
+      "tag": "0101_goat_brain_sources",
+      "breakpoints": true
     }
   ]
 }
