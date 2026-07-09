@@ -3,7 +3,6 @@ import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
-import { listCurrentUserGoatBrain } from "@/lib/brain";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
 import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
@@ -23,7 +22,6 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     tasks,
     schedules,
     recentChats,
-    brain,
     googleIntegrations,
     linear,
     github,
@@ -35,7 +33,6 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     listCurrentUserGoatTasks(),
     listCurrentUserGoatTaskSchedules(),
     listCurrentUserRecentGoatChats(),
-    listCurrentUserGoatBrain(),
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
     getGoatGitHubIntegrationState(user.workosUserId),
@@ -99,7 +96,6 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       },
     }),
     featureFlags: goatFeatureFlagsFromUser(user),
-    brain,
     codexConnected: codex.status === "connected",
     chatResumeEnabled: isGoatChatResumeEnabled(),
   };
