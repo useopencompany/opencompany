@@ -1,0 +1,1084 @@
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  type CodexAppServerNormalizedEvent,
+  normalizeCodexAppServerEvent,
+} from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { getDb } from "@opencompany/db/client";
+import {
+  type GoatLocalBridge,
+  type GoatLocalCodexCommandKind,
+  type GoatLocalCodexCommandStatus,
+  type GoatLocalCodexSession,
+  goatChatMessages,
+  goatChatSessions,
+  goatLocalBridges,
+  goatLocalCodexCommands,
+  goatLocalCodexEvents,
+  goatLocalCodexSessions,
+  goatLocalCodexTurns,
+} from "@opencompany/db/goat-schema";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { newGoatChatMessageId } from "@/lib/chat";
+import { LOCAL_CODEX_DEFAULT_MODEL, LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
+import { extractLocalRepositoryPath, hashLocalBridgeToken } from "@/lib/local-codex-utils";
+import { toGoatTaskTitle } from "@/lib/task-display";
+
+export {
+  extractLocalRepositoryPath,
+  hashLocalBridgeToken,
+  LOCAL_CODEX_DEFAULT_MODEL,
+  LOCAL_CODEX_PICKER_VALUE,
+};
+
+const LOCAL_CODEX_CHAT_MODEL: AgentModelId = "openai/gpt-5.5";
+const LOCAL_BRIDGE_TOKEN_PREFIX = "oc_goat_local_";
+const LOCAL_CODEX_PROMPT_MAX_LENGTH = 10_000;
+const LOCAL_BRIDGE_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
+const LOCAL_CODEX_COMMAND_CLAIM_TIMEOUT_MS = 30_000;
+
+export type CreateLocalBridgeResult = {
+  bridge: Pick<GoatLocalBridge, "id" | "name" | "tokenPrefix">;
+  token: string;
+  command: string;
+};
+
+export type LocalCodexMessageResult =
+  | {
+      ok: true;
+      sessionId: string;
+      userMessageId: string;
+      assistantMessageId: string | null;
+      mode: "started" | "steered";
+    }
+  | { ok: false; status: number; error: string };
+
+export type ClaimedLocalCodexCommand = {
+  id: string;
+  kind: GoatLocalCodexCommandKind;
+  localCodexSessionId: string;
+  localCodexTurnId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
+type LocalCodexCommandRow = {
+  id: string;
+  userWorkosId: string;
+  localCodexSessionId: string;
+  localCodexTurnId: string | null;
+  bridgeId: string | null;
+  claimedByBridgeId: string | null;
+  kind: GoatLocalCodexCommandKind;
+  status: GoatLocalCodexCommandStatus;
+  payload: Record<string, unknown>;
+  error: string | null;
+  claimedAt: Date | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type LocalCodexTurnRow = typeof goatLocalCodexTurns.$inferSelect;
+
+export async function createLocalCodexBridgeForUser(input: {
+  userWorkosId: string;
+  name?: string | null;
+  baseUrl?: string | null;
+}): Promise<CreateLocalBridgeResult> {
+  const token = `${LOCAL_BRIDGE_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+  const now = new Date();
+  const [bridge] = await getDb()
+    .insert(goatLocalBridges)
+    .values({
+      id: `goat_local_bridge_${randomUUID()}`,
+      userWorkosId: input.userWorkosId,
+      name: normalizeBridgeName(input.name),
+      tokenHash: hashLocalBridgeToken(token),
+      tokenPrefix: token.slice(0, LOCAL_BRIDGE_TOKEN_PREFIX.length + 6),
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({
+      id: goatLocalBridges.id,
+      name: goatLocalBridges.name,
+      tokenPrefix: goatLocalBridges.tokenPrefix,
+    });
+  if (!bridge) throw new Error("Unable to create local Codex bridge.");
+
+  const baseUrl = (input.baseUrl || "http://localhost:3002").replace(/\/+$/, "");
+  return {
+    bridge,
+    token,
+    command: `bun --filter @opencompany/goat-local-bridge start --base-url ${shellToken(baseUrl)} --token ${shellToken(token)}`,
+  };
+}
+
+export async function authenticateLocalCodexBridgeToken(
+  authorization: string | null | undefined,
+): Promise<GoatLocalBridge | null> {
+  const token = bearerToken(authorization);
+  if (!token) return null;
+  const tokenHash = hashLocalBridgeToken(token);
+  const [bridge] = await getDb()
+    .select()
+    .from(goatLocalBridges)
+    .where(and(eq(goatLocalBridges.tokenHash, tokenHash), isNull(goatLocalBridges.revokedAt)))
+    .limit(1);
+  if (!bridge) return null;
+  if (!safeEqual(bridge.tokenHash, tokenHash)) return null;
+  return bridge;
+}
+
+export async function heartbeatLocalCodexBridge(input: {
+  bridge: GoatLocalBridge;
+  name?: string | null;
+}) {
+  const now = new Date();
+  await getDb()
+    .update(goatLocalBridges)
+    .set({
+      ...(input.name ? { name: normalizeBridgeName(input.name) } : {}),
+      lastSeenAt: now,
+      updatedAt: now,
+    })
+    .where(eq(goatLocalBridges.id, input.bridge.id));
+}
+
+export async function createOrSteerLocalCodexMessage(input: {
+  userWorkosId: string;
+  sessionId?: string | null;
+  prompt: string;
+  clientMessageId?: string | null;
+}): Promise<LocalCodexMessageResult> {
+  const prompt = input.prompt.trim();
+  if (!prompt) return { ok: false, status: 400, error: "Enter a message before sending." };
+  if (prompt.length > LOCAL_CODEX_PROMPT_MAX_LENGTH) {
+    return { ok: false, status: 400, error: "Messages can be at most 10,000 characters." };
+  }
+
+  const bridge = await loadActiveLocalCodexBridge(input.userWorkosId);
+  if (!bridge) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Start the local Codex bridge before using Local Codex.",
+    };
+  }
+
+  if (input.sessionId) {
+    const existing = await loadLocalCodexSessionForChat({
+      userWorkosId: input.userWorkosId,
+      chatSessionId: input.sessionId,
+    });
+    if (!existing) {
+      return { ok: false, status: 404, error: "Local Codex session not found." };
+    }
+    return enqueueExistingLocalCodexMessage({
+      userWorkosId: input.userWorkosId,
+      prompt,
+      ...(input.clientMessageId !== undefined ? { clientMessageId: input.clientMessageId } : {}),
+      bridge,
+      localSession: existing,
+    });
+  }
+
+  return createFirstLocalCodexTurn({
+    userWorkosId: input.userWorkosId,
+    prompt,
+    repositoryPath: null,
+    ...(input.clientMessageId !== undefined ? { clientMessageId: input.clientMessageId } : {}),
+    bridge,
+  });
+}
+
+export async function interruptLocalCodexSessionForUser(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}) {
+  const localSession = await loadLocalCodexSessionForChat({
+    userWorkosId: input.userWorkosId,
+    chatSessionId: input.chatSessionId,
+  });
+  if (!localSession) return { ok: false, status: 404, error: "Local Codex session not found." };
+
+  const bridge = await loadActiveLocalCodexBridge(input.userWorkosId);
+  if (!bridge) return { ok: false, status: 409, error: "Local Codex bridge is not connected." };
+
+  const turnId = localSession.activeTurnId;
+  await enqueueLocalCodexCommand({
+    userWorkosId: input.userWorkosId,
+    localCodexSessionId: localSession.id,
+    localCodexTurnId: turnId,
+    bridgeId: bridge.id,
+    kind: "interrupt",
+    payload: {
+      localCodexSessionId: localSession.id,
+      ...(turnId ? { localCodexTurnId: turnId } : {}),
+    },
+  });
+  return { ok: true, status: 202, error: null };
+}
+
+export async function claimLocalCodexCommandsForBridge(input: {
+  bridge: GoatLocalBridge;
+  limit?: number;
+}): Promise<ClaimedLocalCodexCommand[]> {
+  const now = new Date();
+  const staleClaimedBefore = new Date(Date.now() - LOCAL_CODEX_COMMAND_CLAIM_TIMEOUT_MS);
+  const limit = Math.max(1, Math.min(input.limit ?? 5, 20));
+  const result = await getDb().execute(sql`
+    WITH candidate AS (
+      SELECT id
+      FROM goat.local_codex_commands
+      WHERE (
+          status = 'queued'
+          AND (bridge_id = ${input.bridge.id} OR bridge_id IS NULL)
+        )
+        OR (
+          status = 'claimed'
+          AND claimed_at < ${staleClaimedBefore}
+          AND (
+            bridge_id = ${input.bridge.id}
+            OR claimed_by_bridge_id = ${input.bridge.id}
+            OR bridge_id IS NULL
+          )
+        )
+      ORDER BY created_at ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${limit}
+    )
+    UPDATE goat.local_codex_commands AS command
+    SET status = 'claimed',
+        claimed_by_bridge_id = ${input.bridge.id},
+        claimed_at = ${now},
+        updated_at = ${now}
+    FROM candidate
+    WHERE command.id = candidate.id
+    RETURNING
+      command.id,
+      command.user_workos_id AS "userWorkosId",
+      command.local_codex_session_id AS "localCodexSessionId",
+      command.local_codex_turn_id AS "localCodexTurnId",
+      command.bridge_id AS "bridgeId",
+      command.claimed_by_bridge_id AS "claimedByBridgeId",
+      command.kind,
+      command.status,
+      command.payload,
+      command.error,
+      command.claimed_at AS "claimedAt",
+      command.completed_at AS "completedAt",
+      command.created_at AS "createdAt",
+      command.updated_at AS "updatedAt"
+  `);
+
+  return rowsFromExecute<LocalCodexCommandRow>(result).map((command) => ({
+    id: command.id,
+    kind: command.kind,
+    localCodexSessionId: command.localCodexSessionId,
+    localCodexTurnId: command.localCodexTurnId,
+    payload: command.payload,
+    createdAt: isoTimestamp(command.createdAt),
+  }));
+}
+
+export async function completeLocalCodexCommand(input: {
+  bridge: GoatLocalBridge;
+  commandId: string;
+  status: Extract<GoatLocalCodexCommandStatus, "succeeded" | "failed">;
+  error?: string | null;
+  codexThreadId?: string | null;
+  codexTurnId?: string | null;
+  worktreePath?: string | null;
+}) {
+  const now = new Date();
+  const [command] = await getDb()
+    .update(goatLocalCodexCommands)
+    .set({
+      status: input.status,
+      error: input.error ?? null,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(goatLocalCodexCommands.id, input.commandId),
+        or(
+          eq(goatLocalCodexCommands.claimedByBridgeId, input.bridge.id),
+          eq(goatLocalCodexCommands.bridgeId, input.bridge.id),
+        ),
+      ),
+    )
+    .returning();
+  if (!command) return { ok: false, status: 404, error: "Command not found." };
+
+  const sessionPatch: Partial<typeof goatLocalCodexSessions.$inferInsert> = {
+    updatedAt: now,
+  };
+  if (input.codexThreadId) sessionPatch.codexThreadId = input.codexThreadId;
+  if (input.worktreePath) sessionPatch.worktreePath = input.worktreePath;
+  if (input.status === "failed") {
+    sessionPatch.status = "failed";
+    sessionPatch.error = input.error ?? "Local Codex command failed.";
+  } else if (command.kind === "interrupt") {
+    sessionPatch.activeTurnId = null;
+    sessionPatch.status = "interrupted";
+    sessionPatch.error = null;
+  } else if (command.kind === "close") {
+    sessionPatch.activeTurnId = null;
+    sessionPatch.status = "closed";
+    sessionPatch.error = null;
+  }
+  await getDb()
+    .update(goatLocalCodexSessions)
+    .set(sessionPatch)
+    .where(eq(goatLocalCodexSessions.id, command.localCodexSessionId));
+
+  if (command.localCodexTurnId) {
+    const turnPatch: Partial<typeof goatLocalCodexTurns.$inferInsert> = { updatedAt: now };
+    if (input.codexTurnId) turnPatch.codexTurnId = input.codexTurnId;
+    if (input.status === "failed") {
+      turnPatch.status = "failed";
+      turnPatch.error = input.error ?? "Local Codex command failed.";
+      turnPatch.completedAt = now;
+      await appendAssistantActivity(command.localCodexTurnId, `Codex error: ${turnPatch.error}`);
+    } else if (command.kind === "interrupt" || command.kind === "close") {
+      turnPatch.status = "interrupted";
+      turnPatch.error = null;
+      turnPatch.completedAt = now;
+    }
+    await getDb()
+      .update(goatLocalCodexTurns)
+      .set(turnPatch)
+      .where(eq(goatLocalCodexTurns.id, command.localCodexTurnId));
+  }
+
+  return { ok: true, status: 200, error: null };
+}
+
+export async function recordLocalCodexBridgeEvents(input: {
+  bridge: GoatLocalBridge;
+  localCodexSessionId: string;
+  localCodexTurnId?: string | null;
+  commandId?: string | null;
+  events: Record<string, unknown>[];
+}) {
+  const localSession = await loadLocalCodexSessionForBridge({
+    bridge: input.bridge,
+    localCodexSessionId: input.localCodexSessionId,
+  });
+  if (!localSession) return { ok: false, status: 404, error: "Local Codex session not found." };
+
+  const normalized = input.events.flatMap(normalizeCodexAppServerEvent);
+  for (const event of normalized) {
+    await persistLocalCodexEvent({
+      bridge: input.bridge,
+      localSession,
+      localCodexTurnId: input.localCodexTurnId ?? localSession.activeTurnId,
+      commandId: input.commandId ?? null,
+      event,
+    });
+  }
+  return { ok: true, status: 202, error: null };
+}
+
+function normalizeBridgeName(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, 80) : "Local Codex bridge";
+}
+
+function bearerToken(value: string | null | undefined) {
+  const match = /^Bearer\s+(.+)$/i.exec(value?.trim() ?? "");
+  return match?.[1]?.trim() || null;
+}
+
+function safeEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function shellToken(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function loadActiveLocalCodexBridge(userWorkosId: string) {
+  const activeAfter = new Date(Date.now() - LOCAL_BRIDGE_ACTIVE_WINDOW_MS);
+  const [bridge] = await getDb()
+    .select()
+    .from(goatLocalBridges)
+    .where(
+      and(
+        eq(goatLocalBridges.userWorkosId, userWorkosId),
+        isNull(goatLocalBridges.revokedAt),
+        gt(goatLocalBridges.lastSeenAt, activeAfter),
+      ),
+    )
+    .orderBy(desc(goatLocalBridges.lastSeenAt), desc(goatLocalBridges.createdAt))
+    .limit(1);
+  return bridge ?? null;
+}
+
+async function loadLocalCodexSessionForChat(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}) {
+  const [session] = await getDb()
+    .select()
+    .from(goatLocalCodexSessions)
+    .innerJoin(goatChatSessions, eq(goatChatSessions.id, goatLocalCodexSessions.chatSessionId))
+    .where(
+      and(
+        eq(goatLocalCodexSessions.userWorkosId, input.userWorkosId),
+        eq(goatLocalCodexSessions.chatSessionId, input.chatSessionId),
+        isNull(goatChatSessions.closedAt),
+      ),
+    )
+    .limit(1);
+  return session?.local_codex_sessions ?? null;
+}
+
+async function loadLocalCodexSessionForBridge(input: {
+  bridge: GoatLocalBridge;
+  localCodexSessionId: string;
+}) {
+  const [session] = await getDb()
+    .select()
+    .from(goatLocalCodexSessions)
+    .where(
+      and(
+        eq(goatLocalCodexSessions.id, input.localCodexSessionId),
+        eq(goatLocalCodexSessions.userWorkosId, input.bridge.userWorkosId),
+        or(
+          eq(goatLocalCodexSessions.bridgeId, input.bridge.id),
+          isNull(goatLocalCodexSessions.bridgeId),
+        ),
+      ),
+    )
+    .limit(1);
+  return session ?? null;
+}
+
+async function createFirstLocalCodexTurn(input: {
+  userWorkosId: string;
+  prompt: string;
+  repositoryPath: string | null;
+  clientMessageId?: string | null;
+  bridge: GoatLocalBridge;
+}): Promise<LocalCodexMessageResult> {
+  const chatSessionId = `goat_chat_${randomUUID()}`;
+  const localCodexSessionId = `goat_local_codex_${randomUUID()}`;
+  const turnId = `goat_local_codex_turn_${randomUUID()}`;
+  const commandId = `goat_local_codex_cmd_${randomUUID()}`;
+  const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
+  const assistantMessageId = newGoatChatMessageId();
+  const now = new Date();
+  const title = toGoatTaskTitle(input.prompt);
+
+  await getDb().execute(sql`
+    WITH created_chat AS (
+      INSERT INTO goat.chat_sessions (
+        id,
+        user_workos_id,
+        title,
+        model,
+        engine,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${chatSessionId},
+        ${input.userWorkosId},
+        ${title},
+        ${LOCAL_CODEX_CHAT_MODEL},
+        'local_codex',
+        ${now},
+        ${now}
+      )
+      RETURNING id
+    ),
+    inserted_user_message AS (
+      INSERT INTO goat.chat_messages (
+        id,
+        session_id,
+        role,
+        content,
+        created_at,
+        updated_at
+      )
+      VALUES (${userMessageId}, ${chatSessionId}, 'user', ${input.prompt}, ${now}, ${now})
+      RETURNING id
+    ),
+    inserted_assistant_message AS (
+      INSERT INTO goat.chat_messages (
+        id,
+        session_id,
+        role,
+        content,
+        debug_trace,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${assistantMessageId},
+        ${chatSessionId},
+        'assistant',
+        '',
+        ${JSON.stringify({ schemaVersion: "goat.local_codex.debug.v1", model: LOCAL_CODEX_DEFAULT_MODEL })}::jsonb,
+        ${now},
+        ${now}
+      )
+      RETURNING id
+    ),
+    inserted_local_session AS (
+      INSERT INTO goat.local_codex_sessions (
+        id,
+        user_workos_id,
+        chat_session_id,
+        bridge_id,
+        repository_path,
+        model,
+        active_turn_id,
+        status,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${localCodexSessionId},
+        ${input.userWorkosId},
+        ${chatSessionId},
+        ${input.bridge.id},
+        ${input.repositoryPath},
+        ${LOCAL_CODEX_DEFAULT_MODEL},
+        ${turnId},
+        'starting',
+        ${now},
+        ${now}
+      )
+      RETURNING id
+    ),
+    inserted_turn AS (
+      INSERT INTO goat.local_codex_turns (
+        id,
+        user_workos_id,
+        local_codex_session_id,
+        user_message_id,
+        assistant_message_id,
+        status,
+        prompt,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${turnId},
+        ${input.userWorkosId},
+        ${localCodexSessionId},
+        ${userMessageId},
+        ${assistantMessageId},
+        'queued',
+        ${input.prompt},
+        ${now},
+        ${now}
+      )
+      RETURNING id
+    )
+    INSERT INTO goat.local_codex_commands (
+      id,
+      user_workos_id,
+      local_codex_session_id,
+      local_codex_turn_id,
+      bridge_id,
+      kind,
+      status,
+      payload,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ${commandId},
+      ${input.userWorkosId},
+      ${localCodexSessionId},
+      ${turnId},
+      ${input.bridge.id},
+      'start_turn',
+      'queued',
+      ${JSON.stringify({
+        prompt: input.prompt,
+        repositoryPath: input.repositoryPath,
+        model: LOCAL_CODEX_DEFAULT_MODEL,
+      })}::jsonb,
+      ${now},
+      ${now}
+    WHERE EXISTS (SELECT 1 FROM created_chat)
+      AND EXISTS (SELECT 1 FROM inserted_user_message)
+      AND EXISTS (SELECT 1 FROM inserted_assistant_message)
+      AND EXISTS (SELECT 1 FROM inserted_local_session)
+      AND EXISTS (SELECT 1 FROM inserted_turn)
+  `);
+
+  return {
+    ok: true,
+    sessionId: chatSessionId,
+    userMessageId,
+    assistantMessageId,
+    mode: "started",
+  };
+}
+
+async function enqueueExistingLocalCodexMessage(input: {
+  userWorkosId: string;
+  prompt: string;
+  clientMessageId?: string | null;
+  bridge: GoatLocalBridge;
+  localSession: GoatLocalCodexSession;
+}): Promise<LocalCodexMessageResult> {
+  const now = new Date();
+  const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
+  const running = input.localSession.status === "running" && input.localSession.activeTurnId;
+
+  if (running) {
+    await getDb().execute(sql`
+      WITH inserted_user_message AS (
+        INSERT INTO goat.chat_messages (
+          id,
+          session_id,
+          role,
+          content,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${userMessageId},
+          ${input.localSession.chatSessionId},
+          'user',
+          ${input.prompt},
+          ${now},
+          ${now}
+        )
+        RETURNING id
+      ),
+      touched_chat AS (
+        UPDATE goat.chat_sessions
+        SET updated_at = ${now}
+        WHERE id = ${input.localSession.chatSessionId}
+        RETURNING id
+      )
+      INSERT INTO goat.local_codex_commands (
+        id,
+        user_workos_id,
+        local_codex_session_id,
+        local_codex_turn_id,
+        bridge_id,
+        kind,
+        status,
+        payload,
+        created_at,
+        updated_at
+      )
+      SELECT
+        ${`goat_local_codex_cmd_${randomUUID()}`},
+        ${input.userWorkosId},
+        ${input.localSession.id},
+        ${input.localSession.activeTurnId},
+        ${input.bridge.id},
+        'steer',
+        'queued',
+        ${JSON.stringify({ prompt: input.prompt })}::jsonb,
+        ${now},
+        ${now}
+      WHERE EXISTS (SELECT 1 FROM inserted_user_message)
+        AND EXISTS (SELECT 1 FROM touched_chat)
+    `);
+    return {
+      ok: true,
+      sessionId: input.localSession.chatSessionId,
+      userMessageId,
+      assistantMessageId: null,
+      mode: "steered",
+    };
+  }
+
+  const turnId = `goat_local_codex_turn_${randomUUID()}`;
+  const assistantMessageId = newGoatChatMessageId();
+  await getDb().execute(sql`
+    WITH inserted_user_message AS (
+      INSERT INTO goat.chat_messages (
+        id,
+        session_id,
+        role,
+        content,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${userMessageId},
+        ${input.localSession.chatSessionId},
+        'user',
+        ${input.prompt},
+        ${now},
+        ${now}
+      )
+      RETURNING id
+    ),
+    inserted_assistant_message AS (
+      INSERT INTO goat.chat_messages (
+        id,
+        session_id,
+        role,
+        content,
+        debug_trace,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${assistantMessageId},
+        ${input.localSession.chatSessionId},
+        'assistant',
+        '',
+        ${JSON.stringify({ schemaVersion: "goat.local_codex.debug.v1", model: input.localSession.model })}::jsonb,
+        ${now},
+        ${now}
+      )
+      RETURNING id
+    ),
+    inserted_turn AS (
+      INSERT INTO goat.local_codex_turns (
+        id,
+        user_workos_id,
+        local_codex_session_id,
+        user_message_id,
+        assistant_message_id,
+        status,
+        prompt,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${turnId},
+        ${input.userWorkosId},
+        ${input.localSession.id},
+        ${userMessageId},
+        ${assistantMessageId},
+        'queued',
+        ${input.prompt},
+        ${now},
+        ${now}
+      )
+      RETURNING id
+    ),
+    updated_session AS (
+      UPDATE goat.local_codex_sessions
+      SET bridge_id = ${input.bridge.id},
+          active_turn_id = ${turnId},
+          status = 'starting',
+          error = NULL,
+          updated_at = ${now}
+      WHERE id = ${input.localSession.id}
+      RETURNING id
+    ),
+    touched_chat AS (
+      UPDATE goat.chat_sessions
+      SET updated_at = ${now}
+      WHERE id = ${input.localSession.chatSessionId}
+      RETURNING id
+    )
+    INSERT INTO goat.local_codex_commands (
+      id,
+      user_workos_id,
+      local_codex_session_id,
+      local_codex_turn_id,
+      bridge_id,
+      kind,
+      status,
+      payload,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ${`goat_local_codex_cmd_${randomUUID()}`},
+      ${input.userWorkosId},
+      ${input.localSession.id},
+      ${turnId},
+      ${input.bridge.id},
+      'start_turn',
+      'queued',
+      ${JSON.stringify({
+        prompt: input.prompt,
+        repositoryPath: input.localSession.repositoryPath,
+        model: input.localSession.model,
+        codexThreadId: input.localSession.codexThreadId,
+        worktreePath: input.localSession.worktreePath,
+      })}::jsonb,
+      ${now},
+      ${now}
+    WHERE EXISTS (SELECT 1 FROM inserted_user_message)
+      AND EXISTS (SELECT 1 FROM inserted_assistant_message)
+      AND EXISTS (SELECT 1 FROM inserted_turn)
+      AND EXISTS (SELECT 1 FROM updated_session)
+      AND EXISTS (SELECT 1 FROM touched_chat)
+  `);
+
+  return {
+    ok: true,
+    sessionId: input.localSession.chatSessionId,
+    userMessageId,
+    assistantMessageId,
+    mode: "started",
+  };
+}
+
+async function enqueueLocalCodexCommand(input: {
+  userWorkosId: string;
+  localCodexSessionId: string;
+  localCodexTurnId?: string | null;
+  bridgeId: string;
+  kind: GoatLocalCodexCommandKind;
+  payload: Record<string, unknown>;
+}) {
+  const now = new Date();
+  await getDb()
+    .insert(goatLocalCodexCommands)
+    .values({
+      id: `goat_local_codex_cmd_${randomUUID()}`,
+      userWorkosId: input.userWorkosId,
+      localCodexSessionId: input.localCodexSessionId,
+      localCodexTurnId: input.localCodexTurnId ?? null,
+      bridgeId: input.bridgeId,
+      kind: input.kind,
+      status: "queued",
+      payload: input.payload,
+      createdAt: now,
+      updatedAt: now,
+    });
+}
+
+async function persistLocalCodexEvent(input: {
+  bridge: GoatLocalBridge;
+  localSession: GoatLocalCodexSession;
+  localCodexTurnId?: string | null;
+  commandId?: string | null;
+  event: CodexAppServerNormalizedEvent;
+}) {
+  const now = new Date();
+  const turnId = input.localCodexTurnId ?? input.localSession.activeTurnId;
+  await getDb()
+    .insert(goatLocalCodexEvents)
+    .values({
+      userWorkosId: input.bridge.userWorkosId,
+      localCodexSessionId: input.localSession.id,
+      localCodexTurnId: turnId ?? null,
+      bridgeId: input.bridge.id,
+      commandId: input.commandId ?? null,
+      type: input.event.type,
+      payload: input.event.payload,
+      rawEvent: input.event.rawEvent,
+      createdAt: now,
+    });
+
+  const turn = turnId ? await loadLocalCodexTurn(turnId) : null;
+  if (turn) {
+    await applyLocalCodexEventToChat({
+      localSession: input.localSession,
+      turn,
+      event: input.event,
+      now,
+    });
+  }
+}
+
+async function applyLocalCodexEventToChat(input: {
+  localSession: GoatLocalCodexSession;
+  turn: LocalCodexTurnRow;
+  event: CodexAppServerNormalizedEvent;
+  now: Date;
+}) {
+  if (input.event.type === "assistant.delta") {
+    return;
+  }
+
+  if (input.event.type === "assistant.completed") {
+    const content = stringPayload(input.event.payload.content);
+    if (content) await setAssistantContent(input.turn.assistantMessageId, content);
+    return;
+  }
+
+  const activity = activityFromLocalCodexEvent(input.event);
+  if (activity) {
+    await appendAssistantActivity(input.turn.id, activity);
+  }
+
+  if (input.event.type === "turn.started") {
+    const codexTurnId = stringPayload(input.event.payload.turnId);
+    await getDb()
+      .update(goatLocalCodexTurns)
+      .set({
+        ...(codexTurnId ? { codexTurnId } : {}),
+        status: "running",
+        updatedAt: input.now,
+      })
+      .where(eq(goatLocalCodexTurns.id, input.turn.id));
+    await getDb()
+      .update(goatLocalCodexSessions)
+      .set({
+        activeTurnId: input.turn.id,
+        status: "running",
+        error: null,
+        updatedAt: input.now,
+      })
+      .where(eq(goatLocalCodexSessions.id, input.localSession.id));
+    return;
+  }
+
+  if (input.event.type === "turn.completed") {
+    const rawStatus = stringPayload(input.event.payload.status);
+    const status =
+      rawStatus === "completed"
+        ? "completed"
+        : rawStatus === "interrupted"
+          ? "interrupted"
+          : "failed";
+    const error = stringPayload(input.event.payload.error);
+    await getDb()
+      .update(goatLocalCodexTurns)
+      .set({
+        status,
+        error: error || null,
+        completedAt: input.now,
+        updatedAt: input.now,
+      })
+      .where(eq(goatLocalCodexTurns.id, input.turn.id));
+    await getDb()
+      .update(goatLocalCodexSessions)
+      .set({
+        activeTurnId: null,
+        status: status === "completed" ? "idle" : status,
+        error: error || null,
+        updatedAt: input.now,
+      })
+      .where(eq(goatLocalCodexSessions.id, input.localSession.id));
+    await getDb()
+      .update(goatChatSessions)
+      .set({ updatedAt: input.now })
+      .where(eq(goatChatSessions.id, input.localSession.chatSessionId));
+    await setAssistantContentFromCompletedEvent(input.turn.id, input.turn.assistantMessageId);
+  }
+}
+
+async function loadLocalCodexTurn(turnId: string) {
+  const [turn] = await getDb()
+    .select()
+    .from(goatLocalCodexTurns)
+    .where(eq(goatLocalCodexTurns.id, turnId))
+    .limit(1);
+  return turn ?? null;
+}
+
+async function appendAssistantActivity(turnId: string, activity: string) {
+  const turn = await loadLocalCodexTurn(turnId);
+  if (!turn) return;
+  const text = `\n\n${activity}`;
+  await appendAssistantContent(turn.assistantMessageId, text);
+}
+
+async function appendAssistantContent(messageId: string, delta: string) {
+  if (!delta) return;
+  const now = new Date();
+  await getDb().execute(sql`
+    UPDATE goat.chat_messages
+    SET content = content || ${delta},
+        updated_at = ${now}
+    WHERE id = ${messageId}
+      AND role = 'assistant'
+  `);
+}
+
+async function setAssistantContent(messageId: string, content: string) {
+  const now = new Date();
+  await getDb().execute(sql`
+    UPDATE goat.chat_messages
+    SET content = ${content},
+        updated_at = ${now}
+    WHERE id = ${messageId}
+      AND role = 'assistant'
+  `);
+}
+
+async function setAssistantContentFromCompletedEvent(turnId: string, assistantMessageId: string) {
+  const [event] = await getDb()
+    .select({ payload: goatLocalCodexEvents.payload })
+    .from(goatLocalCodexEvents)
+    .where(
+      and(
+        eq(goatLocalCodexEvents.localCodexTurnId, turnId),
+        eq(goatLocalCodexEvents.type, "assistant.completed"),
+      ),
+    )
+    .orderBy(desc(goatLocalCodexEvents.createdAt))
+    .limit(1);
+  const content = stringPayload(event?.payload?.content);
+  if (content) await setAssistantContent(assistantMessageId, content);
+}
+
+function activityFromLocalCodexEvent(event: CodexAppServerNormalizedEvent) {
+  if (event.type === "reasoning.completed") {
+    const text = truncateActivity(stringPayload(event.payload.text));
+    return text ? `Codex reasoning: ${text}` : "Codex reasoning completed.";
+  }
+  if (event.type === "command.started") {
+    return `Codex command started: ${formatCommand(event.payload.command)}`;
+  }
+  if (event.type === "command.completed") {
+    return `Codex command completed: ${formatCommand(event.payload.command)}`;
+  }
+  if (event.type === "command.failed") {
+    const error = truncateActivity(stringPayload(event.payload.error));
+    return `Codex command failed: ${formatCommand(event.payload.command)}${error ? ` - ${error}` : ""}`;
+  }
+  if (event.type === "turn.completed") {
+    const status = stringPayload(event.payload.status) || "completed";
+    if (status === "completed") return null;
+    const error = truncateActivity(stringPayload(event.payload.error));
+    return `Codex turn ${status}${error ? `: ${error}` : "."}`;
+  }
+  if (event.type === "error") {
+    return `Codex error: ${truncateActivity(stringPayload(event.payload.message))}`;
+  }
+  return null;
+}
+
+function formatCommand(value: unknown) {
+  const text = truncateActivity(stringPayload(value)) || "command";
+  return `\`${text.replaceAll("`", "\\`")}\``;
+}
+
+function stringPayload(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function truncateActivity(value: string, max = 220) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > max ? `${compact.slice(0, max - 3).trimEnd()}...` : compact;
+}
+
+function safeClientMessageId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.length > 160) return null;
+  return trimmed;
+}
+
+function isoTimestamp(value: unknown) {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.valueOf())) return parsed.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+type ExecuteResultRow = Record<string, unknown>;
+
+function rowsFromExecute<T extends ExecuteResultRow>(result: unknown): T[] {
+  if (!result || typeof result !== "object") return [];
+  const rows = (result as { rows?: unknown }).rows;
+  return Array.isArray(rows) ? (rows as T[]) : [];
+}

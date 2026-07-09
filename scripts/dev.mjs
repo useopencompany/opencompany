@@ -144,6 +144,8 @@ function envForAppMode() {
   return {
     GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
     GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    GOAT_LOCAL_BRIDGE_BASE_URL:
+      process.env.GOAT_LOCAL_BRIDGE_BASE_URL?.trim() || `http://127.0.0.1:${port}`,
     NEXT_PUBLIC_APP_URL: goatAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
     WORKOS_REDIRECT_URI: goatRedirectUri,

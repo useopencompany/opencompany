@@ -32,6 +32,7 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
       id: chatId,
       title: summary?.title ?? "Goat",
       model: summary?.model ?? DEFAULT_GOAT_MODEL,
+      engine: summary?.engine ?? "opencompany",
       messages: [],
     };
   }, [chatId, data.recentChats]);

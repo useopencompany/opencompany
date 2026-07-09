@@ -680,6 +680,20 @@
       "when": 1783424000000,
       "tag": "0096_goat_workspaces_brains",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1783424300000,
+      "tag": "0097_goat_local_codex_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1783424600000,
+      "tag": "0098_goat_local_codex_empty_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type {
+  GoatChatEngine,
   GoatChatMessage,
   GoatHarnessEngine,
   GoatTaskStatus,
@@ -226,6 +227,7 @@ export type GoatChatSessionView = {
   id: string;
   title: string;
   model: AgentModelId;
+  engine?: GoatChatEngine;
   messages: GoatChatUiMessage[];
 };
 
@@ -233,6 +235,7 @@ export type GoatChatSummaryView = {
   id: string;
   title: string;
   model: AgentModelId;
+  engine?: GoatChatEngine;
   preview: string;
   updatedAt: string;
 };

@@ -94,6 +94,14 @@ const SHAPE_SCOPES = {
     table: "goat.chat_sessions",
     where: scopedOpenChatSessionWhere,
   },
+  local_codex_sessions: {
+    table: "goat.local_codex_sessions",
+    where: scopedLocalCodexSessionWhere,
+  },
+  "goat.local_codex_sessions": {
+    table: "goat.local_codex_sessions",
+    where: scopedLocalCodexSessionWhere,
+  },
   integrations: {
     table: "goat.integrations",
     where: scopedUserWhere,
@@ -211,6 +219,14 @@ export function goatElectricChatMessagesSessionId(requestUrl: URL) {
   return sessionId || null;
 }
 
+export function goatElectricLocalCodexChatSessionId(requestUrl: URL) {
+  const table = requestUrl.searchParams.get("table");
+  if (table !== "local_codex_sessions" && table !== "goat.local_codex_sessions") return null;
+
+  const sessionId = requestUrl.searchParams.get("chat_session_id")?.trim();
+  return sessionId || null;
+}
+
 function scopedChatMessageWhere(
   _userWorkosId: string,
   requestUrl: URL,
@@ -221,6 +237,20 @@ function scopedChatMessageWhere(
 
   return {
     clause: `"session_id" = $1`,
+    params: [sessionId],
+  };
+}
+
+function scopedLocalCodexSessionWhere(
+  _userWorkosId: string,
+  requestUrl: URL,
+  context: ShapeWhereContext,
+): ShapeWhere | null {
+  const sessionId = goatElectricLocalCodexChatSessionId(requestUrl);
+  if (!sessionId || context.authorizedChatSessionId !== sessionId) return null;
+
+  return {
+    clause: `"chat_session_id" = $1`,
     params: [sessionId],
   };
 }
