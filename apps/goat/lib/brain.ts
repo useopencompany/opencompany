@@ -58,6 +58,7 @@ export type GoatBrainDocumentView = {
   mimeType: string;
   originalFileName?: string | null;
   assetStorageKey?: string | null;
+  assetSizeBytes?: number | null;
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
   kind: GoatBrainKind;
@@ -332,10 +333,11 @@ export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDoc
     content: row.content,
     body: normalizeGoatBrainCompiledTruth(row.body, row.title || parsed.title || row.brainId),
     timeline: parsed.timeline,
-    format: "markdown",
+    format: row.format,
     mimeType: row.mimeType ?? "text/markdown",
-    originalFileName: null,
-    assetStorageKey: null,
+    originalFileName: row.originalFileName,
+    assetStorageKey: row.assetStorageKey,
+    assetSizeBytes: row.assetSizeBytes,
     relations: parsed.frontmatter.relations ?? [],
     sources: parsed.frontmatter.sources ?? [],
     kind: row.kind,

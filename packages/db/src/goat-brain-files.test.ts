@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseGoatBrainDocument } from "@opencompany/goat-brain";
+import { appendGoatBrainAssetTextBlock, parseGoatBrainDocument } from "@opencompany/goat-brain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createGoatBrainMarkdownContent,
@@ -391,3 +391,46 @@ function materializeSelectDb(rows: unknown[]) {
     }),
   } as never;
 }
+
+describe("goat brain asset projections", () => {
+  it("strips the generated extracted-text block before persisting", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "q3-board-deck",
+      folderPath: "sources",
+      title: "Q3 Board Deck",
+      type: "source",
+      compiledTruth: "Uploaded file `deck.pdf`. Ingestion pending.",
+    });
+    const projected = appendGoatBrainAssetTextBlock(content, "Revenue grew 40% QoQ.");
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "sources/q3-board-deck.md",
+      content: projected,
+    });
+
+    expect(projection.content).toBe(content);
+    expect(projection.contentHash).toBe(hashGoatBrainContent(content));
+    expect(projection.body).not.toContain("Revenue grew 40%");
+  });
+
+  it("discards edits made inside the generated block", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "q3-board-deck",
+      folderPath: "sources",
+      title: "Q3 Board Deck",
+      type: "source",
+      compiledTruth: "Synthesis.",
+    });
+    const tampered = appendGoatBrainAssetTextBlock(content, "original text").replace(
+      "original text",
+      "tampered text",
+    );
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "sources/q3-board-deck.md",
+      content: tampered,
+    });
+
+    expect(projection.content).toBe(content);
+  });
+});

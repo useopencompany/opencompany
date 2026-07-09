@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   BrainSourceNormalizationError,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedUploadAssetSourceItem,
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
+  normalizeUploadAsset,
 } from "./source-items";
 
 function jamiePayload(overrides: Record<string, unknown> = {}) {
@@ -221,5 +223,46 @@ describe("Goat chat capture normalization", () => {
     expect(
       isNormalizedGoatChatCaptureSourceItem(normalizeJamieMeetingCompletedWebhook(jamiePayload())),
     ).toBe(false);
+  });
+});
+
+describe("normalizeUploadAsset", () => {
+  const input = {
+    documentId: "goat_brain_doc_abc",
+    brainId: "q3-board-deck",
+    folderPath: "sources",
+    format: "pdf",
+    mimeType: "application/pdf",
+    originalFileName: "Q3 Board Deck.pdf",
+    sizeBytes: 123_456,
+    contentSha256: "a".repeat(64),
+    uploadedAt: "2026-07-09T10:00:00.000Z",
+  };
+
+  it("normalizes an uploaded asset with a stable external id and source ref", () => {
+    const item = normalizeUploadAsset(input);
+    expect(item.sourceProvider).toBe("upload");
+    expect(item.sourceType).toBe("asset");
+    expect(item.externalId).toBe("goat_brain_doc_abc");
+    expect(item.sourceRef).toBe("upload:goat_brain_doc_abc");
+    expect(item.title).toBe("Q3 Board Deck.pdf");
+    expect(item.content.asset.brainId).toBe("q3-board-deck");
+    expect(isNormalizedUploadAssetSourceItem(item)).toBe(true);
+    // Same bytes dedupe; different bytes re-enqueue.
+    expect(normalizeUploadAsset(input).contentHash).toBe(item.contentHash);
+    expect(normalizeUploadAsset({ ...input, contentSha256: "b".repeat(64) }).contentHash).not.toBe(
+      item.contentHash,
+    );
+  });
+
+  it("rejects malformed digests and timestamps", () => {
+    expect(() => normalizeUploadAsset({ ...input, contentSha256: "nope" })).toThrow(/sha256/);
+    expect(() => normalizeUploadAsset({ ...input, uploadedAt: "not-a-date" })).toThrow(/timestamp/);
+    expect(() => normalizeUploadAsset({ ...input, documentId: " " })).toThrow(/documentId/);
+  });
+
+  it("guards against other item shapes", () => {
+    expect(isNormalizedUploadAssetSourceItem({ sourceProvider: "upload" })).toBe(false);
+    expect(isNormalizedUploadAssetSourceItem(null)).toBe(false);
   });
 });

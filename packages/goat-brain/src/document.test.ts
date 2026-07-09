@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendGoatBrainAssetTextBlock,
+  extractGoatBrainAssetText,
   normalizeGoatBrainBody,
   normalizeGoatBrainCompiledTruth,
   parseGoatBrainDocument,
   replaceGoatBrainCompiledTruth,
   serializeGoatBrainDocument,
+  stripGoatBrainAssetTextBlock,
 } from "./document";
 import type { GoatBrainDocument } from "./schema";
 import { goatBrainTimelineEntryFromParts } from "./timeline";
@@ -283,5 +286,48 @@ Old truth.
         summary: "Captured source information.",
       }),
     ).toThrow('Invalid timeline "at" value');
+  });
+});
+
+describe("goat brain asset text block", () => {
+  const base = serializeGoatBrainDocument({
+    frontmatter: {
+      id: "q3-board-deck",
+      folder: "sources",
+      kind: "page",
+      type: "source",
+      status: "draft",
+      title: "Q3 Board Deck",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+      relations: [],
+    },
+    title: "Q3 Board Deck",
+    compiledTruth: "Uploaded file `deck.pdf`. Ingestion pending.",
+    timeline: [],
+  });
+
+  it("appends, extracts, and strips the generated block", () => {
+    const projected = appendGoatBrainAssetTextBlock(base, "Revenue grew 40% QoQ.\n\nHiring plan.");
+    expect(projected).toContain("## Extracted text");
+    expect(extractGoatBrainAssetText(projected)).toBe("Revenue grew 40% QoQ.\n\nHiring plan.");
+    expect(stripGoatBrainAssetTextBlock(projected)).toBe(base);
+  });
+
+  it("appends nothing for empty asset text", () => {
+    expect(appendGoatBrainAssetTextBlock(base, "   ")).toBe(base);
+    expect(extractGoatBrainAssetText(base)).toBe("");
+    expect(stripGoatBrainAssetTextBlock(base)).toBe(base);
+  });
+
+  it("parses documents ignoring the generated block, including edits inside it", () => {
+    const projected = appendGoatBrainAssetTextBlock(
+      base,
+      "### ev-fake - 2026-07-02T00:00:00.000Z\nlooks like a timeline entry",
+    );
+    const parsed = parseGoatBrainDocument(projected);
+    expect(parsed.compiledTruth).toBe("Uploaded file `deck.pdf`. Ingestion pending.");
+    expect(parsed.timeline).toEqual([]);
+    expect(parsed.frontmatter.id).toBe("q3-board-deck");
   });
 });

@@ -26,6 +26,7 @@ Every claim written into the brain has three parts:
 | Meeting transcripts, call recordings (Jamie) | Snapshot into `evidence/` | Ephemeral; no canonical live home. Pages link the evidence record, never inline the transcript. |
 | Emails | Snapshot into `evidence/` | Mailboxes are private and mutable; the brain cannot rely on re-fetching. |
 | Tracked work items (Linear issues, GitHub issues/PRs) | Pointer + one-line current-state summary | The tracker is the canonical live home; body copies go stale the moment they are written. Never copy the body. |
+| Uploaded files (PDFs) | Bytes-by-key + extracted-text copy | The brain itself is the canonical home: the blob holds the bytes (`asset_storage_key`), the document row holds the machine-extracted text, and the page's `sources` entry carries the `upload:<documentId>` ref. See [data-model.md](./data-model.md#binary-assets-pdf). |
 | Everything else | Pointer only, by default | Snapshot only if the content could not be re-fetched later. |
 
 ## Source ref grammar
