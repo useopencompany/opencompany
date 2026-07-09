@@ -166,6 +166,10 @@ export const GOAT_HARNESS_CREATION_PROMPT_CONTRACT = promptBlock("prompt_contrac
   "Always return a non-empty systemPrompt for the task execution model.",
   "The systemPrompt must include the durable task-runner behavior, tool policy, and result contract needed to execute this task.",
   "Do not rely on any fallback system prompt.",
+  "Treat task_prompt as the source of truth for what the user asked.",
+  "Keep initialUserMessage close to task_prompt. Do not expand it into a more detailed task, add guessed requirements, or invent success criteria.",
+  "Only add light clarifications to initialUserMessage when they come directly from planner inputs, such as requested_engine, available connected repository names, selected output mode, or tool-access realities.",
+  "Put execution guidance, tool-use sequencing, and result-format rules in systemPrompt instead of inflating initialUserMessage.",
 ]);
 
 export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
@@ -192,7 +196,7 @@ export const GOAT_HARNESS_CREATION_CODEX_GOAL_POLICY = promptBlock("codex_goal_p
   'For engine "codex", set codex.goalMode only when the task has an iterative path, a clear finish line, and a verification surface such as tests, build output, reproduced bug behavior, or a review checklist.',
   "Use Goal mode for multi-step coding tasks where Codex should keep working across evidence-based continuation until the objective is complete, blocked, budget-limited, usage-limited, or timed out.",
   "Do not set codex.goalMode for simple one-shot edits, straightforward explanations, quick lookups, or tasks that can finish in a single normal Codex turn.",
-  "When setting codex.goalMode, write a concise objective with concrete success criteria. The objective must be non-empty and no more than 4,000 characters.",
+  "When setting codex.goalMode, write a concise objective grounded in task_prompt with only the concrete success criteria the user asked for or that are inherent to the requested coding workflow, such as running relevant tests after a fix. The objective must be non-empty and no more than 4,000 characters.",
   "Omit codex.goalMode.tokenBudget unless the task clearly needs a custom budget. The runner applies a 200000-token default when it is omitted.",
 ]);
 
