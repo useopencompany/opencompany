@@ -441,6 +441,105 @@ describe("goat-brain cli", () => {
     });
   });
 
+  it("updates title, type, and status through set", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "inbox",
+        "--type",
+        "note",
+        "--id",
+        "quick-note",
+        "--title",
+        "Quick note",
+        "--truth",
+        "Pricing should be usage-based.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(run(["set", "--root", root, "quick-note"])).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("Provide at least one of"),
+    });
+    await expect(
+      run(["set", "--root", root, "quick-note", "--type", "wat"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("Unsupported Goat Brain entity type"),
+    });
+    await expect(
+      run(["set", "--root", root, "quick-note", "--status", "merged"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("Use the merge command"),
+    });
+
+    await expect(
+      run([
+        "set",
+        "--root",
+        root,
+        "quick-note",
+        "--title",
+        "Usage-based pricing",
+        "--type",
+        "concept",
+      ]),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining('Updated "quick-note"'),
+    });
+
+    const updated = JSON.parse(
+      (await run(["get", "--root", root, "quick-note", "--section", "frontmatter", "--json"]))
+        .stdout,
+    ) as { frontmatter: { title: string; type: string; status: string } };
+    expect(updated.frontmatter).toMatchObject({
+      title: "Usage-based pricing",
+      type: "concept",
+      status: "draft",
+    });
+
+    // Promotion is guarded by validation: active compiled truth must cite
+    // evidence.
+    await expect(
+      run(["set", "--root", root, "quick-note", "--status", "active"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("active compiled truth must cite evidence"),
+    });
+    await expect(
+      run([
+        "append-evidence",
+        "--root",
+        root,
+        "quick-note",
+        "--source-ref",
+        "goat-chat:message_123",
+        "--body",
+        "Pricing should be usage-based.",
+        "--evidence-id",
+        "ev-quick-note-capture",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      run([
+        "rewrite",
+        "--root",
+        root,
+        "quick-note",
+        "--truth",
+        "Pricing should be usage-based. [[evidence:ev-quick-note-capture|Chat capture]]",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      run(["set", "--root", root, "quick-note", "--status", "active"]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+  });
+
   it("adds and reads sourced timeline entries through gbrain-style commands", async () => {
     await expect(
       run([

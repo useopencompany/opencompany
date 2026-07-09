@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BrainSourceNormalizationError,
+  isNormalizedGoatChatCaptureSourceItem,
+  normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
 } from "./source-items";
 
@@ -144,5 +146,80 @@ describe("Jamie brain source normalization", () => {
     expect(() => normalizeJamieMeetingCompletedWebhook(jamiePayload(override))).toThrow(
       BrainSourceNormalizationError,
     );
+  });
+});
+
+describe("Goat chat capture normalization", () => {
+  function captureInput(overrides: Record<string, unknown> = {}) {
+    return {
+      text: "Check out https://example.com/pricing-teardown for the pricing rework.",
+      title: "Pricing teardown reference",
+      intent: "reference for the pricing page rework",
+      chatSessionId: "goat_chat_session_1",
+      userMessageId: "goat_chat_msg_1",
+      draftBrainId: "pricing-teardown-reference",
+      draftFolder: "inbox",
+      capturedAt: "2026-07-09T10:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("normalizes a chat capture", () => {
+    const item = normalizeGoatChatCapture(captureInput());
+
+    expect(item).toMatchObject({
+      sourceProvider: "goat-chat",
+      sourceType: "capture",
+      externalId: "pricing-teardown-reference",
+      sourceRef: "goat-chat:goat_chat_msg_1",
+      title: "Pricing teardown reference",
+      occurredAt: "2026-07-09T10:00:00.000Z",
+      capturedAt: "2026-07-09T10:00:00.000Z",
+    });
+    expect(item.content.capture).toMatchObject({
+      text: "Check out https://example.com/pricing-teardown for the pricing rework.",
+      intent: "reference for the pricing page rework",
+      chatSessionId: "goat_chat_session_1",
+      userMessageId: "goat_chat_msg_1",
+      draftBrainId: "pricing-teardown-reference",
+      draftFolder: "inbox",
+    });
+    expect(isNormalizedGoatChatCaptureSourceItem(item)).toBe(true);
+    expect(isNormalizedGoatChatCaptureSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
+  });
+
+  it("derives stable content hashes and changes them when the text changes", () => {
+    const first = normalizeGoatChatCapture(captureInput());
+    const second = normalizeGoatChatCapture(captureInput());
+    const changed = normalizeGoatChatCapture(captureInput({ text: "Different idea." }));
+
+    expect(second.contentHash).toBe(first.contentHash);
+    expect(changed.contentHash).not.toBe(first.contentHash);
+  });
+
+  it("omits an empty intent", () => {
+    const item = normalizeGoatChatCapture(captureInput({ intent: "  " }));
+    expect(item.content.capture.intent).toBeUndefined();
+  });
+
+  it.each([
+    ["text", { text: "  " }],
+    ["title", { title: "" }],
+    ["chat session", { chatSessionId: " " }],
+    ["message", { userMessageId: "" }],
+    ["draft id", { draftBrainId: "" }],
+    ["timestamp", { capturedAt: "not-a-date" }],
+  ])("rejects an invalid %s", (_field, override) => {
+    expect(() => normalizeGoatChatCapture(captureInput(override))).toThrow(
+      BrainSourceNormalizationError,
+    );
+  });
+
+  it("rejects non-capture payloads in the guard", () => {
+    expect(isNormalizedGoatChatCaptureSourceItem(null)).toBe(false);
+    expect(isNormalizedGoatChatCaptureSourceItem({ sourceProvider: "goat-chat" })).toBe(false);
+    expect(
+      isNormalizedGoatChatCaptureSourceItem(normalizeJamieMeetingCompletedWebhook(jamiePayload())),
+    ).toBe(false);
   });
 });

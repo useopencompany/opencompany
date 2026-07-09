@@ -9,6 +9,7 @@ import {
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
+  type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
@@ -39,6 +40,7 @@ const AGENT_CLI_STDOUT_LIMIT = 24_000;
 const AGENT_CLI_STDERR_LIMIT = 4_000;
 const PROMPT_TRANSCRIPT_BYTES = 100_000;
 const PROMPT_SUMMARY_BYTES = 60_000;
+const PROMPT_CAPTURE_BYTES = 64_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 
 // The ingestion agent gets the full working surface of the CLI except the
@@ -53,6 +55,7 @@ const AGENT_CLI_COMMANDS = [
   "doctor",
   "create",
   "rewrite",
+  "set",
   "timeline-add",
   "append-timeline",
   "append-evidence",
@@ -60,6 +63,9 @@ const AGENT_CLI_COMMANDS = [
   "link",
   "move",
 ] as const;
+// The capture curator additionally retires duplicate drafts by merging them
+// into the page that absorbed their content.
+const CAPTURE_AGENT_CLI_COMMANDS = [...AGENT_CLI_COMMANDS, "merge"] as const;
 const READ_ONLY_AGENT_CLI_COMMANDS = new Set([
   "help",
   "list",
@@ -93,26 +99,39 @@ export type GoatBrainAgentIngestDeps = {
   runCli?: GoatBrainAgentCliRunner;
 };
 
-export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = [
-  "You are the Goat Brain ingestion agent: a durable background worker that folds one source item into a single brain of Markdown knowledge documents.",
-  "You operate the brain exclusively through the goat_brain tool, which runs the deterministic goat-brain CLI against this brain. Call the tool and read its real output; never assume or narrate imagined results.",
-  "",
-  "How the brain works:",
-  "- Every document has compiled truth (the current synthesis) and an append-only timeline of dated evidence entries.",
-  "- Types (person, company, media, analysis, concept, email, writing, note, project, source) are tags. Folders are free-form human navigation; evidence/ is a reserved zone for raw captures.",
-  "- Inline links are typed: [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence records, [[source:provider:id|Label]] for external source pointers.",
-  "",
-  "Working discipline:",
-  "- Brain-first lookup: before creating or writing anything, use query/list/get to find the entities this source touches. Update existing pages under their existing ids; create a page only when no existing page is the primary home. Add aliases instead of duplicate pages.",
-  "- Compiled truth is a rewrite, not a log: when a page's state of play changes, use rewrite to replace it with the current durable synthesis. Do not append updates to the bottom of compiled truth.",
-  "- Timeline entries are concise dated evidence: use timeline-add with what happened and why it matters, always with --source-ref (and --evidence-id when an evidence record exists).",
-  "- Backlink iron law: every mention of an entity that has a brain page must be written as a [[page:...]] link — in compiled truth and in timeline entries.",
-  `- ${GOAT_BRAIN_POINTER_COPY_RULE.split("\n").join("\n  ")}`,
-  "- No fabrication: write only what the source or the brain supports. If the source does not say it, it does not go in.",
-  `- If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
-  "",
-  "When you are done, reply with a short plain-text summary of the pages you created or updated (one line per page). Do not include markdown headings in that final reply.",
-].join("\n");
+function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: string }) {
+  return [
+    `You are the Goat Brain ingestion agent: a durable background worker that ${input.mission}`,
+    "You operate the brain exclusively through the goat_brain tool, which runs the deterministic goat-brain CLI against this brain. Call the tool and read its real output; never assume or narrate imagined results.",
+    "",
+    "How the brain works:",
+    "- Every document has compiled truth (the current synthesis) and an append-only timeline of dated evidence entries.",
+    "- Types (person, company, media, analysis, concept, email, writing, note, project, source) are tags. Folders are free-form human navigation; evidence/ is a reserved zone for raw captures.",
+    "- Inline links are typed: [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence records, [[source:provider:id|Label]] for external source pointers.",
+    "",
+    "Working discipline:",
+    "- Brain-first lookup: before creating or writing anything, use query/list/get to find the entities this source touches. Update existing pages under their existing ids; create a page only when no existing page is the primary home. Add aliases instead of duplicate pages.",
+    "- Compiled truth is a rewrite, not a log: when a page's state of play changes, use rewrite to replace it with the current durable synthesis. Do not append updates to the bottom of compiled truth.",
+    "- Timeline entries are concise dated evidence: use timeline-add with what happened and why it matters, always with --source-ref (and --evidence-id when an evidence record exists).",
+    "- Backlink iron law: every mention of an entity that has a brain page must be written as a [[page:...]] link — in compiled truth and in timeline entries.",
+    `- ${GOAT_BRAIN_POINTER_COPY_RULE.split("\n").join("\n  ")}`,
+    "- No fabrication: write only what the source or the brain supports. If the source does not say it, it does not go in.",
+    `- ${input.skipRule}`,
+    "",
+    "When you are done, reply with a short plain-text summary of the pages you created or updated (one line per page). Do not include markdown headings in that final reply.",
+  ].join("\n");
+}
+
+export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission: "folds one source item into a single brain of Markdown knowledge documents.",
+  skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
+});
+
+export const GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "curates one chat capture — content the user explicitly asked to save — into a single brain of Markdown knowledge documents. The capture is already stored as a draft page in the inbox; your job is to file it properly.",
+  skipRule: `The user explicitly saved this content, so it is almost always brain-worthy. Only if it is literally empty or unusable, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}; the draft then stays in the inbox for the user.`,
+});
 
 export function buildJamieMeetingAgentIngestPrompt(
   item: NormalizedJamieMeetingSourceItem,
@@ -162,16 +181,58 @@ function boundedTranscriptMarkdown(item: NormalizedJamieMeetingSourceItem) {
   return formatTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
-export async function runJamieMeetingAgentIngest(
-  input: {
-    userWorkosId: string;
-    brainRef: string | null;
-    item: NormalizedJamieMeetingSourceItem;
-    env: GoatBrainAgentIngestEnv;
-    signal?: AbortSignal;
-  },
-  deps: GoatBrainAgentIngestDeps = {},
-): Promise<Record<string, unknown>> {
+export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCaptureSourceItem) {
+  const capture = item.content.capture;
+  const draftPath = `${capture.draftFolder}/${capture.draftBrainId}.md`;
+  return [
+    "Curate this chat capture into the brain. The user explicitly asked to save it during a chat conversation.",
+    "",
+    `The raw capture is already stored as a draft page with id "${capture.draftBrainId}" at ${draftPath} (type: note, status: draft). Start by reading it with get, then decide its proper home.`,
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Find the capture's home: query the brain for pages that already cover this content and for the entities it mentions.",
+    `2. If an existing page is the natural home, fold the capture into it (rewrite its compiled truth or timeline-add with --source-ref ${item.sourceRef}), then retire the draft with merge --from ${capture.draftBrainId} --into <that-page>. Do not leave the same content living in two places.`,
+    "3. Otherwise curate the draft in place, in this order: use append-evidence to snapshot the raw capture text as a sourced evidence record linked to the draft; rewrite the draft's compiled truth into a durable synthesis that cites that evidence record with [[evidence:...]] and links entities with [[page:...]]; use set to give it a clear title and the right type; move it out of the inbox to the folder where it belongs; then set --status active. Leave it in the inbox as a draft only when it genuinely fits nowhere yet.",
+    "4. Create or update person, company, or project pages for entities central to the capture, with backlinks per the iron law. Do not create pages for entities that are merely mentioned in passing.",
+    "",
+    `If the draft page no longer exists (the user may have deleted or edited it), work from the capture text below and apply the same judgment: fold it into an existing page or create the right page directly.`,
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Captured at: ${item.capturedAt}`,
+    ...(capture.intent ? ["", `## User intent\n${capture.intent}`] : []),
+    `## Capture title\n${item.title}`,
+    `## Capture text\n${truncateByBytes(capture.text, PROMPT_CAPTURE_BYTES)}`,
+  ].join("\n");
+}
+
+type BrainAgentIngestSessionResult = {
+  brainRef: string;
+  skipped: boolean;
+  steps: number;
+  toolCalls: number;
+  mutations: number;
+  upserted: number;
+  deleted: number;
+  usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
+  summary: string;
+};
+
+// Shared scaffolding for every agent ingest profile: resolve the target brain,
+// materialize it to a temp root, run the tool loop, and sync changes back with
+// conflict detection. Profiles differ in system prompt, prompt, command
+// surface, and optional deterministic pre-writes.
+async function runBrainAgentIngestSession(input: {
+  userWorkosId: string;
+  brainRef: string | null;
+  sourceRef: string;
+  env: GoatBrainAgentIngestEnv;
+  system: string;
+  buildPrompt: () => string;
+  commands?: readonly string[];
+  prepareRoot?: (root: string) => Promise<void>;
+  signal?: AbortSignal;
+  deps?: GoatBrainAgentIngestDeps;
+}): Promise<BrainAgentIngestSessionResult> {
   const db = getDb();
   const brainRef =
     input.brainRef ?? (await getDefaultGoatBrainForUser(input.userWorkosId, { db }))?.id;
@@ -187,21 +248,17 @@ export async function runJamieMeetingAgentIngest(
       cliSource: getGoatBrainCliSource(),
       db,
     });
-
-    // The transcript snapshot is written deterministically before the agent
-    // runs: evidence is the dump, and a 400KB transcript should not round-trip
-    // through model tool calls.
-    const evidence = buildJamieMeetingEvidenceWrite(input.item);
-    await writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent);
+    await input.prepareRoot?.(root);
 
     const loop = await runIngestAgentLoop({
       root,
       cliPath: path.join(root, "goat-brain.mjs"),
       gatewayApiKey: input.env.vercelAiGatewayApiKey,
-      system: JAMIE_MEETING_INGEST_SYSTEM_PROMPT,
-      prompt: buildJamieMeetingAgentIngestPrompt(input.item, evidence),
+      system: input.system,
+      prompt: input.buildPrompt(),
+      ...(input.commands ? { commands: input.commands } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
-      ...(deps.runCli ? { runCli: deps.runCli } : {}),
+      ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
     });
 
     const skipped =
@@ -214,7 +271,7 @@ export async function runJamieMeetingAgentIngest(
     logger.info("Goat Brain ingestion agent finished", {
       event: "opencompany.goat_brain_agent_ingest_finished",
       brain_ref: brainRef,
-      source_ref: input.item.sourceRef,
+      source_ref: input.sourceRef,
       skipped,
       steps: loop.steps,
       tool_calls: loop.toolCalls,
@@ -238,16 +295,12 @@ export async function runJamieMeetingAgentIngest(
 
     return {
       brainRef,
-      model: GOAT_BRAIN_AGENT_INGEST_MODEL,
       skipped,
       steps: loop.steps,
       toolCalls: loop.toolCalls,
       mutations: loop.mutations,
       upserted: synced.upserted,
       deleted: synced.deleted,
-      evidenceBrainId: evidence.evidenceBrainId,
-      meetingBrainId: evidence.meetingBrainId,
-      truncatedTranscript: evidence.truncatedTranscript,
       usage: loop.usage,
       summary: loop.finalText.slice(0, RESULT_SUMMARY_LIMIT),
     };
@@ -256,12 +309,78 @@ export async function runJamieMeetingAgentIngest(
   }
 }
 
+export async function runJamieMeetingAgentIngest(
+  input: {
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedJamieMeetingSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  // The transcript snapshot is written deterministically before the agent
+  // runs: evidence is the dump, and a 400KB transcript should not round-trip
+  // through model tool calls.
+  const evidence = buildJamieMeetingEvidenceWrite(input.item);
+  const session = await runBrainAgentIngestSession({
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: JAMIE_MEETING_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildJamieMeetingAgentIngestPrompt(input.item, evidence),
+    prepareRoot: (root) =>
+      writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    evidenceBrainId: evidence.evidenceBrainId,
+    meetingBrainId: evidence.meetingBrainId,
+    truncatedTranscript: evidence.truncatedTranscript,
+  };
+}
+
+export async function runGoatChatCaptureAgentIngest(
+  input: {
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedGoatChatCaptureSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const session = await runBrainAgentIngestSession({
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildGoatChatCaptureAgentIngestPrompt(input.item),
+    commands: CAPTURE_AGENT_CLI_COMMANDS,
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    draftBrainId: input.item.content.capture.draftBrainId,
+  };
+}
+
 async function runIngestAgentLoop(input: {
   root: string;
   cliPath: string;
   gatewayApiKey: string;
   system: string;
   prompt: string;
+  commands?: readonly string[];
   signal?: AbortSignal;
   runCli?: GoatBrainAgentCliRunner;
 }) {
@@ -280,11 +399,12 @@ async function runIngestAgentLoop(input: {
   let toolCalls = 0;
   let mutations = 0;
   const runCli = input.runCli ?? runGoatBrainAgentCli;
+  const commands = input.commands ?? AGENT_CLI_COMMANDS;
   const tools = {
     goat_brain: ai.tool({
       description: [
         "Run one goat-brain CLI command against this brain.",
-        `Commands: ${AGENT_CLI_COMMANDS.join(", ")}.`,
+        `Commands: ${commands.join(", ")}.`,
         'Pass everything after the command name as args tokens, e.g. {"command":"query","args":["hiring plan","--limit","5"]} or {"command":"timeline-add","args":["ada","--body","Met at roadmap review.","--source-ref","jamie:meeting:123"]}.',
         'For long bodies use stdin with the matching flag, e.g. {"command":"create","args":["--type","person","--id","ada","--title","Ada","--truth-stdin"],"stdin":"..."}.',
         'Call {"command":"help","args":["<command>"]} for command-specific usage.',
@@ -294,7 +414,7 @@ async function runIngestAgentLoop(input: {
         properties: {
           command: {
             type: "string",
-            enum: [...AGENT_CLI_COMMANDS],
+            enum: [...commands],
             description: "goat-brain CLI command to run.",
           },
           args: {
@@ -312,7 +432,7 @@ async function runIngestAgentLoop(input: {
       }),
       execute: async (args) => {
         toolCalls += 1;
-        const invalid = validateGoatBrainAgentInvocation(args);
+        const invalid = validateGoatBrainAgentInvocation(args, commands);
         if (invalid) return { ok: false, error: invalid };
         const result = await runCli({
           cliPath: input.cliPath,
@@ -363,13 +483,16 @@ async function runIngestAgentLoop(input: {
   }
 }
 
-export function validateGoatBrainAgentInvocation(args: {
-  command: string;
-  args?: string[];
-  stdin?: string;
-}): string | null {
-  if (!(AGENT_CLI_COMMANDS as readonly string[]).includes(args.command)) {
-    return `Command "${args.command}" is not available to the ingestion agent. Available commands: ${AGENT_CLI_COMMANDS.join(", ")}.`;
+export function validateGoatBrainAgentInvocation(
+  args: {
+    command: string;
+    args?: string[];
+    stdin?: string;
+  },
+  commands: readonly string[] = AGENT_CLI_COMMANDS,
+): string | null {
+  if (!commands.includes(args.command)) {
+    return `Command "${args.command}" is not available to the ingestion agent. Available commands: ${commands.join(", ")}.`;
   }
   const tokens = args.args ?? [];
   if (tokens.some((token) => typeof token !== "string")) {

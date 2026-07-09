@@ -8,6 +8,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
+  isNormalizedGoatChatCaptureSourceItem,
   isNormalizedJamieMeetingSourceItem,
   type NormalizedBrainSourceItem,
   type NormalizedJamieMeetingSourceItem,
@@ -18,6 +19,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
   type GoatBrainAgentIngestEnv,
+  runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
 } from "./goat-brain-agent-ingest";
 import {
@@ -76,6 +78,12 @@ const JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "meeting",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "goat-chat",
+  sourceType: "capture",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -86,6 +94,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
     run: runJamieMeetingAgentIngest,
+  },
+  {
+    descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGoatChatCaptureSourceItem,
+    run: runGoatChatCaptureAgentIngest,
   },
 ];
 

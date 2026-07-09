@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-export type BrainSourceProvider = "jamie";
-export type BrainSourceType = "meeting";
+export type BrainSourceProvider = "jamie" | "goat-chat";
+export type BrainSourceType = "meeting" | "capture";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
   sourceProvider: BrainSourceProvider;
@@ -59,6 +59,110 @@ export type NormalizedJamieMeetingSourceItem =
     sourceProvider: "jamie";
     sourceType: "meeting";
   };
+
+export type NormalizedGoatChatCaptureContent = {
+  capture: {
+    text: string;
+    intent?: string;
+    chatSessionId: string;
+    userMessageId: string;
+    draftBrainId: string;
+    draftFolder: string;
+  };
+};
+
+export type NormalizedGoatChatCaptureSourceItem =
+  NormalizedBrainSourceItem<NormalizedGoatChatCaptureContent> & {
+    sourceProvider: "goat-chat";
+    sourceType: "capture";
+  };
+
+export function normalizeGoatChatCapture(input: {
+  text: string;
+  title: string;
+  intent?: string;
+  chatSessionId: string;
+  userMessageId: string;
+  draftBrainId: string;
+  draftFolder: string;
+  capturedAt: string;
+}): NormalizedGoatChatCaptureSourceItem {
+  const text = input.text.trim();
+  if (!text) throw invalid("capture text must not be empty", "invalid_capture");
+  const title = input.title.trim();
+  if (!title) throw invalid("capture title must not be empty", "invalid_capture");
+  const chatSessionId = input.chatSessionId.trim();
+  if (!chatSessionId) throw invalid("capture chatSessionId must not be empty", "invalid_capture");
+  const userMessageId = input.userMessageId.trim();
+  if (!userMessageId) throw invalid("capture userMessageId must not be empty", "invalid_capture");
+  const draftBrainId = input.draftBrainId.trim();
+  if (!draftBrainId) throw invalid("capture draftBrainId must not be empty", "invalid_capture");
+  const capturedAt = optionalIsoString(input.capturedAt);
+  if (!capturedAt) throw invalid("capture capturedAt must be a timestamp", "invalid_capture");
+  const intent = optionalString(input.intent);
+
+  const capture = {
+    text,
+    ...(intent ? { intent } : {}),
+    chatSessionId,
+    userMessageId,
+    draftBrainId,
+    draftFolder: input.draftFolder,
+  };
+  const contentHashInput = {
+    sourceProvider: "goat-chat",
+    sourceType: "capture",
+    externalId: draftBrainId,
+    title,
+    capture,
+  };
+
+  return {
+    sourceProvider: "goat-chat",
+    sourceType: "capture",
+    // The inbox draft id is minted per capture, so it doubles as the stable
+    // external id for dedupe.
+    externalId: draftBrainId,
+    sourceRef: `goat-chat:${userMessageId}`,
+    title,
+    occurredAt: capturedAt,
+    capturedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { capture },
+  };
+}
+
+export function isNormalizedGoatChatCaptureSourceItem(
+  value: unknown,
+): value is NormalizedGoatChatCaptureSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedGoatChatCaptureSourceItem>;
+  if (
+    item.sourceProvider !== "goat-chat" ||
+    item.sourceType !== "capture" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const capture = (item.content as Partial<NormalizedGoatChatCaptureContent>).capture;
+  return (
+    !!capture &&
+    typeof capture === "object" &&
+    typeof capture.text === "string" &&
+    typeof capture.chatSessionId === "string" &&
+    typeof capture.userMessageId === "string" &&
+    typeof capture.draftBrainId === "string" &&
+    typeof capture.draftFolder === "string"
+  );
+}
 
 export class BrainSourceNormalizationError extends Error {
   constructor(

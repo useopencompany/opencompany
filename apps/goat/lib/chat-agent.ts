@@ -13,6 +13,9 @@ import {
   type GoatBrainToolFlagValue,
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
+  SAVE_TO_BRAIN_TOOL_NAME,
+  type SaveToBrainToolInput,
+  type SaveToBrainToolOutput,
   SCHEDULE_TASK_TOOL_NAME,
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
@@ -29,6 +32,10 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
+  SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
+  SAVE_TO_BRAIN_INTENT_DESCRIPTION,
+  SAVE_TO_BRAIN_TITLE_DESCRIPTION,
+  SAVE_TO_BRAIN_TOOL_DESCRIPTION,
   SCHEDULE_TASK_CRON_DESCRIPTION,
   SCHEDULE_TASK_NAME_DESCRIPTION,
   SCHEDULE_TASK_PROMPT_DESCRIPTION,
@@ -72,6 +79,7 @@ type GoatBrainCliRunner = (
   input: GoatBrainToolInput,
   executionContext?: unknown,
 ) => Promise<GoatBrainToolOutput>;
+type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
 type EditTaskScheduleRunner = (
@@ -90,6 +98,7 @@ const GOAT_BRAIN_CLI_COMMANDS = [
   "query",
   "append-evidence",
   "rewrite",
+  "set",
   "alias",
   "timeline-add",
   "append-timeline",
@@ -139,6 +148,7 @@ export async function runOpenCompanyChatAgent(input: {
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
+  saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
@@ -162,6 +172,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
+    ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
   });
 
@@ -207,6 +218,7 @@ export function createOpenCompanyChatToolContext(input: {
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
+  saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
 }) {
   let startedTask: StartedTask | null = null;
@@ -321,6 +333,54 @@ export function createOpenCompanyChatToolContext(input: {
       },
     }),
   };
+
+  const saveToBrain = input.saveToBrain;
+  if (saveToBrain) {
+    const capturedByKey = new Map<string, SaveToBrainToolOutput>();
+    tools[SAVE_TO_BRAIN_TOOL_NAME] = tool<SaveToBrainToolInput, SaveToBrainToolOutput>({
+      description: SAVE_TO_BRAIN_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SaveToBrainToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          content: {
+            type: "string",
+            description: SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
+          },
+          title: {
+            type: "string",
+            description: SAVE_TO_BRAIN_TITLE_DESCRIPTION,
+          },
+          intent: {
+            type: "string",
+            description: SAVE_TO_BRAIN_INTENT_DESCRIPTION,
+          },
+        },
+        required: ["content"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const content = typeof args.content === "string" ? args.content.trim() : "";
+        if (!content) return { ok: false, error: "save_to_brain content must not be empty." };
+        const title = typeof args.title === "string" ? args.title.trim() : "";
+        const intent = typeof args.intent === "string" ? args.intent.trim() : "";
+
+        // Duplicate calls within one turn return the first capture instead of
+        // minting another inbox draft.
+        const key = `${title}\n${content}`;
+        const already = capturedByKey.get(key);
+        if (already?.ok) return { ...already, status: "already_captured" };
+
+        const output = await saveToBrain({
+          content,
+          ...(title ? { title } : {}),
+          ...(intent ? { intent } : {}),
+        });
+        if (output.ok) capturedByKey.set(key, output);
+        return output;
+      },
+    });
+  }
 
   if (input.scheduleTask) {
     tools[SCHEDULE_TASK_TOOL_NAME] = tool<ScheduleTaskToolInput, ScheduleTaskToolOutput>({

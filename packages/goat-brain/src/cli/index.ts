@@ -25,6 +25,7 @@ import {
   isValidGoatBrainId,
   isValidGoatBrainKind,
   isValidGoatBrainRelationType,
+  normalizeBuiltInGoatBrainEntityType,
   normalizeEvidenceId,
   normalizeGoatBrainFolderForV1,
   normalizeGoatBrainId,
@@ -56,6 +57,7 @@ const COMMANDS: Record<string, Handler> = {
   query,
   ingest,
   rewrite,
+  set,
   "timeline-add": appendTimeline,
   "append-timeline": appendTimeline,
   "append-evidence": appendEvidence,
@@ -89,6 +91,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   list: ["folder", "limit", "include-merged"],
   rewrite: ["id", "truth", "truth-stdin"],
+  set: ["id", "title", "type", "status"],
   timeline: ["id", "limit", "since"],
   "timeline-add": [
     "id",
@@ -163,6 +166,7 @@ Commands:
   timeline          Read dated evidence entries for a doc.
   query             Hybrid retrieval over docs (--folder, --since, --hops, --limit).
   rewrite           Replace compiled truth for a doc.
+  set               Update a doc's title, type, or status.
   timeline-add      Add a dated evidence entry and optional source ref.
   append-timeline   Compatibility alias for timeline-add.
   append-evidence   Create a first-class evidence record and link it to a subject.
@@ -281,6 +285,20 @@ Replace the compiled truth section for a document.
 Examples:
   goat-brain rewrite opencompany --truth "OpenCompany builds company-owned AI agents."
   cat truth.md | goat-brain rewrite opencompany --truth-stdin --json`,
+  set: `Usage: goat-brain set <id> [--title <title>] [--type <type>] [--status <status>] [--json]
+
+Update frontmatter fields for an existing document. Provide at least one of
+--title, --type, or --status. Promoting a page to --status active requires its
+compiled truth to cite evidence with [[evidence:<evidence-id>]].
+
+Options:
+  --title <title>     New human-readable title.
+  --type <type>       Entity type: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.
+  --status <status>   draft, active, archived, or merged.
+
+Examples:
+  goat-brain set quick-note --title "Pricing idea" --type concept
+  goat-brain set pricing-idea --status active`,
   "timeline-add": `Usage: goat-brain timeline-add <id> [--at <iso-date>] (--body <text> | --body-stdin) [options]
 
 Add a dated evidence entry to a document.
@@ -744,6 +762,54 @@ async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
   return ok(`Rewrote compiled truth for "${id}".`, { id, path: relativePath });
+}
+
+async function set(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const title = ctx.args.get("title")?.trim();
+  const typeInput = ctx.args.get("type")?.trim();
+  const statusInput = ctx.args.get("status")?.trim();
+  if (!title && !typeInput && !statusInput) {
+    return fail("Provide at least one of `--title`, `--type`, or `--status`.");
+  }
+  const type = typeInput ? normalizeBuiltInGoatBrainEntityType(typeInput) : undefined;
+  if (typeInput && !type) {
+    return fail(
+      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(
+        ", ",
+      )}.`,
+    );
+  }
+  const status =
+    statusInput === "draft" || statusInput === "active" || statusInput === "archived"
+      ? statusInput
+      : undefined;
+  if (statusInput && !status) {
+    return fail(
+      "`--status` must be draft, active, or archived. Use the merge command to mark a doc merged.",
+    );
+  }
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  if (loaded.doc.frontmatter.status === "merged") {
+    return fail(`"${id}" is merged into "${loaded.doc.frontmatter.mergedInto ?? "?"}".`);
+  }
+  if (title) {
+    loaded.doc.title = title;
+    loaded.doc.frontmatter.title = title;
+  }
+  if (type) loaded.doc.frontmatter.type = type;
+  if (status) loaded.doc.frontmatter.status = status;
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(`Updated "${id}".`, {
+    id,
+    path: relativePath,
+    title: loaded.doc.frontmatter.title,
+    type: loaded.doc.frontmatter.type,
+    status: loaded.doc.frontmatter.status,
+  });
 }
 
 async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {

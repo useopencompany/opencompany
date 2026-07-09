@@ -1,4 +1,7 @@
-import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/goat-brain";
+import {
+  normalizeGoatChatCapture,
+  normalizeJamieMeetingCompletedWebhook,
+} from "@opencompany/goat-brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({
@@ -48,8 +51,10 @@ vi.mock("./db", () => ({ getDb: () => ({}) }));
 vi.mock("./goat-brain", () => ({ writeLocalBrainFile: localBrainMock.writeLocalBrainFile }));
 
 import {
+  buildGoatChatCaptureAgentIngestPrompt,
   buildJamieMeetingAgentIngestPrompt,
   type GoatBrainAgentCliRunner,
+  runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
   validateGoatBrainAgentInvocation,
 } from "./goat-brain-agent-ingest";
@@ -74,6 +79,19 @@ function jamieItem() {
     },
     { capturedAt: "2026-01-01T11:01:00.000Z" },
   );
+}
+
+function captureItem() {
+  return normalizeGoatChatCapture({
+    text: "Check out https://example.com/pricing-teardown for the pricing rework.",
+    title: "Pricing teardown reference",
+    intent: "reference for the pricing page rework",
+    chatSessionId: "goat_chat_session_1",
+    userMessageId: "goat_chat_msg_1",
+    draftBrainId: "pricing-teardown-reference",
+    draftFolder: "inbox",
+    capturedAt: "2026-07-09T10:00:00.000Z",
+  });
 }
 
 type CapturedTool = {
@@ -124,6 +142,14 @@ describe("validateGoatBrainAgentInvocation", () => {
     expect(validateGoatBrainAgentInvocation({ command: "delete" })).toContain("not available");
     expect(validateGoatBrainAgentInvocation({ command: "merge" })).toContain("not available");
     expect(validateGoatBrainAgentInvocation({ command: "ingest" })).toContain("not available");
+    expect(validateGoatBrainAgentInvocation({ command: "set" })).toBeNull();
+  });
+
+  it("honors a custom command allow-list", () => {
+    expect(validateGoatBrainAgentInvocation({ command: "merge" }, ["query", "merge"])).toBeNull();
+    expect(validateGoatBrainAgentInvocation({ command: "create" }, ["query", "merge"])).toContain(
+      "not available",
+    );
   });
 
   it("rejects --root escapes and accepts normal invocations", () => {
@@ -157,6 +183,85 @@ describe("buildJamieMeetingAgentIngestPrompt", () => {
     expect(prompt).toContain("Ada (ada@example.com)");
     expect(prompt).toContain(item.sourceRef);
     expect(prompt).toContain("Transcript segment 0");
+  });
+});
+
+describe("buildGoatChatCaptureAgentIngestPrompt", () => {
+  it("carries the draft pointer, source ref, intent, and capture text", () => {
+    const item = captureItem();
+    const prompt = buildGoatChatCaptureAgentIngestPrompt(item);
+
+    expect(prompt).toContain('"pricing-teardown-reference"');
+    expect(prompt).toContain("inbox/pricing-teardown-reference.md");
+    expect(prompt).toContain("goat-chat:goat_chat_msg_1");
+    expect(prompt).toContain("reference for the pricing page rework");
+    expect(prompt).toContain("https://example.com/pricing-teardown");
+    expect(prompt).toContain("merge --from pricing-teardown-reference");
+  });
+});
+
+describe("runGoatChatCaptureAgentIngest", () => {
+  it("runs the capture curation loop and syncs the brain", async () => {
+    mockAgentRun({
+      finalText: "Promoted the capture into concepts/usage-based-pricing.",
+      toolInvocations: [
+        { command: "get", args: ["pricing-teardown-reference"] },
+        {
+          command: "set",
+          args: ["pricing-teardown-reference", "--type", "concept", "--status", "active"],
+        },
+      ],
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      brainRef: "gbrain_123",
+      skipped: false,
+      toolCalls: 2,
+      mutations: 1,
+      draftBrainId: "pricing-teardown-reference",
+      summary: "Promoted the capture into concepts/usage-based-pricing.",
+    });
+    // No deterministic pre-write for captures: the inbox draft was created at
+    // capture time.
+    expect(localBrainMock.writeLocalBrainFile).not.toHaveBeenCalled();
+    expect(okCli).toHaveBeenCalledWith(
+      expect.objectContaining({
+        argv: ["set", "pricing-teardown-reference", "--type", "concept", "--status", "active"],
+      }),
+    );
+  });
+
+  it("allows merge for capture curation", async () => {
+    mockAgentRun({
+      finalText: "Folded the capture into the existing pricing page.",
+      toolInvocations: [
+        { command: "timeline-add", args: ["pricing", "--body", "New teardown reference."] },
+        { command: "merge", args: ["--from", "pricing-teardown-reference", "--into", "pricing"] },
+      ],
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(okCli).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
   });
 });
 

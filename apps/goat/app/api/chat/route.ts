@@ -10,6 +10,7 @@ import {
 } from "@opencompany/goat-observability";
 import { convertToModelMessages, createGateway, stepCountIs, streamText } from "ai";
 import { currentGoatUser } from "@/lib/auth";
+import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
   createDbGoatChatStore,
@@ -173,6 +174,32 @@ export async function POST(request: Request): Promise<Response> {
         ...(toolCallId ? { toolCallId } : {}),
         signal: request.signal,
       });
+    },
+    saveToBrain: async (toolInput) => {
+      const activeBrain = context.activeBrain;
+      if (!activeBrain) {
+        return {
+          ok: false,
+          error: "You do not have access to any brain in this workspace.",
+        };
+      }
+      const captured = await captureToGoatBrainInbox({
+        brainRef: activeBrain.id,
+        userWorkosId: context.user.workosUserId,
+        text: toolInput.content,
+        ...(toolInput.title ? { title: toolInput.title } : {}),
+        ...(toolInput.intent ? { intent: toolInput.intent } : {}),
+        chatSessionId: turn.session.id,
+        userMessageId: turn.userMessage.id,
+      });
+      if (!captured.ok) return captured;
+      return {
+        ok: true,
+        draftId: captured.draftBrainId,
+        path: captured.path,
+        title: captured.title,
+        status: "captured",
+      };
     },
     ...(exaApiKey
       ? {

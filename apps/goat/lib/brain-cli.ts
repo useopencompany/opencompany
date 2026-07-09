@@ -294,6 +294,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   ],
   timeline: ["id", "limit", "since", "json"],
   rewrite: ["id", "truth", "truth-stdin", "json"],
+  set: ["id", "title", "type", "status", "json"],
   "timeline-add": [
     "id",
     "at",

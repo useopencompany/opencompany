@@ -694,6 +694,13 @@
       "when": 1783424800000,
       "tag": "0098_goat_brain_agent_ingest",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1783425200000,
+      "tag": "0099_goat_brain_chat_capture",
+      "breakpoints": true
     }
   ]
 }

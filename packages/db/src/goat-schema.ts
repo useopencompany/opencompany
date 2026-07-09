@@ -46,8 +46,8 @@ export type GoatIntegrationResourceStatus =
   | "permission_lost"
   | "archived"
   | "sync_failed";
-export type GoatBrainSourceProvider = "jamie";
-export type GoatBrainSourceType = "meeting";
+export type GoatBrainSourceProvider = "jamie" | "goat-chat";
+export type GoatBrainSourceType = "meeting" | "capture";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -763,11 +763,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting')`,
+      sql`${table.sourceType} IN ('meeting', 'capture')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -825,7 +825,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
