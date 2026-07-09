@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  type GoatBrainSyncPage,
   getGoatBrainFile,
   materializeGoatBrainFilesToRoot,
   syncGoatBrainFilesFromRoot,
@@ -265,6 +266,7 @@ type BrainAgentIngestSessionResult = {
   mutations: number;
   upserted: number;
   deleted: number;
+  pages: GoatBrainSyncPage[];
   usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
   summary: string;
 };
@@ -353,6 +355,7 @@ async function runBrainAgentIngestSession(input: {
       mutations: loop.mutations,
       upserted: synced.upserted,
       deleted: synced.deleted,
+      pages: synced.pages,
       usage: loop.usage,
       summary: loop.finalText.slice(0, RESULT_SUMMARY_LIMIT),
     };

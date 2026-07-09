@@ -2,6 +2,15 @@ import type { GoatBrainIngestJobRow, GoatBrainSourceItemRow } from "@/lib/task-c
 
 export type GoatBrainActivityKind = "captured" | "filing" | "filed" | "retrying" | "failed";
 
+export type GoatBrainActivityPageAction = "created" | "updated" | "conflict_created";
+
+export type GoatBrainActivityPage = {
+  brainId: string;
+  folderPath: string;
+  title: string;
+  action: GoatBrainActivityPageAction;
+};
+
 export type GoatBrainActivityEvent = {
   id: string;
   kind: GoatBrainActivityKind;
@@ -10,6 +19,7 @@ export type GoatBrainActivityEvent = {
   detail: string | null;
   sourceTitle: string;
   brainId: string | null;
+  pages: GoatBrainActivityPage[];
 };
 
 export type GoatBrainDraftIngestStateKind = "queued" | "running" | "retrying" | "failed";
@@ -24,6 +34,7 @@ export type GoatBrainDraftIngestState = {
 };
 
 const MAX_ACTIVITY_EVENTS = 50;
+const MAX_ACTIVITY_EVENT_PAGES = 20;
 const MAX_DETAIL_LENGTH = 180;
 
 // Flattens the ingest pipeline into a human activity feed: one event for the
@@ -49,6 +60,7 @@ export function buildGoatBrainActivityEvents(
       detail: null,
       sourceTitle,
       brainId: null,
+      pages: [],
     });
 
     if (job.status === "running") {
@@ -60,6 +72,7 @@ export function buildGoatBrainActivityEvents(
         detail: null,
         sourceTitle,
         brainId: null,
+        pages: [],
       });
     } else if (job.status === "succeeded") {
       events.push({
@@ -70,6 +83,7 @@ export function buildGoatBrainActivityEvents(
         detail: truncateDetail(firstLine(jobResultSummary(job))),
         sourceTitle,
         brainId,
+        pages: jobResultPages(job),
       });
     } else if (job.status === "failed") {
       events.push({
@@ -80,6 +94,7 @@ export function buildGoatBrainActivityEvents(
         detail: truncateDetail(job.last_error),
         sourceTitle,
         brainId: null,
+        pages: [],
       });
     } else if (job.status === "queued" && job.attempts > 0) {
       events.push({
@@ -90,6 +105,7 @@ export function buildGoatBrainActivityEvents(
         detail: truncateDetail(job.last_error),
         sourceTitle,
         brainId: null,
+        pages: [],
       });
     }
   }
@@ -179,6 +195,48 @@ function jobResultBrainId(job: GoatBrainIngestJobRow): string | null {
   // Capture jobs report draftBrainId; meeting jobs report meetingBrainId.
   const value = job.result?.draftBrainId ?? job.result?.meetingBrainId;
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function jobResultPages(job: GoatBrainIngestJobRow): GoatBrainActivityPage[] {
+  const value = job.result?.pages;
+  if (!Array.isArray(value)) return [];
+
+  const pages: GoatBrainActivityPage[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const page = parseActivityPage(item);
+    if (!page) continue;
+    const key = `${page.folderPath}/${page.brainId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pages.push(page);
+    if (pages.length >= MAX_ACTIVITY_EVENT_PAGES) break;
+  }
+  return pages;
+}
+
+function parseActivityPage(value: unknown): GoatBrainActivityPage | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const brainId = normalizedText(record.brainId);
+  const folderPath = normalizedText(record.folderPath);
+  const action = normalizedActivityPageAction(record.action);
+  if (!brainId || !folderPath || !action) return null;
+  return {
+    brainId,
+    folderPath,
+    title: normalizedText(record.title) || brainId,
+    action,
+  };
+}
+
+function normalizedActivityPageAction(value: unknown): GoatBrainActivityPageAction | null {
+  if (value === "created" || value === "updated" || value === "conflict_created") return value;
+  return null;
+}
+
+function normalizedText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function firstLine(value: string | null): string | null {
