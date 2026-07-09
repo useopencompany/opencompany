@@ -6,6 +6,7 @@ import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
+import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import {
   createGoatCollections,
@@ -93,7 +94,7 @@ export function GoatAppDataProvider({
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return ((taskRows ?? []) as GoatTaskRow[])
       .map(taskRowToView)
-      .filter((task) => !task.archivedAt)
+      .filter((task) => !task.archivedAt && isRecentGoatHomeActivity(task.createdAt))
       .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [initialData.tasks, taskRows, tasksLoading]);
 
@@ -109,7 +110,7 @@ export function GoatAppDataProvider({
     if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
     return ((chatSessionRows ?? []) as GoatChatSessionRow[])
-      .filter((row) => !row.closed_at)
+      .filter((row) => !row.closed_at && isRecentGoatHomeActivity(row.updated_at))
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, 8)
       .map((row) => {

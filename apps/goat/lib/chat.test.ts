@@ -178,35 +178,51 @@ describe("persistGoatChatAssistantMessage", () => {
 
 describe("Goat chat history helpers", () => {
   it("lists recent open chats for one user and excludes closed sessions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
     const { store, sessions } = createInMemoryChatStore();
-    const first = await createGoatChatUserTurn(
-      { userWorkosId: "user_1", prompt: "first chat", model: DEFAULT_GOAT_MODEL },
-      store,
-    );
-    const second = await createGoatChatUserTurn(
-      { userWorkosId: "user_1", prompt: "second chat", model: DEFAULT_GOAT_MODEL },
-      store,
-    );
-    await createGoatChatUserTurn(
-      { userWorkosId: "user_2", prompt: "other user chat", model: DEFAULT_GOAT_MODEL },
-      store,
-    );
-    await closeGoatChatSessionForUser(
-      { userWorkosId: "user_1", sessionId: first.session.id },
-      store,
-    );
-    sessions.find((session) => session.id === second.session.id)!.updatedAt = new Date(
-      "2026-07-04T12:00:00.000Z",
-    );
+    try {
+      const first = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "first chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      const second = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "second chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      const old = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "old chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      await createGoatChatUserTurn(
+        { userWorkosId: "user_2", prompt: "other user chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      await closeGoatChatSessionForUser(
+        { userWorkosId: "user_1", sessionId: first.session.id },
+        store,
+      );
+      sessions.find((session) => session.id === second.session.id)!.updatedAt = new Date(
+        "2026-07-04T12:00:00.000Z",
+      );
+      sessions.find((session) => session.id === old.session.id)!.updatedAt = new Date(
+        "2026-07-02T12:00:00.000Z",
+      );
 
-    const summaries = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+      const summaries = await listRecentGoatChatsForUser(
+        { userWorkosId: "user_1", limit: 8 },
+        store,
+      );
 
-    expect(summaries.map((summary) => summary.id)).toEqual([second.session.id]);
-    expect(summaries[0]).toMatchObject({
-      title: "Second chat",
-      preview: "second chat",
-      updatedAt: "2026-07-04T12:00:00.000Z",
-    });
+      expect(summaries.map((summary) => summary.id)).toEqual([second.session.id]);
+      expect(summaries[0]).toMatchObject({
+        title: "Second chat",
+        preview: "second chat",
+        updatedAt: "2026-07-04T12:00:00.000Z",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("loads only the requested user's open chat", async () => {
@@ -261,6 +277,9 @@ function createInMemoryChatStore(
     async listOpenSessions(input) {
       return sessions
         .filter((session) => session.userWorkosId === input.userWorkosId && !session.closedAt)
+        .filter((session) =>
+          input.updatedAfter ? session.updatedAt.getTime() >= input.updatedAfter.getTime() : true,
+        )
         .toSorted((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
         .slice(0, input.limit);
     },

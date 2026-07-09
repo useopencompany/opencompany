@@ -12,8 +12,9 @@ import {
   goatTasks,
   goatTaskToolUsage,
 } from "@opencompany/db/goat-schema";
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
+import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { normalizeGoatTaskName } from "@/lib/task-display";
 import { triggerGoatTaskRun } from "@/lib/task-runner";
@@ -33,7 +34,13 @@ export async function listCurrentUserGoatTasks() {
   return getDb()
     .select()
     .from(goatTasks)
-    .where(and(eq(goatTasks.userWorkosId, user.workosUserId), isNull(goatTasks.archivedAt)))
+    .where(
+      and(
+        eq(goatTasks.userWorkosId, user.workosUserId),
+        isNull(goatTasks.archivedAt),
+        gte(goatTasks.createdAt, goatHomeActivityCutoff()),
+      ),
+    )
     .orderBy(desc(goatTasks.createdAt))
     .limit(50);
 }
