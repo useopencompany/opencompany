@@ -86,7 +86,10 @@ type GoatBrainSearchHit = {
   score: number;
   signals: Array<"lexical" | "name" | "vector" | "graph">;
   snippet: string;               // compiled truth, capped ~1200 chars
-  neighbors: Array<{ id: string; title: string; relationType: string; direction: "out" | "in" }>;
+  neighbors: Array<{
+    id: string; title: string; kind: string; type: string; folder: string; status: string;
+    relationType: string; sourceKind: string; direction: "out" | "in";
+  }>;
   via?: GoatBrainGraphHop[];     // only for hop-expanded hits
 };
 ```
