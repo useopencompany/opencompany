@@ -1,10 +1,11 @@
 import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
-import { relations, sql } from "drizzle-orm";
+import { relations, type SQL, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -15,6 +16,23 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+
+// Postgres full-text search vector, written only by the database (a STORED generated column over
+// `search_text`). Same pattern as the recall index in schema.ts.
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
+// pgvector embedding, serialized as its text literal ("[0.1,0.2,...]"). Dimension is intentionally
+// unconstrained: rows are only ever compared against vectors from the same model (the `model`
+// column gates staleness), so a model swap needs no DDL.
+const vector = customType<{ data: string }>({
+  dataType() {
+    return "vector";
+  },
+});
 
 export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
@@ -391,6 +409,17 @@ export const goatBrainDocuments = goat.table(
     aliases: jsonb("aliases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     contentHash: text("content_hash").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
+    // Retrieval projections: `search_text` (title + aliases + compiled truth + timeline + relation
+    // text) feeds the generated FTS vector; `name_text` (title + aliases) feeds trigram entity
+    // lookup. Both are composed in documentValues() (goat-brain-files.ts).
+    searchText: text("search_text").notNull().default(""),
+    nameText: text("name_text").notNull().default(""),
+    // asset_extracted_text is folded in directly (not via search_text) so PDF/DOCX extraction
+    // updates — which touch only that column — reindex without recomposing search_text.
+    searchTsv: tsvector("search_tsv").generatedAlwaysAs(
+      (): SQL =>
+        sql`to_tsvector('english', coalesce("search_text", '') || ' ' || coalesce("asset_extracted_text", ''))`,
+    ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -412,6 +441,12 @@ export const goatBrainDocuments = goat.table(
     brainRefUpdatedIdx: index("goat_brain_documents_brain_ref_updated_idx").on(
       table.brainRef,
       table.updatedAt,
+    ),
+    // Retrieval: keyword relevance (FTS) and typo/fuzzy entity lookup (trigram) — both GIN.
+    searchTsvIdx: index("goat_brain_documents_search_tsv_idx").using("gin", table.searchTsv),
+    nameTrgmIdx: index("goat_brain_documents_name_trgm_idx").using(
+      "gin",
+      table.nameText.op("gin_trgm_ops"),
     ),
     formatCheck: check(
       "goat_brain_documents_format_check",
@@ -518,6 +553,30 @@ export const goatBrainEdges = goat.table(
       "goat_brain_edges_source_kind_check",
       sql`${table.sourceKind} IN ('relation', 'wiki_link')`,
     ),
+  }),
+);
+
+// One embedding per document over its retrieval text. `content_hash` mirrors the document's
+// content_hash at embed time and `model` records the embedding model, so staleness is a plain SQL
+// join predicate (e.content_hash = d.content_hash AND e.model = $model); stale or missing rows are
+// re-embedded write-through at query time (goat-brain-read.ts). Rebuildable projection — safe to
+// truncate.
+export const goatBrainDocumentEmbeddings = goat.table(
+  "brain_document_embeddings",
+  {
+    documentId: text("document_id")
+      .primaryKey()
+      .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
+    brainRef: text("brain_ref")
+      .notNull()
+      .references(() => goatBrains.id, { onDelete: "cascade" }),
+    contentHash: text("content_hash").notNull(),
+    model: text("model").notNull(),
+    embedding: vector("embedding").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    brainRefIdx: index("goat_brain_document_embeddings_brain_ref_idx").on(table.brainRef),
   }),
 );
 
@@ -1782,6 +1841,7 @@ export type GoatBrainFolder = typeof goatBrainFolders.$inferSelect;
 export type GoatBrainDocument = typeof goatBrainDocuments.$inferSelect;
 export type GoatBrainTimelineEntryRecord = typeof goatBrainTimelineEntries.$inferSelect;
 export type GoatBrainEdge = typeof goatBrainEdges.$inferSelect;
+export type GoatBrainDocumentEmbedding = typeof goatBrainDocumentEmbeddings.$inferSelect;
 export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSelect;
 export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;

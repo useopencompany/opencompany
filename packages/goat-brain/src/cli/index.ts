@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   checkGoatBrainHealth,
-  DEFAULT_GOAT_BRAIN_FOLDERS,
+  compareGoatBrainFolderPaths,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
   defaultGoatBrainFolder,
   deterministicEvidenceId,
@@ -16,11 +16,13 @@ import {
   type GoatBrainRelation,
   type GoatBrainSource,
   goatBrainFolderKindError,
+  goatBrainFolderSourceForPath,
   goatBrainKindForFolder,
   goatBrainTimelineBody,
   goatBrainTimelineEntryFromParts,
   ingestGoatBrain,
   isBuiltInGoatBrainEntityType,
+  isHardDefaultGoatBrainFolder,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainKind,
@@ -41,7 +43,14 @@ import {
 } from "../index";
 import { createGateway } from "../retrieval/gateway";
 import { loadProviders } from "../retrieval/providers";
-import { findGoatBrainFile, listGoatBrainFiles } from "../store";
+import {
+  findGoatBrainFile,
+  listGoatBrainFiles,
+  readGoatBrainFolders,
+  removeGoatBrainFolder,
+  upsertGoatBrainFolder,
+  writeGoatBrainFolders,
+} from "../store";
 import { formatGoatBrainUsageReport, type GoatBrainUsageEntry } from "../usage";
 import { parseArgs, readStdin } from "./args";
 import { type CommandContext, type CommandResult, fail, notFound, ok, render } from "./io";
@@ -134,7 +143,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   merge: ["from", "into"],
   move: ["id", "folder"],
   delete: ["id", "force", "dry-run"],
-  folder: ["path"],
+  folder: ["path", "from", "to"],
   doctor: [],
   get: ["id", "section"],
   ingest: ["text", "text-stdin", "source-ref", "source-title", "at", "dry-run", "model"],
@@ -175,7 +184,7 @@ Commands:
   merge             Mark one doc as merged into another.
   move              Move a doc to another folder.
   delete            Delete a doc (--dry-run, --force).
-  folder            folder list | folder create --path <folder>.
+  folder            folder list | create | delete | rename.
   doctor            Check validation, links, folder shape, and weak provenance.
 
 Global options:
@@ -372,12 +381,18 @@ Examples:
   goat-brain delete old-note --force`,
   folder: `Usage: goat-brain folder list [--json]
        goat-brain folder create --path <folder> [--json]
+       goat-brain folder delete --path <folder> [--json]
+       goat-brain folder rename --from <folder> --to <folder> [--json]
 
-List folders in use or validate a new free-form folder path.
+List folders in use, create an empty adjustable folder, delete an empty adjustable folder,
+or rename an adjustable folder and the documents under it. Required folders
+(inbox, people, companies, evidence) cannot be renamed or removed.
 
 Examples:
   goat-brain folder list
-  goat-brain folder create --path projects/launch`,
+  goat-brain folder create --path projects/launch
+  goat-brain folder delete --path meetings
+  goat-brain folder rename --from research --to market-research`,
   doctor: `Usage: goat-brain doctor [--json]
 
 Check validation, links, folder shape, and weak provenance.
@@ -1122,21 +1137,140 @@ async function del(ctx: CommandContext): Promise<CommandResult> {
 async function folder(ctx: CommandContext): Promise<CommandResult> {
   const subcommand = ctx.args.positionals[0] ?? "list";
   if (subcommand === "list") {
-    const files = await listGoatBrainFiles(ctx.root);
-    const folders = new Set<string>(DEFAULT_GOAT_BRAIN_FOLDERS);
-    for (const file of files) {
-      const doc = parseGoatBrainDocument(file.source);
-      if (doc.frontmatter.folder) folders.add(doc.frontmatter.folder);
-    }
-    const values = [...folders].sort();
-    return ok(values.join("\n"), { folders: values });
+    const folders = await listFoldersWithDocuments(ctx.root);
+    const values = folders.map((folder) => folder.path);
+    return ok(values.join("\n"), { folders: values, folderRows: folders });
   }
   if (subcommand === "create") {
     const folderPath = normalizeGoatBrainFolderForV1(ctx.args.get("path") ?? "");
     if (!isValidGoatBrainFolder(folderPath)) return fail("`--path` must be a safe folder path.");
+    if (isHardDefaultGoatBrainFolder(folderPath)) {
+      return fail(`Folder "${folderPath}" is required and already exists.`);
+    }
+    await upsertGoatBrainFolder(ctx.root, {
+      path: folderPath,
+      source: goatBrainFolderSourceForPath(folderPath),
+    });
     return ok(`Folder "${folderPath}" is available.`, { folder: folderPath });
   }
-  return fail('folder command must be "list" or "create".');
+  if (subcommand === "delete") {
+    const folderPath = normalizeGoatBrainFolderForV1(ctx.args.get("path") ?? "");
+    if (!isValidGoatBrainFolder(folderPath)) return fail("`--path` must be a safe folder path.");
+    if (isHardDefaultGoatBrainFolder(folderPath)) {
+      return fail(`Folder "${folderPath}" is required and cannot be removed.`);
+    }
+    const folders = await readGoatBrainFolders(ctx.root);
+    const docs = await docsUnderFolder(ctx.root, folderPath);
+    const child = folders.find((entry) => entry.path.startsWith(`${folderPath}/`));
+    if (docs.length > 0 || child) return fail(`Folder "${folderPath}" is not empty.`);
+    await removeGoatBrainFolder(ctx.root, folderPath);
+    return ok(`Deleted folder "${folderPath}".`, { folder: folderPath });
+  }
+  if (subcommand === "rename") {
+    const fromPath = normalizeGoatBrainFolderForV1(ctx.args.get("from") ?? "");
+    const toPath = normalizeGoatBrainFolderForV1(ctx.args.get("to") ?? "");
+    if (!isValidGoatBrainFolder(fromPath)) return fail("`--from` must be a safe folder path.");
+    if (!isValidGoatBrainFolder(toPath)) return fail("`--to` must be a safe folder path.");
+    if (fromPath === toPath)
+      return ok(`Folder "${fromPath}" is already named "${toPath}".`, {
+        from: fromPath,
+        to: toPath,
+        movedDocuments: 0,
+      });
+    if (isHardDefaultGoatBrainFolder(fromPath) || isHardDefaultGoatBrainFolder(toPath)) {
+      return fail("Required folders cannot be renamed.");
+    }
+    if (toPath.startsWith(`${fromPath}/`)) {
+      return fail("Cannot rename a folder into one of its own children.");
+    }
+    if (goatBrainKindForFolder(fromPath) !== goatBrainKindForFolder(toPath)) {
+      return fail("Cannot rename folders across the evidence boundary.");
+    }
+    const existingFolders = await readGoatBrainFolders(ctx.root);
+    const targetDocs = await docsUnderFolder(ctx.root, toPath);
+    const targetFolder = existingFolders.find(
+      (entry) => entry.path === toPath || entry.path.startsWith(`${toPath}/`),
+    );
+    if (targetDocs.length > 0 || targetFolder) return fail(`Folder "${toPath}" already exists.`);
+    const sourceFolders = existingFolders.filter(
+      (entry) => entry.path === fromPath || entry.path.startsWith(`${fromPath}/`),
+    );
+    const sourceDocs = await docsUnderFolder(ctx.root, fromPath);
+    if (sourceFolders.length === 0 && sourceDocs.length === 0) {
+      return fail(`Folder "${fromPath}" does not exist.`);
+    }
+    let movedDocuments = 0;
+    for (const loaded of sourceDocs) {
+      const oldPath = loaded.file.relativePath;
+      loaded.doc.frontmatter.folder = replaceFolderPrefix(
+        loaded.doc.frontmatter.folder ?? fromPath,
+        fromPath,
+        toPath,
+      );
+      loaded.doc.frontmatter.updatedAt = nowIso();
+      const newPath = await persist(ctx.root, loaded.doc);
+      if (newPath !== oldPath) await removeGoatBrainFile(ctx.root, oldPath);
+      movedDocuments += 1;
+    }
+    const nextFolders = [
+      ...existingFolders.filter(
+        (entry) => entry.path !== fromPath && !entry.path.startsWith(`${fromPath}/`),
+      ),
+      ...sourceFolders.map((entry) => {
+        const path = replaceFolderPrefix(entry.path, fromPath, toPath);
+        return { path, source: goatBrainFolderSourceForPath(path) };
+      }),
+    ];
+    await writeGoatBrainFolders(ctx.root, nextFolders);
+    return ok(`Renamed folder "${fromPath}" to "${toPath}".`, {
+      from: fromPath,
+      to: toPath,
+      movedDocuments,
+    });
+  }
+  return fail('folder command must be "list", "create", "delete", or "rename".');
+}
+
+async function listFoldersWithDocuments(root: string) {
+  const byPath = new Map((await readGoatBrainFolders(root)).map((entry) => [entry.path, entry]));
+  for (const loaded of await docsUnderFolder(root, "")) {
+    const folder = loaded.doc.frontmatter.folder;
+    if (!folder) continue;
+    for (const path of ancestorFolders(folder)) {
+      if (!byPath.has(path)) {
+        byPath.set(path, { path, source: goatBrainFolderSourceForPath(path) });
+      }
+    }
+  }
+  return [...byPath.values()].toSorted((a, b) => compareGoatBrainFolderPaths(a.path, b.path));
+}
+
+async function docsUnderFolder(root: string, folderPath: string) {
+  const files = await listGoatBrainFiles(root);
+  return files.flatMap((file) => {
+    let doc: ReturnType<typeof parseGoatBrainDocument>;
+    try {
+      doc = parseGoatBrainDocument(file.source);
+    } catch {
+      return [];
+    }
+    const folder = doc.frontmatter.folder;
+    if (!folder) return [];
+    if (folderPath && folder !== folderPath && !folder.startsWith(`${folderPath}/`)) return [];
+    return [{ file, doc }];
+  });
+}
+
+function ancestorFolders(folderPath: string): string[] {
+  const parts = folderPath.split("/").filter(Boolean);
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function replaceFolderPrefix(pathName: string, fromPath: string, toPath: string) {
+  if (pathName === fromPath) return toPath;
+  return pathName.startsWith(`${fromPath}/`)
+    ? `${toPath}/${pathName.slice(fromPath.length + 1)}`
+    : pathName;
 }
 
 async function doctor(ctx: CommandContext): Promise<CommandResult> {

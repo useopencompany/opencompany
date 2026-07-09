@@ -139,7 +139,7 @@ describe("createGoatBrainMarkdownReportForTask", () => {
         expect.objectContaining({
           userWorkosId: "user_1",
           path: "research",
-          source: "system",
+          source: "custom",
         }),
         expect.objectContaining({
           documentId: expect.any(String),
@@ -204,7 +204,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
           expect.objectContaining({
             userWorkosId: "user_1",
             path: "meetings",
-            source: "system",
+            source: "custom",
           }),
           expect.objectContaining({
             userWorkosId: "user_1",

@@ -9,12 +9,23 @@ import {
   materializeGoatBrainFilesToRoot,
   syncGoatBrainFilesFromRoot,
 } from "@opencompany/db/goat-brain-files";
+import {
+  type GoatBrainDocumentRead,
+  type GoatBrainReadContext,
+  type GoatBrainSearchHit,
+  getGoatBrainDocuments,
+  getGoatBrainTimeline,
+  listGoatBrainDocuments,
+  searchGoatBrain,
+} from "@opencompany/db/goat-brain-read";
 import { goatBrainToolRuns } from "@opencompany/db/goat-schema";
 import { createPooledDb } from "@opencompany/db/pool";
 import {
   GOAT_BRAIN_ENTITY_TYPES,
+  type GoatBrainKind,
   isBuiltInGoatBrainEntityType,
   isValidGoatBrainKind,
+  normalizeGoatBrainFolderForV1,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import type {
@@ -27,7 +38,7 @@ import type {
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
 const GOAT_BRAIN_TOOL_HELP =
-  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
+  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. The brain has required folders inbox, people, companies, and evidence; core folders such as projects, meetings, research, decisions, and concepts are adjustable and can be recreated with folder create when needed. query supports type/kind/folder filters and hops for graph expansion; hits list linked pages — follow them with get. get accepts one id or a list of ids (aliases resolve too). Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
 
 const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
   "help",
@@ -37,6 +48,15 @@ const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
   "query",
   "doctor",
   "folder",
+]);
+// Commands served by the DB read plane (@opencompany/db/goat-brain-read) — indexed SQL, no brain
+// materialization, no CLI spawn. `help`/`folder`/`doctor` stay on the CLI: help is static text and
+// doctor legitimately wants the full corpus.
+const READ_PLANE_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
+  "query",
+  "get",
+  "timeline",
+  "list",
 ]);
 const GOAT_BRAIN_MUTATION_QUEUES = new Map<string, Promise<void>>();
 
@@ -115,6 +135,12 @@ export async function runGoatBrainToolForUser(input: {
       stderr: "",
       error: errorMessage(error),
     };
+  }
+  if (READ_PLANE_GOAT_BRAIN_COMMANDS.has(input.toolInput.command)) {
+    return runGoatBrainReadCommandForUser(input, {
+      argv: invocation.argv,
+      display: formatCliDisplay(invocation.argv),
+    });
   }
   return runGoatBrainCliForUser({
     brainRef: input.brainRef,
@@ -231,6 +257,328 @@ async function runResolvedGoatBrainCliForUser(
   return output;
 }
 
+// --- read plane -------------------------------------------------------------------------------
+// query/get/timeline/list are served in-process by @opencompany/db/goat-brain-read instead of
+// materializing the brain and spawning the CLI. Output keeps the GoatBrainToolOutput contract
+// (human-readable stdout + machine-readable `parsed`) and every run is still traced.
+
+async function runGoatBrainReadCommandForUser(
+  input: {
+    brainRef: string;
+    userWorkosId: string;
+    toolInput: GoatBrainToolInput;
+    gatewayApiKey: string;
+    sourceRef: string;
+    chatSessionId?: string;
+    userMessageId?: string;
+    assistantMessageId?: string;
+    toolCallId?: string;
+  },
+  resolved: ResolvedGoatBrainCliArgs,
+): Promise<GoatBrainToolOutput> {
+  const startedAt = new Date();
+  const startedAtMs = Date.now();
+  const traceId = `goat_brain_run_${randomUUID()}`;
+  const ctx: GoatBrainReadContext = {
+    brainRef: input.brainRef,
+    gatewayApiKey: input.gatewayApiKey,
+  };
+  const flags = normalizeCliToolFlags(input.toolInput.flags ?? {});
+  const wantsJson = flagBoolean(flags.json) === true;
+
+  let output: GoatBrainToolOutput;
+  try {
+    const result = await executeGoatBrainReadCommand(ctx, input.toolInput.command, flags);
+    output = {
+      ok: true,
+      exitCode: 0,
+      stdout: wantsJson ? JSON.stringify(result.parsed, null, 2) : result.stdout,
+      stderr: "",
+      command: resolved.display,
+      argv: resolved.argv,
+      parsed: result.parsed,
+    };
+  } catch (error) {
+    output = {
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      command: resolved.display,
+      argv: resolved.argv,
+      error: `${errorMessage(error)}\n\n${GOAT_BRAIN_TOOL_HELP}`,
+    };
+  }
+
+  const durationMs = Date.now() - startedAtMs;
+  output = { ...output, traceId, durationMs };
+  await recordGoatBrainToolRun({
+    traceId,
+    userWorkosId: input.userWorkosId,
+    command: input.toolInput.command,
+    resolved,
+    startedAt,
+    durationMs,
+    materialized: [],
+    processResult: null,
+    output,
+    traceContext: {
+      sourceRef: input.sourceRef,
+      toolInput: input.toolInput,
+      ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
+      ...(input.userMessageId ? { userMessageId: input.userMessageId } : {}),
+      ...(input.assistantMessageId ? { assistantMessageId: input.assistantMessageId } : {}),
+      ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+    },
+    syncResult: null,
+  });
+  return output;
+}
+
+async function executeGoatBrainReadCommand(
+  ctx: GoatBrainReadContext,
+  command: GoatBrainCliCommand,
+  flags: Record<string, GoatBrainToolFlagValue>,
+): Promise<{ stdout: string; parsed: unknown }> {
+  switch (command) {
+    case "query": {
+      const folder = flagString(flags.folder);
+      const type = readEntityTypeFlag(flags.type);
+      const kind = readKindFlag(flags.kind);
+      const since = flagString(flags.since);
+      const limit = flagNumber(flags.limit);
+      const hops = flagNumber(flags.hops);
+      const hits = await searchGoatBrain(ctx, {
+        text: flagString(flags.text) ?? "",
+        ...(folder ? { folder: normalizeGoatBrainFolderForV1(folder) } : {}),
+        ...(type ? { type } : {}),
+        ...(kind ? { kind: kind as GoatBrainKind } : {}),
+        ...(since ? { since } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(hops !== undefined ? { hops: Math.max(0, hops) } : {}),
+        ...(flagBoolean(flags["lexical-only"]) ? { lexicalOnly: true } : {}),
+        ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
+        ...(flagBoolean(flags["include-archived"]) ? { includeArchived: true } : {}),
+      });
+      return { stdout: renderQueryHits(hits), parsed: { hits } };
+    }
+    case "get": {
+      const ids = flagStringList(flags.id);
+      if (ids.length === 0) throw new Error("goat_brain get requires an id (or a list of ids).");
+      const section = flagString(flags.section) ?? "all";
+      if (!["all", "frontmatter", "truth", "timeline"].includes(section)) {
+        throw new Error("`section` must be all, frontmatter, truth, or timeline.");
+      }
+      const result = await getGoatBrainDocuments(ctx, ids);
+      if (result.documents.length === 0) {
+        throw new Error(
+          `No brain doc found with id ${ids.map((id) => `"${id}"`).join(", ")}. Try query to locate it.`,
+        );
+      }
+      return {
+        stdout: renderDocuments(result.documents, result.missing, section),
+        parsed: result,
+      };
+    }
+    case "timeline": {
+      const id = flagString(flags.id);
+      if (!id) throw new Error("goat_brain timeline requires an id.");
+      const since = flagString(flags.since);
+      const limit = flagNumber(flags.limit);
+      const result = await getGoatBrainTimeline(ctx, id, {
+        ...(since ? { since } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+      if (!result) throw new Error(`No brain doc found with id "${id}". Try query to locate it.`);
+      const stdout = result.entries.length
+        ? result.entries
+            .map((entry) =>
+              [
+                `### ${entry.at}`,
+                entry.summary,
+                entry.detail,
+                entry.sourceRef
+                  ? `Source: ${entry.sourceTitle ? `${entry.sourceTitle} (${entry.sourceRef})` : entry.sourceRef}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            )
+            .join("\n\n")
+        : "_No timeline yet._";
+      return { stdout, parsed: result };
+    }
+    case "list": {
+      const folder = flagString(flags.folder);
+      const type = readEntityTypeFlag(flags.type);
+      const kind = readKindFlag(flags.kind);
+      const limit = flagNumber(flags.limit);
+      const documents = await listGoatBrainDocuments(ctx, {
+        ...(folder ? { folder: normalizeGoatBrainFolderForV1(folder) } : {}),
+        ...(type ? { type } : {}),
+        ...(kind ? { kind: kind as GoatBrainKind } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
+      });
+      const stdout = documents.length
+        ? documents
+            .map(
+              (doc) =>
+                `[${doc.folder}] ${doc.title} (${doc.id}, ${doc.type}, ${doc.status}, updated ${doc.updatedAt})`,
+            )
+            .join("\n")
+        : "_No brain docs found._";
+      return { stdout, parsed: { documents } };
+    }
+    default:
+      throw new Error(`Unsupported read command "${command}".`);
+  }
+}
+
+function renderQueryHits(hits: GoatBrainSearchHit[]): string {
+  if (hits.length === 0) return "No matches.";
+  return hits
+    .map((hit, index) => {
+      const neighbors = hit.neighbors
+        .map(
+          (link) =>
+            `${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title})`,
+        )
+        .join(", ");
+      return [
+        `${index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, ${hit.type}, score ${hit.score}, updated ${hit.updatedAt})`,
+        hit.snippet,
+        neighbors ? `Linked: ${neighbors}` : "",
+        `Next: get ${hit.id}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function renderDocuments(
+  documents: GoatBrainDocumentRead[],
+  missing: string[],
+  section: string,
+): string {
+  const parts = documents.map((doc) => renderDocument(doc, section));
+  if (missing.length > 0) {
+    parts.push(`Not found: ${missing.join(", ")}. Try query to locate them.`);
+  }
+  return parts.join("\n\n---\n\n");
+}
+
+function renderDocument(doc: GoatBrainDocumentRead, section: string): string {
+  if (section === "truth") return doc.compiledTruth || "_No compiled truth yet._";
+  if (section === "frontmatter") {
+    return JSON.stringify(
+      {
+        requestedId: doc.requestedId,
+        id: doc.id,
+        resolvedVia: doc.resolvedVia,
+        title: doc.title,
+        folder: doc.folder,
+        kind: doc.kind,
+        type: doc.type,
+        format: doc.format,
+        status: doc.status,
+        aliases: doc.aliases,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+        sources: doc.sources,
+      },
+      null,
+      2,
+    );
+  }
+  const timeline = doc.timeline.length
+    ? doc.timeline.map((entry) => `### ${entry.at}\n${entry.body}`).join("\n\n")
+    : "_No timeline yet._";
+  if (section === "timeline") return timeline;
+
+  const resolvedNote =
+    doc.resolvedVia === "id" ? "" : ` (resolved from "${doc.requestedId}" via ${doc.resolvedVia})`;
+  const links = doc.links.length
+    ? doc.links
+        .map(
+          (link) =>
+            `- ${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title})`,
+        )
+        .join("\n")
+    : "_No links._";
+  const timelineHeading =
+    doc.timelineTotal > doc.timeline.length
+      ? `## Timeline (last ${doc.timeline.length} of ${doc.timelineTotal}; use timeline for more)`
+      : "## Timeline";
+  return [
+    `# ${doc.title} (${doc.id})${resolvedNote}`,
+    `folder: ${doc.folder} | kind: ${doc.kind} | type: ${doc.type} | format: ${doc.format} | status: ${doc.status} | updated: ${doc.updatedAt}`,
+    doc.aliases.length ? `aliases: ${doc.aliases.join(", ")}` : "",
+    "## Compiled truth",
+    doc.compiledTruth || "_No compiled truth yet._",
+    ...(doc.assetText
+      ? ["## Extracted text (machine-generated from the asset)", doc.assetText]
+      : []),
+    timelineHeading,
+    timeline,
+    "## Links",
+    links,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function flagString(value: GoatBrainToolFlagValue | undefined): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number") return String(value);
+  return undefined;
+}
+
+function flagStringList(value: GoatBrainToolFlagValue | undefined): string[] {
+  if (Array.isArray(value)) return value.map((item) => item.trim()).filter(Boolean);
+  const single = flagString(value);
+  return single ? [single] : [];
+}
+
+function flagNumber(value: GoatBrainToolFlagValue | undefined): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function flagBoolean(value: GoatBrainToolFlagValue | undefined): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.trim().toLowerCase() === "true") return true;
+    if (value.trim().toLowerCase() === "false") return false;
+  }
+  return undefined;
+}
+
+function readEntityTypeFlag(value: GoatBrainToolFlagValue | undefined): string | undefined {
+  const type = flagString(value);
+  if (!type) return undefined;
+  if (!isBuiltInGoatBrainEntityType(type)) {
+    throw new Error(
+      `Unsupported Goat Brain entity type "${type}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
+    );
+  }
+  return type;
+}
+
+function readKindFlag(value: GoatBrainToolFlagValue | undefined): string | undefined {
+  const kind = flagString(value);
+  if (!kind) return undefined;
+  if (!isValidGoatBrainKind(kind)) {
+    throw new Error('kind must be "page" or "evidence".');
+  }
+  return kind;
+}
+
 async function syncGoatBrainFilesFromRootWithTransactionDb(input: {
   brainRef: string;
   userWorkosId: string;
@@ -277,14 +625,18 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "status",
     "json",
   ],
-  list: ["folder", "limit", "include-merged", "json"],
+  list: ["folder", "type", "kind", "limit", "include-merged", "json"],
   get: ["id", "section", "json"],
   query: [
     "text",
     "folder",
+    "type",
+    "kind",
     "since",
     "limit",
     "hops",
+    // Accepted for compatibility with existing model habits; the read plane ignores them
+    // (expansion is always both-direction, and stored documents are valid by construction).
     "graph-direction",
     "lexical-only",
     "include-invalid",
@@ -340,7 +692,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   merge: ["from", "into", "json"],
   move: ["id", "folder", "json"],
   delete: ["id", "force", "dry-run", "json"],
-  folder: ["subcommand", "path", "json"],
+  folder: ["subcommand", "path", "from", "to", "json"],
   doctor: ["json"],
 };
 
@@ -661,9 +1013,6 @@ function childBrainCliEnv(input: { root: string; gatewayApiKey: string }): NodeJ
     VERCEL_AI_GATEWAY_API_KEY: input.gatewayApiKey,
     ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
       ? { GOAT_BRAIN_GATEWAY_BASE_URL: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
-      : {}),
-    ...(process.env.GOAT_BRAIN_RETRIEVAL_MODEL
-      ? { GOAT_BRAIN_RETRIEVAL_MODEL: process.env.GOAT_BRAIN_RETRIEVAL_MODEL }
       : {}),
     ...(process.env.GOAT_BRAIN_EMBEDDING_MODEL
       ? { GOAT_BRAIN_EMBEDDING_MODEL: process.env.GOAT_BRAIN_EMBEDDING_MODEL }

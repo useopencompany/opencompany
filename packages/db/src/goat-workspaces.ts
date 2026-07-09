@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { normalizeGoatBrainId } from "../../goat-brain/src/index";
 import { getDb } from "./client";
+import { seedDefaultGoatBrainFolders } from "./goat-brain-files";
 import {
   type GoatBrain,
   type GoatBrainVisibility,
@@ -198,6 +199,13 @@ export async function createDefaultGoatWorkspaceForUser(
       createdByWorkosId: input.userWorkosId,
     })
     .onConflictDoNothing();
+  await seedDefaultGoatBrainFolders(
+    {
+      brainRef: `goat_brain_${input.userWorkosId}`,
+      userWorkosId: input.userWorkosId,
+    },
+    { db },
+  );
 }
 
 // Adopts local memberships for WorkOS organizations the user already belongs
@@ -275,6 +283,10 @@ export async function createGoatBrain(
     .returning();
   const brain = rows[0];
   if (!brain) throw new Error("Failed to create brain.");
+  await seedDefaultGoatBrainFolders(
+    { brainRef: brain.id, userWorkosId: input.createdByWorkosId },
+    { db },
+  );
   if (input.visibility === "restricted") {
     await db
       .insert(goatBrainMembers)

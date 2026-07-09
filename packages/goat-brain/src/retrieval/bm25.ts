@@ -41,7 +41,10 @@ export function lexicalSearch(
   return index.search(trimmed).map((result) => ({ id: result.id as string, score: result.score }));
 }
 
-export function titleTagMatch(record: IndexRecord, query: string): number {
+export function titleTagMatch(
+  record: Pick<IndexRecord, "title" | "aliases">,
+  query: string,
+): number {
   const q = normalize(query);
   if (!q) return 0;
   const names = [record.title, ...record.aliases].map(normalize).filter(Boolean);

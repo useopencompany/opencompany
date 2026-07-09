@@ -1,9 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
-import { renameGoatBrainDocumentAction, updateGoatBrainDocumentAction } from "@/lib/brain-actions";
+import {
+  createGoatBrainFolderAction,
+  deleteGoatBrainFolderAction,
+  renameGoatBrainDocumentAction,
+  renameGoatBrainFolderAction,
+  updateGoatBrainDocumentAction,
+} from "@/lib/brain-actions";
 import { GoatBrainView } from "./GoatBrainView";
 
 const routerMock = vi.hoisted(() => ({
@@ -65,11 +71,18 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
 }));
 
 vi.mock("@/lib/brain-actions", () => ({
+  createGoatBrainFolderAction: vi.fn(),
   deleteGoatBrainDocumentAction: vi.fn(),
+  deleteGoatBrainFolderAction: vi.fn(),
   moveGoatBrainDocumentAction: vi.fn(),
   renameGoatBrainDocumentAction: vi.fn(),
+  renameGoatBrainFolderAction: vi.fn(),
   updateGoatBrainDocumentAction: vi.fn(),
 }));
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("GoatBrainView", () => {
   it("shows an entry timeline from the selected document toolbar", async () => {
@@ -181,6 +194,116 @@ describe("GoatBrainView", () => {
       "href",
       "/brain/goat_brain_1/projects/roadmap",
     );
+  });
+
+  it("orders root folders with hard-folder dividers", () => {
+    render(
+      <GoatBrainView
+        folders={orderedFolders}
+        documents={[]}
+        initialFolderPath="inbox"
+        initialBrainId={null}
+      />,
+    );
+
+    expect(screen.getAllByRole("treeitem").map((item) => item.textContent)).toEqual([
+      "inbox",
+      "projects",
+      "meetings",
+      "research",
+      "decisions",
+      "concepts",
+      "partners",
+      "people",
+      "companies",
+      "evidence",
+    ]);
+    expect(screen.getAllByTestId("brain-root-divider")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Rename folder" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete folder" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add folder" })).toBeEnabled();
+  });
+
+  it("creates an adjustable folder from the sidebar control", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createGoatBrainFolderAction).mockResolvedValueOnce({
+      ok: true,
+      path: "partners",
+    });
+
+    render(
+      <GoatBrainView
+        folders={orderedFolders}
+        documents={[]}
+        initialFolderPath="inbox"
+        initialBrainId={null}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add folder" }));
+    await user.type(screen.getByLabelText("Path"), "partners");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(createGoatBrainFolderAction).toHaveBeenCalledWith({ folderPath: "partners" });
+    });
+    expect(routerMock.replace).toHaveBeenCalledWith("/brain/partners");
+  });
+
+  it("renames only adjustable folders", async () => {
+    const user = userEvent.setup();
+    vi.mocked(renameGoatBrainFolderAction).mockResolvedValueOnce({
+      ok: true,
+      path: "initiatives",
+    });
+
+    render(
+      <GoatBrainView
+        folders={orderedFolders}
+        documents={[]}
+        initialFolderPath="projects"
+        initialBrainId={null}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Rename folder" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete folder" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Rename folder" }));
+    await user.clear(screen.getByLabelText("Path"));
+    await user.type(screen.getByLabelText("Path"), "initiatives");
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+
+    await waitFor(() => {
+      expect(renameGoatBrainFolderAction).toHaveBeenCalledWith({
+        fromPath: "projects",
+        toPath: "initiatives",
+      });
+    });
+  });
+
+  it("deletes only adjustable folders after confirmation", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(true);
+    vi.mocked(deleteGoatBrainFolderAction).mockResolvedValueOnce({ ok: true });
+
+    render(
+      <GoatBrainView
+        folders={orderedFolders}
+        documents={[]}
+        initialFolderPath="projects"
+        initialBrainId={null}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Rename folder" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete folder" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Delete folder" }));
+    await waitFor(() => {
+      expect(deleteGoatBrainFolderAction).toHaveBeenCalledWith({ folderPath: "projects" });
+    });
+    confirm.mockRestore();
   });
 
   it("resolves editor wiki links for folders and folder-qualified files", () => {
@@ -362,6 +485,19 @@ const folders: GoatBrainFolderView[] = [
   },
 ];
 
+const orderedFolders: GoatBrainFolderView[] = [
+  folder("evidence", "system"),
+  folder("people", "system"),
+  folder("companies", "system"),
+  folder("inbox", "system"),
+  folder("partners", "custom"),
+  folder("concepts", "custom"),
+  folder("research", "custom"),
+  folder("projects", "custom"),
+  folder("decisions", "custom"),
+  folder("meetings", "custom"),
+];
+
 const documentWithTimeline: GoatBrainDocumentView = {
   id: "doc_ada",
   brainId: "ada-lovelace",
@@ -464,3 +600,14 @@ Nested truth.
 
 ## Timeline
 `;
+
+function folder(folderPath: string, source: GoatBrainFolderView["source"]): GoatBrainFolderView {
+  return {
+    id: `folder_${folderPath.replaceAll("/", "_")}`,
+    path: folderPath,
+    name: folderPath,
+    source,
+    createdAt: "2026-07-06T12:00:00.000Z",
+    updatedAt: "2026-07-06T12:00:00.000Z",
+  };
+}

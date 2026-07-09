@@ -1,16 +1,32 @@
-export const DEFAULT_GOAT_BRAIN_FOLDERS = [
+export const HARD_DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
   "people",
   "companies",
-  "projects",
-  "meetings",
-  "concepts",
-  "analysis",
-  "sources",
   "evidence",
 ] as const;
 
+export const ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS = [
+  "projects",
+  "meetings",
+  "research",
+  "decisions",
+  "concepts",
+] as const;
+
+export const DEFAULT_GOAT_BRAIN_FOLDERS = [
+  "inbox",
+  ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
+  "people",
+  "companies",
+  "evidence",
+] as const;
+
+export const GOAT_BRAIN_MIDDLE_FOLDER_ORDER = ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS;
+
 export type GoatBrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number];
+export type HardDefaultGoatBrainFolder = (typeof HARD_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
+export type AdjustableDefaultGoatBrainFolder =
+  (typeof ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
 export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx";
 
 export const GOAT_BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
@@ -123,6 +139,18 @@ export function isGoatBrainEvidenceFolder(value: string): boolean {
   const normalized = normalizeGoatBrainFolder(value);
   return (
     normalized === GOAT_BRAIN_EVIDENCE_ZONE || normalized.startsWith(`${GOAT_BRAIN_EVIDENCE_ZONE}/`)
+  );
+}
+
+export function isHardDefaultGoatBrainFolder(value: string): boolean {
+  const normalized = normalizeGoatBrainFolder(value);
+  return HARD_DEFAULT_GOAT_BRAIN_FOLDERS.includes(normalized as HardDefaultGoatBrainFolder);
+}
+
+export function isAdjustableDefaultGoatBrainFolder(value: string): boolean {
+  const normalized = normalizeGoatBrainFolder(value);
+  return ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS.includes(
+    normalized as AdjustableDefaultGoatBrainFolder,
   );
 }
 

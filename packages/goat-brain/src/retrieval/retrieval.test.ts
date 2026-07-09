@@ -206,7 +206,7 @@ describe("goat brain retrieval", () => {
     ).resolves.toEqual([]);
   });
 
-  it("uses vector and rerank providers when available", async () => {
+  it("uses the embedding provider for semantic ranking when available", async () => {
     await writeDoc("companies/acme.md", {
       id: "acme",
       folder: "companies",
@@ -233,19 +233,6 @@ describe("goat brain retrieval", () => {
             texts.map((text) =>
               text.includes("Beta") || text === "semantic target" ? [1, 0] : [0, 1],
             ),
-        },
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({ id: "beta" }),
-      expect.objectContaining({ id: "acme" }),
-    ]);
-
-    await expect(
-      queryGoatBrain(
-        root,
-        { text: "operational context" },
-        {
-          rerank: async () => ["beta", "acme"],
         },
       ),
     ).resolves.toEqual([
