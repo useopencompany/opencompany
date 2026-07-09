@@ -1,24 +1,14 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { normalizeGoatBrainCompiledTruth } from "@opencompany/goat-brain/document";
-import {
-  compareGoatBrainFolderPaths,
-  goatBrainFolderSourceForPath,
-} from "@opencompany/goat-brain/folders";
 import { useLiveQuery } from "@tanstack/react-db";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
-import type { GoatBrainDocumentView, GoatBrainFolderView, GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import {
   createGoatCollections,
-  type GoatBrainDocumentRow,
-  type GoatBrainEdgeRow,
-  type GoatBrainFolderRow,
-  type GoatBrainTimelineEntryRow,
   type GoatChatSessionRow,
   type GoatIntegrationRow,
   type GoatTaskRow,
@@ -57,13 +47,11 @@ export type GoatAppInitialData = {
   recentChats: GoatChatSummaryView[];
   integrations: GoatIntegrationState;
   featureFlags: GoatFeatureFlags;
-  brain: GoatBrainSnapshot;
   codexConnected: boolean;
   chatResumeEnabled: boolean;
 };
 
 type GoatAppData = GoatAppInitialData & {
-  brainEdges: GoatBrainEdgeRow[];
   taskRows: GoatTaskRow[];
 };
 
@@ -77,11 +65,6 @@ export function GoatAppDataProvider({
   children: ReactNode;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
-  // Switching the active brain swaps the brain shape subscriptions in place.
-  const brainCollections = useMemo(
-    () => collections.brainCollections(initialData.activeBrain?.id ?? "__no-brain__"),
-    [collections, initialData.activeBrain?.id],
-  );
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery((q) =>
     q.from({ task: collections.tasks }),
   );
@@ -93,22 +76,6 @@ export function GoatAppDataProvider({
   );
   const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery((q) =>
     q.from({ integration: collections.integrations }),
-  );
-  const { data: brainRows, isLoading: brainLoading } = useLiveQuery(
-    (q) => q.from({ file: brainCollections.documents }),
-    [brainCollections],
-  );
-  const { data: folderRows, isLoading: foldersLoading } = useLiveQuery(
-    (q) => q.from({ folder: brainCollections.folders }),
-    [brainCollections],
-  );
-  const { data: timelineRows } = useLiveQuery(
-    (q) => q.from({ timeline: brainCollections.timelineEntries }),
-    [brainCollections],
-  );
-  const { data: edgeRows } = useLiveQuery(
-    (q) => q.from({ edge: brainCollections.edges }),
-    [brainCollections],
   );
 
   const tasks = useMemo(() => {
@@ -160,25 +127,6 @@ export function GoatAppDataProvider({
     };
   }, [initialData.integrations, integrationRows, integrationsLoading]);
 
-  const brain = useMemo(() => {
-    if (
-      (brainLoading && !brainRows?.length) ||
-      (foldersLoading && !folderRows?.length && initialData.brain.folders.length > 0)
-    ) {
-      return initialData.brain;
-    }
-    const timelinesByDocument = groupTimelineRows(
-      (timelineRows ?? []) as GoatBrainTimelineEntryRow[],
-    );
-    const documents = ((brainRows ?? []) as GoatBrainDocumentRow[])
-      .map((row) => documentViewFromRow(row, timelinesByDocument.get(row.id)))
-      .toSorted(compareBrainDocuments);
-    return {
-      documents,
-      folders: deriveFolderViews(documents, (folderRows ?? []) as GoatBrainFolderRow[]),
-    };
-  }, [brainLoading, brainRows, folderRows, foldersLoading, initialData.brain, timelineRows]);
-
   const value = useMemo<GoatAppData>(
     () => ({
       ...initialData,
@@ -186,11 +134,9 @@ export function GoatAppDataProvider({
       schedules,
       recentChats,
       integrations,
-      brain,
-      brainEdges: (edgeRows ?? []) as GoatBrainEdgeRow[],
       taskRows: (taskRows ?? []) as GoatTaskRow[],
     }),
-    [brain, edgeRows, initialData, integrations, recentChats, schedules, taskRows, tasks],
+    [initialData, integrations, recentChats, schedules, taskRows, tasks],
   );
 
   return <GoatAppDataContext.Provider value={value}>{children}</GoatAppDataContext.Provider>;
@@ -235,207 +181,4 @@ function taskScheduleRowToView(row: GoatTaskScheduleRow): GoatTaskScheduleView {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function documentViewFromRow(
-  row: GoatBrainDocumentRow,
-  timelineRows?: GoatBrainTimelineEntryRow[],
-): GoatBrainDocumentView {
-  const path = `${row.folder_path}/${row.brain_id}.md`;
-  const title = row.title ?? row.brain_id;
-  return {
-    id: row.id,
-    brainId: row.brain_id,
-    folderPath: row.folder_path,
-    path,
-    title,
-    content: row.content,
-    body: normalizeGoatBrainCompiledTruth(row.body, title),
-    timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
-    format: normalizeFormat(row.format),
-    mimeType: row.mime_type ?? "text/markdown",
-    originalFileName: row.original_file_name,
-    assetStorageKey: row.asset_storage_key,
-    relations: normalizeRelations(row.relations),
-    sources: normalizeSources(row.sources),
-    kind: normalizeDocumentKind(row.kind),
-    type: normalizeEntityType(row.entity_type),
-    status: normalizeStatus(row.status),
-    aliases: normalizeStringArray(row.aliases),
-    contentHash: row.content_hash,
-    sizeBytes: row.size_bytes,
-    parseError: null,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function groupTimelineRows(rows: GoatBrainTimelineEntryRow[]) {
-  const byDocument = new Map<string, GoatBrainTimelineEntryRow[]>();
-  for (const row of rows) {
-    const current = byDocument.get(row.document_id) ?? [];
-    current.push(row);
-    byDocument.set(row.document_id, current);
-  }
-  for (const [documentId, values] of byDocument) {
-    byDocument.set(
-      documentId,
-      values.toSorted((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
-    );
-  }
-  return byDocument;
-}
-
-function timelineRowsFromRows(
-  rows: GoatBrainTimelineEntryRow[],
-): GoatBrainDocumentView["timeline"] {
-  return rows.map((row) => ({
-    evidenceId: row.evidence_id,
-    at: row.at,
-    body: [row.summary, row.detail, sourceLine(row)].filter(Boolean).join("\n\n"),
-  }));
-}
-
-function sourceLine(row: GoatBrainTimelineEntryRow) {
-  if (!row.source_ref) return "";
-  return `Source: ${row.source_title ? `${row.source_title} (${row.source_ref})` : row.source_ref}`;
-}
-
-function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentView) {
-  const folder = a.folderPath.localeCompare(b.folderPath);
-  if (folder !== 0) return folder;
-  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-}
-
-function deriveFolderViews(
-  documents: GoatBrainDocumentView[],
-  folderRows: GoatBrainFolderRow[] = [],
-): GoatBrainFolderView[] {
-  const byPath = new Map<string, GoatBrainFolderView>();
-  const zero = new Date(0).toISOString();
-  for (const folder of folderRows) {
-    byPath.set(folder.path, {
-      id: folder.id,
-      path: folder.path,
-      name: folderName(folder.path),
-      source: folder.source,
-      createdAt: folder.created_at,
-      updatedAt: folder.updated_at,
-    });
-  }
-  for (const document of documents) {
-    for (const path of ancestorFolderPaths(document.folderPath)) {
-      const existing = byPath.get(path);
-      byPath.set(path, {
-        id: existing?.id ?? `folder:${path}`,
-        path,
-        name: folderName(path),
-        source: existing?.source ?? goatBrainFolderSourceForPath(path),
-        createdAt: existing?.createdAt ?? document.createdAt,
-        updatedAt:
-          existing && existing.updatedAt > document.updatedAt
-            ? existing.updatedAt
-            : document.updatedAt,
-      });
-    }
-  }
-  if (byPath.size === 0) {
-    byPath.set("inbox", {
-      id: "folder:inbox",
-      path: "inbox",
-      name: "Inbox",
-      source: "system",
-      createdAt: zero,
-      updatedAt: zero,
-    });
-  }
-  return [...byPath.values()].toSorted((a, b) => compareGoatBrainFolderPaths(a.path, b.path));
-}
-
-function ancestorFolderPaths(path: string) {
-  const parts = path.split("/").filter(Boolean);
-  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
-}
-
-function folderName(folderPath: string) {
-  const name = folderPath.split("/").filter(Boolean).at(-1) ?? folderPath;
-  return name
-    .split("-")
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join(" ");
-}
-
-function normalizeTimeline(
-  value: GoatBrainDocumentRow["timeline"],
-): GoatBrainDocumentView["timeline"] {
-  return Array.isArray(value)
-    ? value.flatMap((entry): GoatBrainDocumentView["timeline"] => {
-        const evidenceId = entry.evidenceId ?? entry.evidence_id;
-        return entry.at && entry.body
-          ? [{ evidenceId: evidenceId ?? "", at: entry.at, body: entry.body }]
-          : [];
-      })
-    : [];
-}
-
-function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
-  if (value === "pdf" || value === "docx") return value;
-  return "markdown";
-}
-
-function normalizeDocumentKind(value: string): GoatBrainDocumentView["kind"] {
-  return value === "evidence" ? "evidence" : "page";
-}
-
-function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
-  if (
-    value === "person" ||
-    value === "company" ||
-    value === "project" ||
-    value === "meeting" ||
-    value === "concept" ||
-    value === "source" ||
-    value === "analysis" ||
-    value === "note"
-  ) {
-    return value;
-  }
-  return "note";
-}
-
-function normalizeStatus(value: string): GoatBrainDocumentView["status"] {
-  if (value === "active" || value === "archived" || value === "merged") return value;
-  return "draft";
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-}
-
-function normalizeRelations(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item): GoatBrainDocumentView["relations"] => {
-    if (!item || typeof item !== "object") return [];
-    const record = item as Record<string, unknown>;
-    if (typeof record.to !== "string") return [];
-    return [{ type: typeof record.type === "string" ? record.type : "related", to: record.to }];
-  });
-}
-
-function normalizeSources(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item): GoatBrainDocumentView["sources"] => {
-    if (!item || typeof item !== "object") return [];
-    const record = item as Record<string, unknown>;
-    if (typeof record.ref !== "string") return [];
-    return [
-      {
-        ref: record.ref,
-        ...(typeof record.title === "string" ? { title: record.title } : {}),
-        ...(typeof record.capturedAt === "string" ? { capturedAt: record.capturedAt } : {}),
-      },
-    ];
-  });
 }

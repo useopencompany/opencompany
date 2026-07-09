@@ -41,6 +41,12 @@ vi.mock("@/components/GoatBrainSwitcher", () => ({
   BrainAccessDialog: () => null,
 }));
 
+vi.mock("@/components/GoatBrainActivity", () => ({
+  GoatBrainActivity: ({ brainRef }: { brainRef: string }) => (
+    <span data-testid="brain-activity">{brainRef}</span>
+  ),
+}));
+
 vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
   MarkdownGoatBrainEditor: ({
     content,
@@ -84,12 +90,22 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+const defaultBrain = {
+  id: "goat_brain_1",
+  name: "General",
+  slug: "general",
+  description: null,
+  visibility: "workspace" as const,
+};
+
 describe("GoatBrainView", () => {
   it("shows an entry timeline from the selected document toolbar", async () => {
     const user = userEvent.setup();
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline]}
         initialFolderPath="people"
@@ -118,6 +134,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline, documentLinkingToAda, evidenceAboutAda]}
         initialFolderPath="people"
@@ -153,6 +171,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline, evidenceDocument]}
         initialFolderPath="evidence/chat"
@@ -173,6 +193,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline, evidenceDocument]}
         initialFolderPath="people"
@@ -205,6 +227,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline, documentLinkingToAda]}
         initialFolderPath="people"
@@ -221,9 +245,41 @@ describe("GoatBrainView", () => {
     );
   });
 
+  it("selects same-brain documents instantly and syncs the URL with browser history", async () => {
+    const user = userEvent.setup();
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={folders}
+        documents={[documentWithTimeline, documentLinkingToAda]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Compiler and collaborator.",
+    );
+
+    await user.click(screen.getByRole("treeitem", { name: /projects/i }));
+    await user.click(screen.getByRole("treeitem", { name: /roadmap\.md/i }));
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Coordinate with [[page:ada-lovelace|Ada]].",
+    );
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/projects/roadmap");
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    replaceState.mockRestore();
+  });
+
   it("orders root folders with hard-folder dividers", () => {
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={orderedFolders}
         documents={[]}
         initialFolderPath="inbox"
@@ -259,6 +315,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={orderedFolders}
         documents={[]}
         initialFolderPath="inbox"
@@ -271,9 +329,12 @@ describe("GoatBrainView", () => {
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
-      expect(createGoatBrainFolderAction).toHaveBeenCalledWith({ folderPath: "partners" });
+      expect(createGoatBrainFolderAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        folderPath: "partners",
+      });
     });
-    expect(routerMock.replace).toHaveBeenCalledWith("/brain/partners");
+    expect(routerMock.replace).not.toHaveBeenCalled();
   });
 
   it("renames only adjustable folders", async () => {
@@ -285,6 +346,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={orderedFolders}
         documents={[]}
         initialFolderPath="projects"
@@ -302,6 +365,7 @@ describe("GoatBrainView", () => {
 
     await waitFor(() => {
       expect(renameGoatBrainFolderAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
         fromPath: "projects",
         toPath: "initiatives",
       });
@@ -315,6 +379,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={orderedFolders}
         documents={[]}
         initialFolderPath="projects"
@@ -327,7 +393,10 @@ describe("GoatBrainView", () => {
 
     await user.click(screen.getByRole("button", { name: "Delete folder" }));
     await waitFor(() => {
-      expect(deleteGoatBrainFolderAction).toHaveBeenCalledWith({ folderPath: "projects" });
+      expect(deleteGoatBrainFolderAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        folderPath: "projects",
+      });
     });
     confirm.mockRestore();
   });
@@ -335,6 +404,8 @@ describe("GoatBrainView", () => {
   it("resolves editor wiki links for folders and folder-qualified files", () => {
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline]}
         initialFolderPath="people"
@@ -366,6 +437,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline]}
         initialFolderPath="people"
@@ -400,6 +473,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline]}
         initialFolderPath="people"
@@ -413,6 +488,7 @@ describe("GoatBrainView", () => {
 
     await waitFor(() => {
       expect(renameGoatBrainDocumentAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
         documentId: "doc_ada",
         title: "Ada King",
       });
@@ -429,6 +505,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[documentWithTimeline]}
         initialFolderPath="people"
@@ -445,6 +523,7 @@ describe("GoatBrainView", () => {
     await waitFor(
       () => {
         expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
+          brainRef: "goat_brain_1",
           documentId: "doc_ada",
           body: "Updated truth.",
           expectedContentHash: "hash",
@@ -469,6 +548,8 @@ describe("GoatBrainView", () => {
 
     render(
       <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
         folders={folders}
         documents={[
           {
@@ -490,6 +571,7 @@ describe("GoatBrainView", () => {
     await waitFor(
       () => {
         expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
+          brainRef: "goat_brain_1",
           documentId: "doc_ada",
           body: "Nested truth. Updated.",
           expectedContentHash: "polluted-hash",

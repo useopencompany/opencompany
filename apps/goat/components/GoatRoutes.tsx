@@ -22,6 +22,7 @@ import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";
+import type { GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
@@ -186,29 +187,38 @@ export function GoatJamieSettingsRoute() {
   );
 }
 
-export function GoatBrainRoute({ path }: { path: string[] }) {
-  const { brain, brains } = useGoatAppData();
-  const routeBrain = path[0] ? brains.find((brain) => brain.id === path[0]) : null;
-  const routeBrainId = routeBrain?.id ?? null;
-  const brainPath = routeBrainId ? path.slice(1) : path;
+export function GoatBrainRoute({
+  path,
+  routeBrainId,
+  selectedBrain,
+  initialBrainSnapshot,
+}: {
+  path: string[];
+  routeBrainId: string | null;
+  selectedBrain: GoatBrainSummaryView | null;
+  initialBrainSnapshot: GoatBrainSnapshot | null;
+}) {
   // "settings" is a reserved segment directly after an explicit brain id
   // (brain ids contain underscores, so they can never collide with folder names).
-  if (routeBrain && brainPath[0] === "settings") {
-    return <GoatBrainSettingsRoute brain={routeBrain} />;
+  if (routeBrainId && selectedBrain && path[0] === "settings") {
+    return <GoatBrainSettingsRoute brain={selectedBrain} />;
   }
-  const requestedPath = brainPath.join("/");
+  const brain = initialBrainSnapshot ?? { folders: [], documents: [] };
+  const requestedPath = path.join("/");
   const requestedFolderExists = brain.folders.some((folder) => folder.path === requestedPath);
   const initialBrainId =
-    brainPath.length > 1 && !requestedFolderExists ? (brainPath.at(-1) ?? null) : null;
+    path.length > 1 && !requestedFolderExists ? (path.at(-1) ?? null) : null;
   const initialFolderPath =
-    brainPath.length > 0
+    path.length > 0
       ? initialBrainId
-        ? brainPath.slice(0, -1).join("/")
+        ? path.slice(0, -1).join("/")
         : requestedPath
       : (brain.folders[0]?.path ?? null);
 
   return (
     <GoatBrainView
+      brainRef={selectedBrain?.id ?? null}
+      brain={selectedBrain}
       folders={brain.folders}
       documents={brain.documents}
       initialFolderPath={initialFolderPath || null}

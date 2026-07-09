@@ -2,7 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GoatSettingsRoute } from "./GoatRoutes";
+import { GoatBrainView } from "@/components/GoatBrainView";
+import { GoatBrainRoute, GoatSettingsRoute } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -31,7 +32,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/components/GoatBrainView", () => ({
-  GoatBrainView: () => null,
+  GoatBrainView: vi.fn(() => <div data-testid="brain-view" />),
 }));
 
 vi.mock("@/components/GoatBrainSettings", () => ({
@@ -86,3 +87,112 @@ describe("GoatSettingsRoute", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 });
+
+describe("GoatBrainRoute", () => {
+  beforeEach(() => {
+    vi.mocked(GoatBrainView).mockClear();
+  });
+
+  it("passes an explicit route brain id through to the Brain view", () => {
+    render(
+      <GoatBrainRoute
+        path={["people", "ada-lovelace"]}
+        routeBrainId="goat_brain_team"
+        selectedBrain={teamBrain}
+        initialBrainSnapshot={brainSnapshot}
+      />,
+    );
+
+    expect(screen.getByTestId("brain-view")).toBeInTheDocument();
+    expect(vi.mocked(GoatBrainView)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brainRef: "goat_brain_team",
+        brain: teamBrain,
+        folders: brainSnapshot.folders,
+        documents: brainSnapshot.documents,
+        initialFolderPath: "people",
+        initialBrainId: "ada-lovelace",
+        routeBrainId: "goat_brain_team",
+      }),
+      undefined,
+    );
+  });
+
+  it("uses the selected active brain for default /brain routes without URL prefixing", () => {
+    render(
+      <GoatBrainRoute
+        path={["people", "ada-lovelace"]}
+        routeBrainId={null}
+        selectedBrain={defaultBrain}
+        initialBrainSnapshot={brainSnapshot}
+      />,
+    );
+
+    expect(vi.mocked(GoatBrainView)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brainRef: "goat_brain_default",
+        brain: defaultBrain,
+        initialFolderPath: "people",
+        initialBrainId: "ada-lovelace",
+        routeBrainId: null,
+      }),
+      undefined,
+    );
+  });
+});
+
+const defaultBrain = {
+  id: "goat_brain_default",
+  name: "Default",
+  slug: "default",
+  description: null,
+  visibility: "workspace" as const,
+};
+
+const teamBrain = {
+  id: "goat_brain_team",
+  name: "Team",
+  slug: "team",
+  description: null,
+  visibility: "workspace" as const,
+};
+
+const brainSnapshot = {
+  folders: [
+    {
+      id: "folder_people",
+      path: "people",
+      name: "People",
+      source: "system" as const,
+      createdAt: "2026-07-06T12:00:00.000Z",
+      updatedAt: "2026-07-06T12:00:00.000Z",
+    },
+  ],
+  documents: [
+    {
+      id: "doc_ada",
+      brainId: "ada-lovelace",
+      folderPath: "people",
+      path: "people/ada-lovelace.md",
+      title: "Ada Lovelace",
+      content: "",
+      body: "Compiler and collaborator.",
+      timeline: [],
+      format: "markdown" as const,
+      mimeType: "text/markdown",
+      originalFileName: null,
+      assetStorageKey: null,
+      assetSizeBytes: null,
+      relations: [],
+      sources: [],
+      kind: "page" as const,
+      type: "person" as const,
+      status: "draft" as const,
+      aliases: [],
+      contentHash: "hash",
+      sizeBytes: 128,
+      createdAt: "2026-07-06T12:00:00.000Z",
+      updatedAt: "2026-07-06T12:00:00.000Z",
+    },
+  ],
+};
