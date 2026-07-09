@@ -712,11 +712,13 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
   const apiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!apiKey) return fail("VERCEL_AI_GATEWAY_API_KEY is required for ingest.");
   const usage: GoatBrainUsageEntry[] = [];
+  const reporting = gatewayReportingFromEnv(process.env);
   const gateway = createGateway({
     apiKey,
     ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
       ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
       : {}),
+    ...(reporting ? { reporting } : {}),
     chatModel:
       ctx.args.get("model")?.trim() ||
       process.env.GOAT_BRAIN_INGEST_MODEL?.trim() ||
@@ -745,6 +747,19 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
     ...ok(rendered, result),
     usage,
     code: ingestCommandExitCode(result),
+  };
+}
+
+function gatewayReportingFromEnv(env: NodeJS.ProcessEnv) {
+  const user = env.GOAT_GATEWAY_REPORTING_USER?.trim();
+  const tags = (env.GOAT_GATEWAY_REPORTING_TAGS ?? "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  if (!user && tags.length === 0) return null;
+  return {
+    ...(user ? { user } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
   };
 }
 

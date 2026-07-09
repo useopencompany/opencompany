@@ -140,6 +140,7 @@ export function createServer(
       availableTools: plannerContext.availableTools,
       githubRepositories: plannerContext.githubRepositories,
       gatewayApiKey: env.vercelAiGatewayApiKey,
+      userWorkosId,
       signal: new AbortController().signal,
     });
     reply.send({ ok: true, harnessSpec: planned.harnessSpec });

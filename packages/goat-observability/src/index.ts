@@ -56,6 +56,33 @@ export type GoatFailureCategory =
 
 export type GoatAttributeValue = string | number | boolean | null | undefined;
 export type GoatAttributes = Record<string, GoatAttributeValue>;
+export type GoatGatewayFeature = "chat" | "chat-title" | "task" | "brain-ingest" | "brain-query";
+
+export type GoatGatewayAttribution = {
+  user?: string;
+  tags: string[];
+};
+
+type GoatGatewayJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | GoatGatewayJsonValue[]
+  | { [key: string]: GoatGatewayJsonValue };
+type GoatGatewayProviderOptionValue = { [key: string]: GoatGatewayJsonValue };
+export type GoatGatewayProviderOptions = { [key: string]: { [key: string]: GoatGatewayJsonValue } };
+
+export type GoatGatewayAttributionInput = {
+  userWorkosId?: string | null | undefined;
+  feature: GoatGatewayFeature;
+  env?: string | null | undefined;
+  chatSessionId?: string | null | undefined;
+  taskId?: string | null | undefined;
+  ingestJobId?: string | null | undefined;
+  brainRef?: string | null | undefined;
+  tags?: readonly string[];
+};
 
 export type GoatSpanHandle = {
   setAttributes(attributes: GoatAttributes): void;
@@ -103,6 +130,58 @@ export function hashGoatUserId(userWorkosId: string | null | undefined) {
     hash = BigInt.asUintN(64, hash * prime);
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+export function goatGatewayReportingUser(userWorkosId: string | null | undefined) {
+  const hash = hashGoatUserId(userWorkosId);
+  return hash ? `goat-${hash}` : undefined;
+}
+
+export function createGoatGatewayAttribution(
+  input: GoatGatewayAttributionInput,
+): GoatGatewayAttribution {
+  const user = goatGatewayReportingUser(input.userWorkosId);
+  const env = readEnv();
+  return {
+    ...(user ? { user } : {}),
+    tags: normalizeGatewayTags([
+      "app:goat",
+      `env:${input.env?.trim() || env.VERCEL_ENV || env.NODE_ENV || "unknown"}`,
+      `feature:${input.feature}`,
+      ...(input.chatSessionId ? [contextTag("chat", input.chatSessionId)] : []),
+      ...(input.taskId ? [contextTag("task", input.taskId)] : []),
+      ...(input.ingestJobId ? [contextTag("ingest", input.ingestJobId)] : []),
+      ...(input.brainRef ? [contextTag("brain", input.brainRef)] : []),
+      ...(input.tags ?? []),
+    ]),
+  };
+}
+
+export function goatGatewayProviderOptions(
+  attribution: GoatGatewayAttribution,
+  existing?: GoatGatewayProviderOptions,
+): GoatGatewayProviderOptions {
+  const existingGateway =
+    existing && isPlainRecord(existing.gateway)
+      ? (existing.gateway as GoatGatewayProviderOptionValue)
+      : undefined;
+  return {
+    ...(existing ?? {}),
+    gateway: {
+      ...(existingGateway ?? {}),
+      ...(attribution.user ? { user: attribution.user } : {}),
+      tags: attribution.tags,
+    },
+  };
+}
+
+export function goatGatewayReportingHeaders(
+  attribution: GoatGatewayAttribution,
+): Record<string, string> {
+  return {
+    ...(attribution.user ? { "ai-reporting-user": attribution.user } : {}),
+    ...(attribution.tags.length > 0 ? { "ai-reporting-tags": attribution.tags.join(",") } : {}),
+  };
 }
 
 export function sanitizeGoatAttributes(attributes: GoatAttributes | undefined): Attributes {
@@ -356,6 +435,38 @@ function errorName(error: unknown) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeGatewayTags(tags: readonly string[]) {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    const value = normalizeGatewayTag(tag);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push(value);
+    if (normalized.length >= 10) break;
+  }
+  return normalized;
+}
+
+function contextTag(prefix: string, value: string) {
+  return `${prefix}:${value}`;
+}
+
+function normalizeGatewayTag(tag: string) {
+  if (tag.includes("@")) return null;
+  const normalized = tag
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9:._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return normalized || null;
 }
 
 type EnvLike = Record<string, string | undefined>;

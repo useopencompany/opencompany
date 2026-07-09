@@ -72,6 +72,10 @@ export type GoatBrainReadContext = {
   gatewayApiKey?: string; // absent → lexical-only ranking
   db?: DbClient;
   onUsage?: (entry: GoatBrainUsageEntry) => void;
+  reporting?: {
+    user?: string;
+    tags?: readonly string[];
+  };
 };
 
 export type GoatBrainSearchOptions = {
@@ -550,6 +554,7 @@ async function vectorCandidates(
       ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
         ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
         : {}),
+      ...(ctx.reporting ? { reporting: ctx.reporting } : {}),
       ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
     });
 
