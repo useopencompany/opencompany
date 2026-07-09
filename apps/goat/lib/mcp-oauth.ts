@@ -37,12 +37,12 @@ export function resolveGoatAuthKitDomain(
   }
 }
 
-export function buildGoatMcpEndpointPath(brainId: string) {
-  return `/api/mcp/${encodeURIComponent(brainId)}/mcp`;
+export function buildGoatMcpEndpointPath(brainRef: string) {
+  return `/api/mcp/${encodeURIComponent(brainRef)}/mcp`;
 }
 
-export function buildGoatMcpResourceMetadataPath(brainId: string) {
-  return `/.well-known/oauth-protected-resource${buildGoatMcpEndpointPath(brainId)}`;
+export function buildGoatMcpResourceMetadataPath(brainRef: string) {
+  return `/.well-known/oauth-protected-resource${buildGoatMcpEndpointPath(brainRef)}`;
 }
 
 export function goatMcpResourceUrlFromMetadataRequest(request: Request) {
