@@ -13,9 +13,8 @@ import { goatBrainToolRuns } from "@opencompany/db/goat-schema";
 import { createPooledDb } from "@opencompany/db/pool";
 import {
   GOAT_BRAIN_ENTITY_TYPES,
-  goatBrainFolderForEntityType,
   isBuiltInGoatBrainEntityType,
-  isValidGoatBrainEvidenceKind,
+  isValidGoatBrainKind,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import type {
@@ -267,6 +266,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "id",
     "title",
     "type",
+    "kind",
     "truth",
     "truth-stdin",
     "alias",
@@ -275,7 +275,6 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "source-ref",
     "source-title",
     "evidence-id",
-    "evidence-kind",
     "status",
     "json",
   ],
@@ -295,6 +294,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   ],
   timeline: ["id", "limit", "since", "json"],
   rewrite: ["id", "truth", "truth-stdin", "json"],
+  set: ["id", "title", "type", "status", "json"],
   "timeline-add": [
     "id",
     "at",
@@ -321,7 +321,8 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   ],
   "append-evidence": [
     "id",
-    "kind",
+    "type",
+    "folder",
     "at",
     "title",
     "body",
@@ -477,64 +478,10 @@ function validateCreateFlags(
       "create",
     );
   }
-  const expectedFolder = goatBrainFolderForEntityType(type);
-  if (type === "evidence") {
-    const evidenceKind =
-      typeof flags["evidence-kind"] === "string" ? flags["evidence-kind"].trim() : "";
-    const folderValue = typeof flags.folder === "string" ? flags.folder.trim() : "";
-    const folderSubtype = folderValue.split("/").filter(Boolean)[1];
-    if (evidenceKind && !isValidGoatBrainEvidenceKind(evidenceKind)) {
-      throw goatBrainToolInputError(
-        "goat_brain create evidenceKind must be chat, email, correction, or document.",
-        "create",
-      );
-    }
-    if (folderValue.startsWith("evidence/") && !isValidGoatBrainEvidenceKind(folderSubtype)) {
-      throw goatBrainToolInputError(
-        'goat_brain create evidence folders must be under "evidence/chat", "evidence/email", "evidence/correction", or "evidence/document".',
-        "create",
-      );
-    }
-    if (
-      evidenceKind &&
-      isValidGoatBrainEvidenceKind(folderSubtype) &&
-      evidenceKind !== folderSubtype
-    ) {
-      throw goatBrainToolInputError(
-        "goat_brain create evidenceKind must match the evidence folder subtype.",
-        "create",
-      );
-    }
-    const resolvedKind = isValidGoatBrainEvidenceKind(evidenceKind)
-      ? evidenceKind
-      : isValidGoatBrainEvidenceKind(folderSubtype)
-        ? folderSubtype
-        : "chat";
-    flags["evidence-kind"] = resolvedKind;
-    if (!folderValue) {
-      flags.folder = `evidence/${resolvedKind}`;
-      return;
-    }
-    if (folderValue === "evidence") {
-      flags.folder = `evidence/${resolvedKind}`;
-      return;
-    }
-    if (!folderValue.startsWith("evidence/")) {
-      throw goatBrainToolInputError(
-        `goat_brain create folder "${folderValue}" does not match type "evidence". Use "evidence/${resolvedKind}".`,
-        "create",
-      );
-    }
-    return;
-  }
-  const folder = typeof flags.folder === "string" ? flags.folder.trim() : "";
-  if (!folder) {
-    flags.folder = expectedFolder;
-    return;
-  }
-  if (folder !== expectedFolder && !folder.startsWith(`${expectedFolder}/`)) {
+  const kind = typeof flags.kind === "string" ? flags.kind.trim() : "";
+  if (kind && !isValidGoatBrainKind(kind)) {
     throw goatBrainToolInputError(
-      `goat_brain create folder "${folder}" does not match type "${type}". Use "${expectedFolder}".`,
+      'goat_brain create kind must be "page" or "evidence". Evidence documents live under the "evidence/" folder zone; folders are otherwise free-form.',
       "create",
     );
   }

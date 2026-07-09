@@ -168,14 +168,18 @@ export function GoatJamieSettingsRoute() {
 }
 
 export function GoatBrainRoute({ path }: { path: string[] }) {
-  const { brain } = useGoatAppData();
-  const requestedPath = path.join("/");
+  const { brain, brains } = useGoatAppData();
+  const routeBrain = path[0] ? brains.find((brain) => brain.id === path[0]) : null;
+  const routeBrainId = routeBrain?.id ?? null;
+  const brainPath = routeBrainId ? path.slice(1) : path;
+  const requestedPath = brainPath.join("/");
   const requestedFolderExists = brain.folders.some((folder) => folder.path === requestedPath);
-  const initialBrainId = path.length > 1 && !requestedFolderExists ? (path.at(-1) ?? null) : null;
+  const initialBrainId =
+    brainPath.length > 1 && !requestedFolderExists ? (brainPath.at(-1) ?? null) : null;
   const initialFolderPath =
-    path.length > 0
+    brainPath.length > 0
       ? initialBrainId
-        ? path.slice(0, -1).join("/")
+        ? brainPath.slice(0, -1).join("/")
         : requestedPath
       : (brain.folders[0]?.path ?? null);
 
@@ -185,6 +189,7 @@ export function GoatBrainRoute({ path }: { path: string[] }) {
       documents={brain.documents}
       initialFolderPath={initialFolderPath || null}
       initialBrainId={initialBrainId}
+      routeBrainId={routeBrainId}
     />
   );
 }

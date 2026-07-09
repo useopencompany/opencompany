@@ -46,10 +46,10 @@ export type GoatIntegrationResourceStatus =
   | "permission_lost"
   | "archived"
   | "sync_failed";
-export type GoatBrainSourceProvider = "jamie";
-export type GoatBrainSourceType = "meeting";
+export type GoatBrainSourceProvider = "jamie" | "goat-chat";
+export type GoatBrainSourceType = "meeting" | "capture";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
-export type GoatBrainIngestJobKind = "brain_source_item_ingest";
+export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type GoatTaskToolName =
@@ -114,14 +114,15 @@ export type GoatBrainFolderSource = "system" | "custom";
 export type GoatBrainEntityType =
   | "person"
   | "company"
-  | "project"
-  | "decision"
-  | "meeting"
-  | "research"
+  | "media"
+  | "analysis"
   | "concept"
-  | "evidence"
-  | "note";
-export type GoatBrainEvidenceKind = "chat" | "email" | "correction" | "document";
+  | "email"
+  | "writing"
+  | "note"
+  | "project"
+  | "source";
+export type GoatBrainKind = "page" | "evidence";
 export type GoatBrainRelation = {
   type: string;
   to: string;
@@ -132,7 +133,7 @@ export type GoatBrainSource = {
   title?: string;
   capturedAt?: string;
 };
-export type GoatBrainDocumentKind = "markdown" | "pdf" | "docx";
+export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx";
 export type GoatBrainStatus = "draft" | "active" | "archived" | "merged";
 export type GoatBrainFrontmatterProjection = Record<string, unknown>;
 export type GoatBrainTimelineEntry = {
@@ -372,14 +373,14 @@ export const goatBrainDocuments = goat.table(
       .$type<GoatBrainTimelineEntry[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
-    kind: text("kind").$type<GoatBrainDocumentKind>().notNull().default("markdown"),
+    format: text("format").$type<GoatBrainDocumentFormat>().notNull().default("markdown"),
     mimeType: text("mime_type"),
     originalFileName: text("original_file_name"),
     assetStorageKey: text("asset_storage_key"),
     relations: jsonb("relations").$type<GoatBrainRelation[]>().notNull().default(sql`'[]'::jsonb`),
     sources: jsonb("sources").$type<GoatBrainSource[]>().notNull().default(sql`'[]'::jsonb`),
+    kind: text("kind").$type<GoatBrainKind>().notNull(),
     entityType: text("entity_type").$type<GoatBrainEntityType>().notNull(),
-    evidenceKind: text("evidence_kind").$type<GoatBrainEvidenceKind>(),
     status: text("status").$type<GoatBrainStatus>().notNull().default("draft"),
     aliases: jsonb("aliases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     contentHash: text("content_hash").notNull(),
@@ -406,47 +407,24 @@ export const goatBrainDocuments = goat.table(
       table.brainRef,
       table.updatedAt,
     ),
-    kindCheck: check(
-      "goat_brain_documents_kind_check",
-      sql`${table.kind} IN ('markdown', 'pdf', 'docx')`,
+    formatCheck: check(
+      "goat_brain_documents_format_check",
+      sql`${table.format} IN ('markdown', 'pdf', 'docx')`,
     ),
     statusCheck: check(
       "goat_brain_documents_status_check",
       sql`${table.status} IN ('draft', 'active', 'archived', 'merged')`,
     ),
+    kindCheck: check("goat_brain_documents_kind_check", sql`${table.kind} IN ('page', 'evidence')`),
     entityTypeCheck: check(
       "goat_brain_documents_entity_type_check",
-      sql`${table.entityType} IN ('person', 'company', 'project', 'decision', 'meeting', 'research', 'concept', 'evidence', 'note')`,
+      sql`${table.entityType} IN ('person', 'company', 'media', 'analysis', 'concept', 'email', 'writing', 'note', 'project', 'source')`,
     ),
-    evidenceKindCheck: check(
-      "goat_brain_documents_evidence_kind_check",
+    kindZoneCheck: check(
+      "goat_brain_documents_kind_zone_check",
       sql`(
-        (${table.entityType} = 'evidence' AND (
-          (${table.evidenceKind} = 'chat' AND (${table.folderPath} = 'evidence/chat' OR ${table.folderPath} LIKE 'evidence/chat/%')) OR
-          (${table.evidenceKind} = 'email' AND (${table.folderPath} = 'evidence/email' OR ${table.folderPath} LIKE 'evidence/email/%')) OR
-          (${table.evidenceKind} = 'correction' AND (${table.folderPath} = 'evidence/correction' OR ${table.folderPath} LIKE 'evidence/correction/%')) OR
-          (${table.evidenceKind} = 'document' AND (${table.folderPath} = 'evidence/document' OR ${table.folderPath} LIKE 'evidence/document/%'))
-        )) OR
-        (${table.entityType} <> 'evidence' AND ${table.evidenceKind} IS NULL)
-      )`,
-    ),
-    folderEntityTypeCheck: check(
-      "goat_brain_documents_folder_entity_type_check",
-      sql`(
-        (${table.entityType} = 'person' AND (${table.folderPath} = 'people' OR ${table.folderPath} LIKE 'people/%')) OR
-        (${table.entityType} = 'company' AND (${table.folderPath} = 'companies' OR ${table.folderPath} LIKE 'companies/%')) OR
-        (${table.entityType} = 'project' AND (${table.folderPath} = 'projects' OR ${table.folderPath} LIKE 'projects/%')) OR
-        (${table.entityType} = 'decision' AND (${table.folderPath} = 'decisions' OR ${table.folderPath} LIKE 'decisions/%')) OR
-        (${table.entityType} = 'meeting' AND (${table.folderPath} = 'meetings' OR ${table.folderPath} LIKE 'meetings/%')) OR
-        (${table.entityType} = 'research' AND (${table.folderPath} = 'research' OR ${table.folderPath} LIKE 'research/%')) OR
-        (${table.entityType} = 'concept' AND (${table.folderPath} = 'concepts' OR ${table.folderPath} LIKE 'concepts/%')) OR
-        (${table.entityType} = 'evidence' AND (
-          ${table.folderPath} = 'evidence/chat' OR ${table.folderPath} LIKE 'evidence/chat/%' OR
-          ${table.folderPath} = 'evidence/email' OR ${table.folderPath} LIKE 'evidence/email/%' OR
-          ${table.folderPath} = 'evidence/correction' OR ${table.folderPath} LIKE 'evidence/correction/%' OR
-          ${table.folderPath} = 'evidence/document' OR ${table.folderPath} LIKE 'evidence/document/%'
-        )) OR
-        (${table.entityType} = 'note' AND (${table.folderPath} = 'inbox' OR ${table.folderPath} LIKE 'inbox/%'))
+        (${table.kind} = 'evidence' AND (${table.folderPath} = 'evidence' OR ${table.folderPath} LIKE 'evidence/%')) OR
+        (${table.kind} = 'page' AND ${table.folderPath} <> 'evidence' AND ${table.folderPath} NOT LIKE 'evidence/%')
       )`,
     ),
   }),
@@ -785,11 +763,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting')`,
+      sql`${table.sourceType} IN ('meeting', 'capture')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -811,6 +789,9 @@ export const goatBrainIngestJobs = goat.table(
     sourceProvider: text("source_provider").$type<GoatBrainSourceProvider>().notNull(),
     sourceConnectionId: text("source_connection_id").notNull(),
     integrationId: text("integration_id"),
+    // Target brain for the job (principle: ingestion is per-brain). Null means
+    // the handler resolves the user's default brain at run time.
+    brainRef: text("brain_ref").references(() => goatBrains.id, { onDelete: "set null" }),
     kind: text("kind").$type<GoatBrainIngestJobKind>().notNull(),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<GoatBrainIngestJobStatus>().notNull().default("queued"),
@@ -844,11 +825,11 @@ export const goatBrainIngestJobs = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
-      sql`${table.kind} IN ('brain_source_item_ingest')`,
+      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest')`,
     ),
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",

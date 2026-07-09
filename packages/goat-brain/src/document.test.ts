@@ -14,6 +14,7 @@ describe("goat brain document", () => {
       frontmatter: {
         id: "acme",
         folder: "companies",
+        kind: "page",
         type: "company",
         status: "active",
         title: "Acme",
@@ -48,6 +49,7 @@ describe("goat brain document", () => {
     const source = `---
 id: acme
 folder: companies
+kind: page
 type: company
 status: active
 createdAt: 2026-01-01T00:00:00.000Z
@@ -106,11 +108,12 @@ Original timeline body.
     ]);
   });
 
-  it("rejects documents whose folder root does not match the type", () => {
-    const source = serializeGoatBrainDocument({
+  it("rejects documents whose folder does not match the kind", () => {
+    const pageInEvidenceZone = serializeGoatBrainDocument({
       frontmatter: {
         id: "acme",
-        folder: "people",
+        folder: "evidence/email",
+        kind: "page",
         type: "company",
         status: "draft",
         title: "Acme",
@@ -123,10 +126,46 @@ Original timeline body.
       timeline: [],
     });
 
-    expect(validateGoatBrainDocument(parseGoatBrainDocument(source), "acme", source)).toEqual({
+    expect(
+      validateGoatBrainDocument(
+        parseGoatBrainDocument(pageInEvidenceZone),
+        "acme",
+        pageInEvidenceZone,
+      ),
+    ).toEqual({
       ok: false,
       errors: expect.arrayContaining([
-        expect.stringContaining('folder "people" maps to type "person", not "company"'),
+        'frontmatter.folder/kind mismatch: folder "evidence/email" is inside the "evidence/" zone, which is reserved for evidence documents.',
+      ]),
+    });
+
+    const evidenceOutsideZone = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "ev-acme-email",
+        folder: "companies",
+        kind: "evidence",
+        type: "email",
+        status: "draft",
+        title: "Acme email",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Acme email",
+      compiledTruth: "Acme asked for pricing.",
+      timeline: [],
+    });
+
+    expect(
+      validateGoatBrainDocument(
+        parseGoatBrainDocument(evidenceOutsideZone),
+        "ev-acme-email",
+        evidenceOutsideZone,
+      ),
+    ).toEqual({
+      ok: false,
+      errors: expect.arrayContaining([
+        'frontmatter.folder/kind mismatch: evidence documents must live under the "evidence/" zone.',
       ]),
     });
   });

@@ -140,6 +140,7 @@ describe("buildGoatElectricOriginUrl", () => {
     "goat.brain_documents",
     "goat.brain_timeline_entries",
     "goat.brain_edges",
+    "goat.brain_ingest_jobs",
   ])("scopes %s to the route-authorized brain ref", (table) => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
@@ -170,6 +171,25 @@ describe("buildGoatElectricOriginUrl", () => {
     });
 
     expect(url).toBeNull();
+  });
+
+  it("scopes goat.brain_source_items to the user and strips the payload columns", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items",
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url?.searchParams.get("table")).toBe("goat.brain_source_items");
+    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    const columns = url?.searchParams.get("columns")?.split(",") ?? [];
+    expect(columns).toContain("id");
+    expect(columns).toContain("title");
+    expect(columns).not.toContain("raw_payload");
+    expect(columns).not.toContain("normalized_payload");
   });
 
   it("requires Electric Cloud source id and secret together", () => {

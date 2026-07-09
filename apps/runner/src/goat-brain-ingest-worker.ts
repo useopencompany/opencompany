@@ -1,10 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import {
-  createGoatBrainMarkdownContent,
-  goatBrainFilePathFor,
-  MAX_GOAT_BRAIN_FILE_BYTES,
-  upsertGoatBrainFile,
-} from "@opencompany/db/goat-brain-files";
+import { randomUUID } from "node:crypto";
+import { goatBrainFilePathFor, upsertGoatBrainFile } from "@opencompany/db/goat-brain-files";
 import {
   type GoatBrainIngestJob,
   type GoatBrainIngestJobKind,
@@ -13,19 +8,25 @@ import {
 } from "@opencompany/db/goat-schema";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
-  formatGoatBrainEvidenceLink,
-  goatBrainTimelineEntryFromParts,
+  isNormalizedGoatChatCaptureSourceItem,
   isNormalizedJamieMeetingSourceItem,
   type NormalizedBrainSourceItem,
   type NormalizedJamieMeetingSourceItem,
-  type NormalizedJamieMeetingTranscriptSegment,
-  normalizeEvidenceId,
-  normalizeGoatBrainId,
 } from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
+import {
+  type GoatBrainAgentIngestEnv,
+  runGoatChatCaptureAgentIngest,
+  runJamieMeetingAgentIngest,
+} from "./goat-brain-agent-ingest";
+import {
+  buildJamieMeetingBrainWrites,
+  JAMIE_EVIDENCE_FOLDER,
+  JAMIE_MEETING_FOLDER,
+} from "./goat-brain-jamie-writes";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-brain-ingest" });
@@ -34,7 +35,6 @@ export const GOAT_BRAIN_INGEST_LEASE_TTL_MS = 5 * 60 * 1000;
 export const GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS = 5_000;
 export const GOAT_BRAIN_INGEST_MAX_ATTEMPTS = 5;
 const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
-const JAMIE_TRANSCRIPT_EXCERPT_BYTES = 400_000;
 
 export type GoatBrainIngestJobWithSource = GoatBrainIngestJob & {
   sourceType: GoatBrainSourceType;
@@ -47,18 +47,41 @@ export type GoatBrainIngestJobDescriptor = {
   sourceType: GoatBrainSourceType;
 };
 
+export type GoatBrainIngestHandlerInput<
+  TItem extends NormalizedBrainSourceItem = NormalizedBrainSourceItem,
+> = {
+  userWorkosId: string;
+  brainRef: string | null;
+  item: TItem;
+  env: GoatBrainAgentIngestEnv;
+};
+
 export type GoatBrainIngestHandler<
   TItem extends NormalizedBrainSourceItem = NormalizedBrainSourceItem,
 > = {
   descriptor: GoatBrainIngestJobDescriptor;
   isPayload(value: unknown): value is TItem;
-  run(input: { userWorkosId: string; item: TItem }): Promise<Record<string, unknown>>;
+  run(input: GoatBrainIngestHandlerInput<TItem>): Promise<Record<string, unknown>>;
 };
 
+// Legacy deterministic template writer; kept registered so already-queued jobs
+// drain. New Jamie webhooks enqueue the agentic kind below.
 const JAMIE_MEETING_INGEST_DESCRIPTOR = {
   kind: "brain_source_item_ingest",
   sourceProvider: "jamie",
   sourceType: "meeting",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
+const JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "jamie",
+  sourceType: "meeting",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
+const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "goat-chat",
+  sourceType: "capture",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
@@ -66,6 +89,16 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
     run: writeJamieMeetingToBrain,
+  },
+  {
+    descriptor: JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedJamieMeetingSourceItem,
+    run: runJamieMeetingAgentIngest,
+  },
+  {
+    descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGoatChatCaptureSourceItem,
+    run: runGoatChatCaptureAgentIngest,
   },
 ];
 
@@ -260,7 +293,7 @@ export async function claimNextGoatBrainIngestJob(input: {
 
 export async function runClaimedGoatBrainIngestJob(input: {
   job: GoatBrainIngestJobWithSource;
-  env: Pick<RunnerEnv, "jobLeaseTtlMs">;
+  env: Pick<RunnerEnv, "jobLeaseTtlMs" | "vercelAiGatewayApiKey">;
   handlers?: readonly GoatBrainIngestHandler[];
   store?: GoatBrainIngestStore;
 }) {
@@ -298,9 +331,6 @@ export async function runClaimedGoatBrainIngestJob(input: {
   }, GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS);
 
   try {
-    if (input.job.kind !== "brain_source_item_ingest") {
-      throw new Error(`Unsupported Goat Brain ingest job kind: ${input.job.kind}`);
-    }
     const handler = findGoatBrainIngestHandler(handlers, input.job);
     if (!handler) {
       throw new Error(
@@ -318,7 +348,9 @@ export async function runClaimedGoatBrainIngestJob(input: {
 
     const result = await handler.run({
       userWorkosId: input.job.userWorkosId,
+      brainRef: input.job.brainRef ?? null,
       item: input.job.normalizedPayload,
+      env: { vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey },
     });
     if (!leaseActive) return;
     await store.complete({
@@ -443,29 +475,33 @@ export function startGoatBrainIngestWorker(
 
 export async function writeJamieMeetingToBrain(input: {
   userWorkosId: string;
+  brainRef: string | null;
   item: NormalizedJamieMeetingSourceItem;
+  env: GoatBrainAgentIngestEnv;
 }) {
   const writes = buildJamieMeetingBrainWrites(input.item);
   const db = getDb();
-  // Ingest jobs are personal; they land in the user's default ("General") brain.
-  const brain = await getDefaultGoatBrainForUser(input.userWorkosId, { db });
-  if (!brain) {
+  // Legacy jobs predate per-job brain refs; they land in the user's default
+  // ("General") brain.
+  const brainRef =
+    input.brainRef ?? (await getDefaultGoatBrainForUser(input.userWorkosId, { db }))?.id;
+  if (!brainRef) {
     throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
   }
   const evidence = await upsertGoatBrainFile(
     {
-      brainRef: brain.id,
+      brainRef,
       userWorkosId: input.userWorkosId,
-      path: goatBrainFilePathFor("evidence/document", writes.evidenceBrainId),
+      path: goatBrainFilePathFor(JAMIE_EVIDENCE_FOLDER, writes.evidenceBrainId),
       content: writes.evidenceContent,
     },
     { db },
   );
   const meeting = await upsertGoatBrainFile(
     {
-      brainRef: brain.id,
+      brainRef,
       userWorkosId: input.userWorkosId,
-      path: goatBrainFilePathFor("meetings", writes.meetingBrainId),
+      path: goatBrainFilePathFor(JAMIE_MEETING_FOLDER, writes.meetingBrainId),
       content: writes.meetingContent,
     },
     { db },
@@ -478,212 +514,6 @@ export async function writeJamieMeetingToBrain(input: {
     evidenceDocumentId: evidence.id,
     truncatedTranscript: writes.truncatedTranscript,
   };
-}
-
-export function buildJamieMeetingBrainWrites(item: NormalizedJamieMeetingSourceItem) {
-  const meeting = item.content.meeting;
-  const date = item.occurredAt.slice(0, 10);
-  const titleSlug = (normalizeGoatBrainId(meeting.title) || "meeting").slice(0, 42);
-  const meetingBrainId =
-    normalizeGoatBrainId(`meeting-${date}-${titleSlug}-${shortHash(item.externalId)}`) ||
-    `meeting-${shortHash(item.sourceRef)}`;
-  const evidenceBrainId = normalizeEvidenceId(
-    `ev-jamie-${shortHash(`${item.externalId}:${item.contentHash}`, 18)}`,
-  );
-  if (!evidenceBrainId) throw new Error("Could not derive Jamie evidence id.");
-
-  const source = {
-    ref: item.sourceRef,
-    title: `Jamie: ${meeting.title}`,
-    capturedAt: item.capturedAt,
-  };
-  const summaryMarkdown = truncateByBytes(meeting.summaryMarkdown, 120_000);
-  const fullTranscript = formatTranscript(meeting.transcript);
-  const fullEvidenceContent = createEvidenceContent({
-    item,
-    meetingBrainId,
-    evidenceBrainId,
-    source,
-    summaryMarkdown,
-    transcriptMarkdown: fullTranscript,
-    truncatedTranscript: false,
-  });
-  const truncatedTranscript =
-    Buffer.byteLength(fullEvidenceContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES;
-  const evidenceContent = truncatedTranscript
-    ? createEvidenceContent({
-        item,
-        meetingBrainId,
-        evidenceBrainId,
-        source,
-        summaryMarkdown,
-        transcriptMarkdown: formatTranscriptExcerpt(
-          meeting.transcript,
-          JAMIE_TRANSCRIPT_EXCERPT_BYTES,
-        ),
-        truncatedTranscript: true,
-      })
-    : fullEvidenceContent;
-
-  const evidenceLink = formatGoatBrainEvidenceLink(evidenceBrainId, "Jamie meeting notes");
-  const meetingCompiledTruth = [
-    "Imported from Jamie.",
-    "## Summary",
-    summaryMarkdown,
-    "## Participants",
-    formatParticipants(item),
-    "## Action items",
-    formatActionItems(item),
-    "## Evidence",
-    `- ${evidenceLink}`,
-  ].join("\n\n");
-
-  const meetingContent = createGoatBrainMarkdownContent({
-    id: meetingBrainId,
-    folderPath: "meetings",
-    title: meeting.title,
-    type: "meeting",
-    status: "active",
-    compiledTruth: meetingCompiledTruth,
-    sources: [source],
-    timeline: [
-      goatBrainTimelineEntryFromParts({
-        evidenceId: evidenceBrainId,
-        at: item.occurredAt,
-        summary: `Jamie notes imported for ${meeting.title}.`,
-        detail: "Summary, action items, participants, and transcript were imported from Jamie.",
-        sourceRef: item.sourceRef,
-        sourceTitle: `Jamie: ${meeting.title}`,
-      }),
-    ],
-  });
-
-  if (Buffer.byteLength(evidenceContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES) {
-    throw new Error("Jamie evidence document exceeds the Goat Brain file size limit.");
-  }
-  if (Buffer.byteLength(meetingContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES) {
-    throw new Error("Jamie meeting document exceeds the Goat Brain file size limit.");
-  }
-
-  return {
-    meetingBrainId,
-    evidenceBrainId,
-    meetingContent,
-    evidenceContent,
-    truncatedTranscript,
-  };
-}
-
-function createEvidenceContent(input: {
-  item: NormalizedJamieMeetingSourceItem;
-  meetingBrainId: string;
-  evidenceBrainId: string;
-  source: { ref: string; title: string; capturedAt: string };
-  summaryMarkdown: string;
-  transcriptMarkdown: string;
-  truncatedTranscript: boolean;
-}) {
-  const meeting = input.item.content.meeting;
-  const compiledTruth = [
-    "Jamie meeting notes.",
-    "## Meeting metadata",
-    [
-      `- Started: ${meeting.startTime}`,
-      meeting.endTime ? `- Ended: ${meeting.endTime}` : null,
-      `- Source: ${input.item.sourceRef}`,
-    ]
-      .filter(Boolean)
-      .join("\n"),
-    "## Summary",
-    input.summaryMarkdown,
-    "## Participants",
-    formatParticipants(input.item),
-    "## Action items",
-    formatActionItems(input.item),
-    "## Transcript",
-    input.truncatedTranscript
-      ? [
-          "The full raw Jamie payload is stored on the source item. This evidence record contains a bounded transcript excerpt because the transcript exceeded the Brain file size limit.",
-          input.transcriptMarkdown,
-        ].join("\n\n")
-      : input.transcriptMarkdown,
-  ].join("\n\n");
-
-  return createGoatBrainMarkdownContent({
-    id: input.evidenceBrainId,
-    folderPath: "evidence/document",
-    title: `Jamie notes: ${meeting.title}`,
-    type: "evidence",
-    evidenceKind: "document",
-    status: "active",
-    compiledTruth,
-    related: [{ type: "about", to: input.meetingBrainId }],
-    sources: [input.source],
-  });
-}
-
-function formatParticipants(item: NormalizedJamieMeetingSourceItem) {
-  const participants = item.content.meeting.participants;
-  if (participants.length === 0) return "No participants listed by Jamie.";
-  return participants
-    .map((participant) => {
-      const label =
-        participant.name ?? participant.email ?? participant.id ?? "Unknown participant";
-      const suffix = participant.email && participant.name ? ` (${participant.email})` : "";
-      return `- ${label}${suffix}`;
-    })
-    .join("\n");
-}
-
-function formatActionItems(item: NormalizedJamieMeetingSourceItem) {
-  const actionItems = item.content.meeting.actionItems;
-  if (actionItems.length === 0) return "No action items listed by Jamie.";
-  return actionItems
-    .map((action) => `- ${action.text}${action.assignee ? ` (${action.assignee})` : ""}`)
-    .join("\n");
-}
-
-function formatTranscript(segments: NormalizedJamieMeetingTranscriptSegment[]) {
-  return segments.map(formatTranscriptSegment).join("\n");
-}
-
-function formatTranscriptExcerpt(
-  segments: NormalizedJamieMeetingTranscriptSegment[],
-  maxBytes: number,
-) {
-  const lines: string[] = [];
-  let bytes = 0;
-  for (const segment of segments) {
-    const line = formatTranscriptSegment(segment);
-    const nextBytes = bytes + Buffer.byteLength(`${line}\n`, "utf8");
-    if (nextBytes > maxBytes) break;
-    lines.push(line);
-    bytes = nextBytes;
-  }
-  lines.push(
-    `\nTranscript truncated after ${lines.length} of ${segments.length} Jamie transcript segments.`,
-  );
-  return lines.join("\n");
-}
-
-function formatTranscriptSegment(segment: NormalizedJamieMeetingTranscriptSegment) {
-  const parts = [
-    segment.startedAt ? `[${segment.startedAt}]` : null,
-    segment.speaker ? `**${segment.speaker}:**` : null,
-    segment.text,
-  ].filter(Boolean);
-  return `- ${parts.join(" ")}`;
-}
-
-function truncateByBytes(value: string, maxBytes: number) {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-  let output = "";
-  for (const char of value) {
-    const next = `${output}${char}`;
-    if (Buffer.byteLength(next, "utf8") > maxBytes) break;
-    output = next;
-  }
-  return `${output}\n\n[Truncated to fit the Goat Brain file size limit.]`;
 }
 
 function requireJobLease(job: GoatBrainIngestJobWithSource, field: "leaseId" | "leaseOwner") {
@@ -699,10 +529,6 @@ function nextRetryAt(now: Date, attempts: number) {
 
 function newGoatBrainIngestLeaseId() {
   return `goat_brain_ingest_${randomUUID()}`;
-}
-
-function shortHash(value: string, length = 10) {
-  return createHash("sha256").update(value, "utf8").digest("hex").slice(0, length);
 }
 
 function errorMessage(error: unknown) {
@@ -744,6 +570,7 @@ const goatBrainIngestJobColumnsSql = sql`
   job.source_provider AS "sourceProvider",
   job.source_connection_id AS "sourceConnectionId",
   job.integration_id AS "integrationId",
+  job.brain_ref AS "brainRef",
   job.kind,
   job.content_hash AS "contentHash",
   job.status,

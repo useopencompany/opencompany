@@ -26,8 +26,8 @@ describe("checkGoatBrainHealth", () => {
         frontmatter: {
           id: "ev-acme-email",
           folder: "evidence/email",
-          type: "evidence",
-          evidenceKind: "email",
+          kind: "evidence",
+          type: "email",
           status: "active",
           title: "Acme email",
           createdAt: "2026-01-01T00:00:00.000Z",
@@ -42,6 +42,42 @@ describe("checkGoatBrainHealth", () => {
     expect(report.findings).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "weak_provenance" })]),
     );
+  });
+
+  it("warns on frontmatter source refs that are not provider:id shaped", async () => {
+    await writeDoc(
+      "people/ada.md",
+      serializeGoatBrainDocument({
+        title: "Ada",
+        compiledTruth: "",
+        timeline: [],
+        frontmatter: {
+          id: "ada",
+          folder: "people",
+          kind: "page",
+          type: "person",
+          status: "active",
+          title: "Ada",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          relations: [],
+          sources: [{ ref: "manual" }, { ref: "jamie:meeting:calendar_event_123" }],
+        },
+      }),
+    );
+
+    const report = await checkGoatBrainHealth(root);
+
+    const refFindings = report.findings.filter(
+      (finding) => finding.code === "nonstandard_source_ref",
+    );
+    expect(refFindings).toEqual([
+      expect.objectContaining({
+        severity: "warn",
+        id: "ada",
+        message: 'Source ref "manual" is not provider:id shaped.',
+      }),
+    ]);
   });
 });
 

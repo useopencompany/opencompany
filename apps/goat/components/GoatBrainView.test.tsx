@@ -18,6 +18,23 @@ vi.mock("@/components/useHydrated", () => ({
   useHydrated: () => false,
 }));
 
+vi.mock("@/components/GoatAppDataProvider", () => ({
+  useGoatAppData: () => ({
+    activeBrain: {
+      id: "goat_brain_1",
+      name: "General",
+      slug: "general",
+      description: null,
+      visibility: "workspace",
+    },
+    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
+  }),
+}));
+
+vi.mock("@/components/GoatBrainSwitcher", () => ({
+  BrainAccessDialog: () => null,
+}));
+
 vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
   MarkdownGoatBrainEditor: ({
     content,
@@ -106,6 +123,27 @@ describe("GoatBrainView", () => {
     expect(screen.getByRole("link", { name: /Ada Lovelace.*cites/ })).toHaveAttribute(
       "href",
       "/brain/people/ada-lovelace",
+    );
+  });
+
+  it("keeps the route brain id in generated document links", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline, documentLinkingToAda]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+        routeBrainId="goat_brain_1"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Toggle file details" }));
+
+    expect(screen.getByRole("link", { name: /Roadmap.*wiki_link/ })).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/projects/roadmap",
     );
   });
 
@@ -230,12 +268,13 @@ const documentWithTimeline: GoatBrainDocumentView = {
       body: "[[evidence:ev-platform-planning-chat|Platform planning chat]]: Met Ada during the platform planning chat.\n\nSource: goat-chat:goat_chat_msg_1",
     },
   ],
-  kind: "markdown",
+  format: "markdown",
   mimeType: "text/markdown",
   originalFileName: null,
   assetStorageKey: null,
   relations: [],
   sources: [],
+  kind: "page",
   type: "person",
   status: "draft",
   aliases: [],
@@ -255,12 +294,13 @@ const documentLinkingToAda: GoatBrainDocumentView = {
   content: "",
   body: "Coordinate with [[page:ada-lovelace|Ada]].",
   timeline: [],
-  kind: "markdown",
+  format: "markdown",
   mimeType: "text/markdown",
   originalFileName: null,
   assetStorageKey: null,
   relations: [],
   sources: [],
+  kind: "page",
   type: "project",
   status: "draft",
   aliases: [],
@@ -280,14 +320,14 @@ const evidenceDocument: GoatBrainDocumentView = {
   content: "",
   body: "Met Ada during the platform planning chat.",
   timeline: [],
-  kind: "markdown",
+  format: "markdown",
   mimeType: "text/markdown",
   originalFileName: null,
   assetStorageKey: null,
   relations: [],
   sources: [],
-  type: "evidence",
-  evidenceKind: "chat",
+  kind: "evidence",
+  type: "source",
   status: "active",
   aliases: [],
   tags: [],

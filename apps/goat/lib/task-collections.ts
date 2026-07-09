@@ -200,7 +200,7 @@ export type GoatBrainDocumentRow = {
   content: string;
   body: string;
   timeline: Array<{ evidenceId?: string; evidence_id?: string; at: string; body: string }>;
-  kind: string;
+  format: string;
   mime_type: string | null;
   original_file_name: string | null;
   asset_storage_key: string | null;
@@ -208,8 +208,8 @@ export type GoatBrainDocumentRow = {
   sources: Array<{ ref: string; capturedAt?: string; captured_at?: string; title?: string }>;
   content_hash: string;
   size_bytes: number;
+  kind: string;
   entity_type: string;
-  evidence_kind: string | null;
   status: string;
   aliases: string[];
   created_at: string;
@@ -240,6 +240,48 @@ export type GoatBrainEdgeRow = {
   to_brain_id: string;
   relation_type: string;
   source_kind: "relation" | "wiki_link";
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatBrainIngestJobRow = {
+  id: string;
+  source_item_id: string;
+  user_workos_id: string;
+  source_provider: string;
+  source_connection_id: string;
+  integration_id: string | null;
+  brain_ref: string | null;
+  kind: string;
+  content_hash: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  attempts: number;
+  next_run_at: string;
+  lease_id: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  last_error: string | null;
+  result: Record<string, unknown>;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// Slim projection: the shape proxy strips the raw/normalized payload columns.
+export type GoatBrainSourceItemRow = {
+  id: string;
+  user_workos_id: string;
+  source_provider: string;
+  source_type: string;
+  external_id: string;
+  title: string;
+  occurred_at: string;
+  captured_at: string;
+  content_hash: string;
+  last_ingest_job_id: string | null;
+  last_ingest_status: string | null;
+  last_ingest_error: string | null;
+  last_ingested_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -298,6 +340,12 @@ function createBrainCollections(brainRef: string) {
     edges: createGoatElectricCollection<GoatBrainEdgeRow>({
       id: `goat:brain_edges:${brainRef}`,
       table: "goat.brain_edges",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
+    ingestJobs: createGoatElectricCollection<GoatBrainIngestJobRow>({
+      id: `goat:brain_ingest_jobs:${brainRef}`,
+      table: "goat.brain_ingest_jobs",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
@@ -372,6 +420,13 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
+  // User-scoped (not per-brain): jobs join to these by source_item_id.
+  const brainSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
+    id: "goat:brain_source_items",
+    table: "goat.brain_source_items",
+    getKey: (row) => row.id,
+  });
+
   return {
     tasks,
     taskSchedules,
@@ -380,6 +435,7 @@ function buildGoatCollections() {
     chatMessages: getChatMessageCollection,
     integrations,
     brainCollections: getBrainCollections,
+    brainSourceItems,
   };
 }
 

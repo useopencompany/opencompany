@@ -680,6 +680,27 @@
       "when": 1783424000000,
       "tag": "0096_goat_workspaces_brains",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1783424400000,
+      "tag": "0097_goat_brain_kind_type_decoupling",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1783424800000,
+      "tag": "0098_goat_brain_agent_ingest",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1783425200000,
+      "tag": "0099_goat_brain_chat_capture",
+      "breakpoints": true
     }
   ]
 }

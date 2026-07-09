@@ -26,6 +26,7 @@ import {
   Lightbulb,
   PanelRight,
   Search,
+  Settings2,
   Trash2,
   Users,
 } from "lucide-react";
@@ -33,6 +34,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { GoatBrainActivity } from "@/components/GoatBrainActivity";
+import { BrainAccessDialog } from "@/components/GoatBrainSwitcher";
 import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
@@ -56,6 +59,7 @@ type Props = {
   documents: GoatBrainDocumentView[];
   initialFolderPath: string | null;
   initialBrainId: string | null;
+  routeBrainId?: string | null;
 };
 
 type BrainTreeNode = {
@@ -93,7 +97,13 @@ const DEFAULT_BRAIN_FOLDERS = [
   "evidence",
 ];
 
-export function GoatBrainView({ folders, documents, initialFolderPath, initialBrainId }: Props) {
+export function GoatBrainView({
+  folders,
+  documents,
+  initialFolderPath,
+  initialBrainId,
+  routeBrainId,
+}: Props) {
   const hydrated = useHydrated();
   if (!hydrated) {
     return (
@@ -102,6 +112,7 @@ export function GoatBrainView({ folders, documents, initialFolderPath, initialBr
         documents={documents}
         initialFolderPath={initialFolderPath}
         initialBrainId={initialBrainId}
+        routeBrainId={routeBrainId ?? null}
       />
     );
   }
@@ -111,6 +122,7 @@ export function GoatBrainView({ folders, documents, initialFolderPath, initialBr
       documents={documents}
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
+      routeBrainId={routeBrainId ?? null}
     />
   );
 }
@@ -120,6 +132,7 @@ function LiveGoatBrainView({
   documents: initialDocuments,
   initialFolderPath,
   initialBrainId,
+  routeBrainId,
 }: Props) {
   const { activeBrain } = useGoatAppData();
   const collections = useMemo(() => createGoatCollections(), []);
@@ -160,6 +173,7 @@ function LiveGoatBrainView({
       edgeRows={(edgeRows ?? []) as GoatBrainEdgeRow[]}
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
+      routeBrainId={routeBrainId ?? null}
     />
   );
 }
@@ -170,9 +184,12 @@ function GoatBrainEditor({
   edgeRows = [],
   initialFolderPath,
   initialBrainId,
+  routeBrainId,
 }: Props & { edgeRows?: GoatBrainEdgeRow[] }) {
   const router = useRouter();
   const navInset = useGoatNavInset();
+  const { activeBrain, workspace } = useGoatAppData();
+  const selectedBrainId = routeBrainId ?? null;
   const initialDocument = useMemo(
     () => resolveInitialDocument(documents, initialFolderPath, initialBrainId),
     [documents, initialBrainId, initialFolderPath],
@@ -191,6 +208,7 @@ function GoatBrainEditor({
   const [isPending, startTransition] = useTransition();
   const [isDocPending, startDocTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [docPanelState, setDocPanelState] = useState<{
     docId: string | null;
     value: string;
@@ -240,7 +258,10 @@ function GoatBrainEditor({
     () => buildBrainTree(folders, documents, query),
     [documents, folders, query],
   );
-  const brainLinks = useMemo(() => brainLinkMap(documents), [documents]);
+  const brainLinks = useMemo(
+    () => brainLinkMap(documents, selectedBrainId),
+    [documents, selectedBrainId],
+  );
   const graphLinks = useMemo(() => buildGraphLinks(documents, edgeRows), [documents, edgeRows]);
   const rootGroups = useMemo(() => groupRootNodes(tree.children), [tree.children]);
   const hasRootNodes = rootGroups.some((group) => group.length > 0);
@@ -255,7 +276,7 @@ function GoatBrainEditor({
     setSelectedFolder(document.folderPath);
     setSelectedDocumentId(document.id);
     setExpandedPaths((current) => withAncestorFolders(current, document.folderPath));
-    router.replace(brainDocumentUrl(document));
+    router.replace(brainDocumentUrl(document, selectedBrainId));
   };
 
   const toggleFolder = (path: string) => {
@@ -282,7 +303,7 @@ function GoatBrainEditor({
       setCreatingFolder(false);
       setSelectedFolder(folderPath);
       setExpandedPaths((current) => withAncestorFolders(current, folderPath, true));
-      router.replace(`/brain/${folderUrlSegments(folderPath)}`);
+      router.replace(brainFolderUrl(folderPath, selectedBrainId));
     });
   };
 
@@ -301,8 +322,8 @@ function GoatBrainEditor({
         setSelectedDocumentId(document.id);
         setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
       }
-      if (document) router.replace(brainDocumentUrl(document));
-      else if (result.path) router.replace(brainFilePathUrl(result.path));
+      if (document) router.replace(brainDocumentUrl(document, selectedBrainId));
+      else if (result.path) router.replace(brainFilePathUrl(result.path, selectedBrainId));
     });
   };
 
@@ -393,9 +414,9 @@ function GoatBrainEditor({
       if (next) {
         setSelectedFolder(next.folderPath);
         setExpandedPaths((current) => withAncestorFolders(current, next.folderPath, true));
-        router.replace(brainDocumentUrl(next));
+        router.replace(brainDocumentUrl(next, selectedBrainId));
       } else {
-        router.replace(`/brain/${folderUrlSegments(activeFolder)}`);
+        router.replace(brainFolderUrl(activeFolder, selectedBrainId));
       }
     });
   };
@@ -444,6 +465,18 @@ function GoatBrainEditor({
             >
               <FolderPlus size={15} strokeWidth={1.8} />
             </button>
+            {activeBrain ? <GoatBrainActivity brainRef={activeBrain.id} /> : null}
+            {workspace.role === "admin" && activeBrain ? (
+              <button
+                type="button"
+                aria-label={`Manage access to ${activeBrain.name}`}
+                title="Brain access"
+                onClick={() => setAccessDialogOpen(true)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                <Settings2 size={15} strokeWidth={1.8} />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -629,6 +662,7 @@ function GoatBrainEditor({
           documents={documents}
           brainLinks={brainLinks}
           graphLinks={graphLinks}
+          routeBrainId={selectedBrainId}
           editorValue={editorValue}
           detailsOpen={docPanelState.detailsOpen}
           timelineOpen={docPanelState.timelineOpen}
@@ -637,6 +671,13 @@ function GoatBrainEditor({
           onRenameTitle={renameDocument}
         />
       </div>
+      {accessDialogOpen && activeBrain ? (
+        <BrainAccessDialog
+          brain={activeBrain}
+          workspace={workspace}
+          onClose={() => setAccessDialogOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -713,6 +754,7 @@ function BrainDocumentPanel({
   documents,
   brainLinks,
   graphLinks,
+  routeBrainId,
   editorValue,
   detailsOpen,
   timelineOpen,
@@ -724,6 +766,7 @@ function BrainDocumentPanel({
   documents: GoatBrainDocumentView[];
   brainLinks: Record<string, string>;
   graphLinks: BrainGraphLink[];
+  routeBrainId: string | null;
   editorValue: string;
   detailsOpen: boolean;
   timelineOpen: boolean;
@@ -768,6 +811,7 @@ function BrainDocumentPanel({
             document={selectedDocument}
             documents={documents}
             graphLinks={graphLinks}
+            routeBrainId={routeBrainId}
           />
         ) : null}
       </div>
@@ -779,10 +823,12 @@ function BrainMetadataSidebar({
   document,
   documents,
   graphLinks,
+  routeBrainId,
 }: {
   document: GoatBrainDocumentView;
   documents: GoatBrainDocumentView[];
   graphLinks: BrainGraphLink[];
+  routeBrainId: string | null;
 }) {
   const documentsByBrainId = useMemo(
     () => new Map(documents.map((item) => [item.brainId, item])),
@@ -802,9 +848,7 @@ function BrainMetadataSidebar({
         </h2>
         <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 text-[12px] leading-5">
           <MetadataRow label="Type" value={document.type} />
-          {document.evidenceKind ? (
-            <MetadataRow label="Evidence" value={document.evidenceKind} />
-          ) : null}
+          {document.kind === "evidence" ? <MetadataRow label="Kind" value="evidence" /> : null}
           <MetadataRow label="Created" value={formatDateTime(document.createdAt)} />
           <MetadataRow label="Updated" value={formatDateTime(document.updatedAt)} />
           <span className="text-ink-subtle">ID</span>
@@ -830,6 +874,7 @@ function BrainMetadataSidebar({
         documentsByBrainId={documentsByBrainId}
         empty="No outgoing links."
         direction="out"
+        routeBrainId={routeBrainId}
       />
       <GraphLinksList
         title="Backlinks"
@@ -837,6 +882,7 @@ function BrainMetadataSidebar({
         documentsByBrainId={documentsByBrainId}
         empty="No backlinks."
         direction="in"
+        routeBrainId={routeBrainId}
       />
     </aside>
   );
@@ -966,12 +1012,14 @@ function GraphLinksList({
   documentsByBrainId,
   empty,
   direction,
+  routeBrainId,
 }: {
   title: string;
   links: BrainGraphLink[];
   documentsByBrainId: Map<string, GoatBrainDocumentView>;
   empty: string;
   direction: "out" | "in";
+  routeBrainId: string | null | undefined;
 }) {
   return (
     <section className="min-w-0">
@@ -991,7 +1039,7 @@ function GraphLinksList({
               >
                 {peer ? (
                   <Link
-                    href={brainDocumentUrl(peer)}
+                    href={brainDocumentUrl(peer, routeBrainId)}
                     className="flex min-w-0 items-center gap-1.5 rounded-sm text-ink-muted hover:text-ink"
                   >
                     <span className="truncate">{peer.title || peer.brainId}</span>
@@ -1034,7 +1082,7 @@ function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }
             {entries.length} {entries.length === 1 ? "entry" : "entries"}
           </span>
         </div>
-        {document.kind !== "markdown" ? (
+        {document.format !== "markdown" ? (
           <p className="text-[12.5px] text-ink-muted">No timeline for this asset type.</p>
         ) : entries.length > 0 ? (
           <ol className="max-h-56 space-y-3 overflow-y-auto pr-2">
@@ -1094,13 +1142,16 @@ function buildBrainTree(
 ) {
   const root: BrainTreeNode = { name: "", path: "", type: "folder", children: [] };
   const normalizedQuery = query.trim().toLowerCase();
+  // Merged docs are tombstones whose content lives in the page they were
+  // merged into; hide them from the tree like the CLI's default list does.
+  const listedDocuments = documents.filter((document) => document.status !== "merged");
   const visibleDocuments = normalizedQuery
-    ? documents.filter((document) => {
+    ? listedDocuments.filter((document) => {
         const path = brainDocumentTreePath(document).toLowerCase();
         const title = document.title?.toLowerCase() ?? "";
         return path.includes(normalizedQuery) || title.includes(normalizedQuery);
       })
-    : documents;
+    : listedDocuments;
   const visibleFolders = normalizedQuery
     ? folders.filter((folder) => folder.path.toLowerCase().includes(normalizedQuery))
     : folders;
@@ -1209,33 +1260,42 @@ function resolveInitialDocument(
   );
 }
 
-function brainDocumentUrl(document: GoatBrainDocumentView) {
-  return `/brain/${folderUrlSegments(document.folderPath)}/${encodeURIComponent(document.brainId)}`;
+function brainDocumentUrl(document: GoatBrainDocumentView, routeBrainId?: string | null) {
+  return brainPathUrl([...folderPathSegments(document.folderPath), document.brainId], routeBrainId);
 }
 
-function brainFilePathUrl(path: string) {
+function brainFolderUrl(folderPath: string, routeBrainId?: string | null) {
+  return brainPathUrl(folderPathSegments(folderPath), routeBrainId);
+}
+
+function brainFilePathUrl(path: string, routeBrainId?: string | null) {
   if (path.startsWith("/brain/")) return path;
   const withoutExtension = path.replace(/\.md$/i, "");
-  return `/brain/${withoutExtension
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")}`;
+  return brainPathUrl(folderPathSegments(withoutExtension), routeBrainId);
 }
 
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
   return `${document.folderPath}/${document.brainId}.md`;
 }
 
-function brainLinkMap(documents: GoatBrainDocumentView[]) {
+function brainLinkMap(documents: GoatBrainDocumentView[], routeBrainId?: string | null) {
   const links: Record<string, string> = {};
   for (const document of documents) {
-    const href = brainDocumentUrl(document);
+    const href = brainDocumentUrl(document, routeBrainId);
     links[document.brainId] = href;
     links[`page:${document.brainId}`] = href;
-    if (document.type === "evidence") links[`evidence:${document.brainId}`] = href;
+    if (document.kind === "evidence") links[`evidence:${document.brainId}`] = href;
   }
   return links;
+}
+
+function brainPathUrl(pathSegments: string[], routeBrainId?: string | null) {
+  const segments = routeBrainId ? [routeBrainId, ...pathSegments] : pathSegments;
+  return `/brain/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+function folderPathSegments(folderPath: string) {
+  return folderPath.split("/").filter(Boolean);
 }
 
 function buildGraphLinks(
@@ -1295,14 +1355,6 @@ function documentInlineLinkText(document: GoatBrainDocumentView) {
   return [document.body, ...document.timeline.map((entry) => entry.body)].join("\n\n");
 }
 
-function folderUrlSegments(folderPath: string) {
-  return folderPath
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-}
-
 function ancestorFolderPaths(path: string) {
   const parts = path.split("/").filter(Boolean);
   return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
@@ -1332,14 +1384,14 @@ function documentViewFromRow(
     content: row.content,
     body: row.body,
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
-    kind: normalizeKind(row.kind),
+    format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",
     originalFileName: row.original_file_name,
     assetStorageKey: row.asset_storage_key,
     relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
+    kind: normalizeDocumentKind(row.kind),
     type: normalizeEntityType(row.entity_type),
-    evidenceKind: normalizeEvidenceKind(row.evidence_kind),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
     tags: normalizeStringArray(parsed.tags),
@@ -1442,35 +1494,31 @@ function normalizeTimeline(
     : [];
 }
 
-function normalizeKind(value: string): GoatBrainDocumentView["kind"] {
+function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
   if (value === "pdf" || value === "docx") return value;
   return "markdown";
+}
+
+function normalizeDocumentKind(value: string): GoatBrainDocumentView["kind"] {
+  return value === "evidence" ? "evidence" : "page";
 }
 
 function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
   if (
     value === "person" ||
     value === "company" ||
-    value === "project" ||
-    value === "decision" ||
-    value === "meeting" ||
-    value === "research" ||
+    value === "media" ||
+    value === "analysis" ||
     value === "concept" ||
-    value === "evidence" ||
-    value === "note"
+    value === "email" ||
+    value === "writing" ||
+    value === "note" ||
+    value === "project" ||
+    value === "source"
   ) {
     return value;
   }
   return "note";
-}
-
-function normalizeEvidenceKind(
-  value: string | null | undefined,
-): "chat" | "email" | "correction" | "document" | null {
-  if (value === "chat" || value === "email" || value === "correction" || value === "document") {
-    return value;
-  }
-  return null;
 }
 
 function normalizeStatus(value: string): GoatBrainDocumentView["status"] {

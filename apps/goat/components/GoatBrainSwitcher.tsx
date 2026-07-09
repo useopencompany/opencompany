@@ -26,14 +26,18 @@ export function GoatBrainSwitcher() {
   const [isPending, startTransition] = useTransition();
 
   const switchBrain = (brainId: string) => {
-    if (brainId === activeBrain?.id) return;
+    const href = goatBrainHref(brainId);
+    if (brainId === activeBrain?.id) {
+      router.push(href);
+      return;
+    }
     startTransition(async () => {
       const result = await switchGoatBrainAction(brainId);
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      router.refresh();
+      router.push(href);
     });
   };
 
@@ -122,7 +126,8 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
         return;
       }
       onClose();
-      router.refresh();
+      if (result.brainId) router.push(goatBrainHref(result.brainId));
+      else router.refresh();
     });
   };
 
@@ -179,7 +184,7 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function BrainAccessDialog({
+export function BrainAccessDialog({
   brain,
   workspace,
   onClose,
@@ -294,6 +299,10 @@ function BrainAccessDialog({
       </div>
     </DialogFrame>
   );
+}
+
+function goatBrainHref(brainId: string) {
+  return `/brain/${encodeURIComponent(brainId)}`;
 }
 
 function ClaudeConnectorBlock({ brainId }: { brainId: string }) {

@@ -53,7 +53,7 @@ export async function queryGoatBrain(
 ): Promise<GoatBrainQueryHit[]> {
   const all = await buildCorpus(root);
   const candidates = applyFilters(all, options).filter(
-    (record) => (options.hops ?? 0) <= 0 || record.type !== "evidence",
+    (record) => (options.hops ?? 0) <= 0 || record.kind !== "evidence",
   );
   if (candidates.length === 0) return [];
   const byId = new Map(candidates.map((record) => [record.id, record]));

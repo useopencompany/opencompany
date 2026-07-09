@@ -6,25 +6,26 @@ import {
   checkGoatBrainHealth,
   DEFAULT_GOAT_BRAIN_FOLDERS,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
+  defaultGoatBrainFolder,
   deterministicEvidenceId,
   formatGoatBrainEvidenceLink,
   GOAT_BRAIN_ENTITY_TYPES,
-  GOAT_BRAIN_EVIDENCE_KINDS,
+  GOAT_BRAIN_EVIDENCE_ZONE,
   type GoatBrainDocument,
-  type GoatBrainEvidenceKind,
+  type GoatBrainKind,
   type GoatBrainRelation,
   type GoatBrainSource,
-  goatBrainEntityTypeForFolder,
-  goatBrainFolderForEntityType,
-  goatBrainFolderTypeError,
+  goatBrainFolderKindError,
+  goatBrainKindForFolder,
   goatBrainTimelineBody,
   goatBrainTimelineEntryFromParts,
   ingestGoatBrain,
   isBuiltInGoatBrainEntityType,
-  isValidGoatBrainEvidenceKind,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
+  isValidGoatBrainKind,
   isValidGoatBrainRelationType,
+  normalizeBuiltInGoatBrainEntityType,
   normalizeEvidenceId,
   normalizeGoatBrainFolderForV1,
   normalizeGoatBrainId,
@@ -56,6 +57,7 @@ const COMMANDS: Record<string, Handler> = {
   query,
   ingest,
   rewrite,
+  set,
   "timeline-add": appendTimeline,
   "append-timeline": appendTimeline,
   "append-evidence": appendEvidence,
@@ -76,6 +78,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "id",
     "title",
     "type",
+    "kind",
     "truth",
     "truth-stdin",
     "alias",
@@ -84,11 +87,11 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "source-ref",
     "source-title",
     "evidence-id",
-    "evidence-kind",
     "status",
   ],
   list: ["folder", "limit", "include-merged"],
   rewrite: ["id", "truth", "truth-stdin"],
+  set: ["id", "title", "type", "status"],
   timeline: ["id", "limit", "since"],
   "timeline-add": [
     "id",
@@ -114,7 +117,8 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   "append-evidence": [
     "id",
-    "kind",
+    "type",
+    "folder",
     "at",
     "title",
     "body",
@@ -162,6 +166,7 @@ Commands:
   timeline          Read dated evidence entries for a doc.
   query             Hybrid retrieval over docs (--folder, --since, --hops, --limit).
   rewrite           Replace compiled truth for a doc.
+  set               Update a doc's title, type, or status.
   timeline-add      Add a dated evidence entry and optional source ref.
   append-timeline   Compatibility alias for timeline-add.
   append-evidence   Create a first-class evidence record and link it to a subject.
@@ -192,7 +197,7 @@ Examples:
   goat-brain query --help`,
   create: `Usage: goat-brain create --type <type> --id <id> --title <title> (--truth <text> | --truth-stdin) [options]
 
-Create a new Markdown brain document. Use a built-in type and a matching folder.
+Create a new Markdown brain document. Types are tags; folders are free-form navigation.
 
 Required:
   --type <type>       Entity type: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.
@@ -201,19 +206,20 @@ Required:
   --truth <text>      Compiled truth, or pass --truth-stdin and write truth to stdin.
 
 Common options:
-  --folder <path>     Folder path. Defaults to --type's canonical folder; must match that type.
+  --folder <path>     Any folder path. Defaults to the type's suggested folder.
+                      "${GOAT_BRAIN_EVIDENCE_ZONE}/" is reserved for evidence documents.
+  --kind <kind>       "page" (default) or "evidence". Evidence docs must live under
+                      "${GOAT_BRAIN_EVIDENCE_ZONE}/"; inferred from --folder when omitted.
   --alias <text>      Repeatable alias.
   --tag <text>        Repeatable tag.
   --relation <type:id>
   --source-ref <ref>  Provenance reference for the initial evidence entry.
-  --evidence-kind <kind>
-                      Evidence subtype for --type evidence. Defaults to chat.
   --json
 
 Examples:
   goat-brain create --type company --folder companies --id opencompany --title OpenCompany --truth "OpenCompany builds agent infrastructure."
-  goat-brain create --type evidence --evidence-kind email --id ev-acme-email --title "Acme email" --truth "Acme asked for pricing."
-  echo "Ada leads GTM." | goat-brain create --type person --id ada --title Ada --truth-stdin`,
+  goat-brain create --type person --folder team/gtm --id ada --title Ada --truth "Ada leads GTM."
+  goat-brain create --type email --kind evidence --id ev-acme-email --title "Acme email" --truth "Acme asked for pricing."`,
   list: `Usage: goat-brain list [--folder <path>] [--limit <n>] [--include-merged] [--json]
 
 List existing brain docs without retrieval or model calls.
@@ -279,6 +285,20 @@ Replace the compiled truth section for a document.
 Examples:
   goat-brain rewrite opencompany --truth "OpenCompany builds company-owned AI agents."
   cat truth.md | goat-brain rewrite opencompany --truth-stdin --json`,
+  set: `Usage: goat-brain set <id> [--title <title>] [--type <type>] [--status <status>] [--json]
+
+Update frontmatter fields for an existing document. Provide at least one of
+--title, --type, or --status. Promoting a page to --status active requires its
+compiled truth to cite evidence with [[evidence:<evidence-id>]].
+
+Options:
+  --title <title>     New human-readable title.
+  --type <type>       Entity type: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.
+  --status <status>   draft, active, archived, or merged.
+
+Examples:
+  goat-brain set quick-note --title "Pricing idea" --type concept
+  goat-brain set pricing-idea --status active`,
   "timeline-add": `Usage: goat-brain timeline-add <id> [--at <iso-date>] (--body <text> | --body-stdin) [options]
 
 Add a dated evidence entry to a document.
@@ -299,12 +319,13 @@ Compatibility alias for timeline-add.
 
 Example:
   goat-brain append-timeline opencompany --body "Updated launch plan."`,
-  "append-evidence": `Usage: goat-brain append-evidence <subject-id> --source-ref <ref> [--kind <kind>] [--at <iso-date>] (--body <text> | --body-stdin) [options]
+  "append-evidence": `Usage: goat-brain append-evidence <subject-id> --source-ref <ref> [--at <iso-date>] (--body <text> | --body-stdin) [options]
 
-Create an immutable evidence record under evidence/<kind>/ and link it to the subject document.
+Create an immutable evidence record in the ${GOAT_BRAIN_EVIDENCE_ZONE}/ zone and link it to the subject document.
 
 Options:
-  --kind <kind>        Evidence kind: ${GOAT_BRAIN_EVIDENCE_KINDS.join(", ")}. Defaults to chat.
+  --type <type>        Entity type for the record. Defaults to source.
+  --folder <path>      Folder inside "${GOAT_BRAIN_EVIDENCE_ZONE}/". Defaults to "${GOAT_BRAIN_EVIDENCE_ZONE}".
   --title <title>
   --detail <text> or --detail-stdin
   --source-title <title>
@@ -313,7 +334,7 @@ Options:
   --json
 
 Example:
-  goat-brain append-evidence opencompany --kind email --body "Acme asked for pricing." --source-ref gmail:thread_123`,
+  goat-brain append-evidence opencompany --type email --body "Acme asked for pricing." --source-ref gmail:thread_123`,
   alias: `Usage: goat-brain alias <id> [--add <alias>] [--remove <alias>] [--json]
 
 Add or remove aliases for a document. Repeat --add or --remove as needed.
@@ -336,7 +357,7 @@ Example:
   goat-brain merge --from acme-old --into acme`,
   move: `Usage: goat-brain move <id> --folder <path> [--json]
 
-Move a document to a different folder.
+Move a document to a different folder. Evidence documents stay inside "${GOAT_BRAIN_EVIDENCE_ZONE}/"; pages stay outside it.
 
 Example:
   goat-brain move launch-plan --folder projects/launch`,
@@ -351,7 +372,7 @@ Examples:
   folder: `Usage: goat-brain folder list [--json]
        goat-brain folder create --path <folder> [--json]
 
-List available folders or validate a new folder path.
+List folders in use or validate a new free-form folder path.
 
 Examples:
   goat-brain folder list
@@ -405,30 +426,24 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
       )}.`,
     );
   }
-  const evidenceKindInput = ctx.args.get("evidence-kind")?.trim();
-  if (typeInput !== "evidence" && evidenceKindInput) {
-    return fail("`--evidence-kind` is only valid when `--type evidence` is used.");
+  const kindInput = ctx.args.get("kind")?.trim();
+  if (kindInput && !isValidGoatBrainKind(kindInput)) {
+    return fail('`--kind` must be "page" or "evidence".');
   }
-  let evidenceKind: GoatBrainEvidenceKind | undefined;
-  if (typeInput === "evidence") {
-    const evidenceKindResult = resolveEvidenceKindForCreate(
-      evidenceKindInput,
-      ctx.args.get("folder"),
-    );
-    if (!evidenceKindResult.ok) return fail(evidenceKindResult.error);
-    evidenceKind = evidenceKindResult.value;
-  }
-  const expectedFolder =
-    typeInput === "evidence" && evidenceKind
-      ? `evidence/${evidenceKind}`
-      : goatBrainFolderForEntityType(typeInput);
-  const folder = normalizeGoatBrainFolderForV1(ctx.args.get("folder") ?? expectedFolder);
+  const folderInput = ctx.args.get("folder")?.trim();
+  const kind: GoatBrainKind =
+    kindInput && isValidGoatBrainKind(kindInput)
+      ? kindInput
+      : folderInput
+        ? goatBrainKindForFolder(folderInput)
+        : "page";
+  const folder = normalizeGoatBrainFolderForV1(
+    folderInput ?? defaultGoatBrainFolder(typeInput, kind),
+  );
   if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
-  const folderTypeError = goatBrainFolderTypeError(folder, typeInput);
-  if (folderTypeError) {
-    return fail(
-      `\`--folder\` "${folder}" does not match type "${typeInput}". ${folderTypeError} Use "${expectedFolder}" or a subfolder under it.`,
-    );
+  const folderKindError = goatBrainFolderKindError(folder, kind);
+  if (folderKindError) {
+    return fail(`\`--folder\` "${folder}" does not match kind "${kind}". ${folderKindError}`);
   }
   const rawId = ctx.args.get("id") ?? ctx.args.get("title") ?? "untitled";
   const id = normalizeGoatBrainId(rawId);
@@ -470,8 +485,8 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
     frontmatter: {
       id,
       folder,
+      kind,
       type,
-      ...(evidenceKind ? { evidenceKind } : {}),
       status,
       title,
       createdAt: now,
@@ -749,6 +764,54 @@ async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   return ok(`Rewrote compiled truth for "${id}".`, { id, path: relativePath });
 }
 
+async function set(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const title = ctx.args.get("title")?.trim();
+  const typeInput = ctx.args.get("type")?.trim();
+  const statusInput = ctx.args.get("status")?.trim();
+  if (!title && !typeInput && !statusInput) {
+    return fail("Provide at least one of `--title`, `--type`, or `--status`.");
+  }
+  const type = typeInput ? normalizeBuiltInGoatBrainEntityType(typeInput) : undefined;
+  if (typeInput && !type) {
+    return fail(
+      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(
+        ", ",
+      )}.`,
+    );
+  }
+  const status =
+    statusInput === "draft" || statusInput === "active" || statusInput === "archived"
+      ? statusInput
+      : undefined;
+  if (statusInput && !status) {
+    return fail(
+      "`--status` must be draft, active, or archived. Use the merge command to mark a doc merged.",
+    );
+  }
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  if (loaded.doc.frontmatter.status === "merged") {
+    return fail(`"${id}" is merged into "${loaded.doc.frontmatter.mergedInto ?? "?"}".`);
+  }
+  if (title) {
+    loaded.doc.title = title;
+    loaded.doc.frontmatter.title = title;
+  }
+  if (type) loaded.doc.frontmatter.type = type;
+  if (status) loaded.doc.frontmatter.status = status;
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(`Updated "${id}".`, {
+    id,
+    path: relativePath,
+    title: loaded.doc.frontmatter.title,
+    type: loaded.doc.frontmatter.type,
+    status: loaded.doc.frontmatter.status,
+  });
+}
+
 async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
   const id = ctx.args.positionals[0] ?? ctx.args.get("id");
   if (!id) return fail("Provide a brain id.");
@@ -805,9 +868,18 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
   const subjectId = ctx.args.positionals[0] ?? ctx.args.get("id");
   if (!subjectId) return fail("Provide a subject brain id.");
   if (!isValidGoatBrainId(subjectId)) return fail("Subject id must be a lowercase brain slug.");
-  const evidenceKindResult = resolveEvidenceKindFlag(ctx.args.get("kind")?.trim(), "--kind");
-  if (!evidenceKindResult.ok) return fail(evidenceKindResult.error);
-  const evidenceKind = evidenceKindResult.value;
+  const typeInput = ctx.args.get("type")?.trim() || "source";
+  if (!isBuiltInGoatBrainEntityType(typeInput)) {
+    return fail(
+      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
+    );
+  }
+  const folder = normalizeGoatBrainFolderForV1(
+    ctx.args.get("folder")?.trim() || GOAT_BRAIN_EVIDENCE_ZONE,
+  );
+  if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
+  const folderKindError = goatBrainFolderKindError(folder, "evidence");
+  if (folderKindError) return fail(`\`--folder\` "${folder}" is invalid. ${folderKindError}`);
   const subject = await loadDoc(ctx.root, subjectId);
   if (!subject) return notFound(`No brain doc found with id "${subjectId}".`);
   if (ctx.args.has("body-stdin") && ctx.args.has("detail-stdin")) {
@@ -838,7 +910,7 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
     return fail(`A brain doc with id "${evidenceId}" already exists.`);
   }
   const sourceTitle = ctx.args.get("source-title")?.trim();
-  const title = ctx.args.get("title")?.trim() || evidenceTitle(evidenceKind, sourceTitle, summary);
+  const title = ctx.args.get("title")?.trim() || evidenceTitle(sourceTitle, summary);
   const evidenceBody = goatBrainTimelineBody({
     summary,
     detail,
@@ -848,9 +920,9 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
   const evidenceDoc: GoatBrainDocument = {
     frontmatter: {
       id: evidenceId,
-      folder: `evidence/${evidenceKind}`,
-      type: "evidence",
-      evidenceKind,
+      folder,
+      kind: "evidence",
+      type: typeInput,
       status: "active",
       title,
       createdAt: capturedAt,
@@ -889,7 +961,6 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
     path: subjectPath,
     evidenceId,
     evidencePath,
-    evidenceKind,
   });
 }
 
@@ -897,69 +968,15 @@ function sortedTimelineEntries(entries: GoatBrainDocument["timeline"]) {
   return [...entries].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
-type EvidenceKindResult = { ok: true; value: GoatBrainEvidenceKind } | { ok: false; error: string };
-
-function resolveEvidenceKindForCreate(
-  value: string | undefined,
-  folder: string | undefined,
-): EvidenceKindResult {
-  const fromValue = value?.trim();
-  if (fromValue && !isValidGoatBrainEvidenceKind(fromValue)) {
-    return {
-      ok: false,
-      error: "`--evidence-kind` must be chat, email, correction, or document.",
-    };
-  }
-  const flagKind = isValidGoatBrainEvidenceKind(fromValue) ? fromValue : null;
-  const folderKind = evidenceKindFromFolder(folder);
-  const normalizedFolder = folder ? normalizeGoatBrainFolderForV1(folder) : "";
-  if (normalizedFolder.startsWith("evidence/") && !folderKind) {
-    return {
-      ok: false,
-      error:
-        '`--folder` for evidence must be under "evidence/chat", "evidence/email", "evidence/correction", or "evidence/document".',
-    };
-  }
-  if (flagKind && folderKind && flagKind !== folderKind) {
-    return {
-      ok: false,
-      error: "`--evidence-kind` must match the evidence folder subtype.",
-    };
-  }
-  return { ok: true, value: flagKind ?? folderKind ?? "chat" };
-}
-
-function resolveEvidenceKindFlag(value: string | undefined, flagName: string): EvidenceKindResult {
-  const fromValue = value?.trim();
-  if (!fromValue) return { ok: true, value: "chat" };
-  if (isValidGoatBrainEvidenceKind(fromValue)) return { ok: true, value: fromValue };
-  return {
-    ok: false,
-    error: `\`${flagName}\` must be chat, email, correction, or document.`,
-  };
-}
-
-function evidenceKindFromFolder(folder: string | undefined): GoatBrainEvidenceKind | null {
-  if (!folder) return null;
-  const [root, subtype] = normalizeGoatBrainFolderForV1(folder).split("/");
-  if (root !== "evidence") return null;
-  return isValidGoatBrainEvidenceKind(subtype) ? subtype : null;
-}
-
 function normalizeEvidenceRecordId(value: string | undefined): string | null {
   if (!value) return null;
   return normalizeEvidenceId(value);
 }
 
-function evidenceTitle(
-  kind: GoatBrainEvidenceKind,
-  sourceTitle: string | undefined,
-  summary: string,
-) {
+function evidenceTitle(sourceTitle: string | undefined, summary: string) {
   if (sourceTitle?.trim()) return sourceTitle.trim();
   const clipped = summary.replace(/\s+/g, " ").trim().slice(0, 80);
-  const label = kind[0]?.toUpperCase() ? `${kind[0].toUpperCase()}${kind.slice(1)}` : "Evidence";
-  return clipped ? `${label}: ${clipped}` : `${label} evidence`;
+  return clipped ? `Evidence: ${clipped}` : "Evidence";
 }
 
 async function alias(ctx: CommandContext): Promise<CommandResult> {
@@ -1070,29 +1087,16 @@ async function move(ctx: CommandContext): Promise<CommandResult> {
   if (!isValidGoatBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
   const loaded = await loadDoc(ctx.root, id);
   if (!loaded) return notFound(`No brain doc found with id "${id}".`);
-  const type = loaded.doc.frontmatter.type;
-  if (!isBuiltInGoatBrainEntityType(type)) {
-    return fail(`Cannot move "${id}" because frontmatter.type is missing or invalid.`);
+  const kind = loaded.doc.frontmatter.kind;
+  if (!isValidGoatBrainKind(kind)) {
+    return fail(`Cannot move "${id}" because frontmatter.kind is missing or invalid.`);
   }
-  const folderTypeError = goatBrainFolderTypeError(folder, type);
-  if (folderTypeError) {
-    const expectedFolder =
-      type === "evidence"
-        ? `evidence/${loaded.doc.frontmatter.evidenceKind ?? "chat"}`
-        : goatBrainFolderForEntityType(type);
-    return fail(
-      `\`--folder\` "${folder}" does not match type "${type}". ${folderTypeError} Use "${expectedFolder}" or a subfolder under it.`,
-    );
+  const folderKindError = goatBrainFolderKindError(folder, kind);
+  if (folderKindError) {
+    return fail(`\`--folder\` "${folder}" does not match kind "${kind}". ${folderKindError}`);
   }
   const oldPath = loaded.file.relativePath;
   loaded.doc.frontmatter.folder = folder;
-  if (type === "evidence") {
-    const evidenceKind = evidenceKindFromFolder(folder);
-    if (!evidenceKind) return fail("`--folder` for evidence must use a supported evidence kind.");
-    loaded.doc.frontmatter.evidenceKind = evidenceKind;
-  } else {
-    delete loaded.doc.frontmatter.evidenceKind;
-  }
   loaded.doc.frontmatter.updatedAt = nowIso();
   const newPath = await persist(ctx.root, loaded.doc);
   if (newPath !== oldPath) await removeGoatBrainFile(ctx.root, oldPath);
@@ -1129,11 +1133,6 @@ async function folder(ctx: CommandContext): Promise<CommandResult> {
   if (subcommand === "create") {
     const folderPath = normalizeGoatBrainFolderForV1(ctx.args.get("path") ?? "");
     if (!isValidGoatBrainFolder(folderPath)) return fail("`--path` must be a safe folder path.");
-    if (!goatBrainEntityTypeForFolder(folderPath)) {
-      return fail(
-        `Folder "${folderPath}" must be under a known type folder: ${DEFAULT_GOAT_BRAIN_FOLDERS.join(", ")}.`,
-      );
-    }
     return ok(`Folder "${folderPath}" is available.`, { folder: folderPath });
   }
   return fail('folder command must be "list" or "create".');
@@ -1187,6 +1186,9 @@ function toWritableDocument(
   if (!isBuiltInGoatBrainEntityType(fm.type)) {
     throw new Error("Cannot write a brain document without a valid type.");
   }
+  if (!isValidGoatBrainKind(fm.kind)) {
+    throw new Error("Cannot write a brain document without a valid kind.");
+  }
   return {
     title: doc.title,
     compiledTruth: doc.compiledTruth,
@@ -1194,8 +1196,8 @@ function toWritableDocument(
     frontmatter: {
       id: fm.id,
       folder: fm.folder,
+      kind: fm.kind,
       type: fm.type,
-      ...(fm.evidenceKind ? { evidenceKind: fm.evidenceKind } : {}),
       status: fm.status ?? "draft",
       createdAt: fm.createdAt,
       updatedAt: fm.updatedAt,

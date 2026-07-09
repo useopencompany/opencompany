@@ -63,8 +63,8 @@ describe("goat brain retrieval", () => {
     await writeDoc("evidence/email/ev-acme-email.md", {
       id: "ev-acme-email",
       folder: "evidence/email",
-      type: "evidence",
-      evidenceKind: "email",
+      kind: "evidence",
+      type: "email",
       title: "Acme email",
       truth: "Enterprise search raw source evidence.",
       relations: [{ type: "about", to: "acme" }],
@@ -294,17 +294,8 @@ async function writeDoc(
   input: {
     id: string;
     folder: string;
-    type:
-      | "person"
-      | "company"
-      | "project"
-      | "meeting"
-      | "decision"
-      | "research"
-      | "concept"
-      | "evidence"
-      | "note";
-    evidenceKind?: "chat" | "email" | "correction" | "document";
+    type: "person" | "company" | "project" | "concept" | "note" | "analysis" | "source" | "email";
+    kind?: "page" | "evidence";
     title: string;
     truth: string;
     relations: Array<{ type: string; to: string }>;
@@ -320,8 +311,8 @@ async function writeDoc(
       frontmatter: {
         id: input.id,
         folder: input.folder,
+        kind: input.kind ?? "page",
         type: input.type,
-        ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
         status: input.status ?? "active",
         title: input.title,
         createdAt: "2026-01-01T00:00:00.000Z",

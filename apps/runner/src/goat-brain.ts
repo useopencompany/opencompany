@@ -78,7 +78,8 @@ export async function createGoatBrainMarkdownReportForTask(input: {
     frontmatter: {
       id: brainId,
       folder: folderPath,
-      type: "research",
+      kind: "page",
+      type: "analysis",
       status: "active",
       title,
       createdAt: now,
