@@ -263,6 +263,53 @@ describe("buildSlackConversationAgentIngestPrompt", () => {
     expect(prompt).not.toContain("permalinks");
     expect(prompt).toContain("the DM with Ada");
   });
+
+  it("renders bounded Slack context as interpretive context", () => {
+    const item = normalizeSlackConversationWindow({
+      windowId: "gslkwin_test3",
+      teamId: "T012345",
+      teamDomain: "acme",
+      channelId: "C09ABC",
+      channelName: "product",
+      channelType: "channel",
+      messages: [{ ts: "1783950120.000200", userId: "U02", text: "Yes, let's ship that." }],
+      context: {
+        previousMessages: [
+          {
+            ts: "1783950060.000100",
+            userId: "U01",
+            userName: "Jamie",
+            text: "Do we want to launch onboarding next week?",
+          },
+        ],
+        threads: [
+          {
+            threadTs: "1783950000.000050",
+            messages: [
+              {
+                ts: "1783950030.000080",
+                threadTs: "1783950000.000050",
+                userId: "U03",
+                text: "Earlier thread setup.",
+              },
+            ],
+          },
+        ],
+      },
+      flushedAt: "2026-07-13T10:30:00.000Z",
+    });
+
+    const prompt = buildSlackConversationAgentIngestPrompt(item);
+
+    expect(prompt).toContain("The current window is the primary ingest target");
+    expect(prompt).toContain("Query the brain first");
+    expect(prompt).toContain("## Prior context");
+    expect(prompt).toContain("### Previous channel messages");
+    expect(prompt).toContain("### Thread context for 1783950000.000050");
+    expect(prompt).toContain("Do we want to launch onboarding next week?");
+    expect(prompt).toContain("## Current window transcript");
+    expect(prompt).toContain("Yes, let's ship that.");
+  });
 });
 
 describe("runSlackConversationAgentIngest", () => {

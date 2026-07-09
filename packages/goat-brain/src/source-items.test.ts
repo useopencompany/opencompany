@@ -337,6 +337,47 @@ describe("Slack conversation window normalization", () => {
     expect(edited.contentHash).not.toBe(base.contentHash);
   });
 
+  it("accepts sorted previous and thread context without changing the content hash", () => {
+    const base = normalizeSlackConversationWindow(input);
+    const withContext = normalizeSlackConversationWindow({
+      ...input,
+      context: {
+        previousMessages: [
+          {
+            ts: "1783949940.000050",
+            userId: "U02",
+            text: "Previous answer.",
+          },
+          {
+            ts: "1783949880.000040",
+            userId: "U01",
+            text: "Previous question.",
+          },
+        ],
+        threads: [
+          {
+            threadTs: "1783950120.000200",
+            messages: [
+              {
+                ts: "1783950000.000090",
+                threadTs: "1783950120.000200",
+                userId: "U03",
+                text: "Earlier thread context.",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(withContext.contentHash).toBe(base.contentHash);
+    expect(
+      withContext.content.conversation.context?.previousMessages?.map((message) => message.ts),
+    ).toEqual(["1783949880.000040", "1783949940.000050"]);
+    expect(withContext.content.conversation.context?.threads?.[0]?.messages).toHaveLength(1);
+    expect(isNormalizedSlackConversationSourceItem(withContext)).toBe(true);
+  });
+
   it("titles DM windows after the counterpart", () => {
     const item = normalizeSlackConversationWindow({
       ...input,

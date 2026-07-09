@@ -17,7 +17,11 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
-import { getSlackConversationLabel, resolveSlackUserNames } from "./slack-api";
+import {
+  fetchSlackConversationContext,
+  getSlackConversationLabel,
+  resolveSlackUserNames,
+} from "./slack-api";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-slack-flush" });
@@ -81,10 +85,22 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
   // Enrichment happens before the transaction so no network call ever holds
   // row locks. Names are resolved for the authors visible right now; a message
   // that slips in mid-flush stays pending and seeds the next window anyway.
+  const preview = await previewBufferedSlackMessages(window);
+  if (preview.length === 0) return null;
   const integration = await loadSlackIntegrationContext(window);
   const enrichment = integration.accessToken
-    ? await enrichSlackWindow(window, integration.accessToken)
+    ? await enrichSlackWindow(window, preview, integration.accessToken)
     : { channelName: null, userNames: new Map<string, string>() };
+  const currentMessages = preview.map((row) => toNormalizedMessage(row, enrichment.userNames));
+  const context = integration.accessToken
+    ? await fetchSlackConversationContext({
+        token: integration.accessToken,
+        teamId: window.teamId,
+        channelId: window.channelId,
+        windowStartTs: currentMessages[0]!.ts,
+        currentMessages,
+      })
+    : undefined;
 
   const flushedAt = new Date();
   const result = await db.transaction(async (tx) => {
@@ -99,16 +115,19 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
           text,
           payload
         FROM goat.slack_message_events
-        WHERE integration_id = ${window.integrationId}
-          AND channel_id = ${window.channelId}
+        WHERE id IN (${sql.join(
+          preview.map((row) => sql`${row.id}`),
+          sql`, `,
+        )})
           AND source_item_id IS NULL
         ORDER BY message_ts ASC
-        LIMIT ${GOAT_SLACK_MAX_WINDOW_MESSAGES}
         FOR UPDATE SKIP LOCKED
       `),
     );
     // Another sweeper may have claimed the same due window first.
     if (claimed.length === 0) return null;
+    // Keep pre-fetched context aligned with the exact flushed window.
+    if (claimed.length !== preview.length) return null;
 
     const item = normalizeSlackConversationWindow({
       windowId: newGoatSlackConversationWindowId(),
@@ -118,6 +137,7 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       channelName: enrichment.channelName ?? window.channelId,
       channelType: window.channelType,
       messages: claimed.map((row) => toNormalizedMessage(row, enrichment.userNames)),
+      ...(context ? { context } : {}),
       flushedAt: flushedAt.toISOString(),
     });
 
@@ -163,6 +183,27 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
 
   if (result?.enqueued) wakeGoatBrainIngestWorker();
   return result;
+}
+
+async function previewBufferedSlackMessages(window: GoatSlackDueWindow) {
+  return rowsFromExecute<BufferedSlackMessageRow>(
+    await getDb().execute(sql`
+      SELECT
+        id,
+        message_ts AS "messageTs",
+        thread_ts AS "threadTs",
+        slack_user_id AS "slackUserId",
+        subtype,
+        text,
+        payload
+      FROM goat.slack_message_events
+      WHERE integration_id = ${window.integrationId}
+        AND channel_id = ${window.channelId}
+        AND source_item_id IS NULL
+      ORDER BY message_ts ASC
+      LIMIT ${GOAT_SLACK_MAX_WINDOW_MESSAGES}
+    `),
+  );
 }
 
 export function startGoatSlackFlushWorker(options: { pollIntervalMs?: number } = {}) {
@@ -279,17 +320,11 @@ async function loadSlackIntegrationContext(window: GoatSlackDueWindow): Promise<
   };
 }
 
-async function enrichSlackWindow(window: GoatSlackDueWindow, accessToken: string) {
-  const authorRows = rowsFromExecute<{ slackUserId: string }>(
-    await getDb().execute(sql`
-      SELECT DISTINCT slack_user_id AS "slackUserId"
-      FROM goat.slack_message_events
-      WHERE integration_id = ${window.integrationId}
-        AND channel_id = ${window.channelId}
-        AND source_item_id IS NULL
-        AND slack_user_id IS NOT NULL
-    `),
-  );
+async function enrichSlackWindow(
+  window: GoatSlackDueWindow,
+  messages: readonly BufferedSlackMessageRow[],
+  accessToken: string,
+) {
   const [channelName, userNames] = await Promise.all([
     getSlackConversationLabel({
       token: accessToken,
@@ -300,7 +335,7 @@ async function enrichSlackWindow(window: GoatSlackDueWindow, accessToken: string
     resolveSlackUserNames({
       token: accessToken,
       teamId: window.teamId,
-      userIds: authorRows.map((row) => row.slackUserId),
+      userIds: messages.flatMap((row) => (row.slackUserId ? [row.slackUserId] : [])),
     }),
   ]);
   return { channelName, userNames };
