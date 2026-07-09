@@ -1,0 +1,176 @@
+export const GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION = "goat.brain_ingest_trace.v1";
+
+export const GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS = 96;
+export const GOAT_BRAIN_INGEST_TRACE_MAX_ARGS = 80;
+export const GOAT_BRAIN_INGEST_TRACE_ARG_PREVIEW_LENGTH = 240;
+export const GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH = 1_200;
+export const GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH = 2_000;
+export const GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH = 2_000;
+
+export type GoatBrainIngestTraceUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+};
+
+export type GoatBrainIngestTraceToolCallStatus = "completed" | "failed" | "blocked";
+
+export type GoatBrainIngestTraceToolCall = {
+  id: string;
+  toolName: "goat_brain";
+  command: string;
+  args: string[];
+  stdinPreview: string | null;
+  status: GoatBrainIngestTraceToolCallStatus;
+  mutating: boolean;
+  exitCode: number | null;
+  stdoutPreview: string;
+  stderrPreview: string;
+  errorPreview: string;
+  startedAt: string;
+  completedAt: string;
+};
+
+export type GoatBrainIngestTrace = {
+  schemaVersion: typeof GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION;
+  model: string;
+  steps: number;
+  toolCallCount: number;
+  mutations: number;
+  usage: GoatBrainIngestTraceUsage;
+  finalText: string;
+  toolCalls: GoatBrainIngestTraceToolCall[];
+  truncatedToolCalls: number;
+  createdAt: string;
+};
+
+export function normalizeGoatBrainIngestTrace(value: unknown): GoatBrainIngestTrace | null {
+  const record = readRecord(value);
+  if (!record || record.schemaVersion !== GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION) return null;
+
+  const toolCalls = readArray(record.toolCalls)
+    .slice(0, GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS)
+    .flatMap((item): GoatBrainIngestTraceToolCall[] => {
+      const toolCall = normalizeTraceToolCall(item);
+      return toolCall ? [toolCall] : [];
+    });
+
+  return {
+    schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+    model: readString(record.model),
+    steps: readNonNegativeInteger(record.steps),
+    toolCallCount: readNonNegativeInteger(record.toolCallCount),
+    mutations: readNonNegativeInteger(record.mutations),
+    usage: normalizeTraceUsage(record.usage),
+    finalText: goatBrainIngestTracePreview(
+      readString(record.finalText),
+      GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
+    ),
+    toolCalls,
+    truncatedToolCalls: readNonNegativeInteger(record.truncatedToolCalls),
+    createdAt: readString(record.createdAt),
+  };
+}
+
+export function hasGoatBrainIngestTrace(value: unknown): boolean {
+  return normalizeGoatBrainIngestTrace(value) !== null;
+}
+
+export function sanitizeGoatBrainIngestTraceArgs(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, GOAT_BRAIN_INGEST_TRACE_MAX_ARGS)
+    .map((item) =>
+      goatBrainIngestTracePreview(
+        typeof item === "string" ? item : String(item),
+        GOAT_BRAIN_INGEST_TRACE_ARG_PREVIEW_LENGTH,
+      ),
+    );
+}
+
+export function goatBrainIngestTracePreview(value: unknown, limit: number): string {
+  const text = typeof value === "string" ? value : value == null ? "" : String(value);
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 14))}\n[truncated]`;
+}
+
+function normalizeTraceUsage(value: unknown): GoatBrainIngestTraceUsage {
+  const record = readRecord(value);
+  return {
+    inputTokens: readNullableNonNegativeInteger(record?.inputTokens),
+    outputTokens: readNullableNonNegativeInteger(record?.outputTokens),
+    totalTokens: readNullableNonNegativeInteger(record?.totalTokens),
+  };
+}
+
+function normalizeTraceToolCall(value: unknown): GoatBrainIngestTraceToolCall | null {
+  const record = readRecord(value);
+  if (!record || record.toolName !== "goat_brain") return null;
+  const status = normalizeTraceToolCallStatus(record.status);
+  if (!status) return null;
+
+  return {
+    id: readString(record.id),
+    toolName: "goat_brain",
+    command: readString(record.command),
+    args: sanitizeGoatBrainIngestTraceArgs(record.args),
+    stdinPreview:
+      typeof record.stdinPreview === "string"
+        ? goatBrainIngestTracePreview(
+            record.stdinPreview,
+            GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
+          )
+        : null,
+    status,
+    mutating: record.mutating === true,
+    exitCode: readNullableInteger(record.exitCode),
+    stdoutPreview: goatBrainIngestTracePreview(
+      readString(record.stdoutPreview),
+      GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+    ),
+    stderrPreview: goatBrainIngestTracePreview(
+      readString(record.stderrPreview),
+      GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+    ),
+    errorPreview: goatBrainIngestTracePreview(
+      readString(record.errorPreview),
+      GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+    ),
+    startedAt: readString(record.startedAt),
+    completedAt: readString(record.completedAt),
+  };
+}
+
+function normalizeTraceToolCallStatus(value: unknown): GoatBrainIngestTraceToolCallStatus | null {
+  if (value === "completed" || value === "failed" || value === "blocked") return value;
+  return null;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function readString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function readNullableInteger(value: unknown): number | null {
+  if (value == null) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function readNullableNonNegativeInteger(value: unknown): number | null {
+  const parsed = readNullableInteger(value);
+  return parsed !== null && parsed >= 0 ? parsed : null;
+}
+
+function readNonNegativeInteger(value: unknown): number {
+  return readNullableNonNegativeInteger(value) ?? 0;
+}

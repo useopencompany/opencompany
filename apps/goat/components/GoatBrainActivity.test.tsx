@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainActivity } from "./GoatBrainActivity";
@@ -110,6 +111,41 @@ describe("GoatBrainActivity", () => {
     expect(screen.getAllByRole("link")).toHaveLength(4);
     expect(screen.getByText("+2 more")).toBeInTheDocument();
   });
+
+  it("opens a completed agent trace with collapsed details and raw JSON", async () => {
+    const user = userEvent.setup();
+    queryRows.jobs = [
+      job({
+        status: "succeeded",
+        completed_at: "2026-07-09T10:01:00.000Z",
+        result: {
+          summary: "Filed one page.",
+          trace: trace(),
+        },
+      }),
+    ];
+    queryRows.items = [item()];
+
+    render(<GoatBrainActivity brainRef="goat_brain_1" />);
+
+    await user.click(screen.getByRole("button", { name: "Trace" }));
+
+    expect(screen.getByText("Agent run trace")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Pricing teardown reference")).toBeInTheDocument();
+    const toolRow = screen.getByTestId("brain-ingest-trace-tool-goat_brain_call_1");
+    expect(within(toolRow).queryByText("Stdout")).not.toBeInTheDocument();
+    expect(screen.queryByText(/"schemaVersion"/)).not.toBeInTheDocument();
+
+    await user.click(within(toolRow).getByRole("button", { name: /goat_brain query Pricing/i }));
+
+    expect(within(toolRow).getByText("Stdout")).toBeInTheDocument();
+    expect(within(toolRow).getByText("Pricing page")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Raw JSON/i }));
+
+    expect(screen.getByText(/"schemaVersion": "goat\.brain_ingest_trace\.v1"/)).toBeInTheDocument();
+  });
 });
 
 function job(overrides: Record<string, unknown> = {}) {
@@ -156,5 +192,36 @@ function item(overrides: Record<string, unknown> = {}) {
     created_at: "2026-07-09T10:00:00.000Z",
     updated_at: "2026-07-09T10:00:00.000Z",
     ...overrides,
+  };
+}
+
+function trace() {
+  return {
+    schemaVersion: "goat.brain_ingest_trace.v1",
+    model: "anthropic/claude-sonnet-4.6",
+    steps: 2,
+    toolCallCount: 1,
+    mutations: 0,
+    usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+    finalText: "No durable brain material.",
+    toolCalls: [
+      {
+        id: "goat_brain_call_1",
+        toolName: "goat_brain",
+        command: "query",
+        args: ["Pricing"],
+        stdinPreview: null,
+        status: "completed",
+        mutating: false,
+        exitCode: 0,
+        stdoutPreview: "Pricing page",
+        stderrPreview: "",
+        errorPreview: "",
+        startedAt: "2026-07-09T10:00:00.000Z",
+        completedAt: "2026-07-09T10:00:01.000Z",
+      },
+    ],
+    truncatedToolCalls: 0,
+    createdAt: "2026-07-09T10:00:02.000Z",
   };
 }

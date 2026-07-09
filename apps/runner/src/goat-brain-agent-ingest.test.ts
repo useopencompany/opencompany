@@ -1,3 +1,4 @@
+import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import {
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
@@ -155,6 +156,14 @@ const okCli: GoatBrainAgentCliRunner = vi.fn(async () => ({
   stdout: "ok",
   stderr: "",
 }));
+
+function traceFromResult(result: Record<string, unknown>): GoatBrainIngestTrace {
+  const trace = result.trace;
+  if (!trace || typeof trace !== "object") {
+    throw new Error("Expected result.trace to be present.");
+  }
+  return trace as GoatBrainIngestTrace;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -388,6 +397,31 @@ describe("runGoatChatCaptureAgentIngest", () => {
       mutations: 1,
       draftBrainId: "pricing-teardown-reference",
       summary: "Promoted the capture into concepts/usage-based-pricing.",
+      trace: {
+        schemaVersion: "goat.brain_ingest_trace.v1",
+        model: "anthropic/claude-sonnet-4.6",
+        steps: 2,
+        toolCallCount: 2,
+        mutations: 1,
+        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        finalText: "Promoted the capture into concepts/usage-based-pricing.",
+        toolCalls: [
+          expect.objectContaining({
+            command: "get",
+            args: ["pricing-teardown-reference"],
+            status: "completed",
+            mutating: false,
+            stdoutPreview: "ok",
+          }),
+          expect.objectContaining({
+            command: "set",
+            args: ["pricing-teardown-reference", "--type", "concept", "--status", "active"],
+            status: "completed",
+            mutating: true,
+            stdoutPreview: "ok",
+          }),
+        ],
+      },
     });
     // No deterministic pre-write for captures: the inbox draft was created at
     // capture time.
@@ -420,6 +454,45 @@ describe("runGoatChatCaptureAgentIngest", () => {
 
     expect(okCli).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
+  });
+
+  it("bounds trace previews for long args, stdin, output, and final text", async () => {
+    const longArg = "a".repeat(500);
+    const longText = "body ".repeat(500);
+    const longOutput = "output ".repeat(500);
+    mockAgentRun({
+      finalText: "final ".repeat(500),
+      toolInvocations: [
+        {
+          command: "rewrite",
+          args: ["pricing-teardown-reference", "--truth", longArg],
+          stdin: longText,
+        },
+      ],
+    });
+    const noisyCli: GoatBrainAgentCliRunner = vi.fn(async () => ({
+      ok: true,
+      exitCode: 0,
+      stdout: longOutput,
+      stderr: longOutput,
+    }));
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: noisyCli },
+    );
+
+    const resultTrace = traceFromResult(result);
+    expect(resultTrace.finalText).toContain("[truncated]");
+    expect(resultTrace.toolCalls[0]?.args[2]).toContain("[truncated]");
+    expect(resultTrace.toolCalls[0]?.stdinPreview).toContain("[truncated]");
+    expect(resultTrace.toolCalls[0]?.stdoutPreview).toContain("[truncated]");
+    expect(resultTrace.toolCalls[0]?.stderrPreview).toContain("[truncated]");
   });
 
   it("counts folder creation as a brain mutation", async () => {
@@ -599,7 +672,28 @@ describe("runJamieMeetingAgentIngest", () => {
     );
 
     expect(okCli).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ toolCalls: 2, mutations: 1 });
+    expect(result).toMatchObject({
+      toolCalls: 2,
+      mutations: 1,
+      trace: {
+        toolCallCount: 2,
+        mutations: 1,
+        toolCalls: [
+          expect.objectContaining({
+            command: "delete",
+            args: ["ada", "--force"],
+            status: "blocked",
+            mutating: false,
+            errorPreview: expect.stringContaining("not available"),
+          }),
+          expect.objectContaining({
+            command: "rewrite",
+            status: "completed",
+            mutating: true,
+          }),
+        ],
+      },
+    });
   });
 
   it("fails on sync conflicts so the job retries against a fresh snapshot", async () => {
