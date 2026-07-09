@@ -40,7 +40,7 @@ Edges are **derived, not authored**: `deriveGoatBrainEdges` in `packages/goat-br
 
 ## The pointer/copy contract
 
-Every writer into the brain follows one rule, defined once as `GOAT_BRAIN_POINTER_COPY_RULE` in `packages/goat-brain/src/pointer-copy.ts` and embedded into each writer's system prompt. The prose version lives in `apps/goat/docs/pointer-copy-contract.md`.
+Every writer into the brain follows one rule, defined once as `GOAT_BRAIN_POINTER_COPY_RULE` in `packages/goat-brain/src/pointer-copy.ts` and embedded into each writer's system prompt. The prose version lives in `apps/goat/docs/brain/pointer-copy-contract.md`.
 
 The short form: **prefer pointers over copies.** Every claim carries a `[[source:provider:id]]` pointer. Content is snapshotted into `evidence/` only when the source is ephemeral or unfetchable:
 
@@ -129,7 +129,7 @@ Background tasks planned with `resultMode: "brain_markdown_report"` save their f
 - **The UI** does not search this way; it subscribes to Electric-backed live collections of documents, timeline entries, and edges, scoped to the active brain, and re-renders as rows change. Server-rendered props are only the initial snapshot.
 - **Known limitation:** every agent query currently materializes the brain to a temp directory and discards it afterwards, so the embedding cache never persists between queries.
 
-`apps/goat/docs/brain-retrieval-planes.md` is the design for where this is heading: a deterministic read module over `brain_documents` rows (no materialization, durable `brain_embeddings` cache, exposed in-process, over HTTP, and over a per-brain MCP connector) plus a read-only "librarian" agent for synthesized answers with typed citations. That design is not implemented yet; the MCP connector lives on a separate branch.
+`apps/goat/docs/brain/retrieval-planes.md` is the design for where this is heading: a deterministic read module over `brain_documents` rows (no materialization, durable `brain_embeddings` cache, exposed in-process, over HTTP, and over a per-brain MCP connector) plus a read-only "librarian" agent for synthesized answers with typed citations. That design is not implemented yet; the MCP connector lives on a separate branch.
 
 ## Multiple brains and access
 
@@ -147,4 +147,4 @@ Brains belong to workspaces. `visibility: "workspace"` brains are readable by ev
 - Chat capture flow: `apps/goat/lib/brain-capture.ts` and the `save_to_brain` wiring in `apps/goat/lib/chat-agent.ts` and `apps/goat/app/api/chat/route.ts`.
 - New source providers: normalize into `brain_source_items`, enqueue a `brain_agent_ingest` job, and add a handler — the Jamie webhook route and the chat capture path are the templates.
 - Brain UI: `apps/goat/components/GoatBrainView.tsx`, `MarkdownGoatBrainEditor.tsx`, `GoatBrainSwitcher.tsx`, and server actions in `apps/goat/lib/brain-actions.ts`.
-- Design references: `apps/goat/docs/pointer-copy-contract.md` and `apps/goat/docs/brain-retrieval-planes.md`.
+- Design references: `apps/goat/docs/brain/pointer-copy-contract.md` and `apps/goat/docs/brain/retrieval-planes.md`.
