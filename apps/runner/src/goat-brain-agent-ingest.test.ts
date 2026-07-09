@@ -197,6 +197,11 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     expect(prompt).toContain("reference for the pricing page rework");
     expect(prompt).toContain("https://example.com/pricing-teardown");
     expect(prompt).toContain("merge --from pricing-teardown-reference");
+    expect(prompt).toContain("user-authored ideas and thoughts belong in Brain");
+    expect(prompt).toContain("they do not get a new kind");
+    expect(prompt).toContain("type concept in concepts");
+    expect(prompt).toContain("file the draft in decisions with the best existing type");
+    expect(prompt).toContain("type note in thoughts");
   });
 });
 

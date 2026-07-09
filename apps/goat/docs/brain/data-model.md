@@ -18,6 +18,10 @@ returns `evidence` iff the folder is `evidence` or starts with `evidence/`
 (`GOAT_BRAIN_EVIDENCE_ZONE = "evidence"`). The database enforces the same invariant with a check
 constraint on `goat.brain_documents`.
 
+Ideas and thoughts are not kinds. A saved idea is still a mutable `page`; curation decides whether
+it becomes a `concept`, updates a `project`, lands under `decisions/`, moves to `thoughts/` as a
+raw `note`, stays in `inbox/` as an uncurated draft, or merges into an existing subject page.
+
 ## Entity types (the 8-type contract)
 
 `GOAT_BRAIN_ENTITY_TYPES` — a **closed set**. Types are tags for what a document *is*; folders are

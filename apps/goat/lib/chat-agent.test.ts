@@ -545,7 +545,13 @@ describe("runOpenCompanyChatAgent", () => {
         const system = extractSystemPrompt(options);
         expect(system).toContain("save_to_brain");
         expect(system).toContain("draft in the Brain inbox");
-        expect(extractSaveToBrainToolDescription(options)).toContain("draft page in the inbox");
+        expect(system).toContain("an idea, a thought, a decision");
+        expect(system).toContain(
+          "remain notes, are filed under thoughts/concepts/projects/decisions",
+        );
+        const saveDescription = extractSaveToBrainToolDescription(options);
+        expect(saveDescription).toContain("draft page in the inbox");
+        expect(saveDescription).toContain("idea, thought, note");
 
         const first = await executeSaveToBrainTool(options, {
           content: "https://example.com/pricing-teardown",
