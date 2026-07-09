@@ -427,6 +427,17 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
+  const pendingBrainCaptureSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
+    id: "goat:brain_source_items:goat-chat:capture:pending-failed",
+    table: "goat.brain_source_items",
+    params: {
+      source_provider: "goat-chat",
+      source_type: "capture",
+      last_ingest_status: "pending,failed",
+    },
+    getKey: (row) => row.id,
+  });
+
   return {
     tasks,
     taskSchedules,
@@ -436,6 +447,7 @@ function buildGoatCollections() {
     integrations,
     brainCollections: getBrainCollections,
     brainSourceItems,
+    pendingBrainCaptureSourceItems,
   };
 }
 

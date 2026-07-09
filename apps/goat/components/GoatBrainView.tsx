@@ -15,6 +15,7 @@ import {
   Building2,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   Copy,
   Ellipsis,
   FileCode2,
@@ -25,7 +26,9 @@ import {
   History,
   Inbox,
   Lightbulb,
+  Loader2,
   PanelRight,
+  RotateCw,
   Search,
   Settings2,
   Trash2,
@@ -49,9 +52,15 @@ import {
   updateGoatBrainDocumentAction,
 } from "@/lib/brain-actions";
 import {
+  buildGoatBrainDraftIngestStates,
+  type GoatBrainDraftIngestState,
+} from "@/lib/brain-activity";
+import {
   createGoatCollections,
   type GoatBrainDocumentRow,
   type GoatBrainEdgeRow,
+  type GoatBrainIngestJobRow,
+  type GoatBrainSourceItemRow,
   type GoatBrainTimelineEntryRow,
 } from "@/lib/task-collections";
 
@@ -97,6 +106,7 @@ const DEFAULT_BRAIN_FOLDERS = [
   "concepts",
   "evidence",
 ];
+const EMPTY_DRAFT_INGEST_STATES: ReadonlyMap<string, GoatBrainDraftIngestState> = new Map();
 
 export function GoatBrainView({
   folders,
@@ -153,6 +163,14 @@ function LiveGoatBrainView({
     (q) => q.from({ edge: brainCollections.edges }),
     [brainCollections],
   );
+  const { data: ingestJobRows } = useLiveQuery(
+    (q) => q.from({ job: brainCollections.ingestJobs }),
+    [brainCollections],
+  );
+  const { data: captureSourceItemRows } = useLiveQuery(
+    (q) => q.from({ item: collections.pendingBrainCaptureSourceItems }),
+    [collections],
+  );
   const documents = useMemo(() => {
     if (filesLoading && !fileRows?.length) return initialDocuments;
     const timelinesByDocument = groupTimelineRows(
@@ -166,12 +184,21 @@ function LiveGoatBrainView({
     if (filesLoading && !fileRows?.length) return initialFolders;
     return deriveFolderViews(documents);
   }, [documents, fileRows?.length, filesLoading, initialFolders]);
+  const draftIngestStatesByBrainId = useMemo(
+    () =>
+      buildGoatBrainDraftIngestStates(
+        (ingestJobRows ?? []) as GoatBrainIngestJobRow[],
+        (captureSourceItemRows ?? []) as GoatBrainSourceItemRow[],
+      ),
+    [captureSourceItemRows, ingestJobRows],
+  );
 
   return (
     <GoatBrainEditor
       folders={folders}
       documents={documents}
       edgeRows={(edgeRows ?? []) as GoatBrainEdgeRow[]}
+      draftIngestStatesByBrainId={draftIngestStatesByBrainId}
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
       routeBrainId={routeBrainId ?? null}
@@ -183,10 +210,14 @@ function GoatBrainEditor({
   folders,
   documents,
   edgeRows = [],
+  draftIngestStatesByBrainId = EMPTY_DRAFT_INGEST_STATES,
   initialFolderPath,
   initialBrainId,
   routeBrainId,
-}: Props & { edgeRows?: GoatBrainEdgeRow[] }) {
+}: Props & {
+  edgeRows?: GoatBrainEdgeRow[];
+  draftIngestStatesByBrainId?: ReadonlyMap<string, GoatBrainDraftIngestState>;
+}) {
   const router = useRouter();
   const navInset = useGoatNavInset();
   const { activeBrain, workspace } = useGoatAppData();
@@ -243,6 +274,9 @@ function GoatBrainEditor({
     if (!selectedDocumentId) return null;
     return documents.find((document) => document.id === selectedDocumentId) ?? null;
   }, [documents, selectedDocumentId]);
+  const selectedDraftIngestState = selectedDocument
+    ? (draftIngestStatesByBrainId.get(selectedDocument.brainId) ?? null)
+    : null;
   if (docPanelState.docId !== (selectedDocument?.id ?? null)) {
     setDocPanelState({
       docId: selectedDocument?.id ?? null,
@@ -539,6 +573,7 @@ function GoatBrainEditor({
                         depth={0}
                         activePath={activePath}
                         expandedPaths={visibleExpandedPaths}
+                        draftIngestStatesByBrainId={draftIngestStatesByBrainId}
                         onSelect={selectDocument}
                         onToggleFolder={toggleFolder}
                       />
@@ -583,6 +618,9 @@ function GoatBrainEditor({
                   >
                     {isDocPending ? "Saving…" : "Unsaved"}
                   </span>
+                ) : null}
+                {selectedDraftIngestState ? (
+                  <BrainIngestStatusIcon state={selectedDraftIngestState} />
                 ) : null}
                 <button
                   type="button"
@@ -689,6 +727,7 @@ function TreeItem({
   depth,
   activePath,
   expandedPaths,
+  draftIngestStatesByBrainId,
   onSelect,
   onToggleFolder,
 }: {
@@ -696,6 +735,7 @@ function TreeItem({
   depth: number;
   activePath: string;
   expandedPaths: Set<string>;
+  draftIngestStatesByBrainId: ReadonlyMap<string, GoatBrainDraftIngestState>;
   onSelect: (document: GoatBrainDocumentView) => void;
   onToggleFolder: (path: string) => void;
 }) {
@@ -703,6 +743,10 @@ function TreeItem({
   const expanded = node.type === "folder" && expandedPaths.has(node.path);
   const showChildren = node.type === "folder" && expanded;
   const paddingStyle = { paddingLeft: `${6 + depth * 14}px` };
+  const draftIngestState =
+    node.type === "file" && node.document
+      ? (draftIngestStatesByBrainId.get(node.document.brainId) ?? null)
+      : null;
 
   return (
     <div>
@@ -732,6 +776,7 @@ function TreeItem({
           <span className="h-[13px] w-[13px] shrink-0" />
         )}
         {node.type === "folder" ? <FolderIcon path={node.path} /> : <FileIcon path={node.path} />}
+        {node.type === "file" ? <TreeIngestStatusSlot state={draftIngestState} /> : null}
         <span className="min-w-0 truncate">{node.name}</span>
       </button>
       {showChildren
@@ -742,12 +787,21 @@ function TreeItem({
               depth={depth + 1}
               activePath={activePath}
               expandedPaths={expandedPaths}
+              draftIngestStatesByBrainId={draftIngestStatesByBrainId}
               onSelect={onSelect}
               onToggleFolder={onToggleFolder}
             />
           ))
         : null}
     </div>
+  );
+}
+
+function TreeIngestStatusSlot({ state }: { state: GoatBrainDraftIngestState | null }) {
+  return (
+    <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center">
+      {state ? <BrainIngestStatusIcon state={state} compact /> : null}
+    </span>
   );
 }
 
@@ -1241,6 +1295,50 @@ function FileIcon({ path }: { path: string }) {
     return <FileCode2 size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
   }
   return <FileText size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
+}
+
+function BrainIngestStatusIcon({
+  state,
+  compact = false,
+}: {
+  state: GoatBrainDraftIngestState;
+  compact?: boolean;
+}) {
+  const Icon =
+    state.kind === "failed" ? CircleAlert : state.kind === "retrying" ? RotateCw : Loader2;
+  const label = draftIngestStateLabel(state);
+  const colorClass =
+    state.kind === "failed"
+      ? "text-danger"
+      : state.kind === "retrying"
+        ? "text-amber-600"
+        : "text-ink-muted";
+  const animationClass = state.kind === "queued" || state.kind === "running" ? "animate-spin" : "";
+
+  return (
+    <span
+      role={compact ? "img" : "status"}
+      aria-label={label}
+      title={label}
+      className={`flex shrink-0 items-center justify-center ${compact ? "h-[14px] w-[14px]" : "mr-1 h-5 w-5"} ${colorClass}`}
+    >
+      <Icon size={compact ? 12 : 14} strokeWidth={compact ? 2.1 : 1.9} className={animationClass} />
+    </span>
+  );
+}
+
+function draftIngestStateLabel(state: GoatBrainDraftIngestState) {
+  const title = state.title ? `: ${state.title}` : "";
+  if (state.kind === "failed") {
+    return `Brain filing failed${state.detail ? `: ${state.detail}` : title}`;
+  }
+  if (state.kind === "retrying") {
+    return `Retrying brain filing${title}`;
+  }
+  if (state.kind === "queued") {
+    return `Waiting to file capture into brain${title}`;
+  }
+  return `Filing capture into brain${title}`;
 }
 
 function resolveInitialDocument(
