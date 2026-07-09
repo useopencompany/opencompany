@@ -24,6 +24,7 @@ import {
 
 type SelectedBrainIngestTrace = {
   trace: GoatBrainIngestTrace;
+  traceId: string;
   sourceTitle: string;
 };
 
@@ -47,6 +48,7 @@ export function GoatBrainActivity({ brainRef }: { brainRef: string }) {
       </Popover>
       <BrainIngestTraceDialog
         trace={selectedTrace?.trace ?? null}
+        traceId={selectedTrace?.traceId ?? ""}
         sourceTitle={selectedTrace?.sourceTitle ?? ""}
         open={Boolean(selectedTrace)}
         onOpenChange={(dialogOpen) => {
@@ -125,13 +127,20 @@ function GoatBrainActivityFeed({
                       {event.detail}
                     </span>
                   ) : null}
+                  <TraceIdLine traceId={event.traceId} />
                   {event.kind === "filed" && event.pages.length > 0 ? (
                     <ActivityPageLinks brainRef={brainRef} pages={event.pages} />
                   ) : null}
                   {trace ? (
                     <button
                       type="button"
-                      onClick={() => onOpenTrace({ trace, sourceTitle: event.sourceTitle })}
+                      onClick={() =>
+                        onOpenTrace({
+                          trace,
+                          traceId: event.traceId,
+                          sourceTitle: event.sourceTitle,
+                        })
+                      }
                       className="mt-1 inline-flex w-fit items-center gap-1 rounded-[4px] border border-border-subtle bg-surface px-1.5 py-0.5 text-[11px] leading-4 text-ink-muted transition-colors duration-150 hover:border-border hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
                     >
                       <TerminalSquare size={11} strokeWidth={1.8} />
@@ -144,6 +153,20 @@ function GoatBrainActivityFeed({
           })
         )}
       </div>
+    </div>
+  );
+}
+
+function TraceIdLine({ traceId }: { traceId: string }) {
+  return (
+    <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-[10.5px] leading-4 text-ink-subtle">
+      <span className="shrink-0 font-medium">Trace ID</span>
+      <code
+        className="min-w-0 break-all rounded bg-ink/5 px-1 py-px font-mono text-[10px] text-ink-muted"
+        title={traceId}
+      >
+        {traceId}
+      </code>
     </div>
   );
 }
