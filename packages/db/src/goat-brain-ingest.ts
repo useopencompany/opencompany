@@ -12,6 +12,7 @@ type DbLike = any;
 
 export const GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND: GoatBrainIngestJobKind =
   "brain_source_item_ingest";
+export const GOAT_BRAIN_AGENT_INGEST_JOB_KIND: GoatBrainIngestJobKind = "brain_agent_ingest";
 
 export type UpsertGoatBrainSourceItemResult = {
   sourceItemId: string;
@@ -25,11 +26,14 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   integrationId?: string | null;
   item: NormalizedBrainSourceItem;
   rawPayload: unknown;
+  kind?: GoatBrainIngestJobKind;
+  brainRef?: string | null;
   now?: Date;
   db?: DbLike;
 }): Promise<UpsertGoatBrainSourceItemResult> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
+  const kind = input.kind ?? GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND;
   const occurredAt = new Date(input.item.occurredAt);
   const capturedAt = new Date(input.item.capturedAt);
   const integrationId = input.integrationId ?? null;
@@ -89,7 +93,8 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
       sourceProvider: input.item.sourceProvider,
       sourceConnectionId: input.sourceConnectionId,
       integrationId,
-      kind: GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND,
+      brainRef: input.brainRef ?? null,
+      kind,
       contentHash: input.item.contentHash,
       status: "queued",
       nextRunAt: now,

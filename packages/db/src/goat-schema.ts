@@ -49,7 +49,7 @@ export type GoatIntegrationResourceStatus =
 export type GoatBrainSourceProvider = "jamie";
 export type GoatBrainSourceType = "meeting";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
-export type GoatBrainIngestJobKind = "brain_source_item_ingest";
+export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type GoatTaskToolName =
@@ -789,6 +789,9 @@ export const goatBrainIngestJobs = goat.table(
     sourceProvider: text("source_provider").$type<GoatBrainSourceProvider>().notNull(),
     sourceConnectionId: text("source_connection_id").notNull(),
     integrationId: text("integration_id"),
+    // Target brain for the job (principle: ingestion is per-brain). Null means
+    // the handler resolves the user's default brain at run time.
+    brainRef: text("brain_ref").references(() => goatBrains.id, { onDelete: "set null" }),
     kind: text("kind").$type<GoatBrainIngestJobKind>().notNull(),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<GoatBrainIngestJobStatus>().notNull().default("queued"),
@@ -826,7 +829,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
-      sql`${table.kind} IN ('brain_source_item_ingest')`,
+      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest')`,
     ),
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",

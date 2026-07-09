@@ -1,4 +1,8 @@
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import {
+  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  upsertGoatBrainSourceItemAndEnqueue,
+} from "@opencompany/db/goat-brain-ingest";
+import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   BrainSourceNormalizationError,
   normalizeJamieMeetingCompletedWebhook,
@@ -73,12 +77,18 @@ export async function POST(
     });
   }
 
+  // V1 routing: ingestion targets the user's default brain. Resolving it here
+  // pins the job to one brain; when no brain exists yet the handler resolves
+  // the default brain at run time instead.
+  const defaultBrain = await getDefaultGoatBrainForUser(webhookContext.userWorkosId);
   const result = await upsertGoatBrainSourceItemAndEnqueue({
     userWorkosId: webhookContext.userWorkosId,
     sourceConnectionId: webhookContext.integrationId,
     integrationId: webhookContext.integrationId,
     item,
     rawPayload: payload,
+    kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+    brainRef: defaultBrain?.id ?? null,
     now: receivedAt,
   });
 

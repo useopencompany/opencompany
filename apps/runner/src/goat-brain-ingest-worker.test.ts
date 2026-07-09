@@ -1,10 +1,10 @@
 import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/goat-brain";
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildJamieMeetingBrainWrites,
   type GoatBrainIngestStore,
   runClaimedGoatBrainIngestJob,
 } from "./goat-brain-ingest-worker";
+import { buildJamieMeetingBrainWrites } from "./goat-brain-jamie-writes";
 
 function jamieItem(segmentCount = 2) {
   return normalizeJamieMeetingCompletedWebhook(
@@ -90,7 +90,7 @@ describe("Goat Brain ingest worker", () => {
     };
 
     await runClaimedGoatBrainIngestJob({
-      env: { jobLeaseTtlMs: 30_000 },
+      env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
       store,
       handlers: [
         {
@@ -110,6 +110,7 @@ describe("Goat Brain ingest worker", () => {
         sourceProvider: "jamie",
         sourceConnectionId: "gint_123",
         integrationId: "gint_123",
+        brainRef: "gbrain_123",
         sourceType: "meeting",
         kind: "brain_source_item_ingest",
         contentHash: "hash_123",
@@ -128,7 +129,12 @@ describe("Goat Brain ingest worker", () => {
       },
     });
 
-    expect(run).toHaveBeenCalledWith({ userWorkosId: "user_123", item: normalizedPayload });
+    expect(run).toHaveBeenCalledWith({
+      userWorkosId: "user_123",
+      brainRef: "gbrain_123",
+      item: normalizedPayload,
+      env: { vercelAiGatewayApiKey: "gw_test" },
+    });
     expect(complete).toHaveBeenCalledWith(expect.objectContaining({ result: { handled: true } }));
     expect(fail).not.toHaveBeenCalled();
   });

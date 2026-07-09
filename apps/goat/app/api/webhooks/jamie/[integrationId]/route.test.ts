@@ -1,4 +1,5 @@
 import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bindGoatJamieWebhookApiKey,
@@ -21,7 +22,12 @@ vi.mock("@/lib/task-runner", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-brain-ingest", () => ({
+  GOAT_BRAIN_AGENT_INGEST_JOB_KIND: "brain_agent_ingest",
   upsertGoatBrainSourceItemAndEnqueue: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/goat-workspaces", () => ({
+  getDefaultGoatBrainForUser: vi.fn(),
 }));
 
 describe("POST /api/webhooks/jamie/[integrationId]", () => {
@@ -43,6 +49,9 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
       jobId: "gbjob_123",
       enqueued: true,
     });
+    vi.mocked(getDefaultGoatBrainForUser).mockResolvedValue({
+      id: "gbrain_123",
+    } as Awaited<ReturnType<typeof getDefaultGoatBrainForUser>>);
     vi.mocked(bindGoatJamieWebhookApiKey).mockResolvedValue(undefined);
     vi.mocked(markGoatJamieWebhookConnected).mockResolvedValue(undefined);
   });
@@ -91,6 +100,8 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
         sourceConnectionId: "gint_123",
         integrationId: "gint_123",
         rawPayload: jamiePayload(),
+        kind: "brain_agent_ingest",
+        brainRef: "gbrain_123",
         item: expect.objectContaining({
           sourceProvider: "jamie",
           sourceType: "meeting",
