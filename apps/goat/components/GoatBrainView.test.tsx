@@ -139,6 +139,31 @@ describe("GoatBrainView", () => {
     );
   });
 
+  it("keeps outgoing sidebar links at the compact sidebar text size", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline, evidenceDocument]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Toggle file details" }));
+
+    const outgoingSection = screen.getByRole("heading", { name: "Outgoing" }).closest("section");
+    expect(outgoingSection).not.toBeNull();
+
+    const outgoingList = within(outgoingSection as HTMLElement).getByRole("list");
+    expect(outgoingList).toHaveClass("text-[12px]", "leading-5");
+    expect(screen.getByRole("link", { name: /Platform planning chat.*cites/ })).toHaveAttribute(
+      "href",
+      "/brain/evidence/chat/ev-platform-planning-chat",
+    );
+  });
+
   it("keeps the route brain id in generated document links", async () => {
     const user = userEvent.setup();
 
