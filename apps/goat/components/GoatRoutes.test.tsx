@@ -34,6 +34,10 @@ vi.mock("@/components/GoatBrainView", () => ({
   GoatBrainView: () => null,
 }));
 
+vi.mock("@/components/GoatBrainSettings", () => ({
+  GoatBrainSettings: () => null,
+}));
+
 vi.mock("@/components/GoatSurface", () => ({
   GoatSurface: () => null,
 }));

@@ -2,7 +2,7 @@ import { extractGoatBrainCitations, parseGoatBrainDocument } from "./document";
 import { deriveGoatBrainEdges } from "./edges";
 import { parseGoatBrainInlineLinks } from "./inline-links";
 import { goatBrainRelativePath } from "./paths";
-import { isValidGoatBrainFolder, isValidGoatBrainId } from "./schema";
+import { isValidGoatBrainFolder, isValidGoatBrainId, isValidGoatBrainSourceRef } from "./schema";
 import { listGoatBrainFiles, type StoredGoatBrainFile } from "./store";
 import { validateGoatBrainDocument } from "./validate";
 
@@ -63,7 +63,7 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
 
   const degreeById = graphDegreeById(byId);
   const evidenceRecordIds = new Set(
-    parsedFiles.filter(({ doc }) => doc.frontmatter.type === "evidence").map(({ file }) => file.id),
+    parsedFiles.filter(({ doc }) => doc.frontmatter.kind === "evidence").map(({ file }) => file.id),
   );
 
   for (const { file, doc } of parsedFiles) {
@@ -133,8 +133,20 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
       });
     }
 
+    for (const sourceEntry of doc.frontmatter.sources ?? []) {
+      const ref = sourceEntry.ref.trim();
+      if (ref && !isValidGoatBrainSourceRef(ref)) {
+        findings.push({
+          severity: "warn",
+          code: "nonstandard_source_ref",
+          id: file.id,
+          message: `Source ref "${ref}" is not provider:id shaped.`,
+        });
+      }
+    }
+
     if (
-      doc.frontmatter.type !== "evidence" &&
+      doc.frontmatter.kind !== "evidence" &&
       doc.compiledTruth.trim() &&
       doc.timeline.length === 0 &&
       !(doc.frontmatter.sources ?? []).length

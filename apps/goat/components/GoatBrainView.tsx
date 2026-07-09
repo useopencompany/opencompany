@@ -1,5 +1,11 @@
 "use client";
 
+import { normalizeGoatBrainCompiledTruth } from "@opencompany/goat-brain/document";
+import {
+  compareGoatBrainFolderPaths,
+  goatBrainFolderSourceForPath,
+  goatBrainRootFolderGroup,
+} from "@opencompany/goat-brain/folders";
 import {
   evidenceLinkTargets,
   formatGoatBrainEvidenceLink,
@@ -14,18 +20,23 @@ import {
   Building2,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   Copy,
   Ellipsis,
   FileCode2,
-  FilePlus2,
   FileText,
+  FileUp,
   Folder,
   FolderPlus,
   History,
   Inbox,
   Lightbulb,
+  Loader2,
   PanelRight,
+  Pencil,
+  RotateCw,
   Search,
+  Settings2,
   Trash2,
   Users,
 } from "lucide-react";
@@ -33,21 +44,37 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { GoatBrainActivity } from "@/components/GoatBrainActivity";
 import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
-  createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
   deleteGoatBrainDocumentAction,
+  deleteGoatBrainFolderAction,
   renameGoatBrainDocumentAction,
+  renameGoatBrainFolderAction,
+  replaceGoatBrainAssetAction,
   updateGoatBrainDocumentAction,
+  uploadGoatBrainAssetAction,
 } from "@/lib/brain-actions";
+import {
+  buildGoatBrainDraftIngestStates,
+  type GoatBrainDraftIngestState,
+} from "@/lib/brain-activity";
+import {
+  BRAIN_ASSET_ACCEPT,
+  uploadBrainAssetBlob,
+  validateBrainAssetFile,
+} from "@/lib/brain-asset-upload";
 import {
   createGoatCollections,
   type GoatBrainDocumentRow,
   type GoatBrainEdgeRow,
+  type GoatBrainFolderRow,
+  type GoatBrainIngestJobRow,
+  type GoatBrainSourceItemRow,
   type GoatBrainTimelineEntryRow,
 } from "@/lib/task-collections";
 
@@ -56,6 +83,7 @@ type Props = {
   documents: GoatBrainDocumentView[];
   initialFolderPath: string | null;
   initialBrainId: string | null;
+  routeBrainId?: string | null;
 };
 
 type BrainTreeNode = {
@@ -63,6 +91,7 @@ type BrainTreeNode = {
   path: string;
   type: "folder" | "file";
   children: BrainTreeNode[];
+  folder?: GoatBrainFolderView;
   document?: GoatBrainDocumentView;
 };
 
@@ -73,27 +102,21 @@ type BrainGraphLink = {
   sourceKind: "relation" | "wiki_link";
 };
 
-const ROOT_FOLDER_GROUPS = [
-  ["inbox"],
-  ["people", "companies", "projects"],
-  ["meetings", "research", "evidence"],
-  ["decisions", "concepts"],
-];
+type FolderDialogState =
+  | { kind: "create"; initialPath?: string }
+  | { kind: "rename"; path: string };
+
 const HIDDEN_EMPTY_ROOT_FOLDERS = new Set<string>();
 const AUTOSAVE_DELAY_MS = 1200;
-const DEFAULT_BRAIN_FOLDERS = [
-  "inbox",
-  "people",
-  "companies",
-  "projects",
-  "decisions",
-  "meetings",
-  "research",
-  "concepts",
-  "evidence",
-];
+const EMPTY_DRAFT_INGEST_STATES: ReadonlyMap<string, GoatBrainDraftIngestState> = new Map();
 
-export function GoatBrainView({ folders, documents, initialFolderPath, initialBrainId }: Props) {
+export function GoatBrainView({
+  folders,
+  documents,
+  initialFolderPath,
+  initialBrainId,
+  routeBrainId,
+}: Props) {
   const hydrated = useHydrated();
   if (!hydrated) {
     return (
@@ -102,6 +125,7 @@ export function GoatBrainView({ folders, documents, initialFolderPath, initialBr
         documents={documents}
         initialFolderPath={initialFolderPath}
         initialBrainId={initialBrainId}
+        routeBrainId={routeBrainId ?? null}
       />
     );
   }
@@ -111,6 +135,7 @@ export function GoatBrainView({ folders, documents, initialFolderPath, initialBr
       documents={documents}
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
+      routeBrainId={routeBrainId ?? null}
     />
   );
 }
@@ -120,6 +145,7 @@ function LiveGoatBrainView({
   documents: initialDocuments,
   initialFolderPath,
   initialBrainId,
+  routeBrainId,
 }: Props) {
   const { activeBrain } = useGoatAppData();
   const collections = useMemo(() => createGoatCollections(), []);
@@ -131,6 +157,10 @@ function LiveGoatBrainView({
     (q) => q.from({ file: brainCollections.documents }),
     [brainCollections],
   );
+  const { data: folderRows, isLoading: foldersLoading } = useLiveQuery(
+    (q) => q.from({ folder: brainCollections.folders }),
+    [brainCollections],
+  );
   const { data: timelineRows } = useLiveQuery(
     (q) => q.from({ timeline: brainCollections.timelineEntries }),
     [brainCollections],
@@ -138,6 +168,14 @@ function LiveGoatBrainView({
   const { data: edgeRows } = useLiveQuery(
     (q) => q.from({ edge: brainCollections.edges }),
     [brainCollections],
+  );
+  const { data: ingestJobRows } = useLiveQuery(
+    (q) => q.from({ job: brainCollections.ingestJobs }),
+    [brainCollections],
+  );
+  const { data: captureSourceItemRows } = useLiveQuery(
+    (q) => q.from({ item: collections.pendingBrainCaptureSourceItems }),
+    [collections],
   );
   const documents = useMemo(() => {
     if (filesLoading && !fileRows?.length) return initialDocuments;
@@ -149,17 +187,32 @@ function LiveGoatBrainView({
       .toSorted(compareBrainDocuments);
   }, [fileRows, filesLoading, initialDocuments, timelineRows]);
   const folders = useMemo(() => {
-    if (filesLoading && !fileRows?.length) return initialFolders;
-    return deriveFolderViews(documents);
-  }, [documents, fileRows?.length, filesLoading, initialFolders]);
+    if (
+      (filesLoading && !fileRows?.length) ||
+      (foldersLoading && !folderRows?.length && initialFolders.length > 0)
+    ) {
+      return initialFolders;
+    }
+    return deriveFolderViews(documents, (folderRows ?? []) as GoatBrainFolderRow[]);
+  }, [documents, fileRows?.length, filesLoading, folderRows, foldersLoading, initialFolders]);
+  const draftIngestStatesByBrainId = useMemo(
+    () =>
+      buildGoatBrainDraftIngestStates(
+        (ingestJobRows ?? []) as GoatBrainIngestJobRow[],
+        (captureSourceItemRows ?? []) as GoatBrainSourceItemRow[],
+      ),
+    [captureSourceItemRows, ingestJobRows],
+  );
 
   return (
     <GoatBrainEditor
       folders={folders}
       documents={documents}
       edgeRows={(edgeRows ?? []) as GoatBrainEdgeRow[]}
+      draftIngestStatesByBrainId={draftIngestStatesByBrainId}
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
+      routeBrainId={routeBrainId ?? null}
     />
   );
 }
@@ -168,11 +221,18 @@ function GoatBrainEditor({
   folders,
   documents,
   edgeRows = [],
+  draftIngestStatesByBrainId = EMPTY_DRAFT_INGEST_STATES,
   initialFolderPath,
   initialBrainId,
-}: Props & { edgeRows?: GoatBrainEdgeRow[] }) {
+  routeBrainId,
+}: Props & {
+  edgeRows?: GoatBrainEdgeRow[];
+  draftIngestStatesByBrainId?: ReadonlyMap<string, GoatBrainDraftIngestState>;
+}) {
   const router = useRouter();
   const navInset = useGoatNavInset();
+  const { activeBrain, workspace } = useGoatAppData();
+  const selectedBrainId = routeBrainId ?? null;
   const initialDocument = useMemo(
     () => resolveInitialDocument(documents, initialFolderPath, initialBrainId),
     [documents, initialBrainId, initialFolderPath],
@@ -186,11 +246,14 @@ function GoatBrainEditor({
     () => new Set(ancestorFolderPaths(initialDocument?.folderPath ?? initialSelectedFolder)),
   );
   const [query, setQuery] = useState("");
-  const [creatingFolder, setCreatingFolder] = useState(false);
-  const [newFolderPath, setNewFolderPath] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const [isDocPending, startDocTransition] = useTransition();
+  const [isFolderPending, startFolderTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const [docPanelState, setDocPanelState] = useState<{
     docId: string | null;
     value: string;
@@ -198,7 +261,7 @@ function GoatBrainEditor({
     timelineOpen: boolean;
   }>({
     docId: initialDocument?.id ?? null,
-    value: initialDocument?.body ?? "",
+    value: documentEditorBody(initialDocument),
     detailsOpen: false,
     timelineOpen: false,
   });
@@ -224,26 +287,47 @@ function GoatBrainEditor({
     if (!selectedDocumentId) return null;
     return documents.find((document) => document.id === selectedDocumentId) ?? null;
   }, [documents, selectedDocumentId]);
+  const selectedDraftIngestState = selectedDocument
+    ? (draftIngestStatesByBrainId.get(selectedDocument.brainId) ?? null)
+    : null;
   if (docPanelState.docId !== (selectedDocument?.id ?? null)) {
     setDocPanelState({
       docId: selectedDocument?.id ?? null,
-      value: selectedDocument?.body ?? "",
+      value: documentEditorBody(selectedDocument),
       detailsOpen: false,
       timelineOpen: false,
     });
   }
   const editorValue = docPanelState.value;
-  const dirty = Boolean(selectedDocument && editorValue !== selectedDocument.body);
+  const selectedBody = documentEditorBody(selectedDocument);
+  const dirty = Boolean(selectedDocument && editorValue !== selectedBody);
   const activeFolder = selectedDocument?.folderPath ?? selectedFolder;
   const activePath = selectedDocument ? brainDocumentTreePath(selectedDocument) : activeFolder;
+  const activeFolderView = folders.find((folder) => folder.path === activeFolder) ?? null;
+  const activeFolderEditable = activeFolderView?.source === "custom";
   const tree = useMemo(
     () => buildBrainTree(folders, documents, query),
     [documents, folders, query],
   );
-  const brainLinks = useMemo(() => brainLinkMap(documents), [documents]);
+  const brainLinks = useMemo(
+    () => brainLinkMap(folders, documents, selectedBrainId),
+    [documents, folders, selectedBrainId],
+  );
   const graphLinks = useMemo(() => buildGraphLinks(documents, edgeRows), [documents, edgeRows]);
   const rootGroups = useMemo(() => groupRootNodes(tree.children), [tree.children]);
   const hasRootNodes = rootGroups.some((group) => group.length > 0);
+  const archivedDocuments = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return documents
+      .filter((document) => document.status === "archived")
+      .filter(
+        (document) =>
+          !normalizedQuery ||
+          brainDocumentTreePath(document).toLowerCase().includes(normalizedQuery) ||
+          (document.title?.toLowerCase() ?? "").includes(normalizedQuery),
+      )
+      .toSorted((a, b) => (a.title ?? a.brainId).localeCompare(b.title ?? b.brainId));
+  }, [documents, query]);
   const isSearching = Boolean(query.trim());
   const visibleExpandedPaths = useMemo(
     () => (isSearching ? new Set(collectFolderPaths(tree)) : expandedPaths),
@@ -255,7 +339,7 @@ function GoatBrainEditor({
     setSelectedFolder(document.folderPath);
     setSelectedDocumentId(document.id);
     setExpandedPaths((current) => withAncestorFolders(current, document.folderPath));
-    router.replace(brainDocumentUrl(document));
+    router.replace(brainDocumentUrl(document, selectedBrainId));
   };
 
   const toggleFolder = (path: string) => {
@@ -268,48 +352,13 @@ function GoatBrainEditor({
     });
   };
 
-  const createFolder = () => {
-    const path = newFolderPath.trim();
-    if (!path) return;
-    startTransition(async () => {
-      const result = await createGoatBrainFolderAction(path);
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
-      const folderPath = result.path ?? path;
-      setNewFolderPath("");
-      setCreatingFolder(false);
-      setSelectedFolder(folderPath);
-      setExpandedPaths((current) => withAncestorFolders(current, folderPath, true));
-      router.replace(`/brain/${folderUrlSegments(folderPath)}`);
-    });
-  };
-
-  const createDocument = () => {
-    startTransition(async () => {
-      const result = await createGoatBrainDocumentAction({
-        folderPath: activeFolder,
-      });
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
-      const document = result.document;
-      if (document) {
-        setSelectedFolder(document.folderPath);
-        setSelectedDocumentId(document.id);
-        setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
-      }
-      if (document) router.replace(brainDocumentUrl(document));
-      else if (result.path) router.replace(brainFilePathUrl(result.path));
-    });
-  };
-
   // Saves never reseed the editor draft: keystrokes made while a save is in flight
   // must survive, and the live collection brings the fresh body/contentHash after.
   const saveDocument = () => {
-    if (!selectedDocument || !dirty || isDocPending) return;
+    // Binary-backed documents have no body editor; their compiled truth is
+    // curated by the ingestion agent only.
+    if (!selectedDocument || selectedDocument.format !== "markdown" || !dirty || isDocPending)
+      return;
     const autosave = autosaveFor(selectedDocument.id);
     if (editorValue === autosave.savedValue) return;
     const documentId = selectedDocument.id;
@@ -393,11 +442,124 @@ function GoatBrainEditor({
       if (next) {
         setSelectedFolder(next.folderPath);
         setExpandedPaths((current) => withAncestorFolders(current, next.folderPath, true));
-        router.replace(brainDocumentUrl(next));
+        router.replace(brainDocumentUrl(next, selectedBrainId));
       } else {
-        router.replace(`/brain/${folderUrlSegments(activeFolder)}`);
+        router.replace(brainFolderUrl(activeFolder, selectedBrainId));
       }
     });
+  };
+
+  const submitFolderDialog = (folderPath: string) => {
+    const dialog = folderDialog;
+    if (!dialog) return;
+    const trimmed = folderPath.trim();
+    if (!trimmed) {
+      toast.error("Give the folder a path.");
+      return;
+    }
+    startFolderTransition(async () => {
+      const result =
+        dialog.kind === "create"
+          ? await createGoatBrainFolderAction({ folderPath: trimmed })
+          : await renameGoatBrainFolderAction({ fromPath: dialog.path, toPath: trimmed });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      const nextPath = result.path ?? trimmed;
+      setFolderDialog(null);
+      setSelectedDocumentId(null);
+      setSelectedFolder(nextPath);
+      setExpandedPaths((current) => withAncestorFolders(current, nextPath, true));
+      router.replace(brainFolderUrl(nextPath, selectedBrainId));
+      toast.success(dialog.kind === "create" ? "Folder added" : "Folder renamed");
+    });
+  };
+
+  const deleteFolder = (folderPath: string) => {
+    if (!confirm(`Delete empty folder "${folderPath}"?`)) return;
+    startFolderTransition(async () => {
+      const result = await deleteGoatBrainFolderAction({ folderPath });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      if (activeFolder === folderPath || activeFolder.startsWith(`${folderPath}/`)) {
+        setSelectedDocumentId(null);
+        setSelectedFolder("inbox");
+        router.replace(brainFolderUrl("inbox", selectedBrainId));
+      }
+      toast.success("Folder removed");
+    });
+  };
+
+  const selectUploadedDocument = (document: GoatBrainDocumentView) => {
+    setSelectedFolder(document.folderPath);
+    setSelectedDocumentId(document.id);
+    setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
+    router.replace(brainDocumentUrl(document, selectedBrainId));
+  };
+
+  const uploadAssetFile = async (file: File | undefined) => {
+    if (!file || !activeBrain || isUploading) return;
+    const invalid = validateBrainAssetFile(file);
+    if (invalid) {
+      toast.error(invalid);
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const uploaded = await uploadBrainAssetBlob(activeBrain.id, file);
+      const result = await uploadGoatBrainAssetAction({
+        folderPath: activeFolder,
+        blobUrl: uploaded.blobUrl,
+        originalFileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        contentSha256: uploaded.contentSha256,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      toast.success("Uploaded — filing into the brain");
+      if (result.document) selectUploadedDocument(result.document);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const replaceAssetFile = async (file: File | undefined) => {
+    if (!file || !activeBrain || !selectedDocument || isUploading) return;
+    const invalid = validateBrainAssetFile(file);
+    if (invalid) {
+      toast.error(invalid);
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const uploaded = await uploadBrainAssetBlob(activeBrain.id, file);
+      const result = await replaceGoatBrainAssetAction({
+        documentId: selectedDocument.id,
+        folderPath: selectedDocument.folderPath,
+        blobUrl: uploaded.blobUrl,
+        originalFileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        contentSha256: uploaded.contentSha256,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      toast.success("File replaced — re-filing into the brain");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Replace failed.");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -419,31 +581,46 @@ function GoatBrainEditor({
             Brain
           </span>
           <div className="flex shrink-0 items-center">
-            <button
-              type="button"
-              aria-label="Create brain file"
-              title="New file"
-              onClick={createDocument}
-              disabled={isPending}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
-            >
-              <FilePlus2 size={15} strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              aria-label="Create brain folder"
-              title="New folder"
-              aria-pressed={creatingFolder}
-              onClick={() => setCreatingFolder((creating) => !creating)}
-              disabled={isPending}
-              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45 ${
-                creatingFolder
-                  ? "bg-surface-active text-ink"
-                  : "text-ink-subtle hover:bg-surface-hover hover:text-ink"
-              }`}
-            >
-              <FolderPlus size={15} strokeWidth={1.8} />
-            </button>
+            {activeBrain ? (
+              <button
+                type="button"
+                aria-label="Add folder"
+                title="Add folder"
+                disabled={isFolderPending}
+                onClick={() => setFolderDialog({ kind: "create" })}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
+              >
+                <FolderPlus size={15} strokeWidth={1.8} />
+              </button>
+            ) : null}
+            {activeBrain ? <GoatBrainActivity brainRef={activeBrain.id} /> : null}
+            {activeBrain ? (
+              <button
+                type="button"
+                aria-label="Upload PDF"
+                title="Upload PDF into the selected folder"
+                disabled={isUploading}
+                onClick={() => uploadInputRef.current?.click()}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
+              >
+                {isUploading ? (
+                  <Loader2 size={15} strokeWidth={1.8} className="animate-spin" />
+                ) : (
+                  <FileUp size={15} strokeWidth={1.8} />
+                )}
+              </button>
+            ) : null}
+            {workspace.role === "admin" && activeBrain ? (
+              <button
+                type="button"
+                aria-label={`Open settings for ${activeBrain.name}`}
+                title="Brain settings"
+                onClick={() => router.push(`/brain/${encodeURIComponent(activeBrain.id)}/settings`)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                <Settings2 size={15} strokeWidth={1.8} />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -459,43 +636,48 @@ function GoatBrainEditor({
           </label>
         </div>
 
-        <div role="tree" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {creatingFolder ? (
-            <form
-              className="mb-1 flex h-7 items-center gap-1.5 rounded-[5px] bg-surface pl-[25px] pr-2 ring-1 ring-border-strong"
-              onSubmit={(event) => {
-                event.preventDefault();
-                createFolder();
-              }}
-            >
-              <Folder size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
-              <input
-                autoFocus
-                value={newFolderPath}
-                onChange={(event) => setNewFolderPath(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setNewFolderPath("");
-                    setCreatingFolder(false);
-                  }
-                }}
-                onBlur={() => {
-                  if (!newFolderPath.trim()) setCreatingFolder(false);
-                }}
-                placeholder="New folder"
-                aria-label="New brain folder name"
-                disabled={isPending}
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-subtle"
-              />
-            </form>
-          ) : null}
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept={BRAIN_ASSET_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            void uploadAssetFile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+        <input
+          ref={replaceInputRef}
+          type="file"
+          accept={BRAIN_ASSET_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            void replaceAssetFile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+        <div
+          role="tree"
+          className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+          }}
+          onDrop={(event) => {
+            if (event.dataTransfer.files.length === 0) return;
+            event.preventDefault();
+            void uploadAssetFile(event.dataTransfer.files[0]);
+          }}
+        >
           {hasRootNodes ? (
             <div>
               {rootGroups.map((group, groupIndex) =>
                 group.length > 0 ? (
                   <div key={group.map((node) => node.path).join("|")}>
                     {groupIndex > firstNonEmptyGroupIndex(rootGroups) ? (
-                      <div className="h-2" />
+                      <div
+                        data-testid="brain-root-divider"
+                        className="my-2 h-px bg-border-subtle"
+                      />
                     ) : null}
                     {group.map((node) => (
                       <TreeItem
@@ -504,6 +686,7 @@ function GoatBrainEditor({
                         depth={0}
                         activePath={activePath}
                         expandedPaths={visibleExpandedPaths}
+                        draftIngestStatesByBrainId={draftIngestStatesByBrainId}
                         onSelect={selectDocument}
                         onToggleFolder={toggleFolder}
                       />
@@ -517,6 +700,42 @@ function GoatBrainEditor({
               {documents.length === 0 ? "No brain files yet." : "No files match that search."}
             </div>
           )}
+          {archivedDocuments.length > 0 ? (
+            <div className="mt-2">
+              <button
+                type="button"
+                aria-expanded={archivedOpen}
+                onClick={() => setArchivedOpen((open) => !open)}
+                className="group flex h-7 w-full items-center gap-1.5 rounded-[5px] pl-[6px] pr-2 text-left text-[13px] leading-5 text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                {archivedOpen ? (
+                  <ChevronDown size={13} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+                ) : (
+                  <ChevronRight size={13} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+                )}
+                <History size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
+                <span className="min-w-0 truncate">Archived ({archivedDocuments.length})</span>
+              </button>
+              {archivedOpen
+                ? archivedDocuments.map((document) => (
+                    <button
+                      key={document.id}
+                      type="button"
+                      onClick={() => selectDocument(document)}
+                      className={`group flex h-7 w-full items-center gap-1.5 rounded-[5px] pl-[20px] pr-2 text-left text-[13px] leading-5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                        document.id === selectedDocument?.id
+                          ? "bg-surface-active text-ink"
+                          : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+                      }`}
+                    >
+                      <span className="h-[13px] w-[13px] shrink-0" />
+                      <FileText size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
+                      <span className="min-w-0 truncate">{document.title ?? document.brainId}</span>
+                    </button>
+                  ))
+                : null}
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -530,10 +749,20 @@ function GoatBrainEditor({
                   title={brainDocumentTreePath(selectedDocument)}
                   className="min-w-0 truncate text-[12.5px] font-medium text-ink"
                 >
-                  {selectedDocument.folderPath}/{selectedDocument.brainId}.md
+                  {brainDocumentTreePath(selectedDocument)}
                 </span>
                 <span className="hidden shrink-0 text-[12px] text-ink-subtle md:inline">
                   Updated {formatRelativeTime(selectedDocument.updatedAt)}
+                </span>
+              </>
+            ) : activeFolderView ? (
+              <>
+                <FolderIcon path={activeFolderView.path} />
+                <span
+                  title={activeFolderView.path}
+                  className="min-w-0 truncate text-[12.5px] font-medium text-ink"
+                >
+                  {activeFolderView.path}
                 </span>
               </>
             ) : null}
@@ -548,6 +777,9 @@ function GoatBrainEditor({
                   >
                     {isDocPending ? "Saving…" : "Unsaved"}
                   </span>
+                ) : null}
+                {selectedDraftIngestState ? (
+                  <BrainIngestStatusIcon state={selectedDraftIngestState} />
                 ) : null}
                 <button
                   type="button"
@@ -603,6 +835,21 @@ function GoatBrainEditor({
                         {selectedDocument.timeline.length}
                       </span>
                     </button>
+                    {selectedDocument.format !== "markdown" ? (
+                      <button
+                        type="button"
+                        aria-label="Replace file"
+                        disabled={isUploading}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          replaceInputRef.current?.click();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors duration-150 hover:bg-surface-hover disabled:opacity-45"
+                      >
+                        <FileUp size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+                        Replace file
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       aria-label="Delete document"
@@ -619,6 +866,35 @@ function GoatBrainEditor({
                   </PopoverContent>
                 </Popover>
               </>
+            ) : activeFolderView ? (
+              <>
+                {activeFolderEditable ? (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Rename folder"
+                      title="Rename folder"
+                      disabled={isFolderPending}
+                      onClick={() =>
+                        setFolderDialog({ kind: "rename", path: activeFolderView.path })
+                      }
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
+                    >
+                      <Pencil size={14} strokeWidth={1.9} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Delete folder"
+                      title="Delete folder"
+                      disabled={isFolderPending}
+                      onClick={() => deleteFolder(activeFolderView.path)}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
+                    >
+                      <Trash2 size={14} strokeWidth={1.9} />
+                    </button>
+                  </>
+                ) : null}
+              </>
             ) : null}
           </div>
         </header>
@@ -629,6 +905,7 @@ function GoatBrainEditor({
           documents={documents}
           brainLinks={brainLinks}
           graphLinks={graphLinks}
+          routeBrainId={selectedBrainId}
           editorValue={editorValue}
           detailsOpen={docPanelState.detailsOpen}
           timelineOpen={docPanelState.timelineOpen}
@@ -637,7 +914,80 @@ function GoatBrainEditor({
           onRenameTitle={renameDocument}
         />
       </div>
+      {folderDialog ? (
+        <FolderDialog
+          state={folderDialog}
+          pending={isFolderPending}
+          onClose={() => setFolderDialog(null)}
+          onSubmit={submitFolderDialog}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function FolderDialog({
+  state,
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  state: FolderDialogState;
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (folderPath: string) => void;
+}) {
+  const [value, setValue] = useState(
+    state.kind === "rename" ? state.path : (state.initialPath ?? ""),
+  );
+  const title = state.kind === "rename" ? "Rename folder" : "Add folder";
+  const action = state.kind === "rename" ? "Rename" : "Add";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/20 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div className="flex w-full max-w-[360px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
+        <div className="text-[14px] font-semibold text-ink">{title}</div>
+        <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
+          Path
+          <input
+            autoFocus
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onSubmit(value);
+              if (event.key === "Escape") onClose();
+            }}
+            placeholder="projects"
+            className="rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+          />
+        </label>
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-3 py-1.5 text-[13px] text-ink/70 transition-colors hover:bg-surface-hover"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onSubmit(value)}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {pending ? "Saving…" : action}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -646,6 +996,7 @@ function TreeItem({
   depth,
   activePath,
   expandedPaths,
+  draftIngestStatesByBrainId,
   onSelect,
   onToggleFolder,
 }: {
@@ -653,6 +1004,7 @@ function TreeItem({
   depth: number;
   activePath: string;
   expandedPaths: Set<string>;
+  draftIngestStatesByBrainId: ReadonlyMap<string, GoatBrainDraftIngestState>;
   onSelect: (document: GoatBrainDocumentView) => void;
   onToggleFolder: (path: string) => void;
 }) {
@@ -660,6 +1012,10 @@ function TreeItem({
   const expanded = node.type === "folder" && expandedPaths.has(node.path);
   const showChildren = node.type === "folder" && expanded;
   const paddingStyle = { paddingLeft: `${6 + depth * 14}px` };
+  const draftIngestState =
+    node.type === "file" && node.document
+      ? (draftIngestStatesByBrainId.get(node.document.brainId) ?? null)
+      : null;
 
   return (
     <div>
@@ -689,6 +1045,7 @@ function TreeItem({
           <span className="h-[13px] w-[13px] shrink-0" />
         )}
         {node.type === "folder" ? <FolderIcon path={node.path} /> : <FileIcon path={node.path} />}
+        {node.type === "file" ? <TreeIngestStatusSlot state={draftIngestState} /> : null}
         <span className="min-w-0 truncate">{node.name}</span>
       </button>
       {showChildren
@@ -699,6 +1056,7 @@ function TreeItem({
               depth={depth + 1}
               activePath={activePath}
               expandedPaths={expandedPaths}
+              draftIngestStatesByBrainId={draftIngestStatesByBrainId}
               onSelect={onSelect}
               onToggleFolder={onToggleFolder}
             />
@@ -708,11 +1066,20 @@ function TreeItem({
   );
 }
 
+function TreeIngestStatusSlot({ state }: { state: GoatBrainDraftIngestState | null }) {
+  return (
+    <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center">
+      {state ? <BrainIngestStatusIcon state={state} compact /> : null}
+    </span>
+  );
+}
+
 function BrainDocumentPanel({
   selectedDocument,
   documents,
   brainLinks,
   graphLinks,
+  routeBrainId,
   editorValue,
   detailsOpen,
   timelineOpen,
@@ -724,6 +1091,7 @@ function BrainDocumentPanel({
   documents: GoatBrainDocumentView[];
   brainLinks: Record<string, string>;
   graphLinks: BrainGraphLink[];
+  routeBrainId: string | null;
   editorValue: string;
   detailsOpen: boolean;
   timelineOpen: boolean;
@@ -746,28 +1114,37 @@ function BrainDocumentPanel({
       {timelineOpen ? <BrainDocumentTimeline document={selectedDocument} /> : null}
 
       <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[760px] px-8 pb-24 pt-12">
-            <BrainTitleEditor
-              document={selectedDocument}
-              disabled={isDocPending}
-              onRename={onRenameTitle}
-            />
-            <div className="mt-6">
-              <MarkdownGoatBrainEditor
-                content={editorValue}
-                onChange={onEditorChange}
-                brainLinks={brainLinks}
+        {selectedDocument.format !== "markdown" ? (
+          <BrainAssetViewer
+            document={selectedDocument}
+            disabled={isDocPending}
+            onRenameTitle={onRenameTitle}
+          />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-[760px] px-8 pb-24 pt-12">
+              <BrainTitleEditor
+                document={selectedDocument}
+                disabled={isDocPending}
+                onRename={onRenameTitle}
               />
+              <div className="mt-6">
+                <MarkdownGoatBrainEditor
+                  content={editorValue}
+                  onChange={onEditorChange}
+                  brainLinks={brainLinks}
+                />
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {detailsOpen ? (
           <BrainMetadataSidebar
             document={selectedDocument}
             documents={documents}
             graphLinks={graphLinks}
+            routeBrainId={routeBrainId}
           />
         ) : null}
       </div>
@@ -775,14 +1152,67 @@ function BrainDocumentPanel({
   );
 }
 
+// Binary-backed documents render the file itself first-class (the browser's
+// native PDF viewer); the brain metadata and the agent's summary live in the
+// details sidebar around it, not in front of it.
+function BrainAssetViewer({
+  document,
+  disabled,
+  onRenameTitle,
+}: {
+  document: GoatBrainDocumentView;
+  disabled: boolean;
+  onRenameTitle: (title: string) => void;
+}) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="shrink-0 border-b border-border-subtle px-8 pb-4 pt-6">
+        <BrainTitleEditor document={document} disabled={disabled} onRename={onRenameTitle} />
+        <p className="mt-1 flex items-center gap-2 text-[12px] text-ink-subtle">
+          <span className="truncate">{document.originalFileName ?? document.brainId}</span>
+          {document.assetSizeBytes ? (
+            <span className="shrink-0">{formatFileSize(document.assetSizeBytes)}</span>
+          ) : null}
+          <a
+            href={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+            download={document.originalFileName ?? undefined}
+            className="shrink-0 text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+          >
+            Download
+          </a>
+        </p>
+      </div>
+      {document.format === "pdf" ? (
+        <iframe
+          title={document.title ?? document.brainId}
+          src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+          className="min-h-0 w-full flex-1 border-0 bg-surface-muted"
+        />
+      ) : (
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-ink-muted">
+          No inline preview for this file type yet — use Download.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function BrainMetadataSidebar({
   document,
   documents,
   graphLinks,
+  routeBrainId,
 }: {
   document: GoatBrainDocumentView;
   documents: GoatBrainDocumentView[];
   graphLinks: BrainGraphLink[];
+  routeBrainId: string | null;
 }) {
   const documentsByBrainId = useMemo(
     () => new Map(documents.map((item) => [item.brainId, item])),
@@ -802,9 +1232,8 @@ function BrainMetadataSidebar({
         </h2>
         <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-2 gap-y-2 text-[12px] leading-5">
           <MetadataRow label="Type" value={document.type} />
-          {document.evidenceKind ? (
-            <MetadataRow label="Evidence" value={document.evidenceKind} />
-          ) : null}
+          <MetadataRow label="Status" value={document.status} />
+          {document.kind === "evidence" ? <MetadataRow label="Kind" value="evidence" /> : null}
           <MetadataRow label="Created" value={formatDateTime(document.createdAt)} />
           <MetadataRow label="Updated" value={formatDateTime(document.updatedAt)} />
           <span className="text-ink-subtle">ID</span>
@@ -819,8 +1248,26 @@ function BrainMetadataSidebar({
             label="Sources"
             value={document.sources?.map((item) => item.ref).join(", ") || "-"}
           />
+          {document.format !== "markdown" ? (
+            <>
+              <MetadataRow label="File" value={document.originalFileName ?? "-"} />
+              <MetadataRow
+                label="Size"
+                value={document.assetSizeBytes ? formatFileSize(document.assetSizeBytes) : "-"}
+              />
+            </>
+          ) : null}
         </div>
       </section>
+
+      {document.format !== "markdown" ? (
+        <section className="min-w-0">
+          <h2 className="mb-1 text-[12px] font-semibold text-ink">Summary</h2>
+          <p className="max-h-72 overflow-y-auto whitespace-pre-wrap pr-1 text-[12px] leading-5 text-ink-muted">
+            {document.body.trim() || "No summary yet — ingestion pending."}
+          </p>
+        </section>
+      ) : null}
 
       <SidebarTimelineSection document={document} />
 
@@ -830,6 +1277,7 @@ function BrainMetadataSidebar({
         documentsByBrainId={documentsByBrainId}
         empty="No outgoing links."
         direction="out"
+        routeBrainId={routeBrainId}
       />
       <GraphLinksList
         title="Backlinks"
@@ -837,6 +1285,7 @@ function BrainMetadataSidebar({
         documentsByBrainId={documentsByBrainId}
         empty="No backlinks."
         direction="in"
+        routeBrainId={routeBrainId}
       />
     </aside>
   );
@@ -966,12 +1415,14 @@ function GraphLinksList({
   documentsByBrainId,
   empty,
   direction,
+  routeBrainId,
 }: {
   title: string;
   links: BrainGraphLink[];
   documentsByBrainId: Map<string, GoatBrainDocumentView>;
   empty: string;
   direction: "out" | "in";
+  routeBrainId: string | null | undefined;
 }) {
   return (
     <section className="min-w-0">
@@ -980,7 +1431,7 @@ function GraphLinksList({
         <span className="text-[12px] text-ink-subtle">{links.length}</span>
       </div>
       {links.length > 0 ? (
-        <ol className="max-h-32 space-y-1 overflow-y-auto pr-1">
+        <ol className="max-h-32 space-y-1 overflow-y-auto pr-1 text-[12px] leading-5">
           {links.map((link) => {
             const peerId = direction === "out" ? link.to : link.from;
             const peer = documentsByBrainId.get(peerId);
@@ -991,7 +1442,7 @@ function GraphLinksList({
               >
                 {peer ? (
                   <Link
-                    href={brainDocumentUrl(peer)}
+                    href={brainDocumentUrl(peer, routeBrainId)}
                     className="flex min-w-0 items-center gap-1.5 rounded-sm text-ink-muted hover:text-ink"
                   >
                     <span className="truncate">{peer.title || peer.brainId}</span>
@@ -1034,9 +1485,7 @@ function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }
             {entries.length} {entries.length === 1 ? "entry" : "entries"}
           </span>
         </div>
-        {document.kind !== "markdown" ? (
-          <p className="text-[12.5px] text-ink-muted">No timeline for this asset type.</p>
-        ) : entries.length > 0 ? (
+        {entries.length > 0 ? (
           <ol className="max-h-56 space-y-3 overflow-y-auto pr-2">
             {entries.map((entry, index) => (
               <li
@@ -1067,16 +1516,15 @@ function groupRootNodes(nodes: BrainTreeNode[]) {
   const visibleNodes = nodes.filter(
     (node) => !HIDDEN_EMPTY_ROOT_FOLDERS.has(node.path) || hasDocumentDescendant(node),
   );
-  const byPath = new Map(visibleNodes.map((node) => [node.path, node]));
-  const groupedPaths = new Set(ROOT_FOLDER_GROUPS.flat());
-  const groups = ROOT_FOLDER_GROUPS.map((paths) =>
-    paths.flatMap((path) => {
-      const node = byPath.get(path);
-      return node ? [node] : [];
-    }),
-  );
-  const remaining = visibleNodes.filter((node) => !groupedPaths.has(node.path));
-  return remaining.length > 0 ? [...groups, remaining] : groups;
+  const groups: BrainTreeNode[][] = [[], [], []];
+  for (const node of visibleNodes) {
+    const root = node.path.split("/")[0] ?? node.path;
+    groups[goatBrainRootFolderGroup(root)]?.push(node);
+  }
+  for (const group of groups) {
+    group.sort(compareRootTreeNodes);
+  }
+  return groups;
 }
 
 function firstNonEmptyGroupIndex(groups: BrainTreeNode[][]) {
@@ -1094,19 +1542,25 @@ function buildBrainTree(
 ) {
   const root: BrainTreeNode = { name: "", path: "", type: "folder", children: [] };
   const normalizedQuery = query.trim().toLowerCase();
+  // Merged docs are tombstones whose content lives in the page they were
+  // merged into; hide them from the tree like the CLI's default list does.
+  // Archived docs are retired and render in their own collapsed section.
+  const listedDocuments = documents.filter(
+    (document) => document.status !== "merged" && document.status !== "archived",
+  );
   const visibleDocuments = normalizedQuery
-    ? documents.filter((document) => {
+    ? listedDocuments.filter((document) => {
         const path = brainDocumentTreePath(document).toLowerCase();
         const title = document.title?.toLowerCase() ?? "";
         return path.includes(normalizedQuery) || title.includes(normalizedQuery);
       })
-    : documents;
+    : listedDocuments;
   const visibleFolders = normalizedQuery
     ? folders.filter((folder) => folder.path.toLowerCase().includes(normalizedQuery))
     : folders;
 
   for (const folder of visibleFolders) {
-    insertFolder(root, folder.path);
+    insertFolder(root, folder.path, folder);
   }
   for (const document of visibleDocuments) {
     insertDocument(root, document);
@@ -1115,7 +1569,7 @@ function buildBrainTree(
   return root;
 }
 
-function insertFolder(root: BrainTreeNode, path: string) {
+function insertFolder(root: BrainTreeNode, path: string, folder?: GoatBrainFolderView) {
   const parts = path.split("/").filter(Boolean);
   let current = root;
   parts.forEach((part, index) => {
@@ -1125,6 +1579,7 @@ function insertFolder(root: BrainTreeNode, path: string) {
       child = { name: part, path: nextPath, type: "folder", children: [] };
       current.children.push(child);
     }
+    if (folder && nextPath === folder.path) child.folder = folder;
     current = child;
   });
 }
@@ -1149,9 +1604,20 @@ function insertDocument(root: BrainTreeNode, document: GoatBrainDocumentView) {
 function sortTreeNodes(nodes: BrainTreeNode[]) {
   nodes.sort((a, b) => {
     if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+    if (a.type === "folder" && b.type === "folder") {
+      return compareGoatBrainFolderPaths(a.path, b.path);
+    }
     return a.name.localeCompare(b.name);
   });
   for (const node of nodes) sortTreeNodes(node.children);
+}
+
+function compareRootTreeNodes(a: BrainTreeNode, b: BrainTreeNode) {
+  if (a.type === "folder" && b.type === "folder") {
+    return compareGoatBrainFolderPaths(a.path, b.path);
+  }
+  if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+  return a.name.localeCompare(b.name);
 }
 
 function collectFolderPaths(node: BrainTreeNode): string[] {
@@ -1190,6 +1656,50 @@ function FileIcon({ path }: { path: string }) {
   return <FileText size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
 }
 
+function BrainIngestStatusIcon({
+  state,
+  compact = false,
+}: {
+  state: GoatBrainDraftIngestState;
+  compact?: boolean;
+}) {
+  const Icon =
+    state.kind === "failed" ? CircleAlert : state.kind === "retrying" ? RotateCw : Loader2;
+  const label = draftIngestStateLabel(state);
+  const colorClass =
+    state.kind === "failed"
+      ? "text-danger"
+      : state.kind === "retrying"
+        ? "text-amber-600"
+        : "text-ink-muted";
+  const animationClass = state.kind === "queued" || state.kind === "running" ? "animate-spin" : "";
+
+  return (
+    <span
+      role={compact ? "img" : "status"}
+      aria-label={label}
+      title={label}
+      className={`flex shrink-0 items-center justify-center ${compact ? "h-[14px] w-[14px]" : "mr-1 h-5 w-5"} ${colorClass}`}
+    >
+      <Icon size={compact ? 12 : 14} strokeWidth={compact ? 2.1 : 1.9} className={animationClass} />
+    </span>
+  );
+}
+
+function draftIngestStateLabel(state: GoatBrainDraftIngestState) {
+  const title = state.title ? `: ${state.title}` : "";
+  if (state.kind === "failed") {
+    return `Brain filing failed${state.detail ? `: ${state.detail}` : title}`;
+  }
+  if (state.kind === "retrying") {
+    return `Retrying brain filing${title}`;
+  }
+  if (state.kind === "queued") {
+    return `Waiting to file capture into brain${title}`;
+  }
+  return `Filing capture into brain${title}`;
+}
+
 function resolveInitialDocument(
   documents: GoatBrainDocumentView[],
   initialFolderPath: string | null,
@@ -1209,33 +1719,56 @@ function resolveInitialDocument(
   );
 }
 
-function brainDocumentUrl(document: GoatBrainDocumentView) {
-  return `/brain/${folderUrlSegments(document.folderPath)}/${encodeURIComponent(document.brainId)}`;
+function brainDocumentUrl(document: GoatBrainDocumentView, routeBrainId?: string | null) {
+  return brainPathUrl([...folderPathSegments(document.folderPath), document.brainId], routeBrainId);
 }
 
-function brainFilePathUrl(path: string) {
-  if (path.startsWith("/brain/")) return path;
-  const withoutExtension = path.replace(/\.md$/i, "");
-  return `/brain/${withoutExtension
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")}`;
+function brainFolderUrl(folderPath: string, routeBrainId?: string | null) {
+  return brainPathUrl(folderPathSegments(folderPath), routeBrainId);
 }
 
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
-  return `${document.folderPath}/${document.brainId}.md`;
+  const extension = document.format === "markdown" ? "md" : document.format;
+  return `${document.folderPath}/${document.brainId}.${extension}`;
 }
 
-function brainLinkMap(documents: GoatBrainDocumentView[]) {
+function brainLinkMap(
+  folders: GoatBrainFolderView[],
+  documents: GoatBrainDocumentView[],
+  routeBrainId?: string | null,
+) {
   const links: Record<string, string> = {};
+  for (const folder of folders) {
+    const href = brainFolderUrl(folder.path, routeBrainId);
+    addBrainLinkTarget(links, folder.path, href);
+    addBrainLinkTarget(links, `folder:${folder.path}`, href);
+    addBrainLinkTarget(links, `wiki/${folder.path}`, href);
+  }
   for (const document of documents) {
-    const href = brainDocumentUrl(document);
-    links[document.brainId] = href;
-    links[`page:${document.brainId}`] = href;
-    if (document.type === "evidence") links[`evidence:${document.brainId}`] = href;
+    const href = brainDocumentUrl(document, routeBrainId);
+    const folderTarget = `${document.folderPath}/${document.brainId}`;
+    addBrainLinkTarget(links, document.brainId, href);
+    addBrainLinkTarget(links, folderTarget, href);
+    addBrainLinkTarget(links, `${folderTarget}.md`, href);
+    addBrainLinkTarget(links, `wiki/${folderTarget}`, href);
+    addBrainLinkTarget(links, `wiki/${folderTarget}.md`, href);
+    if (document.kind === "evidence") links[`evidence:${document.brainId}`] = href;
   }
   return links;
+}
+
+function addBrainLinkTarget(links: Record<string, string>, target: string, href: string) {
+  links[target] = href;
+  links[`page:${target}`] = href;
+}
+
+function brainPathUrl(pathSegments: string[], routeBrainId?: string | null) {
+  const segments = routeBrainId ? [routeBrainId, ...pathSegments] : pathSegments;
+  return `/brain/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+function folderPathSegments(folderPath: string) {
+  return folderPath.split("/").filter(Boolean);
 }
 
 function buildGraphLinks(
@@ -1292,15 +1825,13 @@ function buildGraphLinks(
 }
 
 function documentInlineLinkText(document: GoatBrainDocumentView) {
-  return [document.body, ...document.timeline.map((entry) => entry.body)].join("\n\n");
+  return [documentEditorBody(document), ...document.timeline.map((entry) => entry.body)].join(
+    "\n\n",
+  );
 }
 
-function folderUrlSegments(folderPath: string) {
-  return folderPath
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
+function documentEditorBody(document: GoatBrainDocumentView | null | undefined) {
+  return document ? normalizeGoatBrainCompiledTruth(document.body, document.title) : "";
 }
 
 function ancestorFolderPaths(path: string) {
@@ -1321,28 +1852,27 @@ function documentViewFromRow(
   row: GoatBrainDocumentRow,
   timelineRows?: GoatBrainTimelineEntryRow[],
 ): GoatBrainDocumentView {
-  const parsed = parseBrainFrontmatter(row.content);
   const path = `${row.folder_path}/${row.brain_id}.md`;
+  const title = row.title ?? row.brain_id;
   return {
     id: row.id,
     brainId: row.brain_id,
     folderPath: row.folder_path,
     path,
-    title: row.title ?? row.brain_id,
+    title,
     content: row.content,
-    body: row.body,
+    body: normalizeGoatBrainCompiledTruth(row.body, title),
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
-    kind: normalizeKind(row.kind),
+    format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",
     originalFileName: row.original_file_name,
     assetStorageKey: row.asset_storage_key,
     relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
+    kind: normalizeDocumentKind(row.kind),
     type: normalizeEntityType(row.entity_type),
-    evidenceKind: normalizeEvidenceKind(row.evidence_kind),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
-    tags: normalizeStringArray(parsed.tags),
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
     parseError: null,
@@ -1388,27 +1918,30 @@ function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentVie
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 }
 
-function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderView[] {
+function deriveFolderViews(
+  documents: GoatBrainDocumentView[],
+  folderRows: GoatBrainFolderRow[] = [],
+): GoatBrainFolderView[] {
   const byPath = new Map<string, GoatBrainFolderView>();
   const zero = new Date(0).toISOString();
-  for (const folder of DEFAULT_BRAIN_FOLDERS) {
-    byPath.set(folder, {
-      id: `folder:${folder}`,
-      path: folder,
-      name: folderName(folder),
-      source: "system",
-      createdAt: zero,
-      updatedAt: zero,
+  for (const folder of folderRows) {
+    byPath.set(folder.path, {
+      id: folder.id,
+      path: folder.path,
+      name: folderName(folder.path),
+      source: folder.source,
+      createdAt: folder.created_at,
+      updatedAt: folder.updated_at,
     });
   }
   for (const document of documents) {
     for (const path of ancestorFolderPaths(document.folderPath)) {
       const existing = byPath.get(path);
       byPath.set(path, {
-        id: `folder:${path}`,
+        id: existing?.id ?? `folder:${path}`,
         path,
         name: folderName(path),
-        source: DEFAULT_BRAIN_FOLDERS.includes(path) ? "system" : "custom",
+        source: existing?.source ?? goatBrainFolderSourceForPath(path),
         createdAt: existing?.createdAt ?? document.createdAt,
         updatedAt:
           existing && existing.updatedAt > document.updatedAt
@@ -1417,7 +1950,17 @@ function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderV
       });
     }
   }
-  return [...byPath.values()].toSorted((a, b) => a.path.localeCompare(b.path));
+  if (byPath.size === 0) {
+    byPath.set("inbox", {
+      id: "folder:inbox",
+      path: "inbox",
+      name: "Inbox",
+      source: "system",
+      createdAt: zero,
+      updatedAt: zero,
+    });
+  }
+  return [...byPath.values()].toSorted((a, b) => compareGoatBrainFolderPaths(a.path, b.path));
 }
 
 function folderName(folderPath: string) {
@@ -1442,9 +1985,13 @@ function normalizeTimeline(
     : [];
 }
 
-function normalizeKind(value: string): GoatBrainDocumentView["kind"] {
+function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
   if (value === "pdf" || value === "docx") return value;
   return "markdown";
+}
+
+function normalizeDocumentKind(value: string): GoatBrainDocumentView["kind"] {
+  return value === "evidence" ? "evidence" : "page";
 }
 
 function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
@@ -1452,25 +1999,15 @@ function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
     value === "person" ||
     value === "company" ||
     value === "project" ||
-    value === "decision" ||
     value === "meeting" ||
-    value === "research" ||
     value === "concept" ||
-    value === "evidence" ||
+    value === "source" ||
+    value === "analysis" ||
     value === "note"
   ) {
     return value;
   }
   return "note";
-}
-
-function normalizeEvidenceKind(
-  value: string | null | undefined,
-): "chat" | "email" | "correction" | "document" | null {
-  if (value === "chat" || value === "email" || value === "correction" || value === "document") {
-    return value;
-  }
-  return null;
 }
 
 function normalizeStatus(value: string): GoatBrainDocumentView["status"] {
@@ -1512,19 +2049,6 @@ function normalizeSources(value: unknown) {
       },
     ];
   });
-}
-
-function parseBrainFrontmatter(content: string): Record<string, unknown> {
-  const match = /^---\n([\s\S]*?)\n---/.exec(content.replace(/\r\n/g, "\n"));
-  if (!match?.[1]) return {};
-  const tagsMatch = /^tags:\n((?:\s+- .+\n?)+)/m.exec(match[1]);
-  if (!tagsMatch?.[1]) return {};
-  return {
-    tags: tagsMatch[1]
-      .split("\n")
-      .map((line) => line.replace(/^\s+-\s+/, "").trim())
-      .filter(Boolean),
-  };
 }
 
 function formatDateTime(value: string) {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   BrainSourceNormalizationError,
+  isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedUploadAssetSourceItem,
+  normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
+  normalizeUploadAsset,
 } from "./source-items";
 
 function jamiePayload(overrides: Record<string, unknown> = {}) {
@@ -144,5 +148,121 @@ describe("Jamie brain source normalization", () => {
     expect(() => normalizeJamieMeetingCompletedWebhook(jamiePayload(override))).toThrow(
       BrainSourceNormalizationError,
     );
+  });
+});
+
+describe("Goat chat capture normalization", () => {
+  function captureInput(overrides: Record<string, unknown> = {}) {
+    return {
+      text: "Check out https://example.com/pricing-teardown for the pricing rework.",
+      title: "Pricing teardown reference",
+      intent: "reference for the pricing page rework",
+      chatSessionId: "goat_chat_session_1",
+      userMessageId: "goat_chat_msg_1",
+      draftBrainId: "pricing-teardown-reference",
+      draftFolder: "inbox",
+      capturedAt: "2026-07-09T10:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("normalizes a chat capture", () => {
+    const item = normalizeGoatChatCapture(captureInput());
+
+    expect(item).toMatchObject({
+      sourceProvider: "goat-chat",
+      sourceType: "capture",
+      externalId: "pricing-teardown-reference",
+      sourceRef: "goat-chat:goat_chat_msg_1",
+      title: "Pricing teardown reference",
+      occurredAt: "2026-07-09T10:00:00.000Z",
+      capturedAt: "2026-07-09T10:00:00.000Z",
+    });
+    expect(item.content.capture).toMatchObject({
+      text: "Check out https://example.com/pricing-teardown for the pricing rework.",
+      intent: "reference for the pricing page rework",
+      chatSessionId: "goat_chat_session_1",
+      userMessageId: "goat_chat_msg_1",
+      draftBrainId: "pricing-teardown-reference",
+      draftFolder: "inbox",
+    });
+    expect(isNormalizedGoatChatCaptureSourceItem(item)).toBe(true);
+    expect(isNormalizedGoatChatCaptureSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
+  });
+
+  it("derives stable content hashes and changes them when the text changes", () => {
+    const first = normalizeGoatChatCapture(captureInput());
+    const second = normalizeGoatChatCapture(captureInput());
+    const changed = normalizeGoatChatCapture(captureInput({ text: "Different idea." }));
+
+    expect(second.contentHash).toBe(first.contentHash);
+    expect(changed.contentHash).not.toBe(first.contentHash);
+  });
+
+  it("omits an empty intent", () => {
+    const item = normalizeGoatChatCapture(captureInput({ intent: "  " }));
+    expect(item.content.capture.intent).toBeUndefined();
+  });
+
+  it.each([
+    ["text", { text: "  " }],
+    ["title", { title: "" }],
+    ["chat session", { chatSessionId: " " }],
+    ["message", { userMessageId: "" }],
+    ["draft id", { draftBrainId: "" }],
+    ["timestamp", { capturedAt: "not-a-date" }],
+  ])("rejects an invalid %s", (_field, override) => {
+    expect(() => normalizeGoatChatCapture(captureInput(override))).toThrow(
+      BrainSourceNormalizationError,
+    );
+  });
+
+  it("rejects non-capture payloads in the guard", () => {
+    expect(isNormalizedGoatChatCaptureSourceItem(null)).toBe(false);
+    expect(isNormalizedGoatChatCaptureSourceItem({ sourceProvider: "goat-chat" })).toBe(false);
+    expect(
+      isNormalizedGoatChatCaptureSourceItem(normalizeJamieMeetingCompletedWebhook(jamiePayload())),
+    ).toBe(false);
+  });
+});
+
+describe("normalizeUploadAsset", () => {
+  const input = {
+    documentId: "goat_brain_doc_abc",
+    brainId: "q3-board-deck",
+    folderPath: "sources",
+    format: "pdf",
+    mimeType: "application/pdf",
+    originalFileName: "Q3 Board Deck.pdf",
+    sizeBytes: 123_456,
+    contentSha256: "a".repeat(64),
+    uploadedAt: "2026-07-09T10:00:00.000Z",
+  };
+
+  it("normalizes an uploaded asset with a stable external id and source ref", () => {
+    const item = normalizeUploadAsset(input);
+    expect(item.sourceProvider).toBe("upload");
+    expect(item.sourceType).toBe("asset");
+    expect(item.externalId).toBe("goat_brain_doc_abc");
+    expect(item.sourceRef).toBe("upload:goat_brain_doc_abc");
+    expect(item.title).toBe("Q3 Board Deck.pdf");
+    expect(item.content.asset.brainId).toBe("q3-board-deck");
+    expect(isNormalizedUploadAssetSourceItem(item)).toBe(true);
+    // Same bytes dedupe; different bytes re-enqueue.
+    expect(normalizeUploadAsset(input).contentHash).toBe(item.contentHash);
+    expect(normalizeUploadAsset({ ...input, contentSha256: "b".repeat(64) }).contentHash).not.toBe(
+      item.contentHash,
+    );
+  });
+
+  it("rejects malformed digests and timestamps", () => {
+    expect(() => normalizeUploadAsset({ ...input, contentSha256: "nope" })).toThrow(/sha256/);
+    expect(() => normalizeUploadAsset({ ...input, uploadedAt: "not-a-date" })).toThrow(/timestamp/);
+    expect(() => normalizeUploadAsset({ ...input, documentId: " " })).toThrow(/documentId/);
+  });
+
+  it("guards against other item shapes", () => {
+    expect(isNormalizedUploadAssetSourceItem({ sourceProvider: "upload" })).toBe(false);
+    expect(isNormalizedUploadAssetSourceItem(null)).toBe(false);
   });
 });

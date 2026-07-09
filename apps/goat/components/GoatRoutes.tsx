@@ -14,7 +14,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
+import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSurface } from "@/components/GoatSurface";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
@@ -185,14 +186,23 @@ export function GoatJamieSettingsRoute() {
 }
 
 export function GoatBrainRoute({ path }: { path: string[] }) {
-  const { brain } = useGoatAppData();
-  const requestedPath = path.join("/");
+  const { brain, brains } = useGoatAppData();
+  const routeBrain = path[0] ? brains.find((brain) => brain.id === path[0]) : null;
+  const routeBrainId = routeBrain?.id ?? null;
+  const brainPath = routeBrainId ? path.slice(1) : path;
+  // "settings" is a reserved segment directly after an explicit brain id
+  // (brain ids contain underscores, so they can never collide with folder names).
+  if (routeBrain && brainPath[0] === "settings") {
+    return <GoatBrainSettingsRoute brain={routeBrain} />;
+  }
+  const requestedPath = brainPath.join("/");
   const requestedFolderExists = brain.folders.some((folder) => folder.path === requestedPath);
-  const initialBrainId = path.length > 1 && !requestedFolderExists ? (path.at(-1) ?? null) : null;
+  const initialBrainId =
+    brainPath.length > 1 && !requestedFolderExists ? (brainPath.at(-1) ?? null) : null;
   const initialFolderPath =
-    path.length > 0
+    brainPath.length > 0
       ? initialBrainId
-        ? path.slice(0, -1).join("/")
+        ? brainPath.slice(0, -1).join("/")
         : requestedPath
       : (brain.folders[0]?.path ?? null);
 
@@ -202,7 +212,29 @@ export function GoatBrainRoute({ path }: { path: string[] }) {
       documents={brain.documents}
       initialFolderPath={initialFolderPath || null}
       initialBrainId={initialBrainId}
+      routeBrainId={routeBrainId}
     />
+  );
+}
+
+function GoatBrainSettingsRoute({ brain }: { brain: GoatBrainSummaryView }) {
+  const { workspace } = useGoatAppData();
+
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[560px] flex-col gap-6 pb-24 pt-16 sm:pt-24">
+          <BackLink href={`/brain/${encodeURIComponent(brain.id)}`} label={brain.name} />
+          {workspace.role === "admin" ? (
+            <GoatBrainSettings brain={brain} workspace={workspace} />
+          ) : (
+            <p className="text-[13px] leading-5 text-ink-subtle">
+              Only workspace admins can manage brain settings.
+            </p>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
 

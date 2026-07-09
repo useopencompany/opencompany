@@ -1,11 +1,10 @@
-import {
-  createGateway,
-  type Gateway,
-  type GoatBrainUsageEntry,
-  parseJsonStringArray,
-} from "./gateway";
+import { createGateway, type Gateway, type GoatBrainUsageEntry } from "./gateway";
 import type { RetrievalProviders } from "./index";
 
+// Retrieval's only model dependency is embeddings. Query expansion and LLM reranking were removed
+// on purpose: the consumer is an agent in a tool loop — it reformulates queries and reranks by
+// reading snippets — and the two chat calls added seconds of latency for marginal precision. If
+// evals ever show a precision gap, a dedicated reranker model slots in behind this same seam.
 export async function loadProviders(
   env: NodeJS.ProcessEnv = process.env,
   onUsage?: (entry: GoatBrainUsageEntry) => void,
@@ -19,7 +18,6 @@ export async function loadProviders(
     apiKey,
     ...(baseUrl ? { baseUrl } : {}),
     embeddingModel,
-    ...(env.GOAT_BRAIN_RETRIEVAL_MODEL ? { chatModel: env.GOAT_BRAIN_RETRIEVAL_MODEL } : {}),
     ...(onUsage ? { onUsage } : {}),
   });
   return {
@@ -30,21 +28,8 @@ export async function loadProviders(
 
 export function buildProviders(gateway: Gateway): RetrievalProviders {
   return {
-    async expand(query) {
-      const prompt = `Rewrite this search query as 3 short alternative phrasings to improve retrieval. Return only a JSON array of strings.\n\nQuery: ${query}`;
-      return parseJsonStringArray(await gateway.chat(prompt)).slice(0, 3);
-    },
     embedTexts(texts) {
       return gateway.embed(texts);
-    },
-    async rerank(query, candidates) {
-      const list = candidates
-        .map((candidate, i) => `${i + 1}. [${candidate.id}] ${candidate.text}`)
-        .join("\n");
-      const prompt = `Rank these brain documents by how well they answer the query. Return only a JSON array of their ids, most relevant first.\n\nQuery: ${query}\n\nDocuments:\n${list}`;
-      const ranked = parseJsonStringArray(await gateway.chat(prompt));
-      const known = new Set(candidates.map((candidate) => candidate.id));
-      return ranked.filter((id) => known.has(id));
     },
   };
 }

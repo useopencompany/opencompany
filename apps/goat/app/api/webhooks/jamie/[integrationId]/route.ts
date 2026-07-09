@@ -1,4 +1,12 @@
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import {
+  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  upsertGoatBrainSourceItemAndEnqueue,
+} from "@opencompany/db/goat-brain-ingest";
+import {
+  hasAnyBrainSourceForIntegration,
+  listEnabledBrainRefsForIntegration,
+} from "@opencompany/db/goat-brain-sources";
+import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   BrainSourceNormalizationError,
   normalizeJamieMeetingCompletedWebhook,
@@ -73,12 +81,28 @@ export async function POST(
     });
   }
 
+  // Routing: fan out to every brain that has this integration enabled as a
+  // source. Integrations that were never configured per-brain keep the legacy
+  // behavior (user's default brain; null pins resolution to run time). An
+  // integration whose sources are all disabled persists the item but enqueues
+  // nothing.
+  const enabledBrainRefs = await listEnabledBrainRefsForIntegration(webhookContext.integrationId);
+  let brainRefs: (string | null)[] = enabledBrainRefs;
+  if (enabledBrainRefs.length === 0) {
+    const configured = await hasAnyBrainSourceForIntegration(webhookContext.integrationId);
+    if (!configured) {
+      const defaultBrain = await getDefaultGoatBrainForUser(webhookContext.userWorkosId);
+      brainRefs = [defaultBrain?.id ?? null];
+    }
+  }
   const result = await upsertGoatBrainSourceItemAndEnqueue({
     userWorkosId: webhookContext.userWorkosId,
     sourceConnectionId: webhookContext.integrationId,
     integrationId: webhookContext.integrationId,
     item,
     rawPayload: payload,
+    kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+    brainRefs,
     now: receivedAt,
   });
 

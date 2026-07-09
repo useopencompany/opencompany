@@ -4,6 +4,15 @@ import { createLexicalIndex, lexicalSearch, titleTagMatch } from "./bm25";
 import { buildCorpus, type IndexRecord, loadCachedDocumentEmbeddings } from "./corpus";
 import { reciprocalRankFusion } from "./fuse";
 
+export {
+  GOAT_BRAIN_WEIGHT_FRESHNESS,
+  GOAT_BRAIN_WEIGHT_RELEVANCE,
+  goatBrainFreshness,
+} from "./blend";
+export { titleTagMatch } from "./bm25";
+export { reciprocalRankFusion } from "./fuse";
+export { createGateway, type FetchLike, type Gateway, type GatewayConfig } from "./gateway";
+
 export type GoatBrainQueryOptions = {
   text: string;
   folder?: string;
@@ -14,13 +23,12 @@ export type GoatBrainQueryOptions = {
   graphDirection?: GoatBrainGraphDirection;
   includeInvalid?: boolean;
   includeMerged?: boolean;
+  includeArchived?: boolean;
 };
 
 export type RetrievalProviders = {
-  expand?: (query: string) => Promise<string[]>;
   embedTexts?: (texts: string[]) => Promise<number[][]>;
   embeddingCacheKey?: string;
-  rerank?: (query: string, candidates: Array<{ id: string; text: string }>) => Promise<string[]>;
 };
 
 export type GoatBrainQueryHit = {
@@ -53,23 +61,16 @@ export async function queryGoatBrain(
 ): Promise<GoatBrainQueryHit[]> {
   const all = await buildCorpus(root);
   const candidates = applyFilters(all, options).filter(
-    (record) => (options.hops ?? 0) <= 0 || record.type !== "evidence",
+    (record) => (options.hops ?? 0) <= 0 || record.kind !== "evidence",
   );
   if (candidates.length === 0) return [];
   const byId = new Map(candidates.map((record) => [record.id, record]));
   const useModel = !options.lexicalOnly;
 
-  const queries = [options.text];
-  if (useModel && providers.expand && options.text.trim()) {
-    try {
-      queries.push(...(await providers.expand(options.text)));
-    } catch {}
-  }
-
   const lexicalIndex = createLexicalIndex(candidates);
-  const lexicalLists = queries
-    .map((text) => lexicalSearch(lexicalIndex, text).map((hit) => hit.id))
-    .filter((list) => list.length > 0);
+  const lexicalLists = [lexicalSearch(lexicalIndex, options.text).map((hit) => hit.id)].filter(
+    (list) => list.length > 0,
+  );
 
   let vectorList: string[] = [];
   if (useModel && providers.embedTexts && options.text.trim()) {
@@ -106,23 +107,9 @@ export async function queryGoatBrain(
   }
   applyNameBoost(relevanceById, byId, options.text);
 
-  let ordered = [...relevanceById.entries()]
+  const ordered = [...relevanceById.entries()]
     .map(([id, relevance]) => ({ id, relevance }))
     .sort((a, b) => b.relevance - a.relevance);
-  if (useModel && providers.rerank && options.text.trim() && ordered.length > 1) {
-    try {
-      const top = ordered.slice(0, 20);
-      const rankedIds = await providers.rerank(
-        options.text,
-        top.map(({ id }) => ({ id, text: rerankTextFor(byId.get(id)) })),
-      );
-      const rerankRelevance = new Map(rankedIds.map((id, rank) => [id, rankedIds.length - rank]));
-      ordered = ordered.map((item) => ({
-        id: item.id,
-        relevance: rerankRelevance.get(item.id) ?? item.relevance,
-      }));
-    } catch {}
-  }
 
   const scored = ordered
     .map(({ id, relevance }) => {
@@ -166,6 +153,7 @@ function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): I
   return records.filter((record) => {
     if (!options.includeInvalid && !record.valid) return false;
     if (!options.includeMerged && record.status === "merged") return false;
+    if (!options.includeArchived && record.status === "archived") return false;
     if (
       options.folder &&
       record.folder !== options.folder &&
@@ -295,27 +283,10 @@ function cosine(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-function rerankTextFor(record: IndexRecord | undefined): string {
-  if (!record) return "";
-  return [
-    `Title: ${record.title}`,
-    record.aliases.length ? `Aliases: ${record.aliases.join(", ")}` : "",
-    `Type: ${record.type}`,
-    record.relationText ? `Relations:\n${truncate(record.relationText, 500)}` : "",
-    record.compiledTruth ? `Compiled truth:\n${truncate(record.compiledTruth, 1200)}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
 function snippetFor(record: IndexRecord): string {
   const truth = record.compiledTruth.trim();
   if (!truth) return "_No compiled truth yet._";
   return truth.length <= 1200
     ? truth
     : `${truth.slice(0, 1200).trimEnd()}... [truncated; run goat-brain get ${record.id}]`;
-}
-
-function truncate(value: string, limit: number) {
-  return value.length <= limit ? value : `${value.slice(0, limit).trimEnd()}...`;
 }

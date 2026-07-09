@@ -5,7 +5,7 @@ import {
   type GoatBrainRelation,
   type GoatBrainSource,
   type GoatBrainStatus,
-  isValidGoatBrainEvidenceKind,
+  isValidGoatBrainKind,
 } from "./schema";
 import { normalizeBuiltInGoatBrainEntityType } from "./schemas";
 
@@ -38,8 +38,8 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   if (title) out.title = title;
   const type = normalizeBuiltInGoatBrainEntityType(readString(raw.type) ?? undefined);
   if (type) out.type = type;
-  const evidenceKind = readString(raw.evidenceKind) ?? readString(raw.evidence_kind);
-  if (isValidGoatBrainEvidenceKind(evidenceKind)) out.evidenceKind = evidenceKind;
+  const kind = readString(raw.kind);
+  if (isValidGoatBrainKind(kind)) out.kind = kind;
   const status = readStatus(raw.status);
   if (status) out.status = status;
   const aliases = readStringArray(raw.aliases);
@@ -51,10 +51,8 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   out.relations = readRelations("related" in raw ? raw.related : raw.relations);
   const mergedInto = readString(raw.mergedInto) ?? readString(raw.merged_into);
   if (mergedInto) out.mergedInto = mergedInto;
-  const legacyKeys = ["schema_type", "metadata"].filter((key) => key in raw);
+  const legacyKeys = ["schema_type", "metadata", "tags"].filter((key) => key in raw);
   if (legacyKeys.length > 0) out.legacyKeys = legacyKeys;
-  const tags = readStringArray(raw.tags);
-  if (tags.length > 0) out.tags = tags;
   const sources = readSources(raw.sources);
   if (sources.length > 0) out.sources = sources;
   return out;
@@ -64,6 +62,7 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
   const record: Record<string, unknown> = {
     id: frontmatter.id,
     folder: frontmatter.folder,
+    kind: frontmatter.kind,
     type: frontmatter.type,
     status: frontmatter.status,
     createdAt: frontmatter.createdAt,
@@ -73,10 +72,8 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
       to: relation.to,
     })),
   };
-  if (frontmatter.evidenceKind) record.evidenceKind = frontmatter.evidenceKind;
   if (frontmatter.title) record.title = frontmatter.title;
   if (frontmatter.aliases && frontmatter.aliases.length > 0) record.aliases = frontmatter.aliases;
-  if (frontmatter.tags && frontmatter.tags.length > 0) record.tags = frontmatter.tags;
   if (frontmatter.mergedInto) record.mergedInto = frontmatter.mergedInto;
   if (frontmatter.sources && frontmatter.sources.length > 0) {
     record.sources = frontmatter.sources.map((source) => ({

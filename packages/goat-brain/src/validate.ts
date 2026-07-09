@@ -8,20 +8,21 @@ import { parseGoatBrainInlineLinks } from "./inline-links";
 import {
   isValidGoatBrainEntityType,
   isValidGoatBrainEvidenceId,
-  isValidGoatBrainEvidenceKind,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
+  isValidGoatBrainKind,
   isValidGoatBrainRelationType,
   isValidGoatBrainStatus,
 } from "./schema";
-import { goatBrainFolderTypeError } from "./schemas";
+import { goatBrainFolderKindError } from "./schemas";
 import { isIsoDate } from "./time";
 
 export type GoatBrainValidationResult = { ok: true } | { ok: false; errors: string[] };
 export type GoatBrainValidationSubject = "frontmatter" | "sidecar";
 
-export function validateGoatBrainFolderType(input: {
+export function validateGoatBrainFolderKindType(input: {
   folder: unknown;
+  kind: unknown;
   type: unknown;
   subject: GoatBrainValidationSubject;
 }): string[] {
@@ -36,9 +37,12 @@ export function validateGoatBrainFolderType(input: {
         : "sidecar.type is invalid.",
     );
   }
-  if (typeof input.folder === "string" && typeof input.type === "string") {
-    const folderTypeError = goatBrainFolderTypeError(input.folder, input.type);
-    if (folderTypeError) errors.push(`${input.subject}.folder/type mismatch: ${folderTypeError}`);
+  if (!isValidGoatBrainKind(input.kind)) {
+    errors.push(`${input.subject}.kind must be "page" or "evidence".`);
+  }
+  if (isValidGoatBrainFolder(input.folder) && isValidGoatBrainKind(input.kind)) {
+    const folderKindError = goatBrainFolderKindError(input.folder, input.kind);
+    if (folderKindError) errors.push(`${input.subject}.folder/kind mismatch: ${folderKindError}`);
   }
   return errors;
 }
@@ -77,22 +81,15 @@ export function validateGoatBrainDocument(
     errors.push(`frontmatter.id "${fm.id}" does not match file id "${expectedId}".`);
   }
   errors.push(
-    ...validateGoatBrainFolderType({ folder: fm.folder, type: fm.type, subject: "frontmatter" }),
+    ...validateGoatBrainFolderKindType({
+      folder: fm.folder,
+      kind: fm.kind,
+      type: fm.type,
+      subject: "frontmatter",
+    }),
   );
   if (!isValidGoatBrainStatus(fm.status)) {
     errors.push("frontmatter.status must be draft, active, archived, or merged.");
-  }
-  if (fm.type === "evidence") {
-    if (!isValidGoatBrainEvidenceKind(fm.evidenceKind)) {
-      errors.push("frontmatter.evidenceKind must be chat, email, correction, or document.");
-    } else if (typeof fm.folder === "string") {
-      const folderKind = fm.folder.split("/")[1];
-      if (folderKind !== fm.evidenceKind) {
-        errors.push("frontmatter.evidenceKind must match the evidence folder subtype.");
-      }
-    }
-  } else if (fm.evidenceKind !== undefined) {
-    errors.push("frontmatter.evidenceKind is only valid for evidence records.");
   }
   if (!fm.createdAt || !isIsoDate(fm.createdAt)) {
     errors.push("frontmatter.created_at must be an ISO-8601 UTC timestamp.");
@@ -111,9 +108,6 @@ export function validateGoatBrainDocument(
   }
   for (const alias of fm.aliases ?? []) {
     if (!alias.trim()) errors.push("aliases must not contain empty values.");
-  }
-  for (const tag of fm.tags ?? []) {
-    if (!tag.trim()) errors.push("tags must not contain empty values.");
   }
   for (const sourceEntry of fm.sources ?? []) {
     if (!sourceEntry.ref.trim()) errors.push("sources.ref must not be empty.");
@@ -151,7 +145,7 @@ export function validateGoatBrainDocument(
   const citations = extractGoatBrainCitations(doc.compiledTruth);
   if (
     fm.status === "active" &&
-    fm.type !== "evidence" &&
+    fm.kind !== "evidence" &&
     hasCompiledTruth(doc.compiledTruth) &&
     citations.length === 0
   ) {

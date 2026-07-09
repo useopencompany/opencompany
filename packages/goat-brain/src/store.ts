@@ -16,6 +16,14 @@ import {
   validateGoatBrainSidecar,
 } from "./entry";
 import {
+  defaultGoatBrainFolderManifestEntries,
+  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+  type GoatBrainFolderManifestEntry,
+  normalizeGoatBrainFolderEntries,
+  parseGoatBrainFolderManifest,
+  serializeGoatBrainFolderManifest,
+} from "./folders";
+import {
   goatBrainFolderFromRelativePath,
   goatBrainIdFromRelativePath,
   goatBrainRelativePath,
@@ -93,7 +101,7 @@ export async function writeGoatBrainEntry(root: string, entry: GoatBrainEntry): 
   const payloadPath = goatBrainPayloadRelativePath(
     entry.folder,
     entry.id,
-    entry.kind,
+    entry.format,
     entry.originalFileName,
   );
   const sidecarPath = goatBrainSidecarRelativePath(entry.folder, entry.id);
@@ -113,6 +121,49 @@ export async function removeGoatBrainFile(root: string, relativePath: string): P
   if (id && folder) {
     await rm(path.join(root, goatBrainSidecarRelativePath(folder, id)), { force: true });
   }
+}
+
+export async function readGoatBrainFolders(root: string): Promise<GoatBrainFolderManifestEntry[]> {
+  try {
+    const source = await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8");
+    return parseGoatBrainFolderManifest(source);
+  } catch (error) {
+    if (isNotFound(error)) return defaultGoatBrainFolderManifestEntries();
+    throw error;
+  }
+}
+
+export async function writeGoatBrainFolders(
+  root: string,
+  folders: Iterable<Partial<GoatBrainFolderManifestEntry> & { path?: unknown; source?: unknown }>,
+): Promise<void> {
+  await writeGoatBrainDocumentText(
+    root,
+    GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+    serializeGoatBrainFolderManifest(folders),
+  );
+}
+
+export async function upsertGoatBrainFolder(
+  root: string,
+  folder: GoatBrainFolderManifestEntry,
+): Promise<GoatBrainFolderManifestEntry[]> {
+  const byPath = new Map((await readGoatBrainFolders(root)).map((entry) => [entry.path, entry]));
+  byPath.set(folder.path, folder);
+  const next = normalizeGoatBrainFolderEntries(byPath.values());
+  await writeGoatBrainFolders(root, next);
+  return next;
+}
+
+export async function removeGoatBrainFolder(
+  root: string,
+  folderPath: string,
+): Promise<GoatBrainFolderManifestEntry[]> {
+  const next = normalizeGoatBrainFolderEntries(
+    (await readGoatBrainFolders(root)).filter((entry) => entry.path !== folderPath),
+  );
+  await writeGoatBrainFolders(root, next);
+  return next;
 }
 
 async function walkMarkdown(root: string, relDir: string): Promise<string[]> {

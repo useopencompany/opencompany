@@ -297,3 +297,56 @@ body {
   text-decoration-style: dashed;
   text-decoration-color: var(--color-border);
 }
+
+/* Raw wiki-link markup, hidden while the chip is shown. */
+.tiptap-brain .wiki-brain-hidden {
+  display: none;
+}
+/* Bracket / prefix syntax, dimmed while editing the raw link. */
+.tiptap-brain .wiki-brain-syntax {
+  color: var(--color-ink-subtle);
+  opacity: 0.55;
+}
+
+/* Collapsed wiki-link rendered as a compact @mention-style chip. */
+.tiptap-brain .wiki-brain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.06em 0.42em 0.06em 0.34em;
+  margin: 0 0.04em;
+  border: 1px solid var(--color-border);
+  border-radius: 0.45em;
+  background: var(--color-surface-subtle);
+  color: var(--color-ink);
+  font-weight: 550;
+  font-size: 0.92em;
+  line-height: 1.35;
+  white-space: nowrap;
+  vertical-align: baseline;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.tiptap-brain .wiki-brain-chip:hover {
+  background: var(--color-surface-active);
+  border-color: var(--color-border-strong);
+}
+.tiptap-brain .wiki-brain-chip-icon {
+  width: 0.82em;
+  height: 0.82em;
+  flex: 0 0 auto;
+  opacity: 0.55;
+}
+.tiptap-brain .wiki-brain-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 32ch;
+}
+.tiptap-brain .wiki-brain-chip-unresolved {
+  color: var(--color-ink-muted);
+  border-style: dashed;
+  background: transparent;
+}

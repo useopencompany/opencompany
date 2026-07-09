@@ -1,13 +1,18 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { GoatSidebar } from "./GoatSidebar";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
+const routerMock = vi.hoisted(() => ({
+  push: vi.fn(),
+  refresh: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => routerMock,
 }));
 
 vi.mock("@/lib/workspace-actions", () => ({
@@ -46,7 +51,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
 }));
 
 describe("GoatSidebar", () => {
-  it("renders home and brain tabs with settings in the account footer", () => {
+  it("renders home, the brain list, and settings in the account footer", () => {
     pathnameMock.value = "/";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
@@ -54,23 +59,44 @@ describe("GoatSidebar", () => {
     const home = within(nav).getByRole("link", { name: "Home" });
     expect(home).toHaveAttribute("href", "/");
     expect(home).toHaveAttribute("aria-current", "page");
-    expect(within(nav).getByRole("link", { name: "Brain" })).toHaveAttribute("href", "/brain");
-    expect(within(nav).getByRole("link", { name: "Brain" })).not.toHaveAttribute("aria-current");
+    expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
+    expect(screen.getByText("Brains")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "General" })).not.toHaveAttribute("aria-current");
+    expect(
+      screen.queryByRole("button", { name: "Manage access to General" }),
+    ).not.toBeInTheDocument();
 
     const settings = screen.getByRole("link", { name: /Ada Lovelace/ });
     expect(settings).toHaveAttribute("href", "/settings");
   });
 
-  it("marks the brain tab active on nested brain routes", () => {
+  it("does not mark home active on nested brain routes", () => {
     pathnameMock.value = "/brain/people/ada-lovelace";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "Goat primary" });
-    expect(within(nav).getByRole("link", { name: "Brain" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
     expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("opens the active brain route from the brain list", async () => {
+    const user = userEvent.setup();
+    pathnameMock.value = "/";
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "General" }));
+
+    expect(routerMock.push).toHaveBeenCalledWith("/brain/goat_brain_1");
+  });
+
+  it("opens the active brain route from the brain list", async () => {
+    const user = userEvent.setup();
+    pathnameMock.value = "/";
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "General" }));
+
+    expect(routerMock.push).toHaveBeenCalledWith("/brain/goat_brain_1");
   });
 
   it("collapses to zero width and toggles via the sidebar button", () => {

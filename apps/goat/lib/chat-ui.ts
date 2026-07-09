@@ -18,6 +18,8 @@ export const DELETE_TASK_SCHEDULE_TOOL_PART_TYPE =
   `tool-${DELETE_TASK_SCHEDULE_TOOL_NAME}` as const;
 export const GOAT_BRAIN_TOOL_NAME = "goat_brain";
 export const GOAT_BRAIN_TOOL_PART_TYPE = `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
+export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
+export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
 
@@ -131,6 +133,7 @@ export type GoatBrainCliCommand =
   | "query"
   | "append-evidence"
   | "rewrite"
+  | "set"
   | "alias"
   | "timeline-add"
   | "append-timeline"
@@ -162,6 +165,25 @@ export type GoatBrainToolOutput = {
   tracePath?: string;
   durationMs?: number;
 };
+
+export type SaveToBrainToolInput = {
+  content: string;
+  title?: string;
+  intent?: string;
+};
+
+export type SaveToBrainToolOutput =
+  | {
+      ok: true;
+      draftId: string;
+      path: string;
+      title: string;
+      status: "captured" | "already_captured";
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
 export type WebSearchToolInput = {
   query: string;
@@ -210,6 +232,10 @@ export type GoatChatTools = {
   goat_brain: {
     input: GoatBrainToolInput;
     output: GoatBrainToolOutput;
+  };
+  save_to_brain: {
+    input: SaveToBrainToolInput;
+    output: SaveToBrainToolOutput;
   };
   web_search: {
     input: WebSearchToolInput;

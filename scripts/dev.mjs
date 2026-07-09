@@ -5,7 +5,7 @@ import "./load-env.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
-import { startGoatLocalHttpsProxy } from "./lib/caddy-dev.mjs";
+import { goatHttpsDisabled, goatHttpsPort, startGoatLocalHttpsProxy } from "./lib/caddy-dev.mjs";
 import {
   DURABLE_STREAMS_DEV_URL,
   startDurableStreamsDevServer,
@@ -19,6 +19,7 @@ import {
   valueFor,
   waitForNgrokUrl,
 } from "./lib/ngrok-dev.mjs";
+import { killPortListeners } from "./lib/port-kill.mjs";
 
 const { appMode, turboArgs } = parseArgs(process.argv.slice(2));
 const defaultPort = appMode === "goat" ? (process.env.GOAT_PORT ?? "3002") : "3000";
@@ -36,6 +37,7 @@ let goatLocalHttps = null;
 let goatProxyTarget = null;
 
 if (appMode === "goat") {
+  await clearGoatDevPorts(port);
   goatProxyTarget = await prepareGoatProxyTarget(port);
   goatLocalHttps = await startGoatHttps(goatProxyTarget.port);
 }
@@ -302,6 +304,46 @@ async function prepareGoatProxyTarget(appPort) {
   console.log(`  app routes    -> ${goatDevProxy.routes.app}`);
   console.log(`  runner routes -> ${goatDevProxy.routes.runner} (/broker/*, /goat/tools/*)\n`);
   return { port: goatDevProxy.port, exposesRunnerCallbacks: true };
+}
+
+async function clearGoatDevPorts(appPort) {
+  if (isCI) return;
+
+  const ports = [
+    { label: "Goat app", port: appPort },
+    { label: "runner", port: localRunnerPort() },
+  ];
+  if (!goatHttpsDisabled()) {
+    ports.push({ label: "Goat HTTPS", port: goatHttpsPort() });
+  }
+
+  const stopped = [];
+  for (const { label, port } of dedupePorts(ports)) {
+    const result = await killPortListeners(port);
+    if (result.pids.length === 0) continue;
+    stopped.push({ label, ...result });
+  }
+
+  if (stopped.length === 0) return;
+
+  console.log("\nCleared ports for Goat dev:");
+  for (const entry of stopped) {
+    const forced =
+      entry.forcedPids.length > 0 ? `; force-killed ${entry.forcedPids.join(", ")}` : "";
+    console.log(`  ${entry.label} :${entry.port} stopped PID ${entry.pids.join(", ")}${forced}`);
+  }
+}
+
+function dedupePorts(ports) {
+  const seen = new Set();
+  const unique = [];
+  for (const entry of ports) {
+    const key = String(entry.port);
+    if (seen.has(key)) continue;
+    unique.push(entry);
+    seen.add(key);
+  }
+  return unique;
 }
 
 async function startGoatHttps(targetPort) {

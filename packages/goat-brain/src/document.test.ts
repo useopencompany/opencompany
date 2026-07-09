@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendGoatBrainAssetTextBlock,
+  extractGoatBrainAssetText,
+  normalizeGoatBrainBody,
+  normalizeGoatBrainCompiledTruth,
   parseGoatBrainDocument,
   replaceGoatBrainCompiledTruth,
   serializeGoatBrainDocument,
+  stripGoatBrainAssetTextBlock,
 } from "./document";
 import type { GoatBrainDocument } from "./schema";
 import { goatBrainTimelineEntryFromParts } from "./timeline";
@@ -14,13 +19,13 @@ describe("goat brain document", () => {
       frontmatter: {
         id: "acme",
         folder: "companies",
+        kind: "page",
         type: "company",
         status: "active",
         title: "Acme",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
         relations: [{ type: "employs", to: "jane-doe" }],
-        tags: ["customer"],
         sources: [{ ref: "gmail://message/1", capturedAt: "2026-01-01T00:00:00.000Z" }],
       },
       title: "Acme",
@@ -48,6 +53,7 @@ describe("goat brain document", () => {
     const source = `---
 id: acme
 folder: companies
+kind: page
 type: company
 status: active
 createdAt: 2026-01-01T00:00:00.000Z
@@ -106,11 +112,111 @@ Original timeline body.
     ]);
   });
 
-  it("rejects documents whose folder root does not match the type", () => {
-    const source = serializeGoatBrainDocument({
+  it("unwraps a nested legacy brain document body to compiled truth", () => {
+    const nested = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "nested-note",
+        folder: "inbox",
+        kind: "page",
+        type: "note",
+        status: "draft",
+        title: "Nested note",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Nested note",
+      compiledTruth: "Only this truth belongs in the editable body.",
+      timeline: [
+        {
+          evidenceId: "ev-nested",
+          at: "2026-01-01T00:00:00.000Z",
+          body: "Nested timeline.",
+        },
+      ],
+    });
+
+    expect(normalizeGoatBrainBody(nested)).toBe("Only this truth belongs in the editable body.");
+  });
+
+  it("removes a leading duplicate title heading from compiled truth", () => {
+    expect(
+      normalizeGoatBrainCompiledTruth(
+        "# Acme\n\nAcme evaluates Goat Brain.\n\n## Notes\nKeep this section.",
+        "Acme",
+      ),
+    ).toBe("Acme evaluates Goat Brain.\n\n## Notes\nKeep this section.");
+    expect(
+      normalizeGoatBrainCompiledTruth("## **Acme**\n\nAcme evaluates Goat Brain.", "Acme"),
+    ).toBe("Acme evaluates Goat Brain.");
+    expect(normalizeGoatBrainCompiledTruth("# Acme overview\n\nBody.", "Acme")).toBe(
+      "# Acme overview\n\nBody.",
+    );
+  });
+
+  it("preserves ordinary markdown that starts with a frontmatter-like fence", () => {
+    const markdown = `---
+title: Example
+---
+
+This is a user-authored Markdown note, not a full Goat Brain document.`;
+
+    expect(normalizeGoatBrainBody(markdown)).toBe(markdown);
+  });
+
+  it("does not nest frontmatter when replacing compiled truth with a legacy document", () => {
+    const source = `---
+id: acme
+folder: companies
+kind: page
+type: company
+status: draft
+title: Acme
+createdAt: 2026-01-01T00:00:00.000Z
+updatedAt: 2026-01-01T00:00:00.000Z
+related: []
+---
+
+# Acme
+
+## Compiled truth
+Old truth.
+
+<!-- TIMELINE:BELOW - append only past this marker -->
+
+## Timeline
+`;
+    const nested = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "nested-note",
+        folder: "inbox",
+        kind: "page",
+        type: "note",
+        status: "draft",
+        title: "Nested note",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Nested note",
+      compiledTruth: "Replacement truth.",
+      timeline: [],
+    });
+
+    const updated = replaceGoatBrainCompiledTruth(source, nested);
+    const parsed = parseGoatBrainDocument(updated);
+
+    expect(parsed.compiledTruth).toBe("Replacement truth.");
+    expect(parsed.compiledTruth).not.toContain("---");
+    expect(updated.match(/^---$/gm)).toHaveLength(2);
+  });
+
+  it("rejects documents whose folder does not match the kind", () => {
+    const pageInEvidenceZone = serializeGoatBrainDocument({
       frontmatter: {
         id: "acme",
-        folder: "people",
+        folder: "evidence/email",
+        kind: "page",
         type: "company",
         status: "draft",
         title: "Acme",
@@ -123,10 +229,46 @@ Original timeline body.
       timeline: [],
     });
 
-    expect(validateGoatBrainDocument(parseGoatBrainDocument(source), "acme", source)).toEqual({
+    expect(
+      validateGoatBrainDocument(
+        parseGoatBrainDocument(pageInEvidenceZone),
+        "acme",
+        pageInEvidenceZone,
+      ),
+    ).toEqual({
       ok: false,
       errors: expect.arrayContaining([
-        expect.stringContaining('folder "people" maps to type "person", not "company"'),
+        'frontmatter.folder/kind mismatch: folder "evidence/email" is inside the "evidence/" zone, which is reserved for evidence documents.',
+      ]),
+    });
+
+    const evidenceOutsideZone = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "ev-acme-email",
+        folder: "companies",
+        kind: "evidence",
+        type: "source",
+        status: "draft",
+        title: "Acme email",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Acme email",
+      compiledTruth: "Acme asked for pricing.",
+      timeline: [],
+    });
+
+    expect(
+      validateGoatBrainDocument(
+        parseGoatBrainDocument(evidenceOutsideZone),
+        "ev-acme-email",
+        evidenceOutsideZone,
+      ),
+    ).toEqual({
+      ok: false,
+      errors: expect.arrayContaining([
+        'frontmatter.folder/kind mismatch: evidence documents must live under the "evidence/" zone.',
       ]),
     });
   });
@@ -144,5 +286,48 @@ Original timeline body.
         summary: "Captured source information.",
       }),
     ).toThrow('Invalid timeline "at" value');
+  });
+});
+
+describe("goat brain asset text block", () => {
+  const base = serializeGoatBrainDocument({
+    frontmatter: {
+      id: "q3-board-deck",
+      folder: "sources",
+      kind: "page",
+      type: "source",
+      status: "draft",
+      title: "Q3 Board Deck",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+      relations: [],
+    },
+    title: "Q3 Board Deck",
+    compiledTruth: "Uploaded file `deck.pdf`. Ingestion pending.",
+    timeline: [],
+  });
+
+  it("appends, extracts, and strips the generated block", () => {
+    const projected = appendGoatBrainAssetTextBlock(base, "Revenue grew 40% QoQ.\n\nHiring plan.");
+    expect(projected).toContain("## Extracted text");
+    expect(extractGoatBrainAssetText(projected)).toBe("Revenue grew 40% QoQ.\n\nHiring plan.");
+    expect(stripGoatBrainAssetTextBlock(projected)).toBe(base);
+  });
+
+  it("appends nothing for empty asset text", () => {
+    expect(appendGoatBrainAssetTextBlock(base, "   ")).toBe(base);
+    expect(extractGoatBrainAssetText(base)).toBe("");
+    expect(stripGoatBrainAssetTextBlock(base)).toBe(base);
+  });
+
+  it("parses documents ignoring the generated block, including edits inside it", () => {
+    const projected = appendGoatBrainAssetTextBlock(
+      base,
+      "### ev-fake - 2026-07-02T00:00:00.000Z\nlooks like a timeline entry",
+    );
+    const parsed = parseGoatBrainDocument(projected);
+    expect(parsed.compiledTruth).toBe("Uploaded file `deck.pdf`. Ingestion pending.");
+    expect(parsed.timeline).toEqual([]);
+    expect(parsed.frontmatter.id).toBe("q3-board-deck");
   });
 });

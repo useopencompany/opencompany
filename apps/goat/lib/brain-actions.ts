@@ -1,36 +1,28 @@
 "use server";
 
-import { currentGoatBrain, currentGoatUser } from "@/lib/auth";
+import { currentGoatBrain } from "@/lib/auth";
 import {
   type BrainMutationResult,
-  createGoatBrainDocumentForUser,
   createGoatBrainFolderForUser,
   deleteGoatBrainDocumentForUser,
+  deleteGoatBrainFolderForUser,
   moveGoatBrainDocumentForUser,
   renameGoatBrainDocumentForUser,
+  renameGoatBrainFolderForUser,
   updateGoatBrainDocumentForUser,
 } from "@/lib/brain";
+import {
+  createGoatBrainAssetForUser,
+  type GoatBrainAssetUploadInput,
+  replaceGoatBrainAssetForUser,
+} from "@/lib/brain-assets";
 
 // All mutations run against the active brain from the auth context, which is
 // resolved from the user's accessible brains — that lookup is the access check.
-
-export async function createGoatBrainFolderAction(path: string): Promise<BrainMutationResult> {
-  const { user } = await currentGoatUser();
-  return createGoatBrainFolderForUser(user.workosUserId, path);
-}
-
-export async function createGoatBrainDocumentAction(input: {
-  folderPath: string;
-  title?: string;
-}): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
-  return createGoatBrainDocumentForUser({
-    brainRef: brain.id,
-    userWorkosId: context.user.workosUserId,
-    folderPath: input.folderPath,
-    ...(input.title ? { title: input.title } : {}),
-  });
-}
+// Creating markdown documents is deliberately not exposed as an action:
+// written content enters through the brain CLI and ingestion agents only.
+// File uploads are the one exception — the upload action registers a binary
+// asset whose curation still happens through the ingestion agent.
 
 export async function updateGoatBrainDocumentAction(input: {
   documentId: string;
@@ -81,5 +73,62 @@ export async function deleteGoatBrainDocumentAction(
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
     documentId,
+  });
+}
+
+export async function createGoatBrainFolderAction(input: {
+  folderPath: string;
+}): Promise<BrainMutationResult> {
+  const { context, brain } = await currentGoatBrain();
+  return createGoatBrainFolderForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    folderPath: input.folderPath,
+  });
+}
+
+export async function renameGoatBrainFolderAction(input: {
+  fromPath: string;
+  toPath: string;
+}): Promise<BrainMutationResult> {
+  const { context, brain } = await currentGoatBrain();
+  return renameGoatBrainFolderForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    fromPath: input.fromPath,
+    toPath: input.toPath,
+  });
+}
+
+export async function deleteGoatBrainFolderAction(input: {
+  folderPath: string;
+}): Promise<BrainMutationResult> {
+  const { context, brain } = await currentGoatBrain();
+  return deleteGoatBrainFolderForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    folderPath: input.folderPath,
+  });
+}
+
+export async function uploadGoatBrainAssetAction(
+  input: GoatBrainAssetUploadInput,
+): Promise<BrainMutationResult> {
+  const { context, brain } = await currentGoatBrain();
+  return createGoatBrainAssetForUser({
+    ...input,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+  });
+}
+
+export async function replaceGoatBrainAssetAction(
+  input: GoatBrainAssetUploadInput & { documentId: string },
+): Promise<BrainMutationResult> {
+  const { context, brain } = await currentGoatBrain();
+  return replaceGoatBrainAssetForUser({
+    ...input,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
   });
 }

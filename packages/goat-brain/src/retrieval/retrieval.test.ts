@@ -63,8 +63,8 @@ describe("goat brain retrieval", () => {
     await writeDoc("evidence/email/ev-acme-email.md", {
       id: "ev-acme-email",
       folder: "evidence/email",
-      type: "evidence",
-      evidenceKind: "email",
+      kind: "evidence",
+      type: "source",
       title: "Acme email",
       truth: "Enterprise search raw source evidence.",
       relations: [{ type: "about", to: "acme" }],
@@ -206,7 +206,7 @@ describe("goat brain retrieval", () => {
     ).resolves.toEqual([]);
   });
 
-  it("uses vector and rerank providers when available", async () => {
+  it("uses the embedding provider for semantic ranking when available", async () => {
     await writeDoc("companies/acme.md", {
       id: "acme",
       folder: "companies",
@@ -233,19 +233,6 @@ describe("goat brain retrieval", () => {
             texts.map((text) =>
               text.includes("Beta") || text === "semantic target" ? [1, 0] : [0, 1],
             ),
-        },
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({ id: "beta" }),
-      expect.objectContaining({ id: "acme" }),
-    ]);
-
-    await expect(
-      queryGoatBrain(
-        root,
-        { text: "operational context" },
-        {
-          rerank: async () => ["beta", "acme"],
         },
       ),
     ).resolves.toEqual([
@@ -294,17 +281,8 @@ async function writeDoc(
   input: {
     id: string;
     folder: string;
-    type:
-      | "person"
-      | "company"
-      | "project"
-      | "meeting"
-      | "decision"
-      | "research"
-      | "concept"
-      | "evidence"
-      | "note";
-    evidenceKind?: "chat" | "email" | "correction" | "document";
+    type: "person" | "company" | "project" | "meeting" | "concept" | "source" | "analysis" | "note";
+    kind?: "page" | "evidence";
     title: string;
     truth: string;
     relations: Array<{ type: string; to: string }>;
@@ -320,8 +298,8 @@ async function writeDoc(
       frontmatter: {
         id: input.id,
         folder: input.folder,
+        kind: input.kind ?? "page",
         type: input.type,
-        ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
         status: input.status ?? "active",
         title: input.title,
         createdAt: "2026-01-01T00:00:00.000Z",

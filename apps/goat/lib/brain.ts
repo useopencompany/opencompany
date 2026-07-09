@@ -1,35 +1,39 @@
 import {
-  createGoatBrainMarkdownContent,
+  createGoatBrainFolderRow,
   deleteGoatBrainFile,
+  deleteGoatBrainFolderRow,
   deriveGoatBrainFileProjection,
   getGoatBrainFile,
   goatBrainFilePathFor,
   hashGoatBrainContent,
   listGoatBrainFiles,
+  listGoatBrainFolderRows,
   moveGoatBrainFile,
+  renameGoatBrainFolderRow,
   replaceGoatBrainFileCompiledTruth,
   updateGoatBrainFileContent,
-  upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
-import type { GoatBrainDocument as GoatBrainDocumentRow } from "@opencompany/db/goat-schema";
+import type {
+  GoatBrainDocument as GoatBrainDocumentRow,
+  GoatBrainFolder as GoatBrainFolderRow,
+} from "@opencompany/db/goat-schema";
 import {
-  DEFAULT_GOAT_BRAIN_FOLDERS,
+  compareGoatBrainFolderPaths,
   type GoatBrainDocument,
   type GoatBrainEntityType,
-  type GoatBrainEvidenceKind,
+  type GoatBrainKind,
   type GoatBrainRelation,
   type GoatBrainSource,
   type GoatBrainStatus,
   type GoatBrainTimelineEntry,
-  goatBrainEntityTypeForFolder,
-  goatBrainFolderForEntityType,
-  goatBrainFolderTypeError,
+  goatBrainFolderKindError,
+  goatBrainFolderSourceForPath,
   isBuiltInGoatBrainEntityType,
-  isValidGoatBrainEvidenceKind,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
+  isValidGoatBrainKind,
+  normalizeGoatBrainCompiledTruth,
   normalizeGoatBrainFolderForV1,
-  normalizeGoatBrainId,
   nowIso,
   parseGoatBrainDocument,
   serializeGoatBrainDocument,
@@ -54,17 +58,17 @@ export type GoatBrainDocumentView = {
   content: string;
   body: string;
   timeline: GoatBrainTimelineEntry[];
-  kind: "markdown" | "pdf" | "docx";
+  format: "markdown" | "pdf" | "docx";
   mimeType: string;
   originalFileName?: string | null;
   assetStorageKey?: string | null;
+  assetSizeBytes?: number | null;
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
+  kind: GoatBrainKind;
   type: GoatBrainEntityType;
-  evidenceKind?: GoatBrainEvidenceKind | null;
   status: GoatBrainStatus;
   aliases: string[];
-  tags: string[];
   contentHash: string;
   sizeBytes: number;
   parseError?: string | null;
@@ -89,9 +93,8 @@ export type ValidatedGoatBrainContent = {
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
   aliases: string[];
-  tags: string[];
+  kind: GoatBrainKind;
   type: GoatBrainEntityType;
-  evidenceKind?: GoatBrainEvidenceKind;
   status: GoatBrainStatus;
   contentHash: string;
   sizeBytes: number;
@@ -105,86 +108,14 @@ export async function listCurrentUserGoatBrain(): Promise<GoatBrainSnapshot> {
 }
 
 export async function listGoatBrainForBrain(brainRef: string): Promise<GoatBrainSnapshot> {
-  const rows = await listGoatBrainFiles({ brainRef }, { includeInvalid: true });
+  const [rows, folderRows] = await Promise.all([
+    listGoatBrainFiles({ brainRef }, { includeInvalid: true }),
+    listGoatBrainFolderRows({ brainRef }),
+  ]);
   const documents = rows.map(documentViewFromFileRow).sort(compareBrainDocuments);
   return {
-    folders: deriveFolderViews(documents),
+    folders: deriveFolderViews(documents, folderRows),
     documents,
-  };
-}
-
-export async function createGoatBrainFolderForUser(
-  _userWorkosId: string,
-  folderPath: string,
-): Promise<BrainMutationResult> {
-  const normalized = normalizeGoatBrainFolderForV1(folderPath);
-  if (!isValidGoatBrainFolder(normalized)) {
-    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
-  }
-  if (!goatBrainEntityTypeForFolder(normalized)) {
-    return {
-      ok: false,
-      message: `Folders must live under a known type folder: ${DEFAULT_GOAT_BRAIN_FOLDERS.join(", ")}.`,
-    };
-  }
-  const folderType = goatBrainEntityTypeForFolder(normalized);
-  const folderTypeError =
-    normalized === "evidence" || !folderType
-      ? null
-      : goatBrainFolderTypeError(normalized, folderType);
-  if (folderTypeError) {
-    return { ok: false, message: folderTypeError };
-  }
-  return { ok: true, path: normalized };
-}
-
-export async function createGoatBrainDocumentForUser(input: {
-  brainRef: string;
-  userWorkosId: string;
-  folderPath: string;
-  title?: string;
-}): Promise<BrainMutationResult> {
-  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath || "inbox");
-  if (!isValidGoatBrainFolder(folderPath)) {
-    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
-  }
-  const type = goatBrainEntityTypeForFolder(folderPath);
-  if (!type) {
-    return {
-      ok: false,
-      message: `Documents must live under a known type folder: ${DEFAULT_GOAT_BRAIN_FOLDERS.join(", ")}.`,
-    };
-  }
-  const evidenceKind = type === "evidence" ? evidenceKindForFolder(folderPath) : null;
-  const documentFolderPath =
-    type === "evidence" && folderPath === "evidence" ? "evidence/chat" : folderPath;
-  if (type === "evidence" && !evidenceKind && documentFolderPath !== "evidence/chat") {
-    return {
-      ok: false,
-      message:
-        'Evidence documents must live under "evidence/chat", "evidence/email", "evidence/correction", or "evidence/document".',
-    };
-  }
-  const title = input.title?.trim() || "Untitled";
-  const brainId = await nextAvailableGoatBrainId(input.brainRef, normalizeGoatBrainId(title));
-  const content = createGoatBrainMarkdownContent({
-    id: brainId,
-    folderPath: documentFolderPath,
-    title,
-    type,
-    ...(type === "evidence" ? { evidenceKind: evidenceKind ?? "chat" } : {}),
-    status: "draft",
-  });
-  const row = await upsertGoatBrainFile({
-    brainRef: input.brainRef,
-    userWorkosId: input.userWorkosId,
-    path: goatBrainFilePathFor(documentFolderPath, brainId),
-    content,
-  });
-  return {
-    ok: true,
-    path: goatBrainFilePathFor(row.folderPath, row.brainId),
-    document: documentViewFromFileRow(row),
   };
 }
 
@@ -237,7 +168,9 @@ export async function renameGoatBrainDocumentForUser(input: {
     parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
       ? parsed.frontmatter.type
       : existing.entityType;
-  const evidenceKind = parsed.frontmatter.evidenceKind ?? existing.evidenceKind;
+  const kind = isValidGoatBrainKind(parsed.frontmatter.kind)
+    ? parsed.frontmatter.kind
+    : existing.kind;
   const content = serializeGoatBrainDocument({
     title,
     compiledTruth: parsed.compiledTruth,
@@ -245,15 +178,14 @@ export async function renameGoatBrainDocumentForUser(input: {
     frontmatter: {
       id: existing.brainId,
       folder: existing.folderPath,
+      kind,
       type,
-      ...(type === "evidence" && evidenceKind ? { evidenceKind } : {}),
       status: parsed.frontmatter.status ?? existing.status,
       title,
       createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],
       ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
-      ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
       ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
       ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
     },
@@ -291,23 +223,14 @@ export async function moveGoatBrainDocumentForUser(input: {
     parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
       ? parsed.frontmatter.type
       : existing.entityType;
-  const evidenceKind = type === "evidence" ? evidenceKindForFolder(folderPath) : undefined;
-  const folderTypeError = goatBrainFolderTypeError(folderPath, type);
-  if (folderTypeError) {
-    const expectedFolder =
-      type === "evidence"
-        ? `evidence/${parsed.frontmatter.evidenceKind ?? existing.evidenceKind ?? "chat"}`
-        : goatBrainFolderForEntityType(type);
+  const kind = isValidGoatBrainKind(parsed.frontmatter.kind)
+    ? parsed.frontmatter.kind
+    : existing.kind;
+  const folderKindError = goatBrainFolderKindError(folderPath, kind);
+  if (folderKindError) {
     return {
       ok: false,
-      message: `Folder "${folderPath}" does not match type "${type}". ${folderTypeError} Use "${expectedFolder}" or a subfolder under it.`,
-    };
-  }
-  if (type === "evidence" && !evidenceKind) {
-    return {
-      ok: false,
-      message:
-        'Evidence documents must live under "evidence/chat", "evidence/email", "evidence/correction", or "evidence/document".',
+      message: `Folder "${folderPath}" does not match kind "${kind}". ${folderKindError}`,
     };
   }
   const content = serializeGoatBrainDocument({
@@ -317,15 +240,14 @@ export async function moveGoatBrainDocumentForUser(input: {
     frontmatter: {
       id: existing.brainId,
       folder: folderPath,
+      kind,
       type,
-      ...(evidenceKind ? { evidenceKind } : {}),
       status: parsed.frontmatter.status ?? existing.status,
       title: parsed.frontmatter.title ?? existing.title ?? existing.brainId,
       createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],
       ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
-      ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
       ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
       ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
     },
@@ -357,6 +279,59 @@ export async function deleteGoatBrainDocumentForUser(input: {
   return { ok: true };
 }
 
+export async function createGoatBrainFolderForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  folderPath: string;
+}): Promise<BrainMutationResult> {
+  try {
+    await createGoatBrainFolderRow({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      path: input.folderPath,
+    });
+    return { ok: true, path: normalizeGoatBrainFolderForV1(input.folderPath) };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+export async function renameGoatBrainFolderForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  fromPath: string;
+  toPath: string;
+}): Promise<BrainMutationResult> {
+  try {
+    await renameGoatBrainFolderRow({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      fromPath: input.fromPath,
+      toPath: input.toPath,
+    });
+    return { ok: true, path: normalizeGoatBrainFolderForV1(input.toPath) };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+export async function deleteGoatBrainFolderForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  folderPath: string;
+}): Promise<BrainMutationResult> {
+  try {
+    await deleteGoatBrainFolderRow({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      path: input.folderPath,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
 export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoatBrainContent {
   const parsed = parseGoatBrainDocument(source);
   const id =
@@ -379,15 +354,14 @@ export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoa
       frontmatter: {
         id: parsed.frontmatter.id ?? projection.brainId,
         folder: parsed.frontmatter.folder ?? projection.folderPath,
+        kind: projection.kind,
         type: projection.entityType,
-        ...(projection.evidenceKind ? { evidenceKind: projection.evidenceKind } : {}),
         status: projection.status,
         title: parsed.frontmatter.title ?? projection.title ?? projection.brainId,
         createdAt: parsed.frontmatter.createdAt ?? nowIso(),
         updatedAt: parsed.frontmatter.updatedAt ?? nowIso(),
         relations: parsed.frontmatter.relations ?? [],
         ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
-        ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
         ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
         ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
       },
@@ -398,9 +372,8 @@ export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoa
     relations: parsed.frontmatter.relations ?? [],
     sources: parsed.frontmatter.sources ?? [],
     aliases: parsed.frontmatter.aliases ?? [],
-    tags: parsed.frontmatter.tags ?? [],
+    kind: projection.kind,
     type: projection.entityType,
-    ...(projection.evidenceKind ? { evidenceKind: projection.evidenceKind } : {}),
     status: projection.status,
     contentHash: projection.contentHash,
     sizeBytes: projection.sizeBytes,
@@ -418,19 +391,19 @@ export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDoc
     path,
     title: row.title || parsed.title || row.brainId,
     content: row.content,
-    body: row.body,
+    body: normalizeGoatBrainCompiledTruth(row.body, row.title || parsed.title || row.brainId),
     timeline: parsed.timeline,
-    kind: "markdown",
+    format: row.format,
     mimeType: row.mimeType ?? "text/markdown",
-    originalFileName: null,
-    assetStorageKey: null,
+    originalFileName: row.originalFileName,
+    assetStorageKey: row.assetStorageKey,
+    assetSizeBytes: row.assetSizeBytes,
     relations: parsed.frontmatter.relations ?? [],
     sources: parsed.frontmatter.sources ?? [],
+    kind: row.kind,
     type: row.entityType,
-    evidenceKind: row.evidenceKind,
     status: row.status,
     aliases: parsed.frontmatter.aliases ?? [],
-    tags: parsed.frontmatter.tags ?? [],
     contentHash: row.contentHash,
     sizeBytes: row.sizeBytes,
     parseError: null,
@@ -453,22 +426,20 @@ export async function nextAvailableGoatBrainId(brainRef: string, baseId: string)
 
 export { hashGoatBrainContent };
 
-function evidenceKindForFolder(folderPath: string): GoatBrainEvidenceKind | null {
-  const [, subtype] = normalizeGoatBrainFolderForV1(folderPath).split("/");
-  return isValidGoatBrainEvidenceKind(subtype) ? subtype : null;
-}
-
-function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderView[] {
+function deriveFolderViews(
+  documents: GoatBrainDocumentView[],
+  folderRows: GoatBrainFolderRow[] = [],
+): GoatBrainFolderView[] {
   const now = new Date(0).toISOString();
   const byPath = new Map<string, GoatBrainFolderView>();
-  for (const folder of DEFAULT_GOAT_BRAIN_FOLDERS) {
-    byPath.set(folder, {
-      id: `folder:${folder}`,
-      path: folder,
-      name: folderName(folder),
-      source: "system",
-      createdAt: now,
-      updatedAt: now,
+  for (const folder of folderRows) {
+    byPath.set(folder.path, {
+      id: folder.id,
+      path: folder.path,
+      name: folderName(folder.path),
+      source: folder.source,
+      createdAt: folder.createdAt.toISOString(),
+      updatedAt: folder.updatedAt.toISOString(),
     });
   }
   for (const document of documents) {
@@ -479,20 +450,26 @@ function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderV
           ? existing.updatedAt
           : document.updatedAt;
       byPath.set(path, {
-        id: `folder:${path}`,
+        id: existing?.id ?? `folder:${path}`,
         path,
         name: folderName(path),
-        source: DEFAULT_GOAT_BRAIN_FOLDERS.includes(
-          path as (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number],
-        )
-          ? "system"
-          : "custom",
+        source: existing?.source ?? goatBrainFolderSourceForPath(path),
         createdAt: existing?.createdAt ?? document.createdAt,
         updatedAt,
       });
     }
   }
-  return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+  if (byPath.size === 0) {
+    byPath.set("inbox", {
+      id: "folder:inbox",
+      path: "inbox",
+      name: "Inbox",
+      source: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return [...byPath.values()].sort((a, b) => compareGoatBrainFolderPaths(a.path, b.path));
 }
 
 function ancestorFolders(folderPath: string): string[] {
@@ -513,4 +490,8 @@ function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentVie
   const folder = a.folderPath.localeCompare(b.folderPath);
   if (folder !== 0) return folder;
   return a.title.localeCompare(b.title);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

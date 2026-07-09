@@ -20,6 +20,7 @@ export function SpaceSwitcher({
   workspaceName,
   workspaces = [],
   personalHref = "/personal",
+  displayLabel,
   // The company/workspace surface is demoted in the personal-agent-first phase. When true, the
   // switcher hides workspace rows, but keeps workspace creation reachable.
   hideWorkspace = false,
@@ -30,6 +31,7 @@ export function SpaceSwitcher({
   workspaceName: string;
   workspaces?: WorkspacePickerItem[];
   personalHref?: string;
+  displayLabel?: string;
   hideWorkspace?: boolean;
   className?: string;
 }) {
@@ -48,7 +50,8 @@ export function SpaceSwitcher({
   }, [activeWorkspaceId, workspaceName, workspaces]);
   const activeWorkspace = workspaceItems.find((workspace) => workspace.id === activeWorkspaceId);
   const activeLabel =
-    activeSpace === "personal" ? "Personal" : (activeWorkspace?.name ?? workspaceName);
+    displayLabel ??
+    (activeSpace === "personal" ? "Personal" : (activeWorkspace?.name ?? workspaceName));
 
   function closePicker() {
     setOpen(false);

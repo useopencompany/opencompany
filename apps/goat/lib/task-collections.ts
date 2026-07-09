@@ -1,4 +1,5 @@
 import type {
+  GoatBrainFolderSource,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
   GoatTaskEventType,
@@ -89,6 +90,16 @@ export type GoatLocalCodexSessionRow = {
   active_turn_id: string | null;
   status: "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
   error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatBrainFolderRow = {
+  id: string;
+  user_workos_id: string;
+  brain_ref: string;
+  path: string;
+  source: GoatBrainFolderSource;
   created_at: string;
   updated_at: string;
 };
@@ -217,16 +228,17 @@ export type GoatBrainDocumentRow = {
   content: string;
   body: string;
   timeline: Array<{ evidenceId?: string; evidence_id?: string; at: string; body: string }>;
-  kind: string;
+  format: string;
   mime_type: string | null;
   original_file_name: string | null;
   asset_storage_key: string | null;
+  asset_size_bytes: number | null;
   relations: Array<{ type: string; to: string }>;
   sources: Array<{ ref: string; capturedAt?: string; captured_at?: string; title?: string }>;
   content_hash: string;
   size_bytes: number;
+  kind: string;
   entity_type: string;
-  evidence_kind: string | null;
   status: string;
   aliases: string[];
   created_at: string;
@@ -257,6 +269,48 @@ export type GoatBrainEdgeRow = {
   to_brain_id: string;
   relation_type: string;
   source_kind: "relation" | "wiki_link";
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatBrainIngestJobRow = {
+  id: string;
+  source_item_id: string;
+  user_workos_id: string;
+  source_provider: string;
+  source_connection_id: string;
+  integration_id: string | null;
+  brain_ref: string | null;
+  kind: string;
+  content_hash: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  attempts: number;
+  next_run_at: string;
+  lease_id: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  last_error: string | null;
+  result: Record<string, unknown>;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// Slim projection: the shape proxy strips the raw/normalized payload columns.
+export type GoatBrainSourceItemRow = {
+  id: string;
+  user_workos_id: string;
+  source_provider: string;
+  source_type: string;
+  external_id: string;
+  title: string;
+  occurred_at: string;
+  captured_at: string;
+  content_hash: string;
+  last_ingest_job_id: string | null;
+  last_ingest_status: string | null;
+  last_ingest_error: string | null;
+  last_ingested_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -300,6 +354,12 @@ function createTaskRunCollections(taskId: string) {
 // user before forwarding, so each brain gets its own shape subscription.
 function createBrainCollections(brainRef: string) {
   return {
+    folders: createGoatElectricCollection<GoatBrainFolderRow>({
+      id: `goat:brain_folders:${brainRef}`,
+      table: "goat.brain_folders",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
     documents: createGoatElectricCollection<GoatBrainDocumentRow>({
       id: `goat:brain_documents:${brainRef}`,
       table: "goat.brain_documents",
@@ -315,6 +375,12 @@ function createBrainCollections(brainRef: string) {
     edges: createGoatElectricCollection<GoatBrainEdgeRow>({
       id: `goat:brain_edges:${brainRef}`,
       table: "goat.brain_edges",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
+    ingestJobs: createGoatElectricCollection<GoatBrainIngestJobRow>({
+      id: `goat:brain_ingest_jobs:${brainRef}`,
+      table: "goat.brain_ingest_jobs",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
@@ -411,6 +477,24 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
+  // User-scoped (not per-brain): jobs join to these by source_item_id.
+  const brainSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
+    id: "goat:brain_source_items",
+    table: "goat.brain_source_items",
+    getKey: (row) => row.id,
+  });
+
+  const pendingBrainCaptureSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
+    id: "goat:brain_source_items:goat-chat:capture:pending-failed",
+    table: "goat.brain_source_items",
+    params: {
+      source_provider: "goat-chat",
+      source_type: "capture",
+      last_ingest_status: "pending,failed",
+    },
+    getKey: (row) => row.id,
+  });
+
   return {
     tasks,
     taskSchedules,
@@ -420,6 +504,8 @@ function buildGoatCollections() {
     localCodexSessions: getLocalCodexSessionCollection,
     integrations,
     brainCollections: getBrainCollections,
+    brainSourceItems,
+    pendingBrainCaptureSourceItems,
   };
 }
 

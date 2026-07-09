@@ -4,11 +4,11 @@ import type { IndexRecord } from "./corpus";
 const FIELD_BOOSTS = {
   title: 4,
   aliases: 4,
-  tags: 3,
   type: 2,
   relationText: 2,
   compiledTruth: 2,
   timelineText: 1,
+  assetText: 1,
 };
 
 export type GoatBrainLexicalIndex = MiniSearch<IndexRecord>;
@@ -16,7 +16,15 @@ export type GoatBrainLexicalIndex = MiniSearch<IndexRecord>;
 export function createLexicalIndex(records: IndexRecord[]): GoatBrainLexicalIndex {
   const index = new MiniSearch<IndexRecord>({
     idField: "id",
-    fields: ["title", "aliases", "tags", "type", "relationText", "compiledTruth", "timelineText"],
+    fields: [
+      "title",
+      "aliases",
+      "type",
+      "relationText",
+      "compiledTruth",
+      "timelineText",
+      "assetText",
+    ],
     storeFields: ["id"],
     searchOptions: { boost: FIELD_BOOSTS, prefix: true, fuzzy: 0.2, combineWith: "OR" },
   });
@@ -33,10 +41,13 @@ export function lexicalSearch(
   return index.search(trimmed).map((result) => ({ id: result.id as string, score: result.score }));
 }
 
-export function titleTagMatch(record: IndexRecord, query: string): number {
+export function titleTagMatch(
+  record: Pick<IndexRecord, "title" | "aliases">,
+  query: string,
+): number {
   const q = normalize(query);
   if (!q) return 0;
-  const names = [record.title, ...record.aliases, ...record.tagList].map(normalize).filter(Boolean);
+  const names = [record.title, ...record.aliases].map(normalize).filter(Boolean);
   if (names.some((name) => name === q)) return 1;
   if (names.some((name) => contains(name, q) || contains(q, name))) return 0.5;
   return 0;

@@ -17,7 +17,59 @@ const BRAIN_SHAPE_TABLES = new Set([
   "goat.brain_timeline_entries",
   "brain_edges",
   "goat.brain_edges",
+  "brain_ingest_jobs",
+  "goat.brain_ingest_jobs",
 ]);
+
+// Source items carry full raw/normalized payloads (whole meeting transcripts);
+// the activity feed only needs the descriptive columns.
+const BRAIN_SOURCE_ITEM_COLUMNS = [
+  "id",
+  "user_workos_id",
+  "source_provider",
+  "source_type",
+  "external_id",
+  "title",
+  "occurred_at",
+  "captured_at",
+  "content_hash",
+  "last_ingest_job_id",
+  "last_ingest_status",
+  "last_ingest_error",
+  "last_ingested_at",
+  "created_at",
+  "updated_at",
+] as const;
+
+// Documents sync everything except asset_extracted_text: binary-backed rows
+// can carry up to 200KB of machine-extracted text that only search and the
+// ingestion agent need, never the UI.
+const BRAIN_DOCUMENT_COLUMNS = [
+  "id",
+  "user_workos_id",
+  "brain_ref",
+  "brain_id",
+  "folder_path",
+  "title",
+  "content",
+  "body",
+  "timeline",
+  "format",
+  "mime_type",
+  "original_file_name",
+  "asset_storage_key",
+  "asset_size_bytes",
+  "relations",
+  "sources",
+  "kind",
+  "entity_type",
+  "status",
+  "aliases",
+  "content_hash",
+  "size_bytes",
+  "created_at",
+  "updated_at",
+] as const;
 
 const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"] as const;
 
@@ -121,10 +173,12 @@ const SHAPE_SCOPES = {
   brain_documents: {
     table: "goat.brain_documents",
     where: scopedBrainWhere,
+    columns: BRAIN_DOCUMENT_COLUMNS,
   },
   "goat.brain_documents": {
     table: "goat.brain_documents",
     where: scopedBrainWhere,
+    columns: BRAIN_DOCUMENT_COLUMNS,
   },
   brain_timeline_entries: {
     table: "goat.brain_timeline_entries",
@@ -141,6 +195,24 @@ const SHAPE_SCOPES = {
   "goat.brain_edges": {
     table: "goat.brain_edges",
     where: scopedBrainWhere,
+  },
+  brain_ingest_jobs: {
+    table: "goat.brain_ingest_jobs",
+    where: scopedBrainWhere,
+  },
+  "goat.brain_ingest_jobs": {
+    table: "goat.brain_ingest_jobs",
+    where: scopedBrainWhere,
+  },
+  brain_source_items: {
+    table: "goat.brain_source_items",
+    where: scopedBrainSourceItemWhere,
+    columns: BRAIN_SOURCE_ITEM_COLUMNS,
+  },
+  "goat.brain_source_items": {
+    table: "goat.brain_source_items",
+    where: scopedBrainSourceItemWhere,
+    columns: BRAIN_SOURCE_ITEM_COLUMNS,
   },
 } as const;
 
@@ -166,7 +238,13 @@ export function buildGoatElectricOriginUrl(input: {
   electricSecret?: string | null | undefined;
 }) {
   const requestedTable = input.requestUrl.searchParams.get("table");
-  const scope = requestedTable ? SHAPE_SCOPES[requestedTable as keyof typeof SHAPE_SCOPES] : null;
+  const scope: {
+    table: string;
+    where: (userWorkosId: string, requestUrl: URL, context: ShapeWhereContext) => ShapeWhere | null;
+    columns?: readonly string[];
+  } | null = requestedTable
+    ? (SHAPE_SCOPES[requestedTable as keyof typeof SHAPE_SCOPES] ?? null)
+    : null;
   if (!scope) return null;
 
   const originUrl = new URL(`${input.electricUrl.replace(/\/+$/, "")}/v1/shape`);
@@ -182,6 +260,7 @@ export function buildGoatElectricOriginUrl(input: {
   if (!resolved) return null;
 
   originUrl.searchParams.set("table", scope.table);
+  if (scope.columns) originUrl.searchParams.set("columns", scope.columns.join(","));
   originUrl.searchParams.set("where", resolved.clause);
   resolved.params.forEach((param, index) => {
     originUrl.searchParams.set(`params[${index + 1}]`, param);
@@ -286,9 +365,80 @@ function scopedOpenChatSessionWhere(userWorkosId: string): ShapeWhere {
   };
 }
 
+function scopedBrainSourceItemWhere(userWorkosId: string, requestUrl: URL): ShapeWhere | null {
+  const params = [userWorkosId];
+  const clauses = [`"user_workos_id" = $1`];
+
+  const sourceProvider = optionalEnumFilter(requestUrl, "source_provider", [
+    "goat-chat",
+    "jamie",
+    "upload",
+  ]);
+  if (sourceProvider === false) return null;
+  if (sourceProvider) {
+    params.push(sourceProvider);
+    clauses.push(`"source_provider" = $${params.length}`);
+  }
+
+  const sourceType = optionalEnumFilter(requestUrl, "source_type", ["capture", "meeting", "asset"]);
+  if (sourceType === false) return null;
+  if (sourceType) {
+    params.push(sourceType);
+    clauses.push(`"source_type" = $${params.length}`);
+  }
+
+  const ingestStatuses = optionalEnumListFilter(requestUrl, "last_ingest_status", [
+    "pending",
+    "succeeded",
+    "failed",
+  ]);
+  if (ingestStatuses === false) return null;
+  if (ingestStatuses.length === 1) {
+    params.push(ingestStatuses[0]!);
+    clauses.push(`"last_ingest_status" = $${params.length}`);
+  } else if (ingestStatuses.length > 1) {
+    const placeholders = ingestStatuses.map((status) => {
+      params.push(status);
+      return `$${params.length}`;
+    });
+    clauses.push(`"last_ingest_status" IN (${placeholders.join(", ")})`);
+  }
+
+  return {
+    clause: clauses.join(" AND "),
+    params,
+  };
+}
+
 function scopedUserWhere(userWorkosId: string): ShapeWhere {
   return {
     clause: `"user_workos_id" = $1`,
     params: [userWorkosId],
   };
+}
+
+function optionalEnumFilter<T extends string>(
+  requestUrl: URL,
+  key: string,
+  allowed: readonly T[],
+): T | false | null {
+  const value = requestUrl.searchParams.get(key)?.trim();
+  if (!value) return null;
+  return allowed.includes(value as T) ? (value as T) : false;
+}
+
+function optionalEnumListFilter<T extends string>(
+  requestUrl: URL,
+  key: string,
+  allowed: readonly T[],
+): T[] | false {
+  const value = requestUrl.searchParams.get(key)?.trim();
+  if (!value) return [];
+  const values = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (values.length === 0) return [];
+  if (values.some((item) => !allowed.includes(item as T))) return false;
+  return Array.from(new Set(values as T[]));
 }

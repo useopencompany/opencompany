@@ -8,6 +8,7 @@ import {
   type GoatBrainSyncFile,
   goatBrainFilePathFor,
   listGoatBrainFiles,
+  listGoatBrainFolderRows,
   materializeGoatBrainFilesToRoot,
   readGoatBrainFilesFromRoot,
   syncGoatBrainFiles,
@@ -16,11 +17,14 @@ import {
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   formatGoatBrainEvidenceLink,
+  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
   type GoatBrainDocument,
   goatBrainTimelineEntryFromParts,
   normalizeEvidenceId,
   normalizeGoatBrainId,
+  parseGoatBrainFolderManifest,
   serializeGoatBrainDocument,
+  serializeGoatBrainFolderManifest,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { getDb } from "./db";
@@ -78,13 +82,13 @@ export async function createGoatBrainMarkdownReportForTask(input: {
     frontmatter: {
       id: brainId,
       folder: folderPath,
-      type: "research",
+      kind: "page",
+      type: "analysis",
       status: "active",
       title,
       createdAt: now,
       updatedAt: now,
       relations: [],
-      tags: ["research-report"],
       sources: [
         {
           ref: `goat-task:${input.taskId}`,
@@ -144,9 +148,17 @@ export async function materializeGoatBrainForTask(input: {
       db: getDb(),
     },
   );
+  const folderRows = await listGoatBrainFolderRows({ brainRef }, { db: getDb() });
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(GOAT_BRAIN_ROOT)} && mkdir -p ${shellQuote(GOAT_BRAIN_ROOT)}`,
     { timeoutMs: 30_000 },
+  );
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(`${GOAT_BRAIN_ROOT}/.brain`)}`, {
+    timeoutMs: 30_000,
+  });
+  await input.sandbox.files.write(
+    `${GOAT_BRAIN_ROOT}/${GOAT_BRAIN_FOLDER_MANIFEST_PATH}`,
+    serializeGoatBrainFolderManifest(folderRows),
   );
   await input.sandbox.files.write(GOAT_BRAIN_CLI_PATH, getGoatBrainCliSource());
   await input.sandbox.commands.run(`chmod 700 ${shellQuote(GOAT_BRAIN_CLI_PATH)}`, {
@@ -208,9 +220,11 @@ export async function syncGoatBrainFromSandbox(input: {
     }
     files.push({ path: relativePath, content });
   }
+  const folders = await readSandboxFolderManifest(input.sandbox);
   await syncFiles({
     userWorkosId: input.userWorkosId,
     files,
+    folders,
     baseSnapshot: input.baseSnapshot,
     taskId: input.taskId ?? null,
   });
@@ -234,6 +248,7 @@ export async function syncGoatBrainFromLocalRoot(input: {
 async function syncFiles(input: {
   userWorkosId: string;
   files: GoatBrainSyncFile[];
+  folders?: ReturnType<typeof parseGoatBrainFolderManifest> | null;
   baseSnapshot: MaterializedGoatBrainSnapshot;
   taskId?: string | null;
 }) {
@@ -242,6 +257,7 @@ async function syncFiles(input: {
     brainRef,
     userWorkosId: input.userWorkosId,
     files: input.files,
+    folders: input.folders ?? null,
     baseSnapshot: input.baseSnapshot.files.map(dbMaterializedFileFromRunner),
     taskId: input.taskId ?? null,
     db: getDb(),
@@ -252,6 +268,17 @@ async function syncFiles(input: {
         .map((conflict) => conflict.path)
         .join(", ")}.`,
     );
+  }
+}
+
+async function readSandboxFolderManifest(sandbox: SandboxHandle) {
+  try {
+    const source = String(
+      await sandbox.files.read(`${GOAT_BRAIN_ROOT}/${GOAT_BRAIN_FOLDER_MANIFEST_PATH}`),
+    );
+    return parseGoatBrainFolderManifest(source);
+  } catch {
+    return null;
   }
 }
 

@@ -3,9 +3,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  type GoatBrainEntityType,
   goatBrainEntryFromLegacyMarkdown,
+  goatBrainKindForFolder,
   goatBrainSidecarRelativePath,
-  inferGoatBrainEntityTypeFromFolder,
   serializeGoatBrainDocument,
   serializeGoatBrainPayload,
   serializeGoatBrainSidecar,
@@ -89,7 +90,7 @@ describe("materializeGoatBrainToLocalRoot", () => {
         await readFile(path.join(root, "research/.brain/market-map.json"), "utf8"),
       );
       expect(sidecar).toMatchObject({
-        schemaVersion: "goat.brain.entry.v1",
+        schemaVersion: "goat.brain.entry.v2",
         id: "market-map",
         folder: "research",
         payload: {
@@ -138,7 +139,7 @@ describe("createGoatBrainMarkdownReportForTask", () => {
         expect.objectContaining({
           userWorkosId: "user_1",
           path: "research",
-          source: "system",
+          source: "custom",
         }),
         expect.objectContaining({
           documentId: expect.any(String),
@@ -153,8 +154,9 @@ describe("createGoatBrainMarkdownReportForTask", () => {
           brainId: "market-report",
           folderPath: "research",
           title: "Market Report",
-          body: "# Market Report\n\nFindings.\n\nEvidence: [[evidence:ev-created-from-goat-task-1|Task goat_task_1]]",
-          kind: "markdown",
+          body: "Findings.\n\nEvidence: [[evidence:ev-created-from-goat-task-1|Task goat_task_1]]",
+          format: "markdown",
+          kind: "page",
           mimeType: "text/markdown",
           sources: [
             expect.objectContaining({
@@ -202,7 +204,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
           expect.objectContaining({
             userWorkosId: "user_1",
             path: "meetings",
-            source: "system",
+            source: "custom",
           }),
           expect.objectContaining({
             userWorkosId: "user_1",
@@ -220,19 +222,29 @@ describe("syncGoatBrainFromLocalRoot", () => {
     }
   });
 
-  it("rejects removed alias folders instead of silently canonicalizing them", async () => {
+  it("rejects page documents placed inside the evidence zone", async () => {
     const root = await tempRoot();
-    const content = brainDoc({
-      id: "launch-idea",
-      folder: "ideas",
+    const content = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "launch-idea",
+        folder: "evidence/chat",
+        kind: "page",
+        type: "note",
+        status: "draft",
+        title: "Launch idea",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
       title: "Launch idea",
-      truth: "Launch should start with founder-led beta.",
+      compiledTruth: "Launch should start with founder-led beta.",
+      timeline: [],
     });
     const db = createGoatBrainDb({ selectResults: [[]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
-      await writeBrainFile(root, "ideas/launch-idea.md", content);
+      await writeBrainFile(root, "evidence/chat/launch-idea.md", content);
       await expect(
         syncGoatBrainFromLocalRoot({
           root,
@@ -240,7 +252,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
           taskId: "task_1",
           baseSnapshot: { files: [] },
         }),
-      ).rejects.toThrow('frontmatter.folder/type mismatch: folder "ideas" must be under');
+      ).rejects.toThrow("frontmatter.folder/kind mismatch");
       expect(db.insertedValues).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -514,7 +526,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
       await writeBrainFile(
         root,
         goatBrainSidecarRelativePath("research", "research-note"),
-        JSON.stringify({ schemaVersion: "goat.brain.entry.v1", id: "research-note" }),
+        JSON.stringify({ schemaVersion: "goat.brain.entry.v2", id: "research-note" }),
       );
       await expect(
         syncGoatBrainFromLocalRoot({
@@ -612,7 +624,8 @@ function brainDoc(input: { id: string; folder: string; title: string; truth: str
     frontmatter: {
       id: input.id,
       folder: input.folder,
-      type: inferGoatBrainEntityTypeFromFolder(input.folder),
+      kind: goatBrainKindForFolder(input.folder),
+      type: typeForTestFolder(input.folder),
       status: "draft",
       title: input.title,
       createdAt: at,
@@ -623,6 +636,13 @@ function brainDoc(input: { id: string; folder: string; title: string; truth: str
     compiledTruth: input.truth,
     timeline: [{ evidenceId: "ev-captured-in-test", at, body: "Captured in test." }],
   });
+}
+
+function typeForTestFolder(folder: string): GoatBrainEntityType {
+  const root = folder.split("/")[0];
+  if (root === "research") return "analysis";
+  if (root === "projects") return "project";
+  return "note";
 }
 
 function brainRow(input: {
@@ -642,14 +662,14 @@ function brainRow(input: {
     content: input.content,
     body: goatBrainEntryFromLegacyMarkdown(input.content).body,
     timeline: goatBrainEntryFromLegacyMarkdown(input.content).timeline,
-    kind: "markdown",
+    format: "markdown",
     mimeType: "text/markdown",
     originalFileName: null,
     assetStorageKey: null,
     relations: [],
     sources: [],
-    entityType: inferGoatBrainEntityTypeFromFolder(input.folderPath),
-    evidenceKind: null,
+    kind: goatBrainKindForFolder(input.folderPath),
+    entityType: typeForTestFolder(input.folderPath),
     status: "draft",
     aliases: [],
     contentHash: hash(input.content),

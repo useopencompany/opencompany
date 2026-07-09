@@ -1,43 +1,25 @@
-import { spawnSync } from "node:child_process";
 import { argv, exit } from "node:process";
+import { killPortListeners, normalizePort } from "./lib/port-kill.mjs";
 
 const port = argv[2] || "3000";
 
-if (!/^\d+$/.test(port)) {
-  console.error(`Invalid port: ${port}`);
+try {
+  normalizePort(port);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
   exit(1);
 }
 
-const lsof = spawnSync("lsof", ["-tiTCP:" + port, "-sTCP:LISTEN"], {
-  encoding: "utf8",
-});
-
-if (lsof.error) {
-  console.error(lsof.error.message);
-  exit(1);
-}
-
-if (lsof.status && lsof.status !== 1) {
-  process.stderr.write(lsof.stderr);
-  exit(lsof.status);
-}
-
-const pids = lsof.stdout
-  .split(/\s+/)
-  .map((pid) => pid.trim())
-  .filter(Boolean);
-
-if (pids.length === 0) {
-  console.log(`No listener found on port ${port}.`);
-  exit(0);
-}
-
-for (const pid of pids) {
-  try {
-    process.kill(Number(pid), "SIGTERM");
-    console.log(`Stopped PID ${pid} on port ${port}.`);
-  } catch (error) {
-    console.error(`Failed to stop PID ${pid}: ${error instanceof Error ? error.message : error}`);
-    exit(1);
+try {
+  const result = await killPortListeners(port);
+  if (result.pids.length === 0) {
+    console.log(`No listener found on port ${result.port}.`);
+    exit(0);
   }
+  const forced =
+    result.forcedPids.length > 0 ? ` Force-killed ${result.forcedPids.join(", ")}.` : "";
+  console.log(`Stopped PID ${result.pids.join(", ")} on port ${result.port}.${forced}`);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  exit(1);
 }

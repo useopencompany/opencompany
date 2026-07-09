@@ -3,6 +3,9 @@ import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
 import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolInput,
+  SAVE_TO_BRAIN_TOOL_NAME,
+  type SaveToBrainToolInput,
+  type SaveToBrainToolOutput,
   START_TASK_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchToolInput,
@@ -472,6 +475,72 @@ describe("runOpenCompanyChatAgent", () => {
     });
   });
 
+  it("captures saves through save_to_brain and dedupes repeat calls in one turn", async () => {
+    const startTask = vi.fn();
+    const saveToBrain = vi.fn(
+      async (input: SaveToBrainToolInput): Promise<SaveToBrainToolOutput> => ({
+        ok: true,
+        draftId: "pricing-teardown-reference",
+        path: "inbox/pricing-teardown-reference.md",
+        title: input.title ?? "Pricing teardown reference",
+        status: "captured",
+      }),
+    );
+
+    const result = await runOpenCompanyChatAgent({
+      messages: [
+        { role: "user", content: "save this reference: https://example.com/pricing-teardown" },
+      ],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      saveToBrain,
+      generateTextImpl: (async (options: unknown) => {
+        const system = extractSystemPrompt(options);
+        expect(system).toContain("save_to_brain");
+        expect(system).toContain("draft in the Brain inbox");
+        expect(extractSaveToBrainToolDescription(options)).toContain("draft page in the inbox");
+
+        const first = await executeSaveToBrainTool(options, {
+          content: "https://example.com/pricing-teardown",
+          title: "Pricing teardown reference",
+          intent: "reference for the pricing rework",
+        });
+        expect(first).toMatchObject({ ok: true, status: "captured" });
+
+        const repeat = await executeSaveToBrainTool(options, {
+          content: "https://example.com/pricing-teardown",
+          title: "Pricing teardown reference",
+        });
+        expect(repeat).toMatchObject({ ok: true, status: "already_captured" });
+
+        const empty = await executeSaveToBrainTool(options, { content: "   " });
+        expect(empty).toMatchObject({ ok: false });
+
+        return {
+          text: "Saved. It's in your Brain inbox and will be filed shortly.",
+          finishReason: "stop",
+          steps: [
+            {
+              toolCalls: [{ toolName: SAVE_TO_BRAIN_TOOL_NAME }],
+              toolResults: [first],
+            },
+          ],
+        };
+      }) as never,
+    });
+
+    expect(startTask).not.toHaveBeenCalled();
+    expect(saveToBrain).toHaveBeenCalledTimes(1);
+    expect(saveToBrain).toHaveBeenCalledWith({
+      content: "https://example.com/pricing-teardown",
+      title: "Pricing teardown reference",
+      intent: "reference for the pricing rework",
+    });
+    expect(result.task).toBeNull();
+    expect(result.content).toContain("Saved.");
+  });
+
   it("can call web_search inside the chat loop without starting a task", async () => {
     const startTask = vi.fn();
     const webSearch = vi.fn(
@@ -585,6 +654,20 @@ async function executeGoatBrainTool(options: unknown, input: Record<string, unkn
   const tool = (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
     throw new Error(`${GOAT_BRAIN_TOOL_NAME} execute function was not configured.`);
+  }
+  return tool.execute(input);
+}
+
+function extractSaveToBrainToolDescription(options: unknown) {
+  type ToolOptions = { tools?: Record<typeof SAVE_TO_BRAIN_TOOL_NAME, { description?: string }> };
+  return (options as ToolOptions).tools?.[SAVE_TO_BRAIN_TOOL_NAME]?.description ?? "";
+}
+
+async function executeSaveToBrainTool(options: unknown, input: SaveToBrainToolInput) {
+  type ToolOptions = { tools?: Record<typeof SAVE_TO_BRAIN_TOOL_NAME, { execute?: unknown }> };
+  const tool = (options as ToolOptions).tools?.[SAVE_TO_BRAIN_TOOL_NAME];
+  if (typeof tool?.execute !== "function") {
+    throw new Error(`${SAVE_TO_BRAIN_TOOL_NAME} execute function was not configured.`);
   }
   return tool.execute(input);
 }

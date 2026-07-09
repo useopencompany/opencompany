@@ -1,6 +1,12 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+  appendGoatBrainAssetTextBlock,
+  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+  parseGoatBrainDocument,
+  parseGoatBrainFolderManifest,
+} from "@opencompany/goat-brain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createGoatBrainMarkdownContent,
@@ -22,13 +28,12 @@ afterEach(async () => {
 });
 
 describe("goat brain file sync", () => {
-  it("projects evidence kind from evidence subtype markdown", () => {
+  it("projects evidence kind from the evidence zone folder", () => {
     const content = createGoatBrainMarkdownContent({
       id: "ev-acme-email",
       folderPath: "evidence/email",
       title: "Acme email",
-      type: "evidence",
-      evidenceKind: "email",
+      type: "source",
       status: "active",
       compiledTruth: "Acme asked for enterprise pricing.",
     });
@@ -41,9 +46,91 @@ describe("goat brain file sync", () => {
     ).toMatchObject({
       brainId: "ev-acme-email",
       folderPath: "evidence/email",
-      entityType: "evidence",
-      evidenceKind: "email",
+      kind: "evidence",
+      entityType: "source",
     });
+  });
+
+  it("projects pages outside the evidence zone with kind page", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "ada",
+      folderPath: "team/gtm",
+      title: "Ada",
+      type: "person",
+      status: "draft",
+      compiledTruth: "Ada leads GTM.",
+    });
+
+    expect(deriveGoatBrainFileProjection({ path: "team/gtm/ada.md", content })).toMatchObject({
+      brainId: "ada",
+      folderPath: "team/gtm",
+      kind: "page",
+      entityType: "person",
+    });
+  });
+
+  it("projects nested legacy markdown compiled truth as body-only text", () => {
+    const nested = createGoatBrainMarkdownContent({
+      id: "nested-note",
+      folderPath: "inbox",
+      title: "Nested note",
+      type: "note",
+      status: "draft",
+      compiledTruth: "Only this truth should be stored as the body.",
+    });
+    const content = [
+      "---",
+      "id: brain-native-background-workers",
+      "folder: product/concepts",
+      "kind: page",
+      "type: note",
+      "status: draft",
+      "title: Brain-native background workers",
+      "createdAt: 2026-01-01T00:00:00.000Z",
+      "updatedAt: 2026-01-01T00:00:00.000Z",
+      "related: []",
+      "---",
+      "",
+      "# Brain-native background workers",
+      "",
+      "## Compiled truth",
+      nested,
+      "",
+      "<!-- TIMELINE:BELOW - append only past this marker -->",
+      "",
+      "## Timeline",
+      "",
+    ].join("\n");
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "product/concepts/brain-native-background-workers.md",
+      content,
+    });
+
+    expect(projection).toMatchObject({
+      body: "Only this truth should be stored as the body.",
+    });
+    expect(parseGoatBrainDocument(projection.content).compiledTruth).toBe(projection.body);
+    expect(projection.content).not.toContain("id: nested-note");
+  });
+
+  it("projects compiled truth without a duplicate leading title heading", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "# Acme\n\nAcme evaluates Goat Brain.",
+    });
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "companies/acme.md",
+      content,
+    });
+
+    expect(projection.body).toBe("Acme evaluates Goat Brain.");
+    expect(parseGoatBrainDocument(projection.content).compiledTruth).toBe(projection.body);
   });
 
   it("recovers sidecar-backed markdown when only the payload hash is stale", async () => {
@@ -51,11 +138,12 @@ describe("goat brain file sync", () => {
       relativePath: "companies/acme.md",
       payload: "Acme now evaluates Goat Brain.",
       sidecar: {
-        schemaVersion: "goat.brain.entry.v1",
+        schemaVersion: "goat.brain.entry.v2",
         id: "acme",
         folder: "companies",
         title: "Acme",
-        kind: "markdown",
+        format: "markdown",
+        kind: "page",
         mimeType: "text/markdown",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -63,7 +151,6 @@ describe("goat brain file sync", () => {
         sources: [],
         type: "company",
         status: "draft",
-        tags: [],
         timeline: [],
         payload: {
           path: "companies/acme.md",
@@ -88,11 +175,12 @@ describe("goat brain file sync", () => {
       relativePath: "competitors/rivalco-competitor.md",
       payload: "",
       sidecar: {
-        schemaVersion: "goat.brain.entry.v1",
+        schemaVersion: "goat.brain.entry.v2",
         id: "rivalco-competitor",
         folder: "competitors",
         title: "",
-        kind: "markdown",
+        format: "markdown",
+        kind: "page",
         mimeType: "text/markdown",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -100,7 +188,6 @@ describe("goat brain file sync", () => {
         sources: [],
         type: "company",
         status: "draft",
-        tags: [],
         timeline: [],
         payload: {
           path: "competitors/rivalco-competitor.md",
@@ -230,6 +317,59 @@ describe("goat brain file sync", () => {
       { path: "competitors/rivalco-competitor.md", content },
     ]);
   });
+
+  it("materializes persistent folder rows into the folder manifest", async () => {
+    const db = queuedSelectDb([
+      [],
+      [
+        folderRow({ path: "research", source: "custom" }),
+        folderRow({ path: "people", source: "system" }),
+      ],
+    ]);
+
+    await materializeGoatBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
+
+    const folders = parseGoatBrainFolderManifest(
+      await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8"),
+    );
+    expect(folders).toEqual(
+      expect.arrayContaining([
+        { path: "inbox", source: "system" },
+        { path: "research", source: "custom" },
+        { path: "people", source: "system" },
+        { path: "companies", source: "system" },
+        { path: "evidence", source: "system" },
+      ]),
+    );
+    expect(folders.map((folder) => folder.path)).not.toContain("analysis");
+  });
+
+  it("syncs folder manifest rows and normalizes adjustable sources", async () => {
+    const db = folderSyncDb();
+
+    await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      files: [],
+      baseSnapshot: [],
+      folders: [
+        { path: "research", source: "system" },
+        { path: "partners", source: "custom" },
+      ],
+      db: db as never,
+    });
+
+    expect(db.insertedFolders()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "inbox", source: "system" }),
+        expect.objectContaining({ path: "research", source: "custom" }),
+        expect.objectContaining({ path: "partners", source: "custom" }),
+        expect.objectContaining({ path: "people", source: "system" }),
+        expect.objectContaining({ path: "companies", source: "system" }),
+        expect.objectContaining({ path: "evidence", source: "system" }),
+      ]),
+    );
+  });
 });
 
 async function writeSidecarBackedPayload(input: {
@@ -309,3 +449,107 @@ function materializeSelectDb(rows: unknown[]) {
     }),
   } as never;
 }
+
+function queuedSelectDb(results: unknown[][]) {
+  const queue = [...results];
+  return {
+    select: () => {
+      const rows = queue.shift() ?? [];
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        orderBy: async () => rows,
+        then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      };
+      return chain;
+    },
+  } as never;
+}
+
+function folderSyncDb() {
+  let selectCount = 0;
+  const insertedFolders: Record<string, unknown>[] = [];
+  return {
+    select: () => {
+      selectCount += 1;
+      const rows = selectCount === 1 ? [] : insertedFolders;
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      };
+      return chain;
+    },
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        insertedFolders.push(values);
+        return {
+          onConflictDoUpdate: async () => undefined,
+          onConflictDoNothing: async () => undefined,
+        };
+      },
+    }),
+    delete: () => ({
+      where: async () => undefined,
+    }),
+    insertedFolders: () => insertedFolders,
+  };
+}
+
+function folderRow(input: { path: string; source: "system" | "custom" }) {
+  const now = new Date("2026-01-01T00:00:00.000Z");
+  return {
+    id: `folder_${input.path}`,
+    userWorkosId: "user_1",
+    brainRef: "goat_brain_user_1",
+    path: input.path,
+    source: input.source,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+describe("goat brain asset projections", () => {
+  it("strips the generated extracted-text block before persisting", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "q3-board-deck",
+      folderPath: "sources",
+      title: "Q3 Board Deck",
+      type: "source",
+      compiledTruth: "Uploaded file `deck.pdf`. Ingestion pending.",
+    });
+    const projected = appendGoatBrainAssetTextBlock(content, "Revenue grew 40% QoQ.");
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "sources/q3-board-deck.md",
+      content: projected,
+    });
+
+    expect(projection.content).toBe(content);
+    expect(projection.contentHash).toBe(hashGoatBrainContent(content));
+    expect(projection.body).not.toContain("Revenue grew 40%");
+  });
+
+  it("discards edits made inside the generated block", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "q3-board-deck",
+      folderPath: "sources",
+      title: "Q3 Board Deck",
+      type: "source",
+      compiledTruth: "Synthesis.",
+    });
+    const tampered = appendGoatBrainAssetTextBlock(content, "original text").replace(
+      "original text",
+      "tampered text",
+    );
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "sources/q3-board-deck.md",
+      content: tampered,
+    });
+
+    expect(projection.content).toBe(content);
+  });
+});

@@ -6,7 +6,8 @@ import { serializeGoatBrainDocument } from "./document";
 import { deriveGoatBrainEdges } from "./edges";
 import { checkGoatBrainHealth } from "./health";
 import { ingestGoatBrain } from "./ingest";
-import { goatBrainEntityTypeForFolder, inferGoatBrainEntityTypeFromFolder } from "./schemas";
+import { goatBrainKindForFolder } from "./schema";
+import { defaultGoatBrainFolder, goatBrainFolderKindError } from "./schemas";
 import { findGoatBrainFile } from "./store";
 import { parseGoatBrainWikiLinks } from "./wiki-links";
 
@@ -21,13 +22,23 @@ afterEach(async () => {
 });
 
 describe("goat brain entity types and wiki links", () => {
-  it("infers built-in entity types from existing folders", () => {
-    expect(inferGoatBrainEntityTypeFromFolder("people")).toBe("person");
-    expect(inferGoatBrainEntityTypeFromFolder("companies")).toBe("company");
-    expect(inferGoatBrainEntityTypeFromFolder("evidence/email")).toBe("evidence");
-    expect(inferGoatBrainEntityTypeFromFolder("ideas")).toBe("note");
-    expect(goatBrainEntityTypeForFolder("evidence/document")).toBe("evidence");
-    expect(goatBrainEntityTypeForFolder("sources")).toBeNull();
+  it("suggests default folders per type and derives kind from folders", () => {
+    expect(defaultGoatBrainFolder("person", "page")).toBe("people");
+    expect(defaultGoatBrainFolder("company", "page")).toBe("companies");
+    expect(defaultGoatBrainFolder("note", "page")).toBe("inbox");
+    expect(defaultGoatBrainFolder("source", "page")).toBe("research");
+    expect(defaultGoatBrainFolder("source", "evidence")).toBe("evidence");
+    expect(goatBrainKindForFolder("evidence")).toBe("evidence");
+    expect(goatBrainKindForFolder("evidence/email")).toBe("evidence");
+    expect(goatBrainKindForFolder("team/gtm")).toBe("page");
+    expect(goatBrainFolderKindError("companies", "evidence")).toContain(
+      'evidence documents must live under the "evidence/" zone.',
+    );
+    expect(goatBrainFolderKindError("evidence/email", "page")).toContain(
+      "reserved for evidence documents",
+    );
+    expect(goatBrainFolderKindError("evidence/email", "evidence")).toBeNull();
+    expect(goatBrainFolderKindError("team/gtm", "page")).toBeNull();
   });
 
   it("parses wiki links with optional labels", () => {
@@ -67,7 +78,6 @@ describe("goat brain ingest", () => {
             body: "Acme is evaluating Goat Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
-            tags: [],
           },
         ],
         schemaSuggestion: null,
@@ -104,7 +114,6 @@ describe("goat brain ingest", () => {
                 body: "Jane Doe is a founder.",
                 timelineBody: "User asked Goat to remember Jane.",
                 relations: [],
-                tags: [],
               },
             ],
             schemaSuggestion: null,
@@ -145,7 +154,6 @@ describe("goat brain ingest", () => {
             body: "Acme is evaluating Goat Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
-            tags: [],
           },
         ],
       }),
@@ -172,7 +180,6 @@ describe("goat brain ingest", () => {
           body: "Acme is evaluating Goat Brain.",
           timelineBody: "User mentioned Acme.",
           relations: [],
-          tags: [],
         },
       ],
     });
@@ -204,7 +211,6 @@ describe("goat brain ingest", () => {
             body: "Acme is evaluating Goat Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
-            tags: [],
           },
           {
             action: "create",
@@ -215,7 +221,6 @@ describe("goat brain ingest", () => {
             body: "This should fail when the existing malformed file is loaded.",
             timelineBody: "User mentioned a bad entry.",
             relations: [],
-            tags: [],
           },
         ],
       }),
@@ -231,7 +236,7 @@ describe("goat brain ingest", () => {
     expect(result.failed).toEqual([
       expect.objectContaining({
         id: "bad-entry",
-        error: "Legacy brain document is missing a valid frontmatter.id.",
+        error: "Brain document is missing a valid frontmatter.id.",
       }),
     ]);
     await expect(findGoatBrainFile(root, "acme")).resolves.toMatchObject({
@@ -264,16 +269,7 @@ async function writeDoc(
   input: {
     id: string;
     folder: string;
-    type:
-      | "person"
-      | "company"
-      | "project"
-      | "meeting"
-      | "decision"
-      | "research"
-      | "concept"
-      | "evidence"
-      | "note";
+    type: "person" | "company" | "project" | "meeting" | "concept" | "source" | "analysis" | "note";
     title: string;
     truth: string;
   },
@@ -285,6 +281,7 @@ async function writeDoc(
       frontmatter: {
         id: input.id,
         folder: input.folder,
+        kind: goatBrainKindForFolder(input.folder),
         type: input.type,
         status: "active",
         title: input.title,

@@ -68,6 +68,23 @@ describe("goat brain inline links", () => {
     ]);
   });
 
+  it("requires source targets to be provider:id shaped", () => {
+    expect(
+      parseGoatBrainInlineLinks(
+        "[[source:jamie:meeting:calendar_event_123]] [[source:noid]] [[source:Bad:ref]] [[source:gmail:thread 1]]",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "source",
+        target: "jamie:meeting:calendar_event_123",
+        valid: true,
+      }),
+      expect.objectContaining({ kind: "source", target: "noid", valid: false }),
+      expect.objectContaining({ kind: "source", target: "Bad:ref", valid: false }),
+      expect.objectContaining({ kind: "source", target: "gmail:thread 1", valid: false }),
+    ]);
+  });
+
   it("extracts valid targets by kind and dedupes by first occurrence", () => {
     const text =
       "[[page:acme]] [[page:acme|Acme]] [[evidence:ev-seed]] [^ev:ev-seed] [[source:gmail:1]]";

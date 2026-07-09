@@ -684,22 +684,71 @@
     {
       "idx": 97,
       "version": "7",
-      "when": 1783424300000,
-      "tag": "0097_goat_local_codex_sessions",
+      "when": 1783424400000,
+      "tag": "0097_goat_brain_kind_type_decoupling",
       "breakpoints": true
     },
     {
       "idx": 98,
       "version": "7",
-      "when": 1783424600000,
-      "tag": "0098_goat_local_codex_empty_sessions",
+      "when": 1783424800000,
+      "tag": "0098_goat_brain_agent_ingest",
       "breakpoints": true
     },
     {
       "idx": 99,
       "version": "7",
-      "when": 1783424900000,
-      "tag": "0099_goat_local_codex_beta_flag",
+      "when": 1783425200000,
+      "tag": "0099_goat_brain_chat_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1783425600000,
+      "tag": "0100_goat_brain_type_consolidation",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1783590493000,
+      "tag": "0101_goat_brain_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1783700000000,
+      "tag": "0102_goat_brain_binary_assets",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1783710000000,
+      "tag": "0103_goat_brain_retrieval_plane",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1783710100000,
+      "tag": "0104_goat_local_codex_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1783710200000,
+      "tag": "0105_goat_local_codex_empty_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1783710300000,
+      "tag": "0106_goat_local_codex_beta_flag",
       "breakpoints": true
     }
   ]

@@ -1,6 +1,11 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { normalizeGoatBrainCompiledTruth } from "@opencompany/goat-brain/document";
+import {
+  compareGoatBrainFolderPaths,
+  goatBrainFolderSourceForPath,
+} from "@opencompany/goat-brain/folders";
 import { useLiveQuery } from "@tanstack/react-db";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
@@ -12,6 +17,7 @@ import {
   createGoatCollections,
   type GoatBrainDocumentRow,
   type GoatBrainEdgeRow,
+  type GoatBrainFolderRow,
   type GoatBrainTimelineEntryRow,
   type GoatChatSessionRow,
   type GoatIntegrationRow,
@@ -91,6 +97,10 @@ export function GoatAppDataProvider({
     (q) => q.from({ file: brainCollections.documents }),
     [brainCollections],
   );
+  const { data: folderRows, isLoading: foldersLoading } = useLiveQuery(
+    (q) => q.from({ folder: brainCollections.folders }),
+    [brainCollections],
+  );
   const { data: timelineRows } = useLiveQuery(
     (q) => q.from({ timeline: brainCollections.timelineEntries }),
     [brainCollections],
@@ -150,7 +160,12 @@ export function GoatAppDataProvider({
   }, [initialData.integrations, integrationRows, integrationsLoading]);
 
   const brain = useMemo(() => {
-    if (brainLoading && !brainRows?.length) return initialData.brain;
+    if (
+      (brainLoading && !brainRows?.length) ||
+      (foldersLoading && !folderRows?.length && initialData.brain.folders.length > 0)
+    ) {
+      return initialData.brain;
+    }
     const timelinesByDocument = groupTimelineRows(
       (timelineRows ?? []) as GoatBrainTimelineEntryRow[],
     );
@@ -159,9 +174,9 @@ export function GoatAppDataProvider({
       .toSorted(compareBrainDocuments);
     return {
       documents,
-      folders: deriveFolderViews(documents),
+      folders: deriveFolderViews(documents, (folderRows ?? []) as GoatBrainFolderRow[]),
     };
-  }, [brainLoading, brainRows, initialData.brain, timelineRows]);
+  }, [brainLoading, brainRows, folderRows, foldersLoading, initialData.brain, timelineRows]);
 
   const value = useMemo<GoatAppData>(
     () => ({
@@ -226,26 +241,26 @@ function documentViewFromRow(
   timelineRows?: GoatBrainTimelineEntryRow[],
 ): GoatBrainDocumentView {
   const path = `${row.folder_path}/${row.brain_id}.md`;
+  const title = row.title ?? row.brain_id;
   return {
     id: row.id,
     brainId: row.brain_id,
     folderPath: row.folder_path,
     path,
-    title: row.title ?? row.brain_id,
+    title,
     content: row.content,
-    body: row.body,
+    body: normalizeGoatBrainCompiledTruth(row.body, title),
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
-    kind: normalizeKind(row.kind),
+    format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",
     originalFileName: row.original_file_name,
     assetStorageKey: row.asset_storage_key,
     relations: normalizeRelations(row.relations),
     sources: normalizeSources(row.sources),
+    kind: normalizeDocumentKind(row.kind),
     type: normalizeEntityType(row.entity_type),
-    evidenceKind: normalizeEvidenceKind(row.evidence_kind),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
-    tags: parseBrainTags(row.content),
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
     parseError: null,
@@ -291,27 +306,30 @@ function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentVie
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 }
 
-function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderView[] {
+function deriveFolderViews(
+  documents: GoatBrainDocumentView[],
+  folderRows: GoatBrainFolderRow[] = [],
+): GoatBrainFolderView[] {
   const byPath = new Map<string, GoatBrainFolderView>();
   const zero = new Date(0).toISOString();
-  for (const folder of DEFAULT_BRAIN_FOLDERS) {
-    byPath.set(folder, {
-      id: `folder:${folder}`,
-      path: folder,
-      name: folderName(folder),
-      source: "system",
-      createdAt: zero,
-      updatedAt: zero,
+  for (const folder of folderRows) {
+    byPath.set(folder.path, {
+      id: folder.id,
+      path: folder.path,
+      name: folderName(folder.path),
+      source: folder.source,
+      createdAt: folder.created_at,
+      updatedAt: folder.updated_at,
     });
   }
   for (const document of documents) {
     for (const path of ancestorFolderPaths(document.folderPath)) {
       const existing = byPath.get(path);
       byPath.set(path, {
-        id: `folder:${path}`,
+        id: existing?.id ?? `folder:${path}`,
         path,
         name: folderName(path),
-        source: DEFAULT_BRAIN_FOLDERS.includes(path) ? "system" : "custom",
+        source: existing?.source ?? goatBrainFolderSourceForPath(path),
         createdAt: existing?.createdAt ?? document.createdAt,
         updatedAt:
           existing && existing.updatedAt > document.updatedAt
@@ -320,20 +338,18 @@ function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderV
       });
     }
   }
-  return [...byPath.values()].toSorted((a, b) => a.path.localeCompare(b.path));
+  if (byPath.size === 0) {
+    byPath.set("inbox", {
+      id: "folder:inbox",
+      path: "inbox",
+      name: "Inbox",
+      source: "system",
+      createdAt: zero,
+      updatedAt: zero,
+    });
+  }
+  return [...byPath.values()].toSorted((a, b) => compareGoatBrainFolderPaths(a.path, b.path));
 }
-
-const DEFAULT_BRAIN_FOLDERS = [
-  "inbox",
-  "people",
-  "companies",
-  "projects",
-  "decisions",
-  "meetings",
-  "research",
-  "concepts",
-  "evidence",
-];
 
 function ancestorFolderPaths(path: string) {
   const parts = path.split("/").filter(Boolean);
@@ -362,9 +378,13 @@ function normalizeTimeline(
     : [];
 }
 
-function normalizeKind(value: string): GoatBrainDocumentView["kind"] {
+function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
   if (value === "pdf" || value === "docx") return value;
   return "markdown";
+}
+
+function normalizeDocumentKind(value: string): GoatBrainDocumentView["kind"] {
+  return value === "evidence" ? "evidence" : "page";
 }
 
 function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
@@ -372,25 +392,15 @@ function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
     value === "person" ||
     value === "company" ||
     value === "project" ||
-    value === "decision" ||
     value === "meeting" ||
-    value === "research" ||
     value === "concept" ||
-    value === "evidence" ||
+    value === "source" ||
+    value === "analysis" ||
     value === "note"
   ) {
     return value;
   }
   return "note";
-}
-
-function normalizeEvidenceKind(
-  value: string | null | undefined,
-): "chat" | "email" | "correction" | "document" | null {
-  if (value === "chat" || value === "email" || value === "correction" || value === "document") {
-    return value;
-  }
-  return null;
 }
 
 function normalizeStatus(value: string): GoatBrainDocumentView["status"] {
@@ -427,15 +437,4 @@ function normalizeSources(value: unknown) {
       },
     ];
   });
-}
-
-function parseBrainTags(content: string): string[] {
-  const match = /^---\n([\s\S]*?)\n---/.exec(content.replace(/\r\n/g, "\n"));
-  if (!match?.[1]) return [];
-  const tagsMatch = /^tags:\n((?:\s+- .+\n?)+)/m.exec(match[1]);
-  if (!tagsMatch?.[1]) return [];
-  return tagsMatch[1]
-    .split("\n")
-    .map((line) => line.replace(/^\s+-\s+/, "").trim())
-    .filter(Boolean);
 }

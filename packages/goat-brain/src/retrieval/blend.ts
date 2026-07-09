@@ -1,7 +1,7 @@
 import type { IndexRecord } from "./corpus";
 
-const WEIGHT_RELEVANCE = 0.85;
-const WEIGHT_FRESHNESS = 0.15;
+export const GOAT_BRAIN_WEIGHT_RELEVANCE = 0.85;
+export const GOAT_BRAIN_WEIGHT_FRESHNESS = 0.15;
 const HALF_LIFE_DAYS = 90;
 
 export function blend(
@@ -13,13 +13,15 @@ export function blend(
     .map(({ record, relevance }) => ({
       record,
       score:
-        WEIGHT_RELEVANCE * (relevance / maxRelevance) + WEIGHT_FRESHNESS * freshness(record, now),
+        GOAT_BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
+        GOAT_BRAIN_WEIGHT_FRESHNESS * goatBrainFreshness(record.updatedAt, now),
     }))
     .sort((a, b) => b.score - a.score);
 }
 
-function freshness(record: IndexRecord, now: number): number {
-  const updated = Date.parse(record.updatedAt);
+// Recency decay shared by every retrieval surface (CLI corpus ranking and the DB read plane).
+export function goatBrainFreshness(updatedAt: string | Date, now: number): number {
+  const updated = updatedAt instanceof Date ? updatedAt.getTime() : Date.parse(updatedAt);
   if (Number.isNaN(updated)) return 0;
   const ageDays = Math.max(0, (now - updated) / (1000 * 60 * 60 * 24));
   return 0.5 ** (ageDays / HALF_LIFE_DAYS);

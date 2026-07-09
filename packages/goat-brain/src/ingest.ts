@@ -4,6 +4,7 @@ import {
   goatBrainEntryFromLegacyMarkdown,
 } from "./entry";
 import { checkGoatBrainHealth, type GoatBrainHealthReport } from "./health";
+import { GOAT_BRAIN_POINTER_COPY_RULE } from "./pointer-copy";
 import type { Gateway } from "./retrieval/gateway";
 import {
   type GoatBrainEntityType,
@@ -12,7 +13,7 @@ import {
   isValidGoatBrainRelationType,
   normalizeGoatBrainId,
 } from "./schema";
-import { goatBrainFolderForEntityType, normalizeBuiltInGoatBrainEntityType } from "./schemas";
+import { defaultGoatBrainFolder, normalizeBuiltInGoatBrainEntityType } from "./schemas";
 import { findGoatBrainFile, listGoatBrainFiles, writeGoatBrainEntry } from "./store";
 import { nowIso } from "./time";
 import { goatBrainTimelineEntryFromParts, goatBrainTimelinePartsFromEntry } from "./timeline";
@@ -64,7 +65,6 @@ type RawIngestOperation = {
   body?: unknown;
   timelineBody?: unknown;
   relations?: unknown;
-  tags?: unknown;
 };
 
 export type NormalizedIngestOperation = {
@@ -76,7 +76,6 @@ export type NormalizedIngestOperation = {
   body: string;
   timelineBody: string;
   relations: GoatBrainRelation[];
-  tags: string[];
 };
 
 export async function ingestGoatBrain(
@@ -172,15 +171,16 @@ function buildIngestPrompt(input: {
     "You are the controlled ingestion loop for Goat Brain, a durable graph of user-owned knowledge.",
     "Return only JSON. Do not include markdown fences.",
     "Use existing ids when information belongs to an existing entity. Create a new entry only when no existing entry is the primary home.",
-    "Use only these types: person, company, project, decision, meeting, research, concept, evidence, note.",
-    "Prefer relations over extra structured fields. People, companies, projects, meetings, decisions, and evidence should connect through relations.",
-    "Use inline links like [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence, and [[source:ref|Label]] for source refs. Legacy [[brain-id|Label]] page links are accepted but new content should use typed links.",
+    "Use only these types: person, company, project, meeting, concept, source, analysis, note. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
+    "Prefer relations over extra structured fields. People, companies, projects, and sources should connect through relations.",
+    "Use inline links like [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence, and [[source:provider:id|Label]] for source refs. Legacy [[brain-id|Label]] page links are accepted but new content should use typed links.",
+    GOAT_BRAIN_POINTER_COPY_RULE,
     "Compiled truth is the current synthesis for the entity. Rewrite it as the durable state of play, not as a chronological log.",
     "Timeline entries are append-only evidence. `timelineBody` must be a concise factual event from this source, not a restatement of the full source text.",
     "Every timeline entry must preserve source context; the system will attach the source ref, so make `timelineBody` say what happened and why it matters.",
     "",
     "JSON shape:",
-    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|project|decision|meeting|research|concept|evidence|note","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}],"tags":[]}]}',
+    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|project|meeting|concept|source|analysis|note","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}]}]}',
     "",
     `Existing entries:\n${docs || "(none)"}`,
     "",
@@ -242,7 +242,6 @@ function normalizePlan(
         body,
         timelineBody: stringValue(item.timelineBody) || "Captured source information.",
         relations,
-        tags: stringArray(item.tags),
       },
     ];
   });
@@ -275,33 +274,26 @@ async function applyIngestOperation(
 ): Promise<GoatBrainIngestAppliedChange> {
   const existing = await findGoatBrainFile(root, operation.id);
   const existingEntry = existing ? goatBrainEntryFromLegacyMarkdown(existing.source) : null;
-  const folder =
-    existingEntry?.type === operation.type
-      ? existingEntry.folder
-      : folderForIngestType(operation.type);
-  const evidenceKind =
-    operation.type === "evidence"
-      ? existingEntry?.type === "evidence" && existingEntry.evidenceKind
-        ? existingEntry.evidenceKind
-        : "chat"
-      : undefined;
+  // The one-shot planner only writes working pages; evidence docs are captured
+  // by dedicated ingestion paths. Folders are navigation: keep the existing
+  // placement on update and fall back to the type's default for new docs.
+  const folder = existingEntry?.folder ?? defaultGoatBrainFolder(operation.type, "page");
   const entry: GoatBrainEntry = {
     ...(existingEntry ?? {
       id: operation.id,
       createdAt: source.at,
-      kind: "markdown" as const,
+      format: "markdown" as const,
       mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
       relations: [],
       sources: [],
-      tags: [],
       status: "draft" as const,
       timeline: [],
     }),
     id: operation.id,
     folder,
+    kind: existingEntry?.kind ?? "page",
     title: operation.title,
     type: operation.type,
-    ...(evidenceKind ? { evidenceKind } : {}),
     aliases: operation.aliases,
     body: operation.body,
     updatedAt: source.at,
@@ -312,7 +304,6 @@ async function applyIngestOperation(
     capturedAt: source.at,
     ...(source.sourceTitle ? { title: source.sourceTitle } : {}),
   });
-  entry.tags = mergeStrings(entry.tags, operation.tags);
   const timelineEntry = goatBrainTimelineEntryFromParts({
     at: source.at,
     summary: operation.timelineBody,
@@ -324,10 +315,6 @@ async function applyIngestOperation(
   }
   const path = await writeGoatBrainEntry(root, entry);
   return { action: existingEntry ? "update" : "create", id: entry.id, path, type: entry.type };
-}
-
-function folderForIngestType(type: GoatBrainEntityType): string {
-  return type === "evidence" ? "evidence/chat" : goatBrainFolderForEntityType(type);
 }
 
 function isDuplicateTimelineEntry(
@@ -377,10 +364,6 @@ function mergeSources(
 ) {
   if (current.some((item) => item.ref === source.ref)) return current;
   return [...current, source];
-}
-
-function mergeStrings(current: string[], next: string[]) {
-  return [...new Set([...current, ...next].filter((value) => value.trim()))];
 }
 
 function stringArray(value: unknown): string[] {

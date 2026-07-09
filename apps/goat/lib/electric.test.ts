@@ -140,6 +140,7 @@ describe("buildGoatElectricOriginUrl", () => {
     "goat.brain_documents",
     "goat.brain_timeline_entries",
     "goat.brain_edges",
+    "goat.brain_ingest_jobs",
   ])("scopes %s to the route-authorized brain ref", (table) => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
@@ -167,6 +168,56 @@ describe("buildGoatElectricOriginUrl", () => {
       ),
       userWorkosId: "user_123",
       ...(label.includes("mismatched") ? { authorizedBrainRef: "goat_brain_other" } : {}),
+    });
+
+    expect(url).toBeNull();
+  });
+
+  it("scopes goat.brain_source_items to the user and strips the payload columns", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items",
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url?.searchParams.get("table")).toBe("goat.brain_source_items");
+    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    const columns = url?.searchParams.get("columns")?.split(",") ?? [];
+    expect(columns).toContain("id");
+    expect(columns).toContain("title");
+    expect(columns).not.toContain("raw_payload");
+    expect(columns).not.toContain("normalized_payload");
+  });
+
+  it("allows safe goat.brain_source_items filters", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=goat-chat&source_type=capture&last_ingest_status=pending,failed",
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url?.searchParams.get("where")).toBe(
+      `"user_workos_id" = $1 AND "source_provider" = $2 AND "source_type" = $3 AND "last_ingest_status" IN ($4, $5)`,
+    );
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    expect(url?.searchParams.get("params[2]")).toBe("goat-chat");
+    expect(url?.searchParams.get("params[3]")).toBe("capture");
+    expect(url?.searchParams.get("params[4]")).toBe("pending");
+    expect(url?.searchParams.get("params[5]")).toBe("failed");
+  });
+
+  it("rejects unsafe goat.brain_source_items filters", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=other",
+      ),
+      userWorkosId: "user_123",
     });
 
     expect(url).toBeNull();
