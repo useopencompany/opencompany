@@ -34,6 +34,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
+import { GoatBrainActivity } from "@/components/GoatBrainActivity";
 import { BrainAccessDialog } from "@/components/GoatBrainSwitcher";
 import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
@@ -464,6 +465,7 @@ function GoatBrainEditor({
             >
               <FolderPlus size={15} strokeWidth={1.8} />
             </button>
+            {activeBrain ? <GoatBrainActivity brainRef={activeBrain.id} /> : null}
             {workspace.role === "admin" && activeBrain ? (
               <button
                 type="button"
@@ -1140,13 +1142,16 @@ function buildBrainTree(
 ) {
   const root: BrainTreeNode = { name: "", path: "", type: "folder", children: [] };
   const normalizedQuery = query.trim().toLowerCase();
+  // Merged docs are tombstones whose content lives in the page they were
+  // merged into; hide them from the tree like the CLI's default list does.
+  const listedDocuments = documents.filter((document) => document.status !== "merged");
   const visibleDocuments = normalizedQuery
-    ? documents.filter((document) => {
+    ? listedDocuments.filter((document) => {
         const path = brainDocumentTreePath(document).toLowerCase();
         const title = document.title?.toLowerCase() ?? "";
         return path.includes(normalizedQuery) || title.includes(normalizedQuery);
       })
-    : documents;
+    : listedDocuments;
   const visibleFolders = normalizedQuery
     ? folders.filter((folder) => folder.path.toLowerCase().includes(normalizedQuery))
     : folders;
