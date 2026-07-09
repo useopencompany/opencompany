@@ -28,8 +28,17 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
+const toastMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
+}));
+
+vi.mock("@opencompany/ui/components/sonner", () => ({
+  toast: toastMock,
 }));
 
 vi.mock("@/components/GoatBrainView", () => ({
@@ -69,10 +78,25 @@ vi.mock("@/lib/user-preferences", () => ({
 }));
 
 describe("GoatSettingsRoute", () => {
+  const fetchMock = vi.fn();
+  const createObjectUrlMock = vi.fn(() => "blob:bridge-launcher");
+  const revokeObjectUrlMock = vi.fn();
+
   beforeEach(() => {
     appDataMock.value.featureFlags.localCodexBridge = false;
     routerMock.refresh.mockReset();
     userPreferencesMock.updateGoatLocalCodexBetaAction.mockClear();
+    toastMock.success.mockClear();
+    toastMock.error.mockClear();
+    fetchMock.mockReset();
+    createObjectUrlMock.mockClear();
+    revokeObjectUrlMock.mockClear();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: createObjectUrlMock,
+      revokeObjectURL: revokeObjectUrlMock,
+    });
   });
 
   it("shows the Local Codex bridge beta switch and persists changes", async () => {
@@ -86,6 +110,29 @@ describe("GoatSettingsRoute", () => {
 
     expect(userPreferencesMock.updateGoatLocalCodexBetaAction).toHaveBeenCalledWith(true);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("downloads a paired Local Codex bridge launcher when beta is enabled", async () => {
+    appDataMock.value.featureFlags.localCodexBridge = true;
+    fetchMock.mockResolvedValueOnce(new Response("#!/bin/zsh\necho bridge\n"));
+    const clickMock = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const user = userEvent.setup();
+    render(<GoatSettingsRoute />);
+
+    await user.click(screen.getByRole("button", { name: "Download Mac launcher" }));
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/local-codex/bridges/launcher", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: expect.stringContaining("Local Codex"),
+    });
+    await waitFor(() => expect(createObjectUrlMock).toHaveBeenCalled());
+    expect(clickMock).toHaveBeenCalled();
+    expect(revokeObjectUrlMock).toHaveBeenCalledWith("blob:bridge-launcher");
+    expect(toastMock.success).toHaveBeenCalledWith("Bridge launcher downloaded.");
+
+    clickMock.mockRestore();
   });
 });
 

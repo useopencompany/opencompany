@@ -1,12 +1,15 @@
 "use client";
 
+import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
   ChevronRight,
   CircleUserRound,
   Code2,
+  Download,
   FileText,
+  Loader2,
   Mail,
   UserRound,
   Users,
@@ -448,9 +451,72 @@ function BetaFeatureSwitch({
           </button>
         </div>
         {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
+        {checked ? <LocalCodexBridgePairButton /> : null}
       </div>
     </div>
   );
+}
+
+function LocalCodexBridgePairButton() {
+  const [isPairing, setIsPairing] = useState(false);
+
+  const downloadBridge = async () => {
+    if (isPairing) return;
+    setIsPairing(true);
+
+    try {
+      await downloadLocalBridgeLauncher();
+      toast.success("Bridge launcher downloaded.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not pair Local Codex.");
+    } finally {
+      setIsPairing(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={downloadBridge}
+      disabled={isPairing}
+      className="mt-1 inline-flex h-7 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium leading-none text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {isPairing ? (
+        <Loader2 size={13} strokeWidth={2} className="shrink-0 animate-spin" />
+      ) : (
+        <Download size={13} strokeWidth={2} className="shrink-0" />
+      )}
+      {isPairing ? "Preparing" : "Download Mac launcher"}
+    </button>
+  );
+}
+
+async function downloadLocalBridgeLauncher() {
+  const response = await fetch("/api/local-codex/bridges/launcher", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: localBridgeName() }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(error || "Could not pair Local Codex.");
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "opencompany-goat-codex-bridge.terminal";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function localBridgeName() {
+  const platform = navigator.platform?.trim();
+  return platform ? `Local Codex (${platform})` : "Local Codex bridge";
 }
 
 function IntegrationRows({ integrations }: { integrations: GoatIntegrationState }) {
