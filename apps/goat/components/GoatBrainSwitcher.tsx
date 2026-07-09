@@ -1,8 +1,8 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { Brain, Check, Copy, Lock, Plus, Settings2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { Brain, Check, Copy, Lock, Plus } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   type GoatBrainSummaryView,
@@ -19,11 +19,17 @@ import {
 } from "@/lib/workspace-actions";
 
 export function GoatBrainSwitcher() {
-  const { workspace, brains, activeBrain } = useGoatAppData();
+  const { brains, activeBrain } = useGoatAppData();
   const router = useRouter();
+  const pathname = usePathname();
   const [creating, setCreating] = useState(false);
-  const [accessBrain, setAccessBrain] = useState<GoatBrainSummaryView | null>(null);
   const [isPending, startTransition] = useTransition();
+  const brainRouteActive = pathname === "/brain" || pathname.startsWith("/brain/");
+  const routeBrainSegment = brainRouteActive ? pathname.split("/").filter(Boolean)[1] : undefined;
+  const routeBrain = routeBrainSegment
+    ? brains.find((brain) => encodeURIComponent(brain.id) === routeBrainSegment)
+    : null;
+  const highlightedBrainId = routeBrain?.id ?? activeBrain?.id ?? null;
 
   const switchBrain = (brainId: string) => {
     const href = goatBrainHref(brainId);
@@ -45,7 +51,7 @@ export function GoatBrainSwitcher() {
     <>
       <div className="flex flex-col gap-px">
         {brains.map((brain) => {
-          const active = brain.id === activeBrain?.id;
+          const active = brainRouteActive && brain.id === highlightedBrainId;
           return (
             <div key={brain.id} className="group/brain flex items-center">
               <button
@@ -69,16 +75,6 @@ export function GoatBrainSwitcher() {
                   <Lock size={11} strokeWidth={1.75} className="shrink-0 text-ink/40" />
                 ) : null}
               </button>
-              {workspace.role === "admin" ? (
-                <button
-                  type="button"
-                  aria-label={`Manage access to ${brain.name}`}
-                  onClick={() => setAccessBrain(brain)}
-                  className="rounded-md p-1.5 text-ink/0 transition-colors hover:bg-surface-hover hover:text-ink/80 group-hover/brain:text-ink/50"
-                >
-                  <Settings2 size={13} strokeWidth={1.75} />
-                </button>
-              ) : null}
             </div>
           );
         })}
@@ -97,13 +93,6 @@ export function GoatBrainSwitcher() {
         </button>
       </div>
       {creating ? <CreateBrainDialog onClose={() => setCreating(false)} /> : null}
-      {accessBrain ? (
-        <BrainAccessDialog
-          brain={accessBrain}
-          workspace={workspace}
-          onClose={() => setAccessBrain(null)}
-        />
-      ) : null}
     </>
   );
 }
