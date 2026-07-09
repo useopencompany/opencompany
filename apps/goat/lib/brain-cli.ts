@@ -442,7 +442,7 @@ function renderQueryHits(hits: GoatBrainSearchHit[]): string {
       const neighbors = hit.neighbors
         .map(
           (link) =>
-            `${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title})`,
+            `${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title}, ${link.kind}/${link.type})`,
         )
         .join(", ");
       return [
@@ -503,7 +503,7 @@ function renderDocument(doc: GoatBrainDocumentRead, section: string): string {
     ? doc.links
         .map(
           (link) =>
-            `- ${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title})`,
+            `- ${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title}, ${link.kind}/${link.type})`,
         )
         .join("\n")
     : "_No links._";

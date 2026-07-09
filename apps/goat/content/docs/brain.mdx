@@ -38,7 +38,7 @@ Documents reference each other with typed inline links:
 - `[[evidence:ev-some-id|Label]]` — citation of an evidence document.
 - `[[source:provider:id|Label]]` — pointer to an external system, e.g. `[[source:jamie:meeting:123|Jamie notes]]`.
 
-Edges are **derived, not authored**: `deriveGoatBrainEdges` in `packages/goat-brain/src/edges.ts` extracts them from frontmatter relations and inline links, and they are persisted to `goat.brain_edges` on every write. Edge types are the relation type, `wiki_link` for page links, and `cites` for evidence citations. The UI's backlinks panel and the retrieval graph expansion both read these edges.
+Edges are **derived, not authored**: `deriveGoatBrainEdges` in `packages/goat-brain/src/edges.ts` extracts them from frontmatter relations and inline links, and they are persisted to `goat.brain_edges` on every write. Edge types are the relation type, `wiki_link` for page links, and `cites` for evidence citations. The UI separates page links from evidence links, while retrieval returns link metadata for both and keeps hop expansion focused on pages.
 
 ## The pointer/copy contract
 

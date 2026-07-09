@@ -103,6 +103,17 @@ type BrainGraphLink = {
   sourceKind: "relation" | "wiki_link";
 };
 
+type ResolvedBrainGraphLink = BrainGraphLink & {
+  direction: "out" | "in";
+  peer: GoatBrainDocumentView;
+  peerId: string;
+};
+
+type EvidenceGraphItem = {
+  peer: GoatBrainDocumentView;
+  relationTypes: string[];
+};
+
 type FolderDialogState =
   | { kind: "create"; initialPath?: string }
   | { kind: "rename"; path: string };
@@ -1219,8 +1230,32 @@ function BrainMetadataSidebar({
     () => new Map(documents.map((item) => [item.brainId, item])),
     [documents],
   );
-  const outgoingLinks = graphLinks.filter((link) => link.from === document.brainId);
-  const backlinks = graphLinks.filter((link) => link.to === document.brainId);
+  const outgoingLinks = useMemo(
+    () =>
+      resolveGraphLinks(
+        graphLinks.filter((link) => link.from === document.brainId),
+        documentsByBrainId,
+        "out",
+      ),
+    [document.brainId, documentsByBrainId, graphLinks],
+  );
+  const backlinks = useMemo(
+    () =>
+      resolveGraphLinks(
+        graphLinks.filter((link) => link.to === document.brainId),
+        documentsByBrainId,
+        "in",
+      ),
+    [document.brainId, documentsByBrainId, graphLinks],
+  );
+  const pageOutgoingLinks = outgoingLinks.filter((link) => link.peer.kind === "page");
+  const pageBacklinks = backlinks.filter((link) => link.peer.kind === "page");
+  const evidenceItems =
+    document.kind === "evidence"
+      ? []
+      : evidenceGraphItems(
+          [...outgoingLinks, ...backlinks].filter((link) => link.peer.kind === "evidence"),
+        );
 
   return (
     <aside
@@ -1274,20 +1309,17 @@ function BrainMetadataSidebar({
 
       <GraphLinksList
         title="Outgoing"
-        links={outgoingLinks}
-        documentsByBrainId={documentsByBrainId}
+        links={pageOutgoingLinks}
         empty="No outgoing links."
-        direction="out"
         routeBrainId={routeBrainId}
       />
       <GraphLinksList
         title="Backlinks"
-        links={backlinks}
-        documentsByBrainId={documentsByBrainId}
+        links={pageBacklinks}
         empty="No backlinks."
-        direction="in"
         routeBrainId={routeBrainId}
       />
+      <EvidenceLinksList items={evidenceItems} routeBrainId={routeBrainId} />
     </aside>
   );
 }
@@ -1413,16 +1445,12 @@ function SidebarTimelineSection({ document }: { document: GoatBrainDocumentView 
 function GraphLinksList({
   title,
   links,
-  documentsByBrainId,
   empty,
-  direction,
   routeBrainId,
 }: {
   title: string;
-  links: BrainGraphLink[];
-  documentsByBrainId: Map<string, GoatBrainDocumentView>;
+  links: ResolvedBrainGraphLink[];
   empty: string;
-  direction: "out" | "in";
   routeBrainId: string | null | undefined;
 }) {
   return (
@@ -1434,37 +1462,87 @@ function GraphLinksList({
       {links.length > 0 ? (
         <ol className="max-h-32 space-y-1 overflow-y-auto pr-1 text-[12px] leading-5">
           {links.map((link) => {
-            const peerId = direction === "out" ? link.to : link.from;
-            const peer = documentsByBrainId.get(peerId);
             return (
               <li
                 key={`${link.sourceKind}:${link.type}:${link.from}:${link.to}`}
                 className="min-w-0"
               >
-                {peer ? (
-                  <Link
-                    href={brainDocumentUrl(peer, routeBrainId)}
-                    className="flex min-w-0 items-center gap-1.5 rounded-sm text-ink-muted hover:text-ink"
-                  >
-                    <span className="truncate">{peer.title || peer.brainId}</span>
-                    <span className="shrink-0 text-ink-subtle">
-                      {direction === "out" ? "->" : "<-"} {link.type}
-                    </span>
-                  </Link>
-                ) : (
-                  <span className="flex min-w-0 items-center gap-1.5 text-ink-muted">
-                    <span className="truncate">{peerId}</span>
-                    <span className="shrink-0 text-ink-subtle">
-                      {direction === "out" ? "->" : "<-"} {link.type}
-                    </span>
+                <Link
+                  href={brainDocumentUrl(link.peer, routeBrainId)}
+                  className="flex min-w-0 items-center gap-1.5 rounded-sm text-ink-muted hover:text-ink"
+                >
+                  <span className="truncate">{link.peer.title || link.peer.brainId}</span>
+                  <span className="shrink-0 text-ink-subtle">
+                    {link.direction === "out" ? "->" : "<-"} {link.type}
                   </span>
-                )}
+                </Link>
               </li>
             );
           })}
         </ol>
       ) : (
         <p className="text-[12px] text-ink-subtle">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+function resolveGraphLinks(
+  links: BrainGraphLink[],
+  documentsByBrainId: Map<string, GoatBrainDocumentView>,
+  direction: "out" | "in",
+): ResolvedBrainGraphLink[] {
+  return links.flatMap((link) => {
+    const peerId = direction === "out" ? link.to : link.from;
+    const peer = documentsByBrainId.get(peerId);
+    return peer ? [{ ...link, direction, peer, peerId }] : [];
+  });
+}
+
+function evidenceGraphItems(links: ResolvedBrainGraphLink[]): EvidenceGraphItem[] {
+  const byEvidenceId = new Map<string, EvidenceGraphItem>();
+  for (const link of links) {
+    const current = byEvidenceId.get(link.peerId);
+    if (current) {
+      if (!current.relationTypes.includes(link.type)) current.relationTypes.push(link.type);
+      continue;
+    }
+    byEvidenceId.set(link.peerId, { peer: link.peer, relationTypes: [link.type] });
+  }
+  return [...byEvidenceId.values()].sort((a, b) =>
+    (a.peer.title || a.peer.brainId).localeCompare(b.peer.title || b.peer.brainId),
+  );
+}
+
+function EvidenceLinksList({
+  items,
+  routeBrainId,
+}: {
+  items: EvidenceGraphItem[];
+  routeBrainId: string | null | undefined;
+}) {
+  return (
+    <section className="min-w-0">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h2 className="text-[12px] font-semibold text-ink">Evidence</h2>
+        <span className="text-[12px] text-ink-subtle">{items.length}</span>
+      </div>
+      {items.length > 0 ? (
+        <ol className="max-h-32 space-y-1 overflow-y-auto pr-1 text-[12px] leading-5">
+          {items.map((item) => (
+            <li key={item.peer.brainId} className="min-w-0">
+              <Link
+                href={brainDocumentUrl(item.peer, routeBrainId)}
+                className="flex min-w-0 items-center gap-1.5 rounded-sm text-ink-muted hover:text-ink"
+              >
+                <span className="truncate">{item.peer.title || item.peer.brainId}</span>
+                <span className="shrink-0 text-ink-subtle">{item.relationTypes.join(", ")}</span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-[12px] text-ink-subtle">No evidence links.</p>
       )}
     </section>
   );
