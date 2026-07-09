@@ -5,6 +5,7 @@ import { currentGoatUser } from "@/lib/auth";
 import { listCurrentUserGoatBrain } from "@/lib/brain";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
+import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
 import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
@@ -86,6 +87,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
         lastValidatedAt: codex.lastValidatedAt,
       },
     }),
+    featureFlags: goatFeatureFlagsFromUser(user),
     brain,
     codexConnected: codex.status === "connected",
   };

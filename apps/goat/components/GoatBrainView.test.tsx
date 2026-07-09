@@ -208,6 +208,7 @@ describe("GoatBrainView", () => {
 
     expect(screen.getAllByRole("treeitem").map((item) => item.textContent)).toEqual([
       "inbox",
+      "thoughts",
       "projects",
       "meetings",
       "research",
@@ -491,6 +492,7 @@ const orderedFolders: GoatBrainFolderView[] = [
   folder("companies", "system"),
   folder("inbox", "system"),
   folder("partners", "custom"),
+  folder("thoughts", "custom"),
   folder("concepts", "custom"),
   folder("research", "custom"),
   folder("projects", "custom"),

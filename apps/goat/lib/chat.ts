@@ -326,6 +326,7 @@ function toChatSessionView(
     id: session.id,
     title: session.title,
     model: session.model,
+    engine: session.engine,
     messages: messages.map(toGoatChatUiMessage),
   };
 }
@@ -338,6 +339,7 @@ function toChatSummaryView(
     id: session.id,
     title: session.title,
     model: session.model,
+    engine: session.engine,
     preview: previewFromMessages(messages),
     updatedAt: session.updatedAt.toISOString(),
   };

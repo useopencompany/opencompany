@@ -496,6 +496,7 @@ Useful local-only vars:
 | `OPENCOMPANY_NGROK_REQUIRED` | Set to `1` to fail `bun run dev` when ngrok cannot start. Fixed ngrok URLs are treated as required. |
 | `OPENCOMPANY_NGROK_DISABLED` | Set to `1` to skip automatic ngrok startup in `bun run dev`. |
 | `OPENCOMPANY_GOAT_HTTPS_DISABLED` | Set to `1` to skip automatic Caddy HTTPS for `bun run dev:goat`; Goat falls back to HTTP on `GOAT_PORT`. |
+| `GOAT_LOCAL_PROJECTS_DIR` | Optional managed clone folder for Local Codex. Defaults to `~/.opencompany/goat/projects`; `bun run dev:goat` creates it when the local bridge launcher starts. |
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
 
 For local integration testing, `bun run dev` starts ngrok automatically when the local ngrok CLI is

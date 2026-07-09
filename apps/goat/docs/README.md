@@ -8,12 +8,15 @@ For the Brain (Goat's knowledge store — data model, ingestion, tools, contract
 
 ## Current Shape
 
-Goat has two LLM paths:
+Goat has three LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
    This agent answers directly, calls `goat_brain`, or calls `start_task`.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
+3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
+   The bridge creates a clean session folder under `~/.opencompany/goat/sessions`, runs
+   `codex app-server`, and posts normalized Codex events back into the Goat chat.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -37,6 +40,9 @@ Browser
         OR call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
+    OR Local Codex mode
+      POST /api/local-codex/messages
+        enqueue local Codex bridge command
 
 Runner
   Goat task worker wakes/polls
@@ -49,7 +55,7 @@ Runner
     mark task succeeded, failed, or canceled
 
 Goat UI
-  subscribes to Electric task, task message, and task event shapes
+  subscribes to Electric task, chat, and local Codex shapes
 ```
 
 ## Foreground Chat Loop
@@ -124,6 +130,55 @@ Important runtime settings:
 
 The chat path is a normal request/response stream. It has no runner lease or durable retry. The
 durable boundary starts only when `start_task` creates a task row.
+
+## Local Codex Chat
+
+Entry points:
+
+- `apps/goat/components/GoatSurface.tsx`
+- `apps/goat/app/api/local-codex/*`
+- `apps/goat/lib/local-codex.ts`
+- `apps/goat-local-bridge/src/index.ts`
+- `packages/agent-runtime/src/codex-app-server-events.ts`
+
+`Local Codex` is a beta-gated composer engine mode, not a normal model id. Users enable the `Local
+Codex bridge` beta in Goat Settings before the picker option, pairing API, message API, or bridge
+token APIs are available. First messages do not need a repo path for the MVP. Goat persists a
+`local_codex` chat session, creates user and assistant chat rows, and queues a `start_turn` command
+for the most recent active bridge for that user. The bridge starts Codex in a new local session
+folder at `~/.opencompany/goat/sessions/<session-id>`.
+
+In local development, `bun run dev:goat` starts the bridge launcher as part of the Turbo dev stack.
+The launcher waits until the selected Goat user has enabled the `Local Codex bridge` beta, then
+creates or reuses a gitignored token at
+`.context/goat-local-bridge/dev-token.json` for the most recent Goat user, waits for the Goat app,
+then runs the bridge against `http://127.0.0.1:3002` by default. Set
+`GOAT_LOCAL_BRIDGE_DISABLED=1` to skip this, or `GOAT_LOCAL_BRIDGE_USER_WORKOS_ID` to pin the dev
+bridge to a specific local user.
+
+Goat creates `~/.opencompany/goat/projects` as the managed project clone folder during local bridge
+startup for future repo-open flows. For the current MVP, Local Codex sessions start in empty
+per-session folders. Set `GOAT_LOCAL_PROJECTS_DIR` to use a different managed folder.
+
+The local bridge authenticates with a bridge token, long-polls
+`/api/local-codex/bridge/commands`, and acknowledges each command after it has called Codex
+app-server. It launches Codex app-server with `--dangerously-bypass-approvals-and-sandbox` and
+`shell_environment_policy.inherit=all`, so local sessions run with the user's local machine
+permissions and inherited environment. Existing local GitHub auth, SSH agent, git credential helper,
+and `gh` auth should be available to the session. When a command includes a repo path, it validates
+that repo paths are absolute Git repos under `$HOME`, creates detached tracked-HEAD worktrees only,
+and never copies dirty changes or edits the original repo checkout. Commands without a repo path use
+a clean session folder instead.
+
+Codex app-server notifications are normalized in `@opencompany/agent-runtime` before Goat stores
+them in `goat.local_codex_events`. Assistant deltas are persisted as raw events, but Goat only
+writes the assistant chat text from completed assistant messages so the UI does not stream token by
+token. Command, reasoning, error, and turn lifecycle events append compact activity text. The chat UI
+subscribes to `goat.chat_messages` and `goat.local_codex_sessions` through Electric so local Codex
+output and running/interrupt state update live.
+
+While a local Codex turn is running, the composer stays enabled. Submitting more text queues
+`turn/steer`; the dedicated stop control queues `turn/interrupt`.
 
 ## Task Creation
 
@@ -342,11 +397,17 @@ Goat-specific tables live in `packages/db/src/goat-schema.ts`.
 
 Important tables:
 
-- `goat.users`: WorkOS-backed Goat user profile.
+- `goat.users`: WorkOS-backed Goat user profile, including the `local_codex_beta_enabled` beta flag.
 - `goat.chat_sessions`: one open or closed chat thread per user.
 - `goat.chat_messages`: persisted user and assistant chat messages. Assistant messages can point
   at a `taskId` so the UI can render a task card. Task completion notifications are also persisted
   here as synthetic assistant messages.
+- `goat.local_bridges`: paired local Codex bridge records with hashed tokens and heartbeat state.
+- `goat.local_codex_sessions`: per-chat local Codex runtime metadata such as repo path, worktree
+  path, Codex thread id, active turn, status, and error.
+- `goat.local_codex_turns`: local Codex user and assistant message linkage plus Codex turn status.
+- `goat.local_codex_commands`: queued bridge commands for start, steer, interrupt, and close.
+- `goat.local_codex_events`: raw app-server notifications plus normalized event type and payload.
 - `goat.tasks`: durable background task queue, status, stage, result, error, lease, harness spec,
   debug trace, and sandbox id.
 - `goat.task_messages`: durable task transcript rows for user, assistant, and tool messages.

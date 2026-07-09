@@ -28,6 +28,8 @@ A brain document is a markdown file with YAML frontmatter, stored at `folder/id.
 
 The body has two zones: a **compiled truth** section that writers rewrite in place (never append-only), and a **timeline** of dated evidence entries, each with a deterministic `ev-` id, a timestamp, and a source reference. Timeline entries are also denormalized into their own table so the UI can query them efficiently.
 
+Ideas and thoughts do not introduce another `kind`. `kind` remains the page/evidence boundary. A saved user-authored idea starts as a draft `note` in `inbox/`, then curation either merges it into an existing page, promotes it to a `concept`, updates or creates a `project`, files a rationale under `decisions/` with the best existing type, moves a durable raw reflection to `thoughts/` as a `note`, or leaves it in `inbox/` when it is still uncurated.
+
 ## Links and the graph
 
 Documents reference each other with typed inline links:
@@ -80,6 +82,8 @@ When the user asks chat to keep something — "save this reference", "here's an 
 2. **Curate later.** The same call normalizes a `goat-chat`/`capture` source item, enqueues a `brain_agent_ingest` job pinned to the active brain, and wakes the runner. The capture-curation agent then reads the draft, checks the brain for an existing home, and either folds the content into an existing page (retiring the draft via `merge`) or promotes the draft in place: `append-evidence` to snapshot the raw capture, `rewrite` compiled truth citing it, `set` the proper title and type, `move` it to the right folder, and mark it `active`.
 
 Duplicate `save_to_brain` calls within one chat turn dedupe to a single draft; identical webhook re-deliveries dedupe at the source-item layer via content hash.
+
+For ideas and thoughts, the curation agent applies an authorship test before topical filing. A user or team-authored idea with future value belongs in Brain even when rough; an agent behavior preference belongs in Memory; conversation-only scratch stays in chat. Brain-worthy ideas use the existing type and folder model: reusable abstractions become `concept` pages, concrete initiatives update `project` pages, choices or rationales go to the natural subject or `decisions/`, durable raw reflections move to `thoughts/` as `note` pages, and unresolved material remains a draft `note` in `inbox/`.
 
 ### 3. The `goat_brain` chat tool
 

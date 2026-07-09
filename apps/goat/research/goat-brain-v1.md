@@ -146,6 +146,8 @@ Recommended v1 top-level folders:
 
 - `inbox/` - unresolved or unclassified material. Inbox volume is a schema signal, not a dumping
   ground.
+- `thoughts/` - user-owned reflections, takes, and raw ideas that are more durable than inbox but
+  not yet reusable concepts.
 - `people/` - humans.
 - `companies/` - companies, organizations, funds, institutions.
 - `projects/` - ongoing initiatives owned or tracked by the user.
@@ -189,11 +191,12 @@ Suggested first-match rules:
    canonical subjects.
 4. If the item is primarily about a human, file under `people/`.
 5. If the item is primarily about an organization, file under `companies/`.
-6. If the item is primarily about an ongoing user initiative, file under `projects/`.
-7. If the item records a meaningful choice or rationale, file under `decisions/`.
-8. If the item is a produced investigation or answer, file under `research/`.
-9. If the item is a reusable abstraction, term, or framework, file under `concepts/`.
-10. If no rule fits, file under `inbox/` and mark why classification failed.
+6. If the item is a user-owned reflection, take, or raw idea, file under `thoughts/`.
+7. If the item is primarily about an ongoing user initiative, file under `projects/`.
+8. If the item records a meaningful choice or rationale, file under `decisions/`.
+9. If the item is a produced investigation or answer, file under `research/`.
+10. If the item is a reusable abstraction, term, or framework, file under `concepts/`.
+11. If no rule fits, file under `inbox/` and mark why classification failed.
 
 Disambiguation rules:
 

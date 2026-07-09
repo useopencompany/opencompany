@@ -11,6 +11,7 @@ describe("Goat Brain folder taxonomy", () => {
   it("orders the hard and adjustable defaults in the designed root order", () => {
     expect(defaultGoatBrainFolderManifestEntries().map((entry) => entry.path)).toEqual([
       "inbox",
+      "thoughts",
       "projects",
       "meetings",
       "research",
@@ -27,6 +28,7 @@ describe("Goat Brain folder taxonomy", () => {
     expect(goatBrainFolderSourceForPath("people")).toBe("system");
     expect(goatBrainFolderSourceForPath("companies")).toBe("system");
     expect(goatBrainFolderSourceForPath("evidence")).toBe("system");
+    expect(goatBrainFolderSourceForPath("thoughts")).toBe("custom");
     expect(goatBrainFolderSourceForPath("research")).toBe("custom");
     expect(goatBrainFolderSourceForPath("people/acme")).toBe("custom");
   });

@@ -1,10 +1,15 @@
 import { streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
+import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
-import { GOAT_BRAIN_TOOL_PART_TYPE, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
+import {
+  GOAT_BRAIN_TOOL_PART_TYPE,
+  SAVE_TO_BRAIN_TOOL_NAME,
+  START_TASK_TOOL_NAME,
+} from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
@@ -21,6 +26,10 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/brain-cli", () => ({
   runGoatBrainToolForUser: vi.fn(),
+}));
+
+vi.mock("@/lib/brain-capture", () => ({
+  captureToGoatBrainInbox: vi.fn(),
 }));
 
 vi.mock("@/lib/chat", () => ({
@@ -198,19 +207,69 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(200);
   });
 
-  it("wires brain create saves into the model stream", async () => {
+  it("wires save_to_brain captures into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockRunGoatBrainToolForUser().mockResolvedValue({
+    mockCaptureToGoatBrainInbox().mockResolvedValue({
       ok: true,
-      exitCode: 0,
-      stdout: JSON.stringify({
-        ok: true,
-        id: "acme",
-        path: "companies/acme.md",
-      }),
-      stderr: "",
+      draftBrainId: "acme",
+      path: "inbox/acme.md",
+      title: "Acme",
+      jobId: "goat_brain_ingest_job_1",
+      enqueued: true,
     });
+    let saveToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { [SAVE_TO_BRAIN_TOOL_NAME]?: { execute?: unknown } } })
+        .tools?.[SAVE_TO_BRAIN_TOOL_NAME];
+      if (typeof tool?.execute !== "function") {
+        throw new Error("save_to_brain execute function was not configured.");
+      }
+      saveToolPromise = tool.execute({
+        content: "Acme is a company building billing tools.",
+        title: "Acme",
+        intent: "company note from chat",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const request = jsonRequest({
+      model: "openai/gpt-5.5",
+      message: {
+        id: "ui_user_1",
+        role: "user",
+        parts: [{ type: "text", text: "remember Acme is a company building billing tools" }],
+      },
+    });
+    const response = await POST(request);
+    if (!saveToolPromise) throw new Error("save_to_brain was not executed.");
+    const output = await saveToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(output).toEqual({
+      ok: true,
+      draftId: "acme",
+      path: "inbox/acme.md",
+      title: "Acme",
+      status: "captured",
+    });
+    expect(captureToGoatBrainInbox).toHaveBeenCalledWith({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      text: "Acme is a company building billing tools.",
+      title: "Acme",
+      intent: "company note from chat",
+      chatSessionId: "session_1",
+      userMessageId: "user_message_1",
+    });
+    expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects direct brain create from the chat tool before the CLI runner", async () => {
+    mockAuth();
+    mockCreateTurn();
     let brainToolPromise: Promise<unknown> | null = null;
     mockStreamText().mockImplementation((options: unknown) => {
       const tool = (options as { tools?: { goat_brain?: { execute?: unknown } } }).tools
@@ -247,31 +306,11 @@ describe("POST /api/chat", () => {
       },
     });
     const response = await POST(request);
-    await brainToolPromise;
+    if (!brainToolPromise) throw new Error("goat_brain was not executed.");
+    await expect(brainToolPromise).rejects.toThrow("goat_brain command is invalid");
 
     expect(response.status).toBe(200);
-    expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
-      brainRef: "goat_brain_user_1",
-      userWorkosId: "user_1",
-      toolInput: {
-        command: "create",
-        flags: {
-          id: "acme",
-          folder: "companies",
-          title: "Acme",
-          type: "company",
-          truth: "Acme is a company building billing tools.",
-          sourceTitle: "User chat note",
-          json: true,
-        },
-      },
-      gatewayApiKey: "test-key",
-      sourceRef: "goat-chat:user_message_1",
-      chatSessionId: "session_1",
-      userMessageId: "user_message_1",
-      toolCallId: "tool_call_1",
-      signal: request.signal,
-    });
+    expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
   });
 
   it("wires Exa-backed web_search into the model stream when configured", async () => {
@@ -971,6 +1010,10 @@ function mockPersistGoatChatAssistantMessage() {
 
 function mockRunGoatBrainToolForUser() {
   return vi.mocked(runGoatBrainToolForUser);
+}
+
+function mockCaptureToGoatBrainInbox() {
+  return vi.mocked(captureToGoatBrainInbox);
 }
 
 function mockIsGoatCodexConnectedForUser() {

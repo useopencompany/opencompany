@@ -221,9 +221,39 @@ export type GoatTaskDebugTrace = {
 };
 
 export type GoatChatRole = "user" | "assistant";
+export type GoatChatEngine = "opencompany" | "local_codex";
+
+export type GoatLocalCodexSessionStatus =
+  | "starting"
+  | "idle"
+  | "running"
+  | "failed"
+  | "interrupted"
+  | "closed";
+export type GoatLocalCodexTurnStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "interrupted";
+export type GoatLocalCodexCommandKind = "start_turn" | "steer" | "interrupt" | "close";
+export type GoatLocalCodexCommandStatus = "queued" | "claimed" | "succeeded" | "failed";
+export type GoatLocalCodexEventType =
+  | "assistant.delta"
+  | "assistant.completed"
+  | "reasoning.completed"
+  | "command.started"
+  | "command.output"
+  | "command.completed"
+  | "command.failed"
+  | "turn.started"
+  | "turn.completed"
+  | "usage.updated"
+  | "error"
+  | "unknown";
 
 export type GoatChatMessageDebugTrace = {
-  schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1";
+  schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1" | "goat.local_codex.debug.v1";
   model?: string;
   aborted?: boolean;
   finishReason?: string;
@@ -245,6 +275,7 @@ export const goatUsers = goat.table("users", {
   lastName: text("last_name"),
   avatarUrl: text("avatar_url"),
   timezone: text("timezone").notNull().default("UTC"),
+  localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -1396,6 +1427,7 @@ export const goatChatSessions = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     title: text("title").notNull().default("New chat"),
     model: text("model").$type<AgentModelId>().notNull(),
+    engine: text("engine").$type<GoatChatEngine>().notNull().default("opencompany"),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1405,6 +1437,10 @@ export const goatChatSessions = goat.table(
       table.userWorkosId,
       table.closedAt,
       table.updatedAt,
+    ),
+    engineCheck: check(
+      "goat_chat_sessions_engine_check",
+      sql`${table.engine} IN ('opencompany', 'local_codex')`,
     ),
   }),
 );
@@ -1430,6 +1466,195 @@ export const goatChatMessages = goat.table(
     ),
     taskIdx: index("goat_chat_messages_task_idx").on(table.taskId),
     roleCheck: check("goat_chat_messages_role_check", sql`${table.role} IN ('user', 'assistant')`),
+  }),
+);
+
+export const goatLocalBridges = goat.table(
+  "local_bridges",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userLastSeenIdx: index("goat_local_bridges_user_last_seen_idx").on(
+      table.userWorkosId,
+      table.lastSeenAt,
+    ),
+    tokenHashIdx: uniqueIndex("goat_local_bridges_token_hash_idx").on(table.tokenHash),
+  }),
+);
+
+export const goatLocalCodexSessions = goat.table(
+  "local_codex_sessions",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, { onDelete: "set null" }),
+    repositoryPath: text("repository_path"),
+    worktreePath: text("worktree_path"),
+    model: text("model").notNull().default("gpt-5.5"),
+    codexThreadId: text("codex_thread_id"),
+    activeTurnId: text("active_turn_id"),
+    status: text("status").$type<GoatLocalCodexSessionStatus>().notNull().default("starting"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    chatSessionIdx: uniqueIndex("goat_local_codex_sessions_chat_session_idx").on(
+      table.chatSessionId,
+    ),
+    userUpdatedIdx: index("goat_local_codex_sessions_user_updated_idx").on(
+      table.userWorkosId,
+      table.updatedAt,
+    ),
+    bridgeIdx: index("goat_local_codex_sessions_bridge_idx").on(table.bridgeId),
+    statusCheck: check(
+      "goat_local_codex_sessions_status_check",
+      sql`${table.status} IN ('starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
+    ),
+  }),
+);
+
+export const goatLocalCodexTurns = goat.table(
+  "local_codex_turns",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    localCodexSessionId: text("local_codex_session_id")
+      .notNull()
+      .references(() => goatLocalCodexSessions.id, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id")
+      .notNull()
+      .references(() => goatChatMessages.id, { onDelete: "cascade" }),
+    assistantMessageId: text("assistant_message_id")
+      .notNull()
+      .references(() => goatChatMessages.id, { onDelete: "cascade" }),
+    codexTurnId: text("codex_turn_id"),
+    status: text("status").$type<GoatLocalCodexTurnStatus>().notNull().default("queued"),
+    prompt: text("prompt").notNull(),
+    error: text("error"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionCreatedIdx: index("goat_local_codex_turns_session_created_idx").on(
+      table.localCodexSessionId,
+      table.createdAt,
+    ),
+    userCreatedIdx: index("goat_local_codex_turns_user_created_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    assistantMessageIdx: uniqueIndex("goat_local_codex_turns_assistant_message_idx").on(
+      table.assistantMessageId,
+    ),
+    statusCheck: check(
+      "goat_local_codex_turns_status_check",
+      sql`${table.status} IN ('queued', 'running', 'completed', 'failed', 'interrupted')`,
+    ),
+  }),
+);
+
+export const goatLocalCodexCommands = goat.table(
+  "local_codex_commands",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    localCodexSessionId: text("local_codex_session_id")
+      .notNull()
+      .references(() => goatLocalCodexSessions.id, { onDelete: "cascade" }),
+    localCodexTurnId: text("local_codex_turn_id").references(() => goatLocalCodexTurns.id, {
+      onDelete: "set null",
+    }),
+    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, { onDelete: "set null" }),
+    claimedByBridgeId: text("claimed_by_bridge_id").references(() => goatLocalBridges.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").$type<GoatLocalCodexCommandKind>().notNull(),
+    status: text("status").$type<GoatLocalCodexCommandStatus>().notNull().default("queued"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    error: text("error"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    bridgeQueuedIdx: index("goat_local_codex_commands_bridge_queued_idx").on(
+      table.bridgeId,
+      table.status,
+      table.createdAt,
+    ),
+    sessionCreatedIdx: index("goat_local_codex_commands_session_created_idx").on(
+      table.localCodexSessionId,
+      table.createdAt,
+    ),
+    statusCheck: check(
+      "goat_local_codex_commands_status_check",
+      sql`${table.status} IN ('queued', 'claimed', 'succeeded', 'failed')`,
+    ),
+    kindCheck: check(
+      "goat_local_codex_commands_kind_check",
+      sql`${table.kind} IN ('start_turn', 'steer', 'interrupt', 'close')`,
+    ),
+  }),
+);
+
+export const goatLocalCodexEvents = goat.table(
+  "local_codex_events",
+  {
+    id: serial("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    localCodexSessionId: text("local_codex_session_id")
+      .notNull()
+      .references(() => goatLocalCodexSessions.id, { onDelete: "cascade" }),
+    localCodexTurnId: text("local_codex_turn_id").references(() => goatLocalCodexTurns.id, {
+      onDelete: "set null",
+    }),
+    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, { onDelete: "set null" }),
+    commandId: text("command_id").references(() => goatLocalCodexCommands.id, {
+      onDelete: "set null",
+    }),
+    type: text("type").$type<GoatLocalCodexEventType>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    rawEvent: jsonb("raw_event").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionCreatedIdx: index("goat_local_codex_events_session_created_idx").on(
+      table.localCodexSessionId,
+      table.createdAt,
+    ),
+    turnCreatedIdx: index("goat_local_codex_events_turn_created_idx").on(
+      table.localCodexTurnId,
+      table.createdAt,
+    ),
+    typeCheck: check(
+      "goat_local_codex_events_type_check",
+      sql`${table.type} IN ('assistant.delta', 'assistant.completed', 'reasoning.completed', 'command.started', 'command.output', 'command.completed', 'command.failed', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+    ),
   }),
 );
 
@@ -1547,6 +1772,11 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
   chatSessions: many(goatChatSessions),
+  localBridges: many(goatLocalBridges),
+  localCodexSessions: many(goatLocalCodexSessions),
+  localCodexTurns: many(goatLocalCodexTurns),
+  localCodexCommands: many(goatLocalCodexCommands),
+  localCodexEvents: many(goatLocalCodexEvents),
   integrations: many(goatIntegrations),
   integrationCredentials: many(goatIntegrationCredentials),
   integrationResources: many(goatIntegrationResources),
@@ -1679,6 +1909,107 @@ export const goatBrainToolRunsRelations = relations(goatBrainToolRuns, ({ one })
     fields: [goatBrainToolRuns.assistantMessageId],
     references: [goatChatMessages.id],
     relationName: "goat_brain_tool_runs_assistant_message",
+  }),
+}));
+
+export const goatLocalBridgesRelations = relations(goatLocalBridges, ({ one, many }) => ({
+  user: one(goatUsers, {
+    fields: [goatLocalBridges.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  sessions: many(goatLocalCodexSessions),
+  events: many(goatLocalCodexEvents),
+}));
+
+export const goatLocalCodexSessionsRelations = relations(
+  goatLocalCodexSessions,
+  ({ one, many }) => ({
+    user: one(goatUsers, {
+      fields: [goatLocalCodexSessions.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+    chatSession: one(goatChatSessions, {
+      fields: [goatLocalCodexSessions.chatSessionId],
+      references: [goatChatSessions.id],
+    }),
+    bridge: one(goatLocalBridges, {
+      fields: [goatLocalCodexSessions.bridgeId],
+      references: [goatLocalBridges.id],
+    }),
+    turns: many(goatLocalCodexTurns),
+    commands: many(goatLocalCodexCommands),
+    events: many(goatLocalCodexEvents),
+  }),
+);
+
+export const goatLocalCodexTurnsRelations = relations(goatLocalCodexTurns, ({ one, many }) => ({
+  user: one(goatUsers, {
+    fields: [goatLocalCodexTurns.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  localCodexSession: one(goatLocalCodexSessions, {
+    fields: [goatLocalCodexTurns.localCodexSessionId],
+    references: [goatLocalCodexSessions.id],
+  }),
+  userMessage: one(goatChatMessages, {
+    fields: [goatLocalCodexTurns.userMessageId],
+    references: [goatChatMessages.id],
+    relationName: "goat_local_codex_turns_user_message",
+  }),
+  assistantMessage: one(goatChatMessages, {
+    fields: [goatLocalCodexTurns.assistantMessageId],
+    references: [goatChatMessages.id],
+    relationName: "goat_local_codex_turns_assistant_message",
+  }),
+  commands: many(goatLocalCodexCommands),
+  events: many(goatLocalCodexEvents),
+}));
+
+export const goatLocalCodexCommandsRelations = relations(goatLocalCodexCommands, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatLocalCodexCommands.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  localCodexSession: one(goatLocalCodexSessions, {
+    fields: [goatLocalCodexCommands.localCodexSessionId],
+    references: [goatLocalCodexSessions.id],
+  }),
+  localCodexTurn: one(goatLocalCodexTurns, {
+    fields: [goatLocalCodexCommands.localCodexTurnId],
+    references: [goatLocalCodexTurns.id],
+  }),
+  bridge: one(goatLocalBridges, {
+    fields: [goatLocalCodexCommands.bridgeId],
+    references: [goatLocalBridges.id],
+    relationName: "goat_local_codex_commands_bridge",
+  }),
+  claimedByBridge: one(goatLocalBridges, {
+    fields: [goatLocalCodexCommands.claimedByBridgeId],
+    references: [goatLocalBridges.id],
+    relationName: "goat_local_codex_commands_claimed_bridge",
+  }),
+}));
+
+export const goatLocalCodexEventsRelations = relations(goatLocalCodexEvents, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatLocalCodexEvents.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  localCodexSession: one(goatLocalCodexSessions, {
+    fields: [goatLocalCodexEvents.localCodexSessionId],
+    references: [goatLocalCodexSessions.id],
+  }),
+  localCodexTurn: one(goatLocalCodexTurns, {
+    fields: [goatLocalCodexEvents.localCodexTurnId],
+    references: [goatLocalCodexTurns.id],
+  }),
+  bridge: one(goatLocalBridges, {
+    fields: [goatLocalCodexEvents.bridgeId],
+    references: [goatLocalBridges.id],
+  }),
+  command: one(goatLocalCodexCommands, {
+    fields: [goatLocalCodexEvents.commandId],
+    references: [goatLocalCodexCommands.id],
   }),
 }));
 
@@ -1878,9 +2209,10 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
   }),
   messages: many(goatChatMessages),
   brainToolRuns: many(goatBrainToolRuns),
+  localCodexSessions: many(goatLocalCodexSessions),
 }));
 
-export const goatChatMessagesRelations = relations(goatChatMessages, ({ one }) => ({
+export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, many }) => ({
   session: one(goatChatSessions, {
     fields: [goatChatMessages.sessionId],
     references: [goatChatSessions.id],
@@ -1888,6 +2220,12 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one }) =
   task: one(goatTasks, {
     fields: [goatChatMessages.taskId],
     references: [goatTasks.id],
+  }),
+  localCodexUserTurns: many(goatLocalCodexTurns, {
+    relationName: "goat_local_codex_turns_user_message",
+  }),
+  localCodexAssistantTurns: many(goatLocalCodexTurns, {
+    relationName: "goat_local_codex_turns_assistant_message",
   }),
 }));
 
@@ -1903,6 +2241,11 @@ export type GoatBrainEdge = typeof goatBrainEdges.$inferSelect;
 export type GoatBrainDocumentEmbedding = typeof goatBrainDocumentEmbeddings.$inferSelect;
 export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSelect;
 export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
+export type GoatLocalBridge = typeof goatLocalBridges.$inferSelect;
+export type GoatLocalCodexSession = typeof goatLocalCodexSessions.$inferSelect;
+export type GoatLocalCodexTurn = typeof goatLocalCodexTurns.$inferSelect;
+export type GoatLocalCodexCommand = typeof goatLocalCodexCommands.$inferSelect;
+export type GoatLocalCodexEvent = typeof goatLocalCodexEvents.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;
 export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$inferSelect;
 export type GoatBrainSourceItem = typeof goatBrainSourceItems.$inferSelect;

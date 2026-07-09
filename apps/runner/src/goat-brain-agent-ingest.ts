@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  type GoatBrainSyncPage,
   getGoatBrainFile,
   materializeGoatBrainFilesToRoot,
   syncGoatBrainFilesFromRoot,
@@ -81,9 +82,9 @@ const READ_ONLY_AGENT_CLI_COMMANDS = new Set([
   "get",
   "timeline",
   "query",
-  "folder",
   "doctor",
 ]);
+const READ_ONLY_AGENT_FOLDER_SUBCOMMANDS = new Set(["list"]);
 
 export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> & {
   // Needed only by handlers that fetch blob bytes (uploaded assets); optional
@@ -120,7 +121,8 @@ function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: st
     "How the brain works:",
     "- Every document has compiled truth (the current synthesis) and an append-only timeline of dated evidence entries.",
     "- Types (person, company, project, meeting, concept, source, analysis, note) classify what a record represents. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
-    "- Required folders are inbox, people, companies, and evidence. The core work folders projects, meetings, research, decisions, and concepts are adjustable; if a workflow needs one and it is missing, recreate it with `folder create --path <folder>` before moving pages there. evidence/ is a reserved zone for raw captures.",
+    "- Ideas and thoughts are not their own kind. A user-authored idea can be durable brain material, but it is still a page; classify it with the existing types and folders.",
+    "- Required folders are inbox, people, companies, and evidence. The core work folders thoughts, projects, meetings, research, decisions, and concepts are adjustable; if a workflow needs one and it is missing, recreate it with `folder create --path <folder>` before moving pages there. evidence/ is a reserved zone for raw captures.",
     "- Inline links are typed: [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence records, [[source:provider:id|Label]] for external source pointers.",
     "",
     "Working discipline:",
@@ -277,7 +279,8 @@ export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCa
     "1. Find the capture's home: query the brain for pages that already cover this content and for the entities it mentions.",
     `2. If an existing page is the natural home, fold the capture into it (rewrite its compiled truth or timeline-add with --source-ref ${item.sourceRef}), then retire the draft with merge --from ${capture.draftBrainId} --into <that-page>. Do not leave the same content living in two places.`,
     "3. Otherwise curate the draft in place, in this order: use append-evidence to snapshot the raw capture text as a sourced evidence record linked to the draft; rewrite the draft's compiled truth into a durable synthesis that cites that evidence record with [[evidence:...]] and links entities with [[page:...]]; use set to give it a clear title and the right type; move it out of the inbox to the folder where it belongs; then set --status active. Leave it in the inbox as a draft only when it genuinely fits nowhere yet.",
-    "4. Create or update person, company, or project pages for entities central to the capture, with backlinks per the iron law. Do not create pages for entities that are merely mentioned in passing.",
+    "4. Apply the small-team idea rule: user-authored ideas and thoughts belong in Brain even when rough, but they do not get a new kind. If the capture is a reusable abstraction, file it as type concept in concepts. If it is a concrete initiative or product bet, update or create the relevant project page. If it records a choice or rationale, update the natural subject or file the draft in decisions with the best existing type. If it is a durable reflection, take, or raw idea with no better home yet, file it as type note in thoughts. If it is still uncurated raw capture, keep it as a draft note in inbox.",
+    "5. Create or update person, company, or project pages for entities central to the capture, with backlinks per the iron law. Do not create pages for entities that are merely mentioned in passing.",
     "",
     `If the draft page no longer exists (the user may have deleted or edited it), work from the capture text below and apply the same judgment: fold it into an existing page or create the right page directly.`,
     "",
@@ -332,6 +335,7 @@ type BrainAgentIngestSessionResult = {
   mutations: number;
   upserted: number;
   deleted: number;
+  pages: GoatBrainSyncPage[];
   usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
   summary: string;
 };
@@ -420,6 +424,7 @@ async function runBrainAgentIngestSession(input: {
       mutations: loop.mutations,
       upserted: synced.upserted,
       deleted: synced.deleted,
+      pages: synced.pages,
       usage: loop.usage,
       summary: loop.finalText.slice(0, RESULT_SUMMARY_LIMIT),
     };
@@ -704,7 +709,7 @@ async function runIngestAgentLoop(input: {
           ...(args.stdin ? { stdin: args.stdin } : {}),
           signal: abort.signal,
         });
-        if (result.ok && !READ_ONLY_AGENT_CLI_COMMANDS.has(args.command)) {
+        if (result.ok && isMutatingGoatBrainAgentInvocation(args)) {
           mutations += 1;
         }
         return {
@@ -765,6 +770,14 @@ export function validateGoatBrainAgentInvocation(
     return "The --root flag is not allowed; the brain root is fixed for this job.";
   }
   return null;
+}
+
+function isMutatingGoatBrainAgentInvocation(args: { command: string; args?: string[] }): boolean {
+  if (args.command === "folder") {
+    const subcommand = args.args?.[0] ?? "list";
+    return !READ_ONLY_AGENT_FOLDER_SUBCOMMANDS.has(subcommand);
+  }
+  return !READ_ONLY_AGENT_CLI_COMMANDS.has(args.command);
 }
 
 const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {

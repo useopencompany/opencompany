@@ -3,6 +3,7 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { useLiveQuery } from "@tanstack/react-db";
 import { Activity, CircleAlert, CircleCheck, Inbox, Loader2, RotateCw } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { buildGoatBrainActivityEvents, type GoatBrainActivityKind } from "@/lib/brain-activity";
 import {
@@ -91,12 +92,48 @@ function GoatBrainActivityFeed({ brainRef }: { brainRef: string }) {
                       {event.detail}
                     </span>
                   ) : null}
+                  {event.kind === "filed" && event.pages.length > 0 ? (
+                    <ActivityPageLinks brainRef={brainRef} pages={event.pages} />
+                  ) : null}
                 </div>
               </div>
             );
           })
         )}
       </div>
+    </div>
+  );
+}
+
+const MAX_VISIBLE_ACTIVITY_PAGE_LINKS = 4;
+
+function ActivityPageLinks({
+  brainRef,
+  pages,
+}: {
+  brainRef: string;
+  pages: Array<{ brainId: string; folderPath: string; title: string }>;
+}) {
+  const visiblePages = pages.slice(0, MAX_VISIBLE_ACTIVITY_PAGE_LINKS);
+  const hiddenCount = pages.length - visiblePages.length;
+
+  return (
+    <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+      {visiblePages.map((page) => (
+        <Link
+          key={`${page.folderPath}/${page.brainId}`}
+          href={activityPageHref(brainRef, page.folderPath, page.brainId)}
+          className="inline-flex max-w-[180px] truncate rounded-[4px] border border-border-subtle bg-surface px-1.5 py-0.5 text-[11px] leading-4 text-ink-muted transition-colors duration-150 hover:border-border hover:bg-surface-hover hover:text-ink"
+          title={page.title || page.brainId}
+        >
+          {page.title || page.brainId}
+        </Link>
+      ))}
+      {hiddenCount > 0 ? (
+        <span className="rounded-[4px] border border-transparent px-1.5 py-0.5 text-[11px] leading-4 text-ink-subtle">
+          +{hiddenCount} more
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -130,4 +167,9 @@ function formatRelativeTime(value: string) {
     month: "short",
     day: "numeric",
   }).format(timestamp);
+}
+
+function activityPageHref(brainRef: string, folderPath: string, brainId: string) {
+  const segments = [brainRef, ...folderPath.split("/").filter(Boolean), brainId];
+  return `/brain/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
 }

@@ -16,6 +16,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
   BookOpen,
+  Brain,
   BriefcaseBusiness,
   Building2,
   ChevronDown,
@@ -1632,6 +1633,8 @@ function FolderIcon({ path }: { path: string }) {
   switch (root) {
     case "inbox":
       return <Inbox size={14} strokeWidth={1.8} className={className} />;
+    case "thoughts":
+      return <Brain size={14} strokeWidth={1.8} className={className} />;
     case "companies":
       return <Building2 size={14} strokeWidth={1.8} className={className} />;
     case "decisions":

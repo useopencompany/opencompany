@@ -11,6 +11,7 @@ import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import type { GoatBrainDocumentView, GoatBrainFolderView, GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
+import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import {
   createGoatCollections,
@@ -55,6 +56,7 @@ export type GoatAppInitialData = {
   schedules: GoatTaskScheduleView[];
   recentChats: GoatChatSummaryView[];
   integrations: GoatIntegrationState;
+  featureFlags: GoatFeatureFlags;
   brain: GoatBrainSnapshot;
   codexConnected: boolean;
 };
@@ -137,6 +139,7 @@ export function GoatAppDataProvider({
           id: row.id,
           title: row.title,
           model: row.model as AgentModelId,
+          engine: row.engine,
           preview: initial?.preview ?? "No messages yet.",
           updatedAt: row.updated_at,
         };

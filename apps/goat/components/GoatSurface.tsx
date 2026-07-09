@@ -79,10 +79,13 @@ import {
   toGoatChatUiMessage,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
+import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
 import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
+  type GoatLocalCodexSessionRow,
   type GoatTaskRow,
   type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
@@ -108,6 +111,8 @@ type ActiveMentionToken = {
   query: string;
 };
 
+type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue;
+
 export type GoatTaskView = {
   id: string;
   displayId: string;
@@ -132,6 +137,7 @@ export function GoatSurface({
   initialChat,
   recentChats = [],
   codexConnected = false,
+  localCodexBetaEnabled = false,
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
@@ -139,6 +145,7 @@ export function GoatSurface({
   initialChat: GoatChatSessionView | null;
   recentChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
+  localCodexBetaEnabled?: boolean;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -156,9 +163,16 @@ export function GoatSurface({
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
-  const [chatModel, setChatModel] = useState(() =>
-    normalizeGoatModel(initialChat?.model ?? defaultModel),
+  const [chatModel, setChatModel] = useState<GoatChatModelSelection>(() =>
+    localCodexBetaEnabled && initialChat?.engine === "local_codex"
+      ? LOCAL_CODEX_PICKER_VALUE
+      : normalizeGoatModel(initialChat?.model ?? defaultModel),
   );
+  const [localCodexChatSessionId, setLocalCodexChatSessionId] = useState<string | null>(() =>
+    localCodexBetaEnabled && initialChat?.engine === "local_codex" ? initialChat.id : null,
+  );
+  const [localCodexRunning, setLocalCodexRunning] = useState(false);
+  const [localCodexSubmitting, setLocalCodexSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [newChatPrompt, setNewChatPrompt] = useState("");
   const [backgroundChatCount, setBackgroundChatCount] = useState(0);
@@ -232,8 +246,29 @@ export function GoatSurface({
     },
   });
   const isGenerating = status === "submitted" || status === "streaming";
+  const activeInitialChatIsLocalCodex = Boolean(
+    initialChat &&
+      localCodexBetaEnabled &&
+      mode === "chat" &&
+      chatSessionId === initialChat.id &&
+      initialChat.engine === "local_codex",
+  );
+  const activeLocalCodexSessionId =
+    chatSessionId && (activeInitialChatIsLocalCodex || localCodexChatSessionId === chatSessionId)
+      ? chatSessionId
+      : null;
+  const isLocalCodexMode = localCodexBetaEnabled && chatModel === LOCAL_CODEX_PICKER_VALUE;
+  const isLocalCodexChat = isLocalCodexMode || Boolean(activeLocalCodexSessionId);
+  const localCodexFeatureDisabledForChat = Boolean(
+    initialChat &&
+      !localCodexBetaEnabled &&
+      mode === "chat" &&
+      chatSessionId === initialChat.id &&
+      initialChat.engine === "local_codex",
+  );
   const hasMessages = messages.length > 0;
-  const showThinkingBubble = isGenerating && shouldShowThinkingBubble(messages);
+  const showThinkingBubble =
+    (isGenerating || (isLocalCodexChat && localCodexRunning)) && shouldShowThinkingBubble(messages);
   const trimmedNewChatPrompt = newChatPrompt.trim();
   const newChatPromptValid =
     trimmedNewChatPrompt.length > 0 &&
@@ -256,7 +291,7 @@ export function GoatSurface({
   );
 
   useEffect(() => {
-    if (isGenerating) return;
+    if (isGenerating || localCodexSubmitting) return;
     // router.refresh() can lag one render behind local useChat state. Keep local
     // turns visible until the server props catch up for both new and existing chats.
     const localHasChat = mode === "chat" && (messages.length > 0 || Boolean(chatSessionId));
@@ -275,12 +310,29 @@ export function GoatSurface({
 
     const frame = requestAnimationFrame(() => {
       setChatSessionId(initialChat?.id ?? null);
-      setChatModel(normalizeGoatModel(initialChat?.model ?? defaultModel));
+      setChatModel(
+        localCodexBetaEnabled && initialChat?.engine === "local_codex"
+          ? LOCAL_CODEX_PICKER_VALUE
+          : normalizeGoatModel(initialChat?.model ?? defaultModel),
+      );
+      setLocalCodexChatSessionId(
+        localCodexBetaEnabled && initialChat?.engine === "local_codex" ? initialChat.id : null,
+      );
       setMessages(initialChat?.messages ?? []);
       setMode(initialChat ? "chat" : "home");
     });
     return () => cancelAnimationFrame(frame);
-  }, [chatSessionId, defaultModel, initialChat, isGenerating, messages.length, mode, setMessages]);
+  }, [
+    chatSessionId,
+    defaultModel,
+    initialChat,
+    isGenerating,
+    localCodexBetaEnabled,
+    localCodexSubmitting,
+    messages.length,
+    mode,
+    setMessages,
+  ]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -339,7 +391,7 @@ export function GoatSurface({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
-      if (key !== "n" || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
+      if (key !== "k" || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
         return;
       }
 
@@ -407,10 +459,14 @@ export function GoatSurface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isGenerating) return;
+    if (isGenerating || localCodexSubmitting) return;
 
     const prompt = input.trim();
     if (!prompt) return;
+    if (localCodexFeatureDisabledForChat) {
+      toast.error(LOCAL_CODEX_BETA_DISABLED_MESSAGE);
+      return;
+    }
     const mentions =
       activeSelectedMentions.length > 0 && hasCodexMentionToken(prompt)
         ? activeSelectedMentions
@@ -423,17 +479,51 @@ export function GoatSurface({
     setInput("");
     setMentionToken(null);
     setSelectedMentions([]);
+    if (isLocalCodexChat) {
+      const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
+      const existingLocalSessionId = activeLocalCodexSessionId;
+      setLocalCodexSubmitting(true);
+      void sendLocalCodexMessage({
+        prompt,
+        sessionId: existingLocalSessionId,
+        userMessageId,
+      })
+        .then((result) => {
+          setChatSessionId(result.sessionId);
+          setLocalCodexChatSessionId(result.sessionId);
+          setLocalCodexRunning(true);
+          setMessages((current) =>
+            appendLocalCodexOptimisticMessages(existingLocalSessionId ? current : [], {
+              sessionId: result.sessionId,
+              userMessageId: result.userMessageId,
+              assistantMessageId: result.assistantMessageId,
+              prompt,
+            }),
+          );
+          router.replace(`/?chat=${encodeURIComponent(result.sessionId)}`);
+          router.refresh();
+        })
+        .catch((error) => {
+          setInput(prompt);
+          toast.error(
+            error instanceof Error ? error.message : "Local Codex could not start that turn.",
+          );
+        })
+        .finally(() => {
+          if (!mountedRef.current) return;
+          setLocalCodexSubmitting(false);
+        });
+      return;
+    }
+
     const message =
       mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
-    void sendMessage(message, { body: { sessionId: chatSessionId, model: chatModel } }).catch(
-      (error) => {
-        setInput(prompt);
-        setSelectedMentions(mentions);
-        toast.error(
-          error instanceof Error ? error.message : "Goat could not answer that right now.",
-        );
-      },
-    );
+    const model = chatModel;
+    void sendMessage(message, { body: { sessionId: chatSessionId, model } }).catch((error) => {
+      setInput(prompt);
+      setSelectedMentions(mentions);
+      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
+    });
   };
 
   const closeChat = useCallback(() => {
@@ -443,12 +533,27 @@ export function GoatSurface({
     setMode("home");
     setMessages([]);
     setChatSessionId(null);
+    setLocalCodexChatSessionId(null);
+    setLocalCodexRunning(false);
     clearError();
     router.replace("/");
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [chatSessionId, clearError, isGenerating, router, setMessages, stop]);
 
   const stopGeneration = useCallback(() => {
+    if (activeLocalCodexSessionId) {
+      setLocalCodexRunning(false);
+      void fetch(
+        `/api/local-codex/sessions/${encodeURIComponent(activeLocalCodexSessionId)}/interrupt`,
+        {
+          method: "POST",
+        },
+      ).catch(() => {
+        toast.error("Could not interrupt Local Codex.");
+      });
+      return;
+    }
+
     const lastAssistantMessage = messages.findLast((message) => message.role === "assistant");
     if (lastAssistantMessage) {
       setLocallyStoppedAssistantMessageIds((current) =>
@@ -456,7 +561,7 @@ export function GoatSurface({
       );
     }
     void stop();
-  }, [messages, stop]);
+  }, [activeLocalCodexSessionId, messages, stop]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -664,6 +769,12 @@ export function GoatSurface({
       {mode === "chat" && chatSessionId ? (
         <LiveChatMessages sessionId={chatSessionId} setMessages={setMessages} />
       ) : null}
+      {mode === "chat" && activeLocalCodexSessionId ? (
+        <LiveLocalCodexSessionStatus
+          chatSessionId={activeLocalCodexSessionId}
+          setRunning={setLocalCodexRunning}
+        />
+      ) : null}
       {mode === "chat" ? <LiveChatTasks setTasks={setLiveChatTasks} /> : null}
 
       <form
@@ -678,6 +789,14 @@ export function GoatSurface({
               role="alert"
             >
               {chatError.message || "Goat could not answer that right now."}
+            </p>
+          ) : null}
+          {localCodexFeatureDisabledForChat ? (
+            <p
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+              role="status"
+            >
+              {LOCAL_CODEX_BETA_DISABLED_MESSAGE}
             </p>
           ) : null}
           {mentionToken ? (
@@ -729,16 +848,24 @@ export function GoatSurface({
                 onSelect={(event) =>
                   updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
-                disabled={isGenerating}
+                disabled={isGenerating || localCodexFeatureDisabledForChat}
                 className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                 maxLength={10_000}
                 required
               />
             </div>
-            <GoatModelPicker value={chatModel} onChange={setChatModel} disabled={isGenerating} />
+            <GoatModelPicker
+              value={chatModel}
+              onChange={setChatModel}
+              disabled={isGenerating || Boolean(activeLocalCodexSessionId)}
+              localCodexBetaEnabled={localCodexBetaEnabled}
+            />
+            {isLocalCodexChat && localCodexRunning ? (
+              <LocalCodexStopButton onStop={stopGeneration} />
+            ) : null}
             <SubmitButton
-              disabled={!input.trim()}
+              disabled={!input.trim() || localCodexSubmitting || localCodexFeatureDisabledForChat}
               isGenerating={isGenerating}
               onStop={stopGeneration}
             />
@@ -752,6 +879,68 @@ export function GoatSurface({
 function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefined) {
   const mentions = metadata?.mentions ?? [];
   return mentions.filter(isSupportedMention);
+}
+
+type LocalCodexMessageResponse = {
+  ok: true;
+  sessionId: string;
+  userMessageId: string;
+  assistantMessageId: string | null;
+  mode: "started" | "steered";
+};
+
+async function sendLocalCodexMessage(input: {
+  prompt: string;
+  sessionId: string | null;
+  userMessageId: string;
+}): Promise<LocalCodexMessageResponse> {
+  const response = await fetch("/api/local-codex/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      message: {
+        id: input.userMessageId,
+        role: "user",
+        parts: [{ type: "text", text: input.prompt }],
+      },
+    }),
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(error || "Local Codex could not start that turn.");
+  }
+  return response.json() as Promise<LocalCodexMessageResponse>;
+}
+
+function appendLocalCodexOptimisticMessages(
+  current: GoatChatUiMessage[],
+  input: {
+    sessionId: string;
+    userMessageId: string;
+    assistantMessageId: string | null;
+    prompt: string;
+  },
+): GoatChatUiMessage[] {
+  const byId = new Set(current.map((message) => message.id));
+  const next = [...current];
+  if (!byId.has(input.userMessageId)) {
+    next.push({
+      id: input.userMessageId,
+      role: "user",
+      metadata: { sessionId: input.sessionId },
+      parts: [{ type: "text", text: input.prompt }],
+    });
+  }
+  if (input.assistantMessageId && !byId.has(input.assistantMessageId)) {
+    next.push({
+      id: input.assistantMessageId,
+      role: "assistant",
+      metadata: { sessionId: input.sessionId },
+      parts: [],
+    });
+  }
+  return next;
 }
 
 function isSupportedMention(mention: GoatChatMention): mention is GoatChatMention {
@@ -841,14 +1030,65 @@ function LiveChatMessageSubscriber({
   useEffect(() => {
     if (liveMessages.length === 0) return;
     setMessages((current) => {
-      const currentIds = new Set(current.map((message) => message.id));
-      const missingMessages = liveMessages.filter((message) => !currentIds.has(message.id));
-      if (missingMessages.length === 0) return current;
-      return [...current, ...missingMessages];
+      const liveById = new Map(liveMessages.map((message) => [message.id, message]));
+      const optimisticMessages = current.filter((message) => !liveById.has(message.id));
+      const merged = [...liveMessages, ...optimisticMessages];
+      return messagesEqualByRenderableContent(current, merged) ? current : merged;
     });
   }, [liveMessages, setMessages]);
 
   return null;
+}
+
+function LiveLocalCodexSessionStatus({
+  chatSessionId,
+  setRunning,
+}: {
+  chatSessionId: string;
+  setRunning: Dispatch<SetStateAction<boolean>>;
+}) {
+  const hydrated = useHydrated();
+  if (!hydrated) return null;
+  return (
+    <LiveLocalCodexSessionStatusSubscriber chatSessionId={chatSessionId} setRunning={setRunning} />
+  );
+}
+
+function LiveLocalCodexSessionStatusSubscriber({
+  chatSessionId,
+  setRunning,
+}: {
+  chatSessionId: string;
+  setRunning: Dispatch<SetStateAction<boolean>>;
+}) {
+  const collections = useMemo(() => createGoatCollections(), []);
+  const localCodexSessionCollection = useMemo(
+    () => collections.localCodexSessions(chatSessionId),
+    [chatSessionId, collections],
+  );
+  const { data: rows } = useLiveQuery((q) =>
+    q.from({ localCodexSession: localCodexSessionCollection }),
+  );
+  const status = ((rows ?? []) as GoatLocalCodexSessionRow[])[0]?.status ?? null;
+
+  useEffect(() => {
+    if (!status) return;
+    setRunning(status === "starting" || status === "running");
+  }, [setRunning, status]);
+
+  return null;
+}
+
+function messagesEqualByRenderableContent(
+  left: readonly GoatChatUiMessage[],
+  right: readonly GoatChatUiMessage[],
+) {
+  if (left.length !== right.length) return false;
+  return left.every((message, index) => {
+    const other = right[index];
+    if (!other || message.id !== other.id || message.role !== other.role) return false;
+    return JSON.stringify(message.parts) === JSON.stringify(other.parts);
+  });
 }
 
 function LiveChatTasks({
@@ -1590,13 +1830,18 @@ function GoatModelPicker({
   value,
   onChange,
   disabled,
+  localCodexBetaEnabled,
 }: {
-  value: string;
-  onChange: (modelId: AgentModelId) => void;
+  value: GoatChatModelSelection;
+  onChange: (modelId: GoatChatModelSelection) => void;
   disabled: boolean;
+  localCodexBetaEnabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const selectedModel = findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL);
+  const isLocalCodexSelected = localCodexBetaEnabled && value === LOCAL_CODEX_PICKER_VALUE;
+  const selectedModel = !isLocalCodexSelected
+    ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
+    : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -1606,13 +1851,19 @@ function GoatModelPicker({
         disabled={disabled}
         className="mb-px flex h-7 max-w-[170px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
       >
-        <GoatModelProviderIcon
-          modelId={selectedModel?.id ?? DEFAULT_GOAT_MODEL}
-          size={13}
-          strokeWidth={1.9}
-          className="shrink-0"
-        />
-        <span className="truncate">{selectedModel?.label ?? "Model"}</span>
+        {isLocalCodexSelected ? (
+          <Code2 size={13} strokeWidth={1.9} className="shrink-0" />
+        ) : (
+          <GoatModelProviderIcon
+            modelId={selectedModel?.id ?? DEFAULT_GOAT_MODEL}
+            size={13}
+            strokeWidth={1.9}
+            className="shrink-0"
+          />
+        )}
+        <span className="truncate">
+          {isLocalCodexSelected ? "Local Codex" : (selectedModel?.label ?? "Model")}
+        </span>
         <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
       </PopoverTrigger>
       <PopoverContent
@@ -1624,9 +1875,39 @@ function GoatModelPicker({
           <CommandInput placeholder="Search models..." />
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
+            {localCodexBetaEnabled ? (
+              <CommandGroup heading="Engines">
+                <CommandItem
+                  value={LOCAL_CODEX_PICKER_VALUE}
+                  keywords={["Local Codex", "Codex", "local repo", "worktree"]}
+                  onSelect={() => {
+                    onChange(LOCAL_CODEX_PICKER_VALUE);
+                    setOpen(false);
+                  }}
+                  title="Run Codex locally in a clean session folder."
+                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                >
+                  <Check
+                    size={13}
+                    strokeWidth={2}
+                    className={cn(
+                      "shrink-0 text-ink",
+                      isLocalCodexSelected ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <Code2 size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium leading-4">Local Codex</div>
+                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                      Local session bridge
+                    </div>
+                  </div>
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
             <CommandGroup heading="Models">
               {GOAT_MODELS.map((model) => {
-                const isSelected = model.id === selectedModel?.id;
+                const isSelected = !isLocalCodexSelected && model.id === selectedModel?.id;
                 return (
                   <CommandItem
                     key={model.id}
@@ -1734,6 +2015,20 @@ function SubmitButton({
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
       <ArrowUp size={15} strokeWidth={2.2} />
+    </button>
+  );
+}
+
+function LocalCodexStopButton({ onStop }: { onStop: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Interrupt Local Codex"
+      title="Interrupt Local Codex"
+      onClick={onStop}
+      className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <Square size={11} strokeWidth={2.2} fill="currentColor" />
     </button>
   );
 }

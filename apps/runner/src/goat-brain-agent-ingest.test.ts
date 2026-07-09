@@ -227,6 +227,11 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     expect(prompt).toContain("reference for the pricing page rework");
     expect(prompt).toContain("https://example.com/pricing-teardown");
     expect(prompt).toContain("merge --from pricing-teardown-reference");
+    expect(prompt).toContain("user-authored ideas and thoughts belong in Brain");
+    expect(prompt).toContain("they do not get a new kind");
+    expect(prompt).toContain("type concept in concepts");
+    expect(prompt).toContain("file the draft in decisions with the best existing type");
+    expect(prompt).toContain("type note in thoughts");
   });
 });
 
@@ -368,6 +373,46 @@ describe("runGoatChatCaptureAgentIngest", () => {
 
     expect(okCli).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
+  });
+
+  it("counts folder creation as a brain mutation", async () => {
+    mockAgentRun({
+      finalText: "Created the launch folder.",
+      toolInvocations: [{ command: "folder", args: ["create", "--path", "projects/launch"] }],
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({ toolCalls: 1, mutations: 1 });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
+  });
+
+  it("keeps folder list read-only for no-write detection", async () => {
+    mockAgentRun({
+      finalText: "Listed folders.",
+      toolInvocations: [{ command: "folder", args: ["list"] }],
+    });
+
+    await expect(
+      runGoatChatCaptureAgentIngest(
+        {
+          userWorkosId: "user_123",
+          brainRef: "gbrain_123",
+          item: captureItem(),
+          env: { vercelAiGatewayApiKey: "gw_test" },
+        },
+        { runCli: okCli },
+      ),
+    ).rejects.toThrow("finished without writing");
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
   });
 });
 
