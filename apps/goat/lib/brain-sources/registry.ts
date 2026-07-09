@@ -48,7 +48,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     description: "Ingest channel conversations into this brain.",
     icon: MessageSquare,
     connectionKind: "oauth",
-    available: false,
-    connectHref: "/settings",
+    available: true,
+    connectHref: "/api/integrations/slack/start?returnTo=/settings",
   },
 ];

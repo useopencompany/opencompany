@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   BrainSourceNormalizationError,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
+  normalizeSlackConversationWindow,
   normalizeUploadAsset,
+  slackTsToIso,
 } from "./source-items";
 
 function jamiePayload(overrides: Record<string, unknown> = {}) {
@@ -264,5 +267,97 @@ describe("normalizeUploadAsset", () => {
   it("guards against other item shapes", () => {
     expect(isNormalizedUploadAssetSourceItem({ sourceProvider: "upload" })).toBe(false);
     expect(isNormalizedUploadAssetSourceItem(null)).toBe(false);
+  });
+});
+
+describe("Slack conversation window normalization", () => {
+  const input = {
+    windowId: "gslkwin_abc123",
+    teamId: "T012345",
+    teamDomain: "acme",
+    channelId: "C09ABC",
+    channelName: "product",
+    channelType: "channel" as const,
+    messages: [
+      {
+        ts: "1783950120.000200",
+        userId: "U02",
+        userName: "Alex",
+        text: "We decided to ship the new onboarding flow next week.",
+      },
+      {
+        ts: "1783950060.000100",
+        userId: "U01",
+        userName: "Jamie",
+        text: "Where did we land on onboarding?",
+      },
+      {
+        ts: "1783950180.000300",
+        threadTs: "1783950120.000200",
+        userId: "U01",
+        text: "Great, I'll tell the team.",
+      },
+    ],
+    flushedAt: "2026-07-13T10:30:00.000Z",
+  };
+
+  it("normalizes a window and sorts messages by ts", () => {
+    const item = normalizeSlackConversationWindow(input);
+
+    expect(item.sourceProvider).toBe("slack");
+    expect(item.sourceType).toBe("conversation");
+    expect(item.externalId).toBe("gslkwin_abc123");
+    expect(item.sourceRef).toBe("slack:conversation:T012345:C09ABC:1783950180.000300");
+    expect(item.title).toContain("#product");
+    expect(item.content.conversation.windowStartTs).toBe("1783950060.000100");
+    expect(item.content.conversation.windowEndTs).toBe("1783950180.000300");
+    expect(item.content.conversation.messages.map((message) => message.userId)).toEqual([
+      "U01",
+      "U02",
+      "U01",
+    ]);
+    expect(item.occurredAt).toBe(slackTsToIso("1783950060.000100"));
+    expect(item.capturedAt).toBe("2026-07-13T10:30:00.000Z");
+    expect(item.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(isNormalizedSlackConversationSourceItem(item)).toBe(true);
+  });
+
+  it("hashes only message identity, not enrichment", () => {
+    const base = normalizeSlackConversationWindow(input);
+    const renamed = normalizeSlackConversationWindow({
+      ...input,
+      channelName: "product-renamed",
+      messages: input.messages.map(({ userName: _userName, ...message }) => message),
+    });
+    expect(renamed.contentHash).toBe(base.contentHash);
+    const edited = normalizeSlackConversationWindow({
+      ...input,
+      messages: [{ ...input.messages[0]!, text: "changed" }, ...input.messages.slice(1)],
+    });
+    expect(edited.contentHash).not.toBe(base.contentHash);
+  });
+
+  it("titles DM windows after the counterpart", () => {
+    const item = normalizeSlackConversationWindow({
+      ...input,
+      channelType: "im",
+      channelName: "Jamie",
+    });
+    expect(item.title).toContain("DM with Jamie");
+  });
+
+  it("rejects empty windows and malformed input", () => {
+    expect(() => normalizeSlackConversationWindow({ ...input, messages: [] })).toThrow(
+      BrainSourceNormalizationError,
+    );
+    expect(() => normalizeSlackConversationWindow({ ...input, windowId: " " })).toThrow(/windowId/);
+    expect(() => normalizeSlackConversationWindow({ ...input, flushedAt: "nope" })).toThrow(
+      /timestamp/,
+    );
+  });
+
+  it("guards against other item shapes", () => {
+    expect(isNormalizedSlackConversationSourceItem({ sourceProvider: "slack" })).toBe(false);
+    expect(isNormalizedSlackConversationSourceItem(null)).toBe(false);
   });
 });

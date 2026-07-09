@@ -96,6 +96,10 @@ export async function upsertGoatBrainSource(input: {
   userWorkosId: string;
   createdByWorkosId: string;
   enabled: boolean;
+  // Provider-specific routing config (e.g. selected Slack channels). Left out
+  // of the conflict update when omitted so enable/disable toggles don't wipe
+  // an existing selection.
+  config?: Record<string, unknown>;
   now?: Date;
   db?: DbLike;
 }): Promise<{ id: string }> {
@@ -112,12 +116,14 @@ export async function upsertGoatBrainSource(input: {
       userWorkosId: input.userWorkosId,
       createdByWorkosId: input.createdByWorkosId,
       enabled: input.enabled,
+      ...(input.config !== undefined ? { config: input.config } : {}),
       updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [goatBrainSources.brainId, goatBrainSources.integrationId],
       set: {
         enabled: input.enabled,
+        ...(input.config !== undefined ? { config: input.config } : {}),
         updatedAt: now,
       },
     })

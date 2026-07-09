@@ -15,7 +15,10 @@ import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
+  type NormalizedSlackConversationContent,
+  type NormalizedSlackConversationSourceItem,
   type NormalizedUploadAssetSourceItem,
+  slackTsToIso,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { createLogger } from "@opencompany/observability";
@@ -47,6 +50,7 @@ const PROMPT_TRANSCRIPT_BYTES = 100_000;
 const PROMPT_SUMMARY_BYTES = 60_000;
 const PROMPT_CAPTURE_BYTES = 64_000;
 const PROMPT_ASSET_TEXT_BYTES = 100_000;
+const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 
 // The ingestion agent gets the full working surface of the CLI except the
@@ -151,6 +155,69 @@ export const UPLOAD_ASSET_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPromp
     "curates one file the user uploaded into a single brain of Markdown knowledge documents. The file already exists as a document page in the brain (its bytes live outside the markdown plane); your job is to turn that page into a durable synthesis and wire it into the graph.",
   skipRule: `The user explicitly uploaded this file, so it is almost always brain-worthy. Only if its content is literally empty or unreadable AND the file name carries no meaning, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}; the page then stays as an unenriched draft.`,
 });
+
+export const SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one batch of Slack conversation messages into a single brain of Markdown knowledge documents.",
+  skipRule: `Slack is high-noise: most batches are chit-chat, scheduling logistics, or banter that carries no durable knowledge. If nothing in the batch is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, plans, facts about people/companies/projects, and substantive shared content belong in the brain.`,
+});
+
+export function buildSlackConversationAgentIngestPrompt(
+  item: NormalizedSlackConversationSourceItem,
+) {
+  const conversation = item.content.conversation;
+  const label =
+    conversation.channelType === "im"
+      ? `the DM with ${conversation.channelName}`
+      : `#${conversation.channelName}`;
+  const transcript = truncateByBytes(
+    formatSlackConversationTranscript(conversation),
+    PROMPT_SLACK_TRANSCRIPT_BYTES,
+  );
+  const truncated =
+    Buffer.byteLength(transcript, "utf8") <
+    Buffer.byteLength(formatSlackConversationTranscript(conversation), "utf8");
+  return [
+    `Ingest this batch of Slack messages from ${label} into the brain. It is one conversation window: everything posted there since the last ingested batch.`,
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Judge the whole window first: extract only durable knowledge — decisions, plans, commitments, facts about people, companies, or projects, and substantive shared content. Ignore chit-chat around it.",
+    `2. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite individual messages with --source-ref slack:message:${conversation.teamId}:${conversation.channelId}:<message ts>.`,
+    "3. Snapshot with append-evidence only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.",
+    "4. Create or update person, company, or project pages for entities central to the conversation, with backlinks per the iron law. Do not create pages for people who merely posted a message.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Window: ${slackTsToIso(conversation.windowStartTs)} to ${slackTsToIso(conversation.windowEndTs)}`,
+    conversation.teamDomain
+      ? `Message permalinks: https://${conversation.teamDomain}.slack.com/archives/${conversation.channelId}/p<message ts without the dot>`
+      : null,
+    truncated ? "The transcript below was truncated to fit the prompt size limit." : null,
+    "",
+    `## Conversation\n- Channel: ${label}\n- Type: ${conversation.channelType}\n- Messages: ${conversation.messages.length}`,
+    `## Transcript\n${transcript}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function formatSlackConversationTranscript(
+  conversation: NormalizedSlackConversationContent["conversation"],
+) {
+  return conversation.messages
+    .map((message) => {
+      const time = slackTsToIso(message.ts).slice(0, 16).replace("T", " ");
+      const author = message.userName ?? message.userId;
+      const isThreadReply = Boolean(message.threadTs && message.threadTs !== message.ts);
+      const prefix = isThreadReply ? "  ↳ " : "";
+      const files =
+        message.files && message.files.length > 0
+          ? ` [files: ${message.files.map((file) => file.name).join(", ")}]`
+          : "";
+      const text = message.text.replaceAll("\n", `\n${prefix}  `);
+      return `${prefix}[${time}] ${author} (ts ${message.ts}): ${text}${files}`;
+    })
+    .join("\n");
+}
 
 export function buildJamieMeetingAgentIngestPrompt(
   item: NormalizedJamieMeetingSourceItem,
@@ -428,6 +495,39 @@ export async function runGoatChatCaptureAgentIngest(
     ...session,
     model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     draftBrainId: input.item.content.capture.draftBrainId,
+  };
+}
+
+export async function runSlackConversationAgentIngest(
+  input: {
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedSlackConversationSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const conversation = input.item.content.conversation;
+  const session = await runBrainAgentIngestSession({
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildSlackConversationAgentIngestPrompt(input.item),
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    channelId: conversation.channelId,
+    channelType: conversation.channelType,
+    messageCount: conversation.messages.length,
+    windowStartTs: conversation.windowStartTs,
+    windowEndTs: conversation.windowEndTs,
   };
 }
 

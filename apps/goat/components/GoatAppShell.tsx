@@ -11,23 +11,35 @@ import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
+import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, brains, activeBrain } = await currentGoatUser();
-  const [tasks, schedules, recentChats, brain, googleIntegrations, linear, github, jamie, codex] =
-    await Promise.all([
-      listCurrentUserGoatTasks(),
-      listCurrentUserGoatTaskSchedules(),
-      listCurrentUserRecentGoatChats(),
-      listCurrentUserGoatBrain(),
-      getGoatGoogleIntegrationState(user.workosUserId),
-      getGoatLinearIntegrationState(user.workosUserId),
-      getGoatGitHubIntegrationState(user.workosUserId),
-      getGoatJamieIntegrationState(user.workosUserId),
-      loadCurrentGoatCodexAuthSettings(),
-    ]);
+  const [
+    tasks,
+    schedules,
+    recentChats,
+    brain,
+    googleIntegrations,
+    linear,
+    github,
+    jamie,
+    slack,
+    codex,
+  ] = await Promise.all([
+    listCurrentUserGoatTasks(),
+    listCurrentUserGoatTaskSchedules(),
+    listCurrentUserRecentGoatChats(),
+    listCurrentUserGoatBrain(),
+    getGoatGoogleIntegrationState(user.workosUserId),
+    getGoatLinearIntegrationState(user.workosUserId),
+    getGoatGitHubIntegrationState(user.workosUserId),
+    getGoatJamieIntegrationState(user.workosUserId),
+    getGoatSlackIntegrationState(user.workosUserId),
+    loadCurrentGoatCodexAuthSettings(),
+  ]);
 
   const initialData: GoatAppInitialData = {
     user: {
@@ -66,6 +78,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       linear,
       github,
       jamie,
+      slack,
       codex: {
         provider: "codex",
         connected: codex.status === "connected",
@@ -103,6 +116,7 @@ function buildIntegrationState(input: {
   linear: GoatIntegrationState["linear"];
   github: GoatIntegrationState["github"];
   jamie: GoatIntegrationState["jamie"];
+  slack: GoatIntegrationState["slack"];
   codex: GoatCodexProviderState;
 }): GoatIntegrationState {
   return {
@@ -110,6 +124,7 @@ function buildIntegrationState(input: {
     linear: input.linear,
     github: input.github,
     jamie: input.jamie,
+    slack: input.slack,
     codex: input.codex,
   };
 }
