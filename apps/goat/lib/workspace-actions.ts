@@ -47,9 +47,9 @@ function errorResult(error: unknown, fallback: string): { ok: false; error: stri
   return { ok: false, error: error instanceof Error ? error.message : fallback };
 }
 
-export async function switchGoatBrainAction(brainId: string): Promise<GoatWorkspaceActionResult> {
+export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorkspaceActionResult> {
   const { user } = await currentGoatUser();
-  const access = await getGoatBrainAccess({ userWorkosId: user.workosUserId, brainRef: brainId });
+  const access = await getGoatBrainAccess({ userWorkosId: user.workosUserId, brainRef });
   if (!access) return { ok: false, error: "You do not have access to that brain." };
 
   const cookieStore = await cookies();
@@ -66,7 +66,7 @@ export async function createGoatBrainAction(input: {
   name: string;
   visibility: GoatBrainVisibility;
   description?: string;
-}): Promise<GoatWorkspaceActionResult & { brainId?: string }> {
+}): Promise<GoatWorkspaceActionResult & { brainRef?: string }> {
   const context = await currentGoatUser();
   try {
     const brain = await createGoatBrain({
@@ -83,14 +83,14 @@ export async function createGoatBrainAction(input: {
       maxAge: 60 * 60 * 24 * 365,
     });
     revalidatePath("/", "layout");
-    return { ok: true, brainId: brain.id };
+    return { ok: true, brainRef: brain.id };
   } catch (error) {
     return errorResult(error, "Could not create the brain.");
   }
 }
 
 export async function setGoatBrainAccessAction(input: {
-  brainId: string;
+  brainRef: string;
   visibility: GoatBrainVisibility;
   memberWorkosIds: string[];
 }): Promise<GoatWorkspaceActionResult> {
@@ -100,7 +100,7 @@ export async function setGoatBrainAccessAction(input: {
   }
   const access = await getGoatBrainAccess({
     userWorkosId: context.user.workosUserId,
-    brainRef: input.brainId,
+    brainRef: input.brainRef,
   });
   if (!access || access.brain.workspaceId !== context.workspace.id) {
     return { ok: false, error: "Brain not found in this workspace." };
@@ -108,7 +108,7 @@ export async function setGoatBrainAccessAction(input: {
 
   try {
     await updateGoatBrainVisibility({
-      brainRef: input.brainId,
+      brainRef: input.brainRef,
       visibility: input.visibility,
       actingUserWorkosId: context.user.workosUserId,
     });
@@ -117,7 +117,7 @@ export async function setGoatBrainAccessAction(input: {
       // The acting admin always keeps access so the brain cannot be orphaned.
       memberIds.add(context.user.workosUserId);
       await replaceGoatBrainMembers({
-        brainRef: input.brainId,
+        brainRef: input.brainRef,
         userWorkosIds: [...memberIds],
         addedByWorkosId: context.user.workosUserId,
       });
@@ -129,7 +129,7 @@ export async function setGoatBrainAccessAction(input: {
   }
 }
 
-export async function getGoatBrainAccessDetailsAction(brainId: string): Promise<{
+export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise<{
   visibility: GoatBrainVisibility;
   memberWorkosIds: string[];
   workspaceMembers: GoatWorkspaceMemberView[];
@@ -137,12 +137,12 @@ export async function getGoatBrainAccessDetailsAction(brainId: string): Promise<
   const context = await currentGoatUser();
   const access = await getGoatBrainAccess({
     userWorkosId: context.user.workosUserId,
-    brainRef: brainId,
+    brainRef,
   });
   if (!access || access.brain.workspaceId !== context.workspace.id) return null;
 
   const [memberWorkosIds, workspaceMembers] = await Promise.all([
-    listGoatBrainMemberIds(brainId),
+    listGoatBrainMemberIds(brainRef),
     listGoatWorkspaceMembersAction(),
   ]);
   return {

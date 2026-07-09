@@ -40,6 +40,7 @@ const VECTOR_CANDIDATE_LIMIT = 50;
 const EMBED_BACKFILL_LIMIT = 64;
 const EMBED_TEXT_MAX_CHARS = 8000;
 const SNIPPET_MAX_CHARS = 1200;
+const ASSET_TEXT_MAX_CHARS = 20_000;
 const NEIGHBOR_LIMIT = 5;
 const LINKS_LIMIT = 50;
 const TIMELINE_RECENT_LIMIT = 20;
@@ -109,11 +110,14 @@ export type GoatBrainDocumentRead = {
   folder: string;
   kind: string;
   type: string;
+  format: string;
   status: string;
   aliases: string[];
   createdAt: string;
   updatedAt: string;
   compiledTruth: string;
+  // Machine-extracted text for binary-backed documents (pdf/docx), capped for tool output.
+  assetText?: string;
   // Chronological tail of the timeline; fetch the full history via getGoatBrainTimeline.
   timeline: Array<{ at: string; evidenceId: string; body: string }>;
   timelineTotal: number;
@@ -294,6 +298,7 @@ export async function getGoatBrainDocuments(
     if (!entry) return [];
     const { row, resolvedVia } = entry;
     const timeline = [...(row.timeline ?? [])].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const assetText = (row.assetExtractedText ?? "").trim();
     return [
       {
         requestedId,
@@ -303,11 +308,20 @@ export async function getGoatBrainDocuments(
         folder: row.folderPath,
         kind: row.kind,
         type: row.entityType,
+        format: row.format,
         status: row.status,
         aliases: row.aliases ?? [],
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
         compiledTruth: row.body,
+        ...(assetText
+          ? {
+              assetText:
+                assetText.length <= ASSET_TEXT_MAX_CHARS
+                  ? assetText
+                  : `${assetText.slice(0, ASSET_TEXT_MAX_CHARS).trimEnd()}... [truncated extracted text]`,
+            }
+          : {}),
         timeline: timeline.slice(-TIMELINE_RECENT_LIMIT).map((item) => ({
           at: item.at,
           evidenceId: item.evidenceId,

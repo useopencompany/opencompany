@@ -1,16 +1,20 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  getGoatBrainFile,
   materializeGoatBrainFilesToRoot,
   syncGoatBrainFilesFromRoot,
+  updateGoatBrainAssetExtraction,
 } from "@opencompany/db/goat-brain-files";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
+  type NormalizedUploadAssetSourceItem,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { createLogger } from "@opencompany/observability";
@@ -41,6 +45,7 @@ const AGENT_CLI_STDERR_LIMIT = 4_000;
 const PROMPT_TRANSCRIPT_BYTES = 100_000;
 const PROMPT_SUMMARY_BYTES = 60_000;
 const PROMPT_CAPTURE_BYTES = 64_000;
+const PROMPT_ASSET_TEXT_BYTES = 100_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 
 // The ingestion agent gets the full working surface of the CLI except the
@@ -76,7 +81,11 @@ const READ_ONLY_AGENT_CLI_COMMANDS = new Set([
   "doctor",
 ]);
 
-export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey">;
+export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> & {
+  // Needed only by handlers that fetch blob bytes (uploaded assets); optional
+  // so text-only profiles and tests need not provide it.
+  blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
+};
 
 export type GoatBrainAgentCliResult = {
   ok: boolean;
@@ -132,6 +141,12 @@ export const GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystem
   mission:
     "curates one chat capture — content the user explicitly asked to save — into a single brain of Markdown knowledge documents. The capture is already stored as a draft page in the inbox; your job is to file it properly.",
   skipRule: `The user explicitly saved this content, so it is almost always brain-worthy. Only if it is literally empty or unusable, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}; the draft then stays in the inbox for the user.`,
+});
+
+export const UPLOAD_ASSET_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "curates one file the user uploaded into a single brain of Markdown knowledge documents. The file already exists as a document page in the brain (its bytes live outside the markdown plane); your job is to turn that page into a durable synthesis and wire it into the graph.",
+  skipRule: `The user explicitly uploaded this file, so it is almost always brain-worthy. Only if its content is literally empty or unreadable AND the file name carries no meaning, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}; the page then stays as an unenriched draft.`,
 });
 
 export function buildJamieMeetingAgentIngestPrompt(
@@ -204,6 +219,41 @@ export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCa
     `## Capture title\n${item.title}`,
     `## Capture text\n${truncateByBytes(capture.text, PROMPT_CAPTURE_BYTES)}`,
   ].join("\n");
+}
+
+export function buildUploadAssetAgentIngestPrompt(
+  item: NormalizedUploadAssetSourceItem,
+  context: { extractedText: string; truncatedText: boolean },
+) {
+  const asset = item.content.asset;
+  const extracted = context.extractedText.trim();
+  return [
+    "Ingest this file the user uploaded into the brain.",
+    "",
+    `The file already exists as a page in this brain: id "${asset.brainId}" in the "${asset.folderPath}" folder (format: ${asset.format}, original file: ${asset.originalFileName}).`,
+    'The page\'s materialized file ends with a generated "Extracted text" block mirroring the text below; it is machine-derived and any edits to it are discarded, so never write into it.',
+    "",
+    "Required outcome, all scoped to this brain:",
+    `1. Rewrite that page's compiled truth into a durable synthesis of the document: what it is, who it involves, the key facts, claims, and figures, and why it matters — with [[page:...]] links to every entity page. Do not paste the extracted text; synthesize it.`,
+    "2. Give the page the right type for what the document represents (an external artifact is `source`) and a clear human title. Keep its id and folder unchanged unless another folder is clearly the better home.",
+    `3. Create or update person, company, or project pages for entities central to the document, with the document on their timelines (timeline-add with --source-ref ${item.sourceRef}). Do not create pages for entities merely mentioned in passing.`,
+    "4. Backlinks between all of these pages per the iron law.",
+    "",
+    extracted
+      ? null
+      : "No text could be extracted from this file (it may be scanned or image-only). Write a minimal compiled truth stating what the file is, judged from its name and metadata, and leave the page as draft.",
+    context.truncatedText
+      ? "The extracted text below was truncated to fit the prompt size limit."
+      : null,
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Uploaded at: ${item.capturedAt}`,
+    "",
+    `## File\n- Name: ${asset.originalFileName}\n- Type: ${asset.mimeType}\n- Size: ${asset.sizeBytes} bytes`,
+    `## Extracted text\n${extracted || "(none)"}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 }
 
 type BrainAgentIngestSessionResult = {
@@ -373,6 +423,116 @@ export async function runGoatChatCaptureAgentIngest(
     model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     draftBrainId: input.item.content.capture.draftBrainId,
   };
+}
+
+export async function runUploadAssetAgentIngest(
+  input: {
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedUploadAssetSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const db = getDb();
+  const brainRef =
+    input.brainRef ?? (await getDefaultGoatBrainForUser(input.userWorkosId, { db }))?.id;
+  if (!brainRef) {
+    throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
+  }
+  const asset = input.item.content.asset;
+  const row = await getGoatBrainFile({ brainRef, fileId: asset.documentId }, { db });
+  // The user may delete the document between upload and ingestion; that is a
+  // clean no-op, not a retryable failure.
+  if (!row) {
+    return { brainRef, skipped: true, reason: "document_missing", documentId: asset.documentId };
+  }
+  if (row.format === "markdown" || !row.assetStorageKey) {
+    throw new Error(`Brain document ${asset.documentId} is not a binary asset.`);
+  }
+
+  // Stage 1 (deterministic): fetch the bytes, extract text, record it on the
+  // row so materialization inside the agent session includes the generated
+  // extracted-text block and retrieval can index it.
+  const bytes = await downloadGoatBrainAssetBytes(row.assetStorageKey, input.env);
+  const extractedText = row.format === "pdf" ? await extractPdfText(bytes) : "";
+  await updateGoatBrainAssetExtraction(
+    {
+      brainRef,
+      userWorkosId: input.userWorkosId,
+      fileId: row.id,
+      extractedText,
+      assetContentHash: createHash("sha256").update(bytes).digest("hex"),
+      assetSizeBytes: bytes.byteLength,
+    },
+    { db },
+  );
+
+  const truncatedText = Buffer.byteLength(extractedText, "utf8") > PROMPT_ASSET_TEXT_BYTES;
+  const session = await runBrainAgentIngestSession({
+    userWorkosId: input.userWorkosId,
+    brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: UPLOAD_ASSET_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () =>
+      buildUploadAssetAgentIngestPrompt(input.item, {
+        extractedText: truncateByBytes(extractedText, PROMPT_ASSET_TEXT_BYTES),
+        truncatedText,
+      }),
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    documentId: row.id,
+    assetBrainId: row.brainId,
+    extractedTextBytes: Buffer.byteLength(extractedText, "utf8"),
+  };
+}
+
+async function downloadGoatBrainAssetBytes(
+  storageKey: string,
+  env: GoatBrainAgentIngestEnv,
+): Promise<Buffer> {
+  // Same pattern as attachment-hydration.ts: the blob lives in the PRIVATE
+  // store; the token defaults to BLOB_READ_WRITE_TOKEN, overridden when the
+  // runner env provides one explicitly.
+  const { get } = await import("@vercel/blob");
+  const result = await get(storageKey, {
+    access: "private",
+    useCache: false,
+    ...(env.blobReadWriteToken ? { token: env.blobReadWriteToken } : {}),
+  });
+  if (!result || result.statusCode !== 200 || !result.stream) {
+    throw new Error(`Could not download Goat brain asset blob (status ${result?.statusCode}).`);
+  }
+  const chunks: Uint8Array[] = [];
+  const reader = result.stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function extractPdfText(bytes: Buffer): Promise<string> {
+  try {
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const { text } = await extractText(pdf, { mergePages: true });
+    return typeof text === "string" ? text.trim() : "";
+  } catch (error) {
+    logger.warn("Goat Brain asset text extraction failed", {
+      event: "opencompany.goat_brain_asset_extraction_failed",
+      error,
+    });
+    return "";
+  }
 }
 
 async function runIngestAgentLoop(input: {

@@ -26,7 +26,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 
 | Command | Does |
 | --- | --- |
-| `create` | New doc: `--type` (one of the [10 entity types](./data-model.md#entity-types-the-10-type-contract)), `--id`, `--title`, `--truth`/`--truth-stdin`; optional `--folder`, `--kind`, `--alias`, `--tag`, `--relation type:id`, `--source-ref`. |
+| `create` | New doc: `--type` (one of the [8 entity types](./data-model.md#entity-types-the-8-type-contract)), `--id`, `--title`, `--truth`/`--truth-stdin`; optional `--folder`, `--kind`, `--alias`, `--tag`, `--relation type:id`, `--source-ref`. |
 | `ingest` | One-shot LLM planner from source text (`--text`/`--text-stdin`, required `--source-ref`, `--dry-run`). |
 | `rewrite <id>` | Replace compiled truth. |
 | `set <id>` | Update `--title`, `--type`, `--status`. Promoting to `--status active` requires the truth to cite `[[evidence:...]]`. |
@@ -55,7 +55,7 @@ System prompts embed `GOAT_BRAIN_POINTER_COPY_RULE`. Dispatch and leasing live i
 
 ## MCP connector (external agents)
 
-`apps/goat/app/api/mcp/[brainId]/[transport]/route.ts` exposes a per-brain MCP server,
+`apps/goat/app/api/mcp/[brainRef]/[transport]/route.ts` exposes a per-brain MCP server,
 OAuth-authenticated via WorkOS AuthKit — the token's grant *is* the brain, so a token for brain A
 cannot address brain B. Current tool surface: `query_brain` (read-only retrieval returning JSON
 hits) and `get_document` (full documents by id or alias, batched). Both are served by the read

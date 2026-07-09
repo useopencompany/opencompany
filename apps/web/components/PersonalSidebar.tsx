@@ -776,6 +776,7 @@ function PersonalSidebarView({
             workspaceName={workspaceName}
             workspaces={workspaces}
             hideWorkspace={!companySurfaceEnabled}
+            displayLabel="opencompany v3"
             className="min-w-0 flex-1 px-0 pb-0"
           />
         </div>

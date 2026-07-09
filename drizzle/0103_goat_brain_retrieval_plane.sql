@@ -1,7 +1,9 @@
 CREATE EXTENSION IF NOT EXISTS vector;--> statement-breakpoint
 ALTER TABLE "goat"."brain_documents" ADD COLUMN IF NOT EXISTS "search_text" text DEFAULT '' NOT NULL;--> statement-breakpoint
 ALTER TABLE "goat"."brain_documents" ADD COLUMN IF NOT EXISTS "name_text" text DEFAULT '' NOT NULL;--> statement-breakpoint
-ALTER TABLE "goat"."brain_documents" ADD COLUMN IF NOT EXISTS "search_tsv" tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce("search_text", ''))) STORED;--> statement-breakpoint
+-- asset_extracted_text (0102) is folded in directly so PDF/DOCX extraction updates — which touch
+-- only that column — reindex without having to recompose search_text.
+ALTER TABLE "goat"."brain_documents" ADD COLUMN IF NOT EXISTS "search_tsv" tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce("search_text", '') || ' ' || coalesce("asset_extracted_text", ''))) STORED;--> statement-breakpoint
 UPDATE "goat"."brain_documents" SET
   "name_text" = trim(concat_ws(' ',
     coalesce("title", ''),

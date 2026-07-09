@@ -10,6 +10,7 @@ import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedJamieMeetingSourceItem,
+  isNormalizedUploadAssetSourceItem,
   type NormalizedBrainSourceItem,
   type NormalizedJamieMeetingSourceItem,
 } from "@opencompany/goat-brain";
@@ -21,6 +22,7 @@ import {
   type GoatBrainAgentIngestEnv,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
+  runUploadAssetAgentIngest,
 } from "./goat-brain-agent-ingest";
 import {
   buildJamieMeetingBrainWrites,
@@ -84,6 +86,12 @@ const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "capture",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "upload",
+  sourceType: "asset",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -99,6 +107,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGoatChatCaptureSourceItem,
     run: runGoatChatCaptureAgentIngest,
+  },
+  {
+    descriptor: UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedUploadAssetSourceItem,
+    run: runUploadAssetAgentIngest,
   },
 ];
 
@@ -293,7 +306,9 @@ export async function claimNextGoatBrainIngestJob(input: {
 
 export async function runClaimedGoatBrainIngestJob(input: {
   job: GoatBrainIngestJobWithSource;
-  env: Pick<RunnerEnv, "jobLeaseTtlMs" | "vercelAiGatewayApiKey">;
+  env: Pick<RunnerEnv, "jobLeaseTtlMs" | "vercelAiGatewayApiKey"> & {
+    blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
+  };
   handlers?: readonly GoatBrainIngestHandler[];
   store?: GoatBrainIngestStore;
 }) {
@@ -350,7 +365,10 @@ export async function runClaimedGoatBrainIngestJob(input: {
       userWorkosId: input.job.userWorkosId,
       brainRef: input.job.brainRef ?? null,
       item: input.job.normalizedPayload,
-      env: { vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey },
+      env: {
+        vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
+        blobReadWriteToken: input.env.blobReadWriteToken,
+      },
     });
     if (!leaseActive) return;
     await store.complete({

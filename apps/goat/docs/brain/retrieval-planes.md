@@ -97,7 +97,7 @@ score-polluting graph expansion was doing.
 
 ## Index plane (precomputed at write time)
 
-Migration `0101` (hand-authored SQL + journal entry, per the 0100 precedent):
+Migration `0103` (hand-authored SQL + journal entry, per the 0100 precedent):
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;   -- pg_trgm already enabled (0042)
@@ -106,7 +106,8 @@ ALTER TABLE goat.brain_documents
   ADD COLUMN search_text text NOT NULL DEFAULT '',
   ADD COLUMN name_text  text NOT NULL DEFAULT '',
   ADD COLUMN search_tsv tsvector GENERATED ALWAYS AS
-    (to_tsvector('english', coalesce(search_text, ''))) STORED;
+    (to_tsvector('english', coalesce(search_text, '') || ' ' ||
+                 coalesce(asset_extracted_text, ''))) STORED;  -- asset text (0102) folded in
 CREATE INDEX ... ON goat.brain_documents USING gin (search_tsv);
 CREATE INDEX ... ON goat.brain_documents USING gin (name_text gin_trgm_ops);
 
@@ -124,7 +125,8 @@ CREATE INDEX ... ON goat.brain_document_embeddings (brain_ref);
 - `search_text` = title + aliases + compiled truth + timeline summaries + relation text, composed
   in `documentValues()` (`goat-brain-files.ts`) — the projection already computes every part.
   The migration backfills it from existing columns. `name_text` = title + aliases, for trigram
-  entity lookup.
+  entity lookup. `asset_extracted_text` (binary assets, 0102) joins the tsvector directly rather
+  than via `search_text` because extraction updates bypass `documentValues()`.
 - One weight class, one tsvector. Title emphasis comes from the name-boost stage (below), not
   from `setweight` gymnastics over jsonb columns.
 - **One embedding per document**, over title + aliases + compiled truth (capped ~8k chars). No
@@ -232,7 +234,7 @@ two chat-model calls sat mid-pipeline.
 
 ## Implementation slices (each its own issue)
 
-1. Migration 0101 (extension, columns, indexes, embeddings table, `search_text` backfill) +
+1. Migration 0103 (extension, columns, indexes, embeddings table, `search_text` backfill) +
    projection writes `search_text`/`name_text`.
 2. Read module: search pipeline (FTS + trgm + vector + fusion/blend/hops/neighbors) + point
    reads; port `retrieval.test.ts` invariants against a test DB.

@@ -13,7 +13,7 @@ type DbLike = any;
 
 export type GoatBrainSourceWithIntegration = {
   id: string;
-  brainId: string;
+  brainRef: string;
   provider: GoatBrainSourceConfigProvider;
   integrationId: string;
   userWorkosId: string;
@@ -26,13 +26,13 @@ export type GoatBrainSourceWithIntegration = {
 };
 
 export async function listGoatBrainSourcesForBrain(
-  brainId: string,
+  brainRef: string,
   db: DbLike = getDb(),
 ): Promise<GoatBrainSourceWithIntegration[]> {
   const rows = await db
     .select({
       id: goatBrainSources.id,
-      brainId: goatBrainSources.brainId,
+      brainRef: goatBrainSources.brainId,
       provider: goatBrainSources.provider,
       integrationId: goatBrainSources.integrationId,
       userWorkosId: goatBrainSources.userWorkosId,
@@ -47,11 +47,11 @@ export async function listGoatBrainSourcesForBrain(
     .from(goatBrainSources)
     .innerJoin(goatIntegrations, eq(goatBrainSources.integrationId, goatIntegrations.id))
     .innerJoin(goatUsers, eq(goatBrainSources.userWorkosId, goatUsers.workosUserId))
-    .where(eq(goatBrainSources.brainId, brainId));
+    .where(eq(goatBrainSources.brainId, brainRef));
 
   return rows.map((row: (typeof rows)[number]) => ({
     id: row.id,
-    brainId: row.brainId,
+    brainRef: row.brainRef,
     provider: row.provider,
     integrationId: row.integrationId,
     userWorkosId: row.userWorkosId,
@@ -69,12 +69,12 @@ export async function listEnabledBrainRefsForIntegration(
   db: DbLike = getDb(),
 ): Promise<string[]> {
   const rows = await db
-    .select({ brainId: goatBrainSources.brainId })
+    .select({ brainRef: goatBrainSources.brainId })
     .from(goatBrainSources)
     .where(
       and(eq(goatBrainSources.integrationId, integrationId), eq(goatBrainSources.enabled, true)),
     );
-  return rows.map((row: { brainId: string }) => row.brainId);
+  return rows.map((row: { brainRef: string }) => row.brainRef);
 }
 
 export async function hasAnyBrainSourceForIntegration(
@@ -90,7 +90,7 @@ export async function hasAnyBrainSourceForIntegration(
 }
 
 export async function upsertGoatBrainSource(input: {
-  brainId: string;
+  brainRef: string;
   provider: GoatBrainSourceConfigProvider;
   integrationId: string;
   userWorkosId: string;
@@ -106,7 +106,7 @@ export async function upsertGoatBrainSource(input: {
     .insert(goatBrainSources)
     .values({
       id: newGoatBrainSourceId(),
-      brainId: input.brainId,
+      brainId: input.brainRef,
       provider: input.provider,
       integrationId: input.integrationId,
       userWorkosId: input.userWorkosId,

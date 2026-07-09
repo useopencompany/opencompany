@@ -19,7 +19,7 @@ The database is the source of truth. Whenever an agent needs to work on the brai
 
 A brain document is a markdown file with YAML frontmatter, stored at `folder/id.md`:
 
-- **`id`** — a lowercase slug, unique within the brain (called `brainId` in code, distinct from the `brain_ref` that identifies the brain itself).
+- **`id`** — a lowercase slug, unique within the brain (called `brainId` in document code, distinct from the `brain_ref` that identifies the brain itself).
 - **`kind`** — `page` or `evidence`. This is the only structural rule in the system: evidence documents must live under the `evidence/` zone, pages must live outside it. A database constraint enforces it.
 - **`type`** — what the record represents, one of eight: `person`, `company`, `project`, `meeting`, `concept`, `source`, `analysis`, `note`. External artifacts of any format (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`. Types are pure metadata; they do not dictate where a document lives. Retired v1 names (`media`, `email` → `source`; `writing` → `analysis`) still parse via legacy aliases.
 - **`folder`** — free-form navigation, up to six path segments. There is an opinionated default per type (`person` → `people`, `note` → `inbox`, and so on in `packages/goat-brain/src/schemas.ts`), but users and agents can organize folders however they like.

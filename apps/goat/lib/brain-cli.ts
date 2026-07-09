@@ -481,6 +481,7 @@ function renderDocument(doc: GoatBrainDocumentRead, section: string): string {
         folder: doc.folder,
         kind: doc.kind,
         type: doc.type,
+        format: doc.format,
         status: doc.status,
         aliases: doc.aliases,
         createdAt: doc.createdAt,
@@ -512,10 +513,13 @@ function renderDocument(doc: GoatBrainDocumentRead, section: string): string {
       : "## Timeline";
   return [
     `# ${doc.title} (${doc.id})${resolvedNote}`,
-    `folder: ${doc.folder} | kind: ${doc.kind} | type: ${doc.type} | status: ${doc.status} | updated: ${doc.updatedAt}`,
+    `folder: ${doc.folder} | kind: ${doc.kind} | type: ${doc.type} | format: ${doc.format} | status: ${doc.status} | updated: ${doc.updatedAt}`,
     doc.aliases.length ? `aliases: ${doc.aliases.join(", ")}` : "",
     "## Compiled truth",
     doc.compiledTruth || "_No compiled truth yet._",
+    ...(doc.assetText
+      ? ["## Extracted text (machine-generated from the asset)", doc.assetText]
+      : []),
     timelineHeading,
     timeline,
     "## Links",

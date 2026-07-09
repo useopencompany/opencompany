@@ -18,24 +18,22 @@ returns `evidence` iff the folder is `evidence` or starts with `evidence/`
 (`GOAT_BRAIN_EVIDENCE_ZONE = "evidence"`). The database enforces the same invariant with a check
 constraint on `goat.brain_documents`.
 
-## Entity types (the 10-type contract)
+## Entity types (the 8-type contract)
 
 `GOAT_BRAIN_ENTITY_TYPES` — a **closed set**. Types are tags for what a document *is*; folders are
 free-form navigation for where it *lives*. Don't add a type without updating schema.ts, the DB
-check constraint, and this page.
+check constraint, and this page. Retired v1 names still parse through legacy aliases:
+`media` and `email` normalize to `source`, and `writing` normalizes to `analysis`.
 
 | Type | Typical use | Suggested default folder |
 | --- | --- | --- |
 | `person` | A human — colleague, contact, participant | `people/` |
 | `company` | An organization | `companies/` |
-| `media` | Video, podcast, article, image reference | `media/` |
 | `analysis` | Research output, synthesis, report | `analysis/` |
 | `concept` | Idea, framework, definition | `concepts/` |
-| `email` | Email summary or snapshot | `emails/` (snapshot: `evidence/`) |
-| `writing` | The user's own writing | `writing/` |
 | `note` | Unstructured note, quick capture | `inbox/` |
 | `project` | An initiative with a lifecycle | `projects/` |
-| `source` | A generic external source record | `sources/` (snapshot: `evidence/`) |
+| `source` | External artifact/reference: article, video, email thread, repo, document, source record | `sources/` (snapshot: `evidence/`) |
 
 Validation: `isValidGoatBrainEntityType` (set membership).
 Normalization: `normalizeGoatBrainEntityType` (lowercase, `[^a-z0-9]` → `_`, max 64 chars).
@@ -55,13 +53,13 @@ the closed set above is what validators actually accept.
 
 ## Default folders
 
-`DEFAULT_GOAT_BRAIN_FOLDERS` — the 12 system folders seeded per brain (rows in
+`DEFAULT_GOAT_BRAIN_FOLDERS` — the 9 system folders seeded per brain (rows in
 `goat.brain_folders` with `source: "system"`); users and agents can create free-form custom
 folders beyond these:
 
 ```
 inbox/  people/  companies/  projects/  meetings/  concepts/
-media/  writing/  analysis/  emails/  sources/  evidence/
+analysis/  sources/  evidence/
 ```
 
 Folder paths match `GOAT_BRAIN_FOLDER_PATTERN`: lowercase `a-z0-9-` segments separated by `/`,
@@ -127,8 +125,29 @@ meeting [[evidence:ev-jamie-abc123]].
 - **Timeline** — append-only dated entries, each with an `ev-*` id and optionally a source ref.
   History is never rewritten; the truth section is recompiled *from* it.
 
-Binary formats: `format` on the document row is `markdown` (default), `pdf`, or `docx`
-(`GoatBrainDocumentFormat`).
+## Binary assets (PDF)
+
+`format` on the document row is `markdown` (default), `pdf`, or `docx`
+(`GoatBrainDocumentFormat`). A binary-backed document is **one row, one folder entry, one
+artifact** — there is no sibling "stub page":
+
+- The bytes live in the private Vercel Blob store behind `asset_storage_key`;
+  `original_file_name`, `mime_type`, `asset_size_bytes`, and `asset_content_hash` (sha256 of the
+  bytes) describe them. The UI serves them through `/api/brain-assets/[documentId]` and renders
+  the file first-class, with metadata and the agent's summary in the details sidebar.
+- The `content` column still holds a normal markdown projection (frontmatter + compiled truth +
+  timeline), so metadata, relations, wiki links, versioning, and sync work identically to
+  markdown pages. The asset linkage is a `sources` entry with the `upload:<documentId>` ref.
+- `asset_extracted_text` carries the machine-extracted text (capped at 200KB), written by the
+  upload ingestion worker. Materialization appends it to the projection file as a generated
+  block between `ASSET-TEXT:BEGIN/END` sentinels; the document parser strips that block, so the
+  CLI and sync ignore it and edits inside it are discarded. Retrieval indexes it as the
+  low-boost `assetText` field.
+- Uploads enter via drag-drop / the upload button in the brain tree
+  (`uploadGoatBrainAssetAction`), which creates the draft row and enqueues a
+  `brain_agent_ingest` job (provider `upload`, type `asset`). The runner extracts the text, then
+  the standard ingestion agent rewrites the page's compiled truth and wires backlinks. Deleting
+  the document best-effort deletes the blob; version rows keep the page, not the bytes.
 
 ## Database tables
 

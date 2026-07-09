@@ -18,16 +18,16 @@ export function GoatBrainSwitcher() {
   const routeBrain = routeBrainSegment
     ? brains.find((brain) => encodeURIComponent(brain.id) === routeBrainSegment)
     : null;
-  const highlightedBrainId = routeBrain?.id ?? activeBrain?.id ?? null;
+  const highlightedBrainRef = routeBrain?.id ?? activeBrain?.id ?? null;
 
-  const switchBrain = (brainId: string) => {
-    const href = goatBrainHref(brainId);
-    if (brainId === activeBrain?.id) {
+  const switchBrain = (brainRef: string) => {
+    const href = goatBrainHref(brainRef);
+    if (brainRef === activeBrain?.id) {
       router.push(href);
       return;
     }
     startTransition(async () => {
-      const result = await switchGoatBrainAction(brainId);
+      const result = await switchGoatBrainAction(brainRef);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -40,7 +40,7 @@ export function GoatBrainSwitcher() {
     <>
       <div className="flex flex-col gap-px">
         {brains.map((brain) => {
-          const active = brainRouteActive && brain.id === highlightedBrainId;
+          const active = brainRouteActive && brain.id === highlightedBrainRef;
           return (
             <div key={brain.id} className="group/brain flex items-center">
               <button
@@ -104,7 +104,7 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
         return;
       }
       onClose();
-      if (result.brainId) router.push(goatBrainHref(result.brainId));
+      if (result.brainRef) router.push(goatBrainHref(result.brainRef));
       else router.refresh();
     });
   };
@@ -162,8 +162,8 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function goatBrainHref(brainId: string) {
-  return `/brain/${encodeURIComponent(brainId)}`;
+function goatBrainHref(brainRef: string) {
+  return `/brain/${encodeURIComponent(brainRef)}`;
 }
 
 export function VisibilityOption({
