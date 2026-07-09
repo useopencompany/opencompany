@@ -25,6 +25,7 @@ import {
   isValidGoatBrainId,
   isValidGoatBrainKind,
   isValidGoatBrainStatus,
+  normalizeGoatBrainBody,
   normalizeGoatBrainFolderForV1,
   type GoatBrainDocument as ParsedGoatBrainDocument,
   parseGoatBrainDocument,
@@ -213,6 +214,7 @@ export function deriveGoatBrainFileProjection(input: {
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
   if (!entityType) throw new Error("frontmatter.type must be a built-in brain entity type.");
   if (!kind) throw new Error('frontmatter.kind must be "page" or "evidence".');
+  const body = normalizeGoatBrainBody(parsed.compiledTruth);
   const content = canonicalGoatBrainContent({
     parsed,
     brainId,
@@ -221,6 +223,7 @@ export function deriveGoatBrainFileProjection(input: {
     kind,
     entityType,
     status,
+    body,
     source,
   });
   const sizeBytes = Buffer.byteLength(content, "utf8");
@@ -235,7 +238,7 @@ export function deriveGoatBrainFileProjection(input: {
     format: GOAT_BRAIN_FILE_FORMAT,
     mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
     content,
-    body: parsed.compiledTruth,
+    body,
     timeline: parsed.timeline,
     contentHash: hashGoatBrainContent(content),
     sizeBytes,
@@ -258,6 +261,7 @@ function canonicalGoatBrainContent(input: {
   kind: GoatBrainKind;
   entityType: GoatBrainEntityType;
   status: GoatBrainStatus;
+  body: string;
   source: string;
 }): string {
   const fm = input.parsed.frontmatter;
@@ -267,13 +271,14 @@ function canonicalGoatBrainContent(input: {
     fm.kind === input.kind &&
     fm.type === input.entityType &&
     fm.status === input.status &&
-    fm.title === input.title
+    fm.title === input.title &&
+    input.parsed.compiledTruth === input.body
   ) {
     return input.source;
   }
   return serializeGoatBrainDocument({
     title: input.title,
-    compiledTruth: input.parsed.compiledTruth,
+    compiledTruth: input.body,
     timeline: input.parsed.timeline,
     frontmatter: {
       id: input.brainId,

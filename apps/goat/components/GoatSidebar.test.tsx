@@ -89,6 +89,16 @@ describe("GoatSidebar", () => {
     expect(routerMock.push).toHaveBeenCalledWith("/brain/goat_brain_1");
   });
 
+  it("opens the active brain route from the brain list", async () => {
+    const user = userEvent.setup();
+    pathnameMock.value = "/";
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "General" }));
+
+    expect(routerMock.push).toHaveBeenCalledWith("/brain/goat_brain_1");
+  });
+
   it("collapses to zero width and toggles via the sidebar button", () => {
     pathnameMock.value = "/";
     const onToggleCollapsed = vi.fn();

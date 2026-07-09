@@ -1,5 +1,6 @@
 "use client";
 
+import { normalizeGoatBrainBody } from "@opencompany/goat-brain/document";
 import {
   evidenceLinkTargets,
   formatGoatBrainEvidenceLink,
@@ -216,7 +217,7 @@ function GoatBrainEditor({
     timelineOpen: boolean;
   }>({
     docId: initialDocument?.id ?? null,
-    value: initialDocument?.body ?? "",
+    value: documentEditorBody(initialDocument),
     detailsOpen: false,
     timelineOpen: false,
   });
@@ -245,13 +246,14 @@ function GoatBrainEditor({
   if (docPanelState.docId !== (selectedDocument?.id ?? null)) {
     setDocPanelState({
       docId: selectedDocument?.id ?? null,
-      value: selectedDocument?.body ?? "",
+      value: documentEditorBody(selectedDocument),
       detailsOpen: false,
       timelineOpen: false,
     });
   }
   const editorValue = docPanelState.value;
-  const dirty = Boolean(selectedDocument && editorValue !== selectedDocument.body);
+  const selectedBody = documentEditorBody(selectedDocument);
+  const dirty = Boolean(selectedDocument && editorValue !== selectedBody);
   const activeFolder = selectedDocument?.folderPath ?? selectedFolder;
   const activePath = selectedDocument ? brainDocumentTreePath(selectedDocument) : activeFolder;
   const tree = useMemo(
@@ -1371,7 +1373,13 @@ function buildGraphLinks(
 }
 
 function documentInlineLinkText(document: GoatBrainDocumentView) {
-  return [document.body, ...document.timeline.map((entry) => entry.body)].join("\n\n");
+  return [documentEditorBody(document), ...document.timeline.map((entry) => entry.body)].join(
+    "\n\n",
+  );
+}
+
+function documentEditorBody(document: GoatBrainDocumentView | null | undefined) {
+  return document ? normalizeGoatBrainBody(document.body) : "";
 }
 
 function ancestorFolderPaths(path: string) {
@@ -1401,7 +1409,7 @@ function documentViewFromRow(
     path,
     title: row.title ?? row.brain_id,
     content: row.content,
-    body: row.body,
+    body: normalizeGoatBrainBody(row.body),
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),
     format: normalizeFormat(row.format),
     mimeType: row.mime_type ?? "text/markdown",

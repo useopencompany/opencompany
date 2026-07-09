@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { parseGoatBrainDocument } from "@opencompany/goat-brain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createGoatBrainMarkdownContent,
@@ -61,6 +62,51 @@ describe("goat brain file sync", () => {
       kind: "page",
       entityType: "person",
     });
+  });
+
+  it("projects nested legacy markdown compiled truth as body-only text", () => {
+    const nested = createGoatBrainMarkdownContent({
+      id: "nested-note",
+      folderPath: "inbox",
+      title: "Nested note",
+      type: "note",
+      status: "draft",
+      compiledTruth: "Only this truth should be stored as the body.",
+    });
+    const content = [
+      "---",
+      "id: brain-native-background-workers",
+      "folder: product/concepts",
+      "kind: page",
+      "type: note",
+      "status: draft",
+      "title: Brain-native background workers",
+      "createdAt: 2026-01-01T00:00:00.000Z",
+      "updatedAt: 2026-01-01T00:00:00.000Z",
+      "related: []",
+      "---",
+      "",
+      "# Brain-native background workers",
+      "",
+      "## Compiled truth",
+      nested,
+      "",
+      "<!-- TIMELINE:BELOW - append only past this marker -->",
+      "",
+      "## Timeline",
+      "",
+    ].join("\n");
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "product/concepts/brain-native-background-workers.md",
+      content,
+    });
+
+    expect(projection).toMatchObject({
+      body: "Only this truth should be stored as the body.",
+    });
+    expect(parseGoatBrainDocument(projection.content).compiledTruth).toBe(projection.body);
+    expect(projection.content).not.toContain("id: nested-note");
   });
 
   it("recovers sidecar-backed markdown when only the payload hash is stale", async () => {
