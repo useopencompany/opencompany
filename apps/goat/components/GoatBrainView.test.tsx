@@ -197,10 +197,7 @@ describe("GoatBrainView", () => {
       within(evidenceSection as HTMLElement).getByRole("link", {
         name: /Platform planning chat.*cites/,
       }),
-    ).toHaveAttribute(
-      "href",
-      "/brain/evidence/chat/ev-platform-planning-chat",
-    );
+    ).toHaveAttribute("href", "/brain/evidence/chat/ev-platform-planning-chat");
   });
 
   it("keeps the route brain id in generated document links", async () => {
