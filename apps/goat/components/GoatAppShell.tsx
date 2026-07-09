@@ -17,27 +17,18 @@ import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, brains, activeBrain } = await currentGoatUser();
-  const [
-    tasks,
-    schedules,
-    recentChats,
-    googleIntegrations,
-    linear,
-    github,
-    jamie,
-    slack,
-    codex,
-  ] = await Promise.all([
-    listCurrentUserGoatTasks(),
-    listCurrentUserGoatTaskSchedules(),
-    listCurrentUserRecentGoatChats(),
-    getGoatGoogleIntegrationState(user.workosUserId),
-    getGoatLinearIntegrationState(user.workosUserId),
-    getGoatGitHubIntegrationState(user.workosUserId),
-    getGoatJamieIntegrationState(user.workosUserId),
-    getGoatSlackIntegrationState(user.workosUserId),
-    loadCurrentGoatCodexAuthSettings(),
-  ]);
+  const [tasks, schedules, recentChats, googleIntegrations, linear, github, jamie, slack, codex] =
+    await Promise.all([
+      listCurrentUserGoatTasks(),
+      listCurrentUserGoatTaskSchedules(),
+      listCurrentUserRecentGoatChats(),
+      getGoatGoogleIntegrationState(user.workosUserId),
+      getGoatLinearIntegrationState(user.workosUserId),
+      getGoatGitHubIntegrationState(user.workosUserId),
+      getGoatJamieIntegrationState(user.workosUserId),
+      getGoatSlackIntegrationState(user.workosUserId),
+      loadCurrentGoatCodexAuthSettings(),
+    ]);
 
   const initialData: GoatAppInitialData = {
     user: {

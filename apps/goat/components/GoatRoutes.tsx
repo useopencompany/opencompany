@@ -206,8 +206,7 @@ export function GoatBrainRoute({
   const brain = initialBrainSnapshot ?? { folders: [], documents: [] };
   const requestedPath = path.join("/");
   const requestedFolderExists = brain.folders.some((folder) => folder.path === requestedPath);
-  const initialBrainId =
-    path.length > 1 && !requestedFolderExists ? (path.at(-1) ?? null) : null;
+  const initialBrainId = path.length > 1 && !requestedFolderExists ? (path.at(-1) ?? null) : null;
   const initialFolderPath =
     path.length > 0
       ? initialBrainId

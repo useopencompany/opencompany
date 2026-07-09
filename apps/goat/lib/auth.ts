@@ -9,8 +9,8 @@ import {
   adoptGoatWorkspaceMembershipsFromOrgs,
   createDefaultGoatWorkspaceForUser,
   DEFAULT_GOAT_BRAIN_SLUG,
-  getGoatBrainAccess,
   type GoatWorkspaceWithRole,
+  getGoatBrainAccess,
   listAccessibleGoatBrains,
   listGoatWorkspacesForUser,
 } from "@opencompany/db/goat-workspaces";
