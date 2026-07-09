@@ -10,6 +10,7 @@ import {
   createDefaultGoatWorkspaceForUser,
   DEFAULT_GOAT_BRAIN_SLUG,
   type GoatWorkspaceWithRole,
+  getGoatBrainAccess,
   listAccessibleGoatBrains,
   listGoatWorkspacesForUser,
 } from "@opencompany/db/goat-workspaces";
@@ -170,4 +171,18 @@ export async function currentGoatBrain(): Promise<{ context: GoatAuthContext; br
     throw new Error("You do not have access to any brain in this workspace.");
   }
   return { context, brain: context.activeBrain };
+}
+
+export async function currentGoatBrainByRef(
+  brainRef: string,
+): Promise<{ context: GoatAuthContext; brain: GoatBrain }> {
+  const context = await currentGoatUser();
+  const access = await getGoatBrainAccess({
+    userWorkosId: context.user.workosUserId,
+    brainRef,
+  });
+  if (!access || access.brain.workspaceId !== context.workspace.id) {
+    throw new Error("You do not have access to that brain.");
+  }
+  return { context, brain: access.brain };
 }

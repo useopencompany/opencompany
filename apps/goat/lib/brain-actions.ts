@@ -1,6 +1,6 @@
 "use server";
 
-import { currentGoatBrain } from "@/lib/auth";
+import { currentGoatBrainByRef } from "@/lib/auth";
 import {
   type BrainMutationResult,
   createGoatBrainFolderForUser,
@@ -17,19 +17,22 @@ import {
   replaceGoatBrainAssetForUser,
 } from "@/lib/brain-assets";
 
-// All mutations run against the active brain from the auth context, which is
-// resolved from the user's accessible brains — that lookup is the access check.
+// All mutations run against the explicit route-selected brain after checking
+// that the current user can access it.
 // Creating markdown documents is deliberately not exposed as an action:
 // written content enters through the brain CLI and ingestion agents only.
 // File uploads are the one exception — the upload action registers a binary
 // asset whose curation still happens through the ingestion agent.
 
 export async function updateGoatBrainDocumentAction(input: {
+  brainRef: string;
   documentId: string;
   body: string;
   expectedContentHash?: string;
 }): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return updateGoatBrainDocumentForUser({
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
@@ -40,10 +43,13 @@ export async function updateGoatBrainDocumentAction(input: {
 }
 
 export async function renameGoatBrainDocumentAction(input: {
+  brainRef: string;
   documentId: string;
   title: string;
 }): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return renameGoatBrainDocumentForUser({
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
@@ -53,10 +59,13 @@ export async function renameGoatBrainDocumentAction(input: {
 }
 
 export async function moveGoatBrainDocumentAction(input: {
+  brainRef: string;
   documentId: string;
   folderPath: string;
 }): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return moveGoatBrainDocumentForUser({
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
@@ -65,21 +74,27 @@ export async function moveGoatBrainDocumentAction(input: {
   });
 }
 
-export async function deleteGoatBrainDocumentAction(
-  documentId: string,
-): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+export async function deleteGoatBrainDocumentAction(input: {
+  brainRef: string;
+  documentId: string;
+}): Promise<BrainMutationResult> {
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return deleteGoatBrainDocumentForUser({
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
-    documentId,
+    documentId: input.documentId,
   });
 }
 
 export async function createGoatBrainFolderAction(input: {
+  brainRef: string;
   folderPath: string;
 }): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return createGoatBrainFolderForUser({
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
@@ -88,10 +103,13 @@ export async function createGoatBrainFolderAction(input: {
 }
 
 export async function renameGoatBrainFolderAction(input: {
+  brainRef: string;
   fromPath: string;
   toPath: string;
 }): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return renameGoatBrainFolderForUser({
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
@@ -101,9 +119,12 @@ export async function renameGoatBrainFolderAction(input: {
 }
 
 export async function deleteGoatBrainFolderAction(input: {
+  brainRef: string;
   folderPath: string;
 }): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return deleteGoatBrainFolderForUser({
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
@@ -112,9 +133,11 @@ export async function deleteGoatBrainFolderAction(input: {
 }
 
 export async function uploadGoatBrainAssetAction(
-  input: GoatBrainAssetUploadInput,
+  input: GoatBrainAssetUploadInput & { brainRef: string },
 ): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return createGoatBrainAssetForUser({
     ...input,
     brainRef: brain.id,
@@ -123,12 +146,31 @@ export async function uploadGoatBrainAssetAction(
 }
 
 export async function replaceGoatBrainAssetAction(
-  input: GoatBrainAssetUploadInput & { documentId: string },
+  input: GoatBrainAssetUploadInput & { brainRef: string; documentId: string },
 ): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
   return replaceGoatBrainAssetForUser({
     ...input,
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
   });
+}
+
+async function resolveBrainMutationContext(brainRef: string): Promise<
+  | Awaited<ReturnType<typeof currentGoatBrainByRef>>
+  | {
+      ok: false;
+      message: string;
+    }
+> {
+  try {
+    return await currentGoatBrainByRef(brainRef);
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "You do not have access to that brain.",
+    };
+  }
 }
