@@ -22,6 +22,10 @@ import { useComposerAttachments } from "@/components/useComposerAttachments";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
+import {
+  PERSONAL_COMPOSER_FOCUS_EVENT,
+  PERSONAL_COMPOSER_FOCUS_STORAGE_KEY,
+} from "@/lib/personal/composer-shortcut";
 import { personalPaths } from "@/lib/personal/paths";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
@@ -85,6 +89,20 @@ export default function PersonalHome() {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [input]);
+
+  useEffect(() => {
+    function focusComposer() {
+      window.sessionStorage.removeItem(PERSONAL_COMPOSER_FOCUS_STORAGE_KEY);
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+
+    window.addEventListener(PERSONAL_COMPOSER_FOCUS_EVENT, focusComposer);
+    if (window.sessionStorage.getItem(PERSONAL_COMPOSER_FOCUS_STORAGE_KEY) === "1") {
+      focusComposer();
+    }
+
+    return () => window.removeEventListener(PERSONAL_COMPOSER_FOCUS_EVENT, focusComposer);
+  }, []);
 
   const submit = () => {
     const content = input.trim();

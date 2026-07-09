@@ -8,7 +8,7 @@ import type {
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import { PanelLeft } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { FloatingNavInsetProvider } from "@/components/FloatingNavInsetContext";
 import { useMobileInspector } from "@/components/MobileInspectorContext";
@@ -32,8 +32,13 @@ import {
   addPersonalAgentTool,
   type PersonalIntegrationId,
 } from "@/lib/personal/actions";
+import {
+  PERSONAL_COMPOSER_FOCUS_EVENT,
+  PERSONAL_COMPOSER_FOCUS_STORAGE_KEY,
+} from "@/lib/personal/composer-shortcut";
 import type { PersonalIntegrationDetails } from "@/lib/personal/integration-details";
 import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
+import { personalPaths } from "@/lib/personal/paths";
 import { browserTimezone, type UserTimezoneSource } from "@/lib/timezones";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 import { useDrawerGesture } from "@/lib/useDrawerGesture";
@@ -155,6 +160,7 @@ export default function PersonalShell({
   // DETAILS ]). Desktop (>= md) is untouched: `collapsed` still drives the in-flow width.
   const isMobile = useIsMobile();
   const pathname = usePathname();
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
   const { handle: inspectorHandle } = useMobileInspector();
@@ -213,6 +219,24 @@ export default function PersonalShell({
       window.removeEventListener("keydown", onKey);
     };
   }, [isMobile, drawerOpen]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey)) return;
+      if (event.altKey || event.shiftKey) return;
+
+      event.preventDefault();
+      window.sessionStorage.setItem(PERSONAL_COMPOSER_FOCUS_STORAGE_KEY, "1");
+      if (isMobile) setDrawerOpen(false);
+      if (pathname !== personalPaths.home) router.push(personalPaths.home);
+      window.requestAnimationFrame(() => {
+        window.dispatchEvent(new Event(PERSONAL_COMPOSER_FOCUS_EVENT));
+      });
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMobile, pathname, router]);
 
   const bundleDir = agent.path ? agentBundleDir(agent.path) : null;
 
