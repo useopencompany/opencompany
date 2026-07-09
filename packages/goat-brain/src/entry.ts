@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
-  type ParsedGoatBrainDocument,
   normalizeGoatBrainBody,
+  type ParsedGoatBrainDocument,
   parseGoatBrainDocument,
   serializeGoatBrainDocument,
 } from "./document";

@@ -1,11 +1,11 @@
 "use client";
 
+import { normalizeGoatBrainBody } from "@opencompany/goat-brain/document";
 import {
   evidenceLinkTargets,
   formatGoatBrainEvidenceLink,
   pageLinkTargets,
 } from "@opencompany/goat-brain/inline-links";
-import { normalizeGoatBrainBody } from "@opencompany/goat-brain/document";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
