@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
+import { GoatSpendOverview } from "@/components/GoatSpendOverview";
 import { GoatSurface } from "@/components/GoatSurface";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
@@ -137,6 +138,8 @@ export function GoatSettingsRoute() {
               />
             </Link>
           </section>
+
+          <GoatSpendOverview />
 
           <section className="flex flex-col gap-1">
             <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
