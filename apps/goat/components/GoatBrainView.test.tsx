@@ -111,11 +111,15 @@ describe("GoatBrainView", () => {
 
   it("shows derived backlinks in the details drawer", async () => {
     const user = userEvent.setup();
+    const evidenceAboutAda = {
+      ...evidenceDocument,
+      relations: [{ type: "about", to: "ada-lovelace" }],
+    };
 
     render(
       <GoatBrainView
         folders={folders}
-        documents={[documentWithTimeline, documentLinkingToAda]}
+        documents={[documentWithTimeline, documentLinkingToAda, evidenceAboutAda]}
         initialFolderPath="people"
         initialBrainId="ada-lovelace"
       />,
@@ -124,10 +128,24 @@ describe("GoatBrainView", () => {
     await user.click(screen.getByRole("button", { name: "Toggle file details" }));
 
     expect(screen.getByRole("heading", { name: "Backlinks" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Roadmap.*wiki_link/ })).toHaveAttribute(
-      "href",
-      "/brain/projects/roadmap",
-    );
+    const backlinksSection = screen.getByRole("heading", { name: "Backlinks" }).closest("section");
+    expect(backlinksSection).not.toBeNull();
+    expect(within(backlinksSection as HTMLElement).getByText("1")).toBeInTheDocument();
+    expect(
+      within(backlinksSection as HTMLElement).getByRole("link", { name: /Roadmap.*wiki_link/ }),
+    ).toHaveAttribute("href", "/brain/projects/roadmap");
+    expect(
+      within(backlinksSection as HTMLElement).queryByRole("link", {
+        name: /Platform planning chat.*about/,
+      }),
+    ).not.toBeInTheDocument();
+    const evidenceSection = screen.getByRole("heading", { name: "Evidence" }).closest("section");
+    expect(evidenceSection).not.toBeNull();
+    expect(
+      within(evidenceSection as HTMLElement).getByRole("link", {
+        name: /Platform planning chat.*cites, about/,
+      }),
+    ).toHaveAttribute("href", "/brain/evidence/chat/ev-platform-planning-chat");
   });
 
   it("shows derived evidence backlinks from timeline inline links", async () => {
@@ -150,7 +168,7 @@ describe("GoatBrainView", () => {
     );
   });
 
-  it("keeps outgoing sidebar links at the compact sidebar text size", async () => {
+  it("shows evidence separately from compact outgoing page links", async () => {
     const user = userEvent.setup();
 
     render(
@@ -166,10 +184,20 @@ describe("GoatBrainView", () => {
 
     const outgoingSection = screen.getByRole("heading", { name: "Outgoing" }).closest("section");
     expect(outgoingSection).not.toBeNull();
+    expect(within(outgoingSection as HTMLElement).getByText("0")).toBeInTheDocument();
+    expect(
+      within(outgoingSection as HTMLElement).getByText("No outgoing links."),
+    ).toBeInTheDocument();
 
-    const outgoingList = within(outgoingSection as HTMLElement).getByRole("list");
-    expect(outgoingList).toHaveClass("text-[12px]", "leading-5");
-    expect(screen.getByRole("link", { name: /Platform planning chat.*cites/ })).toHaveAttribute(
+    const evidenceSection = screen.getByRole("heading", { name: "Evidence" }).closest("section");
+    expect(evidenceSection).not.toBeNull();
+    const evidenceList = within(evidenceSection as HTMLElement).getByRole("list");
+    expect(evidenceList).toHaveClass("text-[12px]", "leading-5");
+    expect(
+      within(evidenceSection as HTMLElement).getByRole("link", {
+        name: /Platform planning chat.*cites/,
+      }),
+    ).toHaveAttribute(
       "href",
       "/brain/evidence/chat/ev-platform-planning-chat",
     );
