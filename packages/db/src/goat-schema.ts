@@ -114,14 +114,12 @@ export type GoatBrainFolderSource = "system" | "custom";
 export type GoatBrainEntityType =
   | "person"
   | "company"
-  | "media"
-  | "analysis"
-  | "concept"
-  | "email"
-  | "writing"
-  | "note"
   | "project"
-  | "source";
+  | "meeting"
+  | "concept"
+  | "source"
+  | "analysis"
+  | "note";
 export type GoatBrainKind = "page" | "evidence";
 export type GoatBrainRelation = {
   type: string;
@@ -418,7 +416,7 @@ export const goatBrainDocuments = goat.table(
     kindCheck: check("goat_brain_documents_kind_check", sql`${table.kind} IN ('page', 'evidence')`),
     entityTypeCheck: check(
       "goat_brain_documents_entity_type_check",
-      sql`${table.entityType} IN ('person', 'company', 'media', 'analysis', 'concept', 'email', 'writing', 'note', 'project', 'source')`,
+      sql`${table.entityType} IN ('person', 'company', 'project', 'meeting', 'concept', 'source', 'analysis', 'note')`,
     ),
     kindZoneCheck: check(
       "goat_brain_documents_kind_zone_check",

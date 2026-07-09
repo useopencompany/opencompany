@@ -21,10 +21,10 @@ A brain document is a markdown file with YAML frontmatter, stored at `folder/id.
 
 - **`id`** — a lowercase slug, unique within the brain (called `brainId` in code, distinct from the `brain_ref` that identifies the brain itself).
 - **`kind`** — `page` or `evidence`. This is the only structural rule in the system: evidence documents must live under the `evidence/` zone, pages must live outside it. A database constraint enforces it.
-- **`type`** — one of ten semantic tags: `person`, `company`, `project`, `media`, `analysis`, `concept`, `email`, `writing`, `note`, `source`. Types are pure metadata; they do not dictate where a document lives.
+- **`type`** — what the record represents, one of eight: `person`, `company`, `project`, `meeting`, `concept`, `source`, `analysis`, `note`. External artifacts of any format (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`. Types are pure metadata; they do not dictate where a document lives. Retired v1 names (`media`, `email` → `source`; `writing` → `analysis`) still parse via legacy aliases.
 - **`folder`** — free-form navigation, up to six path segments. There is an opinionated default per type (`person` → `people`, `note` → `inbox`, and so on in `packages/goat-brain/src/schemas.ts`), but users and agents can organize folders however they like.
-- **`status`** — `draft`, `active`, `archived`, or `merged`. Active pages must cite at least one evidence record in their compiled truth; validation enforces it on write.
-- **`aliases`, `tags`, `relations`, `sources`** — additional frontmatter used for lookup and graph derivation.
+- **`status`** — the curation signal: `draft` (captured, not yet curated), `active` (curated synthesis; must cite at least one evidence record in its compiled truth — validation enforces it on write), `archived` (deliberately retired), or `merged` (tombstone pointing at `mergedInto`). Ingestion agents promote pages to `active` once their compiled truth cites evidence. Retrieval (`query`) excludes merged and archived documents unless `--include-merged` / `--include-archived` is passed; the UI shows archived documents in a collapsed sidebar section and hides merged ones entirely.
+- **`aliases`, `relations`, `sources`** — additional frontmatter used for lookup and graph derivation.
 
 The body has two zones: a **compiled truth** section that writers rewrite in place (never append-only), and a **timeline** of dated evidence entries, each with a deterministic `ev-` id, a timestamp, and a source reference. Timeline entries are also denormalized into their own table so the UI can query them efficiently.
 
@@ -56,7 +56,7 @@ All tables live in the `goat` Postgres schema, defined in `packages/db/src/goat-
 
 - **`brains`** — one row per brain: workspace, name, slug, `visibility` (`workspace` or `restricted`). `brain_members` holds the allow-list for restricted brains.
 - **`brain_folders`** — the folder tree per brain (`system` or `custom` source).
-- **`brain_documents`** — the documents: content, body, timeline JSON, kind, entity type, status, relations, sources, aliases, tags, content hash. Format can be `markdown`, `pdf`, or `docx`.
+- **`brain_documents`** — the documents: content, body, timeline JSON, kind, entity type, status, relations, sources, aliases, content hash. Format can be `markdown`, `pdf`, or `docx`.
 - **`brain_timeline_entries`** — denormalized per-entry rows for efficient timeline queries.
 - **`brain_edges`** — the derived graph.
 - **`brain_document_versions`** — an audit trail of overwrites and deletes.
@@ -70,7 +70,7 @@ There are five ways content gets into a brain.
 
 ### 1. The UI editor
 
-The Brain page (`/brain/...`) renders `GoatBrainView` with a Tiptap markdown editor that decorates inline links and supports cmd-click navigation. Edits autosave after 1.2s of idle through server actions in `apps/goat/lib/brain-actions.ts` (`createGoatBrainDocumentAction`, `updateGoatBrainDocumentAction`, move, rename, delete). Updates carry an `expectedContentHash` so concurrent edits are detected rather than silently overwritten.
+The Brain page (`/brain/...`) renders `GoatBrainView` with a Tiptap markdown editor that decorates inline links and supports cmd-click navigation. Edits autosave after 1.2s of idle through server actions in `apps/goat/lib/brain-actions.ts` (`updateGoatBrainDocumentAction`, move, rename, delete). Updates carry an `expectedContentHash` so concurrent edits are detected rather than silently overwritten. The UI deliberately has no create affordance: new documents and folders enter through the brain CLI and ingestion agents only.
 
 ### 2. Chat captures (`save_to_brain`)
 

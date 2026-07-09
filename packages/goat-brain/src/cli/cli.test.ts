@@ -134,7 +134,7 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--type",
-        "email",
+        "source",
         "--kind",
         "slack",
         "--id",
@@ -248,7 +248,7 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--type",
-        "email",
+        "source",
         "--kind",
         "evidence",
         "--id",
@@ -268,7 +268,7 @@ describe("goat-brain cli", () => {
     expect(evidence.doc.frontmatter).toMatchObject({
       folder: "evidence",
       kind: "evidence",
-      type: "email",
+      type: "source",
     });
 
     await expect(
@@ -625,7 +625,7 @@ describe("goat-brain cli", () => {
       root,
       "acme",
       "--type",
-      "email",
+      "source",
       "--folder",
       "evidence/email",
       "--body",
@@ -661,7 +661,7 @@ describe("goat-brain cli", () => {
     expect(evidence.doc.frontmatter).toMatchObject({
       folder: "evidence/email",
       kind: "evidence",
-      type: "email",
+      type: "source",
       relations: [{ type: "about", to: "acme" }],
     });
 
@@ -747,7 +747,7 @@ describe("goat-brain cli", () => {
         "--root",
         root,
         "--type",
-        "email",
+        "source",
         "--kind",
         "evidence",
         "--id",
@@ -768,7 +768,7 @@ describe("goat-brain cli", () => {
     expect(created.doc.frontmatter).toMatchObject({
       folder: "evidence",
       kind: "evidence",
-      type: "email",
+      type: "source",
     });
 
     const doctor = await run(["doctor", "--root", root, "--json"]);

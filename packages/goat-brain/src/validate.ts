@@ -109,9 +109,6 @@ export function validateGoatBrainDocument(
   for (const alias of fm.aliases ?? []) {
     if (!alias.trim()) errors.push("aliases must not contain empty values.");
   }
-  for (const tag of fm.tags ?? []) {
-    if (!tag.trim()) errors.push("tags must not contain empty values.");
-  }
   for (const sourceEntry of fm.sources ?? []) {
     if (!sourceEntry.ref.trim()) errors.push("sources.ref must not be empty.");
     if (sourceEntry.capturedAt && !isIsoDate(sourceEntry.capturedAt)) {

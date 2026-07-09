@@ -102,7 +102,6 @@ export function replaceGoatBrainCompiledTruth(
           relations: frontmatter.relations ?? [],
           ...(frontmatter.title ? { title: frontmatter.title } : {}),
           ...(frontmatter.aliases ? { aliases: frontmatter.aliases } : {}),
-          ...(frontmatter.tags ? { tags: frontmatter.tags } : {}),
           ...(frontmatter.sources ? { sources: frontmatter.sources } : {}),
           ...(frontmatter.mergedInto ? { mergedInto: frontmatter.mergedInto } : {}),
         })}\n\n`

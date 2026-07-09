@@ -51,10 +51,8 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   out.relations = readRelations("related" in raw ? raw.related : raw.relations);
   const mergedInto = readString(raw.mergedInto) ?? readString(raw.merged_into);
   if (mergedInto) out.mergedInto = mergedInto;
-  const legacyKeys = ["schema_type", "metadata"].filter((key) => key in raw);
+  const legacyKeys = ["schema_type", "metadata", "tags"].filter((key) => key in raw);
   if (legacyKeys.length > 0) out.legacyKeys = legacyKeys;
-  const tags = readStringArray(raw.tags);
-  if (tags.length > 0) out.tags = tags;
   const sources = readSources(raw.sources);
   if (sources.length > 0) out.sources = sources;
   return out;
@@ -76,7 +74,6 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
   };
   if (frontmatter.title) record.title = frontmatter.title;
   if (frontmatter.aliases && frontmatter.aliases.length > 0) record.aliases = frontmatter.aliases;
-  if (frontmatter.tags && frontmatter.tags.length > 0) record.tags = frontmatter.tags;
   if (frontmatter.mergedInto) record.mergedInto = frontmatter.mergedInto;
   if (frontmatter.sources && frontmatter.sources.length > 0) {
     record.sources = frontmatter.sources.map((source) => ({

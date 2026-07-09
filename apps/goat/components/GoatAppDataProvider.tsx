@@ -242,7 +242,6 @@ function documentViewFromRow(
     type: normalizeEntityType(row.entity_type),
     status: normalizeStatus(row.status),
     aliases: normalizeStringArray(row.aliases),
-    tags: parseBrainTags(row.content),
     contentHash: row.content_hash,
     sizeBytes: row.size_bytes,
     parseError: null,
@@ -327,10 +326,7 @@ const DEFAULT_BRAIN_FOLDERS = [
   "projects",
   "meetings",
   "concepts",
-  "media",
-  "writing",
   "analysis",
-  "emails",
   "sources",
   "evidence",
 ];
@@ -375,14 +371,12 @@ function normalizeEntityType(value: string): GoatBrainDocumentView["type"] {
   if (
     value === "person" ||
     value === "company" ||
-    value === "media" ||
-    value === "analysis" ||
-    value === "concept" ||
-    value === "email" ||
-    value === "writing" ||
-    value === "note" ||
     value === "project" ||
-    value === "source"
+    value === "meeting" ||
+    value === "concept" ||
+    value === "source" ||
+    value === "analysis" ||
+    value === "note"
   ) {
     return value;
   }
@@ -423,15 +417,4 @@ function normalizeSources(value: unknown) {
       },
     ];
   });
-}
-
-function parseBrainTags(content: string): string[] {
-  const match = /^---\n([\s\S]*?)\n---/.exec(content.replace(/\r\n/g, "\n"));
-  if (!match?.[1]) return [];
-  const tagsMatch = /^tags:\n((?:\s+- .+\n?)+)/m.exec(match[1]);
-  if (!tagsMatch?.[1]) return [];
-  return tagsMatch[1]
-    .split("\n")
-    .map((line) => line.replace(/^\s+-\s+/, "").trim())
-    .filter(Boolean);
 }

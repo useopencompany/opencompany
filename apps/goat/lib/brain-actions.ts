@@ -1,10 +1,8 @@
 "use server";
 
-import { currentGoatBrain, currentGoatUser } from "@/lib/auth";
+import { currentGoatBrain } from "@/lib/auth";
 import {
   type BrainMutationResult,
-  createGoatBrainDocumentForUser,
-  createGoatBrainFolderForUser,
   deleteGoatBrainDocumentForUser,
   moveGoatBrainDocumentForUser,
   renameGoatBrainDocumentForUser,
@@ -13,24 +11,8 @@ import {
 
 // All mutations run against the active brain from the auth context, which is
 // resolved from the user's accessible brains — that lookup is the access check.
-
-export async function createGoatBrainFolderAction(path: string): Promise<BrainMutationResult> {
-  const { user } = await currentGoatUser();
-  return createGoatBrainFolderForUser(user.workosUserId, path);
-}
-
-export async function createGoatBrainDocumentAction(input: {
-  folderPath: string;
-  title?: string;
-}): Promise<BrainMutationResult> {
-  const { context, brain } = await currentGoatBrain();
-  return createGoatBrainDocumentForUser({
-    brainRef: brain.id,
-    userWorkosId: context.user.workosUserId,
-    folderPath: input.folderPath,
-    ...(input.title ? { title: input.title } : {}),
-  });
-}
+// Creating documents and folders is deliberately not exposed as an action:
+// new content enters through the brain CLI and ingestion agents only.
 
 export async function updateGoatBrainDocumentAction(input: {
   documentId: string;

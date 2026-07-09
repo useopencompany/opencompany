@@ -64,7 +64,7 @@ describe("goat brain retrieval", () => {
       id: "ev-acme-email",
       folder: "evidence/email",
       kind: "evidence",
-      type: "email",
+      type: "source",
       title: "Acme email",
       truth: "Enterprise search raw source evidence.",
       relations: [{ type: "about", to: "acme" }],
@@ -294,7 +294,7 @@ async function writeDoc(
   input: {
     id: string;
     folder: string;
-    type: "person" | "company" | "project" | "concept" | "note" | "analysis" | "source" | "email";
+    type: "person" | "company" | "project" | "meeting" | "concept" | "source" | "analysis" | "note";
     kind?: "page" | "evidence";
     title: string;
     truth: string;

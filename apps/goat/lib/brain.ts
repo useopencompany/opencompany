@@ -63,7 +63,6 @@ export type GoatBrainDocumentView = {
   type: GoatBrainEntityType;
   status: GoatBrainStatus;
   aliases: string[];
-  tags: string[];
   contentHash: string;
   sizeBytes: number;
   parseError?: string | null;
@@ -88,7 +87,6 @@ export type ValidatedGoatBrainContent = {
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
   aliases: string[];
-  tags: string[];
   kind: GoatBrainKind;
   type: GoatBrainEntityType;
   status: GoatBrainStatus;
@@ -109,49 +107,6 @@ export async function listGoatBrainForBrain(brainRef: string): Promise<GoatBrain
   return {
     folders: deriveFolderViews(documents),
     documents,
-  };
-}
-
-export async function createGoatBrainFolderForUser(
-  _userWorkosId: string,
-  folderPath: string,
-): Promise<BrainMutationResult> {
-  const normalized = normalizeGoatBrainFolderForV1(folderPath);
-  if (!isValidGoatBrainFolder(normalized)) {
-    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
-  }
-  return { ok: true, path: normalized };
-}
-
-export async function createGoatBrainDocumentForUser(input: {
-  brainRef: string;
-  userWorkosId: string;
-  folderPath: string;
-  title?: string;
-}): Promise<BrainMutationResult> {
-  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath || "inbox");
-  if (!isValidGoatBrainFolder(folderPath)) {
-    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
-  }
-  const title = input.title?.trim() || "Untitled";
-  const brainId = await nextAvailableGoatBrainId(input.brainRef, normalizeGoatBrainId(title));
-  const content = createGoatBrainMarkdownContent({
-    id: brainId,
-    folderPath,
-    title,
-    type: suggestedTypeForFolder(folderPath),
-    status: "draft",
-  });
-  const row = await upsertGoatBrainFile({
-    brainRef: input.brainRef,
-    userWorkosId: input.userWorkosId,
-    path: goatBrainFilePathFor(folderPath, brainId),
-    content,
-  });
-  return {
-    ok: true,
-    path: goatBrainFilePathFor(row.folderPath, row.brainId),
-    document: documentViewFromFileRow(row),
   };
 }
 
@@ -222,7 +177,6 @@ export async function renameGoatBrainDocumentForUser(input: {
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],
       ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
-      ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
       ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
       ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
     },
@@ -285,7 +239,6 @@ export async function moveGoatBrainDocumentForUser(input: {
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],
       ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
-      ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
       ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
       ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
     },
@@ -347,7 +300,6 @@ export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoa
         updatedAt: parsed.frontmatter.updatedAt ?? nowIso(),
         relations: parsed.frontmatter.relations ?? [],
         ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
-        ...(parsed.frontmatter.tags ? { tags: parsed.frontmatter.tags } : {}),
         ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
         ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
       },
@@ -358,7 +310,6 @@ export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoa
     relations: parsed.frontmatter.relations ?? [],
     sources: parsed.frontmatter.sources ?? [],
     aliases: parsed.frontmatter.aliases ?? [],
-    tags: parsed.frontmatter.tags ?? [],
     kind: projection.kind,
     type: projection.entityType,
     status: projection.status,
@@ -390,7 +341,6 @@ export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDoc
     type: row.entityType,
     status: row.status,
     aliases: parsed.frontmatter.aliases ?? [],
-    tags: parsed.frontmatter.tags ?? [],
     contentHash: row.contentHash,
     sizeBytes: row.sizeBytes,
     parseError: null,
@@ -412,26 +362,6 @@ export async function nextAvailableGoatBrainId(brainRef: string, baseId: string)
 }
 
 export { hashGoatBrainContent };
-
-// Folders no longer determine type; this only picks a sensible default tag for
-// docs created from a folder context in the UI.
-const SUGGESTED_TYPE_BY_FOLDER_ROOT: Record<string, GoatBrainEntityType> = {
-  people: "person",
-  companies: "company",
-  projects: "project",
-  media: "media",
-  analysis: "analysis",
-  concepts: "concept",
-  emails: "email",
-  writing: "writing",
-  sources: "source",
-  evidence: "source",
-};
-
-function suggestedTypeForFolder(folderPath: string): GoatBrainEntityType {
-  const root = normalizeGoatBrainFolderForV1(folderPath).split("/")[0] ?? "";
-  return SUGGESTED_TYPE_BY_FOLDER_ROOT[root] ?? "note";
-}
 
 function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderView[] {
   const now = new Date(0).toISOString();

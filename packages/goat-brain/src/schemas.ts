@@ -10,6 +10,14 @@ import {
 
 const ENTITY_TYPE_SET = new Set<string>(GOAT_BRAIN_ENTITY_TYPES);
 
+// Retired v1 type names normalize to their v2 home so documents materialized
+// before migration 0100 keep parsing; the next write rewrites the frontmatter.
+const LEGACY_ENTITY_TYPE_ALIASES: Record<string, GoatBrainEntityType> = {
+  media: "source",
+  email: "source",
+  writing: "analysis",
+};
+
 export function isBuiltInGoatBrainEntityType(value: unknown): value is GoatBrainEntityType {
   return typeof value === "string" && ENTITY_TYPE_SET.has(value);
 }
@@ -19,22 +27,21 @@ export function normalizeBuiltInGoatBrainEntityType(
 ): GoatBrainEntityType | null {
   if (!value) return null;
   const normalized = normalizeGoatBrainEntityType(value);
-  return isBuiltInGoatBrainEntityType(normalized) ? normalized : null;
+  if (isBuiltInGoatBrainEntityType(normalized)) return normalized;
+  return LEGACY_ENTITY_TYPE_ALIASES[normalized] ?? null;
 }
 
-// Types are frontmatter tags; folders are free-form human navigation. This map
+// Types classify documents; folders are free-form human navigation. This map
 // is only the opinionated default used when a caller does not pick a folder.
 const DEFAULT_FOLDER_BY_ENTITY_TYPE: Record<GoatBrainEntityType, string> = {
   person: "people",
   company: "companies",
   project: "projects",
-  media: "media",
-  analysis: "analysis",
+  meeting: "meetings",
   concept: "concepts",
-  email: "emails",
-  writing: "writing",
-  note: "inbox",
   source: "sources",
+  analysis: "analysis",
+  note: "inbox",
 };
 
 export function defaultGoatBrainFolder(type: GoatBrainEntityType, kind: GoatBrainKind): string {

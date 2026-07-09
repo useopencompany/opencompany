@@ -23,8 +23,6 @@ export type IndexRecord = {
   type: GoatBrainEntityType;
   status: GoatBrainStatus;
   aliases: string[];
-  tags: string;
-  tagList: string[];
   relationText: string;
   compiledTruth: string;
   contentHash: string;
@@ -57,8 +55,6 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
         type: doc.frontmatter.type ?? "note",
         status: doc.frontmatter.status ?? "draft",
         aliases: doc.frontmatter.aliases ?? [],
-        tags: (doc.frontmatter.tags ?? []).join(" "),
-        tagList: doc.frontmatter.tags ?? [],
         relationText: relationsToText(doc.frontmatter.relations),
         compiledTruth: doc.compiledTruth,
         contentHash: goatBrainPayloadHash(embeddingText),

@@ -65,7 +65,6 @@ type RawIngestOperation = {
   body?: unknown;
   timelineBody?: unknown;
   relations?: unknown;
-  tags?: unknown;
 };
 
 export type NormalizedIngestOperation = {
@@ -77,7 +76,6 @@ export type NormalizedIngestOperation = {
   body: string;
   timelineBody: string;
   relations: GoatBrainRelation[];
-  tags: string[];
 };
 
 export async function ingestGoatBrain(
@@ -173,7 +171,7 @@ function buildIngestPrompt(input: {
     "You are the controlled ingestion loop for Goat Brain, a durable graph of user-owned knowledge.",
     "Return only JSON. Do not include markdown fences.",
     "Use existing ids when information belongs to an existing entity. Create a new entry only when no existing entry is the primary home.",
-    "Use only these types: person, company, media, analysis, concept, email, writing, note, project, source.",
+    "Use only these types: person, company, project, meeting, concept, source, analysis, note. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
     "Prefer relations over extra structured fields. People, companies, projects, and sources should connect through relations.",
     "Use inline links like [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence, and [[source:provider:id|Label]] for source refs. Legacy [[brain-id|Label]] page links are accepted but new content should use typed links.",
     GOAT_BRAIN_POINTER_COPY_RULE,
@@ -182,7 +180,7 @@ function buildIngestPrompt(input: {
     "Every timeline entry must preserve source context; the system will attach the source ref, so make `timelineBody` say what happened and why it matters.",
     "",
     "JSON shape:",
-    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|media|analysis|concept|email|writing|note|project|source","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}],"tags":[]}]}',
+    '{"operations":[{"action":"create|update","id":"brain-id","title":"Title","type":"person|company|project|meeting|concept|source|analysis|note","aliases":[],"body":"durable markdown body","timelineBody":"dated evidence summary","relations":[{"type":"related","to":"other-id"}]}]}',
     "",
     `Existing entries:\n${docs || "(none)"}`,
     "",
@@ -244,7 +242,6 @@ function normalizePlan(
         body,
         timelineBody: stringValue(item.timelineBody) || "Captured source information.",
         relations,
-        tags: stringArray(item.tags),
       },
     ];
   });
@@ -289,7 +286,6 @@ async function applyIngestOperation(
       mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
       relations: [],
       sources: [],
-      tags: [],
       status: "draft" as const,
       timeline: [],
     }),
@@ -308,7 +304,6 @@ async function applyIngestOperation(
     capturedAt: source.at,
     ...(source.sourceTitle ? { title: source.sourceTitle } : {}),
   });
-  entry.tags = mergeStrings(entry.tags, operation.tags);
   const timelineEntry = goatBrainTimelineEntryFromParts({
     at: source.at,
     summary: operation.timelineBody,
@@ -369,10 +364,6 @@ function mergeSources(
 ) {
   if (current.some((item) => item.ref === source.ref)) return current;
   return [...current, source];
-}
-
-function mergeStrings(current: string[], next: string[]) {
-  return [...new Set([...current, ...next].filter((value) => value.trim()))];
 }
 
 function stringArray(value: unknown): string[] {

@@ -68,7 +68,6 @@ export type GoatBrainFileProjection = {
   relations: GoatBrainRelation[];
   sources: GoatBrainSource[];
   aliases: string[];
-  tags: string[];
 };
 
 export type GoatBrainStoredFrontmatter = {
@@ -84,7 +83,6 @@ export type GoatBrainStoredFrontmatter = {
   sources?: GoatBrainSource[];
   mergedInto?: string;
   folder?: string;
-  tags?: string[];
 };
 
 export type MaterializedGoatBrainFile = {
@@ -246,7 +244,6 @@ export function deriveGoatBrainFileProjection(input: {
     relations: parsed.frontmatter.relations ?? [],
     sources: parsed.frontmatter.sources ?? [],
     aliases: parsed.frontmatter.aliases ?? [],
-    tags: parsed.frontmatter.tags ?? [],
   };
 }
 
@@ -286,7 +283,6 @@ function canonicalGoatBrainContent(input: {
       updatedAt: fm.updatedAt ?? new Date().toISOString(),
       relations: fm.relations ?? [],
       ...(fm.aliases ? { aliases: fm.aliases } : {}),
-      ...(fm.tags ? { tags: fm.tags } : {}),
       ...(fm.sources ? { sources: fm.sources } : {}),
       ...(fm.mergedInto ? { mergedInto: fm.mergedInto } : {}),
     },
@@ -512,7 +508,6 @@ export async function materializeGoatBrainFilesToRoot(input: {
           type: entry.type,
           status: entry.status,
           ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
-          tags: entry.tags,
           timeline: entry.timeline,
           payload: {
             path: payloadPath,

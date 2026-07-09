@@ -82,7 +82,6 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "truth",
     "truth-stdin",
     "alias",
-    "tag",
     "relation",
     "source-ref",
     "source-title",
@@ -149,6 +148,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "lexical-only",
     "include-invalid",
     "include-merged",
+    "include-archived",
   ],
 };
 
@@ -197,7 +197,7 @@ Examples:
   goat-brain query --help`,
   create: `Usage: goat-brain create --type <type> --id <id> --title <title> (--truth <text> | --truth-stdin) [options]
 
-Create a new Markdown brain document. Types are tags; folders are free-form navigation.
+Create a new Markdown brain document. Types classify documents; folders are free-form navigation.
 
 Required:
   --type <type>       Entity type: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.
@@ -211,7 +211,6 @@ Common options:
   --kind <kind>       "page" (default) or "evidence". Evidence docs must live under
                       "${GOAT_BRAIN_EVIDENCE_ZONE}/"; inferred from --folder when omitted.
   --alias <text>      Repeatable alias.
-  --tag <text>        Repeatable tag.
   --relation <type:id>
   --source-ref <ref>  Provenance reference for the initial evidence entry.
   --json
@@ -219,7 +218,7 @@ Common options:
 Examples:
   goat-brain create --type company --folder companies --id opencompany --title OpenCompany --truth "OpenCompany builds agent infrastructure."
   goat-brain create --type person --folder team/gtm --id ada --title Ada --truth "Ada leads GTM."
-  goat-brain create --type email --kind evidence --id ev-acme-email --title "Acme email" --truth "Acme asked for pricing."`,
+  goat-brain create --type source --kind evidence --id ev-acme-email --title "Acme email" --truth "Acme asked for pricing."`,
   list: `Usage: goat-brain list [--folder <path>] [--limit <n>] [--include-merged] [--json]
 
 List existing brain docs without retrieval or model calls.
@@ -246,6 +245,7 @@ Examples:
        goat-brain query --text <text> [options]
 
 Search and retrieve relevant brain docs. Use list for inventory/enumeration instead of wildcard queries.
+Merged and archived docs are excluded unless explicitly included.
 
 Options:
   --folder <path>
@@ -256,6 +256,7 @@ Options:
   --lexical-only
   --include-invalid
   --include-merged
+  --include-archived
   --json
 
 Examples:
@@ -334,7 +335,7 @@ Options:
   --json
 
 Example:
-  goat-brain append-evidence opencompany --type email --body "Acme asked for pricing." --source-ref gmail:thread_123`,
+  goat-brain append-evidence opencompany --type source --body "Acme asked for pricing." --source-ref gmail:thread_123`,
   alias: `Usage: goat-brain alias <id> [--add <alias>] [--remove <alias>] [--json]
 
 Add or remove aliases for a document. Repeat --add or --remove as needed.
@@ -493,7 +494,6 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
       updatedAt: now,
       relations: relations.value,
       ...(ctx.args.getAll("alias").length > 0 ? { aliases: ctx.args.getAll("alias") } : {}),
-      ...(ctx.args.getAll("tag").length > 0 ? { tags: ctx.args.getAll("tag") } : {}),
       ...(sourceRef
         ? {
             sources: [
@@ -672,6 +672,7 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
       lexicalOnly: ctx.args.has("lexical-only"),
       ...(ctx.args.has("include-invalid") ? { includeInvalid: true } : {}),
       ...(ctx.args.has("include-merged") ? { includeMerged: true } : {}),
+      ...(ctx.args.has("include-archived") ? { includeArchived: true } : {}),
     },
     providers,
   );
@@ -1204,7 +1205,6 @@ function toWritableDocument(
       relations: fm.relations ?? [],
       ...(fm.title ? { title: fm.title } : {}),
       ...(fm.aliases ? { aliases: fm.aliases } : {}),
-      ...(fm.tags ? { tags: fm.tags } : {}),
       ...(fm.sources ? { sources: fm.sources } : {}),
       ...(fm.mergedInto ? { mergedInto: fm.mergedInto } : {}),
     },

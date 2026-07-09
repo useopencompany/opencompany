@@ -183,7 +183,7 @@ describe("runGoatBrainToolForUser", () => {
           command: "append-evidence",
           flags: {
             id: "opencompany",
-            type: "email",
+            type: "source",
             body: "Acme asked for pricing.",
             json: true,
           },
@@ -195,7 +195,7 @@ describe("runGoatBrainToolForUser", () => {
       "--id",
       "opencompany",
       "--type",
-      "email",
+      "source",
       "--body",
       "Acme asked for pricing.",
       "--json",
@@ -224,7 +224,7 @@ describe("runGoatBrainToolForUser", () => {
       stdout: "",
       stderr: "",
       error: expect.stringContaining(
-        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, media, analysis, concept, email, writing, note, project, source.',
+        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, project, meeting, concept, source, analysis, note.',
       ),
     });
     expect(output.error).toContain('Relevant help command: { command: "help"');

@@ -44,7 +44,6 @@ export type GoatBrainEntry = {
   type: GoatBrainEntityType;
   status: GoatBrainStatus;
   aliases: string[];
-  tags: string[];
   timeline: GoatBrainTimelineEntry[];
   originalFileName?: string;
   assetStorageKey?: string;
@@ -72,7 +71,6 @@ export type GoatBrainSidecar = {
   type: GoatBrainEntityType;
   status?: GoatBrainStatus;
   aliases?: string[];
-  tags: string[];
   timeline?: GoatBrainTimelineEntry[];
   assetStorageKey?: string;
   payload: GoatBrainPayloadDescriptor;
@@ -131,7 +129,6 @@ export function goatBrainEntryFromLegacyDocument(doc: GoatBrainDocument): GoatBr
     type: doc.frontmatter.type,
     status: doc.frontmatter.status ?? "draft",
     aliases: doc.frontmatter.aliases ?? [],
-    tags: doc.frontmatter.tags ?? [],
     timeline: doc.timeline,
   };
 }
@@ -168,7 +165,6 @@ export function goatBrainEntryFromParsedLegacy(parsed: ParsedGoatBrainDocument):
     type: frontmatter.type,
     status: frontmatter.status ?? "draft",
     aliases: frontmatter.aliases ?? [],
-    tags: frontmatter.tags ?? [],
     timeline: parsed.timeline,
   };
 }
@@ -186,7 +182,6 @@ export function legacyGoatBrainDocumentFromEntry(entry: GoatBrainEntry): GoatBra
       updatedAt: entry.updatedAt,
       relations: entry.relations,
       ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
-      ...(entry.tags.length > 0 ? { tags: entry.tags } : {}),
       ...(entry.sources.length > 0 ? { sources: entry.sources } : {}),
     },
     title: entry.title,
@@ -226,7 +221,6 @@ export function serializeGoatBrainSidecar(entry: GoatBrainEntry): string {
     type: entry.type,
     status: entry.status,
     ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
-    tags: entry.tags,
     ...(entry.format === "markdown" ? { timeline: entry.timeline } : {}),
     ...(entry.assetStorageKey ? { assetStorageKey: entry.assetStorageKey } : {}),
     payload: {
@@ -302,9 +296,6 @@ function validateGoatBrainSidecarMetadata(input: {
   if (sidecar.aliases && !validStringArray(sidecar.aliases)) {
     errors.push("sidecar.aliases must be an array of non-empty strings.");
   }
-  if (sidecar.tags !== undefined && !validStringArray(sidecar.tags)) {
-    errors.push("sidecar.tags must be an array of non-empty strings.");
-  }
   if (sidecar.sources !== undefined && !Array.isArray(sidecar.sources)) {
     errors.push("sidecar.sources must be an array.");
   }
@@ -343,7 +334,6 @@ function entryFromValidSidecar(sidecar: GoatBrainSidecar, payloadContent: string
     type: sidecar.type,
     status: sidecar.status ?? "draft",
     aliases: sidecar.aliases ?? [],
-    tags: Array.isArray(sidecar.tags) ? sidecar.tags : [],
     timeline:
       sidecar.format === "markdown" && Array.isArray(sidecar.timeline) ? sidecar.timeline : [],
     ...(sidecar.payload.originalFileName
