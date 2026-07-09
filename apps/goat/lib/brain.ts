@@ -1,19 +1,24 @@
 import {
-  createGoatBrainMarkdownContent,
+  createGoatBrainFolderRow,
   deleteGoatBrainFile,
+  deleteGoatBrainFolderRow,
   deriveGoatBrainFileProjection,
   getGoatBrainFile,
   goatBrainFilePathFor,
   hashGoatBrainContent,
   listGoatBrainFiles,
+  listGoatBrainFolderRows,
   moveGoatBrainFile,
+  renameGoatBrainFolderRow,
   replaceGoatBrainFileCompiledTruth,
   updateGoatBrainFileContent,
-  upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
-import type { GoatBrainDocument as GoatBrainDocumentRow } from "@opencompany/db/goat-schema";
+import type {
+  GoatBrainDocument as GoatBrainDocumentRow,
+  GoatBrainFolder as GoatBrainFolderRow,
+} from "@opencompany/db/goat-schema";
 import {
-  DEFAULT_GOAT_BRAIN_FOLDERS,
+  compareGoatBrainFolderPaths,
   type GoatBrainDocument,
   type GoatBrainEntityType,
   type GoatBrainKind,
@@ -22,14 +27,13 @@ import {
   type GoatBrainStatus,
   type GoatBrainTimelineEntry,
   goatBrainFolderKindError,
-  goatBrainKindForFolder,
+  goatBrainFolderSourceForPath,
   isBuiltInGoatBrainEntityType,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainKind,
   normalizeGoatBrainCompiledTruth,
   normalizeGoatBrainFolderForV1,
-  normalizeGoatBrainId,
   nowIso,
   parseGoatBrainDocument,
   serializeGoatBrainDocument,
@@ -103,10 +107,13 @@ export async function listCurrentUserGoatBrain(): Promise<GoatBrainSnapshot> {
 }
 
 export async function listGoatBrainForBrain(brainRef: string): Promise<GoatBrainSnapshot> {
-  const rows = await listGoatBrainFiles({ brainRef }, { includeInvalid: true });
+  const [rows, folderRows] = await Promise.all([
+    listGoatBrainFiles({ brainRef }, { includeInvalid: true }),
+    listGoatBrainFolderRows({ brainRef }),
+  ]);
   const documents = rows.map(documentViewFromFileRow).sort(compareBrainDocuments);
   return {
-    folders: deriveFolderViews(documents),
+    folders: deriveFolderViews(documents, folderRows),
     documents,
   };
 }
@@ -271,6 +278,59 @@ export async function deleteGoatBrainDocumentForUser(input: {
   return { ok: true };
 }
 
+export async function createGoatBrainFolderForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  folderPath: string;
+}): Promise<BrainMutationResult> {
+  try {
+    await createGoatBrainFolderRow({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      path: input.folderPath,
+    });
+    return { ok: true, path: normalizeGoatBrainFolderForV1(input.folderPath) };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+export async function renameGoatBrainFolderForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  fromPath: string;
+  toPath: string;
+}): Promise<BrainMutationResult> {
+  try {
+    await renameGoatBrainFolderRow({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      fromPath: input.fromPath,
+      toPath: input.toPath,
+    });
+    return { ok: true, path: normalizeGoatBrainFolderForV1(input.toPath) };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+export async function deleteGoatBrainFolderForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  folderPath: string;
+}): Promise<BrainMutationResult> {
+  try {
+    await deleteGoatBrainFolderRow({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      path: input.folderPath,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
 export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoatBrainContent {
   const parsed = parseGoatBrainDocument(source);
   const id =
@@ -364,17 +424,20 @@ export async function nextAvailableGoatBrainId(brainRef: string, baseId: string)
 
 export { hashGoatBrainContent };
 
-function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderView[] {
+function deriveFolderViews(
+  documents: GoatBrainDocumentView[],
+  folderRows: GoatBrainFolderRow[] = [],
+): GoatBrainFolderView[] {
   const now = new Date(0).toISOString();
   const byPath = new Map<string, GoatBrainFolderView>();
-  for (const folder of DEFAULT_GOAT_BRAIN_FOLDERS) {
-    byPath.set(folder, {
-      id: `folder:${folder}`,
-      path: folder,
-      name: folderName(folder),
-      source: "system",
-      createdAt: now,
-      updatedAt: now,
+  for (const folder of folderRows) {
+    byPath.set(folder.path, {
+      id: folder.id,
+      path: folder.path,
+      name: folderName(folder.path),
+      source: folder.source,
+      createdAt: folder.createdAt.toISOString(),
+      updatedAt: folder.updatedAt.toISOString(),
     });
   }
   for (const document of documents) {
@@ -385,20 +448,26 @@ function deriveFolderViews(documents: GoatBrainDocumentView[]): GoatBrainFolderV
           ? existing.updatedAt
           : document.updatedAt;
       byPath.set(path, {
-        id: `folder:${path}`,
+        id: existing?.id ?? `folder:${path}`,
         path,
         name: folderName(path),
-        source: DEFAULT_GOAT_BRAIN_FOLDERS.includes(
-          path as (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number],
-        )
-          ? "system"
-          : "custom",
+        source: existing?.source ?? goatBrainFolderSourceForPath(path),
         createdAt: existing?.createdAt ?? document.createdAt,
         updatedAt,
       });
     }
   }
-  return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+  if (byPath.size === 0) {
+    byPath.set("inbox", {
+      id: "folder:inbox",
+      path: "inbox",
+      name: "Inbox",
+      source: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return [...byPath.values()].sort((a, b) => compareGoatBrainFolderPaths(a.path, b.path));
 }
 
 function ancestorFolders(folderPath: string): string[] {
@@ -419,4 +488,8 @@ function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentVie
   const folder = a.folderPath.localeCompare(b.folderPath);
   if (folder !== 0) return folder;
   return a.title.localeCompare(b.title);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

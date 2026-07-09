@@ -215,6 +215,76 @@ describe("goat-brain cli", () => {
     );
   });
 
+  it("persists adjustable folders and protects hard default folders", async () => {
+    await expect(
+      run(["folder", "--root", root, "create", "--path", "market-research"]),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining('Folder "market-research" is available.'),
+    });
+    await expect(run(["folder", "--root", root, "list"])).resolves.toMatchObject({
+      stdout: expect.stringContaining("market-research"),
+    });
+    await expect(
+      run(["folder", "--root", root, "delete", "--path", "market-research"]),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining('Deleted folder "market-research".'),
+    });
+    expect((await run(["folder", "--root", root, "list"])).stdout).not.toContain("market-research");
+    await expect(
+      run(["folder", "--root", root, "delete", "--path", "inbox"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('Folder "inbox" is required and cannot be removed.'),
+    });
+    await expect(
+      run(["folder", "--root", root, "create", "--path", "inbox"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('Folder "inbox" is required and already exists.'),
+    });
+  });
+
+  it("renames adjustable folders and moves contained docs", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--type",
+        "analysis",
+        "--folder",
+        "research",
+        "--id",
+        "market-map",
+        "--title",
+        "Market map",
+        "--truth",
+        "Market map is a research note.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(
+      run(["folder", "--root", root, "rename", "--from", "research", "--to", "market-research"]),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining('Renamed folder "research" to "market-research".'),
+    });
+
+    const loaded = JSON.parse(
+      (await run(["get", "--root", root, "market-map", "--json"])).stdout,
+    ) as {
+      doc: { frontmatter: { folder: string } };
+      path: string;
+    };
+    expect(loaded.path).toBe("market-research/market-map.md");
+    expect(loaded.doc.frontmatter.folder).toBe("market-research");
+    const folders = (await run(["folder", "--root", root, "list"])).stdout.trim().split("\n");
+    expect(folders).not.toContain("research");
+    expect(folders).toContain("market-research");
+  });
+
   it("defaults create folders from type and kind and accepts free-form folders", async () => {
     await expect(
       run([

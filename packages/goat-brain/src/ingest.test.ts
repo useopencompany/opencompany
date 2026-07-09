@@ -26,7 +26,7 @@ describe("goat brain entity types and wiki links", () => {
     expect(defaultGoatBrainFolder("person", "page")).toBe("people");
     expect(defaultGoatBrainFolder("company", "page")).toBe("companies");
     expect(defaultGoatBrainFolder("note", "page")).toBe("inbox");
-    expect(defaultGoatBrainFolder("source", "page")).toBe("sources");
+    expect(defaultGoatBrainFolder("source", "page")).toBe("research");
     expect(defaultGoatBrainFolder("source", "evidence")).toBe("evidence");
     expect(goatBrainKindForFolder("evidence")).toBe("evidence");
     expect(goatBrainKindForFolder("evidence/email")).toBe("evidence");

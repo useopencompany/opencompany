@@ -27,7 +27,7 @@ import type {
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
 const GOAT_BRAIN_TOOL_HELP =
-  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
+  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. The brain has required folders inbox, people, companies, and evidence; core folders such as projects, meetings, research, decisions, and concepts are adjustable and can be recreated with folder create when needed. Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
 
 const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
   "help",
@@ -340,7 +340,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   merge: ["from", "into", "json"],
   move: ["id", "folder", "json"],
   delete: ["id", "force", "dry-run", "json"],
-  folder: ["subcommand", "path", "json"],
+  folder: ["subcommand", "path", "from", "to", "json"],
   doctor: ["json"],
 };
 

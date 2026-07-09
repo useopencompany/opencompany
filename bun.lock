@@ -277,6 +277,7 @@
         "@types/pg": "^8.11.10",
         "drizzle-kit": "^0.31.10",
         "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
       },
     },
     "packages/goat-brain": {
