@@ -82,6 +82,8 @@ describe("Sidebar status menu item", () => {
     const user = userEvent.setup();
 
     renderSidebar();
+    expect(screen.getByText("opencompany v3")).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "Switch space" }));
 
     expect(await screen.findByRole("link", { name: "Personal" })).toHaveAttribute(

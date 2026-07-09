@@ -504,6 +504,7 @@ function SidebarContent({
               activeWorkspaceId={activeWorkspaceId}
               workspaceName={workspaceName}
               workspaces={workspaces}
+              displayLabel="opencompany v3"
               className="min-w-0 flex-1 px-0 pb-0"
             />
           </div>
