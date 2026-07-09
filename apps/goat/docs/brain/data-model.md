@@ -53,13 +53,13 @@ the closed set above is what validators actually accept.
 
 ## Default folders
 
-`DEFAULT_GOAT_BRAIN_FOLDERS` — the 9 system folders seeded per brain (rows in
-`goat.brain_folders` with `source: "system"`); users and agents can create free-form custom
-folders beyond these:
+`DEFAULT_GOAT_BRAIN_FOLDERS` — the 10 folders seeded per brain. `inbox`, `people`, `companies`,
+and `evidence` are required system folders; the rest are adjustable custom defaults. Users and
+agents can create free-form custom folders beyond these:
 
 ```
-inbox/  people/  companies/  projects/  meetings/  concepts/
-analysis/  sources/  evidence/
+inbox/  thoughts/  projects/  meetings/  research/  decisions/
+concepts/  people/  companies/  evidence/
 ```
 
 Folder paths match `GOAT_BRAIN_FOLDER_PATTERN`: lowercase `a-z0-9-` segments separated by `/`,
