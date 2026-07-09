@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-export type BrainSourceProvider = "jamie" | "goat-chat";
-export type BrainSourceType = "meeting" | "capture";
+export type BrainSourceProvider = "jamie" | "goat-chat" | "upload";
+export type BrainSourceType = "meeting" | "capture" | "asset";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
   sourceProvider: BrainSourceProvider;
@@ -161,6 +161,114 @@ export function isNormalizedGoatChatCaptureSourceItem(
     typeof capture.userMessageId === "string" &&
     typeof capture.draftBrainId === "string" &&
     typeof capture.draftFolder === "string"
+  );
+}
+
+export type NormalizedUploadAssetContent = {
+  asset: {
+    // The brain_documents row created at upload time; the ingestion agent
+    // enriches this existing page rather than creating a new one.
+    documentId: string;
+    brainId: string;
+    folderPath: string;
+    format: string;
+    mimeType: string;
+    originalFileName: string;
+    sizeBytes: number;
+  };
+};
+
+export type NormalizedUploadAssetSourceItem =
+  NormalizedBrainSourceItem<NormalizedUploadAssetContent> & {
+    sourceProvider: "upload";
+    sourceType: "asset";
+  };
+
+export function normalizeUploadAsset(input: {
+  documentId: string;
+  brainId: string;
+  folderPath: string;
+  format: string;
+  mimeType: string;
+  originalFileName: string;
+  sizeBytes: number;
+  // sha256 of the uploaded bytes; keeps re-uploads of the same file deduped
+  // and re-uploads of changed bytes enqueueing a fresh ingest job.
+  contentSha256: string;
+  uploadedAt: string;
+}): NormalizedUploadAssetSourceItem {
+  const documentId = input.documentId.trim();
+  if (!documentId) throw invalid("asset documentId must not be empty", "invalid_asset");
+  const originalFileName = input.originalFileName.trim();
+  if (!originalFileName) throw invalid("asset originalFileName must not be empty", "invalid_asset");
+  const contentSha256 = input.contentSha256.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(contentSha256)) {
+    throw invalid("asset contentSha256 must be a sha256 hex digest", "invalid_asset");
+  }
+  const uploadedAt = optionalIsoString(input.uploadedAt);
+  if (!uploadedAt) throw invalid("asset uploadedAt must be a timestamp", "invalid_asset");
+
+  const asset = {
+    documentId,
+    brainId: input.brainId,
+    folderPath: input.folderPath,
+    format: input.format,
+    mimeType: input.mimeType,
+    originalFileName,
+    sizeBytes: input.sizeBytes,
+  };
+  const contentHashInput = {
+    sourceProvider: "upload",
+    sourceType: "asset",
+    externalId: documentId,
+    contentSha256,
+    asset,
+  };
+
+  return {
+    sourceProvider: "upload",
+    sourceType: "asset",
+    externalId: documentId,
+    sourceRef: `upload:${documentId}`,
+    title: originalFileName,
+    occurredAt: uploadedAt,
+    capturedAt: uploadedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { asset },
+  };
+}
+
+export function isNormalizedUploadAssetSourceItem(
+  value: unknown,
+): value is NormalizedUploadAssetSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedUploadAssetSourceItem>;
+  if (
+    item.sourceProvider !== "upload" ||
+    item.sourceType !== "asset" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const asset = (item.content as Partial<NormalizedUploadAssetContent>).asset;
+  return (
+    !!asset &&
+    typeof asset === "object" &&
+    typeof asset.documentId === "string" &&
+    typeof asset.brainId === "string" &&
+    typeof asset.folderPath === "string" &&
+    typeof asset.format === "string" &&
+    typeof asset.mimeType === "string" &&
+    typeof asset.originalFileName === "string" &&
+    typeof asset.sizeBytes === "number"
   );
 }
 

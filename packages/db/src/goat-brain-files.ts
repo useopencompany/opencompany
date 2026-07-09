@@ -5,10 +5,12 @@ import path from "node:path";
 import { and, desc, eq, like, notInArray, or } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
+  appendGoatBrainAssetTextBlock,
   defaultGoatBrainFolderManifestEntries,
   deriveGoatBrainEdges,
   GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
   GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+  type GoatBrainDocumentFormat,
   type GoatBrainEntityType,
   type GoatBrainFolderManifestEntry,
   type GoatBrainKind,
@@ -43,6 +45,7 @@ import {
   serializeGoatBrainDocument,
   serializeGoatBrainFolderManifest,
   serializeLegacyGoatBrainEntry,
+  stripGoatBrainAssetTextBlock,
   validateGoatBrainDocument,
   validateGoatBrainSidecar,
 } from "../../goat-brain/src/index";
@@ -60,6 +63,8 @@ import {
 export const GOAT_BRAIN_FILE_MIME_TYPE = "text/markdown";
 export const GOAT_BRAIN_FILE_FORMAT = "markdown";
 export const MAX_GOAT_BRAIN_FILE_BYTES = 1_000_000;
+// Cap on stored machine-extracted asset text (pdf/docx rows).
+export const MAX_GOAT_BRAIN_ASSET_TEXT_BYTES = 200_000;
 
 export type GoatBrainFileProjection = {
   path: string;
@@ -102,6 +107,11 @@ export type MaterializedGoatBrainFile = {
   path: string;
   folderPath: string;
   contentHash: string;
+  // Hash of the bytes actually written to disk when they differ from the
+  // row's contentHash (binary-backed rows materialize content plus a
+  // generated extracted-text block). Sync uses it to detect unchanged files;
+  // conflict detection keeps comparing DB rows via contentHash.
+  materializedHash?: string;
 };
 
 export type GoatBrainSyncFile = {
@@ -184,7 +194,12 @@ export function deriveGoatBrainFileProjection(input: {
   content: string;
 }): GoatBrainFileProjection {
   const normalizedPath = normalizeBrainFilePath(input.path);
-  const source = sourceFromSidecarOrPayloadSync(normalizedPath, input.content);
+  // The generated extracted-text block on binary-backed projections is never
+  // authoritative: strip it before parsing so it can neither leak into the
+  // content column nor let edits inside it flow back.
+  const source = stripGoatBrainAssetTextBlock(
+    sourceFromSidecarOrPayloadSync(normalizedPath, input.content),
+  );
 
   const pathBrainId = goatBrainIdFromRelativePath(normalizedPath);
   const pathFolder = goatBrainFolderFromRelativePath(normalizedPath);
@@ -524,6 +539,8 @@ export async function upsertGoatBrainFile(
         userWorkosId: input.userWorkosId,
         brainRef: input.brainRef,
         ...documentValues(projection),
+        format: GOAT_BRAIN_FILE_FORMAT,
+        mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       })
@@ -619,7 +636,7 @@ export async function deleteGoatBrainFile(
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
-  await runAtomically(db, async (tx: DbLike) => {
+  const deleted = await runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.brainRef, input.fileId);
     if (existing)
       await insertVersion(tx, input.userWorkosId, existing, "delete", input.taskId ?? null);
@@ -631,7 +648,165 @@ export async function deleteGoatBrainFile(
           eq(goatBrainDocuments.id, input.fileId),
         ),
       );
+    return existing as GoatBrainDocument | null;
   });
+  if (deleted?.assetStorageKey) await deleteGoatBrainAssetBlob(deleted.assetStorageKey);
+}
+
+// Best-effort blob cleanup after the row is gone. Version rows keep the
+// markdown projection, not the bytes, so a deleted asset's page can be
+// restored but its file cannot.
+async function deleteGoatBrainAssetBlob(storageKey: string): Promise<void> {
+  try {
+    const { del } = await import("@vercel/blob");
+    await del(storageKey);
+  } catch (error) {
+    console.warn(`Failed to delete Goat brain asset blob "${storageKey}":`, error);
+  }
+}
+
+// Creates the brain document for an uploaded binary file. The row's content
+// column holds the normal markdown projection (frontmatter + compiled truth +
+// timeline); the bytes live in blob storage behind assetStorageKey. The
+// caller is responsible for choosing an unused brainId and for enqueuing the
+// ingestion job that extracts text and curates the page.
+export async function createGoatBrainAssetDocument(
+  input: GoatBrainScope & {
+    id?: string;
+    brainId: string;
+    folderPath: string;
+    title: string;
+    entityType?: GoatBrainEntityType;
+    format: Exclude<GoatBrainDocumentFormat, "markdown">;
+    mimeType: string;
+    originalFileName: string;
+    assetStorageKey: string;
+    assetSizeBytes: number;
+    assetContentHash?: string | null;
+    sourceRef: string;
+  },
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainDocument> {
+  const db = options.db ?? getDb();
+  const now = new Date();
+  const content = createGoatBrainMarkdownContent({
+    id: input.brainId,
+    folderPath: input.folderPath,
+    title: input.title,
+    type: input.entityType ?? "source",
+    status: "draft",
+    compiledTruth: `Uploaded file \`${input.originalFileName}\`. Ingestion pending.`,
+    sources: [
+      { ref: input.sourceRef, title: input.originalFileName, capturedAt: now.toISOString() },
+    ],
+  });
+  const projection = deriveGoatBrainFileProjection({
+    path: goatBrainFilePathFor(input.folderPath, input.brainId),
+    content,
+  });
+  return runAtomically(db, async (tx: DbLike) => {
+    const rows = await tx
+      .insert(goatBrainDocuments)
+      .values({
+        id: input.id ?? `goat_brain_doc_${randomUUID()}`,
+        userWorkosId: input.userWorkosId,
+        brainRef: input.brainRef,
+        ...documentValues(projection),
+        format: input.format,
+        mimeType: input.mimeType,
+        originalFileName: input.originalFileName,
+        assetStorageKey: input.assetStorageKey,
+        assetSizeBytes: input.assetSizeBytes,
+        assetContentHash: input.assetContentHash ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    const row = rows[0];
+    if (!row) throw new Error("Failed to create Goat brain asset document.");
+    await replaceDerivedRows(tx, input.userWorkosId, row, projection);
+    return row;
+  });
+}
+
+// Records the machine-extracted text of a binary asset (ingestion stage 1).
+// Only asset columns move; the markdown projection is untouched, so no
+// version row is written.
+export async function updateGoatBrainAssetExtraction(
+  input: GoatBrainScope & {
+    fileId: string;
+    extractedText: string;
+    assetContentHash: string;
+    assetSizeBytes: number;
+  },
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainDocument> {
+  const db = options.db ?? getDb();
+  const extractedText = truncateUtf8(input.extractedText, MAX_GOAT_BRAIN_ASSET_TEXT_BYTES);
+  const rows = await db
+    .update(goatBrainDocuments)
+    .set({
+      assetExtractedText: extractedText || null,
+      assetContentHash: input.assetContentHash,
+      assetSizeBytes: input.assetSizeBytes,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(goatBrainDocuments.brainRef, input.brainRef), eq(goatBrainDocuments.id, input.fileId)),
+    )
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("Brain document not found.");
+  return row;
+}
+
+// Points an existing asset document at newly uploaded bytes (re-upload). The
+// stale blob is removed best-effort and the extracted text is cleared until
+// the next ingestion pass rebuilds it.
+export async function replaceGoatBrainAssetFile(
+  input: GoatBrainScope & {
+    fileId: string;
+    mimeType: string;
+    originalFileName: string;
+    assetStorageKey: string;
+    assetSizeBytes: number;
+    assetContentHash?: string | null;
+  },
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainDocument> {
+  const db = options.db ?? getDb();
+  const existing = await getDocumentById(db, input.brainRef, input.fileId);
+  if (!existing) throw new Error("Brain document not found.");
+  if (existing.format === GOAT_BRAIN_FILE_FORMAT) {
+    throw new Error("Only binary-backed brain documents can have their file replaced.");
+  }
+  const rows = await db
+    .update(goatBrainDocuments)
+    .set({
+      mimeType: input.mimeType,
+      originalFileName: input.originalFileName,
+      assetStorageKey: input.assetStorageKey,
+      assetSizeBytes: input.assetSizeBytes,
+      assetContentHash: input.assetContentHash ?? null,
+      assetExtractedText: null,
+      userWorkosId: input.userWorkosId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(goatBrainDocuments.brainRef, input.brainRef), eq(goatBrainDocuments.id, input.fileId)),
+    )
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("Failed to replace Goat brain asset file.");
+  if (existing.assetStorageKey && existing.assetStorageKey !== input.assetStorageKey) {
+    await deleteGoatBrainAssetBlob(existing.assetStorageKey);
+  }
+  return row;
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  return Buffer.from(value, "utf8").subarray(0, maxBytes).toString("utf8").replace(/�+$/, "");
 }
 
 export async function materializeGoatBrainFilesToRoot(input: {
@@ -660,8 +835,20 @@ export async function materializeGoatBrainFilesToRoot(input: {
     GOAT_BRAIN_FOLDER_MANIFEST_PATH,
     serializeGoatBrainFolderManifest(folderRows),
   );
+  const materializedHashByPath = new Map<string, string>();
   for (const row of rows) {
     const payloadPath = goatBrainFilePathFor(row.folderPath, row.brainId);
+    if (row.format !== GOAT_BRAIN_FILE_FORMAT) {
+      // Binary-backed rows materialize as their markdown projection (the
+      // content column) plus a generated, non-authoritative extracted-text
+      // block; the bytes themselves stay in blob storage.
+      const projected = appendGoatBrainAssetTextBlock(row.content, row.assetExtractedText ?? "");
+      await writeRootFile(input.root, payloadPath, projected);
+      if (projected !== row.content) {
+        materializedHashByPath.set(payloadPath, hashGoatBrainContent(projected));
+      }
+      continue;
+    }
     let entry: ReturnType<typeof goatBrainEntryFromLegacyMarkdown> | null = null;
     try {
       entry = goatBrainEntryFromLegacyMarkdown(row.content);
@@ -707,13 +894,18 @@ export async function materializeGoatBrainFilesToRoot(input: {
   }
   if (input.cliSource)
     await writeFile(path.join(input.root, "goat-brain.mjs"), input.cliSource, "utf8");
-  return rows.map((row) => ({
-    id: row.id,
-    brainId: row.brainId,
-    path: goatBrainFilePathFor(row.folderPath, row.brainId),
-    folderPath: row.folderPath,
-    contentHash: row.contentHash,
-  }));
+  return rows.map((row) => {
+    const path = goatBrainFilePathFor(row.folderPath, row.brainId);
+    const materializedHash = materializedHashByPath.get(path);
+    return {
+      id: row.id,
+      brainId: row.brainId,
+      path,
+      folderPath: row.folderPath,
+      contentHash: row.contentHash,
+      ...(materializedHash ? { materializedHash } : {}),
+    };
+  });
 }
 
 export async function readGoatBrainFilesFromRoot(root: string): Promise<GoatBrainSyncFile[]> {
@@ -772,7 +964,8 @@ export async function syncGoatBrainFiles(input: {
       throw new Error(`Duplicate brain file path "${normalizedPath}".`);
     const base = baseByPath.get(normalizedPath);
     const unchangedFromBase =
-      base !== undefined && hashGoatBrainContent(file.content) === base.contentHash;
+      base !== undefined &&
+      hashGoatBrainContent(file.content) === (base.materializedHash ?? base.contentHash);
     const skip = Boolean(file.skip || unchangedFromBase);
     if (skip) {
       skippedPaths.add(normalizedPath);
@@ -956,6 +1149,9 @@ export function goatBrainFilePathFor(folderPath: string, brainId: string): strin
   return goatBrainRelativePath(folderPath, brainId);
 }
 
+// Markdown-plane fields only. format/mimeType and the asset columns are
+// deliberately absent so file-plane syncs can never clobber a binary-backed
+// row's asset identity; new rows get their format at insert time.
 function documentValues(projection: GoatBrainFileProjection) {
   return {
     brainId: projection.brainId,
@@ -964,10 +1160,6 @@ function documentValues(projection: GoatBrainFileProjection) {
     content: projection.content,
     body: projection.body,
     timeline: projection.timeline,
-    format: projection.format,
-    mimeType: projection.mimeType,
-    originalFileName: null,
-    assetStorageKey: null,
     relations: projection.relations,
     sources: projection.sources,
     kind: projection.kind,
@@ -976,7 +1168,28 @@ function documentValues(projection: GoatBrainFileProjection) {
     aliases: projection.aliases,
     contentHash: projection.contentHash,
     sizeBytes: projection.sizeBytes,
+    searchText: goatBrainSearchText(projection),
+    nameText: goatBrainNameText(projection),
   };
+}
+
+// Retrieval projections consumed by goat-brain-read.ts: `search_text` feeds the generated FTS
+// tsvector, `name_text` feeds trigram entity lookup. Migration 0102 backfills the same
+// composition in SQL for pre-existing rows.
+function goatBrainSearchText(projection: GoatBrainFileProjection): string {
+  return [
+    projection.title,
+    projection.aliases.join(" "),
+    projection.body,
+    projection.timeline.map((entry) => entry.body).join("\n"),
+    projection.relations.map((relation) => `${relation.type} ${relation.to}`).join("\n"),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function goatBrainNameText(projection: GoatBrainFileProjection): string {
+  return [projection.title, ...projection.aliases].filter(Boolean).join(" ").trim();
 }
 
 async function replaceDerivedRows(

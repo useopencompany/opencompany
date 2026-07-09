@@ -18,7 +18,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | `list` | List docs without retrieval or model calls (`--folder`, `--limit`, `--include-merged`). Use this for inventory, not wildcard queries. |
 | `get <id>` | Read one doc (`--section all\|truth\|timeline\|frontmatter`). |
 | `timeline <id>` | Dated evidence entries (`--since 30d`, `--limit`). |
-| `query <text>` | Hybrid retrieval: BM25 + optional embeddings/rerank, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`). |
+| `query <text>` | Hybrid retrieval: BM25 + optional embeddings, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`). No LLM calls in the ranking loop (see [retrieval-planes.md](./retrieval-planes.md)). |
 | `folder list` | Folders in use. |
 | `doctor` | Validation, link, folder-shape, and weak-provenance findings (`health.ts`). |
 
@@ -26,7 +26,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 
 | Command | Does |
 | --- | --- |
-| `create` | New doc: `--type` (one of the [10 entity types](./data-model.md#entity-types-the-10-type-contract)), `--id`, `--title`, `--truth`/`--truth-stdin`; optional `--folder`, `--kind`, `--alias`, `--tag`, `--relation type:id`, `--source-ref`. |
+| `create` | New doc: `--type` (one of the [8 entity types](./data-model.md#entity-types-the-8-type-contract)), `--id`, `--title`, `--truth`/`--truth-stdin`; optional `--folder`, `--kind`, `--alias`, `--tag`, `--relation type:id`, `--source-ref`. |
 | `ingest` | One-shot LLM planner from source text (`--text`/`--text-stdin`, required `--source-ref`, `--dry-run`). |
 | `rewrite <id>` | Replace compiled truth. |
 | `set <id>` | Update `--title`, `--type`, `--status`. Promoting to `--status active` requires the truth to cite `[[evidence:...]]`. |
@@ -43,7 +43,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 
 | Tool | Where | Capability |
 | --- | --- | --- |
-| `goat_brain` | `apps/goat/lib/brain-cli.ts` (schema in `chat-ui.ts`) | Full CLI access against a per-call materialized root. Reads and mutations today — the mutation surface predates the "writes are agent-mediated" rule and narrows once the [read plane](./retrieval-planes.md) lands. |
+| `goat_brain` | `apps/goat/lib/brain-cli.ts` (schema in `chat-ui.ts`) | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Mutations still run the CLI against a per-call materialized root; that surface predates the "writes are agent-mediated" rule and narrows separately. |
 | `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only: instant draft page in `inbox/` + durable curation job. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-chat-captures-agentic). |
 
 ## Runner ingestion agents
@@ -55,16 +55,17 @@ System prompts embed `GOAT_BRAIN_POINTER_COPY_RULE`. Dispatch and leasing live i
 
 ## MCP connector (external agents)
 
-`apps/goat/app/api/mcp/[brainId]/[transport]/route.ts` exposes a per-brain MCP server,
+`apps/goat/app/api/mcp/[brainRef]/[transport]/route.ts` exposes a per-brain MCP server,
 OAuth-authenticated via WorkOS AuthKit — the token's grant *is* the brain, so a token for brain A
 cannot address brain B. Current tool surface: `query_brain` (read-only retrieval returning JSON
-hits). External consumers never get write tools; external content enters via ingestion jobs only.
+hits) and `get_document` (full documents by id or alias, batched). Both are served by the read
+plane. External consumers never get write tools; external content enters via ingestion jobs only.
 
 ## Capability summary
 
 | Consumer | Read | Write |
 | --- | --- | --- |
-| Runner ingestion agents | ✓ (CLI) | ✓ (CLI, allow-listed) |
-| Goat chat `goat_brain` | ✓ (CLI) | ✓ today, narrowing to capture-only |
+| Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
+| Goat chat `goat_brain` | ✓ (read plane) | ✓ today, narrowing to capture-only |
 | Goat chat `save_to_brain` | — | capture → curation job only |
-| External agents (MCP) | ✓ (`query_brain`) | never |
+| External agents (MCP) | ✓ (read plane: `query_brain`, `get_document`) | never |

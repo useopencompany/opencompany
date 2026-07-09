@@ -41,6 +41,36 @@ const BRAIN_SOURCE_ITEM_COLUMNS = [
   "updated_at",
 ] as const;
 
+// Documents sync everything except asset_extracted_text: binary-backed rows
+// can carry up to 200KB of machine-extracted text that only search and the
+// ingestion agent need, never the UI.
+const BRAIN_DOCUMENT_COLUMNS = [
+  "id",
+  "user_workos_id",
+  "brain_ref",
+  "brain_id",
+  "folder_path",
+  "title",
+  "content",
+  "body",
+  "timeline",
+  "format",
+  "mime_type",
+  "original_file_name",
+  "asset_storage_key",
+  "asset_size_bytes",
+  "relations",
+  "sources",
+  "kind",
+  "entity_type",
+  "status",
+  "aliases",
+  "content_hash",
+  "size_bytes",
+  "created_at",
+  "updated_at",
+] as const;
+
 const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"] as const;
 
 const SHAPE_SCOPES = {
@@ -135,10 +165,12 @@ const SHAPE_SCOPES = {
   brain_documents: {
     table: "goat.brain_documents",
     where: scopedBrainWhere,
+    columns: BRAIN_DOCUMENT_COLUMNS,
   },
   "goat.brain_documents": {
     table: "goat.brain_documents",
     where: scopedBrainWhere,
+    columns: BRAIN_DOCUMENT_COLUMNS,
   },
   brain_timeline_entries: {
     table: "goat.brain_timeline_entries",
@@ -307,14 +339,18 @@ function scopedBrainSourceItemWhere(userWorkosId: string, requestUrl: URL): Shap
   const params = [userWorkosId];
   const clauses = [`"user_workos_id" = $1`];
 
-  const sourceProvider = optionalEnumFilter(requestUrl, "source_provider", ["goat-chat", "jamie"]);
+  const sourceProvider = optionalEnumFilter(requestUrl, "source_provider", [
+    "goat-chat",
+    "jamie",
+    "upload",
+  ]);
   if (sourceProvider === false) return null;
   if (sourceProvider) {
     params.push(sourceProvider);
     clauses.push(`"source_provider" = $${params.length}`);
   }
 
-  const sourceType = optionalEnumFilter(requestUrl, "source_type", ["capture", "meeting"]);
+  const sourceType = optionalEnumFilter(requestUrl, "source_type", ["capture", "meeting", "asset"]);
   if (sourceType === false) return null;
   if (sourceType) {
     params.push(sourceType);

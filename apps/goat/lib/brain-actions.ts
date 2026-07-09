@@ -11,11 +11,18 @@ import {
   renameGoatBrainFolderForUser,
   updateGoatBrainDocumentForUser,
 } from "@/lib/brain";
+import {
+  createGoatBrainAssetForUser,
+  type GoatBrainAssetUploadInput,
+  replaceGoatBrainAssetForUser,
+} from "@/lib/brain-assets";
 
 // All mutations run against the active brain from the auth context, which is
 // resolved from the user's accessible brains — that lookup is the access check.
-// Creating documents is deliberately not exposed as an action: new content
-// enters through the brain CLI and ingestion agents only.
+// Creating markdown documents is deliberately not exposed as an action:
+// written content enters through the brain CLI and ingestion agents only.
+// File uploads are the one exception — the upload action registers a binary
+// asset whose curation still happens through the ingestion agent.
 
 export async function updateGoatBrainDocumentAction(input: {
   documentId: string;
@@ -101,5 +108,27 @@ export async function deleteGoatBrainFolderAction(input: {
     brainRef: brain.id,
     userWorkosId: context.user.workosUserId,
     folderPath: input.folderPath,
+  });
+}
+
+export async function uploadGoatBrainAssetAction(
+  input: GoatBrainAssetUploadInput,
+): Promise<BrainMutationResult> {
+  const { context, brain } = await currentGoatBrain();
+  return createGoatBrainAssetForUser({
+    ...input,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+  });
+}
+
+export async function replaceGoatBrainAssetAction(
+  input: GoatBrainAssetUploadInput & { documentId: string },
+): Promise<BrainMutationResult> {
+  const { context, brain } = await currentGoatBrain();
+  return replaceGoatBrainAssetForUser({
+    ...input,
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
   });
 }

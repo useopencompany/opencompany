@@ -68,6 +68,7 @@
         "@tiptap/pm": "^3.23.5",
         "@tiptap/react": "^3.23.5",
         "@tiptap/starter-kit": "^3.23.5",
+        "@vercel/blob": "^2.4.0",
         "@workos-inc/authkit-nextjs": "^4.1.0",
         "@workos-inc/node": "^9.3.1",
         "ai": "^6.0.189",
@@ -127,6 +128,7 @@
         "drizzle-orm": "^0.45.2",
         "e2b": "^2.21.0",
         "fastify": "^5.6.2",
+        "unpdf": "^1.4.0",
       },
       "devDependencies": {
         "@durable-streams/server": "^0.3.7",
@@ -269,6 +271,7 @@
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/goat-brain": "workspace:*",
+        "@vercel/blob": "^2.4.0",
         "drizzle-orm": "^0.45.2",
         "pg": "^8.13.1",
       },
@@ -3362,6 +3365,8 @@
     "unist-util-visit-parents": ["unist-util-visit-parents@6.0.2", "", { "dependencies": { "@types/unist": "^3.0.0", "unist-util-is": "^6.0.0" } }, "sha512-goh1s1TBrqSqukSc8wrjwWhL0hiJxgA8m4kFxGlQ+8FYQ3C/m11FcTs4YYem7V664AhHVvgoQLk890Ssdsr2IQ=="],
 
     "universalify": ["universalify@2.0.1", "", {}, "sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw=="],
+
+    "unpdf": ["unpdf@1.6.2", "", { "peerDependencies": { "@napi-rs/canvas": "^0.1.69" }, "optionalPeers": ["@napi-rs/canvas"] }, "sha512-zQ80ySoPuPHOsvIoRp/nJyQt8TOUoTh1+WBCGcBvlddQNgKDLRwm0AY3x8Q35I7+kIiRSgqMx+Ma2pl9McIp7A=="],
 
     "unpipe": ["unpipe@1.0.0", "", {}, "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ=="],
 

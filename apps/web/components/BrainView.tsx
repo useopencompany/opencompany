@@ -1635,7 +1635,7 @@ function TreeItem({
           {node.type === "folder" ? (
             <Folder size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
           ) : (
-            <FileIcon path={node.path} />
+            <BrainFileIcon file={node.file} path={node.path} />
           )}
           <input
             ref={renameInputRef}
@@ -1738,7 +1738,7 @@ function TreeItem({
           {node.type === "folder" ? (
             <Folder size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
           ) : (
-            <FileIcon path={node.path} />
+            <BrainFileIcon file={node.file} path={node.path} />
           )}
           <span className="min-w-0 truncate tracking-[-0.005em]">{node.name}</span>
         </button>
@@ -1906,15 +1906,18 @@ function SyncBadge({ file }: { file: BrainFile }) {
       <Icon
         size={11}
         strokeWidth={2}
-        className={
-          file.githubSyncStatus === "pending" || file.githubSyncStatus === "syncing"
-            ? "animate-spin"
-            : ""
-        }
+        className={isSyncInProgress(file.githubSyncStatus) ? "animate-spin" : ""}
       />
       {status.label}
     </span>
   );
+}
+
+function BrainFileIcon({ file, path }: { file: BrainFile | undefined; path: string }) {
+  if (file && isSyncInProgress(file.githubSyncStatus)) {
+    return <Loader2 size={13} strokeWidth={1.9} className="shrink-0 animate-spin text-warning" />;
+  }
+  return <FileIcon path={path} />;
 }
 
 function FileIcon({ path }: { path: string }) {
@@ -2209,6 +2212,10 @@ function isCodePath(path: string) {
   return /\.(ts|tsx|js|jsx|json|css|html|yaml|yml)$/i.test(path);
 }
 
+function isSyncInProgress(status: string) {
+  return status === "pending" || status === "syncing";
+}
+
 function syncStatus(status: string) {
   if (status === "failed") {
     return {
@@ -2217,7 +2224,7 @@ function syncStatus(status: string) {
       className: "border-danger-border bg-danger-bg text-danger",
     };
   }
-  if (status === "pending" || status === "syncing") {
+  if (isSyncInProgress(status)) {
     return {
       label: status === "syncing" ? "Committing" : "Queued",
       icon: Loader2,

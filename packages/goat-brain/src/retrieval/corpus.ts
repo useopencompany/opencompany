@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { parseGoatBrainDocument } from "../document";
+import { extractGoatBrainAssetText, parseGoatBrainDocument } from "../document";
 import { goatBrainPayloadHash } from "../entry";
 import { evidenceLinkTargets, pageLinkTargets } from "../inline-links";
 import { goatBrainFolderFromRelativePath } from "../paths";
@@ -28,6 +28,9 @@ export type IndexRecord = {
   contentHash: string;
   embeddingText: string;
   timelineText: string;
+  // Machine-extracted text of binary-backed documents (pdf/docx); empty for
+  // plain markdown pages.
+  assetText: string;
   updatedAt: string;
   relations: GoatBrainRelation[];
   wikiLinks: string[];
@@ -60,6 +63,7 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
         contentHash: goatBrainPayloadHash(embeddingText),
         embeddingText,
         timelineText,
+        assetText: extractGoatBrainAssetText(file.source),
         updatedAt: doc.frontmatter.updatedAt ?? "",
         relations: doc.frontmatter.relations ?? [],
         wikiLinks: pageLinkTargets(inlineLinkText),

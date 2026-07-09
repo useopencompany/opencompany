@@ -32,6 +32,10 @@
       "types": "./src/goat-brain-ingest.ts",
       "default": "./src/goat-brain-ingest.ts"
     },
+    "./goat-brain-read": {
+      "types": "./src/goat-brain-read.ts",
+      "default": "./src/goat-brain-read.ts"
+    },
     "./goat-brain-sources": {
       "types": "./src/goat-brain-sources.ts",
       "default": "./src/goat-brain-sources.ts"
@@ -76,6 +80,7 @@
     "@opencompany/crypto": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@neondatabase/serverless": "^1.1.0",
+    "@vercel/blob": "^2.4.0",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1"
   },

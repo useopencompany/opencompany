@@ -47,11 +47,11 @@ export function GoatBrainSettings({
       </SettingsSection>
 
       <SettingsSection title="Claude connector">
-        <ClaudeConnectorBlock brainId={brain.id} />
+        <ClaudeConnectorBlock brainRef={brain.id} />
       </SettingsSection>
 
       <SettingsSection title="Sources">
-        <BrainSourcesSection brainId={brain.id} />
+        <BrainSourcesSection brainRef={brain.id} />
       </SettingsSection>
     </div>
   );
@@ -110,7 +110,7 @@ function BrainAccessSection({
   const save = () => {
     startTransition(async () => {
       const result = await setGoatBrainAccessAction({
-        brainId: brain.id,
+        brainRef: brain.id,
         visibility,
         memberWorkosIds: [...selected],
       });
@@ -184,11 +184,11 @@ function BrainAccessSection({
   );
 }
 
-function ClaudeConnectorBlock({ brainId }: { brainId: string }) {
+function ClaudeConnectorBlock({ brainRef }: { brainRef: string }) {
   const [copied, setCopied] = useState(false);
   const hydrated = useHydrated();
   const origin = hydrated ? window.location.origin.replace(/\/+$/, "") : "";
-  const connectorPath = `/api/mcp/${encodeURIComponent(brainId)}/mcp`;
+  const connectorPath = `/api/mcp/${encodeURIComponent(brainRef)}/mcp`;
   const connectorUrl = origin ? `${origin}${connectorPath}` : connectorPath;
 
   const copyConnectorUrl = async () => {
@@ -230,19 +230,19 @@ function ClaudeConnectorBlock({ brainId }: { brainId: string }) {
   );
 }
 
-function BrainSourcesSection({ brainId }: { brainId: string }) {
+function BrainSourcesSection({ brainRef }: { brainRef: string }) {
   const [details, setDetails] = useState<GoatBrainSourcesDetails | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   const reload = useCallback(async () => {
-    const next = await getGoatBrainSourcesAction(brainId);
+    const next = await getGoatBrainSourcesAction(brainRef);
     setDetails(next);
     setLoaded(true);
-  }, [brainId]);
+  }, [brainRef]);
 
   useEffect(() => {
     let cancelled = false;
-    void getGoatBrainSourcesAction(brainId).then((next) => {
+    void getGoatBrainSourcesAction(brainRef).then((next) => {
       if (cancelled) return;
       setDetails(next);
       setLoaded(true);
@@ -250,7 +250,7 @@ function BrainSourcesSection({ brainId }: { brainId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [brainId]);
+  }, [brainRef]);
 
   if (!loaded) {
     return <div className="px-1 py-1.5 text-[12px] text-ink-subtle">Loading sources…</div>;
@@ -264,7 +264,7 @@ function BrainSourcesSection({ brainId }: { brainId: string }) {
       {GOAT_BRAIN_SOURCE_PROVIDERS.map((provider) => (
         <SourceProviderCard
           key={provider.id}
-          brainId={brainId}
+          brainRef={brainRef}
           provider={provider}
           details={details}
           onChanged={reload}
@@ -275,12 +275,12 @@ function BrainSourcesSection({ brainId }: { brainId: string }) {
 }
 
 function SourceProviderCard({
-  brainId,
+  brainRef,
   provider,
   details,
   onChanged,
 }: {
-  brainId: string;
+  brainRef: string;
   provider: GoatBrainSourceProviderDef;
   details: GoatBrainSourcesDetails | null;
   onChanged: () => Promise<void>;
@@ -305,7 +305,7 @@ function SourceProviderCard({
     if (!integrationId) return;
     startTransition(async () => {
       const result = await setGoatBrainSourceEnabledAction({
-        brainId,
+        brainRef,
         provider: provider.id,
         integrationId,
         enabled: !enabled,

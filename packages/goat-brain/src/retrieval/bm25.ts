@@ -8,6 +8,7 @@ const FIELD_BOOSTS = {
   relationText: 2,
   compiledTruth: 2,
   timelineText: 1,
+  assetText: 1,
 };
 
 export type GoatBrainLexicalIndex = MiniSearch<IndexRecord>;
@@ -15,7 +16,15 @@ export type GoatBrainLexicalIndex = MiniSearch<IndexRecord>;
 export function createLexicalIndex(records: IndexRecord[]): GoatBrainLexicalIndex {
   const index = new MiniSearch<IndexRecord>({
     idField: "id",
-    fields: ["title", "aliases", "type", "relationText", "compiledTruth", "timelineText"],
+    fields: [
+      "title",
+      "aliases",
+      "type",
+      "relationText",
+      "compiledTruth",
+      "timelineText",
+      "assetText",
+    ],
     storeFields: ["id"],
     searchOptions: { boost: FIELD_BOOSTS, prefix: true, fuzzy: 0.2, combineWith: "OR" },
   });
@@ -32,7 +41,10 @@ export function lexicalSearch(
   return index.search(trimmed).map((result) => ({ id: result.id as string, score: result.score }));
 }
 
-export function titleTagMatch(record: IndexRecord, query: string): number {
+export function titleTagMatch(
+  record: Pick<IndexRecord, "title" | "aliases">,
+  query: string,
+): number {
   const q = normalize(query);
   if (!q) return 0;
   const names = [record.title, ...record.aliases].map(normalize).filter(Boolean);

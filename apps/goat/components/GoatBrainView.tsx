@@ -25,6 +25,7 @@ import {
   Ellipsis,
   FileCode2,
   FileText,
+  FileUp,
   Folder,
   FolderPlus,
   History,
@@ -54,12 +55,19 @@ import {
   deleteGoatBrainFolderAction,
   renameGoatBrainDocumentAction,
   renameGoatBrainFolderAction,
+  replaceGoatBrainAssetAction,
   updateGoatBrainDocumentAction,
+  uploadGoatBrainAssetAction,
 } from "@/lib/brain-actions";
 import {
   buildGoatBrainDraftIngestStates,
   type GoatBrainDraftIngestState,
 } from "@/lib/brain-activity";
+import {
+  BRAIN_ASSET_ACCEPT,
+  uploadBrainAssetBlob,
+  validateBrainAssetFile,
+} from "@/lib/brain-asset-upload";
 import {
   createGoatCollections,
   type GoatBrainDocumentRow,
@@ -243,6 +251,9 @@ function GoatBrainEditor({
   const [isFolderPending, startFolderTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const [docPanelState, setDocPanelState] = useState<{
     docId: string | null;
     value: string;
@@ -344,7 +355,10 @@ function GoatBrainEditor({
   // Saves never reseed the editor draft: keystrokes made while a save is in flight
   // must survive, and the live collection brings the fresh body/contentHash after.
   const saveDocument = () => {
-    if (!selectedDocument || !dirty || isDocPending) return;
+    // Binary-backed documents have no body editor; their compiled truth is
+    // curated by the ingestion agent only.
+    if (!selectedDocument || selectedDocument.format !== "markdown" || !dirty || isDocPending)
+      return;
     const autosave = autosaveFor(selectedDocument.id);
     if (editorValue === autosave.savedValue) return;
     const documentId = selectedDocument.id;
@@ -479,6 +493,75 @@ function GoatBrainEditor({
     });
   };
 
+  const selectUploadedDocument = (document: GoatBrainDocumentView) => {
+    setSelectedFolder(document.folderPath);
+    setSelectedDocumentId(document.id);
+    setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
+    router.replace(brainDocumentUrl(document, selectedBrainId));
+  };
+
+  const uploadAssetFile = async (file: File | undefined) => {
+    if (!file || !activeBrain || isUploading) return;
+    const invalid = validateBrainAssetFile(file);
+    if (invalid) {
+      toast.error(invalid);
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const uploaded = await uploadBrainAssetBlob(activeBrain.id, file);
+      const result = await uploadGoatBrainAssetAction({
+        folderPath: activeFolder,
+        blobUrl: uploaded.blobUrl,
+        originalFileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        contentSha256: uploaded.contentSha256,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      toast.success("Uploaded — filing into the brain");
+      if (result.document) selectUploadedDocument(result.document);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const replaceAssetFile = async (file: File | undefined) => {
+    if (!file || !activeBrain || !selectedDocument || isUploading) return;
+    const invalid = validateBrainAssetFile(file);
+    if (invalid) {
+      toast.error(invalid);
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const uploaded = await uploadBrainAssetBlob(activeBrain.id, file);
+      const result = await replaceGoatBrainAssetAction({
+        documentId: selectedDocument.id,
+        folderPath: selectedDocument.folderPath,
+        blobUrl: uploaded.blobUrl,
+        originalFileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        contentSha256: uploaded.contentSha256,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      toast.success("File replaced — re-filing into the brain");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Replace failed.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <main
       className="flex h-full min-h-0 w-full overflow-hidden bg-canvas text-ink"
@@ -511,6 +594,22 @@ function GoatBrainEditor({
               </button>
             ) : null}
             {activeBrain ? <GoatBrainActivity brainRef={activeBrain.id} /> : null}
+            {activeBrain ? (
+              <button
+                type="button"
+                aria-label="Upload PDF"
+                title="Upload PDF into the selected folder"
+                disabled={isUploading}
+                onClick={() => uploadInputRef.current?.click()}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
+              >
+                {isUploading ? (
+                  <Loader2 size={15} strokeWidth={1.8} className="animate-spin" />
+                ) : (
+                  <FileUp size={15} strokeWidth={1.8} />
+                )}
+              </button>
+            ) : null}
             {workspace.role === "admin" && activeBrain ? (
               <button
                 type="button"
@@ -537,7 +636,38 @@ function GoatBrainEditor({
           </label>
         </div>
 
-        <div role="tree" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept={BRAIN_ASSET_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            void uploadAssetFile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+        <input
+          ref={replaceInputRef}
+          type="file"
+          accept={BRAIN_ASSET_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            void replaceAssetFile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+        <div
+          role="tree"
+          className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+          }}
+          onDrop={(event) => {
+            if (event.dataTransfer.files.length === 0) return;
+            event.preventDefault();
+            void uploadAssetFile(event.dataTransfer.files[0]);
+          }}
+        >
           {hasRootNodes ? (
             <div>
               {rootGroups.map((group, groupIndex) =>
@@ -619,7 +749,7 @@ function GoatBrainEditor({
                   title={brainDocumentTreePath(selectedDocument)}
                   className="min-w-0 truncate text-[12.5px] font-medium text-ink"
                 >
-                  {selectedDocument.folderPath}/{selectedDocument.brainId}.md
+                  {brainDocumentTreePath(selectedDocument)}
                 </span>
                 <span className="hidden shrink-0 text-[12px] text-ink-subtle md:inline">
                   Updated {formatRelativeTime(selectedDocument.updatedAt)}
@@ -705,6 +835,21 @@ function GoatBrainEditor({
                         {selectedDocument.timeline.length}
                       </span>
                     </button>
+                    {selectedDocument.format !== "markdown" ? (
+                      <button
+                        type="button"
+                        aria-label="Replace file"
+                        disabled={isUploading}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          replaceInputRef.current?.click();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors duration-150 hover:bg-surface-hover disabled:opacity-45"
+                      >
+                        <FileUp size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+                        Replace file
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       aria-label="Delete document"
@@ -969,22 +1114,30 @@ function BrainDocumentPanel({
       {timelineOpen ? <BrainDocumentTimeline document={selectedDocument} /> : null}
 
       <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[760px] px-8 pb-24 pt-12">
-            <BrainTitleEditor
-              document={selectedDocument}
-              disabled={isDocPending}
-              onRename={onRenameTitle}
-            />
-            <div className="mt-6">
-              <MarkdownGoatBrainEditor
-                content={editorValue}
-                onChange={onEditorChange}
-                brainLinks={brainLinks}
+        {selectedDocument.format !== "markdown" ? (
+          <BrainAssetViewer
+            document={selectedDocument}
+            disabled={isDocPending}
+            onRenameTitle={onRenameTitle}
+          />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-[760px] px-8 pb-24 pt-12">
+              <BrainTitleEditor
+                document={selectedDocument}
+                disabled={isDocPending}
+                onRename={onRenameTitle}
               />
+              <div className="mt-6">
+                <MarkdownGoatBrainEditor
+                  content={editorValue}
+                  onChange={onEditorChange}
+                  brainLinks={brainLinks}
+                />
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {detailsOpen ? (
           <BrainMetadataSidebar
@@ -997,6 +1150,57 @@ function BrainDocumentPanel({
       </div>
     </section>
   );
+}
+
+// Binary-backed documents render the file itself first-class (the browser's
+// native PDF viewer); the brain metadata and the agent's summary live in the
+// details sidebar around it, not in front of it.
+function BrainAssetViewer({
+  document,
+  disabled,
+  onRenameTitle,
+}: {
+  document: GoatBrainDocumentView;
+  disabled: boolean;
+  onRenameTitle: (title: string) => void;
+}) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="shrink-0 border-b border-border-subtle px-8 pb-4 pt-6">
+        <BrainTitleEditor document={document} disabled={disabled} onRename={onRenameTitle} />
+        <p className="mt-1 flex items-center gap-2 text-[12px] text-ink-subtle">
+          <span className="truncate">{document.originalFileName ?? document.brainId}</span>
+          {document.assetSizeBytes ? (
+            <span className="shrink-0">{formatFileSize(document.assetSizeBytes)}</span>
+          ) : null}
+          <a
+            href={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+            download={document.originalFileName ?? undefined}
+            className="shrink-0 text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+          >
+            Download
+          </a>
+        </p>
+      </div>
+      {document.format === "pdf" ? (
+        <iframe
+          title={document.title ?? document.brainId}
+          src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+          className="min-h-0 w-full flex-1 border-0 bg-surface-muted"
+        />
+      ) : (
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-ink-muted">
+          No inline preview for this file type yet — use Download.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function BrainMetadataSidebar({
@@ -1044,8 +1248,26 @@ function BrainMetadataSidebar({
             label="Sources"
             value={document.sources?.map((item) => item.ref).join(", ") || "-"}
           />
+          {document.format !== "markdown" ? (
+            <>
+              <MetadataRow label="File" value={document.originalFileName ?? "-"} />
+              <MetadataRow
+                label="Size"
+                value={document.assetSizeBytes ? formatFileSize(document.assetSizeBytes) : "-"}
+              />
+            </>
+          ) : null}
         </div>
       </section>
+
+      {document.format !== "markdown" ? (
+        <section className="min-w-0">
+          <h2 className="mb-1 text-[12px] font-semibold text-ink">Summary</h2>
+          <p className="max-h-72 overflow-y-auto whitespace-pre-wrap pr-1 text-[12px] leading-5 text-ink-muted">
+            {document.body.trim() || "No summary yet — ingestion pending."}
+          </p>
+        </section>
+      ) : null}
 
       <SidebarTimelineSection document={document} />
 
@@ -1263,9 +1485,7 @@ function BrainDocumentTimeline({ document }: { document: GoatBrainDocumentView }
             {entries.length} {entries.length === 1 ? "entry" : "entries"}
           </span>
         </div>
-        {document.format !== "markdown" ? (
-          <p className="text-[12.5px] text-ink-muted">No timeline for this asset type.</p>
-        ) : entries.length > 0 ? (
+        {entries.length > 0 ? (
           <ol className="max-h-56 space-y-3 overflow-y-auto pr-2">
             {entries.map((entry, index) => (
               <li
@@ -1508,7 +1728,8 @@ function brainFolderUrl(folderPath: string, routeBrainId?: string | null) {
 }
 
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
-  return `${document.folderPath}/${document.brainId}.md`;
+  const extension = document.format === "markdown" ? "md" : document.format;
+  return `${document.folderPath}/${document.brainId}.${extension}`;
 }
 
 function brainLinkMap(
