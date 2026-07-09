@@ -18,6 +18,7 @@ import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./del
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
 import { setGoatTaskWakeup, startGoatTaskWorker } from "./goat-worker";
@@ -92,6 +93,7 @@ const jobWorker = startRunnerJobWorker(env, {
 const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
 const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
 const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
+const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
 const goatTaskScheduleWorker =
   env.goatTaskWorkerEnabled && goatTaskWorker
     ? startGoatTaskScheduleWorker({ onTaskCreated: goatTaskWorker.notify })
@@ -148,6 +150,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatTaskWorker?.stop() ?? Promise.resolve(),
       goatBrainIngestWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
+      goatLinearFlushWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])
       .then(() => Promise.allSettled([flushAllSessionStreams()]))

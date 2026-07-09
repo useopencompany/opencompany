@@ -1,6 +1,6 @@
 import type { GoatBrainSourceConfigProvider } from "@opencompany/db/goat-schema";
 import type { LucideIcon } from "lucide-react";
-import { FileText, GitBranch, Mail, MessageSquare } from "lucide-react";
+import { FileText, GitBranch, ListTodo, Mail, MessageSquare } from "lucide-react";
 
 export type GoatBrainSourceProviderDef = {
   id: GoatBrainSourceConfigProvider;
@@ -50,5 +50,14 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectionKind: "oauth",
     available: true,
     connectHref: "/api/integrations/slack/start?returnTo=/settings",
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    description: "Ingest issue and comment activity from selected teams into this brain.",
+    icon: ListTodo,
+    connectionKind: "oauth",
+    available: true,
+    connectHref: "/api/integrations/linear-ingest/start?returnTo=/settings",
   },
 ];

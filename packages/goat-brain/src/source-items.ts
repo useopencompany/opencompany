@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-export type BrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack";
-export type BrainSourceType = "meeting" | "capture" | "asset" | "conversation";
+export type BrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack" | "linear";
+export type BrainSourceType = "meeting" | "capture" | "asset" | "conversation" | "issue";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
   sourceProvider: BrainSourceProvider;
@@ -448,6 +448,227 @@ export function slackTsToIso(ts: string): string {
     throw invalid(`slack ts must be numeric, got ${ts}`, "invalid_conversation");
   }
   return new Date(seconds * 1000).toISOString();
+}
+
+export type NormalizedLinearIssueActivity = {
+  occurredAt: string;
+  entityType: "issue" | "comment";
+  action: "create" | "update" | "remove";
+  actorName?: string;
+  /** Human summary of what changed, e.g. "state, assignee". */
+  changedFields?: string[];
+  commentId?: string;
+  commentBody?: string;
+};
+
+export type NormalizedLinearIssueComment = {
+  id: string;
+  body: string;
+  authorName?: string;
+  createdAt?: string;
+  url?: string;
+};
+
+export type NormalizedLinearIssueContent = {
+  issue: {
+    organizationId: string;
+    organizationUrlKey?: string;
+    teamId?: string;
+    teamKey?: string;
+    teamName?: string;
+    issueId: string;
+    /** Human key like "ENG-123"; absent when the live snapshot was unavailable. */
+    identifier?: string;
+    url?: string;
+    title: string;
+    description?: string;
+    state?: string;
+    stateType?: string;
+    priority?: string;
+    assigneeName?: string;
+    creatorName?: string;
+    projectName?: string;
+    labels?: string[];
+    dueDate?: string;
+    estimate?: number;
+    createdAt?: string;
+    updatedAt?: string;
+    completedAt?: string;
+    canceledAt?: string;
+    /** True when the live issue snapshot could not be fetched (deleted issue,
+     * revoked token); fields above then reflect the last buffered event. */
+    snapshotStale?: boolean;
+    windowStart: string;
+    windowEnd: string;
+    activity: NormalizedLinearIssueActivity[];
+    comments: NormalizedLinearIssueComment[];
+  };
+};
+
+export type NormalizedLinearIssueSourceItem =
+  NormalizedBrainSourceItem<NormalizedLinearIssueContent> & {
+    sourceProvider: "linear";
+    sourceType: "issue";
+  };
+
+export function normalizeLinearIssueWindow(input: {
+  // Minted per flush, so it doubles as the stable external id for dedupe.
+  windowId: string;
+  organizationId: string;
+  issueId: string;
+  title: string;
+  activity: NormalizedLinearIssueActivity[];
+  comments?: NormalizedLinearIssueComment[];
+  flushedAt: string;
+  organizationUrlKey?: string;
+  teamId?: string;
+  teamKey?: string;
+  teamName?: string;
+  identifier?: string;
+  url?: string;
+  description?: string;
+  state?: string;
+  stateType?: string;
+  priority?: string;
+  assigneeName?: string;
+  creatorName?: string;
+  projectName?: string;
+  labels?: string[];
+  dueDate?: string;
+  estimate?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+  canceledAt?: string;
+  snapshotStale?: boolean;
+}): NormalizedLinearIssueSourceItem {
+  const windowId = input.windowId.trim();
+  if (!windowId) throw invalid("issue windowId must not be empty", "invalid_issue");
+  const organizationId = input.organizationId.trim();
+  if (!organizationId) throw invalid("issue organizationId must not be empty", "invalid_issue");
+  const issueId = input.issueId.trim();
+  if (!issueId) throw invalid("issue issueId must not be empty", "invalid_issue");
+  if (input.activity.length === 0) {
+    throw invalid("issue activity must not be empty", "invalid_issue");
+  }
+  const flushedAt = optionalIsoString(input.flushedAt);
+  if (!flushedAt) throw invalid("issue flushedAt must be a timestamp", "invalid_issue");
+  const title = optionalString(input.title) ?? optionalString(input.identifier) ?? issueId;
+
+  const activity = [...input.activity].sort(
+    (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
+  );
+  const windowStart = activity[0]!.occurredAt;
+  const windowEnd = activity[activity.length - 1]!.occurredAt;
+  const comments = input.comments ?? [];
+  const identifier = optionalString(input.identifier);
+  const organizationUrlKey = optionalString(input.organizationUrlKey);
+  const teamId = optionalString(input.teamId);
+  const teamKey = optionalString(input.teamKey);
+  const teamName = optionalString(input.teamName);
+  const url = optionalString(input.url);
+  const description = optionalString(input.description);
+  const state = optionalString(input.state);
+  const stateType = optionalString(input.stateType);
+  const priority = optionalString(input.priority);
+  const assigneeName = optionalString(input.assigneeName);
+  const creatorName = optionalString(input.creatorName);
+  const projectName = optionalString(input.projectName);
+  const dueDate = optionalString(input.dueDate);
+  const createdAt = optionalIsoString(input.createdAt);
+  const updatedAt = optionalIsoString(input.updatedAt);
+  const completedAt = optionalIsoString(input.completedAt);
+  const canceledAt = optionalIsoString(input.canceledAt);
+
+  const issue = {
+    organizationId,
+    ...(organizationUrlKey ? { organizationUrlKey } : {}),
+    ...(teamId ? { teamId } : {}),
+    ...(teamKey ? { teamKey } : {}),
+    ...(teamName ? { teamName } : {}),
+    issueId,
+    ...(identifier ? { identifier } : {}),
+    ...(url ? { url } : {}),
+    title,
+    ...(description ? { description } : {}),
+    ...(state ? { state } : {}),
+    ...(stateType ? { stateType } : {}),
+    ...(priority ? { priority } : {}),
+    ...(assigneeName ? { assigneeName } : {}),
+    ...(creatorName ? { creatorName } : {}),
+    ...(projectName ? { projectName } : {}),
+    ...(input.labels && input.labels.length > 0 ? { labels: input.labels } : {}),
+    ...(dueDate ? { dueDate } : {}),
+    ...(typeof input.estimate === "number" ? { estimate: input.estimate } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
+    ...(canceledAt ? { canceledAt } : {}),
+    ...(input.snapshotStale ? { snapshotStale: true } : {}),
+    windowStart,
+    windowEnd,
+    activity,
+    comments,
+  };
+  const contentHashInput = {
+    sourceProvider: "linear",
+    sourceType: "issue",
+    organizationId,
+    issueId,
+    activity: activity.map((entry) => ({
+      occurredAt: entry.occurredAt,
+      entityType: entry.entityType,
+      action: entry.action,
+      ...(entry.commentId ? { commentId: entry.commentId } : {}),
+    })),
+    title,
+    ...(state ? { state } : {}),
+  };
+
+  return {
+    sourceProvider: "linear",
+    sourceType: "issue",
+    externalId: windowId,
+    sourceRef: `linear:issue:${identifier ?? issueId}`,
+    title: identifier ? `${identifier} ${title}` : title,
+    occurredAt: windowStart,
+    capturedAt: flushedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { issue },
+  };
+}
+
+export function isNormalizedLinearIssueSourceItem(
+  value: unknown,
+): value is NormalizedLinearIssueSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedLinearIssueSourceItem>;
+  if (
+    item.sourceProvider !== "linear" ||
+    item.sourceType !== "issue" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const issue = (item.content as Partial<NormalizedLinearIssueContent>).issue;
+  return (
+    !!issue &&
+    typeof issue === "object" &&
+    typeof issue.organizationId === "string" &&
+    typeof issue.issueId === "string" &&
+    typeof issue.title === "string" &&
+    Array.isArray(issue.activity) &&
+    issue.activity.length > 0 &&
+    Array.isArray(issue.comments)
+  );
 }
 
 export class BrainSourceNormalizationError extends Error {

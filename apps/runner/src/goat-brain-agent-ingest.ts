@@ -15,6 +15,8 @@ import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
+  type NormalizedLinearIssueContent,
+  type NormalizedLinearIssueSourceItem,
   type NormalizedSlackConversationContent,
   type NormalizedSlackConversationMessage,
   type NormalizedSlackConversationSourceItem,
@@ -53,6 +55,8 @@ const PROMPT_CAPTURE_BYTES = 64_000;
 const PROMPT_ASSET_TEXT_BYTES = 100_000;
 const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
 const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
+const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
+const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 
 // The ingestion agent gets the full working surface of the CLI except the
@@ -163,6 +167,101 @@ export const SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSyste
     "folds one batch of Slack conversation messages into a single brain of Markdown knowledge documents.",
   skipRule: `Slack is high-noise: most batches are chit-chat, scheduling logistics, or banter that carries no durable knowledge. If nothing in the batch is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, plans, facts about people/companies/projects, and substantive shared content belong in the brain.`,
 });
+
+export const LINEAR_ISSUE_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one window of Linear issue activity into a single brain of Markdown knowledge documents.",
+  skipRule: `Linear is mostly routine task churn: status moves, assignment shuffles, estimate tweaks, and short logistics comments carry no durable knowledge. If nothing in the window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, scope changes, root causes, substantive discussion, and facts about people, companies, or projects belong in the brain.`,
+});
+
+export function buildLinearIssueAgentIngestPrompt(item: NormalizedLinearIssueSourceItem) {
+  const issue = item.content.issue;
+  const label = issue.identifier ?? issue.issueId;
+  const activityText = truncateByBytes(
+    formatLinearIssueActivity(issue),
+    PROMPT_LINEAR_ACTIVITY_BYTES,
+  );
+  const description = issue.description
+    ? truncateByBytes(issue.description, PROMPT_LINEAR_DESCRIPTION_BYTES)
+    : "";
+  return [
+    `Ingest this batch of Linear activity on issue ${label} into the brain. It is one activity window: everything that happened on the issue since the last ingested batch.`,
+    "The issue snapshot reflects the issue's current state and is interpretive context; the activity window is the primary ingest target.",
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Query the brain first for likely existing pages and facts before writing, so you update existing knowledge instead of duplicating it.",
+    "2. Judge the window first: extract only durable knowledge — decisions, scope changes, root causes, commitments, and facts about people, companies, or projects. Ignore routine status churn around it.",
+    `3. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite the issue with --source-ref ${item.sourceRef} and individual comments with --source-ref linear:comment:<comment id>.`,
+    "4. Tracked work items follow the pointer rule: the issue's canonical home is Linear, so write a pointer plus a one-line current-state summary, never a copy of the issue body. Do not create a page per issue — fold the knowledge into the project, person, or concept pages it belongs to; create a dedicated page only when the issue clearly is the project.",
+    "5. Create or update person, company, or project pages for entities central to the activity, with backlinks per the iron law. Do not create pages for people who merely moved a ticket.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Window: ${issue.windowStart} to ${issue.windowEnd}`,
+    issue.url ? `Issue URL: ${issue.url}` : null,
+    issue.snapshotStale
+      ? "The live issue snapshot could not be fetched (the issue may have been deleted); the fields below reflect the last buffered event."
+      : null,
+    "",
+    `## Issue snapshot\n${formatLinearIssueSnapshot(issue)}`,
+    description ? `## Issue description\n${description}` : null,
+    `## Activity window\n${activityText}`,
+    issue.comments.length > 0 ? `## Comments\n${formatLinearIssueComments(issue)}` : null,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function formatLinearIssueSnapshot(issue: NormalizedLinearIssueContent["issue"]) {
+  const lines = [
+    `- Issue: ${issue.identifier ?? issue.issueId} — ${issue.title}`,
+    issue.teamName
+      ? `- Team: ${issue.teamName}${issue.teamKey ? ` (${issue.teamKey})` : ""}`
+      : null,
+    issue.projectName ? `- Project: ${issue.projectName}` : null,
+    issue.state ? `- State: ${issue.state}` : null,
+    issue.priority ? `- Priority: ${issue.priority}` : null,
+    issue.assigneeName ? `- Assignee: ${issue.assigneeName}` : null,
+    issue.creatorName ? `- Created by: ${issue.creatorName}` : null,
+    issue.labels && issue.labels.length > 0 ? `- Labels: ${issue.labels.join(", ")}` : null,
+    issue.dueDate ? `- Due: ${issue.dueDate}` : null,
+    issue.completedAt ? `- Completed: ${issue.completedAt}` : null,
+    issue.canceledAt ? `- Canceled: ${issue.canceledAt}` : null,
+  ];
+  return lines.filter((line): line is string => line !== null).join("\n");
+}
+
+function formatLinearIssueActivity(issue: NormalizedLinearIssueContent["issue"]) {
+  return issue.activity
+    .map((entry) => {
+      const time = entry.occurredAt.slice(0, 16).replace("T", " ");
+      const actor = entry.actorName ?? "Someone";
+      if (entry.entityType === "comment") {
+        const verb = entry.action === "update" ? "edited a comment" : "commented";
+        const body = entry.commentBody ? `: ${entry.commentBody.replaceAll("\n", "\n    ")}` : "";
+        const ref = entry.commentId ? ` (comment id ${entry.commentId})` : "";
+        return `[${time}] ${actor} ${verb}${ref}${body}`;
+      }
+      if (entry.action === "create") return `[${time}] ${actor} created the issue`;
+      if (entry.action === "remove") return `[${time}] ${actor} deleted the issue`;
+      const fields =
+        entry.changedFields && entry.changedFields.length > 0
+          ? ` (${entry.changedFields.join(", ")})`
+          : "";
+      return `[${time}] ${actor} updated the issue${fields}`;
+    })
+    .join("\n");
+}
+
+function formatLinearIssueComments(issue: NormalizedLinearIssueContent["issue"]) {
+  return issue.comments
+    .map((comment) => {
+      const time = comment.createdAt ? comment.createdAt.slice(0, 16).replace("T", " ") : "";
+      const author = comment.authorName ?? "Unknown";
+      const body = comment.body.replaceAll("\n", "\n  ");
+      return `[${time}] ${author} (comment id ${comment.id}): ${body}`;
+    })
+    .join("\n");
+}
 
 export function buildSlackConversationAgentIngestPrompt(
   item: NormalizedSlackConversationSourceItem,
@@ -577,6 +676,42 @@ export async function runSlackConversationAgentIngest(
     messageCount: conversation.messages.length,
     windowStartTs: conversation.windowStartTs,
     windowEndTs: conversation.windowEndTs,
+  };
+}
+
+export async function runLinearIssueAgentIngest(
+  input: {
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedLinearIssueSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const issue = input.item.content.issue;
+  const session = await runBrainAgentIngestSession({
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: LINEAR_ISSUE_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildLinearIssueAgentIngestPrompt(input.item),
+    // Issue activity is authored by whoever worked the ticket, not the
+    // integration owner.
+    createdByWorkosId: null,
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    issueId: issue.issueId,
+    issueIdentifier: issue.identifier ?? null,
+    activityCount: issue.activity.length,
+    windowStart: issue.windowStart,
+    windowEnd: issue.windowEnd,
   };
 }
 

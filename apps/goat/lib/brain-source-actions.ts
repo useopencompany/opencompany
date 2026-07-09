@@ -7,6 +7,7 @@ import {
   upsertGoatBrainSource,
 } from "@opencompany/db/goat-brain-sources";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
+import { GOAT_LINEAR_MCP_EXTERNAL_ID, type GoatLinearTeamRef } from "@opencompany/db/goat-linear";
 import {
   type GoatBrainSourceConfigProvider,
   type GoatIntegrationProvider,
@@ -15,11 +16,19 @@ import {
 } from "@opencompany/db/goat-schema";
 import type { GoatSlackConversationRef } from "@opencompany/db/goat-slack";
 import { getDefaultGoatBrainForUser, getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
-import type { GoatJamieProviderState, GoatSlackProviderState } from "@/lib/integration-state";
+import type {
+  GoatJamieProviderState,
+  GoatLinearSourceProviderState,
+  GoatSlackProviderState,
+} from "@/lib/integration-state";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
+import {
+  getGoatLinearSourceIntegrationState,
+  linearGraphqlRequest,
+} from "@/lib/integrations/linear-ingest";
 import { getGoatSlackIntegrationState, slackApiRequest } from "@/lib/integrations/slack";
 import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
 
@@ -46,6 +55,9 @@ export type GoatBrainSourcesDetails = {
   slack: {
     integration: GoatSlackProviderState;
   };
+  linear: {
+    integration: GoatLinearSourceProviderState;
+  };
 };
 
 function integrationProviderFor(
@@ -56,6 +68,7 @@ function integrationProviderFor(
     case "gmail":
     case "github":
     case "slack":
+    case "linear":
       return provider;
     default:
       return null;
@@ -79,10 +92,11 @@ export async function getGoatBrainSourcesAction(
   const context = await requireAdminBrainContext(brainRef);
   if (!context) return null;
 
-  const [sources, jamieState, slackState, defaultBrain] = await Promise.all([
+  const [sources, jamieState, slackState, linearState, defaultBrain] = await Promise.all([
     listGoatBrainSourcesForBrain(brainRef),
     getGoatJamieIntegrationState(context.user.workosUserId),
     getGoatSlackIntegrationState(context.user.workosUserId),
+    getGoatLinearSourceIntegrationState(context.user.workosUserId),
     getDefaultGoatBrainForUser(context.user.workosUserId),
   ]);
 
@@ -107,6 +121,9 @@ export async function getGoatBrainSourcesAction(
     },
     slack: {
       integration: slackState,
+    },
+    linear: {
+      integration: linearState,
     },
   };
 }
@@ -141,6 +158,11 @@ export async function setGoatBrainSourceEnabledAction(input: {
         eq(goatIntegrations.id, input.integrationId),
         eq(goatIntegrations.userWorkosId, context.user.workosUserId),
         eq(goatIntegrations.provider, integrationProvider),
+        // Provider "linear" also covers the MCP connector row; only the
+        // ingestion connection (keyed on the organization id) can feed brains.
+        ...(integrationProvider === "linear"
+          ? [ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID)]
+          : []),
       ),
     )
     .limit(1);
@@ -332,6 +354,151 @@ export async function setGoatBrainSlackSourceAction(input: {
       error: error instanceof Error ? error.message : "Could not update the Slack source.",
     };
   }
+}
+
+export type GoatLinearTeamListResult =
+  | { ok: true; teams: GoatLinearTeamRef[]; partial: boolean }
+  | { ok: false; error: string };
+
+export async function listGoatLinearTeamsAction(
+  integrationId: string,
+): Promise<GoatLinearTeamListResult> {
+  const context = await currentGoatUser();
+  const token = await loadOwnLinearAccessToken(context.user.workosUserId, integrationId);
+  if (!token) {
+    return { ok: false, error: "Connect Linear in your settings first." };
+  }
+
+  const teams: GoatLinearTeamRef[] = [];
+  let cursor: string | undefined;
+  let partial = false;
+
+  try {
+    do {
+      const page = await linearGraphqlRequest<{
+        teams?: {
+          nodes?: Array<{ id?: string; key?: string; name?: string }>;
+          pageInfo?: { hasNextPage?: boolean; endCursor?: string };
+        };
+      }>({
+        token,
+        query: `query GoatLinearTeams($after: String) {
+          teams(first: 100, after: $after) {
+            nodes { id key name }
+            pageInfo { hasNextPage endCursor }
+          }
+        }`,
+        variables: cursor ? { after: cursor } : {},
+      });
+      for (const team of page.teams?.nodes ?? []) {
+        if (!team.id) continue;
+        teams.push({
+          id: team.id,
+          name: team.name?.trim() || team.key?.trim() || team.id,
+          ...(team.key?.trim() ? { key: team.key.trim() } : {}),
+        });
+      }
+      cursor = page.teams?.pageInfo?.hasNextPage
+        ? (page.teams.pageInfo.endCursor ?? undefined)
+        : undefined;
+    } while (cursor);
+  } catch {
+    // Rate limits or transient Linear errors: return what we have so the
+    // picker stays usable instead of failing outright.
+    partial = true;
+  }
+
+  teams.sort((a, b) => a.name.localeCompare(b.name));
+  return { ok: true, teams, partial };
+}
+
+export async function setGoatBrainLinearSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+  enabled: boolean;
+  teams: GoatLinearTeamRef[];
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireAdminBrainContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "Only workspace admins can configure brain sources." };
+  }
+
+  const [integration] = await getDb()
+    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, input.integrationId),
+        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
+        eq(goatIntegrations.provider, "linear"),
+        ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
+      ),
+    )
+    .limit(1);
+  if (!integration || integration.status === "disconnected") {
+    return { ok: false, error: "Connect Linear in your settings first." };
+  }
+
+  try {
+    await upsertGoatBrainSource({
+      brainRef: input.brainRef,
+      provider: "linear",
+      integrationId: input.integrationId,
+      userWorkosId: context.user.workosUserId,
+      createdByWorkosId: context.user.workosUserId,
+      enabled: input.enabled,
+      config: {
+        teams: sanitizeTeamRefs(input.teams),
+      },
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the Linear source.",
+    };
+  }
+}
+
+async function loadOwnLinearAccessToken(userWorkosId: string, integrationId: string) {
+  const [integration] = await getDb()
+    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, integrationId),
+        eq(goatIntegrations.userWorkosId, userWorkosId),
+        eq(goatIntegrations.provider, "linear"),
+        ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
+      ),
+    )
+    .limit(1);
+  if (!integration || integration.status !== "connected") return null;
+
+  const credential = await loadGoatIntegrationCredential({
+    userWorkosId,
+    integrationId,
+    provider: "linear",
+    kind: "oauth_token",
+  }).catch(() => null);
+  const token = credential?.payload.access_token;
+  return typeof token === "string" && token ? token : null;
+}
+
+function sanitizeTeamRefs(refs: GoatLinearTeamRef[]): GoatLinearTeamRef[] {
+  const seen = new Set<string>();
+  const sanitized: GoatLinearTeamRef[] = [];
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id.trim() : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const name = typeof ref.name === "string" ? ref.name.trim() : "";
+    const key = typeof ref.key === "string" ? ref.key.trim() : "";
+    sanitized.push({ id, name: name || id, ...(key ? { key } : {}) });
+  }
+  return sanitized;
 }
 
 async function loadOwnSlackAccessToken(userWorkosId: string, integrationId: string) {

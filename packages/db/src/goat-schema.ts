@@ -70,10 +70,12 @@ export type GoatIntegrationResourceStatus =
   | "permission_lost"
   | "archived"
   | "sync_failed";
-export type GoatBrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack";
-export type GoatBrainSourceConfigProvider = "jamie" | "gmail" | "github" | "slack";
-export type GoatBrainSourceType = "meeting" | "capture" | "asset" | "conversation";
+export type GoatBrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack" | "linear";
+export type GoatBrainSourceConfigProvider = "jamie" | "gmail" | "github" | "slack" | "linear";
+export type GoatBrainSourceType = "meeting" | "capture" | "asset" | "conversation" | "issue";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
+export type GoatLinearEventEntityType = "issue" | "comment";
+export type GoatLinearEventAction = "create" | "update" | "remove";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -855,7 +857,7 @@ export const goatBrainSources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'github', 'slack')`,
+      sql`${table.provider} IN ('jamie', 'gmail', 'github', 'slack', 'linear')`,
     ),
   }),
 );
@@ -921,11 +923,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation')`,
+      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -986,7 +988,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -1043,6 +1045,60 @@ export const goatSlackMessageEvents = goat.table(
     channelTypeCheck: check(
       "goat_slack_message_events_channel_type_check",
       sql`${table.channelType} IN ('channel', 'group', 'im', 'mpim')`,
+    ),
+  }),
+);
+
+// Raw Linear activity buffer: the webhook inserts one row per relevant issue or
+// comment event; the runner's flush sweeper batches unflushed rows per issue
+// into an issue-window source item after a quiet period (source_item_id NULL =
+// unflushed).
+export const goatLinearIssueEvents = goat.table(
+  "linear_issue_events",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    organizationId: text("organization_id").notNull(),
+    // Nullable: comment events do not always carry the issue's team; the flush
+    // worker re-resolves the team from the live issue snapshot.
+    teamId: text("team_id"),
+    issueId: text("issue_id").notNull(),
+    // One webhook delivery may buffer for several integrations of the same
+    // Linear organization; the delivery id makes redeliveries per-integration no-ops.
+    deliveryId: text("delivery_id").notNull(),
+    entityType: text("entity_type").$type<GoatLinearEventEntityType>().notNull(),
+    action: text("action").$type<GoatLinearEventAction>().notNull(),
+    issueTitle: text("issue_title"),
+    actorName: text("actor_name"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationDeliveryIdx: uniqueIndex("goat_linear_issue_events_integration_delivery_idx").on(
+      table.integrationId,
+      table.deliveryId,
+    ),
+    pendingIdx: index("goat_linear_issue_events_pending_idx")
+      .on(table.integrationId, table.issueId, table.receivedAt)
+      .where(sql`${table.sourceItemId} IS NULL`),
+    sourceItemIdx: index("goat_linear_issue_events_source_item_idx").on(table.sourceItemId),
+    entityTypeCheck: check(
+      "goat_linear_issue_events_entity_type_check",
+      sql`${table.entityType} IN ('issue', 'comment')`,
+    ),
+    actionCheck: check(
+      "goat_linear_issue_events_action_check",
+      sql`${table.action} IN ('create', 'update', 'remove')`,
     ),
   }),
 );

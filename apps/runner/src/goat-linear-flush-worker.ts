@@ -1,0 +1,434 @@
+import {
+  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  upsertGoatBrainSourceItemAndEnqueue,
+} from "@opencompany/db/goat-brain-ingest";
+import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
+import {
+  goatLinearSelectedTeamIds,
+  listEnabledGoatLinearBrainSourceRoutes,
+  newGoatLinearIssueWindowId,
+} from "@opencompany/db/goat-linear";
+import type {
+  GoatIntegrationStatus,
+  GoatLinearEventAction,
+  GoatLinearEventEntityType,
+} from "@opencompany/db/goat-schema";
+import {
+  type NormalizedLinearIssueActivity,
+  type NormalizedLinearIssueComment,
+  normalizeLinearIssueWindow,
+} from "@opencompany/goat-brain";
+import { captureException, createLogger } from "@opencompany/observability";
+import { sql } from "drizzle-orm";
+import { getDb } from "./db";
+import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { fetchLinearIssueSnapshot, type LinearIssueSnapshot } from "./linear-api";
+import { rowsFromExecute } from "./sql-exec";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "goat-linear-flush" });
+
+// A window flushes after the issue has been quiet for the quiet period, or
+// once its oldest buffered event has waited out the max wait — whichever comes
+// first. One agent ingest session then covers the whole window. Issues change
+// in slower bursts than chat, so the windows are wider than Slack's.
+export const GOAT_LINEAR_QUIET_PERIOD_MS = 15 * 60_000;
+export const GOAT_LINEAR_MAX_WAIT_MS = 2 * 60 * 60_000;
+export const GOAT_LINEAR_MAX_WINDOW_EVENTS = 200;
+const GOAT_LINEAR_FLUSH_POLL_INTERVAL_MS = 60_000;
+
+export type GoatLinearDueWindow = {
+  integrationId: string;
+  userWorkosId: string;
+  organizationId: string;
+  issueId: string;
+};
+
+type BufferedLinearEventRow = {
+  id: string;
+  teamId: string | null;
+  entityType: GoatLinearEventEntityType;
+  action: GoatLinearEventAction;
+  issueTitle: string | null;
+  actorName: string | null;
+  payload: Record<string, unknown>;
+  eventTime: string | Date;
+};
+
+export async function listDueGoatLinearIssueWindows(input: {
+  now?: Date;
+  quietPeriodMs?: number;
+  maxWaitMs?: number;
+}): Promise<GoatLinearDueWindow[]> {
+  const now = input.now ?? new Date();
+  const quietCutoff = new Date(
+    now.getTime() - (input.quietPeriodMs ?? GOAT_LINEAR_QUIET_PERIOD_MS),
+  );
+  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_LINEAR_MAX_WAIT_MS));
+  const result = await getDb().execute(sql`
+    SELECT
+      integration_id AS "integrationId",
+      user_workos_id AS "userWorkosId",
+      organization_id AS "organizationId",
+      issue_id AS "issueId"
+    FROM goat.linear_issue_events
+    WHERE source_item_id IS NULL
+    GROUP BY 1, 2, 3, 4
+    HAVING max(received_at) < ${quietCutoff} OR min(received_at) < ${maxWaitCutoff}
+  `);
+  return rowsFromExecute<GoatLinearDueWindow>(result);
+}
+
+export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): Promise<{
+  sourceItemId: string;
+  eventCount: number;
+  enqueued: boolean;
+} | null> {
+  const db = getDb();
+
+  // Enrichment happens before the transaction so no network call ever holds
+  // row locks. An event that slips in mid-flush stays pending and seeds the
+  // next window anyway.
+  const preview = await previewBufferedLinearEvents(window);
+  if (preview.length === 0) return null;
+  const integration = await loadLinearIntegrationContext(window);
+  const snapshot = integration.accessToken
+    ? await fetchLinearIssueSnapshot({
+        token: integration.accessToken,
+        issueId: window.issueId,
+      })
+    : null;
+
+  const flushedAt = new Date();
+  const result = await db.transaction(async (tx) => {
+    const claimed = rowsFromExecute<BufferedLinearEventRow>(
+      await tx.execute(sql`
+        SELECT
+          id,
+          team_id AS "teamId",
+          entity_type AS "entityType",
+          action,
+          issue_title AS "issueTitle",
+          actor_name AS "actorName",
+          payload,
+          event_time AS "eventTime"
+        FROM goat.linear_issue_events
+        WHERE id IN (${sql.join(
+          preview.map((row) => sql`${row.id}`),
+          sql`, `,
+        )})
+          AND source_item_id IS NULL
+        ORDER BY event_time ASC, id ASC
+        FOR UPDATE SKIP LOCKED
+      `),
+    );
+    // Another sweeper may have claimed the same due window first.
+    if (claimed.length === 0) return null;
+    // Keep the pre-fetched snapshot aligned with the exact flushed window.
+    if (claimed.length !== preview.length) return null;
+
+    const item = buildLinearIssueWindowItem({
+      window,
+      events: claimed,
+      snapshot,
+      organizationUrlKey: integration.organizationUrlKey,
+      flushedAt,
+    });
+
+    // Routing is re-resolved at flush time: the user may have deselected the
+    // team or disabled the source since the events were buffered. A revoked
+    // integration still flushes (persisting the window) with no jobs, so the
+    // buffer never wedges on a dead token.
+    const routes =
+      integration.status === "connected"
+        ? await listEnabledGoatLinearBrainSourceRoutes([window.integrationId], tx)
+        : [];
+    const teamId = snapshot?.teamId ?? claimed.find((row) => row.teamId)?.teamId ?? null;
+    const brainRefs = routes
+      .filter((route) => {
+        const selected = goatLinearSelectedTeamIds(route.config);
+        if (selected.size === 0) return false;
+        // Without a resolvable team (deleted issue with team-less buffered
+        // comments) the window cannot be routed confidently; persist it with
+        // no jobs rather than fan out to the wrong brain.
+        return teamId ? selected.has(teamId) : false;
+      })
+      .map((route) => route.brainRef);
+
+    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+      userWorkosId: window.userWorkosId,
+      sourceConnectionId: window.integrationId,
+      integrationId: window.integrationId,
+      item,
+      rawPayload: { eventIds: claimed.map((row) => row.id) },
+      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      brainRefs,
+      now: flushedAt,
+      db: tx,
+    });
+
+    await tx.execute(sql`
+      UPDATE goat.linear_issue_events
+      SET source_item_id = ${upserted.sourceItemId}
+      WHERE id IN (${sql.join(
+        claimed.map((row) => sql`${row.id}`),
+        sql`, `,
+      )})
+    `);
+
+    return {
+      sourceItemId: upserted.sourceItemId,
+      eventCount: claimed.length,
+      enqueued: upserted.enqueued,
+    };
+  });
+
+  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  return result;
+}
+
+export function buildLinearIssueWindowItem(input: {
+  window: GoatLinearDueWindow;
+  events: readonly BufferedLinearEventRow[];
+  snapshot: LinearIssueSnapshot | null;
+  organizationUrlKey: string | null;
+  flushedAt: Date;
+}) {
+  const { window, events, snapshot } = input;
+  const activity = events.map((row) => toNormalizedActivity(row));
+  const comments = snapshot ? snapshot.comments : commentsFromBufferedEvents(events);
+  const lastTitled = [...events].reverse().find((row) => row.issueTitle);
+
+  return normalizeLinearIssueWindow({
+    windowId: newGoatLinearIssueWindowId(),
+    organizationId: window.organizationId,
+    issueId: window.issueId,
+    title: snapshot?.title ?? lastTitled?.issueTitle ?? window.issueId,
+    activity,
+    comments,
+    flushedAt: input.flushedAt.toISOString(),
+    ...(input.organizationUrlKey ? { organizationUrlKey: input.organizationUrlKey } : {}),
+    ...(snapshot
+      ? {
+          ...(snapshot.identifier ? { identifier: snapshot.identifier } : {}),
+          ...(snapshot.url ? { url: snapshot.url } : {}),
+          ...(snapshot.description ? { description: snapshot.description } : {}),
+          ...(snapshot.state ? { state: snapshot.state } : {}),
+          ...(snapshot.stateType ? { stateType: snapshot.stateType } : {}),
+          ...(snapshot.priority ? { priority: snapshot.priority } : {}),
+          ...(snapshot.assigneeName ? { assigneeName: snapshot.assigneeName } : {}),
+          ...(snapshot.creatorName ? { creatorName: snapshot.creatorName } : {}),
+          ...(snapshot.projectName ? { projectName: snapshot.projectName } : {}),
+          ...(snapshot.labels ? { labels: snapshot.labels } : {}),
+          ...(snapshot.dueDate ? { dueDate: snapshot.dueDate } : {}),
+          ...(typeof snapshot.estimate === "number" ? { estimate: snapshot.estimate } : {}),
+          ...(snapshot.createdAt ? { createdAt: snapshot.createdAt } : {}),
+          ...(snapshot.updatedAt ? { updatedAt: snapshot.updatedAt } : {}),
+          ...(snapshot.completedAt ? { completedAt: snapshot.completedAt } : {}),
+          ...(snapshot.canceledAt ? { canceledAt: snapshot.canceledAt } : {}),
+          ...(snapshot.teamId ? { teamId: snapshot.teamId } : {}),
+          ...(snapshot.teamKey ? { teamKey: snapshot.teamKey } : {}),
+          ...(snapshot.teamName ? { teamName: snapshot.teamName } : {}),
+        }
+      : {
+          snapshotStale: true,
+          ...(events.find((row) => row.teamId)?.teamId
+            ? { teamId: events.find((row) => row.teamId)!.teamId! }
+            : {}),
+        }),
+  });
+}
+
+export function startGoatLinearFlushWorker(options: { pollIntervalMs?: number } = {}) {
+  const pollIntervalMs = Math.max(
+    1_000,
+    options.pollIntervalMs ?? GOAT_LINEAR_FLUSH_POLL_INTERVAL_MS,
+  );
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let wake: (() => void) | null = null;
+
+  const sleep = () =>
+    new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        wake = null;
+        resolve();
+      }, pollIntervalMs);
+      timer.unref?.();
+      wake = () => {
+        if (timer) clearTimeout(timer);
+        wake = null;
+        resolve();
+      };
+    });
+
+  const loop = (async () => {
+    while (!stopped) {
+      try {
+        const due = await listDueGoatLinearIssueWindows({});
+        for (const window of due) {
+          if (stopped) break;
+          const flushed = await flushGoatLinearIssueWindow(window).catch((error) => {
+            captureException(error, {
+              event: "opencompany.goat_linear_flush_failed",
+              integration_id: window.integrationId,
+              issue_id: window.issueId,
+            });
+            logger.error("Goat Linear window flush failed", {
+              event: "opencompany.goat_linear_flush_failed",
+              integration_id: window.integrationId,
+              issue_id: window.issueId,
+              error,
+            });
+            return null;
+          });
+          if (flushed) {
+            logger.info("Goat Linear window flushed", {
+              event: "opencompany.goat_linear_window_flushed",
+              integration_id: window.integrationId,
+              issue_id: window.issueId,
+              source_item_id: flushed.sourceItemId,
+              event_count: flushed.eventCount,
+              enqueued: flushed.enqueued,
+            });
+          }
+        }
+      } catch (error) {
+        captureException(error, { event: "opencompany.goat_linear_flush_worker_failed" });
+        logger.error("Goat Linear flush worker failed", {
+          event: "opencompany.goat_linear_flush_worker_failed",
+          error,
+        });
+      }
+      if (stopped) break;
+      await sleep();
+    }
+  })();
+
+  return {
+    notify: () => wake?.(),
+    stop: async () => {
+      stopped = true;
+      wake?.();
+      await loop;
+    },
+  };
+}
+
+async function previewBufferedLinearEvents(window: GoatLinearDueWindow) {
+  return rowsFromExecute<BufferedLinearEventRow>(
+    await getDb().execute(sql`
+      SELECT
+        id,
+        team_id AS "teamId",
+        entity_type AS "entityType",
+        action,
+        issue_title AS "issueTitle",
+        actor_name AS "actorName",
+        payload,
+        event_time AS "eventTime"
+      FROM goat.linear_issue_events
+      WHERE integration_id = ${window.integrationId}
+        AND issue_id = ${window.issueId}
+        AND source_item_id IS NULL
+      ORDER BY event_time ASC, id ASC
+      LIMIT ${GOAT_LINEAR_MAX_WINDOW_EVENTS}
+    `),
+  );
+}
+
+async function loadLinearIntegrationContext(window: GoatLinearDueWindow): Promise<{
+  status: GoatIntegrationStatus | "unknown";
+  accessToken: string | null;
+  organizationUrlKey: string | null;
+}> {
+  const statusRows = rowsFromExecute<{ status: GoatIntegrationStatus }>(
+    await getDb().execute(sql`
+      SELECT status FROM goat.integrations WHERE id = ${window.integrationId}
+    `),
+  );
+  const status = statusRows[0]?.status ?? "unknown";
+
+  const credential =
+    status === "connected"
+      ? await loadGoatIntegrationCredential({
+          userWorkosId: window.userWorkosId,
+          integrationId: window.integrationId,
+          provider: "linear",
+          kind: "oauth_token",
+        }).catch((error) => {
+          logger.warn("Goat Linear credential load failed", {
+            event: "opencompany.goat_linear_credential_load_failed",
+            integration_id: window.integrationId,
+            error,
+          });
+          return null;
+        })
+      : null;
+
+  const accessToken = credential?.payload.access_token;
+  const organizationUrlKey = credential?.payload.organization_url_key;
+  return {
+    status,
+    accessToken: typeof accessToken === "string" && accessToken ? accessToken : null,
+    organizationUrlKey:
+      typeof organizationUrlKey === "string" && organizationUrlKey ? organizationUrlKey : null,
+  };
+}
+
+// Raw db.execute skips Drizzle's column mapping, so timestamptz comes back as
+// a string; coerce before formatting.
+function eventTimeIso(value: string | Date): string {
+  return (value instanceof Date ? value : new Date(value)).toISOString();
+}
+
+function toNormalizedActivity(row: BufferedLinearEventRow): NormalizedLinearIssueActivity {
+  const data = asRecord(row.payload.data);
+  const updatedFrom = asRecord(row.payload.updatedFrom);
+  const changedFields = updatedFrom
+    ? Object.keys(updatedFrom).filter((key) => key !== "updatedAt")
+    : [];
+  const commentId = row.entityType === "comment" ? asString(data?.id) : null;
+  const commentBody = row.entityType === "comment" ? asString(data?.body) : null;
+  return {
+    occurredAt: eventTimeIso(row.eventTime),
+    entityType: row.entityType,
+    action: row.action,
+    ...(row.actorName ? { actorName: row.actorName } : {}),
+    ...(changedFields.length > 0 ? { changedFields } : {}),
+    ...(commentId ? { commentId } : {}),
+    ...(commentBody ? { commentBody } : {}),
+  };
+}
+
+// Fallback when the live snapshot is unavailable: reconstruct the comments the
+// window itself carried so the ingest agent still sees the discussion.
+function commentsFromBufferedEvents(
+  events: readonly BufferedLinearEventRow[],
+): NormalizedLinearIssueComment[] {
+  const byId = new Map<string, NormalizedLinearIssueComment>();
+  for (const row of events) {
+    if (row.entityType !== "comment") continue;
+    const data = asRecord(row.payload.data);
+    const id = asString(data?.id);
+    const body = asString(data?.body);
+    if (!id || !body) continue;
+    const createdAt = asString(data?.createdAt) ?? eventTimeIso(row.eventTime);
+    byId.set(id, {
+      id,
+      body,
+      ...(row.actorName ? { authorName: row.actorName } : {}),
+      createdAt,
+    });
+  }
+  return [...byId.values()];
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}

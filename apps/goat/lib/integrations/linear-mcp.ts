@@ -58,6 +58,9 @@ export async function getGoatLinearIntegrationState(
       and(
         eq(goatIntegrations.userWorkosId, userWorkosId),
         eq(goatIntegrations.provider, GOAT_LINEAR_PROVIDER),
+        // The Linear brain-source connection shares provider "linear" but keys
+        // external_id on the organization id; this state is MCP-only.
+        eq(goatIntegrations.externalId, LINEAR_EXTERNAL_ID),
       ),
     )
     .orderBy(desc(goatIntegrations.updatedAt))

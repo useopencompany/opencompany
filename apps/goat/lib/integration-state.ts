@@ -16,6 +16,20 @@ export type GoatLinearProviderState = {
   statusReason: string | null;
 };
 
+// The Linear brain-source connection (a Linear OAuth app with webhooks), as
+// opposed to GoatLinearProviderState which describes the MCP connector. Both
+// share provider "linear"; rows are told apart by external_id ("linear_mcp"
+// for MCP, the Linear organization id for the source connection).
+export type GoatLinearSourceProviderState = {
+  provider: "linear";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  organizationName: string | null;
+  statusReason: string | null;
+};
+
 export type GoatGitHubProviderState = {
   provider: "github";
   connected: boolean;
@@ -65,6 +79,8 @@ export type GoatIntegrationState = {
 type IntegrationStateRow = {
   id?: string;
   provider: GoatIntegrationProvider;
+  externalId?: string | null;
+  external_id?: string | null;
   accountEmail?: string | null;
   account_email?: string | null;
   accountName?: string | null;
@@ -80,6 +96,12 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
   const byProvider = new Map<GoatIntegrationProvider, IntegrationStateRow>();
   for (const row of rows) {
     if (row.status === "disconnected") continue;
+    // Provider "linear" covers two kinds of rows; the MCP card must only ever
+    // reflect the MCP connector row (external_id "linear_mcp"). Linear
+    // brain-source rows are surfaced through the brain settings page instead.
+    if (row.provider === "linear" && (row.externalId ?? row.external_id) !== "linear_mcp") {
+      continue;
+    }
     byProvider.set(row.provider, row);
   }
 
