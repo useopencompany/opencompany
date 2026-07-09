@@ -54,7 +54,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
   {
     id: "linear",
     name: "Linear",
-    description: "Ingest issue and comment activity from selected teams into this brain.",
+    description: "Ingest selected issue and comment events from selected teams into this brain.",
     icon: ListTodo,
     connectionKind: "oauth",
     available: true,
