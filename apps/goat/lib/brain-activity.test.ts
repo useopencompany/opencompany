@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildGoatBrainActivityEvents } from "@/lib/brain-activity";
+import {
+  buildGoatBrainActivityEvents,
+  buildGoatBrainDraftIngestStates,
+} from "@/lib/brain-activity";
 import type { GoatBrainIngestJobRow, GoatBrainSourceItemRow } from "@/lib/task-collections";
 
 function job(overrides: Partial<GoatBrainIngestJobRow> = {}): GoatBrainIngestJobRow {
@@ -131,5 +134,54 @@ describe("buildGoatBrainActivityEvents", () => {
 
     expect(events.map((event) => event.id)).toEqual(["gbjob_new:captured", "gbjob_old:captured"]);
     expect(events[1]?.sourceTitle).toBe("Untitled");
+  });
+});
+
+describe("buildGoatBrainDraftIngestStates", () => {
+  it("maps pending chat capture jobs to their inbox draft id", () => {
+    const states = buildGoatBrainDraftIngestStates([job()], [item()]);
+
+    expect(states.get("pricing-reference")).toMatchObject({
+      kind: "queued",
+      jobId: "gbjob_1",
+      title: "Pricing teardown reference",
+      attempts: 0,
+    });
+  });
+
+  it("uses running, retrying, and failed job states", () => {
+    const running = buildGoatBrainDraftIngestStates(
+      [job({ status: "running", attempts: 1 })],
+      [item()],
+    );
+    expect(running.get("pricing-reference")).toMatchObject({ kind: "running", attempts: 1 });
+
+    const retrying = buildGoatBrainDraftIngestStates(
+      [job({ status: "queued", attempts: 2, last_error: "Brain changed while running." })],
+      [item()],
+    );
+    expect(retrying.get("pricing-reference")).toMatchObject({
+      kind: "retrying",
+      detail: "Brain changed while running.",
+    });
+
+    const failed = buildGoatBrainDraftIngestStates(
+      [job({ status: "failed", attempts: 5, last_error: "Gateway timed out." })],
+      [item({ last_ingest_status: "failed" })],
+    );
+    expect(failed.get("pricing-reference")).toMatchObject({
+      kind: "failed",
+      detail: "Gateway timed out.",
+    });
+  });
+
+  it("hides succeeded jobs and ignores non-capture source items", () => {
+    expect(buildGoatBrainDraftIngestStates([job({ status: "succeeded" })], [item()]).size).toBe(0);
+    expect(
+      buildGoatBrainDraftIngestStates(
+        [job({ source_provider: "jamie" })],
+        [item({ source_provider: "jamie", source_type: "meeting" })],
+      ).size,
+    ).toBe(0);
   });
 });
