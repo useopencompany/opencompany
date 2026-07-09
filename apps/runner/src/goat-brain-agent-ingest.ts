@@ -4,9 +4,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  type GoatBrainSyncPage,
   getGoatBrainFile,
   materializeGoatBrainFilesToRoot,
-  type GoatBrainSyncPage,
   syncGoatBrainFilesFromRoot,
   updateGoatBrainAssetExtraction,
 } from "@opencompany/db/goat-brain-files";
