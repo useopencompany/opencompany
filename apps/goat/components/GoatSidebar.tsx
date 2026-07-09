@@ -74,7 +74,7 @@ export function GoatSidebar({
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
           <span className="truncate px-1 text-[13px] font-semibold tracking-[-0.01em] text-ink">
-            Goat
+            opencompany v2
           </span>
         </div>
 
