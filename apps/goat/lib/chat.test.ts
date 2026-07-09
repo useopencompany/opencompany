@@ -272,6 +272,7 @@ function createInMemoryChatStore(
         userWorkosId: input.userWorkosId,
         title: input.title,
         model: input.model,
+        engine: "opencompany",
         closedAt: null,
         createdAt: now,
         updatedAt: now,
