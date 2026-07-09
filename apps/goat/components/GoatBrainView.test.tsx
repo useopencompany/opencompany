@@ -39,16 +39,29 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
   MarkdownGoatBrainEditor: ({
     content,
     onChange,
+    brainLinks,
   }: {
     content: string;
     onChange: (content: string) => void;
-  }) => (
-    <textarea
-      aria-label="Brain body"
-      value={content}
-      onChange={(event) => onChange(event.currentTarget.value)}
-    />
-  ),
+    brainLinks?: Record<string, string>;
+  }) => {
+    return (
+      <div>
+        <textarea
+          aria-label="Brain body"
+          value={content}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+        <div aria-hidden>
+          {Object.entries(brainLinks ?? {}).map(([target, href]) => (
+            <a key={target} data-testid={`brain-link:${target}`} href={href}>
+              {target}
+            </a>
+          ))}
+        </div>
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/lib/brain-actions", () => ({
@@ -144,6 +157,35 @@ describe("GoatBrainView", () => {
     expect(screen.getByRole("link", { name: /Roadmap.*wiki_link/ })).toHaveAttribute(
       "href",
       "/brain/goat_brain_1/projects/roadmap",
+    );
+  });
+
+  it("resolves editor wiki links for folders and folder-qualified files", () => {
+    render(
+      <GoatBrainView
+        folders={folders}
+        documents={[documentWithTimeline]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+        routeBrainId="goat_brain_1"
+      />,
+    );
+
+    expect(screen.getByTestId("brain-link:page:people")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people",
+    );
+    expect(screen.getByTestId("brain-link:page:people/ada-lovelace")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people/ada-lovelace",
+    );
+    expect(screen.getByTestId("brain-link:page:wiki/people/ada-lovelace")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people/ada-lovelace",
+    );
+    expect(screen.getByTestId("brain-link:folder:people")).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/people",
     );
   });
 
