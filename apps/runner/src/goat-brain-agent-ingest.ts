@@ -7,6 +7,7 @@ import {
   type GoatBrainSyncPage,
   getGoatBrainFile,
   materializeGoatBrainFilesToRoot,
+  readGoatBrainFolderManifestFromRoot,
   syncGoatBrainFilesFromRoot,
   updateGoatBrainAssetExtraction,
 } from "@opencompany/db/goat-brain-files";
@@ -25,6 +26,7 @@ import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail"
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
+  type GoatBrainFolderManifestEntry,
   type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
@@ -150,11 +152,13 @@ function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: st
     "- Every document has compiled truth (the current synthesis) and an append-only timeline of dated evidence entries.",
     "- Types (person, company, project, meeting, concept, source, analysis, note) classify what a record represents. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
     "- Ideas and thoughts are not their own kind. A user-authored idea can be durable brain material, but it is still a page; classify it with the existing types and folders.",
-    "- Required folders are inbox, people, companies, and evidence. The core work folders thoughts, projects, meetings, research, decisions, and concepts are adjustable; if a workflow needs one and it is missing, recreate it with `folder create --path <folder>` before moving pages there. evidence/ is a reserved zone for raw captures.",
+    "- Required folders are inbox, people, companies, and evidence. The core work folders thoughts, projects, meetings, research, decisions, and concepts are adjustable. Users and agents can also create custom folders; treat them as deliberate organization, not decoration. evidence/ is a reserved zone for raw captures.",
     "- Inline links are typed: [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence records, [[source:provider:id|Label]] for external source pointers.",
     "",
     "Working discipline:",
     "- Brain-first lookup: before creating or writing anything, use query/list/get to find the entities this source touches. Update existing pages under their existing ids; create a page only when no existing page is the primary home. Add aliases instead of duplicate pages.",
+    "- Folder routing: before moving or creating pages, use the current folder inventory in the task and call `folder list` if uncertain. Prefer the most specific matching custom folder over a broad default folder. If no existing folder fits, create the smallest clear folder or subfolder with `folder create --path <path>` before moving pages there.",
+    "- Page granularity: company pages are identity summaries, not dumping grounds for every product, project, or implementation update. When a source is mainly about a named product surface, repository area, feature, workflow, or decision, create or update a focused page for that subject and link it from the company page instead of expanding the company page indefinitely.",
     "- Compiled truth is a rewrite, not a log: when a page's state of play changes, use rewrite to replace it with the current durable synthesis. Do not append updates to the bottom of compiled truth.",
     "- Timeline entries are concise dated evidence: use timeline-add with what happened and why it matters, always with --source-ref (and --evidence-id when an evidence record exists).",
     "- Backlink iron law: every mention of an entity that has a brain page must be written as a [[page:...]] link — in compiled truth and in timeline entries.",
@@ -354,7 +358,7 @@ export function buildGitHubActivityAgentIngestPrompt(item: NormalizedGitHubActiv
     `2. Judge brain-worthiness: does this event change what someone should believe about a project's state of play? Routine housekeeping does not. ${activity.state === "commented" ? "A comment records discussion on a tracked item — ingest it only when it carries a durable decision, a new fact, or a change in direction, not routine back-and-forth, acknowledgements, or status pings." : activity.state === "opened" ? "An opened item records work or a problem now in flight — ingest it only when what it starts or surfaces matters at the project level." : "A merged pull request records shipped work — ingest it only when what shipped matters at the project level."}`,
     `3. Fold what it changes into the page where it belongs — usually a project page: rewrite compiled truth when the state of play changes, and record the event as dated evidence with timeline-add --source-ref ${item.sourceRef}.`,
     `4. Pointer discipline: this is a tracked work item with a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}${activity.number !== undefined ? `#${activity.number}` : ""}]]. Never copy the description into a page and never snapshot it into evidence/; the tracker copy goes stale immediately.`,
-    "5. Create a project page only when the repository's project clearly has none yet and this event is substantial enough to seed one. Update person or company pages only when the event reveals durable knowledge about them; do not create person pages for people who merely authored or merged the change.",
+    "5. Create a project/product page when the repository area or product surface clearly has none yet and this event is substantial enough to seed one. If a matching custom folder such as product/ exists, use it for product-surface work. Do not fold product implementation details into the top-level company page merely because no page exists yet. Update person or company pages only when the event reveals durable knowledge about them; do not create person pages for people who merely authored or merged the change.",
     "",
     `Source ref: ${item.sourceRef}`,
     `Occurred at: ${item.occurredAt}`,
@@ -678,6 +682,7 @@ async function runBrainAgentIngestSession(input: {
       db,
     });
     await input.prepareRoot?.(root);
+    const folderPrompt = await buildGoatBrainFolderInventoryPrompt(root);
 
     const loop = await runIngestAgentLoop({
       root,
@@ -687,7 +692,7 @@ async function runBrainAgentIngestSession(input: {
       brainRef,
       ingestJobId: input.jobId,
       system: input.system,
-      prompt: input.buildPrompt(),
+      prompt: appendGoatBrainFolderInventory(input.buildPrompt(), folderPrompt),
       ...(input.commands ? { commands: input.commands } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
@@ -744,6 +749,29 @@ async function runBrainAgentIngestSession(input: {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+export async function buildGoatBrainFolderInventoryPrompt(root: string): Promise<string | null> {
+  const folders = await readGoatBrainFolderManifestFromRoot(root);
+  if (!folders || folders.length === 0) return null;
+  return formatGoatBrainFolderInventoryPrompt(folders);
+}
+
+export function formatGoatBrainFolderInventoryPrompt(
+  folders: readonly GoatBrainFolderManifestEntry[],
+): string | null {
+  if (folders.length === 0) return null;
+  const lines = folders.map((folder) => `- ${folder.path}/ (${folder.source})`);
+  return [
+    "## Current brain folders",
+    "Use this inventory before choosing where to file new or moved pages. Custom folders are deliberate user-created structure; prefer a matching custom folder over a broad company/project page. If a subject fits an existing custom folder but needs more structure, create a focused subfolder under it.",
+    ...lines,
+  ].join("\n");
+}
+
+function appendGoatBrainFolderInventory(prompt: string, folderPrompt: string | null) {
+  if (!folderPrompt) return prompt;
+  return `${folderPrompt}\n\n${prompt}`;
 }
 
 export async function runJamieMeetingAgentIngest(
