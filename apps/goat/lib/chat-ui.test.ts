@@ -161,6 +161,24 @@ describe("toGoatChatUiMessage", () => {
       },
     });
   });
+
+  it("exposes persisted turn timing in message metadata", () => {
+    const message = storedAssistantMessage({
+      debugTrace: {
+        schemaVersion: "goat.codex_chat.debug.v1",
+        model: "gpt-5.5",
+        durationMs: 153_400,
+      },
+      createdAt: new Date("2026-07-04T12:00:00.000Z"),
+      updatedAt: new Date("2026-07-04T12:02:33.400Z"),
+    });
+
+    expect(toGoatChatUiMessage(message).metadata?.timing).toEqual({
+      createdAt: "2026-07-04T12:00:00.000Z",
+      updatedAt: "2026-07-04T12:02:33.400Z",
+      durationMs: 153_400,
+    });
+  });
 });
 
 describe("compareGoatChatMessageOrder", () => {

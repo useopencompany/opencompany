@@ -960,7 +960,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.stop).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a thinking indicator while streaming before assistant output arrives", () => {
+  it("shows a live elapsed timer while streaming before assistant output arrives", () => {
     chatMock.status = "streaming";
 
     render(
@@ -983,11 +983,11 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: "Goat is thinking" })).toBeInTheDocument();
-    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Goat is working" })).toBeInTheDocument();
+    expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
-  it("hides the thinking indicator once assistant output is visible", () => {
+  it("keeps the live elapsed timer visible once assistant output is visible", () => {
     chatMock.status = "streaming";
 
     render(
@@ -1017,7 +1017,8 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     expect(screen.getByText("Streaming answer")).toBeInTheDocument();
-    expect(screen.queryByRole("status", { name: "Goat is thinking" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Goat is working" })).toBeInTheDocument();
+    expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
   it("renders assistant text from UI message parts", () => {
@@ -1044,6 +1045,35 @@ describe("GoatSurface chat streaming UI", () => {
     const assistantText = screen.getByText("Streaming answer");
     expect(assistantText).toBeInTheDocument();
     expect(assistantText.closest(".bg-surface-muted")).toBeNull();
+  });
+
+  it("renders the final elapsed time for completed assistant turns", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: {
+                sessionId: "chat_1",
+                timing: { durationMs: 153_400 },
+              },
+              parts: [{ type: "text", text: "Streaming answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Streaming answer")).toBeInTheDocument();
+    expect(screen.getByLabelText("Turn completed in 2m, 33.4s")).toBeInTheDocument();
+    expect(screen.getByText("2m, 33.4s")).toBeInTheDocument();
   });
 
   it("renders assistant soft line breaks as visible line breaks", () => {
