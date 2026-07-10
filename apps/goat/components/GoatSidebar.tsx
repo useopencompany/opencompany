@@ -80,17 +80,13 @@ export function GoatSidebar({
             aria-label="Collapse sidebar"
             aria-expanded={!collapsed}
             onClick={onToggleCollapsed}
-            className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            className="shrink-0 rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
-          <span className="truncate px-1 text-[13px] font-semibold tracking-[-0.01em] text-ink">
-            opencompany v2
-          </span>
-        </div>
-
-        <div className="px-2 pb-2">
-          <GoatWorkspaceSwitcher />
+          <div className="min-w-0 flex-1">
+            <GoatWorkspaceSwitcher />
+          </div>
         </div>
 
         {/* Primary nav */}
