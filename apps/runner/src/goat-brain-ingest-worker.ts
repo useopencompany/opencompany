@@ -22,6 +22,14 @@ import {
   type NormalizedBrainSourceItem,
   type NormalizedJamieMeetingSourceItem,
 } from "@opencompany/goat-brain";
+import {
+  GOAT_SPANS,
+  type GoatAttributes,
+  hashGoatUserId,
+  recordGoatBrainIngestRun,
+  startGoatSpan,
+  withGoatSpan,
+} from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -424,11 +432,72 @@ export async function runClaimedGoatBrainIngestJob(input: {
   handlers?: readonly GoatBrainIngestHandler[];
   store?: GoatBrainIngestStore;
 }) {
+  const runStartedAt = performance.now();
   const store = input.store ?? createDbGoatBrainIngestStore();
   const handlers = input.handlers ?? GOAT_BRAIN_INGEST_HANDLERS;
   const leaseId = requireJobLease(input.job, "leaseId");
   const leaseOwner = requireJobLease(input.job, "leaseOwner");
+  const userIdHash = hashGoatUserId(input.job.userWorkosId);
+  const baseAttributes = {
+    ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+    "goat.brain_ingest_job_id": input.job.id,
+    "goat.brain_source_item_id": input.job.sourceItemId,
+    "goat.brain_ref": input.job.brainRef ?? undefined,
+    "goat.ingest_kind": input.job.kind,
+    "goat.source_provider": input.job.sourceProvider,
+    "goat.source_type": input.job.sourceType,
+    "goat.status": input.job.status,
+    "goat.attempt": input.job.attempts,
+    "goat.lease_owner": leaseOwner,
+  } satisfies GoatAttributes;
+  const runSpan = startGoatSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
   let leaseActive = true;
+  let telemetryFinished = false;
+
+  const finishTelemetry = (
+    outcome: "success" | "failure" | "aborted" | "skipped",
+    attributes: GoatAttributes = {},
+    error?: unknown,
+  ) => {
+    if (telemetryFinished) return;
+    telemetryFinished = true;
+    const durationMs = Math.round(performance.now() - runStartedAt);
+    const failureCategory =
+      outcome === "failure" && error
+        ? runSpan.fail(error, attributes)
+        : (attributes["goat.failure_category"] as string | undefined);
+    const finalAttributes = {
+      ...baseAttributes,
+      "goat.outcome": outcome,
+      ...(failureCategory ? { "goat.failure_category": failureCategory } : {}),
+      ...attributes,
+    };
+    runSpan.end(finalAttributes);
+    recordGoatBrainIngestRun({
+      durationMs,
+      outcome,
+      attributes: finalAttributes,
+    });
+    const logFields = {
+      event: "opencompany.goat_brain_ingest_run_finished",
+      outcome,
+      ...(failureCategory ? { failure_category: failureCategory } : {}),
+      job_id: input.job.id,
+      source_item_id: input.job.sourceItemId,
+      brain_ref: input.job.brainRef,
+      kind: input.job.kind,
+      source_provider: input.job.sourceProvider,
+      source_type: input.job.sourceType,
+      status: finalAttributes["goat.status"],
+      attempts: input.job.attempts,
+      duration_ms: durationMs,
+    };
+    if (outcome === "success" || outcome === "skipped") {
+      logger.info("Goat Brain ingest job finished", logFields);
+    } else {
+      logger.warn("Goat Brain ingest job finished", logFields);
+    }
+  };
 
   const heartbeat = async () => {
     const now = new Date();
@@ -464,58 +533,110 @@ export async function runClaimedGoatBrainIngestJob(input: {
         `Unsupported Goat Brain ingest source: ${input.job.kind}/${input.job.sourceProvider}/${input.job.sourceType}`,
       );
     }
-    if (!handler.isPayload(input.job.normalizedPayload)) {
+    const normalizedPayload = input.job.normalizedPayload;
+    if (!handler.isPayload(normalizedPayload)) {
       throw new Error(
         `Goat Brain ingest job has an invalid ${input.job.sourceProvider}/${input.job.sourceType} normalized payload.`,
       );
     }
-    if (input.job.normalizedPayload.contentHash !== input.job.contentHash) {
+    if (normalizedPayload.contentHash !== input.job.contentHash) {
       throw new Error("Goat Brain ingest job content hash does not match its source payload.");
     }
 
-    const result = await handler.run({
-      jobId: input.job.id,
-      userWorkosId: input.job.userWorkosId,
-      brainRef: input.job.brainRef ?? null,
-      integrationId: input.job.integrationId ?? null,
-      item: input.job.normalizedPayload,
-      env: {
-        vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
-        blobReadWriteToken: input.env.blobReadWriteToken,
-      },
-    });
-    if (!leaseActive) return;
-    if (isSkippedIngestResult(result)) {
-      await store.skip({
-        id: input.job.id,
-        sourceItemId: input.job.sourceItemId,
-        leaseId,
-        leaseOwner,
-        now: new Date(),
-        result,
-        reason: skippedIngestReason(result),
+    const result = await runSpan.runInContext(() =>
+      handler.run({
+        jobId: input.job.id,
+        userWorkosId: input.job.userWorkosId,
+        brainRef: input.job.brainRef ?? null,
+        integrationId: input.job.integrationId ?? null,
+        item: normalizedPayload,
+        env: {
+          vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
+          blobReadWriteToken: input.env.blobReadWriteToken,
+        },
+      }),
+    );
+    if (!leaseActive) {
+      finishTelemetry("aborted", {
+        "goat.status": "running",
+        "goat.failure_category": "lease_lost",
       });
       return;
     }
-    await store.complete({
-      id: input.job.id,
-      sourceItemId: input.job.sourceItemId,
-      leaseId,
-      leaseOwner,
-      now: new Date(),
-      result,
+    if (isSkippedIngestResult(result)) {
+      const skipped = await runSpan.runInContext(() =>
+        withGoatSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
+          store.skip({
+            id: input.job.id,
+            sourceItemId: input.job.sourceItemId,
+            leaseId,
+            leaseOwner,
+            now: new Date(),
+            result,
+            reason: skippedIngestReason(result),
+          }),
+        ),
+      );
+      if (!skipped) {
+        leaseActive = false;
+        finishTelemetry("aborted", {
+          "goat.status": "running",
+          "goat.failure_category": "lease_lost",
+        });
+        return;
+      }
+      finishTelemetry("skipped", {
+        "goat.status": "skipped",
+      });
+      return;
+    }
+    const completed = await runSpan.runInContext(() =>
+      withGoatSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
+        store.complete({
+          id: input.job.id,
+          sourceItemId: input.job.sourceItemId,
+          leaseId,
+          leaseOwner,
+          now: new Date(),
+          result,
+        }),
+      ),
+    );
+    if (!completed) {
+      leaseActive = false;
+      finishTelemetry("aborted", {
+        "goat.status": "running",
+        "goat.failure_category": "lease_lost",
+      });
+      return;
+    }
+    finishTelemetry("success", {
+      "goat.status": "succeeded",
     });
   } catch (error) {
     const message = errorMessage(error);
-    await store.fail({
-      id: input.job.id,
-      sourceItemId: input.job.sourceItemId,
-      leaseId,
-      leaseOwner,
-      now: new Date(),
-      attempts: input.job.attempts,
-      error: message,
-    });
+    const terminal = input.job.attempts >= GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
+    const active = await runSpan.runInContext(() =>
+      withGoatSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
+        store.fail({
+          id: input.job.id,
+          sourceItemId: input.job.sourceItemId,
+          leaseId,
+          leaseOwner,
+          now: new Date(),
+          attempts: input.job.attempts,
+          error: message,
+        }),
+      ),
+    );
+    if (!active || !leaseActive) {
+      finishTelemetry("aborted", {
+        "goat.status": "running",
+        "goat.failure_category": "lease_lost",
+      });
+      throw error;
+    }
+    finishTelemetry("failure", { "goat.status": terminal ? "failed" : "queued" }, error);
     throw error;
   } finally {
     clearInterval(heartbeatTimer);

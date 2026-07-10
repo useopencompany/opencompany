@@ -55,6 +55,7 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 - [Deployment](./docs/deployment.md) — production release flow, Vercel, Render, env, smoke checks
 - [Secret management](./docs/secret-management.md) — Infisical source of truth and sync setup
 - [Environment variables](./docs/env-vars.md) — where every runtime and release env var lives
+- [Agent MCP](./docs/agent-mcp.md) — local SigNoz MCP setup for Conductor, Claude Code, and Codex
 - [Auth](./docs/auth.md) — WorkOS AuthKit, env vars, identity model
 - [Observability](./docs/observability.md) — production error capture and launch debugging
 - [Contributing](./CONTRIBUTING.md)

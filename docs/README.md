@@ -8,6 +8,7 @@
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
 - [analytics.md](./analytics.md) — PostHog analytics package, event registry, and privacy rules.
 - [observability.md](./observability.md) — production error capture and launch debugging.
+- [agent-mcp.md](./agent-mcp.md) — local SigNoz MCP setup for Conductor, Claude Code, and Codex.
 - [changelog.md](./changelog.md) — how to update `CHANGELOG.md` from the true merge history, including screen recordings ([changelog-media.md](./changelog-media.md)).
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) — local checks, CI gates, conventions.
 
