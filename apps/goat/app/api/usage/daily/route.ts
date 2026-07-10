@@ -1,3 +1,4 @@
+import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import { currentGoatUser } from "@/lib/auth";
 import { getGoatDailyUsage, getGoatUsageDrilldown } from "@/lib/gateway-usage";
 
@@ -29,17 +30,22 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
+    const userWorkosIds = await getWorkspaceUsageUserWorkosIds(
+      context.workspace.id,
+      context.user.workosUserId,
+    );
     const [days, drilldown] = await Promise.all([
       getGoatDailyUsage({
         apiKey,
-        userWorkosId: context.user.workosUserId,
+        userWorkosIds,
         start,
         end,
       }),
       drilldownDay
         ? getGoatUsageDrilldown({
             apiKey,
-            userWorkosId: context.user.workosUserId,
+            userWorkosIds,
+            currentUserWorkosId: context.user.workosUserId,
             day: drilldownDay,
           })
         : Promise.resolve(null),
@@ -61,6 +67,15 @@ export async function GET(request: Request): Promise<Response> {
       { status: 502 },
     );
   }
+}
+
+async function getWorkspaceUsageUserWorkosIds(workspaceId: string, currentUserWorkosId: string) {
+  const ids = new Set([currentUserWorkosId]);
+  const members = await listGoatWorkspaceMembers(workspaceId);
+  for (const member of members) {
+    ids.add(member.user.workosUserId);
+  }
+  return Array.from(ids);
 }
 
 function validateDateRange(start: string, end: string) {

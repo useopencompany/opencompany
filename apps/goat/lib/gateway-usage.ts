@@ -1,6 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { goatBrainIngestJobs, goatChatSessions, goatTasks } from "@opencompany/db/goat-schema";
-import { createGoatGatewayAttribution } from "@opencompany/goat-observability";
+import { goatGatewayReportingUser } from "@opencompany/goat-observability";
 import { and, eq, inArray } from "drizzle-orm";
 
 const VERCEL_AI_GATEWAY_REPORT_URL = "https://ai-gateway.vercel.sh/v1/report";
@@ -34,6 +34,21 @@ export type GoatUsageDrilldownItem = {
 };
 
 type GatewayReportRow = Record<string, unknown>;
+type GoatUsageUserInput =
+  | { userWorkosId: string; userWorkosIds?: never }
+  | { userWorkosIds: readonly string[]; userWorkosId?: never };
+type GatewayReportUser = {
+  userWorkosId: string;
+  reportingUserId: string;
+};
+type TaggedUsageRow = {
+  tag: string;
+  userWorkosId: string;
+  totalCostUsdMicros: number;
+  requestCount: number;
+  kind: "chat" | "task" | "ingest";
+  id: string;
+};
 
 const DAILY_USAGE_CATEGORY_FEATURES = [
   { category: "chatCostUsdMicros", features: ["chat", "chat-title"] },
@@ -41,79 +56,111 @@ const DAILY_USAGE_CATEGORY_FEATURES = [
   { category: "brainCostUsdMicros", features: ["brain-ingest", "brain-query"] },
 ] as const;
 
-export async function getGoatDailyUsage(input: {
+export async function getGoatDailyUsage(input: GoatUsageUserInput & {
   apiKey: string;
-  userWorkosId: string;
   start: string;
   end: string;
 }) {
-  const attribution = createGoatGatewayAttribution({
-    userWorkosId: input.userWorkosId,
-    feature: "chat",
-  });
-  if (!attribution.user) throw new Error("Could not build Goat Gateway reporting user.");
+  const reportUsers = gatewayReportUsers(input);
+  if (reportUsers.length === 0) throw new Error("Could not build Goat Gateway reporting user.");
 
-  const [report, categoryRows] = await Promise.all([
-    fetchGatewayReport({
-      apiKey: input.apiKey,
-      start: input.start,
-      end: input.end,
-      groupBy: "day",
-      userId: attribution.user,
-      tags: ["app:goat"],
-    }),
-    fetchDailyUsageCategoryRows({
-      apiKey: input.apiKey,
-      start: input.start,
-      end: input.end,
-      userId: attribution.user,
-    }),
+  const [reports, categoryRowsByUser] = await Promise.all([
+    Promise.all(
+      reportUsers.map((reportUser) =>
+        fetchGatewayReport({
+          apiKey: input.apiKey,
+          start: input.start,
+          end: input.end,
+          groupBy: "day",
+          userId: reportUser.reportingUserId,
+          tags: ["app:goat"],
+        }),
+      ),
+    ),
+    Promise.all(
+      reportUsers.map((reportUser) =>
+        fetchDailyUsageCategoryRows({
+          apiKey: input.apiKey,
+          start: input.start,
+          end: input.end,
+          userId: reportUser.reportingUserId,
+        }),
+      ),
+    ),
   ]);
 
   return applyDailyUsageCategories(
-    fillDailyRows(input.start, input.end, report.results.map(toDailyUsageRow)),
-    categoryRows,
+    fillDailyRows(
+      input.start,
+      input.end,
+      sumDailyUsageRows(reports.flatMap((report) => report.results.map(toDailyUsageRow))),
+    ),
+    categoryRowsByUser.flat(),
   );
 }
 
-export async function getGoatUsageDrilldown(input: {
+export async function getGoatUsageDrilldown(input: GoatUsageUserInput & {
   apiKey: string;
-  userWorkosId: string;
+  currentUserWorkosId?: string;
   day: string;
 }) {
-  const attribution = createGoatGatewayAttribution({
-    userWorkosId: input.userWorkosId,
-    feature: "chat",
-  });
-  if (!attribution.user) throw new Error("Could not build Goat Gateway reporting user.");
+  const reportUsers = gatewayReportUsers(input);
+  if (reportUsers.length === 0) throw new Error("Could not build Goat Gateway reporting user.");
+  const currentUserWorkosId = input.currentUserWorkosId ?? reportUsers[0]?.userWorkosId ?? "";
 
-  const report = await fetchGatewayReport({
-    apiKey: input.apiKey,
-    start: input.day,
-    end: input.day,
-    groupBy: "tag",
-    userId: attribution.user,
-    tags: ["app:goat"],
-  });
-  const rows = report.results.map(toTaggedUsageRow).flatMap((row) => {
-    const context = parseContextTag(row.tag);
-    return context ? [{ ...row, ...context }] : [];
-  });
+  const reports = await Promise.all(
+    reportUsers.map(async (reportUser) => {
+      const report = await fetchGatewayReport({
+        apiKey: input.apiKey,
+        start: input.day,
+        end: input.day,
+        groupBy: "tag",
+        userId: reportUser.reportingUserId,
+        tags: ["app:goat"],
+      });
+      return report.results
+        .map((row) => toTaggedUsageRow(row, reportUser.userWorkosId))
+        .flatMap((row) => {
+          const context = parseContextTag(row.tag);
+          return context ? [{ ...row, ...context }] : [];
+        });
+    }),
+  );
+  const rows = reports.flat();
 
-  const labels = await loadUsageContextLabels(input.userWorkosId, rows);
+  const labels = await loadUsageContextLabels(
+    currentUserWorkosId,
+    rows.filter((row) => row.userWorkosId === currentUserWorkosId),
+  );
   return rows.map((row): GoatUsageDrilldownItem => {
     const key = contextKey(row.kind, row.id);
     const label = labels.get(key);
+    const canLink = Boolean(label) || row.userWorkosId === currentUserWorkosId;
     return {
       tag: row.tag,
       kind: row.kind,
       id: row.id,
-      label: label?.label ?? fallbackContextLabel(row.kind, row.id),
-      href: label?.href ?? fallbackContextHref(row.kind, row.id),
+      label: label?.label ?? fallbackContextLabel(row.kind, row.id, { includeId: canLink }),
+      href: label?.href ?? (canLink ? fallbackContextHref(row.kind, row.id) : null),
       totalCostUsdMicros: row.totalCostUsdMicros,
       requestCount: row.requestCount,
     };
   });
+}
+
+function gatewayReportUsers(input: GoatUsageUserInput): GatewayReportUser[] {
+  const rawUserIds = "userWorkosIds" in input ? input.userWorkosIds : [input.userWorkosId];
+  const seen = new Set<string>();
+  const users: GatewayReportUser[] = [];
+  for (const rawUserId of rawUserIds) {
+    const userWorkosId = rawUserId.trim();
+    if (!userWorkosId || seen.has(userWorkosId)) continue;
+    seen.add(userWorkosId);
+    const reportingUserId = goatGatewayReportingUser(userWorkosId);
+    if (!reportingUserId) continue;
+    users.push({ userWorkosId, reportingUserId });
+  }
+  return users;
 }
 
 async function fetchGatewayReport(input: {
@@ -165,6 +212,29 @@ function toDailyUsageRow(row: GatewayReportRow): GoatDailyUsageRow {
   };
 }
 
+function sumDailyUsageRows(rows: GoatDailyUsageRow[]) {
+  const byDay = new Map<string, GoatDailyUsageRow>();
+  for (const row of rows) {
+    if (!row.day) continue;
+    const day = byDay.get(row.day) ?? emptyDailyUsageRow(row.day);
+    day.totalCostUsdMicros += row.totalCostUsdMicros;
+    day.chatCostUsdMicros += row.chatCostUsdMicros;
+    day.taskCostUsdMicros += row.taskCostUsdMicros;
+    day.brainCostUsdMicros += row.brainCostUsdMicros;
+    day.marketCostUsdMicros += row.marketCostUsdMicros;
+    day.surchargeCostUsdMicros += row.surchargeCostUsdMicros;
+    day.gatewayCostUsdMicros += row.gatewayCostUsdMicros;
+    day.inputTokens += row.inputTokens;
+    day.outputTokens += row.outputTokens;
+    day.cachedInputTokens += row.cachedInputTokens;
+    day.cacheCreationInputTokens += row.cacheCreationInputTokens;
+    day.reasoningTokens += row.reasoningTokens;
+    day.requestCount += row.requestCount;
+    byDay.set(row.day, day);
+  }
+  return Array.from(byDay.values());
+}
+
 async function fetchDailyUsageCategoryRows(input: {
   apiKey: string;
   start: string;
@@ -211,9 +281,10 @@ function applyDailyUsageCategories(
   return days.map((day) => byDay.get(day.day) ?? day);
 }
 
-function toTaggedUsageRow(row: GatewayReportRow) {
+function toTaggedUsageRow(row: GatewayReportRow, userWorkosId: string) {
   return {
     tag: readString(row.tag),
+    userWorkosId,
     totalCostUsdMicros: dollarsToMicros(row.total_cost),
     requestCount: readNumber(row.request_count),
   };
@@ -268,7 +339,7 @@ function parseContextTag(tag: string): { kind: "chat" | "task" | "ingest"; id: s
 
 async function loadUsageContextLabels(
   userWorkosId: string,
-  rows: Array<{ kind: "chat" | "task" | "ingest"; id: string }>,
+  rows: readonly TaggedUsageRow[],
 ) {
   const labels = new Map<string, { label: string; href: string | null }>();
   const chats = rows.filter((row) => row.kind === "chat").map((row) => row.id);
@@ -333,7 +404,16 @@ function contextKey(kind: string, id: string) {
   return `${kind}:${id}`;
 }
 
-function fallbackContextLabel(kind: "chat" | "task" | "ingest", id: string) {
+function fallbackContextLabel(
+  kind: "chat" | "task" | "ingest",
+  id: string,
+  options: { includeId: boolean },
+) {
+  if (!options.includeId) {
+    if (kind === "chat") return "Chat usage";
+    if (kind === "task") return "Task usage";
+    return "Brain ingest";
+  }
   return `${kind} ${id}`;
 }
 
