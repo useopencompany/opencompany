@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatAuthContext } from "@/lib/auth";
 import { currentGoatUser } from "@/lib/auth";
+import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
 import { POST } from "./route";
 
@@ -12,9 +13,25 @@ vi.mock("@/lib/codex-chat", () => ({
   createGoatCodexChatMessage: vi.fn(),
 }));
 
+vi.mock("@/lib/chat-title", () => ({
+  generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
+}));
+
+vi.mock("next/server", () => ({
+  after: vi.fn((work: Promise<unknown>) => work),
+  NextResponse: {
+    json: (body: unknown, init?: ResponseInit) =>
+      new Response(JSON.stringify(body), {
+        ...init,
+        headers: { "Content-Type": "application/json", ...init?.headers },
+      }),
+  },
+}));
+
 describe("POST /api/codex-chat/messages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
     mockCurrentGoatUser().mockResolvedValue({
       user: {
         workosUserId: "user_1",
@@ -63,6 +80,23 @@ describe("POST /api/codex-chat/messages", () => {
       sessionId: "goat_chat_1",
       prompt: "hello",
       clientMessageId: "client_msg_1",
+      settings: undefined,
+    });
+    expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
+  });
+
+  it("schedules LLM title generation for new Codex chats", async () => {
+    const response = await POST(
+      jsonRequest({
+        prompt: "can you investigate why the deploy keeps timing out and summarize the likely fix?",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mockGenerateGoatChatTitleForMessage()).toHaveBeenCalledWith({
+      sessionId: "goat_chat_1",
+      messageId: "goat_chat_msg_user",
+      apiKey: "test-key",
     });
   });
 });
@@ -81,4 +115,8 @@ function mockCurrentGoatUser() {
 
 function mockCreateGoatCodexChatMessage() {
   return vi.mocked(createGoatCodexChatMessage);
+}
+
+function mockGenerateGoatChatTitleForMessage() {
+  return vi.mocked(generateGoatChatTitleForMessage);
 }

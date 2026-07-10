@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
 
@@ -39,6 +40,17 @@ export async function POST(request: Request) {
     settings: body.value.settings,
   });
   if (!result.ok) return new Response(result.error, { status: result.status });
+
+  const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
+  if (!sessionId) {
+    after(
+      generateGoatChatTitleForMessage({
+        sessionId: result.sessionId,
+        messageId: result.userMessageId,
+        ...(gatewayApiKey ? { apiKey: gatewayApiKey } : {}),
+      }).catch(() => undefined),
+    );
+  }
 
   return NextResponse.json(result, { status: 202 });
 }
