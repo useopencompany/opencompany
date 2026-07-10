@@ -79,7 +79,12 @@ import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
-import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
+import {
+  DEFAULT_GOAT_MODEL,
+  GOAT_MODELS,
+  goatModelContextWindowTokens,
+  normalizeGoatModel,
+} from "@/lib/model-options";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -498,6 +503,16 @@ export function GoatSurface({
     (initialChat?.id === chatSessionId ? initialChat.engine : null) ??
     activeEngine ??
     "opencompany";
+  // Context-window occupancy: the most recent assistant turn that reported usage
+  // reflects the current fill level. Undefined until the first turn completes.
+  const currentContextTokens = useMemo(() => {
+    for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
+      const tokens = chatMessages[index]?.metadata?.contextTokens;
+      if (typeof tokens === "number" && tokens > 0) return tokens;
+    }
+    return 0;
+  }, [chatMessages]);
+  const contextMaxTokens = goatModelContextWindowTokens(activeChatModel);
 
   const applyCodexComposerUiState = useCallback((state: CodexComposerUiState) => {
     setCodexReasoningEffort(state.reasoningEffort);
@@ -1039,19 +1054,24 @@ export function GoatSurface({
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
           <div className="w-full px-6 pb-2 pt-5">
-            <div className="mx-auto flex w-full max-w-[720px] items-center justify-between gap-3">
+            <div className="flex w-full items-center justify-between gap-3">
               <ChatTitleHeader
                 title={activeChatTitle}
                 model={activeChatModel}
                 engine={activeChatEngine}
               />
-              {activeEngineChat?.engine === "codex" ? (
-                <CodexSandboxStatusIndicator
-                  status={
-                    codexSandboxStatus ?? (engineRunning || engineSubmitting ? "running" : null)
-                  }
-                />
-              ) : null}
+              <div className="flex shrink-0 items-center gap-2">
+                {activeEngineChat?.engine === "codex" ? (
+                  <CodexSandboxStatusIndicator
+                    status={
+                      codexSandboxStatus ?? (engineRunning || engineSubmitting ? "running" : null)
+                    }
+                  />
+                ) : null}
+                {currentContextTokens > 0 ? (
+                  <ChatContextMeter used={currentContextTokens} max={contextMaxTokens} />
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -1683,7 +1703,7 @@ function ChatTitleHeader({
   engine: GoatChatEngine;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-ink shadow-[0_1px_3px_rgba(15,15,15,0.04)]">
+    <div className="flex min-w-0 items-center gap-2 text-ink">
       {engine === "local_codex" ? (
         <Code2 size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : engine === "codex" ? (
@@ -1701,6 +1721,61 @@ function ChatTitleHeader({
       </span>
     </div>
   );
+}
+
+// A small ring that fills to the share of the model's context window in use. The
+// exact "used / max" figure stays out of the chrome and is surfaced on hover
+// (native title), keeping the header quiet — mirrors the web app's meter.
+function ChatContextMeter({ used, max }: { used: number; max: number }) {
+  const fraction = max > 0 ? Math.min(1, used / max) : 0;
+  const size = 14;
+  const strokeWidth = 2;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const detail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
+    fraction * 100,
+  )}%`;
+  return (
+    <span
+      className="flex shrink-0 items-center text-ink-muted"
+      title={detail}
+      aria-label={`Context window usage: ${detail}`}
+    >
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          stroke="currentColor"
+          className="text-ink/15"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - fraction)}
+          className="text-ink/70 transition-[stroke-dashoffset] duration-500"
+        />
+      </svg>
+    </span>
+  );
+}
+
+// Compact token formatter: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".
+function formatCompactTokens(value: number): string {
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return `${value}`;
 }
 
 function CodexSandboxStatusIndicator({ status }: { status: GoatCodexSandboxStatus | null }) {

@@ -102,7 +102,8 @@ export function GoatSidebar({
           <GoatBrainSwitcher />
         </div>
 
-        <div className="min-h-0 flex-1" />
+        {/* Recent chats */}
+        <GoatSidebarRecentChats />
 
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
@@ -146,6 +147,56 @@ export function GoatSidebar({
       </div>
     </aside>
   );
+}
+
+function GoatSidebarRecentChats() {
+  const { recentChats } = useGoatAppData();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  // Keep the footer pinned to the bottom when there is nothing to show.
+  if (recentChats.length === 0) {
+    return <div className="min-h-0 flex-1" />;
+  }
+
+  return (
+    <div className="mt-4 flex min-h-0 flex-1 flex-col">
+      <div className="px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+        Recent chats
+      </div>
+      <nav
+        aria-label="Recent chats"
+        className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2"
+      >
+        {recentChats.map((chat) => {
+          const href = chatHref(chat.id);
+          const active = pathname === href;
+          const prefetchChat = () => router.prefetch(href);
+          return (
+            <Link
+              key={chat.id}
+              href={href}
+              prefetch
+              onMouseEnter={prefetchChat}
+              onFocus={prefetchChat}
+              aria-current={active ? "page" : undefined}
+              className={`group flex w-full items-center rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                active
+                  ? "bg-surface-active text-ink"
+                  : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+              }`}
+            >
+              <span className="truncate tracking-[-0.005em]">{chat.title}</span>
+            </Link>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
+
+function chatHref(sessionId: string) {
+  return `/chat/${encodeURIComponent(sessionId)}`;
 }
 
 function GoatWorkspaceSwitcher() {
