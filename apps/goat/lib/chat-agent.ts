@@ -223,9 +223,10 @@ export async function runOpenCompanyChatAgent(input: {
 
 export function createOpenCompanyChatToolContext(input: {
   model: AgentModelId;
-  startTask: (task: StartTaskRequest) => Promise<StartedTask>;
+  startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
   requestedEngine?: GoatHarnessEngine;
   latestUserMessage?: string;
+  brainCommands?: readonly GoatBrainCliCommand[];
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
@@ -239,6 +240,7 @@ export function createOpenCompanyChatToolContext(input: {
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
+  const brainCommands = input.brainCommands ?? GOAT_BRAIN_CLI_COMMANDS;
 
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
@@ -249,7 +251,7 @@ export function createOpenCompanyChatToolContext(input: {
         properties: {
           command: {
             type: "string",
-            enum: [...GOAT_BRAIN_CLI_COMMANDS],
+            enum: [...brainCommands],
             description: GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
           },
           flags: {
@@ -284,7 +286,11 @@ export function createOpenCompanyChatToolContext(input: {
           : input.runBrainCli(normalized, executionContext);
       },
     }),
-    [START_TASK_TOOL_NAME]: tool<StartTaskToolInput, StartTaskToolOutput>({
+  };
+
+  const startTask = input.startTask;
+  if (startTask) {
+    tools[START_TASK_TOOL_NAME] = tool<StartTaskToolInput, StartTaskToolOutput>({
       description: START_TASK_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<StartTaskToolInput>({
         type: "object",
@@ -331,7 +337,7 @@ export function createOpenCompanyChatToolContext(input: {
           inferStartTaskEngine([name, prompt, reason].join("\n"));
 
         try {
-          startTaskInFlight = input.startTask({
+          startTaskInFlight = startTask({
             prompt,
             ...(name ? { name } : {}),
             model: input.model,
@@ -343,8 +349,8 @@ export function createOpenCompanyChatToolContext(input: {
         }
         return toStartTaskToolOutput(startedTask, "queued");
       },
-    }),
-  };
+    });
+  }
 
   const saveToBrain = input.saveToBrain;
   if (saveToBrain) {

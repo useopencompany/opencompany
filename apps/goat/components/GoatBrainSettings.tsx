@@ -144,7 +144,7 @@ function BrainAccessSection({
             setDirty(true);
           }}
           title={`Everyone in ${workspace.name}`}
-          description="All current and future members can view and edit."
+          description="All current and future members can view."
         />
         <VisibilityOption
           checked={visibility === "restricted"}
@@ -153,7 +153,7 @@ function BrainAccessSection({
             setDirty(true);
           }}
           title="Only specific members"
-          description="Pick who can view and edit this brain."
+          description="Pick who can view this brain."
         />
       </div>
       {visibility === "restricted" ? (

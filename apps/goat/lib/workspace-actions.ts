@@ -111,6 +111,9 @@ export async function createGoatBrainAction(input: {
   description?: string;
 }): Promise<GoatWorkspaceActionResult & { brainRef?: string }> {
   const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can create brains." };
+  }
   try {
     const brain = await createGoatBrain({
       workspaceId: context.workspace.id,
@@ -178,6 +181,7 @@ export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise
   workspaceMembers: GoatWorkspaceMemberView[];
 } | null> {
   const context = await currentGoatUser();
+  if (context.role !== "admin") return null;
   const access = await getGoatBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,

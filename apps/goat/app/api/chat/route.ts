@@ -42,6 +42,7 @@ import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
   type DeleteTaskScheduleToolOutput,
   type EditTaskScheduleToolOutput,
+  type GoatBrainCliCommand,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
   textFromGoatChatUiMessage,
@@ -61,6 +62,15 @@ import { createGoatTaskForUser } from "@/lib/tasks";
 
 export const maxDuration = 240;
 export const runtime = "nodejs";
+
+const GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS = [
+  "help",
+  "list",
+  "get",
+  "timeline",
+  "query",
+  "doctor",
+] as const satisfies readonly GoatBrainCliCommand[];
 
 type ChatRequestBody = {
   sessionId?: unknown;
@@ -98,9 +108,12 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Goat chat is not configured.", { status: 503 });
   }
   const exaApiKey = process.env.EXA_API_KEY?.trim();
+  const canManageWorkspaceBrain = context.role === "admin";
 
   const store = createDbGoatChatStore();
-  const recurringSchedules = await listCurrentUserGoatTaskSchedules();
+  const recurringSchedules = canManageWorkspaceBrain
+    ? await listCurrentUserGoatTaskSchedules()
+    : [];
   const startedAt = performance.now();
   const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
@@ -189,6 +202,7 @@ export async function POST(request: Request): Promise<Response> {
     model: turn.session.model,
     latestUserMessage: parsed.value.prompt,
     ...(requestedEngine ? { requestedEngine } : {}),
+    ...(canManageWorkspaceBrain ? {} : { brainCommands: GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS }),
     runBrainCli: (toolInput, toolExecutionContext) => {
       const toolCallId = goatBrainToolCallId(toolExecutionContext);
       const activeBrain = context.activeBrain;
@@ -199,6 +213,15 @@ export async function POST(request: Request): Promise<Response> {
           stdout: "",
           stderr: "",
           error: "You do not have access to any brain in this workspace.",
+        });
+      }
+      if (!canManageWorkspaceBrain && !isMemberReadOnlyGoatBrainCommand(toolInput.command)) {
+        return Promise.resolve({
+          ok: false,
+          exitCode: null,
+          stdout: "",
+          stderr: "",
+          error: "Only workspace admins can edit the brain.",
         });
       }
       return runGoatBrainToolForUser({
@@ -213,32 +236,36 @@ export async function POST(request: Request): Promise<Response> {
         signal: generationSignal,
       });
     },
-    saveToBrain: async (toolInput) => {
-      const activeBrain = context.activeBrain;
-      if (!activeBrain) {
-        return {
-          ok: false,
-          error: "You do not have access to any brain in this workspace.",
-        };
-      }
-      const captured = await captureToGoatBrainInbox({
-        brainRef: activeBrain.id,
-        userWorkosId: context.user.workosUserId,
-        text: toolInput.content,
-        ...(toolInput.title ? { title: toolInput.title } : {}),
-        ...(toolInput.intent ? { intent: toolInput.intent } : {}),
-        chatSessionId: turn.session.id,
-        userMessageId: turn.userMessage.id,
-      });
-      if (!captured.ok) return captured;
-      return {
-        ok: true,
-        draftId: captured.draftBrainId,
-        path: captured.path,
-        title: captured.title,
-        status: "captured",
-      };
-    },
+    ...(canManageWorkspaceBrain
+      ? {
+          saveToBrain: async (toolInput) => {
+            const activeBrain = context.activeBrain;
+            if (!activeBrain) {
+              return {
+                ok: false,
+                error: "You do not have access to any brain in this workspace.",
+              };
+            }
+            const captured = await captureToGoatBrainInbox({
+              brainRef: activeBrain.id,
+              userWorkosId: context.user.workosUserId,
+              text: toolInput.content,
+              ...(toolInput.title ? { title: toolInput.title } : {}),
+              ...(toolInput.intent ? { intent: toolInput.intent } : {}),
+              chatSessionId: turn.session.id,
+              userMessageId: turn.userMessage.id,
+            });
+            if (!captured.ok) return captured;
+            return {
+              ok: true,
+              draftId: captured.draftBrainId,
+              path: captured.path,
+              title: captured.title,
+              status: "captured",
+            };
+          },
+        }
+      : {}),
     ...(exaApiKey
       ? {
           webSearch: (toolInput) =>
@@ -257,113 +284,117 @@ export async function POST(request: Request): Promise<Response> {
             }),
         }
       : {}),
-    startTask: async (task) => {
-      const created = await createGoatTaskForUser({
-        userWorkosId: context.user.workosUserId,
-        ...(task.name ? { name: task.name } : {}),
-        prompt: task.prompt,
-        model: task.model,
-        ...(task.engine ? { engine: task.engine } : {}),
-      });
-      const attributes = {
-        ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
-        "goat.chat_session_id": turn.session.id,
-        "goat.chat_message_id": turn.userMessage.id,
-        "goat.model": turn.session.model,
-        "goat.task_id": created.id,
-      };
-      chatSpan.setAttributes({
-        ...attributes,
-        "goat.task_started": true,
-      });
-      recordGoatCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
-      return {
-        id: created.id,
-        displayId: created.displayId,
-        name: created.name,
-        prompt: created.prompt,
-      };
-    },
-    scheduleTask: async (schedule) => {
-      const created = await createGoatTaskScheduleForUser({
-        userWorkosId: context.user.workosUserId,
-        name: schedule.name,
-        sourceDescription: schedule.sourceDescription ?? schedule.reason ?? "",
-        cron: schedule.cron,
-        timezone: schedule.timezone ?? context.user.timezone,
-        prompt: schedule.prompt,
-      });
-      return {
-        scheduleId: created.id,
-        scheduleName: created.name,
-        cron: created.cron,
-        timezone: created.timezone,
-        nextRunAt: created.nextRunAt.toISOString(),
-        prompt: created.prompt,
-        status: "scheduled",
-      };
-    },
-    editTaskSchedule: async (edit) => {
-      const target = resolveChatScheduleTarget(recurringSchedules, {
-        ...(edit.scheduleId ? { scheduleId: edit.scheduleId } : {}),
-        ...(edit.scheduleName ? { scheduleName: edit.scheduleName } : {}),
-      });
-      if (!target.ok) return target;
+    ...(canManageWorkspaceBrain
+      ? {
+          startTask: async (task) => {
+            const created = await createGoatTaskForUser({
+              userWorkosId: context.user.workosUserId,
+              ...(task.name ? { name: task.name } : {}),
+              prompt: task.prompt,
+              model: task.model,
+              ...(task.engine ? { engine: task.engine } : {}),
+            });
+            const attributes = {
+              ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+              "goat.chat_session_id": turn.session.id,
+              "goat.chat_message_id": turn.userMessage.id,
+              "goat.model": turn.session.model,
+              "goat.task_id": created.id,
+            };
+            chatSpan.setAttributes({
+              ...attributes,
+              "goat.task_started": true,
+            });
+            recordGoatCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
+            return {
+              id: created.id,
+              displayId: created.displayId,
+              name: created.name,
+              prompt: created.prompt,
+            };
+          },
+          scheduleTask: async (schedule) => {
+            const created = await createGoatTaskScheduleForUser({
+              userWorkosId: context.user.workosUserId,
+              name: schedule.name,
+              sourceDescription: schedule.sourceDescription ?? schedule.reason ?? "",
+              cron: schedule.cron,
+              timezone: schedule.timezone ?? context.user.timezone,
+              prompt: schedule.prompt,
+            });
+            return {
+              scheduleId: created.id,
+              scheduleName: created.name,
+              cron: created.cron,
+              timezone: created.timezone,
+              nextRunAt: created.nextRunAt.toISOString(),
+              prompt: created.prompt,
+              status: "scheduled",
+            };
+          },
+          editTaskSchedule: async (edit) => {
+            const target = resolveChatScheduleTarget(recurringSchedules, {
+              ...(edit.scheduleId ? { scheduleId: edit.scheduleId } : {}),
+              ...(edit.scheduleName ? { scheduleName: edit.scheduleName } : {}),
+            });
+            if (!target.ok) return target;
 
-      const name = edit.name?.trim() || target.schedule.name;
-      const cron = edit.cron?.trim() || target.schedule.cron;
-      const timezone = edit.timezone?.trim() || target.schedule.timezone;
-      const prompt = edit.prompt?.trim() || target.schedule.prompt;
-      const scheduleTimingChanged = Boolean(edit.cron?.trim() || edit.timezone?.trim());
-      const sourceDescription =
-        edit.sourceDescription?.trim() ||
-        (!scheduleTimingChanged ? target.schedule.sourceDescription : "") ||
-        `${cron} - ${timezone}`;
+            const name = edit.name?.trim() || target.schedule.name;
+            const cron = edit.cron?.trim() || target.schedule.cron;
+            const timezone = edit.timezone?.trim() || target.schedule.timezone;
+            const prompt = edit.prompt?.trim() || target.schedule.prompt;
+            const scheduleTimingChanged = Boolean(edit.cron?.trim() || edit.timezone?.trim());
+            const sourceDescription =
+              edit.sourceDescription?.trim() ||
+              (!scheduleTimingChanged ? target.schedule.sourceDescription : "") ||
+              `${cron} - ${timezone}`;
 
-      const result = await updateGoatTaskScheduleAction(target.schedule.id, {
-        name,
-        sourceDescription,
-        cron,
-        timezone,
-        prompt,
-      });
-      if (!result.ok) {
-        return {
-          ok: false,
-          status: "invalid",
-          error: result.error,
-        } satisfies EditTaskScheduleToolOutput;
-      }
+            const result = await updateGoatTaskScheduleAction(target.schedule.id, {
+              name,
+              sourceDescription,
+              cron,
+              timezone,
+              prompt,
+            });
+            if (!result.ok) {
+              return {
+                ok: false,
+                status: "invalid",
+                error: result.error,
+              } satisfies EditTaskScheduleToolOutput;
+            }
 
-      return {
-        ok: true,
-        scheduleId: result.schedule.id,
-        scheduleName: result.schedule.name,
-        cron: result.schedule.cron,
-        timezone: result.schedule.timezone,
-        nextRunAt: result.schedule.nextRunAt.toISOString(),
-        status: "updated",
-      };
-    },
-    deleteTaskSchedule: async (input) => {
-      const target = resolveChatScheduleTarget(recurringSchedules, input);
-      if (!target.ok) return target;
+            return {
+              ok: true,
+              scheduleId: result.schedule.id,
+              scheduleName: result.schedule.name,
+              cron: result.schedule.cron,
+              timezone: result.schedule.timezone,
+              nextRunAt: result.schedule.nextRunAt.toISOString(),
+              status: "updated",
+            };
+          },
+          deleteTaskSchedule: async (input) => {
+            const target = resolveChatScheduleTarget(recurringSchedules, input);
+            if (!target.ok) return target;
 
-      const result = await deleteGoatTaskScheduleAction(target.schedule.id);
-      if (!result.ok) {
-        return {
-          ok: false,
-          status: "invalid",
-          error: result.error,
-        } satisfies DeleteTaskScheduleToolOutput;
-      }
-      return {
-        ok: true,
-        scheduleId: target.schedule.id,
-        scheduleName: target.schedule.name,
-        status: "deleted",
-      };
-    },
+            const result = await deleteGoatTaskScheduleAction(target.schedule.id);
+            if (!result.ok) {
+              return {
+                ok: false,
+                status: "invalid",
+                error: result.error,
+              } satisfies DeleteTaskScheduleToolOutput;
+            }
+            return {
+              ok: true,
+              scheduleId: target.schedule.id,
+              scheduleName: target.schedule.name,
+              status: "deleted",
+            };
+          },
+        }
+      : {}),
   });
 
   let debugTrace: GoatChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
@@ -436,8 +467,15 @@ export async function POST(request: Request): Promise<Response> {
       },
       webSearchEnabled: Boolean(exaApiKey),
       activeBrain: context.activeBrain
-        ? { name: context.activeBrain.name, workspaceName: context.workspace.name }
+        ? {
+            name: context.activeBrain.name,
+            workspaceName: context.workspace.name,
+            readOnly: !canManageWorkspaceBrain,
+          }
         : null,
+      brainWriteEnabled: canManageWorkspaceBrain,
+      taskToolsEnabled: canManageWorkspaceBrain,
+      scheduleToolsEnabled: canManageWorkspaceBrain,
       recurringSchedules,
     }),
     messages: await convertToModelMessages(turn.messages),
@@ -673,6 +711,10 @@ async function executeGoatChatExaSearch(input: {
 function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
   if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
   return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function isMemberReadOnlyGoatBrainCommand(command: GoatBrainCliCommand) {
+  return (GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS as readonly string[]).includes(command);
 }
 
 function resolveChatScheduleTarget(

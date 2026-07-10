@@ -15,6 +15,9 @@ import { GoatBrainView } from "./GoatBrainView";
 const routerMock = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
+const workspaceRoleMock = vi.hoisted(() => ({
+  value: "admin" as "admin" | "member",
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
@@ -33,8 +36,8 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       description: null,
       visibility: "workspace",
     },
-    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
-    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
+    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
+    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value }],
     workspaceMembers: [],
   }),
 }));
@@ -54,16 +57,19 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
     content,
     onChange,
     brainLinks,
+    readOnly,
   }: {
     content: string;
     onChange: (content: string) => void;
     brainLinks?: Record<string, string>;
+    readOnly?: boolean;
   }) => {
     return (
       <div>
         <textarea
           aria-label="Brain body"
           value={content}
+          disabled={readOnly}
           onChange={(event) => onChange(event.currentTarget.value)}
         />
         <div aria-hidden>
@@ -90,6 +96,7 @@ vi.mock("@/lib/brain-actions", () => ({
 
 afterEach(() => {
   vi.clearAllMocks();
+  workspaceRoleMock.value = "admin";
 });
 
 const defaultBrain = {
@@ -306,6 +313,35 @@ describe("GoatBrainView", () => {
     expect(screen.queryByRole("button", { name: "Rename folder" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete folder" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add folder" })).toBeEnabled();
+  });
+
+  it("renders workspace-member brain access as browse-only", async () => {
+    const user = userEvent.setup();
+    workspaceRoleMock.value = "member";
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={folders}
+        documents={[documentWithTimeline]}
+        initialFolderPath="people"
+        initialBrainId="ada-lovelace"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Add folder" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload PDF" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open settings for/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Page title" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+
+    expect(screen.getByRole("button", { name: "Toggle timeline" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete document" })).not.toBeInTheDocument();
+    expect(updateGoatBrainDocumentAction).not.toHaveBeenCalled();
+    expect(renameGoatBrainDocumentAction).not.toHaveBeenCalled();
   });
 
   it("creates an adjustable folder from the sidebar control", async () => {

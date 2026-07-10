@@ -16,10 +16,12 @@ export function MarkdownGoatBrainEditor({
   content,
   onChange,
   brainLinks = {},
+  readOnly = false,
 }: {
   content: string;
   onChange: (content: string) => void;
   brainLinks?: Record<string, string>;
+  readOnly?: boolean;
 }) {
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
@@ -37,6 +39,7 @@ export function MarkdownGoatBrainEditor({
       ],
       content: initialContent,
       contentType: "markdown",
+      editable: !readOnly,
       editorProps: {
         attributes: {
           class:
@@ -50,6 +53,7 @@ export function MarkdownGoatBrainEditor({
         refreshToolbar((value) => value + 1);
       },
       onUpdate: ({ editor }) => {
+        if (readOnly) return;
         setIsEmpty(editor.isEmpty);
         refreshToolbar((value) => value + 1);
         onChange(editor.getMarkdown());
@@ -60,7 +64,7 @@ export function MarkdownGoatBrainEditor({
 
   return (
     <div className="relative">
-      {editor ? (
+      {editor && !readOnly ? (
         <BubbleMenu
           editor={editor}
           className="flex items-center gap-0.5 rounded-lg border border-black/[0.08] bg-surface-raised p-1 shadow-[0_12px_28px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
@@ -107,7 +111,7 @@ export function MarkdownGoatBrainEditor({
       <div className="relative">
         {isEmpty ? (
           <div className="pointer-events-none absolute left-0 top-0 text-[15px] leading-7 text-ink-subtle/70">
-            Start writing...
+            {readOnly ? "No content yet." : "Start writing..."}
           </div>
         ) : null}
         <EditorContent editor={editor} />
