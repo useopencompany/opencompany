@@ -7,6 +7,7 @@ import {
   Activity,
   CircleAlert,
   CircleCheck,
+  CircleMinus,
   Inbox,
   Loader2,
   RotateCw,
@@ -211,6 +212,7 @@ const ACTIVITY_ICONS: Record<
   captured: { component: Inbox, className: "text-ink-muted" },
   filing: { component: Loader2, className: "animate-spin text-ink-muted" },
   filed: { component: CircleCheck, className: "text-emerald-600" },
+  skipped: { component: CircleMinus, className: "text-ink-subtle" },
   retrying: { component: RotateCw, className: "text-amber-600" },
   failed: { component: CircleAlert, className: "text-danger" },
 };

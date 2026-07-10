@@ -196,19 +196,20 @@ describe("buildGoatElectricOriginUrl", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=goat-chat&source_type=capture&last_ingest_status=pending,failed",
+        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=goat-chat&source_type=capture&last_ingest_status=pending,skipped,failed",
       ),
       userWorkosId: "user_123",
     });
 
     expect(url?.searchParams.get("where")).toBe(
-      `"user_workos_id" = $1 AND "source_provider" = $2 AND "source_type" = $3 AND "last_ingest_status" IN ($4, $5)`,
+      `"user_workos_id" = $1 AND "source_provider" = $2 AND "source_type" = $3 AND "last_ingest_status" IN ($4, $5, $6)`,
     );
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
     expect(url?.searchParams.get("params[2]")).toBe("goat-chat");
     expect(url?.searchParams.get("params[3]")).toBe("capture");
     expect(url?.searchParams.get("params[4]")).toBe("pending");
-    expect(url?.searchParams.get("params[5]")).toBe("failed");
+    expect(url?.searchParams.get("params[5]")).toBe("skipped");
+    expect(url?.searchParams.get("params[6]")).toBe("failed");
   });
 
   it("rejects unsafe goat.brain_source_items filters", () => {

@@ -174,9 +174,10 @@ describe("buildGoatBrainActivityEvents", () => {
       [item()],
     );
 
-    const traced = events.find((event) => event.id === "gbjob_traced:filed");
+    const traced = events.find((event) => event.id === "gbjob_traced:skipped");
     const legacy = events.find((event) => event.id === "gbjob_legacy:filed");
     expect(traced).toMatchObject({
+      kind: "skipped",
       title: "Skipped filing",
       trace: {
         schemaVersion: "goat.brain_ingest_trace.v1",
@@ -184,6 +185,30 @@ describe("buildGoatBrainActivityEvents", () => {
       },
     });
     expect(legacy).toMatchObject({ trace: null });
+  });
+
+  it("shows first-class skipped jobs as skipped filing events", () => {
+    const events = buildGoatBrainActivityEvents(
+      [
+        job({
+          status: "skipped",
+          completed_at: "2026-07-09T10:01:20.000Z",
+          last_error: "routine_linear_status_change",
+          result: {
+            skipped: true,
+            reason: "routine_linear_status_change",
+            summary: "SKIP",
+          },
+        }),
+      ],
+      [item({ source_provider: "linear", source_type: "issue", title: "G-51 add github" })],
+    );
+
+    expect(events.find((event) => event.kind === "skipped")).toMatchObject({
+      title: "Skipped filing",
+      detail: "SKIP",
+      sourceTitle: "G-51 add github",
+    });
   });
 
   it("reports failures and retries with the last error", () => {

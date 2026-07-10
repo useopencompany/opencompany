@@ -27,6 +27,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
+  GOAT_BRAIN_AGENT_SKIP_SENTINEL,
   type GoatBrainAgentIngestEnv,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
@@ -205,6 +206,15 @@ export type GoatBrainIngestStore = {
     now: Date;
     result: Record<string, unknown>;
   }): Promise<boolean>;
+  skip(input: {
+    id: string;
+    sourceItemId: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+    result: Record<string, unknown>;
+    reason: string | null;
+  }): Promise<boolean>;
   fail(input: {
     id: string;
     sourceItemId: string;
@@ -303,6 +313,41 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
           RETURNING source.id
         )
         SELECT id FROM completed_job
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async skip(input) {
+      const resultJson = JSON.stringify(input.result);
+      const result = await getDb().execute(sql`
+        WITH skipped_job AS (
+          UPDATE goat.brain_ingest_jobs
+          SET status = 'skipped',
+              lease_id = NULL,
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              last_error = NULL,
+              result = ${resultJson}::jsonb,
+              completed_at = ${input.now},
+              updated_at = ${input.now}
+          WHERE id = ${input.id}
+            AND source_item_id = ${input.sourceItemId}
+            AND lease_id = ${input.leaseId}
+            AND lease_owner = ${input.leaseOwner}
+            AND status = 'running'
+          RETURNING id, source_item_id
+        ),
+        updated_source AS (
+          UPDATE goat.brain_source_items AS source
+          SET last_ingest_status = 'skipped',
+              last_ingested_at = ${input.now},
+              last_ingest_error = ${input.reason},
+              updated_at = ${input.now}
+          FROM skipped_job
+          WHERE source.id = skipped_job.source_item_id
+          RETURNING source.id
+        )
+        SELECT id FROM skipped_job
       `);
       return rowsFromExecute<{ id: string }>(result).length > 0;
     },
@@ -440,6 +485,18 @@ export async function runClaimedGoatBrainIngestJob(input: {
       },
     });
     if (!leaseActive) return;
+    if (isSkippedIngestResult(result)) {
+      await store.skip({
+        id: input.job.id,
+        sourceItemId: input.job.sourceItemId,
+        leaseId,
+        leaseOwner,
+        now: new Date(),
+        result,
+        reason: skippedIngestReason(result),
+      });
+      return;
+    }
     await store.complete({
       id: input.job.id,
       sourceItemId: input.job.sourceItemId,
@@ -633,6 +690,24 @@ function newGoatBrainIngestLeaseId() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Goat Brain ingest error.";
+}
+
+function isSkippedIngestResult(result: Record<string, unknown>) {
+  return result.skipped === true;
+}
+
+function skippedIngestReason(result: Record<string, unknown>) {
+  const reason = result.reason;
+  if (typeof reason === "string" && reason.trim()) return reason.trim();
+  const summary = result.summary;
+  if (
+    typeof summary === "string" &&
+    summary.trim() &&
+    summary.trim() !== GOAT_BRAIN_AGENT_SKIP_SENTINEL
+  ) {
+    return summary.trim();
+  }
+  return null;
 }
 
 function findGoatBrainIngestHandler(

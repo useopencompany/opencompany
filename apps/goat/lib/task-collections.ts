@@ -298,7 +298,7 @@ export type GoatBrainIngestJobRow = {
   brain_ref: string | null;
   kind: string;
   content_hash: string;
-  status: "queued" | "running" | "succeeded" | "failed";
+  status: "queued" | "running" | "succeeded" | "failed" | "skipped";
   attempts: number;
   next_run_at: string;
   lease_id: string | null;

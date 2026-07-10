@@ -4,7 +4,13 @@ import {
 } from "@opencompany/db/goat-brain-ingest-trace";
 import type { GoatBrainIngestJobRow, GoatBrainSourceItemRow } from "@/lib/task-collections";
 
-export type GoatBrainActivityKind = "captured" | "filing" | "filed" | "retrying" | "failed";
+export type GoatBrainActivityKind =
+  | "captured"
+  | "filing"
+  | "filed"
+  | "retrying"
+  | "failed"
+  | "skipped";
 
 export type GoatBrainActivityPageAction = "created" | "updated" | "conflict_created";
 
@@ -84,15 +90,15 @@ export function buildGoatBrainActivityEvents(
         pages: [],
         trace: null,
       });
-    } else if (job.status === "succeeded") {
+    } else if (job.status === "succeeded" || job.status === "skipped") {
       const skipped = jobResultSkipped(job);
       events.push({
-        id: `${job.id}:filed`,
+        id: skipped ? `${job.id}:skipped` : `${job.id}:filed`,
         traceId: job.id,
-        kind: "filed",
+        kind: skipped ? "skipped" : "filed",
         at: job.completed_at ?? job.updated_at,
         title: skipped ? "Skipped filing" : "Filed into brain",
-        detail: truncateDetail(firstLine(jobResultSummary(job))),
+        detail: truncateDetail(firstLine(jobResultSummary(job) ?? job.last_error)),
         sourceTitle,
         brainId,
         pages: jobResultPages(job),
@@ -145,7 +151,7 @@ export function buildGoatBrainDraftIngestStates(
 
   for (const job of jobs) {
     if (job.kind !== "brain_agent_ingest" || job.source_provider !== "goat-chat") continue;
-    if (job.status === "succeeded") continue;
+    if (job.status === "succeeded" || job.status === "skipped") continue;
 
     const item = captureItemsById.get(job.source_item_id);
     if (!item) continue;
@@ -215,7 +221,7 @@ function jobResultBrainId(job: GoatBrainIngestJobRow): string | null {
 }
 
 function jobResultSkipped(job: GoatBrainIngestJobRow): boolean {
-  return job.result?.skipped === true;
+  return job.status === "skipped" || job.result?.skipped === true;
 }
 
 function jobResultTrace(job: GoatBrainIngestJobRow): GoatBrainIngestTrace | null {

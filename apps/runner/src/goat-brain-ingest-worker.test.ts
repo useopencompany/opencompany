@@ -1,5 +1,6 @@
 import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/goat-brain";
 import { describe, expect, it, vi } from "vitest";
+import { GOAT_BRAIN_AGENT_SKIP_SENTINEL } from "./goat-brain-agent-ingest";
 import {
   type GoatBrainIngestStore,
   runClaimedGoatBrainIngestJob,
@@ -81,11 +82,13 @@ describe("Goat Brain ingest worker", () => {
     };
     const run = vi.fn(async () => ({ handled: true }));
     const complete = vi.fn(async () => true);
+    const skip = vi.fn(async () => true);
     const fail = vi.fn(async () => true);
     const store: GoatBrainIngestStore = {
       claimNext: vi.fn(async () => null),
       heartbeat: vi.fn(async () => true),
       complete,
+      skip,
       fail,
     };
 
@@ -138,6 +141,95 @@ describe("Goat Brain ingest worker", () => {
       env: { vercelAiGatewayApiKey: "gw_test", blobReadWriteToken: undefined },
     });
     expect(complete).toHaveBeenCalledWith(expect.objectContaining({ result: { handled: true } }));
+    expect(skip).not.toHaveBeenCalled();
     expect(fail).not.toHaveBeenCalled();
+  });
+
+  it("marks skipped handler results as terminal skips", async () => {
+    const normalizedPayload = {
+      sourceProvider: "linear" as const,
+      sourceType: "issue" as const,
+      externalId: "external_123",
+      sourceRef: "linear:issue:G-51",
+      title: "G-51 add github as source",
+      occurredAt: "2026-01-01T10:00:00.000Z",
+      capturedAt: "2026-01-01T10:01:00.000Z",
+      contentHash: "hash_123",
+      contentHashInput: {},
+      content: {},
+    };
+    for (const { result, reason } of [
+      {
+        result: {
+          skipped: true,
+          reason: "routine_linear_status_change",
+          summary: GOAT_BRAIN_AGENT_SKIP_SENTINEL,
+        },
+        reason: "routine_linear_status_change",
+      },
+      {
+        result: { skipped: true, summary: "No durable brain material." },
+        reason: "No durable brain material.",
+      },
+      {
+        result: { skipped: true, summary: GOAT_BRAIN_AGENT_SKIP_SENTINEL },
+        reason: null,
+      },
+    ]) {
+      const complete = vi.fn(async () => true);
+      const skip = vi.fn(async () => true);
+      const fail = vi.fn(async () => true);
+      const store: GoatBrainIngestStore = {
+        claimNext: vi.fn(async () => null),
+        heartbeat: vi.fn(async () => true),
+        complete,
+        skip,
+        fail,
+      };
+
+      await runClaimedGoatBrainIngestJob({
+        env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
+        store,
+        handlers: [
+          {
+            descriptor: {
+              kind: "brain_agent_ingest",
+              sourceProvider: "linear",
+              sourceType: "issue",
+            },
+            isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+            run: vi.fn(async () => result),
+          },
+        ],
+        job: {
+          id: "gbjob_123",
+          sourceItemId: "gbsrc_123",
+          userWorkosId: "user_123",
+          sourceProvider: "linear",
+          sourceConnectionId: "gint_123",
+          integrationId: "gint_123",
+          brainRef: "gbrain_123",
+          sourceType: "issue",
+          kind: "brain_agent_ingest",
+          contentHash: "hash_123",
+          status: "running",
+          attempts: 1,
+          nextRunAt: new Date("2026-01-01T10:00:00.000Z"),
+          leaseId: "lease_123",
+          leaseOwner: "runner_123",
+          leaseExpiresAt: new Date("2026-01-01T10:05:00.000Z"),
+          lastError: null,
+          result: {},
+          completedAt: null,
+          createdAt: new Date("2026-01-01T10:00:00.000Z"),
+          updatedAt: new Date("2026-01-01T10:00:00.000Z"),
+          normalizedPayload,
+        },
+      });
+
+      expect(skip).toHaveBeenCalledWith(expect.objectContaining({ result, reason }));
+      expect(complete).not.toHaveBeenCalled();
+      expect(fail).not.toHaveBeenCalled();
+    }
   });
 });

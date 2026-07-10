@@ -91,9 +91,9 @@ export type GoatGmailMessageDirection = "sent" | "received";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
 export type GoatLinearEventAction = "create" | "update" | "remove";
-export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed";
+export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
-export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed";
+export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 
 export type GoatTaskToolName =
   | "exa_search"
@@ -966,7 +966,7 @@ export const goatBrainSourceItems = goat.table(
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
-      sql`${table.lastIngestStatus} IS NULL OR ${table.lastIngestStatus} IN ('pending', 'succeeded', 'failed')`,
+      sql`${table.lastIngestStatus} IS NULL OR ${table.lastIngestStatus} IN ('pending', 'succeeded', 'failed', 'skipped')`,
     ),
   }),
 );
@@ -1034,7 +1034,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",
-      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed')`,
+      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'skipped')`,
     ),
   }),
 );
