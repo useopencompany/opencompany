@@ -834,6 +834,13 @@
       "when": 1783981000000,
       "tag": "0118_goat_brain_enrichment_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1783981100000,
+      "tag": "0119_goat_integration_workspace_ownership",
+      "breakpoints": true
     }
   ]
 }
