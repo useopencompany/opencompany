@@ -1,5 +1,5 @@
-import { GoatUsageSettingsRoute } from "@/components/GoatRoutes";
+import { redirect } from "next/navigation";
 
 export default function UsageSettingsPage() {
-  return <GoatUsageSettingsRoute />;
+  redirect("/settings/workspace/usage");
 }
