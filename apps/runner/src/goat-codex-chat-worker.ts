@@ -9,6 +9,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatCodexChatTurn } from "./goat-codex-chat";
+import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
@@ -79,9 +80,12 @@ export async function claimNextGoatCodexChatTurn(input: {
           WHERE earlier.codex_chat_session_id = turn.codex_chat_session_id
             AND earlier.id <> turn.id
             AND earlier.status = 'queued'
-            AND earlier.created_at < turn.created_at
+            AND (
+              earlier.created_at < turn.created_at
+              OR (earlier.created_at = turn.created_at AND earlier.id < turn.id)
+            )
         )
-      ORDER BY turn.created_at ASC
+      ORDER BY turn.created_at ASC, turn.id ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
@@ -144,6 +148,20 @@ async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
     return;
   }
 
+  let heartbeatAbort: GoatCodexChatLeaseLostError | null = null;
+  const markHeartbeatLost = (error: unknown) => {
+    if (heartbeatAbort) return;
+    heartbeatAbort = new GoatCodexChatLeaseLostError();
+    captureException(error, {
+      event: "opencompany.goat_codex_chat_heartbeat_failed",
+      turn_id: turn.id,
+    });
+    logger.warn("Goat codex chat heartbeat failed", {
+      event: "opencompany.goat_codex_chat_heartbeat_failed",
+      turn_id: turn.id,
+      error,
+    });
+  };
   const heartbeat = setInterval(
     () => {
       void heartbeatGoatCodexChatTurn({
@@ -151,12 +169,21 @@ async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
         leaseId,
         leaseOwner,
         leaseTtlMs: env.jobLeaseTtlMs,
-      }).catch(() => undefined);
+      })
+        .then((owned) => {
+          if (!owned) markHeartbeatLost(new GoatCodexChatLeaseLostError());
+        })
+        .catch(markHeartbeatLost);
     },
     Math.max(5_000, Math.floor(env.jobLeaseTtlMs / 3)),
   );
   try {
-    await runGoatCodexChatTurn({ turn, session, env });
+    await runGoatCodexChatTurn({
+      turn,
+      session,
+      env,
+      shouldAbort: () => heartbeatAbort,
+    });
   } finally {
     clearInterval(heartbeat);
   }
@@ -236,6 +263,7 @@ export function startGoatCodexChatWorker(
           if (!turn) break;
           const running = runClaimedTurn(turn, env)
             .catch((error) => {
+              if (error instanceof GoatCodexChatLeaseLostError) return;
               captureException(error, {
                 event: "opencompany.goat_codex_chat_turn_failed",
                 turn_id: turn.id,

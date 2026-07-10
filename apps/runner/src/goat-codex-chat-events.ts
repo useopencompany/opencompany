@@ -12,14 +12,12 @@ import {
   type GoatCodexChatEventType,
   type GoatCodexChatSessionStatus,
   goatChatMessages,
-  goatChatSessions,
-  goatCodexChatEvents,
-  goatCodexChatSessions,
-  goatCodexChatTurns,
 } from "@opencompany/db/goat-schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { CodexAppServerSummary } from "./codex-app-server";
 import { getDb } from "./db";
+import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import { rowsFromExecute } from "./sql-exec";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 
@@ -87,46 +85,75 @@ export function createGoatCodexChatProjector(input: {
       ...(options.aborted ? { aborted: true } : {}),
       ...(options.usage ? { usage: options.usage } : {}),
     };
-    await getDb()
-      .update(goatChatMessages)
-      .set({ content, debugTrace, updatedAt: new Date() })
-      .where(
-        and(
-          eq(goatChatMessages.id, target.assistantMessageId),
-          eq(goatChatMessages.role, "assistant"),
-        ),
-      );
+    assertRowsChanged(
+      await getDb().execute(sql`
+        UPDATE goat.chat_messages AS message
+        SET content = ${content},
+            debug_trace = ${JSON.stringify(debugTrace)}::jsonb,
+            updated_at = ${new Date()}
+        WHERE message.id = ${target.assistantMessageId}
+          AND message.role = 'assistant'
+          AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+        RETURNING message.id
+      `),
+    );
   };
 
   const insertEventRow = async (event: CodexAppServerNormalizedEvent) => {
     if (!PERSISTED_EVENT_TYPES.has(event.type as GoatCodexChatEventType)) return;
-    await getDb()
-      .insert(goatCodexChatEvents)
-      .values({
-        userWorkosId: target.userWorkosId,
-        codexChatSessionId: target.codexChatSessionId,
-        codexChatTurnId: target.turnId,
-        type: event.type as GoatCodexChatEventType,
-        payload: redactJson(event.payload, redact) as Record<string, unknown>,
-        rawEvent: redactJson(event.rawEvent, redact) as Record<string, unknown>,
-        createdAt: new Date(),
-      });
+    assertRowsChanged(
+      await getDb().execute(sql`
+        INSERT INTO goat.codex_chat_events (
+          user_workos_id,
+          codex_chat_session_id,
+          codex_chat_turn_id,
+          type,
+          payload,
+          raw_event,
+          created_at
+        )
+        SELECT ${target.userWorkosId},
+               ${target.codexChatSessionId},
+               ${target.turnId},
+               ${event.type},
+               ${JSON.stringify(redactJson(event.payload, redact))}::jsonb,
+               ${JSON.stringify(redactJson(event.rawEvent, redact))}::jsonb,
+               ${new Date()}
+        WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+        RETURNING id
+      `),
+    );
   };
 
   const markTurnRunning = async (codexTurnId: string | null) => {
     const now = new Date();
-    await getDb()
-      .update(goatCodexChatTurns)
-      .set({
-        ...(codexTurnId ? { codexTurnId } : {}),
-        status: "running",
-        updatedAt: now,
-      })
-      .where(turnLeaseWhere());
-    await getDb()
-      .update(goatCodexChatSessions)
-      .set({ status: "running", activeTurnId: target.turnId, error: null, updatedAt: now })
-      .where(sessionWhere());
+    assertRowsChanged(
+      await getDb().execute(sql`
+        UPDATE goat.codex_chat_turns AS turn
+        SET codex_turn_id = COALESCE(${codexTurnId}, turn.codex_turn_id),
+            status = 'running',
+            updated_at = ${now}
+        WHERE turn.id = ${target.turnId}
+          AND turn.user_workos_id = ${target.userWorkosId}
+          AND turn.lease_id = ${target.leaseId}
+          AND turn.lease_owner = ${target.leaseOwner}
+          AND turn.status = 'running'
+        RETURNING turn.id
+      `),
+    );
+    assertRowsChanged(
+      await getDb().execute(sql`
+        UPDATE goat.codex_chat_sessions AS session
+        SET status = 'running',
+            active_turn_id = ${target.turnId},
+            error = NULL,
+            updated_at = ${now}
+        WHERE session.id = ${target.codexChatSessionId}
+          AND session.user_workos_id = ${target.userWorkosId}
+          AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+        RETURNING session.id
+      `),
+    );
   };
 
   const handleEvent = async (event: CodexAppServerNormalizedEvent) => {
@@ -167,48 +194,57 @@ export function createGoatCodexChatProjector(input: {
     error: string | null;
   }) => {
     const now = new Date();
-    await getDb()
-      .update(goatCodexChatTurns)
-      .set({
-        status: options.turnStatus,
-        error: options.error,
-        completedAt: now,
-        updatedAt: now,
-      })
-      .where(turnLeaseWhere());
-    await getDb()
-      .update(goatCodexChatSessions)
-      .set({
-        activeTurnId: null,
-        status: options.sessionStatus,
-        error: options.error,
-        updatedAt: now,
-      })
-      .where(sessionWhere());
-    await getDb()
-      .update(goatChatSessions)
-      .set({ updatedAt: now })
-      .where(
-        and(
-          eq(goatChatSessions.id, target.chatSessionId),
-          eq(goatChatSessions.userWorkosId, target.userWorkosId),
-        ),
-      );
+    assertRowsChanged(
+      await getDb().execute(sql`
+        UPDATE goat.codex_chat_turns AS turn
+        SET status = ${options.turnStatus},
+            error = ${options.error},
+            completed_at = ${now},
+            updated_at = ${now}
+        WHERE turn.id = ${target.turnId}
+          AND turn.user_workos_id = ${target.userWorkosId}
+          AND turn.lease_id = ${target.leaseId}
+          AND turn.lease_owner = ${target.leaseOwner}
+          AND turn.status = 'running'
+        RETURNING turn.id
+      `),
+    );
+    assertRowsChanged(
+      await getDb().execute(sql`
+        UPDATE goat.codex_chat_sessions AS session
+        SET active_turn_id = NULL,
+            status = ${options.sessionStatus},
+            error = ${options.error},
+            updated_at = ${now}
+        WHERE session.id = ${target.codexChatSessionId}
+          AND session.user_workos_id = ${target.userWorkosId}
+          AND (session.active_turn_id IS NULL OR session.active_turn_id = ${target.turnId})
+          AND EXISTS (${turnLeaseSubquery({ runningOnly: false })})
+        RETURNING session.id
+      `),
+    );
+    assertRowsChanged(
+      await getDb().execute(sql`
+        UPDATE goat.chat_sessions AS session
+        SET updated_at = ${now}
+        WHERE session.id = ${target.chatSessionId}
+          AND session.user_workos_id = ${target.userWorkosId}
+          AND EXISTS (${turnLeaseSubquery({ runningOnly: false })})
+        RETURNING session.id
+      `),
+    );
   };
 
-  const turnLeaseWhere = () =>
-    and(
-      eq(goatCodexChatTurns.id, target.turnId),
-      eq(goatCodexChatTurns.userWorkosId, target.userWorkosId),
-      eq(goatCodexChatTurns.leaseId, target.leaseId),
-      eq(goatCodexChatTurns.leaseOwner, target.leaseOwner),
-    );
-
-  const sessionWhere = () =>
-    and(
-      eq(goatCodexChatSessions.id, target.codexChatSessionId),
-      eq(goatCodexChatSessions.userWorkosId, target.userWorkosId),
-    );
+  const turnLeaseSubquery = (options: { runningOnly: boolean }) => sql`
+    SELECT 1
+    FROM goat.codex_chat_turns AS lease_turn
+    WHERE lease_turn.id = ${target.turnId}
+      AND lease_turn.user_workos_id = ${target.userWorkosId}
+      AND lease_turn.codex_chat_session_id = ${target.codexChatSessionId}
+      AND lease_turn.lease_id = ${target.leaseId}
+      AND lease_turn.lease_owner = ${target.leaseOwner}
+      ${options.runningOnly ? sql`AND lease_turn.status = 'running'` : sql``}
+  `;
 
   return {
     // Serialized by the app-server notification batcher: each flush awaits this before the next.
@@ -260,6 +296,12 @@ export function createGoatCodexChatProjector(input: {
       });
     },
   };
+}
+
+function assertRowsChanged(result: unknown) {
+  if (rowsFromExecute(result).length === 0) {
+    throw new GoatCodexChatLeaseLostError();
+  }
 }
 
 export async function loadCodexChatAssistantMessageParts(assistantMessageId: string) {

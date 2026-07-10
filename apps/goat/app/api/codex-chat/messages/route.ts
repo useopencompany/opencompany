@@ -17,6 +17,9 @@ export async function POST(request: Request) {
 
   const body = await readJsonBody<CodexChatMessageBody>(request);
   if (!body.ok) return new Response(body.error, { status: 400 });
+  if (!isMessageBody(body.value)) {
+    return new Response("Invalid Codex chat message.", { status: 400 });
+  }
 
   const prompt = readPrompt(body.value);
   if (!prompt) return new Response("Invalid Codex chat message.", { status: 400 });
@@ -48,6 +51,10 @@ function isUiMessage(value: unknown): value is GoatChatUiMessage {
   if (!value || typeof value !== "object") return false;
   const message = value as { role?: unknown; parts?: unknown };
   return message.role === "user" && Array.isArray(message.parts);
+}
+
+function isMessageBody(value: unknown): value is CodexChatMessageBody {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 async function readJsonBody<T>(request: Request) {

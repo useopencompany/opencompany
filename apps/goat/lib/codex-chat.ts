@@ -68,7 +68,12 @@ export async function createGoatCodexChatMessage(input: {
 
   if (result.ok) {
     // Best-effort nudge; the runner worker's poll loop picks the turn up regardless.
-    await triggerGoatCodexChatWake().catch(() => undefined);
+    await triggerGoatCodexChatWake().catch((error) => {
+      console.warn("Goat codex chat wake failed.", {
+        event: "goat.codex_chat_wake_failed",
+        error,
+      });
+    });
   }
   return result;
 }

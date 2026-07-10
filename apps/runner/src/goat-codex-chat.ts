@@ -2,11 +2,11 @@ import { shellQuote } from "@opencompany/agent-runtime";
 import {
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
-  goatCodexChatSessions,
   goatCodexChatTurns,
   goatIntegrations,
 } from "@opencompany/db/goat-schema";
-import { and, desc, eq } from "drizzle-orm";
+import { captureException, createLogger } from "@opencompany/observability";
+import { and, desc, eq, type SQL, sql } from "drizzle-orm";
 import { runCodexAppServerTurn } from "./codex-app-server";
 import { ensureCodexInstalled } from "./codex-tool";
 import { createKnownSecretRedactor, gitAuthHeader } from "./coding-agent-shared";
@@ -14,16 +14,20 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getGitHubWorkInstallationToken } from "./github";
 import { loadGoatCodexCliAuth, persistRefreshedGoatCodexAuth } from "./goat-codex";
+import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
 import { armSandboxIdleTimeout, createOrConnectSandbox } from "./sandbox";
+import { rowsFromExecute } from "./sql-exec";
 
 const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
 const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
 const GOAT_CODEX_CHAT_SKILL_FINGERPRINT = "goat-codex-chat-v1";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat" });
 
 export const GOAT_CODEX_CHAT_REAUTH_MESSAGE =
   "Codex is disconnected. Reconnect Codex in Goat settings, then send your message again.";
@@ -35,19 +39,13 @@ export class GoatCodexChatInterruptedError extends Error {
   }
 }
 
-export class GoatCodexChatLeaseLostError extends Error {
-  constructor() {
-    super("Codex chat turn lease is no longer owned by this worker.");
-    this.name = "GoatCodexChatLeaseLostError";
-  }
-}
-
 export async function runGoatCodexChatTurn(input: {
   turn: GoatCodexChatTurn;
   session: GoatCodexChatSession;
   env: RunnerEnv;
+  shouldAbort?: () => Error | null;
 }) {
-  const { turn, session, env } = input;
+  const { turn, session, env, shouldAbort } = input;
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) {
@@ -92,15 +90,12 @@ export async function runGoatCodexChatTurn(input: {
   }
 
   if (sandbox.sandboxId !== session.sandboxId) {
-    await getDb()
-      .update(goatCodexChatSessions)
-      .set({ sandboxId: sandbox.sandboxId, updatedAt: new Date() })
-      .where(
-        and(
-          eq(goatCodexChatSessions.id, session.id),
-          eq(goatCodexChatSessions.userWorkosId, turn.userWorkosId),
-        ),
-      );
+    await updateCodexChatSessionIfLeaseHeld({
+      turn,
+      leaseId,
+      leaseOwner,
+      setSql: sql`sandbox_id = ${sandbox.sandboxId}, updated_at = ${new Date()}`,
+    });
   }
 
   const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
@@ -155,27 +150,39 @@ export async function runGoatCodexChatTurn(input: {
         githubAuthHeader: github?.githubAuthHeader ?? null,
       },
       timeoutMs: env.codexTimeoutMs,
-      checkAbort: createTurnAbortCheck({ turnId: turn.id, leaseId, leaseOwner }),
+      checkAbort: createTurnAbortCheck({
+        turnId: turn.id,
+        leaseId,
+        leaseOwner,
+        ...(shouldAbort ? { shouldAbort } : {}),
+      }),
       onRuntimeEvents: (events) => projector.push(events),
       onActivity: async () => undefined,
     });
 
     if (summary.sessionId && summary.sessionId !== session.codexThreadId) {
-      await getDb()
-        .update(goatCodexChatSessions)
-        .set({ codexThreadId: summary.sessionId, updatedAt: new Date() })
-        .where(
-          and(
-            eq(goatCodexChatSessions.id, session.id),
-            eq(goatCodexChatSessions.userWorkosId, turn.userWorkosId),
-          ),
-        );
+      await updateCodexChatSessionIfLeaseHeld({
+        turn,
+        leaseId,
+        leaseOwner,
+        setSql: sql`codex_thread_id = ${summary.sessionId}, updated_at = ${new Date()}`,
+      });
     }
     await persistRefreshedGoatCodexAuth({
       sandbox,
       userWorkosId: turn.userWorkosId,
       auth,
       codexHome: CODEX_CHAT_HOME,
+    }).catch((error) => {
+      captureException(error, {
+        event: "opencompany.goat_codex_chat_auth_persist_failed",
+        turn_id: turn.id,
+      });
+      logger.warn("Failed to persist refreshed Goat Codex auth", {
+        event: "opencompany.goat_codex_chat_auth_persist_failed",
+        turn_id: turn.id,
+        error,
+      });
     });
     await projector.finalize(summary);
   } catch (error) {
@@ -225,9 +232,44 @@ export async function loadGoatGitHubAuthForUser(userWorkosId: string) {
   return { githubToken, githubAuthHeader: gitAuthHeader(githubToken) };
 }
 
-function createTurnAbortCheck(input: { turnId: string; leaseId: string; leaseOwner: string }) {
+async function updateCodexChatSessionIfLeaseHeld(input: {
+  turn: GoatCodexChatTurn;
+  leaseId: string;
+  leaseOwner: string;
+  setSql: SQL;
+}) {
+  const result = await getDb().execute(sql`
+    UPDATE goat.codex_chat_sessions AS session
+    SET ${input.setSql}
+    WHERE session.id = ${input.turn.codexChatSessionId}
+      AND session.user_workos_id = ${input.turn.userWorkosId}
+      AND EXISTS (
+        SELECT 1
+        FROM goat.codex_chat_turns AS turn
+        WHERE turn.id = ${input.turn.id}
+          AND turn.user_workos_id = ${input.turn.userWorkosId}
+          AND turn.codex_chat_session_id = session.id
+          AND turn.lease_id = ${input.leaseId}
+          AND turn.lease_owner = ${input.leaseOwner}
+          AND turn.status = 'running'
+      )
+    RETURNING session.id
+  `);
+  if (rowsFromExecute(result).length === 0) {
+    throw new GoatCodexChatLeaseLostError();
+  }
+}
+
+function createTurnAbortCheck(input: {
+  turnId: string;
+  leaseId: string;
+  leaseOwner: string;
+  shouldAbort?: () => Error | null;
+}) {
   let lastCheckedAt = 0;
   return async () => {
+    const externalAbort = input.shouldAbort?.();
+    if (externalAbort) throw externalAbort;
     const now = Date.now();
     if (now - lastCheckedAt < INTERRUPT_POLL_INTERVAL_MS) return;
     lastCheckedAt = now;

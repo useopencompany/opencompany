@@ -1,6 +1,8 @@
 import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 import { GOAT_SPANS, recordGoatTaskDispatch, startGoatSpan } from "@opencompany/goat-observability";
 
+const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
+
 type RunnerContext = {
   task_id: string;
   event?: string;
@@ -141,12 +143,20 @@ export async function triggerGoatCodexChatWake() {
     return;
   }
 
-  const response = await fetch(`${baseUrl}/internal/goat/codex-chat/wake`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CODEX_CHAT_WAKE_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/internal/goat/codex-chat/wake`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const details = await response.text();

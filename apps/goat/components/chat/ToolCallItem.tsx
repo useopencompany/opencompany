@@ -274,11 +274,11 @@ function brainOutputCommand(value: unknown) {
 }
 
 function brainOutputStdout(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stdout.trim() ? value.stdout : null;
+  return isGoatBrainToolOutput(value) && value.stdout?.trim() ? value.stdout : null;
 }
 
 function brainOutputStderr(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stderr.trim() ? value.stderr : null;
+  return isGoatBrainToolOutput(value) && value.stderr?.trim() ? value.stderr : null;
 }
 
 function brainOutputParsed(value: unknown) {

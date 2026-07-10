@@ -301,13 +301,11 @@ export function GoatSurface({
     initialChat && mode === "chat" && chatSessionId === initialChat.id
       ? engineChatKindFromChat(initialChat, localCodexBetaEnabled)
       : null;
-  const activeEngineChat = chatSessionId
-    ? activeInitialChatEngine
-      ? { engine: activeInitialChatEngine, chatSessionId }
-      : engineChatSession?.chatSessionId === chatSessionId
-        ? engineChatSession
-        : null
-    : null;
+  const activeEngineChat = useMemo(() => {
+    if (!chatSessionId) return null;
+    if (activeInitialChatEngine) return { engine: activeInitialChatEngine, chatSessionId };
+    return engineChatSession?.chatSessionId === chatSessionId ? engineChatSession : null;
+  }, [activeInitialChatEngine, chatSessionId, engineChatSession]);
   const isLocalCodexMode = localCodexBetaEnabled && chatModel === LOCAL_CODEX_PICKER_VALUE;
   const isCodexMode = chatModel === CODEX_PICKER_VALUE;
   const selectedEngine: GoatEngineChatKind | null = isLocalCodexMode

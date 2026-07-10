@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   applyCodexEventToUiMessageParts,
   type CodexAppServerNormalizedEvent,
+  type CodexUiMessagePart,
   finalizeCodexUiMessageParts,
   normalizeCodexAppServerEvent,
   parseCodexUiMessageParts,
@@ -354,27 +355,21 @@ export async function completeLocalCodexCommand(input: {
     if (!turn) return { ok: true, status: 200, error: null };
 
     const turnPatch: Partial<typeof goatLocalCodexTurns.$inferInsert> = { updatedAt: now };
+    let assistantFinalization: {
+      outcome: "failed" | "interrupted";
+      error: string | null;
+    } | null = null;
     if (input.codexTurnId) turnPatch.codexTurnId = input.codexTurnId;
     if (input.status === "failed") {
       turnPatch.status = "failed";
       turnPatch.error = input.error ?? "Local Codex command failed.";
       turnPatch.completedAt = now;
-      await finalizeAssistantMessageParts({
-        assistantMessageId: turn.assistantMessageId,
-        outcome: "failed",
-        error: turnPatch.error,
-        now,
-      });
+      assistantFinalization = { outcome: "failed", error: turnPatch.error };
     } else if (command.kind === "interrupt" || command.kind === "close") {
       turnPatch.status = "interrupted";
       turnPatch.error = null;
       turnPatch.completedAt = now;
-      await finalizeAssistantMessageParts({
-        assistantMessageId: turn.assistantMessageId,
-        outcome: "interrupted",
-        error: null,
-        now,
-      });
+      assistantFinalization = { outcome: "interrupted", error: null };
     }
     await getDb()
       .update(goatLocalCodexTurns)
@@ -386,6 +381,14 @@ export async function completeLocalCodexCommand(input: {
           eq(goatLocalCodexTurns.localCodexSessionId, command.localCodexSessionId),
         ),
       );
+    if (assistantFinalization) {
+      await finalizeAssistantMessageParts({
+        assistantMessageId: turn.assistantMessageId,
+        outcome: assistantFinalization.outcome,
+        error: assistantFinalization.error,
+        now,
+      });
+    }
   }
 
   return { ok: true, status: 200, error: null };
@@ -1126,7 +1129,7 @@ async function projectEventIntoAssistantMessage(input: {
 }) {
   const message = await loadAssistantMessageForProjection(input.assistantMessageId);
   if (!message) return;
-  const parts = parseCodexUiMessageParts(message.debugTrace?.uiMessageParts);
+  const parts = assistantProjectionParts(message);
   const projection = applyCodexEventToUiMessageParts(parts, input.event);
   if (!projection.changed) return;
   await writeAssistantMessageProjection({
@@ -1149,7 +1152,7 @@ async function finalizeAssistantMessageParts(input: {
 }) {
   const message = await loadAssistantMessageForProjection(input.assistantMessageId);
   if (!message) return;
-  const parts = parseCodexUiMessageParts(message.debugTrace?.uiMessageParts);
+  const parts = assistantProjectionParts(message);
   const projection = finalizeCodexUiMessageParts(parts, input.outcome, input.error);
   // Always write: even without dangling command parts the error/aborted metadata must land.
   await writeAssistantMessageProjection({
@@ -1179,9 +1182,15 @@ async function writeAssistantMessageProjection(input: {
     schemaVersion: "goat.local_codex.debug.v2",
     model: input.model ?? input.existingTrace?.model ?? LOCAL_CODEX_DEFAULT_MODEL,
     uiMessageParts: input.parts,
-    ...(input.error ? { error: input.error } : {}),
-    ...(input.aborted ? { aborted: true } : {}),
   };
+  if (input.error !== undefined) {
+    if (input.error) debugTrace.error = input.error;
+    else delete debugTrace.error;
+  }
+  if (input.aborted !== undefined) {
+    if (input.aborted) debugTrace.aborted = true;
+    else delete debugTrace.aborted;
+  }
   await getDb()
     .update(goatChatMessages)
     .set({ content: input.content, debugTrace, updatedAt: input.now })
@@ -1191,6 +1200,15 @@ async function writeAssistantMessageProjection(input: {
         eq(goatChatMessages.role, "assistant"),
       ),
     );
+}
+
+function assistantProjectionParts(message: {
+  content: string;
+  debugTrace: GoatChatMessageDebugTrace | null;
+}): CodexUiMessagePart[] {
+  const parts = parseCodexUiMessageParts(message.debugTrace?.uiMessageParts);
+  if (parts.length > 0) return parts;
+  return message.content.trim() ? [{ type: "text", text: message.content }] : [];
 }
 
 function stringPayload(value: unknown) {

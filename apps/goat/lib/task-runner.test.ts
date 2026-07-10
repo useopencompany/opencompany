@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { goatRunnerConfigured, triggerGoatTaskRun } from "@/lib/task-runner";
+import {
+  goatRunnerConfigured,
+  triggerGoatCodexChatWake,
+  triggerGoatTaskRun,
+} from "@/lib/task-runner";
 
 const telemetry = vi.hoisted(() => ({
   startGoatSpan: vi.fn(() => ({
@@ -100,5 +104,52 @@ describe("triggerGoatTaskRun", () => {
         }),
       }),
     );
+  });
+});
+
+describe("triggerGoatCodexChatWake", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("sends authenticated wake requests", async () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner.example.com");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await triggerGoatCodexChatWake();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://runner.example.com/internal/goat/codex-chat/wake",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer token" },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("aborts wake requests that do not return promptly", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner.example.com");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+        const signal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        });
+      }),
+    );
+
+    const wake = expect(triggerGoatCodexChatWake()).rejects.toThrow("aborted");
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await wake;
   });
 });
