@@ -7,7 +7,9 @@ import type {
   goatTasks,
 } from "@opencompany/db/goat-schema";
 import {
+  createGoatGatewayAttribution,
   GOAT_SPANS,
+  goatGatewayProviderOptions,
   hashGoatUserId,
   recordGoatModelUsageTokens,
   withGoatSpan,
@@ -173,6 +175,8 @@ export async function executeGoatTask(
           availableTools: normalizeGoatTaskToolNames(input.task.harnessSpec.tools),
           githubRepositories: input.plannerContext?.githubRepositories ?? [],
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
+          userWorkosId: input.task.userWorkosId,
+          taskId: input.task.id,
           signal: input.signal,
         });
   const harnessSpec = planned.harnessSpec;
@@ -468,6 +472,11 @@ async function runGoatTaskModelStreamInner(input: {
   const { streamText } = getBraintrustAISDK(ai);
   const toolMessagesByCallId = new Map<string, string>();
   const streamAssistantContent = input.harnessSpec.resultMode === "assistant_final";
+  const attribution = createGoatGatewayAttribution({
+    userWorkosId: input.userWorkosId,
+    feature: "task",
+    taskId: input.taskId,
+  });
   let assistantProgressVersion = 0;
   const toolRuntime = buildGoatTaskToolRuntime({
     selectedTools: input.harnessSpec.tools,
@@ -553,6 +562,7 @@ async function runGoatTaskModelStreamInner(input: {
           system: input.harnessSpec.systemPrompt,
         }),
       abortSignal: input.signal,
+      providerOptions: goatGatewayProviderOptions(attribution),
     });
 
     let assistantContent = "";
@@ -645,6 +655,8 @@ export async function planGoatHarnessForTask(input: {
   model: GoatHarnessSpec["model"];
   requestedEngine?: GoatHarnessSpec["engine"];
   gatewayApiKey: string;
+  userWorkosId?: string | null;
+  taskId?: string | null;
   availableTools: readonly GoatTaskToolName[];
   githubRepositories?: readonly string[];
   signal?: AbortSignal;
@@ -677,6 +689,11 @@ export async function planGoatHarnessForTask(input: {
     githubRepositories: input.githubRepositories ?? [],
     defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
   });
+  const attribution = createGoatGatewayAttribution({
+    userWorkosId: input.userWorkosId,
+    feature: "task",
+    ...(input.taskId ? { taskId: input.taskId } : {}),
+  });
 
   const result = await withGoatSpan(
     GOAT_SPANS.taskPlan,
@@ -694,6 +711,7 @@ export async function planGoatHarnessForTask(input: {
         system: systemPrompt,
         prompt: userPrompt,
         ...(input.signal ? { abortSignal: input.signal } : {}),
+        providerOptions: goatGatewayProviderOptions(attribution),
       }),
   );
   const harnessSpec = normalizeHarnessSpec(

@@ -1,6 +1,10 @@
 import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { goatChatMessages, goatChatSessions } from "@opencompany/db/goat-schema";
+import {
+  createGoatGatewayAttribution,
+  goatGatewayProviderOptions,
+} from "@opencompany/goat-observability";
 import { createGateway, generateText } from "ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
 
@@ -29,7 +33,7 @@ export async function generateGoatChatTitleForMessage(input: {
 
   const db = getDb();
   const [session] = await db
-    .select({ id: goatChatSessions.id })
+    .select({ id: goatChatSessions.id, userWorkosId: goatChatSessions.userWorkosId })
     .from(goatChatSessions)
     .where(and(eq(goatChatSessions.id, input.sessionId), isNull(goatChatSessions.closedAt)))
     .limit(1);
@@ -47,6 +51,8 @@ export async function generateGoatChatTitleForMessage(input: {
       content: firstUserMessage.content,
       fallbackTitle,
       apiKey,
+      userWorkosId: session.userWorkosId,
+      chatSessionId: session.id,
     });
   } catch {
     return { ok: false, skipped: "title_generation_failed" };
@@ -66,8 +72,15 @@ export async function generateGoatChatTitle(input: {
   content: string;
   fallbackTitle: string;
   apiKey: string;
+  userWorkosId?: string | null;
+  chatSessionId?: string | null;
 }) {
   const gateway = createGateway({ apiKey: input.apiKey });
+  const attribution = createGoatGatewayAttribution({
+    userWorkosId: input.userWorkosId,
+    feature: "chat-title",
+    ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
+  });
   const result = await generateText({
     model: gateway(TITLE_MODEL),
     system:
@@ -78,7 +91,7 @@ export async function generateGoatChatTitle(input: {
     )}`,
     maxOutputTokens: 20,
     temperature: 0,
-    providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+    providerOptions: goatGatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
   });
 
   return sanitizeGoatChatTitle(result.text, input.fallbackTitle);

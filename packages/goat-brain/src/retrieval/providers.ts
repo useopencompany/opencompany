@@ -13,16 +13,31 @@ export async function loadProviders(
   if (!apiKey) return {};
   const baseUrl = env.GOAT_BRAIN_GATEWAY_BASE_URL;
   const embeddingModel = env.GOAT_BRAIN_EMBEDDING_MODEL ?? "openai/text-embedding-3-small";
+  const reporting = gatewayReportingFromEnv(env);
 
   const gateway = createGateway({
     apiKey,
     ...(baseUrl ? { baseUrl } : {}),
     embeddingModel,
+    ...(reporting ? { reporting } : {}),
     ...(onUsage ? { onUsage } : {}),
   });
   return {
     ...buildProviders(gateway),
     embeddingCacheKey: `${baseUrl ?? "vercel-ai-gateway"}:${embeddingModel}`,
+  };
+}
+
+function gatewayReportingFromEnv(env: NodeJS.ProcessEnv) {
+  const user = env.GOAT_GATEWAY_REPORTING_USER?.trim();
+  const tags = (env.GOAT_GATEWAY_REPORTING_TAGS ?? "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  if (!user && tags.length === 0) return null;
+  return {
+    ...(user ? { user } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
   };
 }
 

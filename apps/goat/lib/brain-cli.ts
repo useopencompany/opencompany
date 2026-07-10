@@ -28,6 +28,7 @@ import {
   normalizeGoatBrainFolderForV1,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
+import { createGoatGatewayAttribution } from "@opencompany/goat-observability";
 import type {
   GoatBrainCliCommand,
   GoatBrainToolFlagValue,
@@ -193,6 +194,12 @@ async function runResolvedGoatBrainCliForUser(
       argv: resolved.argv,
       root,
       gatewayApiKey: input.gatewayApiKey,
+      reporting: createGoatGatewayAttribution({
+        userWorkosId: input.userWorkosId,
+        feature: "brain-query",
+        brainRef: input.brainRef,
+        ...(input.trace?.chatSessionId ? { chatSessionId: input.trace.chatSessionId } : {}),
+      }),
       ...(input.stdin ? { stdin: input.stdin } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });
@@ -282,6 +289,12 @@ async function runGoatBrainReadCommandForUser(
   const ctx: GoatBrainReadContext = {
     brainRef: input.brainRef,
     gatewayApiKey: input.gatewayApiKey,
+    reporting: createGoatGatewayAttribution({
+      userWorkosId: input.userWorkosId,
+      feature: "brain-query",
+      brainRef: input.brainRef,
+      ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
+    }),
   };
   const flags = normalizeCliToolFlags(input.toolInput.flags ?? {});
   const wantsJson = flagBoolean(flags.json) === true;
@@ -910,6 +923,7 @@ async function runCliProcess(input: {
   argv: string[];
   root: string;
   gatewayApiKey: string;
+  reporting?: { user?: string; tags: string[] };
   stdin?: string;
   signal?: AbortSignal;
 }): Promise<GoatBrainCliProcessResult> {
@@ -1004,7 +1018,11 @@ async function runCliProcess(input: {
   });
 }
 
-function childBrainCliEnv(input: { root: string; gatewayApiKey: string }): NodeJS.ProcessEnv {
+function childBrainCliEnv(input: {
+  root: string;
+  gatewayApiKey: string;
+  reporting?: { user?: string; tags: string[] };
+}): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME ?? "",
@@ -1016,6 +1034,10 @@ function childBrainCliEnv(input: { root: string; gatewayApiKey: string }): NodeJ
       : {}),
     ...(process.env.GOAT_BRAIN_EMBEDDING_MODEL
       ? { GOAT_BRAIN_EMBEDDING_MODEL: process.env.GOAT_BRAIN_EMBEDDING_MODEL }
+      : {}),
+    ...(input.reporting?.user ? { GOAT_GATEWAY_REPORTING_USER: input.reporting.user } : {}),
+    ...(input.reporting?.tags.length
+      ? { GOAT_GATEWAY_REPORTING_TAGS: input.reporting.tags.join(",") }
       : {}),
   };
 }

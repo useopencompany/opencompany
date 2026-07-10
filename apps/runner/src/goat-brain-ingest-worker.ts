@@ -60,6 +60,7 @@ export type GoatBrainIngestJobDescriptor = {
 export type GoatBrainIngestHandlerInput<
   TItem extends NormalizedBrainSourceItem = NormalizedBrainSourceItem,
 > = {
+  jobId: string;
   userWorkosId: string;
   brainRef: string | null;
   item: TItem;
@@ -116,34 +117,40 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
-    run: writeJamieMeetingToBrain,
+    run: runTypedGoatBrainIngestHandler(writeJamieMeetingToBrain),
   },
   {
     descriptor: JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
-    run: runJamieMeetingAgentIngest,
+    run: runTypedGoatBrainIngestHandler(runJamieMeetingAgentIngest),
   },
   {
     descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGoatChatCaptureSourceItem,
-    run: runGoatChatCaptureAgentIngest,
+    run: runTypedGoatBrainIngestHandler(runGoatChatCaptureAgentIngest),
   },
   {
     descriptor: UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedUploadAssetSourceItem,
-    run: runUploadAssetAgentIngest,
+    run: runTypedGoatBrainIngestHandler(runUploadAssetAgentIngest),
   },
   {
     descriptor: SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedSlackConversationSourceItem,
-    run: runSlackConversationAgentIngest,
+    run: runTypedGoatBrainIngestHandler(runSlackConversationAgentIngest),
   },
   {
     descriptor: LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedLinearIssueSourceItem,
-    run: runLinearIssueAgentIngest,
+    run: runTypedGoatBrainIngestHandler(runLinearIssueAgentIngest),
   },
 ];
+
+function runTypedGoatBrainIngestHandler<TItem extends NormalizedBrainSourceItem>(
+  run: (input: GoatBrainIngestHandlerInput<TItem>) => Promise<Record<string, unknown>>,
+): GoatBrainIngestHandler["run"] {
+  return (input) => run(input as GoatBrainIngestHandlerInput<TItem>);
+}
 
 export type GoatBrainIngestStore = {
   claimNext(input: {
@@ -392,6 +399,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
     }
 
     const result = await handler.run({
+      jobId: input.job.id,
       userWorkosId: input.job.userWorkosId,
       brainRef: input.job.brainRef ?? null,
       item: input.job.normalizedPayload,
