@@ -23,6 +23,9 @@ describe("GET /api/usage/daily", () => {
       {
         day: "2026-07-09",
         totalCostUsdMicros: 1000,
+        chatCostUsdMicros: 600,
+        taskCostUsdMicros: 300,
+        brainCostUsdMicros: 100,
         marketCostUsdMicros: 1000,
         surchargeCostUsdMicros: 0,
         gatewayCostUsdMicros: 0,

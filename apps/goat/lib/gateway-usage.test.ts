@@ -16,27 +16,33 @@ describe("Goat Gateway usage reporting", () => {
   });
 
   it("fills empty UTC days from Vercel daily report rows", async () => {
+    const responses = [
+      {
+        results: [
+          {
+            day: "2026-07-09",
+            total_cost: 1.25,
+            market_cost: 1.25,
+            surcharge_cost: 0,
+            gateway_cost: 0,
+            input_tokens: 100,
+            output_tokens: 25,
+            cached_input_tokens: 10,
+            cache_creation_input_tokens: 5,
+            reasoning_tokens: 3,
+            request_count: 2,
+          },
+        ],
+      },
+      { results: [{ day: "2026-07-09", total_cost: 0.5 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.125 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.25 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.2 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.175 }] },
+    ];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        Response.json({
-          results: [
-            {
-              day: "2026-07-09",
-              total_cost: 1.25,
-              market_cost: 1.25,
-              surcharge_cost: 0,
-              gateway_cost: 0,
-              input_tokens: 100,
-              output_tokens: 25,
-              cached_input_tokens: 10,
-              cache_creation_input_tokens: 5,
-              reasoning_tokens: 3,
-              request_count: 2,
-            },
-          ],
-        }),
-      ),
+      vi.fn(async () => Response.json(responses.shift() ?? { results: [] })),
     );
 
     await expect(
@@ -55,6 +61,9 @@ describe("Goat Gateway usage reporting", () => {
       expect.objectContaining({
         day: "2026-07-09",
         totalCostUsdMicros: 1_250_000,
+        chatCostUsdMicros: 625_000,
+        taskCostUsdMicros: 250_000,
+        brainCostUsdMicros: 375_000,
         inputTokens: 100,
         outputTokens: 25,
         requestCount: 2,
@@ -66,6 +75,17 @@ describe("Goat Gateway usage reporting", () => {
     expect(url.searchParams.get("tags")).toBe("app:goat");
     expect(url.searchParams.get("tags_match")).toBe("all");
     expect(url.searchParams.get("user_id")).toMatch(/^goat-[0-9a-f]{16}$/);
+    const featureTags = vi
+      .mocked(fetch)
+      .mock.calls.slice(1)
+      .map((call) => new URL(String(call[0])).searchParams.get("tags"));
+    expect(featureTags).toEqual([
+      "app:goat,feature:chat",
+      "app:goat,feature:chat-title",
+      "app:goat,feature:task",
+      "app:goat,feature:brain-ingest",
+      "app:goat,feature:brain-query",
+    ]);
   });
 
   it("returns contextual tag drilldown rows without summing all tags", async () => {

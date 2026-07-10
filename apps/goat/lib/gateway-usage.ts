@@ -9,6 +9,9 @@ const USD_MICROS_PER_DOLLAR = 1_000_000;
 export type GoatDailyUsageRow = {
   day: string;
   totalCostUsdMicros: number;
+  chatCostUsdMicros: number;
+  taskCostUsdMicros: number;
+  brainCostUsdMicros: number;
   marketCostUsdMicros: number;
   surchargeCostUsdMicros: number;
   gatewayCostUsdMicros: number;
@@ -32,6 +35,12 @@ export type GoatUsageDrilldownItem = {
 
 type GatewayReportRow = Record<string, unknown>;
 
+const DAILY_USAGE_CATEGORY_FEATURES = [
+  { category: "chatCostUsdMicros", features: ["chat", "chat-title"] },
+  { category: "taskCostUsdMicros", features: ["task"] },
+  { category: "brainCostUsdMicros", features: ["brain-ingest", "brain-query"] },
+] as const;
+
 export async function getGoatDailyUsage(input: {
   apiKey: string;
   userWorkosId: string;
@@ -44,15 +53,27 @@ export async function getGoatDailyUsage(input: {
   });
   if (!attribution.user) throw new Error("Could not build Goat Gateway reporting user.");
 
-  const report = await fetchGatewayReport({
-    apiKey: input.apiKey,
-    start: input.start,
-    end: input.end,
-    groupBy: "day",
-    userId: attribution.user,
-  });
+  const [report, categoryRows] = await Promise.all([
+    fetchGatewayReport({
+      apiKey: input.apiKey,
+      start: input.start,
+      end: input.end,
+      groupBy: "day",
+      userId: attribution.user,
+      tags: ["app:goat"],
+    }),
+    fetchDailyUsageCategoryRows({
+      apiKey: input.apiKey,
+      start: input.start,
+      end: input.end,
+      userId: attribution.user,
+    }),
+  ]);
 
-  return fillDailyRows(input.start, input.end, report.results.map(toDailyUsageRow));
+  return applyDailyUsageCategories(
+    fillDailyRows(input.start, input.end, report.results.map(toDailyUsageRow)),
+    categoryRows,
+  );
 }
 
 export async function getGoatUsageDrilldown(input: {
@@ -72,6 +93,7 @@ export async function getGoatUsageDrilldown(input: {
     end: input.day,
     groupBy: "tag",
     userId: attribution.user,
+    tags: ["app:goat"],
   });
   const rows = report.results.map(toTaggedUsageRow).flatMap((row) => {
     const context = parseContextTag(row.tag);
@@ -100,13 +122,14 @@ async function fetchGatewayReport(input: {
   end: string;
   groupBy: "day" | "tag";
   userId: string;
+  tags: readonly string[];
 }) {
   const url = new URL(VERCEL_AI_GATEWAY_REPORT_URL);
   url.searchParams.set("start_date", input.start);
   url.searchParams.set("end_date", input.end);
   url.searchParams.set("group_by", input.groupBy);
   url.searchParams.set("user_id", input.userId);
-  url.searchParams.set("tags", "app:goat");
+  url.searchParams.set("tags", input.tags.join(","));
   url.searchParams.set("tags_match", "all");
 
   const response = await fetch(url, {
@@ -127,6 +150,9 @@ function toDailyUsageRow(row: GatewayReportRow): GoatDailyUsageRow {
   return {
     day: readString(row.day),
     totalCostUsdMicros: dollarsToMicros(row.total_cost),
+    chatCostUsdMicros: 0,
+    taskCostUsdMicros: 0,
+    brainCostUsdMicros: 0,
     marketCostUsdMicros: dollarsToMicros(row.market_cost),
     surchargeCostUsdMicros: dollarsToMicros(row.surcharge_cost),
     gatewayCostUsdMicros: dollarsToMicros(row.gateway_cost),
@@ -137,6 +163,52 @@ function toDailyUsageRow(row: GatewayReportRow): GoatDailyUsageRow {
     reasoningTokens: readNumber(row.reasoning_tokens),
     requestCount: readNumber(row.request_count),
   };
+}
+
+async function fetchDailyUsageCategoryRows(input: {
+  apiKey: string;
+  start: string;
+  end: string;
+  userId: string;
+}) {
+  const reports = await Promise.all(
+    DAILY_USAGE_CATEGORY_FEATURES.flatMap(({ category, features }) =>
+      features.map(async (feature) => {
+        const report = await fetchGatewayReport({
+          apiKey: input.apiKey,
+          start: input.start,
+          end: input.end,
+          groupBy: "day",
+          userId: input.userId,
+          tags: ["app:goat", `feature:${feature}`],
+        });
+        return report.results.map((row) => ({
+          day: readString(row.day),
+          category,
+          totalCostUsdMicros: dollarsToMicros(row.total_cost),
+        }));
+      }),
+    ),
+  );
+
+  return reports.flat();
+}
+
+function applyDailyUsageCategories(
+  days: GoatDailyUsageRow[],
+  categoryRows: Array<{
+    day: string;
+    category: (typeof DAILY_USAGE_CATEGORY_FEATURES)[number]["category"];
+    totalCostUsdMicros: number;
+  }>,
+) {
+  const byDay = new Map(days.map((day) => [day.day, { ...day }]));
+  for (const row of categoryRows) {
+    const day = byDay.get(row.day);
+    if (!day) continue;
+    day[row.category] += row.totalCostUsdMicros;
+  }
+  return days.map((day) => byDay.get(day.day) ?? day);
 }
 
 function toTaggedUsageRow(row: GatewayReportRow) {
@@ -160,6 +232,9 @@ function emptyDailyUsageRow(day: string): GoatDailyUsageRow {
   return {
     day,
     totalCostUsdMicros: 0,
+    chatCostUsdMicros: 0,
+    taskCostUsdMicros: 0,
+    brainCostUsdMicros: 0,
     marketCostUsdMicros: 0,
     surchargeCostUsdMicros: 0,
     gatewayCostUsdMicros: 0,
