@@ -18,7 +18,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | `list` | List docs without retrieval or model calls (`--folder`, `--limit`, `--include-merged`). Use this for inventory, not wildcard queries. |
 | `get <id>` | Read one doc (`--section all\|truth\|timeline\|frontmatter`). |
 | `timeline <id>` | Dated evidence entries (`--since 30d`, `--limit`). |
-| `query <text>` | Hybrid retrieval: BM25 + optional embeddings, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`). No LLM calls in the ranking loop (see [retrieval-planes.md](./retrieval-planes.md)). |
+| `query <text>` | Hybrid retrieval: BM25 + optional embeddings, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`). `--since` accepts compact windows like `6h`/`2d` or natural windows like `last 6 hours`. No LLM calls in the ranking loop (see [retrieval-planes.md](./retrieval-planes.md)). |
 | `folder list` | Folders in use. |
 | `doctor` | Validation, link, folder-shape, and weak-provenance findings (`health.ts`). |
 
@@ -43,7 +43,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 
 | Tool | Where | Capability |
 | --- | --- | --- |
-| `goat_brain` | `apps/goat/lib/brain-cli.ts` (schema in `chat-ui.ts`) | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Main chat allows only recall plus explicit edits to known existing records; it does not expose `create` or `folder`. |
+| `goat_brain` | `apps/goat/lib/brain-cli.ts` + shared read surface in `apps/goat/lib/brain-surface.ts` | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Main chat exposes the same read-only command surface as MCP and does not expose write commands. |
 | `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only: instant draft page in `inbox/` + durable curation job. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-chat-captures-agentic). |
 
 ## Runner ingestion agents
@@ -57,15 +57,17 @@ System prompts embed `GOAT_BRAIN_POINTER_COPY_RULE`. Dispatch and leasing live i
 
 `apps/goat/app/api/mcp/[brainRef]/[transport]/route.ts` exposes a per-brain MCP server,
 OAuth-authenticated via WorkOS AuthKit — the token's grant *is* the brain, so a token for brain A
-cannot address brain B. Current tool surface: `query_brain` (read-only retrieval returning JSON
-hits) and `get_document` (full documents by id or alias, batched). Both are served by the read
-plane. External consumers never get write tools; external content enters via ingestion jobs only.
+cannot address brain B. Current canonical tool surface: `goat_brain`, the same read-only command
+surface used by main chat (`query`, `list`, `get`, `timeline`, `help`, `doctor`). Compatibility
+wrappers `query_brain` and `get_document` remain available for older clients and delegate through
+the same tool runner. Reads are served by the read plane. External consumers never get write tools;
+external content enters via ingestion jobs only.
 
 ## Capability summary
 
 | Consumer | Read | Write |
 | --- | --- | --- |
 | Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
-| Goat chat `goat_brain` | ✓ (read plane) | Explicit edits to known existing records only; no direct entity or folder creation |
+| Goat chat `goat_brain` | ✓ (read plane) | never |
 | Goat chat `save_to_brain` | — | capture → curation job only |
-| External agents (MCP) | ✓ (read plane: `query_brain`, `get_document`) | never |
+| External agents (MCP) | ✓ (read plane: `goat_brain`, plus compatibility `query_brain`/`get_document`) | never |
