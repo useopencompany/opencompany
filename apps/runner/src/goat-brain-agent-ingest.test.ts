@@ -293,6 +293,12 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     expect(prompt).toContain("file the draft in decisions with the best existing type");
     expect(prompt).toContain("type note in thoughts");
   });
+
+  it("routes the raw evidence snapshot into the evidence/chat provenance subfolder", () => {
+    const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem());
+
+    expect(prompt).toContain("append-evidence with --folder evidence/chat");
+  });
 });
 
 describe("formatGoatBrainFolderInventoryPrompt", () => {
@@ -323,6 +329,12 @@ describe("buildSlackConversationAgentIngestPrompt", () => {
     expect(prompt).toContain("Jamie (ts 1783950060.000100): Where did we land on onboarding?");
     expect(prompt).toContain("↳ [");
     expect(prompt).toContain("We decided to ship the new flow next week.");
+  });
+
+  it("routes standalone evidence snapshots into the evidence/slack provenance subfolder", () => {
+    const prompt = buildSlackConversationAgentIngestPrompt(slackItem());
+
+    expect(prompt).toContain("append-evidence --folder evidence/slack");
   });
 
   it("omits the permalink hint without a team domain", () => {
