@@ -316,6 +316,7 @@ Set these in the Render `opencompany-runner` service.
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
+| `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` | Goat Codex chat only | Idle timeout for persistent Goat Codex chat sandboxes, defaults to `300000` (5 minutes). Sandboxes pause on idle and auto-resume on the next message. |
 | `RUNNER_GOAT_TASK_WORKER_ENABLED` | Goat only | Enables the experimental Goat task worker and `/goat/tools/*` runner callbacks. Defaults to `false` so normal runner deployments do not poll Goat tables or expose Goat tool execution. |
 | `RUNNER_TOOL_ARG_REPAIR_ENABLED` | No | Kill switch for the model-based deferred-tool argument repair fallback (Layer 3). Deterministic validation + coercion always run; this only gates the small-model repair. Defaults to `true`. |
 | `RUNNER_WORKER_CONCURRENCY` | No | Max parallel sessions per instance, defaults to `8` (prod 40). Bounded by the event loop + E2B sandbox quota + gateway rate limits, not CPU/RAM. |
