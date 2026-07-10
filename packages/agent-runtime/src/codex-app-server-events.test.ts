@@ -102,4 +102,70 @@ describe("normalizeCodexAppServerEvent", () => {
       })[0],
     ).toMatchObject({ type: "error", payload: { message: "bad" } });
   });
+
+  it("maps plan and goal updates", () => {
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/plan/delta",
+        params: { itemId: "plan_1", delta: "1. Inspect" },
+      })[0],
+    ).toMatchObject({
+      type: "plan.updated",
+      payload: { itemId: "plan_1", text: "1. Inspect", status: "running" },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/completed",
+        params: { item: { id: "plan_1", type: "plan", text: "1. Inspect", status: "completed" } },
+      })[0],
+    ).toMatchObject({
+      type: "plan.updated",
+      payload: { itemId: "plan_1", text: "1. Inspect", status: "completed" },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "thread/goal/updated",
+        params: {
+          goal: {
+            objective: "Finish the feature",
+            status: "active",
+            tokenBudget: 1000,
+            tokensUsed: 25,
+          },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "goal.updated",
+      payload: {
+        objective: "Finish the feature",
+        status: "active",
+        tokenBudget: 1000,
+        tokensUsed: 25,
+      },
+    });
+  });
+
+  it("maps user questions and approval requests", () => {
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "userInput/requested",
+        params: { itemId: "question_1", question: "Which branch?" },
+      })[0],
+    ).toMatchObject({
+      type: "question.requested",
+      payload: { itemId: "question_1", question: "Which branch?" },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "approval/requested",
+        params: { itemId: "approval_1", title: "Run command", action: "bun test" },
+      })[0],
+    ).toMatchObject({
+      type: "approval.requested",
+      payload: { itemId: "approval_1", title: "Run command", action: "bun test" },
+    });
+  });
 });

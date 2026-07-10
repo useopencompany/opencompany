@@ -10,6 +10,7 @@ type LocalCodexMessageBody = {
   sessionId?: unknown;
   prompt?: unknown;
   message?: unknown;
+  settings?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
     ...(sessionId ? { sessionId } : {}),
     prompt,
     ...(clientMessageId ? { clientMessageId } : {}),
+    settings: body.value.settings,
   });
   if (!result.ok) return new Response(result.error, { status: result.status });
 

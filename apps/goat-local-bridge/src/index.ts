@@ -9,6 +9,8 @@ import {
 import { ensureDetachedHeadWorktree, ensureEmptySessionWorkspace } from "./worktree";
 
 const LOCAL_CODEX_DEFAULT_MODEL = "gpt-5.5";
+const DEFAULT_CODEX_REASONING_EFFORT = "medium";
+const CODEX_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 
 type BridgeOptions = {
   baseUrl: string;
@@ -26,6 +28,17 @@ type BridgeCommand = {
   localCodexTurnId: string | null;
   payload: Record<string, unknown>;
   createdAt: string;
+};
+
+type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+type CodexSettings = {
+  reasoningEffort: CodexReasoningEffort;
+  planModeReasoningEffort: CodexReasoningEffort | null;
+  goalMode: {
+    objective: string;
+    tokenBudget?: number | null;
+  } | null;
 };
 
 type CodexSessionRuntime = {
@@ -134,6 +147,8 @@ async function startTurn(options: BridgeOptions, command: BridgeCommand) {
 
   const existing = sessions.get(command.localCodexSessionId);
   const worktreePath = readString(command.payload.worktreePath);
+  const model = readString(command.payload.model) || options.model;
+  const codexSettings = readCodexSettings(command.payload.settings);
   const runtime =
     existing ??
     (await createSessionRuntime(options, {
@@ -143,17 +158,37 @@ async function startTurn(options: BridgeOptions, command: BridgeCommand) {
       repositoryPath,
       worktreePath,
       codexThreadId: readString(command.payload.codexThreadId),
-      model: readString(command.payload.model) || options.model,
+      model,
+      settings: codexSettings,
     }));
 
   runtime.eventContext.localCodexTurnId = command.localCodexTurnId;
   runtime.eventContext.commandId = command.id;
+  if (existing) {
+    await runtime.appServer.request("thread/resume", {
+      threadId: runtime.threadId,
+      model,
+      cwd: runtime.worktreePath,
+      config: reasoningConfig(codexSettings),
+    });
+  }
+  if (codexSettings.goalMode) {
+    await runtime.appServer.request("thread/goal/set", {
+      threadId: runtime.threadId,
+      objective: codexSettings.goalMode.objective,
+      status: "active",
+      ...(codexSettings.goalMode.tokenBudget != null
+        ? { tokenBudget: codexSettings.goalMode.tokenBudget }
+        : {}),
+    });
+  }
 
   const turnResult = await runtime.appServer.request("turn/start", {
     threadId: runtime.threadId,
     input: textInput(prompt),
     cwd: runtime.worktreePath,
-    model: readString(command.payload.model) || options.model,
+    model,
+    effort: codexSettings.reasoningEffort,
   });
   const turnId = readStringPath(turnResult, ["turn", "id"]) ?? readStringPath(turnResult, ["id"]);
   runtime.activeTurnId = turnId;
@@ -175,6 +210,7 @@ async function createSessionRuntime(
     worktreePath: string | null;
     codexThreadId: string | null;
     model: string;
+    settings: CodexSettings;
   },
 ): Promise<CodexSessionRuntime> {
   const worktree = input.worktreePath ?? (await createCodexWorkingDirectory(input)).worktreePath;
@@ -211,10 +247,13 @@ async function createSessionRuntime(
     ? await appServer.request("thread/resume", {
         threadId: input.codexThreadId,
         cwd: worktree,
+        model: input.model,
+        config: reasoningConfig(input.settings),
       })
     : await appServer.request("thread/start", {
         model: input.model,
         cwd: worktree,
+        config: reasoningConfig(input.settings),
       });
   const threadId =
     readStringPath(threadResult, ["thread", "id"]) ??
@@ -471,6 +510,46 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function readCodexSettings(value: unknown): CodexSettings {
+  const record = isRecord(value) ? value : {};
+  const reasoningEffort = readReasoningEffort(record.reasoningEffort);
+  const planModeReasoningEffort = readReasoningEffort(record.planModeReasoningEffort);
+  return {
+    reasoningEffort: reasoningEffort ?? DEFAULT_CODEX_REASONING_EFFORT,
+    planModeReasoningEffort,
+    goalMode: readGoalMode(record.goalMode),
+  };
+}
+
+function reasoningConfig(settings: CodexSettings) {
+  return {
+    model_reasoning_effort: settings.reasoningEffort,
+    ...(settings.planModeReasoningEffort
+      ? { plan_mode_reasoning_effort: settings.planModeReasoningEffort }
+      : {}),
+  };
+}
+
+function readReasoningEffort(value: unknown): CodexReasoningEffort | null {
+  return typeof value === "string" && CODEX_REASONING_EFFORTS.has(value)
+    ? (value as CodexReasoningEffort)
+    : null;
+}
+
+function readGoalMode(value: unknown): CodexSettings["goalMode"] {
+  if (!isRecord(value)) return null;
+  const objective = readString(value.objective);
+  if (!objective) return null;
+  const tokenBudget =
+    typeof value.tokenBudget === "number" && Number.isInteger(value.tokenBudget)
+      ? value.tokenBudget
+      : null;
+  return {
+    objective,
+    ...(tokenBudget && tokenBudget > 0 ? { tokenBudget } : {}),
+  };
+}
+
 function readStringPath(value: unknown, path: string[]) {
   let current = value;
   for (const key of path) {
@@ -484,6 +563,10 @@ function formatRpcError(error: unknown) {
   if (!error || typeof error !== "object") return "Codex app-server request failed.";
   const record = error as Record<string, unknown>;
   return readString(record.message) ?? JSON.stringify(record);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function errorMessage(error: unknown) {

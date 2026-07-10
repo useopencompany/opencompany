@@ -1,7 +1,11 @@
 import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import {
+  CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
+  CODEX_GOAL_TOOL_NAME,
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
@@ -173,6 +177,10 @@ export function toolStatusText(status: ToolCallView["status"], state: string) {
 export function toolLabel(name: string) {
   if (name === GOAT_BRAIN_TOOL_NAME) return "Brain";
   if (name === CODEX_COMMAND_TOOL_NAME) return "Command";
+  if (name === CODEX_PLAN_TOOL_NAME) return "Plan";
+  if (name === CODEX_GOAL_TOOL_NAME) return "Goal";
+  if (name === CODEX_QUESTION_TOOL_NAME) return "Question";
+  if (name === CODEX_APPROVAL_TOOL_NAME) return "Approval";
   if (name === START_TASK_TOOL_NAME) return "Task";
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
@@ -194,6 +202,15 @@ export function toolDetail(
     return isRecord(part.input) && typeof part.input.command === "string"
       ? part.input.command
       : null;
+  }
+
+  if (
+    name === CODEX_PLAN_TOOL_NAME ||
+    name === CODEX_GOAL_TOOL_NAME ||
+    name === CODEX_QUESTION_TOOL_NAME ||
+    name === CODEX_APPROVAL_TOOL_NAME
+  ) {
+    return codexStateToolDetail(name, part);
   }
 
   if (part.state === "output-error" && typeof part.errorText === "string") {
@@ -289,6 +306,31 @@ function taskScheduleMutationToolDetail(part: Record<string, unknown>) {
     return truncateToolPreview(scheduleName ?? formatToolInput(part.input));
   }
   return formatToolInput(part.input);
+}
+
+function codexStateToolDetail(name: string, part: Record<string, unknown>) {
+  const input = isRecord(part.input) ? part.input : {};
+  const output = isRecord(part.output) ? part.output : {};
+
+  if (name === CODEX_PLAN_TOOL_NAME) {
+    return truncateToolPreview(readString(output.text) ?? readString(input.text) ?? "Plan mode");
+  }
+  if (name === CODEX_GOAL_TOOL_NAME) {
+    const status = readString(output.status);
+    const objective = readString(output.objective);
+    return truncateToolPreview(
+      [status ? `Status: ${status}` : null, objective].filter(Boolean).join(" - "),
+    );
+  }
+  if (name === CODEX_QUESTION_TOOL_NAME) {
+    return truncateToolPreview(readString(input.question) ?? "Codex is waiting for input.");
+  }
+  if (name === CODEX_APPROVAL_TOOL_NAME) {
+    return truncateToolPreview(
+      readString(input.title) ?? readString(input.action) ?? "Codex is waiting for approval.",
+    );
+  }
+  return null;
 }
 
 function formatToolInput(value: unknown) {
@@ -477,6 +519,10 @@ export function isStartTaskToolOutput(value: unknown): value is StartTaskToolOut
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export function shouldShowThinkingBubble(messages: readonly GoatChatUiMessage[]) {

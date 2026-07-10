@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { normalizeCodexAppServerEvent } from "./codex-app-server-events";
 import {
   applyCodexEventToUiMessageParts,
+  CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_PART_TYPE,
+  CODEX_GOAL_TOOL_NAME,
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
   type CodexUiMessagePart,
   codexUiMessagePartsContent,
   createCodexCommandOutputAccumulator,
@@ -222,6 +226,101 @@ describe("applyCodexEventToUiMessageParts", () => {
     });
     expect(accumulator.take("cmd_1")).toBeNull();
   });
+
+  it("projects plan deltas into a durable plan part", () => {
+    const parts = reduce(
+      [],
+      [
+        {
+          method: "item/plan/delta",
+          params: { itemId: "plan_1", delta: "1. Read code\n" },
+        },
+        {
+          method: "item/plan/delta",
+          params: { itemId: "plan_1", delta: "2. Patch tests" },
+        },
+        {
+          method: "item/completed",
+          params: {
+            item: {
+              id: "plan_1",
+              type: "plan",
+              text: "1. Read code\n2. Patch tests",
+              status: "completed",
+            },
+          },
+        },
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_PLAN_TOOL_NAME,
+        toolCallId: "plan_1",
+        state: "output-available",
+        input: { label: "Plan" },
+        output: { status: "completed", text: "1. Read code\n2. Patch tests" },
+      },
+    ]);
+  });
+
+  it("projects goal, question, and approval request states", () => {
+    const parts = reduce(
+      [],
+      [
+        {
+          method: "thread/goal/updated",
+          params: {
+            goal: {
+              objective: "Ship this UI",
+              status: "active",
+              tokenBudget: 1000,
+              tokensUsed: 25,
+            },
+          },
+        },
+        {
+          method: "userInput/requested",
+          params: { itemId: "question_1", question: "Which branch should I use?" },
+        },
+        {
+          method: "approval/requested",
+          params: { itemId: "approval_1", title: "Apply patch", action: "apply_patch" },
+        },
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_GOAL_TOOL_NAME,
+        toolCallId: `${CODEX_GOAL_TOOL_NAME}_1`,
+        state: "output-available",
+        input: { label: "Goal" },
+        output: {
+          objective: "Ship this UI",
+          status: "active",
+          tokenBudget: 1000,
+          tokensUsed: 25,
+        },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_QUESTION_TOOL_NAME,
+        toolCallId: "question_1",
+        state: "approval-requested",
+        input: { label: "Question", question: "Which branch should I use?", questions: undefined },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_APPROVAL_TOOL_NAME,
+        toolCallId: "approval_1",
+        state: "approval-requested",
+        input: { label: "Approval", title: "Apply patch", action: "apply_patch" },
+      },
+    ]);
+  });
 });
 
 describe("finalizeCodexUiMessageParts", () => {
@@ -265,6 +364,21 @@ describe("parseCodexUiMessageParts", () => {
         state: "output-available",
         input: { command: "ls" },
         output: { status: "completed", exitCode: 0, outputPreview: "apps" },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_PLAN_TOOL_NAME,
+        toolCallId: "plan_1",
+        state: "output-available",
+        input: { label: "Plan" },
+        output: { status: "completed", text: "1. Read code" },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_QUESTION_TOOL_NAME,
+        toolCallId: "question_1",
+        state: "approval-requested",
+        input: { label: "Question", question: "Continue?" },
       },
       { type: "text", text: "hello" },
     ];

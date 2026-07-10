@@ -6,6 +6,10 @@ export type CodexAppServerEventType =
   | "command.output"
   | "command.completed"
   | "command.failed"
+  | "plan.updated"
+  | "goal.updated"
+  | "question.requested"
+  | "approval.requested"
   | "turn.started"
   | "turn.completed"
   | "usage.updated"
@@ -52,6 +56,17 @@ export function normalizeCodexAppServerEvent(
     ];
   }
 
+  if (method === "item/plan/delta") {
+    const delta = rawString(params?.delta);
+    return [
+      normalized("plan.updated", event, {
+        ...base,
+        text: delta ?? "",
+        status: "running",
+      }),
+    ];
+  }
+
   if (method === "item/started") {
     if (item?.type === "commandExecution") {
       return [
@@ -79,6 +94,16 @@ export function normalizeCodexAppServerEvent(
         normalized("reasoning.completed", event, {
           ...base,
           text: rawString(item.text) ?? rawString(item.summary) ?? rawString(item.content) ?? "",
+        }),
+      ];
+    }
+
+    if (isPlanItem(item)) {
+      return [
+        normalized("plan.updated", event, {
+          ...base,
+          text: rawString(item.text) ?? rawString(item.summary) ?? rawString(item.content) ?? "",
+          status: firstString(item.status) ?? "completed",
         }),
       ];
     }
@@ -142,6 +167,44 @@ export function normalizeCodexAppServerEvent(
     ];
   }
 
+  if (method === "thread/goal/updated") {
+    return [
+      normalized("goal.updated", event, {
+        ...base,
+        ...goalPayload(params),
+      }),
+    ];
+  }
+
+  if (method === "thread/goal/cleared") {
+    return [
+      normalized("goal.updated", event, {
+        ...base,
+        status: "cleared",
+      }),
+    ];
+  }
+
+  if (isQuestionRequest(method, params)) {
+    return [
+      normalized("question.requested", event, {
+        ...base,
+        question: firstString(params?.question, stringFromPath(params, ["prompt", "question"])),
+        questions: Array.isArray(params?.questions) ? params.questions : undefined,
+      }),
+    ];
+  }
+
+  if (isApprovalRequest(method, params)) {
+    return [
+      normalized("approval.requested", event, {
+        ...base,
+        title: firstString(params?.title, params?.message),
+        action: firstString(params?.action, params?.command),
+      }),
+    ];
+  }
+
   if (method === "error") {
     return [
       normalized("error", event, {
@@ -191,6 +254,42 @@ function compactPayload(payload: Record<string, unknown>) {
 
 function isReasoningItem(item: Record<string, unknown>) {
   return typeof item.type === "string" && item.type.toLowerCase().includes("reasoning");
+}
+
+function isPlanItem(item: Record<string, unknown>) {
+  return typeof item.type === "string" && item.type.toLowerCase().includes("plan");
+}
+
+function goalPayload(params: Record<string, unknown> | null | undefined) {
+  const goal = readRecord(params?.goal) ?? params;
+  return {
+    objective: firstString(goal?.objective),
+    status: firstString(goal?.status),
+    tokenBudget: typeof goal?.tokenBudget === "number" ? goal.tokenBudget : undefined,
+    tokensUsed: typeof goal?.tokensUsed === "number" ? goal.tokensUsed : undefined,
+    timeUsedSeconds: typeof goal?.timeUsedSeconds === "number" ? goal.timeUsedSeconds : undefined,
+  };
+}
+
+function isQuestionRequest(method: string, params: Record<string, unknown> | null | undefined) {
+  const normalizedMethod = method.toLowerCase();
+  return (
+    (normalizedMethod.includes("question") || normalizedMethod.includes("userinput")) &&
+    (normalizedMethod.includes("request") || normalizedMethod.includes("required")) &&
+    (typeof params?.question === "string" || Array.isArray(params?.questions))
+  );
+}
+
+function isApprovalRequest(method: string, params: Record<string, unknown> | null | undefined) {
+  const normalizedMethod = method.toLowerCase();
+  return (
+    normalizedMethod.includes("approval") &&
+    (normalizedMethod.includes("request") || normalizedMethod.includes("required")) &&
+    (typeof params?.title === "string" ||
+      typeof params?.message === "string" ||
+      typeof params?.action === "string" ||
+      typeof params?.command === "string")
+  );
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

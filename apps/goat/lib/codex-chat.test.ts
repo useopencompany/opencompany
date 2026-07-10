@@ -57,6 +57,22 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid Codex settings before writing", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "hello",
+      settings: { reasoningEffort: "extreme" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "Invalid Codex reasoning effort.",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.wake).not.toHaveBeenCalled();
+  });
+
   it("rejects sends while Codex is disconnected", async () => {
     mocks.codexConnected.mockResolvedValue(false);
     const result = await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });

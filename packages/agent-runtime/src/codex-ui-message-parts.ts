@@ -9,6 +9,10 @@ import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 export const CODEX_COMMAND_TOOL_NAME = "codex_command";
 export const CODEX_COMMAND_TOOL_PART_TYPE = `tool-${CODEX_COMMAND_TOOL_NAME}` as const;
 export const CODEX_COMMAND_OUTPUT_PREVIEW_LIMIT = 4_000;
+export const CODEX_PLAN_TOOL_NAME = "codex_plan";
+export const CODEX_GOAL_TOOL_NAME = "codex_goal";
+export const CODEX_QUESTION_TOOL_NAME = "codex_question";
+export const CODEX_APPROVAL_TOOL_NAME = "codex_approval";
 
 export type CodexCommandToolInput = { command: string };
 export type CodexCommandToolOutput = {
@@ -28,7 +32,33 @@ export type CodexUiCommandPart = {
   | { state: "output-available"; output: CodexCommandToolOutput }
   | { state: "output-error"; errorText: string }
 );
-export type CodexUiMessagePart = CodexUiTextPart | CodexUiReasoningPart | CodexUiCommandPart;
+export type CodexUiStatusPart = {
+  type: "dynamic-tool";
+  toolName:
+    | typeof CODEX_PLAN_TOOL_NAME
+    | typeof CODEX_GOAL_TOOL_NAME
+    | typeof CODEX_QUESTION_TOOL_NAME
+    | typeof CODEX_APPROVAL_TOOL_NAME;
+  toolCallId: string;
+  input: Record<string, unknown>;
+} & (
+  | { state: "input-available" }
+  | { state: "approval-requested" }
+  | { state: "output-available"; output: Record<string, unknown> }
+);
+type CodexUiStatusPartPayload =
+  | { state: "input-available"; input: Record<string, unknown> }
+  | { state: "approval-requested"; input: Record<string, unknown> }
+  | {
+      state: "output-available";
+      input: Record<string, unknown>;
+      output: Record<string, unknown>;
+    };
+export type CodexUiMessagePart =
+  | CodexUiTextPart
+  | CodexUiReasoningPart
+  | CodexUiCommandPart
+  | CodexUiStatusPart;
 
 export type CodexUiMessageProjection = {
   parts: CodexUiMessagePart[];
@@ -103,6 +133,22 @@ export function applyCodexEventToUiMessageParts(
           input: existing.input,
           errorText,
         })),
+      );
+    }
+    case "plan.updated": {
+      return changed(upsertStatusPart(parts, event, CODEX_PLAN_TOOL_NAME, planStatusPart(event)));
+    }
+    case "goal.updated": {
+      return changed(upsertStatusPart(parts, event, CODEX_GOAL_TOOL_NAME, goalStatusPart(event)));
+    }
+    case "question.requested": {
+      return changed(
+        upsertStatusPart(parts, event, CODEX_QUESTION_TOOL_NAME, questionStatusPart(event)),
+      );
+    }
+    case "approval.requested": {
+      return changed(
+        upsertStatusPart(parts, event, CODEX_APPROVAL_TOOL_NAME, approvalStatusPart(event)),
       );
     }
     case "error": {
@@ -196,6 +242,41 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
           errorText,
         });
       }
+      continue;
+    }
+    if (
+      part.type === "dynamic-tool" &&
+      typeof part.toolName === "string" &&
+      isCodexStatusToolName(part.toolName) &&
+      typeof part.toolCallId === "string"
+    ) {
+      const input = isRecord(part.input) ? part.input : {};
+      if (part.state === "input-available") {
+        parts.push({
+          type: "dynamic-tool",
+          toolName: part.toolName,
+          toolCallId: part.toolCallId,
+          state: "input-available",
+          input,
+        });
+      } else if (part.state === "approval-requested") {
+        parts.push({
+          type: "dynamic-tool",
+          toolName: part.toolName,
+          toolCallId: part.toolCallId,
+          state: "approval-requested",
+          input,
+        });
+      } else if (part.state === "output-available") {
+        parts.push({
+          type: "dynamic-tool",
+          toolName: part.toolName,
+          toolCallId: part.toolCallId,
+          state: "output-available",
+          input,
+          output: isRecord(part.output) ? part.output : {},
+        });
+      }
     }
   }
   return parts;
@@ -267,6 +348,148 @@ function replaceCommandPart(
   return next;
 }
 
+function upsertStatusPart(
+  parts: readonly CodexUiMessagePart[],
+  event: CodexAppServerNormalizedEvent,
+  toolName: CodexUiStatusPart["toolName"],
+  nextPart: CodexUiStatusPartPayload,
+): CodexUiMessagePart[] {
+  const toolCallId = statusToolCallId(event, toolName, parts);
+  const index = parts.findIndex(
+    (part) =>
+      part.type === "dynamic-tool" && part.toolName === toolName && part.toolCallId === toolCallId,
+  );
+  const existing = index >= 0 ? (parts[index] ?? null) : null;
+  const resolvedPart =
+    toolName === CODEX_PLAN_TOOL_NAME && nextPart.state === "input-available"
+      ? appendPlanDelta(existing, nextPart)
+      : nextPart;
+  const part = createStatusPart(toolName, toolCallId, resolvedPart);
+  if (index < 0) return [...parts, part];
+  return parts.map((current, currentIndex) => (currentIndex === index ? part : current));
+}
+
+function createStatusPart(
+  toolName: CodexUiStatusPart["toolName"],
+  toolCallId: string,
+  payload: CodexUiStatusPartPayload,
+): CodexUiStatusPart {
+  if (payload.state === "output-available") {
+    return {
+      type: "dynamic-tool",
+      toolName,
+      toolCallId,
+      state: "output-available",
+      input: payload.input,
+      output: payload.output,
+    };
+  }
+  return {
+    type: "dynamic-tool",
+    toolName,
+    toolCallId,
+    state: payload.state,
+    input: payload.input,
+  };
+}
+
+function appendPlanDelta(
+  existing: CodexUiMessagePart | null,
+  nextPart: Extract<CodexUiStatusPartPayload, { state: "input-available" }>,
+): Extract<CodexUiStatusPartPayload, { state: "input-available" }> {
+  if (!existing || existing.type !== "dynamic-tool" || existing.toolName !== CODEX_PLAN_TOOL_NAME) {
+    return nextPart;
+  }
+  const previousText =
+    readString(existing.input.text) ??
+    (existing.state === "output-available" ? readString(existing.output.text) : null) ??
+    "";
+  const delta = readString(nextPart.input.text) ?? "";
+  return {
+    ...nextPart,
+    input: {
+      ...nextPart.input,
+      text: `${previousText}${delta}`,
+    },
+  };
+}
+
+function planStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const text = readString(event.payload.text) ?? "";
+  const completed = readString(event.payload.status) === "completed";
+  return completed
+    ? {
+        state: "output-available",
+        input: { label: "Plan" },
+        output: { status: "completed", text },
+      }
+    : {
+        state: "input-available",
+        input: { label: "Plan", text },
+      };
+}
+
+function goalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const output = Object.fromEntries(
+    Object.entries({
+      objective: readString(event.payload.objective),
+      status: readString(event.payload.status),
+      tokenBudget: typeof event.payload.tokenBudget === "number" ? event.payload.tokenBudget : null,
+      tokensUsed: typeof event.payload.tokensUsed === "number" ? event.payload.tokensUsed : null,
+      timeUsedSeconds:
+        typeof event.payload.timeUsedSeconds === "number" ? event.payload.timeUsedSeconds : null,
+    }).filter(([, value]) => value !== null),
+  );
+  return {
+    state: "output-available",
+    input: { label: "Goal" },
+    output,
+  };
+}
+
+function questionStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  return {
+    state: "approval-requested",
+    input: {
+      label: "Question",
+      question: readString(event.payload.question),
+      questions: Array.isArray(event.payload.questions) ? event.payload.questions : undefined,
+    },
+  };
+}
+
+function approvalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  return {
+    state: "approval-requested",
+    input: {
+      label: "Approval",
+      title: readString(event.payload.title),
+      action: readString(event.payload.action),
+    },
+  };
+}
+
+function statusToolCallId(
+  event: CodexAppServerNormalizedEvent,
+  toolName: CodexUiStatusPart["toolName"],
+  parts: readonly CodexUiMessagePart[],
+) {
+  const itemId = readString(event.payload.itemId);
+  if (itemId) return itemId;
+  const existing = parts.find((part) => part.type === "dynamic-tool" && part.toolName === toolName);
+  if (existing?.type === "dynamic-tool") return existing.toolCallId;
+  return `${toolName}_${parts.length + 1}`;
+}
+
+function isCodexStatusToolName(value: string): value is CodexUiStatusPart["toolName"] {
+  return (
+    value === CODEX_PLAN_TOOL_NAME ||
+    value === CODEX_GOAL_TOOL_NAME ||
+    value === CODEX_QUESTION_TOOL_NAME ||
+    value === CODEX_APPROVAL_TOOL_NAME
+  );
+}
+
 function commandToolCallId(
   event: CodexAppServerNormalizedEvent,
   parts: readonly CodexUiMessagePart[],
@@ -325,6 +548,10 @@ function isCommandPart(part: CodexUiMessagePart): part is CodexUiCommandPart {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function unchanged(parts: readonly CodexUiMessagePart[]): CodexUiMessageProjection {

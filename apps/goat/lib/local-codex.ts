@@ -11,6 +11,7 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatChatMessageDebugTrace,
+  type GoatCodexChatTurnSettings,
   type GoatLocalBridge,
   type GoatLocalCodexCommandKind,
   type GoatLocalCodexCommandStatus,
@@ -26,6 +27,7 @@ import {
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
+import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_DEFAULT_MODEL, LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
 import { extractLocalRepositoryPath, hashLocalBridgeToken } from "@/lib/local-codex-utils";
 import { toGoatTaskTitle } from "@/lib/task-display";
@@ -156,12 +158,16 @@ export async function createOrSteerLocalCodexMessage(input: {
   sessionId?: string | null;
   prompt: string;
   clientMessageId?: string | null;
+  settings?: unknown;
 }): Promise<LocalCodexMessageResult> {
   const prompt = input.prompt.trim();
   if (!prompt) return { ok: false, status: 400, error: "Enter a message before sending." };
   if (prompt.length > LOCAL_CODEX_PROMPT_MAX_LENGTH) {
     return { ok: false, status: 400, error: "Messages can be at most 10,000 characters." };
   }
+  const parsedSettings = parseCodexChatSettings(input.settings);
+  if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
+  const settings = parsedSettings.settings;
 
   const bridge = await loadActiveLocalCodexBridge(input.userWorkosId);
   if (!bridge) {
@@ -184,6 +190,7 @@ export async function createOrSteerLocalCodexMessage(input: {
       userWorkosId: input.userWorkosId,
       prompt,
       ...(input.clientMessageId !== undefined ? { clientMessageId: input.clientMessageId } : {}),
+      settings,
       bridge,
       localSession: existing,
     });
@@ -194,6 +201,7 @@ export async function createOrSteerLocalCodexMessage(input: {
     prompt,
     repositoryPath: null,
     ...(input.clientMessageId !== undefined ? { clientMessageId: input.clientMessageId } : {}),
+    settings,
     bridge,
   });
 }
@@ -545,6 +553,7 @@ async function createFirstLocalCodexTurn(input: {
   prompt: string;
   repositoryPath: string | null;
   clientMessageId?: string | null;
+  settings: GoatCodexChatTurnSettings;
   bridge: GoatLocalBridge;
 }): Promise<LocalCodexMessageResult> {
   const chatSessionId = `goat_chat_${randomUUID()}`;
@@ -648,6 +657,7 @@ async function createFirstLocalCodexTurn(input: {
         assistant_message_id,
         status,
         prompt,
+        settings,
         created_at,
         updated_at
       )
@@ -659,6 +669,7 @@ async function createFirstLocalCodexTurn(input: {
         ${assistantMessageId},
         'queued',
         ${input.prompt},
+        ${JSON.stringify(input.settings)}::jsonb,
         ${now},
         ${now}
       )
@@ -688,6 +699,7 @@ async function createFirstLocalCodexTurn(input: {
         prompt: input.prompt,
         repositoryPath: input.repositoryPath,
         model: LOCAL_CODEX_DEFAULT_MODEL,
+        settings: input.settings,
       })}::jsonb,
       ${now},
       ${now}
@@ -711,6 +723,7 @@ async function enqueueExistingLocalCodexMessage(input: {
   userWorkosId: string;
   prompt: string;
   clientMessageId?: string | null;
+  settings: GoatCodexChatTurnSettings;
   bridge: GoatLocalBridge;
   localSession: GoatLocalCodexSession;
 }): Promise<LocalCodexMessageResult> {
@@ -765,7 +778,7 @@ async function enqueueExistingLocalCodexMessage(input: {
         ${input.bridge.id},
         'steer',
         'queued',
-        ${JSON.stringify({ prompt: input.prompt })}::jsonb,
+        ${JSON.stringify({ prompt: input.prompt, settings: input.settings })}::jsonb,
         ${now},
         ${now}
       WHERE EXISTS (SELECT 1 FROM inserted_user_message)
@@ -833,6 +846,7 @@ async function enqueueExistingLocalCodexMessage(input: {
         assistant_message_id,
         status,
         prompt,
+        settings,
         created_at,
         updated_at
       )
@@ -844,6 +858,7 @@ async function enqueueExistingLocalCodexMessage(input: {
         ${assistantMessageId},
         'queued',
         ${input.prompt},
+        ${JSON.stringify(input.settings)}::jsonb,
         ${now},
         ${now}
       )
@@ -891,6 +906,7 @@ async function enqueueExistingLocalCodexMessage(input: {
         model: input.localSession.model,
         codexThreadId: input.localSession.codexThreadId,
         worktreePath: input.localSession.worktreePath,
+        settings: input.settings,
       })}::jsonb,
       ${now},
       ${now}

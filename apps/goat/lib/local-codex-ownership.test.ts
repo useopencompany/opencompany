@@ -285,6 +285,7 @@ function localTurnFixture(overrides: Partial<GoatLocalCodexTurn> = {}): GoatLoca
     codexTurnId: null,
     status: "running",
     prompt: "Inspect",
+    settings: {},
     error: null,
     completedAt: null,
     createdAt: now,

@@ -250,6 +250,11 @@ describe("GoatSurface chat streaming UI", () => {
         role: "user",
         parts: [{ type: "text", text: "Inspect" }],
       },
+      settings: {
+        reasoningEffort: "medium",
+        planModeEnabled: false,
+        goalMode: null,
+      },
     });
   });
 
@@ -273,6 +278,38 @@ describe("GoatSurface chat streaming UI", () => {
     );
     await user.click(screen.getByRole("button", { name: "Model" }));
     expect(screen.getByText("Cloud Codex sandbox")).toBeInTheDocument();
+  });
+
+  it("shows Codex controls only for Codex engine chats", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /Codex reasoning effort/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Plan mode" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Goal mode" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Plan mode" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "Goal mode" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("submits Codex engine chats to the codex-chat endpoint", async () => {
@@ -321,7 +358,77 @@ describe("GoatSurface chat streaming UI", () => {
         role: "user",
         parts: [{ type: "text", text: "Clone my repo" }],
       },
+      settings: {
+        reasoningEffort: "medium",
+        planModeEnabled: false,
+        goalMode: null,
+      },
     });
+  });
+
+  it("submits Codex reasoning, plan, and goal settings", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: "goat_chat_codex_1",
+          userMessageId: "goat_chat_msg_codex_user",
+          assistantMessageId: "goat_chat_msg_codex_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Plan mode" }));
+    await user.click(screen.getByRole("button", { name: "Goal mode" }));
+    await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));
+    await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
+    await user.type(screen.getByPlaceholderText("Token budget"), "200000");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Run the failing suite",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      settings: {
+        reasoningEffort: "high",
+        planModeEnabled: true,
+        goalMode: {
+          objective: "Fix the flaky tests",
+          tokenBudget: 200000,
+        },
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Plan mode" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      ),
+    );
   });
 
   it("opens existing Codex chats in codex mode without enabling resume", () => {
