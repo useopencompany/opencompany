@@ -166,7 +166,11 @@ async function resolveBrainMutationContext(brainRef: string): Promise<
     }
 > {
   try {
-    return await currentGoatBrainByRef(brainRef);
+    const resolved = await currentGoatBrainByRef(brainRef);
+    if (resolved.context.role !== "admin") {
+      return { ok: false, message: "Only workspace admins can edit the brain." };
+    }
+    return resolved;
   } catch (error) {
     return {
       ok: false,

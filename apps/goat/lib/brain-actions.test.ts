@@ -32,8 +32,9 @@ vi.mock("@/lib/brain-assets", () => ({
 
 describe("brain actions", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(currentGoatBrainByRef).mockResolvedValue({
-      context: { user: { workosUserId: "user_1" } },
+      context: { role: "admin", user: { workosUserId: "user_1" } },
       brain: { id: "goat_brain_team" },
     } as Awaited<ReturnType<typeof currentGoatBrainByRef>>);
     vi.mocked(updateGoatBrainDocumentForUser).mockResolvedValue({ ok: true });
@@ -93,6 +94,22 @@ describe("brain actions", () => {
     });
 
     expect(result).toEqual({ ok: false, message: "You do not have access to that brain." });
+    expect(updateGoatBrainDocumentForUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-admin brain mutations without writing", async () => {
+    vi.mocked(currentGoatBrainByRef).mockResolvedValueOnce({
+      context: { role: "member", user: { workosUserId: "user_1" } },
+      brain: { id: "goat_brain_team" },
+    } as Awaited<ReturnType<typeof currentGoatBrainByRef>>);
+
+    const result = await updateGoatBrainDocumentAction({
+      brainRef: "goat_brain_team",
+      documentId: "doc_1",
+      body: "Updated truth.",
+    });
+
+    expect(result).toEqual({ ok: false, message: "Only workspace admins can edit the brain." });
     expect(updateGoatBrainDocumentForUser).not.toHaveBeenCalled();
   });
 });

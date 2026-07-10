@@ -1,13 +1,16 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GoatSidebar } from "./GoatSidebar";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 const routerMock = vi.hoisted(() => ({
   push: vi.fn(),
   refresh: vi.fn(),
+}));
+const workspaceRoleMock = vi.hoisted(() => ({
+  value: "admin" as "admin" | "member",
 }));
 
 vi.mock("next/navigation", () => ({
@@ -31,8 +34,8 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       lastName: "Lovelace",
       avatarUrl: null,
     },
-    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
-    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
+    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
+    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value }],
     workspaceMembers: [],
     brains: [
       {
@@ -54,6 +57,11 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
 }));
 
 describe("GoatSidebar", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    workspaceRoleMock.value = "admin";
+  });
+
   it("renders home, the brain list, and settings in the account footer", () => {
     pathnameMock.value = "/";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
@@ -110,6 +118,16 @@ describe("GoatSidebar", () => {
     await user.click(screen.getByRole("button", { name: "General" }));
 
     expect(routerMock.push).toHaveBeenCalledWith("/brain/goat_brain_1");
+  });
+
+  it("does not show brain creation to workspace members", () => {
+    workspaceRoleMock.value = "member";
+    pathnameMock.value = "/";
+
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New brain" })).not.toBeInTheDocument();
   });
 
   it("collapses to zero width and toggles via the sidebar button", () => {

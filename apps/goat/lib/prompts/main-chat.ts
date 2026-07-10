@@ -61,7 +61,10 @@ export function createOpenCompanyChatSystemPrompt(
     currentDate?: Date | string;
     userContext?: OpenCompanyChatUserContext;
     webSearchEnabled?: boolean;
-    activeBrain?: { name: string; workspaceName: string } | null;
+    brainWriteEnabled?: boolean;
+    taskToolsEnabled?: boolean;
+    scheduleToolsEnabled?: boolean;
+    activeBrain?: { name: string; workspaceName: string; readOnly?: boolean } | null;
     recurringSchedules?: readonly {
       id: string;
       name: string;
@@ -81,7 +84,11 @@ export function createOpenCompanyChatSystemPrompt(
     ]),
     promptBlock("user_context", formatUserContext(input.userContext)),
     promptBlock("behavior", [
-      ...OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES,
+      ...formatBaseBehaviorLines({
+        brainWriteEnabled: input.brainWriteEnabled,
+        taskToolsEnabled: input.taskToolsEnabled,
+        scheduleToolsEnabled: input.scheduleToolsEnabled,
+      }),
       ...(input.webSearchEnabled ? OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES : []),
     ]),
     OPENCOMPANY_CHAT_SOUL,
@@ -89,13 +96,73 @@ export function createOpenCompanyChatSystemPrompt(
 }
 
 function formatActiveBrainContext(
-  activeBrain: { name: string; workspaceName: string } | null | undefined,
+  activeBrain: { name: string; workspaceName: string; readOnly?: boolean } | null | undefined,
 ) {
   if (!activeBrain) {
     return ["No brain is available: the goat_brain tool will fail until one is accessible."];
   }
+  if (activeBrain.readOnly) {
+    return [
+      `The goat_brain tool reads the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace. This user has browse-only access: do not write, save, edit, file, or delete Brain content.`,
+    ];
+  }
   return [
     `The goat_brain tool reads and writes the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace. Saved and recalled context is scoped to that brain.`,
+  ];
+}
+
+function formatBaseBehaviorLines(input: {
+  brainWriteEnabled?: boolean | undefined;
+  taskToolsEnabled?: boolean | undefined;
+  scheduleToolsEnabled?: boolean | undefined;
+}) {
+  const brainWriteEnabled = input.brainWriteEnabled ?? true;
+  const taskToolsEnabled = input.taskToolsEnabled ?? true;
+  const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
+  const lines = OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES.filter((line) => {
+    if (
+      !brainWriteEnabled &&
+      (line.startsWith("Use the save_to_brain tool") ||
+        line.startsWith("Use the goat_brain tool inside chat") ||
+        line.includes("save_to_brain") ||
+        line.includes("save this to Brain") ||
+        line.includes("updated the user's Brain"))
+    ) {
+      return false;
+    }
+    if (
+      !taskToolsEnabled &&
+      (line.startsWith("Decide from the user's intent") ||
+        line.startsWith("Start a task") ||
+        line.startsWith("If you think you do not have the capability") ||
+        line.startsWith("Requests to check") ||
+        line.startsWith("When you start a task"))
+    ) {
+      return false;
+    }
+    if (
+      !scheduleToolsEnabled &&
+      (line.startsWith("Create a recurring task schedule") ||
+        line.startsWith("Edit or delete an existing recurring task schedule") ||
+        line.startsWith("Recurring schedules generate"))
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  return [
+    ...(brainWriteEnabled
+      ? []
+      : [
+          "Use the goat_brain tool only to recall, search, inspect, or verify durable workspace context. Do not save, edit, file, create, move, merge, link, or delete Brain content.",
+        ]),
+    ...(taskToolsEnabled
+      ? []
+      : [
+          "Handle the request in this chat when possible. If it requires tracked background execution, connected-account work, or long-running investigation, say that a workspace admin needs to start that task.",
+        ]),
+    ...lines,
   ];
 }
 

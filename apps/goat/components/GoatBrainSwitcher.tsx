@@ -8,7 +8,7 @@ import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { createGoatBrainAction, switchGoatBrainAction } from "@/lib/workspace-actions";
 
 export function GoatBrainSwitcher() {
-  const { brains, activeBrain } = useGoatAppData();
+  const { brains, activeBrain, workspace } = useGoatAppData();
   const router = useRouter();
   const pathname = usePathname();
   const [creating, setCreating] = useState(false);
@@ -72,14 +72,16 @@ export function GoatBrainSwitcher() {
             No brains available in this workspace.
           </div>
         ) : null}
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          className="flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <Plus size={14} strokeWidth={1.75} className="shrink-0" />
-          <span className="truncate tracking-[-0.005em]">New brain</span>
-        </button>
+        {workspace.role === "admin" ? (
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <Plus size={14} strokeWidth={1.75} className="shrink-0" />
+            <span className="truncate tracking-[-0.005em]">New brain</span>
+          </button>
+        ) : null}
       </div>
       {creating ? <CreateBrainDialog onClose={() => setCreating(false)} /> : null}
     </>
@@ -131,7 +133,7 @@ function CreateBrainDialog({ onClose }: { onClose: () => void }) {
             checked={visibility === "workspace"}
             onSelect={() => setVisibility("workspace")}
             title="Everyone in the workspace"
-            description="All current and future members can view and edit."
+            description="All current and future members can view."
           />
           <VisibilityOption
             checked={visibility === "restricted"}

@@ -257,6 +257,7 @@ function GoatBrainEditor({
   const router = useRouter();
   const navInset = useGoatNavInset();
   const { workspace } = useGoatAppData();
+  const canEditBrain = workspace.role === "admin";
   const selectedBrainId = routeBrainId ?? null;
   const initialDocument = useMemo(
     () => resolveInitialDocument(documents, initialFolderPath, initialBrainId),
@@ -371,7 +372,7 @@ function GoatBrainEditor({
   );
 
   const selectDocument = (document: GoatBrainDocumentView) => {
-    saveRef.current(); // flush pending edits on the outgoing document
+    if (canEditBrain) saveRef.current(); // flush pending edits on the outgoing document
     setSelectedFolder(document.folderPath);
     setSelectedDocumentId(document.id);
     setExpandedPaths((current) => withAncestorFolders(current, document.folderPath));
@@ -398,7 +399,8 @@ function GoatBrainEditor({
       !selectedDocument ||
       selectedDocument.format !== "markdown" ||
       !dirty ||
-      isDocPending
+      isDocPending ||
+      !canEditBrain
     )
       return;
     const autosave = autosaveFor(selectedDocument.id);
@@ -432,17 +434,17 @@ function GoatBrainEditor({
   // Debounced autosave: fires once typing pauses; when an in-flight save finishes
   // (isDocPending flips), the effect re-arms so newer edits get their own save.
   useEffect(() => {
-    if (!dirty || isDocPending) return;
+    if (!canEditBrain || !dirty || isDocPending) return;
     const autosave = autosaveFor(selectedDocumentId);
     if (editorValue === autosave.savedValue || editorValue === autosave.failedValue) return;
     const timer = setTimeout(() => saveRef.current(), AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [autosaveFor, dirty, editorValue, isDocPending, selectedDocumentId]);
+  }, [autosaveFor, canEditBrain, dirty, editorValue, isDocPending, selectedDocumentId]);
 
   // Rename deliberately does NOT reseed the editor draft (applyDocumentResult), so unsaved
   // body edits survive a title change; the live collection syncs title + contentHash after.
   const renameDocument = (title: string) => {
-    if (!brainRef || !selectedDocument) return;
+    if (!brainRef || !selectedDocument || !canEditBrain) return;
     const currentTitle = selectedDocument.title ?? selectedDocument.brainId;
     if (title === currentTitle) return;
     startDocTransition(async () => {
@@ -470,7 +472,7 @@ function GoatBrainEditor({
   };
 
   const deleteDocument = () => {
-    if (!brainRef || !selectedDocument) return;
+    if (!brainRef || !selectedDocument || !canEditBrain) return;
     if (!confirm(`Delete "${selectedDocument.title ?? selectedDocument.brainId}"?`)) return;
     startDocTransition(async () => {
       const deletedId = selectedDocument.id;
@@ -495,7 +497,7 @@ function GoatBrainEditor({
 
   const submitFolderDialog = (folderPath: string) => {
     const dialog = folderDialog;
-    if (!brainRef || !dialog) return;
+    if (!brainRef || !dialog || !canEditBrain) return;
     const trimmed = folderPath.trim();
     if (!trimmed) {
       toast.error("Give the folder a path.");
@@ -521,7 +523,7 @@ function GoatBrainEditor({
   };
 
   const deleteFolder = (folderPath: string) => {
-    if (!brainRef) return;
+    if (!brainRef || !canEditBrain) return;
     if (!confirm(`Delete empty folder "${folderPath}"?`)) return;
     startFolderTransition(async () => {
       const result = await deleteGoatBrainFolderAction({ brainRef, folderPath });
@@ -546,7 +548,7 @@ function GoatBrainEditor({
   };
 
   const uploadAssetFile = async (file: File | undefined) => {
-    if (!file || !brainRef || isUploading) return;
+    if (!file || !brainRef || isUploading || !canEditBrain) return;
     const invalid = validateBrainAssetFile(file);
     if (invalid) {
       toast.error(invalid);
@@ -578,7 +580,7 @@ function GoatBrainEditor({
   };
 
   const replaceAssetFile = async (file: File | undefined) => {
-    if (!file || !brainRef || !selectedDocument || isUploading) return;
+    if (!file || !brainRef || !selectedDocument || isUploading || !canEditBrain) return;
     const invalid = validateBrainAssetFile(file);
     if (invalid) {
       toast.error(invalid);
@@ -615,6 +617,7 @@ function GoatBrainEditor({
       onKeyDown={(event) => {
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
           event.preventDefault();
+          if (!canEditBrain) return;
           autosaveFor(selectedDocument?.id ?? null).failedValue = null;
           saveDocument();
         }
@@ -628,7 +631,7 @@ function GoatBrainEditor({
             Brain
           </span>
           <div className="flex shrink-0 items-center">
-            {brainRef ? (
+            {brainRef && canEditBrain ? (
               <button
                 type="button"
                 aria-label="Add folder"
@@ -641,7 +644,7 @@ function GoatBrainEditor({
               </button>
             ) : null}
             {brainRef ? <GoatBrainActivity brainRef={brainRef} /> : null}
-            {brainRef ? (
+            {brainRef && canEditBrain ? (
               <button
                 type="button"
                 aria-label="Upload PDF"
@@ -707,9 +710,11 @@ function GoatBrainEditor({
           role="tree"
           className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
           onDragOver={(event) => {
+            if (!canEditBrain) return;
             if (event.dataTransfer.types.includes("Files")) event.preventDefault();
           }}
           onDrop={(event) => {
+            if (!canEditBrain) return;
             if (event.dataTransfer.files.length === 0) return;
             event.preventDefault();
             void uploadAssetFile(event.dataTransfer.files[0]);
@@ -885,7 +890,7 @@ function GoatBrainEditor({
                         {selectedDocument.timeline.length}
                       </span>
                     </button>
-                    {selectedDocument.format !== "markdown" ? (
+                    {canEditBrain && selectedDocument.format !== "markdown" ? (
                       <button
                         type="button"
                         aria-label="Replace file"
@@ -900,25 +905,27 @@ function GoatBrainEditor({
                         Replace file
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      aria-label="Delete document"
-                      disabled={isDocPending}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        deleteDocument();
-                      }}
-                      className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-danger transition-colors duration-150 hover:bg-danger-bg disabled:opacity-45"
-                    >
-                      <Trash2 size={14} strokeWidth={1.9} className="shrink-0" />
-                      Delete
-                    </button>
+                    {canEditBrain ? (
+                      <button
+                        type="button"
+                        aria-label="Delete document"
+                        disabled={isDocPending}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          deleteDocument();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-danger transition-colors duration-150 hover:bg-danger-bg disabled:opacity-45"
+                      >
+                        <Trash2 size={14} strokeWidth={1.9} className="shrink-0" />
+                        Delete
+                      </button>
+                    ) : null}
                   </PopoverContent>
                 </Popover>
               </>
             ) : activeFolderView ? (
               <>
-                {activeFolderEditable ? (
+                {canEditBrain && activeFolderEditable ? (
                   <>
                     <button
                       type="button"
@@ -960,11 +967,12 @@ function GoatBrainEditor({
           detailsOpen={docPanelState.detailsOpen}
           timelineOpen={docPanelState.timelineOpen}
           isDocPending={isDocPending}
+          readOnly={!canEditBrain}
           onEditorChange={(value) => setDocPanelState((state) => ({ ...state, value }))}
           onRenameTitle={renameDocument}
         />
       </div>
-      {folderDialog ? (
+      {folderDialog && canEditBrain ? (
         <FolderDialog
           state={folderDialog}
           pending={isFolderPending}
@@ -1134,6 +1142,7 @@ function BrainDocumentPanel({
   detailsOpen,
   timelineOpen,
   isDocPending,
+  readOnly,
   onEditorChange,
   onRenameTitle,
 }: {
@@ -1146,6 +1155,7 @@ function BrainDocumentPanel({
   detailsOpen: boolean;
   timelineOpen: boolean;
   isDocPending: boolean;
+  readOnly: boolean;
   onEditorChange: (value: string) => void;
   onRenameTitle: (title: string) => void;
 }) {
@@ -1153,7 +1163,9 @@ function BrainDocumentPanel({
     return (
       <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
         <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-ink-muted">
-          Create or select a brain file to edit it.
+          {readOnly
+            ? "Select a brain file to view it."
+            : "Create or select a brain file to edit it."}
         </div>
       </section>
     );
@@ -1167,7 +1179,7 @@ function BrainDocumentPanel({
         {selectedDocument.format !== "markdown" ? (
           <BrainAssetViewer
             document={selectedDocument}
-            disabled={isDocPending}
+            disabled={isDocPending || readOnly}
             onRenameTitle={onRenameTitle}
           />
         ) : (
@@ -1175,7 +1187,7 @@ function BrainDocumentPanel({
             <div className="mx-auto w-full max-w-[760px] px-8 pb-24 pt-12">
               <BrainTitleEditor
                 document={selectedDocument}
-                disabled={isDocPending}
+                disabled={isDocPending || readOnly}
                 onRename={onRenameTitle}
               />
               <div className="mt-6">
@@ -1183,6 +1195,7 @@ function BrainDocumentPanel({
                   content={editorValue}
                   onChange={onEditorChange}
                   brainLinks={brainLinks}
+                  readOnly={readOnly}
                 />
               </div>
             </div>

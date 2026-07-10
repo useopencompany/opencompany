@@ -7,8 +7,12 @@ import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/c
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
+  DELETE_TASK_SCHEDULE_TOOL_NAME,
+  EDIT_TASK_SCHEDULE_TOOL_NAME,
+  GOAT_BRAIN_TOOL_NAME,
   GOAT_BRAIN_TOOL_PART_TYPE,
   SAVE_TO_BRAIN_TOOL_NAME,
+  SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
@@ -342,6 +346,69 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(200);
     expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
+  });
+
+  it("limits member chats to read-only brain tools and no background work", async () => {
+    mockAuth({ role: "member" });
+    mockCreateTurn();
+    let brainToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        tools?: Record<string, { inputSchema?: unknown; execute?: unknown }>;
+      };
+      expect(typedOptions.system).toContain("browse-only access");
+      expect(typedOptions.system).not.toContain("save_to_brain");
+      expect(typedOptions.system).not.toContain("Start a task when the user asks");
+      expect(typedOptions.tools?.[SAVE_TO_BRAIN_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[START_TASK_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[SCHEDULE_TASK_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[EDIT_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[DELETE_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
+
+      const brainTool = typedOptions.tools?.[GOAT_BRAIN_TOOL_NAME];
+      const schema = brainTool?.inputSchema as {
+        properties?: { command?: { enum?: string[] } };
+      };
+      expect(schema.properties?.command?.enum).toContain("query");
+      expect(schema.properties?.command?.enum).not.toContain("append-evidence");
+      expect(schema.properties?.command?.enum).not.toContain("rewrite");
+      if (typeof brainTool?.execute !== "function") {
+        throw new Error("goat_brain execute function was not configured.");
+      }
+      brainToolPromise = brainTool.execute({
+        command: "append-evidence",
+        flags: { id: "acme", body: "member write" },
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "add this to the brain" }],
+        },
+      }),
+    );
+    const output = await brainToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(output).toEqual({
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      error: "Only workspace admins can edit the brain.",
+    });
+    expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
+    expect(captureToGoatBrainInbox).not.toHaveBeenCalled();
+    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(listCurrentUserGoatTaskSchedules).not.toHaveBeenCalled();
   });
 
   it("wires Exa-backed web_search into the model stream when configured", async () => {
@@ -964,6 +1031,7 @@ function mockAuth(
     firstName: string | null;
     lastName: string | null;
     timezone: string;
+    role: "admin" | "member";
   }> = {},
 ) {
   const user = {
@@ -996,7 +1064,7 @@ function mockAuth(
       createdAt: new Date(),
       updatedAt: new Date(),
     },
-    role: "admin",
+    role: overrides.role ?? "admin",
     workspaces: [
       {
         workspace: {
@@ -1007,7 +1075,7 @@ function mockAuth(
           createdAt: new Date(),
           updatedAt: new Date(),
         },
-        role: "admin",
+        role: overrides.role ?? "admin",
       },
     ],
     brains: [ACTIVE_BRAIN],
