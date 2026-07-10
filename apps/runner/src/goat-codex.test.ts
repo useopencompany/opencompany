@@ -122,6 +122,11 @@ describe("runGoatCodexTask", () => {
     );
     expect(appServerMocks.runCodexAppServerTurn.mock.calls[0]![0].task).toContain("Use Codex.");
     expect(appServerMocks.runCodexAppServerTurn.mock.calls[0]![0].task).toContain("Fix the issue.");
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { user_id: "user_1" },
+      }),
+    );
     expect(onEngineSessionId).toHaveBeenCalledWith("thread_new");
     expect(result).toMatchObject({
       content: "Codex completed.",

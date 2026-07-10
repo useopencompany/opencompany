@@ -49,6 +49,9 @@ export async function startCodexDeviceAuthFlow(input: {
   });
   const sandbox = await Sandbox.create(input.env.ampE2bTemplate ?? "amp", {
     envs: {},
+    metadata: {
+      user_id: input.requestedByUserId,
+    },
     timeoutMs: CODEX_AUTH_SANDBOX_TIMEOUT_MS,
     // Single-use, short-lived auth sandbox: let it self-terminate at its timeout (E2B's default
     // `kill`) rather than pause+resume. An abandoned flow — the user closes the tab and never polls
@@ -144,6 +147,9 @@ export async function startGoatCodexDeviceAuthFlow(input: {
   await supersedeActiveGoatCodexAuthFlows(input.userWorkosId);
   const sandbox = await createCodexAuthSandbox({
     ownerLogFields: { user_workos_id: input.userWorkosId },
+    metadata: {
+      user_id: input.userWorkosId,
+    },
     template: input.env.ampE2bTemplate ?? "amp",
   });
 
@@ -667,6 +673,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
 
 async function createCodexAuthSandbox(input: {
   template: string;
+  metadata?: Record<string, string> | undefined;
   ownerLogFields: Record<string, string | number | boolean | null>;
 }) {
   logger.debug("Creating Codex auth sandbox", {
@@ -676,6 +683,7 @@ async function createCodexAuthSandbox(input: {
   });
   const sandbox = await Sandbox.create(input.template, {
     envs: {},
+    ...(input.metadata ? { metadata: input.metadata } : {}),
     timeoutMs: CODEX_AUTH_SANDBOX_TIMEOUT_MS,
     lifecycle: { onTimeout: "kill" },
   });

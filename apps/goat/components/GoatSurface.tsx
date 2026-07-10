@@ -88,6 +88,7 @@ import {
   type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
+import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
 import {
   deleteGoatTaskScheduleAction,
   type GoatTaskScheduleView,
@@ -103,6 +104,7 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
+const CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS = 30_000;
 const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
 
 type ActiveMentionToken = {
@@ -127,7 +129,11 @@ type CodexComposerSettings = {
 
 const ENGINE_CHAT_CONFIG: Record<
   GoatEngineChatKind,
-  { label: string; messagesEndpoint: string; interruptEndpoint: (chatSessionId: string) => string }
+  {
+    label: string;
+    messagesEndpoint: string;
+    interruptEndpoint: (chatSessionId: string) => string;
+  }
 > = {
   local_codex: {
     label: "Local Codex",
@@ -231,6 +237,7 @@ export function GoatSurface({
   const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
+  const [codexSandboxStatus, setCodexSandboxStatus] = useState<GoatCodexSandboxStatus | null>(null);
   const [engineRunning, setEngineRunning] = useState(false);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
@@ -417,6 +424,7 @@ export function GoatSurface({
       setCodexGoalModeEnabled(false);
       setCodexGoalObjective("");
       setCodexGoalTokenBudget("");
+      setCodexSandboxStatus(null);
       setEngineRunning(false);
       setMessages([]);
       setLocallyStoppedAssistantMessageIds(new Set());
@@ -872,12 +880,19 @@ export function GoatSurface({
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
           <div className="w-full px-6 pb-2 pt-5">
-            <div className="mx-auto flex w-full max-w-[720px] items-center justify-start">
+            <div className="mx-auto flex w-full max-w-[720px] items-center justify-between gap-3">
               <ChatTitleHeader
                 title={activeChatTitle}
                 model={activeChatModel}
                 engine={activeChatEngine}
               />
+              {activeEngineChat?.engine === "codex" ? (
+                <CodexSandboxStatusIndicator
+                  status={
+                    codexSandboxStatus ?? (engineRunning || engineSubmitting ? "running" : null)
+                  }
+                />
+              ) : null}
             </div>
           </div>
 
@@ -923,6 +938,7 @@ export function GoatSurface({
         <LiveCodexChatSessionStatus
           chatSessionId={activeEngineChat.chatSessionId}
           setRunning={setEngineRunning}
+          setSandboxStatus={setCodexSandboxStatus}
         />
       ) : null}
       {mode === "chat" ? <LiveChatTasks setTasks={setLiveChatTasks} /> : null}
@@ -1417,6 +1433,25 @@ function ChatTitleHeader({
   );
 }
 
+function CodexSandboxStatusIndicator({ status }: { status: GoatCodexSandboxStatus | null }) {
+  if (!status) return null;
+
+  const label = status === "running" ? "Running" : status === "sleeping" ? "Sleeping" : "Deleted";
+  const dotClass =
+    status === "running" ? "bg-[#18a058]" : status === "sleeping" ? "bg-[#d7d7d2]" : "bg-danger";
+
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
+      title={`Sandbox ${label.toLowerCase()}`}
+      aria-label={`Sandbox ${label.toLowerCase()}`}
+    >
+      <span className={cn("size-2 rounded-full", dotClass)} aria-hidden="true" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 type LiveChatMessagesChange = Dispatch<
   SetStateAction<{ sessionId: string; messages: GoatChatUiMessage[] } | null>
 >;
@@ -1510,23 +1545,31 @@ function LiveLocalCodexSessionStatusSubscriber({
 function LiveCodexChatSessionStatus({
   chatSessionId,
   setRunning,
+  setSandboxStatus,
 }: {
   chatSessionId: string;
   setRunning: Dispatch<SetStateAction<boolean>>;
+  setSandboxStatus: Dispatch<SetStateAction<GoatCodexSandboxStatus | null>>;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) return null;
   return (
-    <LiveCodexChatSessionStatusSubscriber chatSessionId={chatSessionId} setRunning={setRunning} />
+    <LiveCodexChatSessionStatusSubscriber
+      chatSessionId={chatSessionId}
+      setRunning={setRunning}
+      setSandboxStatus={setSandboxStatus}
+    />
   );
 }
 
 function LiveCodexChatSessionStatusSubscriber({
   chatSessionId,
   setRunning,
+  setSandboxStatus,
 }: {
   chatSessionId: string;
   setRunning: Dispatch<SetStateAction<boolean>>;
+  setSandboxStatus: Dispatch<SetStateAction<GoatCodexSandboxStatus | null>>;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const codexChatSessionCollection = useMemo(
@@ -1536,12 +1579,58 @@ function LiveCodexChatSessionStatusSubscriber({
   const { data: rows } = useLiveQuery((q) =>
     q.from({ codexChatSession: codexChatSessionCollection }),
   );
-  const status = ((rows ?? []) as GoatCodexChatSessionRow[])[0]?.status ?? null;
+  const row = ((rows ?? []) as GoatCodexChatSessionRow[])[0] ?? null;
+  const status = row?.status ?? null;
+  const sandboxId = row?.sandbox_id ?? null;
 
   useEffect(() => {
     if (!status) return;
     setRunning(status === "starting" || status === "running");
   }, [setRunning, status]);
+
+  useEffect(() => {
+    if (!status) {
+      setSandboxStatus(null);
+      return;
+    }
+    if (!sandboxId) {
+      setSandboxStatus(status === "starting" || status === "running" ? "running" : null);
+      return;
+    }
+
+    const controller = new AbortController();
+    let active = true;
+
+    const loadStatus = async () => {
+      try {
+        const response = await fetch(
+          `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/sandbox-status`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) return;
+        const body = (await response.json()) as { status?: unknown };
+        if (!active) return;
+        if (body.status === "running" || body.status === "sleeping" || body.status === "deleted") {
+          setSandboxStatus(body.status);
+        }
+      } catch {
+        // The session status still tells us when a turn is actively starting/running.
+        if (active && (status === "starting" || status === "running")) {
+          setSandboxStatus("running");
+        }
+      }
+    };
+
+    void loadStatus();
+    const interval = setInterval(() => {
+      void loadStatus();
+    }, CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [chatSessionId, sandboxId, setSandboxStatus, status]);
 
   return null;
 }

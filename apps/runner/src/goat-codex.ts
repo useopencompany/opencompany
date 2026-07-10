@@ -94,6 +94,9 @@ export async function runGoatCodexTask(input: {
   const sandbox = await createOrConnectSandbox({
     template: input.env.codexE2bTemplate ?? "codex",
     envs: {},
+    metadata: {
+      user_id: input.userWorkosId,
+    },
     idleTimeoutMs: input.env.e2bSandboxIdleTimeoutMs,
   });
 

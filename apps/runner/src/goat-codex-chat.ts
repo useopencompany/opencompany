@@ -81,6 +81,9 @@ export async function runGoatCodexChatTurn(input: {
       sandboxId: session.sandboxId,
       template: env.codexE2bTemplate ?? "codex",
       envs: {},
+      metadata: {
+        user_id: turn.userWorkosId,
+      },
       idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
     });
   } catch (error) {

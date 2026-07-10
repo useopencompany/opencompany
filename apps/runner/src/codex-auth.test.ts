@@ -123,6 +123,12 @@ describe("startGoatCodexDeviceAuthFlow", () => {
     );
     expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_old");
     expect(mocks.order.indexOf("kill:sbx_old")).toBeLessThan(mocks.order.indexOf("create"));
+    expect(mocks.sandboxCreate).toHaveBeenCalledWith("amp", {
+      envs: {},
+      metadata: { user_id: "user_1" },
+      timeoutMs: 20 * 60 * 1000,
+      lifecycle: { onTimeout: "kill" },
+    });
     expect(mocks.inserts).toHaveLength(1);
   });
 

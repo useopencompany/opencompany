@@ -2,6 +2,9 @@ import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 import { GOAT_SPANS, recordGoatTaskDispatch, startGoatSpan } from "@opencompany/goat-observability";
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
+const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
+
+export type GoatCodexSandboxStatus = "running" | "sleeping" | "deleted";
 
 type RunnerContext = {
   task_id: string;
@@ -162,6 +165,45 @@ export async function triggerGoatCodexChatWake() {
     const details = await response.text();
     throw new Error(`Goat codex chat wake failed with ${response.status}: ${details}`);
   }
+}
+
+export async function getGoatCodexSandboxStatus(
+  sandboxId: string,
+): Promise<GoatCodexSandboxStatus> {
+  const baseUrl = runnerInternalBaseUrl();
+  const token = runnerToken();
+  if (!baseUrl || !token) {
+    throw new Error("Goat runner is not configured.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(
+      `${baseUrl}/internal/goat/codex-chat/sandboxes/${encodeURIComponent(sandboxId)}/status`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Goat codex sandbox status failed with ${response.status}: ${details}`);
+  }
+
+  const body = (await response.json()) as { status?: unknown };
+  if (body.status !== "running" && body.status !== "sleeping" && body.status !== "deleted") {
+    throw new Error("Goat codex sandbox status returned an invalid status.");
+  }
+  return body.status;
 }
 
 export async function triggerGoatBrainIngestWake() {

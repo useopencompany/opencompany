@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 const e2bMocks = vi.hoisted(() => ({
   connect: vi.fn(),
   create: vi.fn(),
+  getInfo: vi.fn(),
   kill: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ import {
   commandExitResult,
   connectSandbox,
   createOrConnectSandbox,
+  getSandboxLifecycleStatus,
   githubRemoteMatches,
   guardCommandStreamCallbacks,
   prepareWorkspace,
@@ -225,6 +227,43 @@ describe("createOrConnectSandbox", () => {
         latencyMs: expect.any(Number),
       }),
     ]);
+  });
+
+  it("passes metadata to newly created sandboxes", async () => {
+    const sandbox = {
+      sandboxId: "sbx_new",
+      setTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+    e2bMocks.create.mockResolvedValue(sandbox);
+
+    await createOrConnectSandbox({
+      envs: {},
+      metadata: { user_id: "user_123" },
+      idleTimeoutMs: 30_000,
+    });
+
+    expect(e2bMocks.create).toHaveBeenCalledWith({
+      envs: {},
+      metadata: { user_id: "user_123" },
+      timeoutMs: 30_000,
+      lifecycle: { onTimeout: "pause", autoResume: true },
+    });
+  });
+});
+
+describe("getSandboxLifecycleStatus", () => {
+  it("maps E2B running and paused states to UI statuses", async () => {
+    e2bMocks.getInfo.mockResolvedValueOnce({ state: "running" });
+    await expect(getSandboxLifecycleStatus("sbx_running")).resolves.toBe("running");
+
+    e2bMocks.getInfo.mockResolvedValueOnce({ state: "paused" });
+    await expect(getSandboxLifecycleStatus("sbx_sleeping")).resolves.toBe("sleeping");
+  });
+
+  it("maps missing sandboxes to deleted", async () => {
+    e2bMocks.getInfo.mockRejectedValue(new Error("sandbox not found"));
+
+    await expect(getSandboxLifecycleStatus("sbx_missing")).resolves.toBe("deleted");
   });
 });
 
