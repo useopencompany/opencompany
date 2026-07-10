@@ -18,6 +18,7 @@ import type {
 import {
   type NormalizedLinearIssueActivity,
   type NormalizedLinearIssueComment,
+  type NormalizedLinearIssueSourceItem,
   normalizeLinearIssueWindow,
 } from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -84,6 +85,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
   sourceItemId: string;
   eventCount: number;
   enqueued: boolean;
+  skipped: boolean;
 } | null> {
   const db = getDb();
 
@@ -135,6 +137,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       organizationUrlKey: integration.organizationUrlKey,
       flushedAt,
     });
+    const ingestDecision = classifyLinearIssueWindowForIngest(item);
 
     // Routing is re-resolved at flush time: the user may have deselected the
     // team or disabled the source since the events were buffered. A revoked
@@ -165,6 +168,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       rawPayload: { eventIds: claimed.map((row) => row.id) },
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
+      skipReason: ingestDecision.action === "skip" ? ingestDecision.reason : null,
       now: flushedAt,
       db: tx,
     });
@@ -182,6 +186,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       sourceItemId: upserted.sourceItemId,
       eventCount: claimed.length,
       enqueued: upserted.enqueued,
+      skipped: upserted.skipped,
     };
   });
 
@@ -292,6 +297,7 @@ export function startGoatLinearFlushWorker(options: { pollIntervalMs?: number } 
               source_item_id: flushed.sourceItemId,
               event_count: flushed.eventCount,
               enqueued: flushed.enqueued,
+              skipped: flushed.skipped,
             });
           }
         }
@@ -415,6 +421,69 @@ function eventsMatchLinearRoute(
     });
     return eventType ? goatLinearRouteMatchesEvent(config, eventType) : false;
   });
+}
+
+export type GoatLinearIssueWindowIngestDecision =
+  | { action: "ingest" }
+  | { action: "skip"; reason: "routine_linear_status_change" | "routine_linear_metadata_update" };
+
+const ROUTINE_LINEAR_ISSUE_UPDATE_FIELDS = new Set([
+  "assignee",
+  "assigneeid",
+  "assigneename",
+  "canceledat",
+  "completedat",
+  "cycle",
+  "cycleid",
+  "estimate",
+  "priority",
+  "prioritylabel",
+  "state",
+  "stateid",
+  "statetype",
+  "status",
+  "statusid",
+]);
+
+const LINEAR_STATUS_FIELDS = new Set([
+  "canceledat",
+  "completedat",
+  "state",
+  "stateid",
+  "statetype",
+  "status",
+  "statusid",
+]);
+
+export function classifyLinearIssueWindowForIngest(
+  item: NormalizedLinearIssueSourceItem,
+): GoatLinearIssueWindowIngestDecision {
+  const issue = item.content.issue;
+  if (issue.snapshotStale) return { action: "ingest" };
+  if (issue.activity.length === 0) {
+    return { action: "skip", reason: "routine_linear_metadata_update" };
+  }
+
+  let sawStatusField = false;
+  for (const activity of issue.activity) {
+    if (activity.entityType !== "issue" || activity.action !== "update") {
+      return { action: "ingest" };
+    }
+    const changedFields = activity.changedFields ?? [];
+    if (changedFields.length === 0) return { action: "ingest" };
+    for (const field of changedFields) {
+      const normalized = field.toLowerCase();
+      if (!ROUTINE_LINEAR_ISSUE_UPDATE_FIELDS.has(normalized)) {
+        return { action: "ingest" };
+      }
+      if (LINEAR_STATUS_FIELDS.has(normalized)) sawStatusField = true;
+    }
+  }
+
+  return {
+    action: "skip",
+    reason: sawStatusField ? "routine_linear_status_change" : "routine_linear_metadata_update",
+  };
 }
 
 // Fallback when the live snapshot is unavailable: reconstruct the comments the

@@ -55,6 +55,7 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
       jobId: "gbjob_123",
       jobIds: ["gbjob_123"],
       enqueued: true,
+      skipped: false,
     });
     vi.mocked(listEnabledBrainRefsForIntegration).mockResolvedValue([]);
     vi.mocked(hasAnyBrainSourceForIntegration).mockResolvedValue(false);
@@ -135,6 +136,7 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
       jobId: "gbjob_b",
       jobIds: ["gbjob_a", "gbjob_b"],
       enqueued: true,
+      skipped: false,
     });
 
     const response = await POST(jamieRequest(jamiePayload()), routeContext());
@@ -156,6 +158,7 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
       jobId: null,
       jobIds: [],
       enqueued: false,
+      skipped: false,
     });
 
     const response = await POST(jamieRequest(jamiePayload()), routeContext());

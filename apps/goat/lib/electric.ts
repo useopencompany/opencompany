@@ -422,6 +422,7 @@ function scopedBrainSourceItemWhere(userWorkosId: string, requestUrl: URL): Shap
     "pending",
     "succeeded",
     "failed",
+    "skipped",
   ]);
   if (ingestStatuses === false) return null;
   if (ingestStatuses.length === 1) {
