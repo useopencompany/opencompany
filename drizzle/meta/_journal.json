@@ -841,6 +841,13 @@
       "when": 1783981100000,
       "tag": "0119_goat_integration_workspace_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1783981200000,
+      "tag": "0120_goat_chat_attachments",
+      "breakpoints": true
     }
   ]
 }

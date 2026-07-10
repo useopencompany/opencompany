@@ -1,4 +1,4 @@
-import { executeExaSearchRequest } from "@opencompany/agent-runtime";
+import { executeExaSearchRequest, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
@@ -31,6 +31,12 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
+import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
+import {
+  extractGoatChatAttachmentTexts,
+  hydrateGoatChatAttachmentParts,
+  parseGoatChatAttachmentsInput,
+} from "@/lib/chat-attachments";
 import {
   clearActiveGoatChatStream,
   getGoatChatStreamContext,
@@ -84,17 +90,40 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Invalid chat message.", { status: 400 });
   }
 
+  const parsedAttachments = parseGoatChatAttachmentsInput(
+    message.metadata?.attachments,
+    context.user.workosUserId,
+  );
+  if (!parsedAttachments.ok) return new Response(parsedAttachments.error, { status: 400 });
+  const attachments = parsedAttachments.attachments;
+
   const parsed = validateGoatChatInput({
     prompt: textFromGoatChatUiMessage(message),
     model: body.value.model,
     sessionId: body.value.sessionId,
+    hasAttachments: attachments.length > 0,
   });
   if (!parsed.ok) return new Response(parsed.error, { status: 400 });
+
+  const attachmentCapabilities = modelSupportsAttachments(parsed.value.model);
+  if (
+    attachments.some((attachment) => attachment.kind === "image") &&
+    !attachmentCapabilities.images
+  ) {
+    return new Response("The selected model does not support image attachments.", { status: 400 });
+  }
+  if (attachments.some((attachment) => attachment.kind === "pdf") && !attachmentCapabilities.pdf) {
+    return new Response("The selected model does not support PDF attachments.", { status: 400 });
+  }
+
   const mentionEngine = readGoatChatMentionEngine(body.value.mentions);
   const requestedEngine =
     mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
       ? "codex"
       : undefined;
+  if (requestedEngine && attachments.length > 0) {
+    return new Response("Attachments are not supported in engine chats yet.", { status: 400 });
+  }
 
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
@@ -164,6 +193,10 @@ export async function POST(request: Request): Promise<Response> {
 
   let turn: Awaited<ReturnType<typeof createGoatChatUserTurn>>;
   try {
+    // Extract docx/xlsx text once at submit time; every later turn reads the
+    // stored text instead of re-downloading the blob.
+    const attachmentTexts =
+      attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;
     turn = await createGoatChatUserTurn(
       {
         userWorkosId: context.user.workosUserId,
@@ -171,6 +204,8 @@ export async function POST(request: Request): Promise<Response> {
         model: parsed.value.model,
         sessionId: parsed.value.sessionId,
         messageId: safeClientMessageId(message.id),
+        attachments: attachments.length > 0 ? attachments : null,
+        attachmentTexts,
       },
       store,
     );
@@ -251,10 +286,26 @@ export async function POST(request: Request): Promise<Response> {
                 error: "You do not have access to any brain in this workspace.",
               };
             }
+            const attachmentIds = toolInput.attachmentIds ?? [];
+            if (attachmentIds.length > 0) {
+              return saveChatAttachmentsToGoatBrain({
+                brainRef: activeBrain.id,
+                userWorkosId: context.user.workosUserId,
+                attachmentIds,
+                sessionMessages: turn.storedMessages,
+              });
+            }
+            const content = toolInput.content?.trim();
+            if (!content) {
+              return {
+                ok: false,
+                error: "Provide content or attachmentIds to save.",
+              };
+            }
             const captured = await captureToGoatBrainInbox({
               brainRef: activeBrain.id,
               userWorkosId: context.user.workosUserId,
-              text: toolInput.content,
+              text: content,
               ...(toolInput.title ? { title: toolInput.title } : {}),
               ...(toolInput.intent ? { intent: toolInput.intent } : {}),
               chatSessionId: turn.session.id,
@@ -488,7 +539,13 @@ export async function POST(request: Request): Promise<Response> {
       scheduleToolsEnabled: canManageWorkspaceBrain,
       recurringSchedules,
     }),
-    messages: await convertToModelMessages(turn.messages),
+    messages: await convertToModelMessages(
+      await hydrateGoatChatAttachmentParts({
+        uiMessages: turn.messages,
+        storedMessages: turn.storedMessages,
+        modelId: turn.session.model,
+      }),
+    ),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     // Providers deliver tokens in bursts; re-chunk to word-level with a small
     // delay so streamed text reads as a steady flow instead of jumps.

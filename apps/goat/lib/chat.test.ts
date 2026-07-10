@@ -378,6 +378,8 @@ function createInMemoryChatStore(
         content: input.content,
         taskId: input.taskId ?? null,
         debugTrace: input.debugTrace ?? null,
+        attachments: input.attachments ?? null,
+        attachmentTexts: input.attachmentTexts ?? null,
         createdAt: now,
         updatedAt: now,
         taskDisplayId: task?.displayId ?? null,

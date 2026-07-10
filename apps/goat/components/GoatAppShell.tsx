@@ -45,6 +45,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
 
   const initialData: GoatAppInitialData = {
     user: {
+      workosUserId: user.workosUserId,
       email: user.email,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
