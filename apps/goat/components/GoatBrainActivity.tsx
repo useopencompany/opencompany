@@ -14,7 +14,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BrainIngestTraceDialog } from "@/components/BrainIngestTraceView";
 import { buildGoatBrainActivityEvents, type GoatBrainActivityKind } from "@/lib/brain-activity";
 import {
@@ -28,6 +28,12 @@ type SelectedBrainIngestTrace = {
   traceId: string;
   sourceTitle: string;
 };
+
+type BrainActivitySourceItemsResponse = {
+  sourceItems?: GoatBrainSourceItemRow[];
+};
+
+const MAX_ACTIVITY_SOURCE_ITEM_FETCH_IDS = 100;
 
 export function GoatBrainActivity({ brainRef }: { brainRef: string }) {
   const [open, setOpen] = useState(false);
@@ -82,13 +88,55 @@ function GoatBrainActivityFeed({
     (q) => q.from({ item: collections.brainSourceItems }),
     [collections],
   );
-  const events = useMemo(
-    () =>
-      buildGoatBrainActivityEvents(
-        (jobRows ?? []) as GoatBrainIngestJobRow[],
-        (itemRows ?? []) as GoatBrainSourceItemRow[],
+  const [brainSourceItemRows, setBrainSourceItemRows] = useState<GoatBrainSourceItemRow[]>([]);
+  const sourceItems = useMemo(
+    () => mergeSourceItemRows(brainSourceItemRows, (itemRows ?? []) as GoatBrainSourceItemRow[]),
+    [brainSourceItemRows, itemRows],
+  );
+  const missingSourceItemIds = useMemo(() => {
+    if (itemsLoading) return [];
+    const known = new Set(sourceItems.map((item) => item.id));
+    return Array.from(
+      new Set(
+        ((jobRows ?? []) as GoatBrainIngestJobRow[])
+          .map((job) => job.source_item_id)
+          .filter((id) => id && !known.has(id)),
       ),
-    [itemRows, jobRows],
+    ).slice(0, MAX_ACTIVITY_SOURCE_ITEM_FETCH_IDS);
+  }, [itemsLoading, jobRows, sourceItems]);
+  const missingSourceItemIdsKey = missingSourceItemIds.join(",");
+  useEffect(() => {
+    if (!missingSourceItemIdsKey) return;
+    const controller = new AbortController();
+    const url = new URL("/api/brain-activity/source-items", window.location.origin);
+    url.searchParams.set("brain_ref", brainRef);
+    url.searchParams.set("source_item_ids", missingSourceItemIdsKey);
+
+    fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok)
+          throw new Error(`Failed to load brain source metadata: ${response.status}`);
+        return (await response.json()) as BrainActivitySourceItemsResponse;
+      })
+      .then((body) => {
+        const sourceItems = Array.isArray(body.sourceItems) ? body.sourceItems : [];
+        if (sourceItems.length === 0) return;
+        setBrainSourceItemRows((current) => mergeSourceItemRows(current, sourceItems));
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        console.warn("[goat-brain-activity] failed to load source metadata", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [brainRef, missingSourceItemIdsKey]);
+  const events = useMemo(
+    () => buildGoatBrainActivityEvents((jobRows ?? []) as GoatBrainIngestJobRow[], sourceItems),
+    [jobRows, sourceItems],
   );
   const loading = (jobsLoading || itemsLoading) && events.length === 0;
 
@@ -170,6 +218,14 @@ function TraceIdLine({ traceId }: { traceId: string }) {
       </code>
     </div>
   );
+}
+
+function mergeSourceItemRows(...sources: readonly (readonly GoatBrainSourceItemRow[])[]) {
+  const rowsById = new Map<string, GoatBrainSourceItemRow>();
+  for (const source of sources) {
+    for (const row of source) rowsById.set(row.id, row);
+  }
+  return Array.from(rowsById.values());
 }
 
 const MAX_VISIBLE_ACTIVITY_PAGE_LINKS = 4;

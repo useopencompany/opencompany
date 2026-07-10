@@ -81,6 +81,8 @@ const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
 const PROMPT_GMAIL_MESSAGES_BYTES = 80_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
+const INFERRED_NO_MUTATION_SKIP_REASON =
+  "No brain-worthy content identified; agent completed without brain mutations.";
 
 // The ingestion agent gets the full working surface of the CLI except the
 // planner (`ingest` runs its own LLM) and destructive curation commands.
@@ -634,6 +636,8 @@ export function buildUploadAssetAgentIngestPrompt(
 type BrainAgentIngestSessionResult = {
   brainRef: string;
   skipped: boolean;
+  reason?: string;
+  skipMode?: BrainAgentIngestSkipMode;
   steps: number;
   toolCalls: number;
   mutations: number;
@@ -644,6 +648,9 @@ type BrainAgentIngestSessionResult = {
   summary: string;
   trace: GoatBrainIngestTrace;
 };
+
+type BrainAgentNoMutationOutcome = "fail" | "skip";
+type BrainAgentIngestSkipMode = "explicit" | "inferred_no_mutations";
 
 // Shared scaffolding for every agent ingest profile: resolve the target brain,
 // materialize it to a temp root, run the tool loop, and sync changes back with
@@ -659,6 +666,7 @@ async function runBrainAgentIngestSession(input: {
   buildPrompt: () => string;
   commands?: readonly string[];
   prepareRoot?: (root: string) => Promise<void>;
+  noMutationOutcome?: BrainAgentNoMutationOutcome;
   // Attribution for documents this session creates. Defaults to the acting
   // user (the human whose capture/meeting/upload this is); Slack passes null
   // because the integration owner did not author the channel's content.
@@ -698,18 +706,18 @@ async function runBrainAgentIngestSession(input: {
       ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
     });
 
-    const skipped =
-      loop.mutations === 0 && loop.finalText.startsWith(GOAT_BRAIN_AGENT_SKIP_SENTINEL);
-    if (!skipped && loop.mutations === 0) {
-      throw new Error(
-        "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
-      );
-    }
+    const outcome = brainAgentIngestCompletionOutcome({
+      mutations: loop.mutations,
+      finalText: loop.finalText,
+      failedMutatingToolCalls: loop.failedMutatingToolCalls,
+      noMutationOutcome: input.noMutationOutcome ?? "fail",
+    });
     logger.info("Goat Brain ingestion agent finished", {
       event: "opencompany.goat_brain_agent_ingest_finished",
       brain_ref: brainRef,
       source_ref: input.sourceRef,
-      skipped,
+      skipped: outcome.skipped,
+      ...(outcome.skipMode ? { skip_mode: outcome.skipMode } : {}),
       steps: loop.steps,
       tool_calls: loop.toolCalls,
       mutations: loop.mutations,
@@ -735,7 +743,9 @@ async function runBrainAgentIngestSession(input: {
 
     return {
       brainRef,
-      skipped,
+      skipped: outcome.skipped,
+      ...(outcome.reason ? { reason: outcome.reason } : {}),
+      ...(outcome.skipMode ? { skipMode: outcome.skipMode } : {}),
       steps: loop.steps,
       toolCalls: loop.toolCalls,
       mutations: loop.mutations,
@@ -743,12 +753,41 @@ async function runBrainAgentIngestSession(input: {
       deleted: synced.deleted,
       pages: synced.pages,
       usage: loop.usage,
-      summary: loop.finalText.slice(0, RESULT_SUMMARY_LIMIT),
+      summary: (outcome.reason ?? loop.finalText).slice(0, RESULT_SUMMARY_LIMIT),
       trace: loop.trace,
     };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+function brainAgentIngestCompletionOutcome(input: {
+  mutations: number;
+  finalText: string;
+  failedMutatingToolCalls: number;
+  noMutationOutcome: BrainAgentNoMutationOutcome;
+}): { skipped: boolean; reason?: string; skipMode?: BrainAgentIngestSkipMode } {
+  if (input.mutations > 0) return { skipped: false };
+  if (input.failedMutatingToolCalls > 0) {
+    throw new Error(
+      `Goat Brain ingestion agent attempted ${input.failedMutatingToolCalls} mutating command${
+        input.failedMutatingToolCalls === 1 ? "" : "s"
+      } without successfully writing to the brain.`,
+    );
+  }
+  if (input.finalText.startsWith(GOAT_BRAIN_AGENT_SKIP_SENTINEL)) {
+    return { skipped: true, skipMode: "explicit" };
+  }
+  if (input.noMutationOutcome === "skip") {
+    return {
+      skipped: true,
+      reason: INFERRED_NO_MUTATION_SKIP_REASON,
+      skipMode: "inferred_no_mutations",
+    };
+  }
+  throw new Error(
+    "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
+  );
 }
 
 export async function buildGoatBrainFolderInventoryPrompt(root: string): Promise<string | null> {
@@ -799,6 +838,7 @@ export async function runJamieMeetingAgentIngest(
     buildPrompt: () => buildJamieMeetingAgentIngestPrompt(input.item, evidence),
     prepareRoot: (root) =>
       writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
+    noMutationOutcome: "skip",
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });
@@ -864,6 +904,7 @@ export async function runSlackConversationAgentIngest(
     system: SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT,
     buildPrompt: () => buildSlackConversationAgentIngestPrompt(input.item),
     createdByWorkosId: null,
+    noMutationOutcome: "skip",
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });
@@ -902,6 +943,7 @@ export async function runLinearIssueAgentIngest(
     // Issue activity is authored by whoever worked the ticket, not the
     // integration owner.
     createdByWorkosId: null,
+    noMutationOutcome: "skip",
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });
@@ -974,6 +1016,7 @@ export async function runGmailThreadAgentIngest(
     // Email content is authored by the correspondents, not the integration
     // owner.
     createdByWorkosId: null,
+    noMutationOutcome: "skip",
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });
@@ -1013,6 +1056,7 @@ export async function runGitHubActivityAgentIngest(
     buildPrompt: () => buildGitHubActivityAgentIngestPrompt(input.item),
     // The integration owner did not author the repository's activity.
     createdByWorkosId: null,
+    noMutationOutcome: "skip",
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });
@@ -1178,6 +1222,7 @@ async function runIngestAgentLoop(input: {
 
   let toolCalls = 0;
   let mutations = 0;
+  let failedMutatingToolCalls = 0;
   let cliQueue: Promise<void> = Promise.resolve();
   const traceToolCalls: GoatBrainIngestTraceToolCall[] = [];
   const runCli = input.runCli ?? runGoatBrainAgentCli;
@@ -1237,8 +1282,10 @@ async function runIngestAgentLoop(input: {
           typeof args.stdin === "string" && args.stdin
             ? goatBrainIngestTracePreview(args.stdin, GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
             : null;
+        const mutating = isMutatingGoatBrainAgentInvocation(args);
         const invalid = validateGoatBrainAgentInvocation(args, commands);
         if (invalid) {
+          if (mutating) failedMutatingToolCalls += 1;
           appendTraceToolCall(traceToolCalls, {
             id: traceId,
             toolName: "goat_brain",
@@ -1246,7 +1293,7 @@ async function runIngestAgentLoop(input: {
             args: sanitizedArgs,
             stdinPreview,
             status: "blocked",
-            mutating: false,
+            mutating,
             exitCode: null,
             stdoutPreview: "",
             stderrPreview: "",
@@ -1259,7 +1306,6 @@ async function runIngestAgentLoop(input: {
           });
           return { ok: false, error: invalid };
         }
-        const mutating = isMutatingGoatBrainAgentInvocation(args);
         const result = await runSerializedCli(() => {
           startedAt = new Date().toISOString();
           return runCli({
@@ -1274,6 +1320,8 @@ async function runIngestAgentLoop(input: {
         });
         if (result.ok && mutating) {
           mutations += 1;
+        } else if (!result.ok && mutating) {
+          failedMutatingToolCalls += 1;
         }
         appendTraceToolCall(traceToolCalls, {
           id: traceId,
@@ -1344,6 +1392,7 @@ async function runIngestAgentLoop(input: {
       steps: result.steps.length,
       toolCalls,
       mutations,
+      failedMutatingToolCalls,
       usage: normalizedUsage,
       trace,
     };

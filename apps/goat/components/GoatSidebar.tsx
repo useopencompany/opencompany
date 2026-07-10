@@ -179,12 +179,7 @@ function GoatWorkspaceSwitcher() {
         className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <Building2 size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium leading-tight">{workspace.name}</span>
-          <span className="block truncate text-[11px] leading-tight text-ink-subtle">
-            {workspace.role}
-          </span>
-        </span>
+        <span className="min-w-0 flex-1 truncate font-medium leading-tight">{workspace.name}</span>
       </Link>
     );
   }
@@ -197,12 +192,7 @@ function GoatWorkspaceSwitcher() {
         className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60 data-[popup-open]:bg-surface-active data-[popup-open]:text-ink"
       >
         <Building2 size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium leading-tight">{workspace.name}</span>
-          <span className="block truncate text-[11px] leading-tight text-ink-subtle">
-            {workspace.role}
-          </span>
-        </span>
+        <span className="min-w-0 flex-1 truncate font-medium leading-tight">{workspace.name}</span>
         {isPending ? (
           <Loader2 size={13} strokeWidth={1.75} className="shrink-0 animate-spin text-ink/45" />
         ) : (
