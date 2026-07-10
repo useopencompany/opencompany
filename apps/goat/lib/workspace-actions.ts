@@ -1,29 +1,31 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import {
-  type GoatBrainVisibility,
-  type GoatWorkspace,
-  goatWorkspaces,
-} from "@opencompany/db/goat-schema";
+import { type GoatBrainVisibility, goatWorkspaces } from "@opencompany/db/goat-schema";
 import {
   createGoatBrain,
+  DEFAULT_GOAT_BRAIN_SLUG,
   getGoatBrainAccess,
+  listAccessibleGoatBrains,
   listGoatBrainMemberIds,
   listGoatWorkspaceMembers,
+  listGoatWorkspacesForUser,
   removeGoatWorkspaceMember,
   replaceGoatBrainMembers,
-  setGoatWorkspaceOrganizationId,
   updateGoatBrainVisibility,
   updateGoatWorkspaceName,
 } from "@opencompany/db/goat-workspaces";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { currentGoatUser, GOAT_ACTIVE_BRAIN_COOKIE } from "@/lib/auth";
+import {
+  currentGoatUser,
+  GOAT_ACTIVE_BRAIN_COOKIE,
+  GOAT_ACTIVE_WORKSPACE_COOKIE,
+} from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos-client";
+import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 
-const ADMIN_ROLE = "admin";
 const MEMBER_ROLE = "member";
 
 export type GoatWorkspaceActionResult = { ok: true } | { ok: false; error: string };
@@ -33,6 +35,12 @@ export type GoatWorkspaceMemberView = {
   email: string;
   name: string;
   avatarUrl: string | null;
+  role: "admin" | "member";
+};
+
+export type GoatWorkspaceView = {
+  id: string;
+  name: string;
   role: "admin" | "member";
 };
 
@@ -58,6 +66,41 @@ export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorks
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
   });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+export async function switchGoatWorkspaceAction(
+  workspaceId: string,
+): Promise<GoatWorkspaceActionResult> {
+  const context = await currentGoatUser();
+  const workspaces = await listGoatWorkspacesForUser(context.user.workosUserId);
+  const target = workspaces.find((entry) => entry.workspace.id === workspaceId);
+  if (!target) return { ok: false, error: "You do not have access to that workspace." };
+
+  const brains = await listAccessibleGoatBrains({
+    userWorkosId: context.user.workosUserId,
+    workspaceId: target.workspace.id,
+  });
+  const activeBrain =
+    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+
+  const cookieStore = await cookies();
+  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
+    path: "/",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  if (activeBrain) {
+    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, activeBrain.id, {
+      path: "/",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  } else {
+    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
+  }
+
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -164,46 +207,6 @@ export async function listGoatWorkspaceMembersAction(): Promise<GoatWorkspaceMem
     avatarUrl: entry.user.avatarUrl,
     role: entry.member.role,
   }));
-}
-
-// Creates the WorkOS organization for a workspace on first need (first invite)
-// and backfills memberships for every existing local member.
-async function ensureGoatWorkspaceOrganization(workspace: GoatWorkspace): Promise<string> {
-  if (workspace.workosOrganizationId) return workspace.workosOrganizationId;
-
-  const workos = getWorkOSClient();
-  let organizationId: string | undefined;
-  try {
-    const organization = await workos.organizations.createOrganization(
-      { name: workspace.name },
-      { idempotencyKey: workspace.id },
-    );
-    organizationId = organization.id;
-
-    const members = await listGoatWorkspaceMembers(workspace.id);
-    for (const entry of members) {
-      await workos.userManagement.createOrganizationMembership({
-        organizationId: organization.id,
-        userId: entry.user.workosUserId,
-        roleSlug: entry.member.role === "admin" ? ADMIN_ROLE : MEMBER_ROLE,
-      });
-    }
-
-    await setGoatWorkspaceOrganizationId({
-      workspaceId: workspace.id,
-      workosOrganizationId: organization.id,
-    });
-    return organization.id;
-  } catch (error) {
-    if (organizationId) {
-      try {
-        await workos.organizations.deleteOrganization(organizationId);
-      } catch (cleanupError) {
-        console.error("[goat] Failed to clean up WorkOS organization", cleanupError);
-      }
-    }
-    throw error;
-  }
 }
 
 export async function inviteToGoatWorkspaceAction(

@@ -21,6 +21,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { getWorkOSClient } from "@/lib/workos-client";
+import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
 export const GOAT_ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
 export const GOAT_ACTIVE_BRAIN_COOKIE = "goat-active-brain";
@@ -30,6 +31,7 @@ export type GoatAuthContext = {
   user: typeof goatUsers.$inferSelect;
   workspace: GoatWorkspace;
   role: GoatWorkspaceRole;
+  workspaces: GoatWorkspaceWithRole[];
   brains: GoatBrain[];
   activeBrain: GoatBrain | null;
 };
@@ -98,17 +100,18 @@ async function ensureGoatWorkspaces(
   user: typeof goatUsers.$inferSelect,
 ): Promise<GoatWorkspaceWithRole[]> {
   let workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return workspaces;
+  if (workspaces.length > 0) return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
 
   await adoptWorkOSOrganizationMemberships(authUser);
   workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return workspaces;
+  if (workspaces.length > 0) return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
 
   await createDefaultGoatWorkspaceForUser({
     userWorkosId: user.workosUserId,
     name: defaultWorkspaceName(user),
   });
-  return listGoatWorkspacesForUser(user.workosUserId);
+  workspaces = await listGoatWorkspacesForUser(user.workosUserId);
+  return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
 }
 
 const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
@@ -147,6 +150,7 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
     user,
     workspace: active.workspace,
     role: active.role,
+    workspaces,
     brains,
     activeBrain,
   };

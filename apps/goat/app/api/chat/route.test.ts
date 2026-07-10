@@ -997,6 +997,19 @@ function mockAuth(
       updatedAt: new Date(),
     },
     role: "admin",
+    workspaces: [
+      {
+        workspace: {
+          id: "goat_ws_user_1",
+          workosOrganizationId: null,
+          name: "Test Workspace",
+          createdByWorkosId: "user_1",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        role: "admin",
+      },
+    ],
     brains: [ACTIVE_BRAIN],
     activeBrain: ACTIVE_BRAIN,
   });

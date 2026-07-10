@@ -51,6 +51,7 @@ export type GoatBrainSummaryView = {
 export type GoatAppInitialData = {
   user: GoatUserView;
   workspace: GoatWorkspaceView;
+  workspaces: GoatWorkspaceView[];
   workspaceMembers: GoatWorkspaceMemberView[];
   brains: GoatBrainSummaryView[];
   activeBrain: GoatBrainSummaryView | null;

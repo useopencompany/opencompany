@@ -132,6 +132,19 @@ describe("cancelGoatTaskAction", () => {
         updatedAt: new Date("2026-01-01T00:00:00.000Z"),
       },
       role: "admin",
+      workspaces: [
+        {
+          workspace: {
+            id: "goat_ws_user_1",
+            workosOrganizationId: null,
+            name: "Ada's Workspace",
+            createdByWorkosId: "user_1",
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+          },
+          role: "admin",
+        },
+      ],
       brains: [],
       activeBrain: null,
     });

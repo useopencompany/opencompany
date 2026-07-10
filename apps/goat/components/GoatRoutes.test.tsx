@@ -18,6 +18,7 @@ const appDataMock = vi.hoisted(() => ({
       avatarUrl: null,
     },
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
+    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
     featureFlags: { localCodexBridge: false },
     integrations: {},
