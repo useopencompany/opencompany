@@ -51,9 +51,7 @@ describe("JamieIntegrationSetup", () => {
   });
 });
 
-function jamieState(
-  overrides: Partial<GoatJamieProviderState> = {},
-): GoatJamieProviderState {
+function jamieState(overrides: Partial<GoatJamieProviderState> = {}): GoatJamieProviderState {
   return {
     provider: "jamie",
     connected: false,
