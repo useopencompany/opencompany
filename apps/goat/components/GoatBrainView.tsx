@@ -1125,9 +1125,11 @@ function TreeItem({
 }
 
 function TreeIngestStatusSlot({ state }: { state: GoatBrainDraftIngestState | null }) {
+  if (!state) return null;
+
   return (
     <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center">
-      {state ? <BrainIngestStatusIcon state={state} compact /> : null}
+      <BrainIngestStatusIcon state={state} compact />
     </span>
   );
 }
