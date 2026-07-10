@@ -6,6 +6,10 @@ import {
   listGoatBrainSourcesForBrain,
   upsertGoatBrainSource,
 } from "@opencompany/db/goat-brain-sources";
+import {
+  type GoatGitHubRepositoryRef,
+  listGoatGitHubIntegrationRepositories,
+} from "@opencompany/db/goat-github";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
   GOAT_LINEAR_EVENT_TYPES,
@@ -22,6 +26,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import type { GoatSlackConversationRef } from "@opencompany/db/goat-slack";
 import { getDefaultGoatBrainForUser, getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
+import { GITHUB_ACTIVITY_EVENT_TYPES, type GitHubActivityEventType } from "@opencompany/goat-brain";
 import { and, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
@@ -30,6 +35,10 @@ import type {
   GoatLinearSourceProviderState,
   GoatSlackProviderState,
 } from "@/lib/integration-state";
+import {
+  type GoatGitHubProviderState,
+  getGoatGitHubIntegrationState,
+} from "@/lib/integrations/github";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import {
   getGoatLinearSourceIntegrationState,
@@ -63,6 +72,9 @@ export type GoatBrainSourcesDetails = {
   };
   linear: {
     integration: GoatLinearSourceProviderState;
+  };
+  github: {
+    integration: GoatGitHubProviderState;
   };
 };
 
@@ -98,13 +110,15 @@ export async function getGoatBrainSourcesAction(
   const context = await requireAdminBrainContext(brainRef);
   if (!context) return null;
 
-  const [sources, jamieState, slackState, linearState, defaultBrain] = await Promise.all([
-    listGoatBrainSourcesForBrain(brainRef),
-    getGoatJamieIntegrationState(context.user.workosUserId),
-    getGoatSlackIntegrationState(context.user.workosUserId),
-    getGoatLinearSourceIntegrationState(context.user.workosUserId),
-    getDefaultGoatBrainForUser(context.user.workosUserId),
-  ]);
+  const [sources, jamieState, slackState, linearState, githubState, defaultBrain] =
+    await Promise.all([
+      listGoatBrainSourcesForBrain(brainRef),
+      getGoatJamieIntegrationState(context.user.workosUserId),
+      getGoatSlackIntegrationState(context.user.workosUserId),
+      getGoatLinearSourceIntegrationState(context.user.workosUserId),
+      getGoatGitHubIntegrationState(context.user.workosUserId),
+      getDefaultGoatBrainForUser(context.user.workosUserId),
+    ]);
 
   const jamieConfigured = jamieState.integrationId
     ? await hasAnyBrainSourceForIntegration(jamieState.integrationId)
@@ -130,6 +144,9 @@ export async function getGoatBrainSourcesAction(
     },
     linear: {
       integration: linearState,
+    },
+    github: {
+      integration: githubState,
     },
   };
 }
@@ -470,6 +487,86 @@ export async function setGoatBrainLinearSourceAction(input: {
   }
 }
 
+export type GoatGitHubRepositoryListResult =
+  | { ok: true; repos: Array<GoatGitHubRepositoryRef & { private: boolean }> }
+  | { ok: false; error: string };
+
+export async function listGoatGitHubRepositoriesAction(
+  integrationId: string,
+): Promise<GoatGitHubRepositoryListResult> {
+  const context = await currentGoatUser();
+  const [integration] = await getDb()
+    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, integrationId),
+        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
+        eq(goatIntegrations.provider, "github"),
+      ),
+    )
+    .limit(1);
+  if (!integration || integration.status !== "connected") {
+    return { ok: false, error: "Connect GitHub in your settings first." };
+  }
+
+  // Repositories were synced into integration resources at connect time; the
+  // picker reads that catalog instead of calling GitHub.
+  const repos = await listGoatGitHubIntegrationRepositories(integrationId);
+  return { ok: true, repos };
+}
+
+export async function setGoatBrainGitHubSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+  enabled: boolean;
+  repos: GoatGitHubRepositoryRef[];
+  events: GitHubActivityEventType[];
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireAdminBrainContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "Only workspace admins can configure brain sources." };
+  }
+
+  const [integration] = await getDb()
+    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, input.integrationId),
+        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
+        eq(goatIntegrations.provider, "github"),
+      ),
+    )
+    .limit(1);
+  if (!integration || integration.status === "disconnected") {
+    return { ok: false, error: "Connect GitHub in your settings first." };
+  }
+
+  try {
+    await upsertGoatBrainSource({
+      brainRef: input.brainRef,
+      provider: "github",
+      integrationId: input.integrationId,
+      userWorkosId: context.user.workosUserId,
+      createdByWorkosId: context.user.workosUserId,
+      enabled: input.enabled,
+      config: {
+        repos: sanitizeRepositoryRefs(input.repos),
+        events: sanitizeEventTypes(input.events),
+      },
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the GitHub source.",
+    };
+  }
+}
+
 async function loadOwnLinearAccessToken(userWorkosId: string, integrationId: string) {
   const [integration] = await getDb()
     .select({ id: goatIntegrations.id, status: goatIntegrations.status })
@@ -518,6 +615,24 @@ function sanitizeLinearEventRefs(refs: GoatLinearEventRef[]): GoatLinearEventRef
     if (!allowed.has(id as GoatLinearEventType) || seen.has(id as GoatLinearEventType)) continue;
     seen.add(id as GoatLinearEventType);
     sanitized.push({ id: id as GoatLinearEventType });
+  }
+  return sanitized;
+}
+
+function sanitizeEventTypes(events: GitHubActivityEventType[]): GitHubActivityEventType[] {
+  const known = new Set<string>(GITHUB_ACTIVITY_EVENT_TYPES);
+  return [...new Set(events)].filter((event) => known.has(event));
+}
+
+function sanitizeRepositoryRefs(refs: GoatGitHubRepositoryRef[]): GoatGitHubRepositoryRef[] {
+  const seen = new Set<string>();
+  const sanitized: GoatGitHubRepositoryRef[] = [];
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id.trim() : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const fullName = typeof ref.fullName === "string" ? ref.fullName.trim() : "";
+    sanitized.push({ id, fullName: fullName || id });
   }
   return sanitized;
 }

@@ -12,6 +12,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
+  isNormalizedGitHubActivitySourceItem,
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
@@ -26,6 +27,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
   type GoatBrainAgentIngestEnv,
+  runGitHubActivityAgentIngest,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
@@ -113,6 +115,12 @@ const LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "issue",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "github",
+  sourceType: "activity",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -143,6 +151,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedLinearIssueSourceItem,
     run: runTypedGoatBrainIngestHandler(runLinearIssueAgentIngest),
+  },
+  {
+    descriptor: GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGitHubActivitySourceItem,
+    run: runTypedGoatBrainIngestHandler(runGitHubActivityAgentIngest),
   },
 ];
 

@@ -24,6 +24,7 @@ import {
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
+  type NormalizedGitHubActivitySourceItem,
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
@@ -222,6 +223,57 @@ export function buildLinearIssueAgentIngestPrompt(item: NormalizedLinearIssueSou
     description ? `## Issue description\n${description}` : null,
     `## Activity window\n${activityText}`,
     issue.comments.length > 0 ? `## Comments\n${formatLinearIssueComments(issue)}` : null,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+export const GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one GitHub activity event — a newly opened pull request, a merged pull request, or a newly opened issue — into a single brain of Markdown knowledge documents.",
+  skipRule: `GitHub activity is often routine: dependency bumps, typo fixes, chores, and housekeeping issues carry no durable knowledge. If the event is not brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Only work that changes a project's state of play belongs in the brain: shipped or in-flight features, meaningful fixes, newly surfaced problems, and decisions recorded in the description.`,
+});
+
+export function buildGitHubActivityAgentIngestPrompt(item: NormalizedGitHubActivitySourceItem) {
+  const activity = item.content.activity;
+  const label =
+    activity.kind === "pull_request"
+      ? `${activity.state === "merged" ? "merged" : "newly opened"} pull request ${activity.repository.fullName}#${activity.number}`
+      : `newly opened issue ${activity.repository.fullName}#${activity.number}`;
+  const stats =
+    activity.kind === "pull_request"
+      ? [
+          activity.author ? `- Author: ${activity.author}` : null,
+          activity.mergedBy ? `- Merged by: ${activity.mergedBy}` : null,
+          activity.baseRef && activity.headRef
+            ? `- Branches: ${activity.headRef} -> ${activity.baseRef}`
+            : null,
+          activity.additions !== undefined && activity.deletions !== undefined
+            ? `- Size: +${activity.additions} / -${activity.deletions}${
+                activity.changedFiles !== undefined ? ` across ${activity.changedFiles} files` : ""
+              }`
+            : null,
+        ]
+      : [activity.author ? `- Author: ${activity.author}` : null];
+  const labels = activity.labels && activity.labels.length > 0 ? activity.labels.join(", ") : null;
+  return [
+    `Ingest this ${label} into the brain.`,
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Query the brain first for the project, product, or repository this work belongs to, and for the entities the event touches, so you update existing knowledge instead of duplicating it.",
+    `2. Judge brain-worthiness: does this event change what someone should believe about a project's state of play? Routine housekeeping does not. ${activity.state === "opened" ? "An opened item records work or a problem now in flight — ingest it only when what it starts or surfaces matters at the project level." : "A merged pull request records shipped work — ingest it only when what shipped matters at the project level."}`,
+    `3. Fold what it changes into the page where it belongs — usually a project page: rewrite compiled truth when the state of play changes, and record the event as dated evidence with timeline-add --source-ref ${item.sourceRef}.`,
+    `4. Pointer discipline: this is a tracked work item with a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}${activity.number !== undefined ? `#${activity.number}` : ""}]]. Never copy the description into a page and never snapshot it into evidence/; the tracker copy goes stale immediately.`,
+    "5. Create a project page only when the repository's project clearly has none yet and this event is substantial enough to seed one. Update person or company pages only when the event reveals durable knowledge about them; do not create person pages for people who merely authored or merged the change.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Occurred at: ${item.occurredAt}`,
+    `URL: ${activity.url}`,
+    activity.truncatedBody ? "The description below was truncated to fit the size limit." : null,
+    "",
+    `## Event\n- Repository: ${activity.repository.fullName}${activity.repository.private ? " (private)" : ""}\n- Kind: ${activity.kind}\n- State: ${activity.state}\n- Title: ${activity.title}${labels ? `\n- Labels: ${labels}` : ""}`,
+    ...stats.filter((line): line is string => line !== null),
+    `## Description\n${activity.body.trim() || "(none)"}`,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -742,6 +794,42 @@ export async function runLinearIssueAgentIngest(
     activityCount: issue.activity.length,
     windowStart: issue.windowStart,
     windowEnd: issue.windowEnd,
+  };
+}
+
+export async function runGitHubActivityAgentIngest(
+  input: {
+    jobId?: string;
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedGitHubActivitySourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const activity = input.item.content.activity;
+  const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildGitHubActivityAgentIngestPrompt(input.item),
+    // The integration owner did not author the repository's activity.
+    createdByWorkosId: null,
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    activityKind: activity.kind,
+    activityState: activity.state,
+    repository: activity.repository.fullName,
+    ...(activity.number !== undefined ? { number: activity.number } : {}),
   };
 }
 

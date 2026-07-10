@@ -70,9 +70,21 @@ export type GoatIntegrationResourceStatus =
   | "permission_lost"
   | "archived"
   | "sync_failed";
-export type GoatBrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack" | "linear";
+export type GoatBrainSourceProvider =
+  | "jamie"
+  | "goat-chat"
+  | "upload"
+  | "slack"
+  | "linear"
+  | "github";
 export type GoatBrainSourceConfigProvider = "jamie" | "gmail" | "github" | "slack" | "linear";
-export type GoatBrainSourceType = "meeting" | "capture" | "asset" | "conversation" | "issue";
+export type GoatBrainSourceType =
+  | "meeting"
+  | "capture"
+  | "asset"
+  | "conversation"
+  | "issue"
+  | "activity";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
 export type GoatLinearEventAction = "create" | "update" | "remove";
@@ -943,11 +955,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue')`,
+      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue', 'activity')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -1011,7 +1023,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",

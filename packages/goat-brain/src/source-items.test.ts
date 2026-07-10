@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   BrainSourceNormalizationError,
+  githubActivityEventType,
+  isNormalizedGitHubActivitySourceItem,
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
+  normalizeGitHubActivityWebhook,
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
   normalizeLinearIssueWindow,
@@ -506,5 +509,193 @@ describe("Linear issue window normalization", () => {
   it("guards against other item shapes", () => {
     expect(isNormalizedLinearIssueSourceItem({ sourceProvider: "linear" })).toBe(false);
     expect(isNormalizedLinearIssueSourceItem(null)).toBe(false);
+  });
+});
+
+describe("GitHub activity normalization", () => {
+  const capturedAt = "2026-07-01T12:00:00.000Z";
+
+  function pullRequestPayload(overrides: Record<string, unknown> = {}) {
+    return {
+      action: "closed",
+      repository: { id: 4242, full_name: "acme/api", private: true },
+      pull_request: {
+        number: 123,
+        merged: true,
+        title: "Add usage-based billing",
+        body: "Implements metered billing per workspace.",
+        html_url: "https://github.com/acme/api/pull/123",
+        user: { login: "ada" },
+        merged_by: { login: "grace" },
+        created_at: "2026-07-01T09:30:00Z",
+        merged_at: "2026-07-01T11:58:00Z",
+        base: { ref: "main" },
+        head: { ref: "billing" },
+        additions: 120,
+        deletions: 12,
+        changed_files: 9,
+        commits: 4,
+        labels: [{ name: "feature" }],
+        ...overrides,
+      },
+      installation: { id: 777 },
+    };
+  }
+
+  it("normalizes a merged pull request", () => {
+    const item = normalizeGitHubActivityWebhook("pull_request", pullRequestPayload(), {
+      capturedAt,
+    });
+    expect(item).not.toBeNull();
+    expect(item?.sourceProvider).toBe("github");
+    expect(item?.sourceType).toBe("activity");
+    expect(item?.externalId).toBe("acme/api:pull:123");
+    expect(item?.sourceRef).toBe("github:acme/api:pull:123");
+    expect(item?.title).toBe("acme/api #123 merged: Add usage-based billing");
+    expect(item?.occurredAt).toBe("2026-07-01T11:58:00Z");
+    expect(item?.content.activity).toMatchObject({
+      kind: "pull_request",
+      repository: { id: "4242", fullName: "acme/api", private: true },
+      state: "merged",
+      author: "ada",
+      mergedBy: "grace",
+      baseRef: "main",
+      headRef: "billing",
+      additions: 120,
+      labels: ["feature"],
+      truncatedBody: false,
+    });
+    expect(item ? githubActivityEventType(item.content.activity) : null).toBe(
+      "pull_request_merged",
+    );
+    expect(isNormalizedGitHubActivitySourceItem(item)).toBe(true);
+  });
+
+  it("normalizes an opened pull request", () => {
+    const item = normalizeGitHubActivityWebhook(
+      "pull_request",
+      { ...pullRequestPayload({ merged: false, merged_at: null }), action: "opened" },
+      { capturedAt },
+    );
+    expect(item?.sourceRef).toBe("github:acme/api:pull:123");
+    expect(item?.title).toBe("acme/api #123 opened: Add usage-based billing");
+    expect(item?.occurredAt).toBe("2026-07-01T09:30:00Z");
+    expect(item?.content.activity).toMatchObject({ state: "opened", author: "ada" });
+    expect(item?.content.activity.mergedBy).toBeUndefined();
+    expect(item ? githubActivityEventType(item.content.activity) : null).toBe(
+      "pull_request_opened",
+    );
+  });
+
+  it("ignores non-merged pull request closes and unsupported actions", () => {
+    expect(
+      normalizeGitHubActivityWebhook("pull_request", pullRequestPayload({ merged: false }), {
+        capturedAt,
+      }),
+    ).toBeNull();
+    expect(
+      normalizeGitHubActivityWebhook(
+        "pull_request",
+        { ...pullRequestPayload(), action: "reopened" },
+        { capturedAt },
+      ),
+    ).toBeNull();
+    expect(normalizeGitHubActivityWebhook("push", {}, { capturedAt })).toBeNull();
+    expect(
+      normalizeGitHubActivityWebhook("release", { action: "published" }, { capturedAt }),
+    ).toBeNull();
+  });
+
+  it("normalizes an opened issue and skips other issue actions and PRs-as-issues", () => {
+    const payload = {
+      action: "opened",
+      repository: { id: 4242, full_name: "acme/api", private: false },
+      issue: {
+        number: 45,
+        title: "Billing webhook drops retries",
+        body: "Stripe retries are acked before processing.",
+        html_url: "https://github.com/acme/api/issues/45",
+        user: { login: "ada" },
+        created_at: "2026-07-01T10:00:00Z",
+        labels: [{ name: "bug" }],
+      },
+    };
+    const item = normalizeGitHubActivityWebhook("issues", payload, { capturedAt });
+    expect(item?.sourceRef).toBe("github:acme/api:issue:45");
+    expect(item?.occurredAt).toBe("2026-07-01T10:00:00Z");
+    expect(item?.content.activity).toMatchObject({
+      kind: "issue",
+      state: "opened",
+      labels: ["bug"],
+    });
+    expect(item ? githubActivityEventType(item.content.activity) : null).toBe("issue_opened");
+
+    expect(
+      normalizeGitHubActivityWebhook("issues", { ...payload, action: "closed" }, { capturedAt }),
+    ).toBeNull();
+    const asPullRequest = {
+      ...payload,
+      issue: { ...payload.issue, pull_request: { url: "https://api.github.com/..." } },
+    };
+    expect(normalizeGitHubActivityWebhook("issues", asPullRequest, { capturedAt })).toBeNull();
+  });
+
+  it("derives stable content hashes and truncates oversized bodies", () => {
+    const first = normalizeGitHubActivityWebhook("pull_request", pullRequestPayload(), {
+      capturedAt,
+    });
+    const second = normalizeGitHubActivityWebhook("pull_request", pullRequestPayload(), {
+      capturedAt: "2026-07-02T00:00:00.000Z",
+    });
+    expect(first?.contentHash).toBe(second?.contentHash);
+
+    // The same PR opened and later merged are distinct source items: same
+    // external id, different state in the content hash.
+    const opened = normalizeGitHubActivityWebhook(
+      "pull_request",
+      { ...pullRequestPayload({ merged: false, merged_at: null }), action: "opened" },
+      { capturedAt },
+    );
+    expect(opened?.externalId).toBe(first?.externalId);
+    expect(opened?.contentHash).not.toBe(first?.contentHash);
+
+    const edited = normalizeGitHubActivityWebhook(
+      "pull_request",
+      pullRequestPayload({ body: "Rewritten description." }),
+      { capturedAt },
+    );
+    expect(edited?.contentHash).not.toBe(first?.contentHash);
+
+    const oversized = normalizeGitHubActivityWebhook(
+      "pull_request",
+      pullRequestPayload({ body: "x".repeat(30_000) }),
+      { capturedAt },
+    );
+    expect(oversized?.content.activity.truncatedBody).toBe(true);
+    expect(Buffer.byteLength(oversized?.content.activity.body ?? "", "utf8")).toBeLessThanOrEqual(
+      20_000,
+    );
+  });
+
+  it("throws on malformed payloads for supported actions", () => {
+    expect(() =>
+      normalizeGitHubActivityWebhook(
+        "pull_request",
+        { action: "closed", pull_request: { merged: true, number: 1 } },
+        { capturedAt },
+      ),
+    ).toThrow(BrainSourceNormalizationError);
+    expect(() =>
+      normalizeGitHubActivityWebhook(
+        "issues",
+        { action: "opened", repository: { id: 1, full_name: "acme/api" }, issue: { number: 1 } },
+        { capturedAt },
+      ),
+    ).toThrow(BrainSourceNormalizationError);
+  });
+
+  it("guards against other item shapes", () => {
+    expect(isNormalizedGitHubActivitySourceItem({ sourceProvider: "github" })).toBe(false);
+    expect(isNormalizedGitHubActivitySourceItem(null)).toBe(false);
   });
 });
