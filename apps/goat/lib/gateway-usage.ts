@@ -56,11 +56,13 @@ const DAILY_USAGE_CATEGORY_FEATURES = [
   { category: "brainCostUsdMicros", features: ["brain-ingest", "brain-query"] },
 ] as const;
 
-export async function getGoatDailyUsage(input: GoatUsageUserInput & {
-  apiKey: string;
-  start: string;
-  end: string;
-}) {
+export async function getGoatDailyUsage(
+  input: GoatUsageUserInput & {
+    apiKey: string;
+    start: string;
+    end: string;
+  },
+) {
   const reportUsers = gatewayReportUsers(input);
   if (reportUsers.length === 0) throw new Error("Could not build Goat Gateway reporting user.");
 
@@ -99,11 +101,13 @@ export async function getGoatDailyUsage(input: GoatUsageUserInput & {
   );
 }
 
-export async function getGoatUsageDrilldown(input: GoatUsageUserInput & {
-  apiKey: string;
-  currentUserWorkosId?: string;
-  day: string;
-}) {
+export async function getGoatUsageDrilldown(
+  input: GoatUsageUserInput & {
+    apiKey: string;
+    currentUserWorkosId?: string;
+    day: string;
+  },
+) {
   const reportUsers = gatewayReportUsers(input);
   if (reportUsers.length === 0) throw new Error("Could not build Goat Gateway reporting user.");
   const currentUserWorkosId = input.currentUserWorkosId ?? reportUsers[0]?.userWorkosId ?? "";
@@ -337,10 +341,7 @@ function parseContextTag(tag: string): { kind: "chat" | "task" | "ingest"; id: s
   return { kind: kind as "chat" | "task" | "ingest", id };
 }
 
-async function loadUsageContextLabels(
-  userWorkosId: string,
-  rows: readonly TaggedUsageRow[],
-) {
+async function loadUsageContextLabels(userWorkosId: string, rows: readonly TaggedUsageRow[]) {
   const labels = new Map<string, { label: string; href: string | null }>();
   const chats = rows.filter((row) => row.kind === "chat").map((row) => row.id);
   const tasks = rows.filter((row) => row.kind === "task").map((row) => row.id);

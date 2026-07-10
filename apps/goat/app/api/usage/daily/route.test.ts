@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { getGoatDailyUsage, getGoatUsageDrilldown } from "@/lib/gateway-usage";
 import { GET } from "./route";
