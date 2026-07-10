@@ -8,6 +8,7 @@ import type {
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
+import { finiteDurationMs } from "@/lib/chat-timing";
 
 export {
   CODEX_APPROVAL_TOOL_NAME,
@@ -53,6 +54,11 @@ export type GoatChatMessageMetadata = {
   mentions?: GoatChatMention[];
   taskId?: string;
   task?: GoatTaskCardMetadata | null;
+  timing?: {
+    createdAt?: string;
+    updatedAt?: string;
+    durationMs?: number;
+  };
   error?: string;
   aborted?: boolean;
 };
@@ -338,7 +344,14 @@ export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiM
 export function toGoatChatMessageMetadata(
   message: Pick<
     GoatStoredChatMessage,
-    "sessionId" | "taskId" | "taskDisplayId" | "taskName" | "taskStatus" | "debugTrace"
+    | "sessionId"
+    | "taskId"
+    | "taskDisplayId"
+    | "taskName"
+    | "taskStatus"
+    | "debugTrace"
+    | "createdAt"
+    | "updatedAt"
   >,
 ): GoatChatMessageMetadata | undefined {
   const task =
@@ -352,15 +365,39 @@ export function toGoatChatMessageMetadata(
       : null;
   const error = message.debugTrace?.error;
   const aborted = message.debugTrace?.aborted === true;
+  const timing = toGoatChatMessageTiming(message);
 
-  if (!message.sessionId && !message.taskId && !task && !error && !aborted) return undefined;
+  if (!message.sessionId && !message.taskId && !task && !timing && !error && !aborted) {
+    return undefined;
+  }
   return {
     sessionId: message.sessionId,
     ...(message.taskId ? { taskId: message.taskId } : {}),
     ...(task ? { task } : {}),
+    ...(timing ? { timing } : {}),
     ...(error ? { error } : {}),
     ...(aborted ? { aborted } : {}),
   };
+}
+
+function toGoatChatMessageTiming(
+  message: Pick<GoatStoredChatMessage, "createdAt" | "updatedAt" | "debugTrace">,
+) {
+  const createdAt = serializeChatMessageTimestamp(message.createdAt);
+  const updatedAt = serializeChatMessageTimestamp(message.updatedAt);
+  const durationMs = finiteDurationMs(message.debugTrace?.durationMs);
+  if (!createdAt && !updatedAt && durationMs === null) return null;
+  return {
+    ...(createdAt ? { createdAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(durationMs !== null ? { durationMs } : {}),
+  };
+}
+
+function serializeChatMessageTimestamp(value: Date | string) {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function toGoatChatUiMessageParts(

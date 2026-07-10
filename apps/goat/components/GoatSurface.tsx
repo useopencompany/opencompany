@@ -58,7 +58,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { buildChatTaskLookup, shouldShowThinkingBubble } from "@/components/chat/assistant-items";
+import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useHydrated } from "@/components/useHydrated";
@@ -208,6 +208,9 @@ export function GoatSurface({
   const mountedRef = useRef(false);
   const pendingInputCaretRef = useRef<number | null>(null);
   const initialCodexComposerUiState = codexComposerUiStateForChat(initialChat);
+  const activeTurnStartedAtRef = useRef<number | null>(null);
+  const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
+  const wasAgentWorkingRef = useRef(false);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
@@ -275,6 +278,10 @@ export function GoatSurface({
     ReadonlySet<string>
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
+  const [activeTurnStartedAtMs, setActiveTurnStartedAtMs] = useState<number | null>(null);
+  const [optimisticTurnDurations, setOptimisticTurnDurations] = useState<
+    ReadonlyMap<string, number>
+  >(() => new Map());
   const [, startArchiveTransition] = useTransition();
   const homeChats = useMemo(
     () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds),
@@ -288,6 +295,33 @@ export function GoatSurface({
   const hasHomeActivity =
     homeChats.length > 0 || homeSchedules.length > 0 || homeResults.length > 0;
   const homeGreetingName = userName.trim() || "there";
+
+  const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
+    const startedAtMs = Date.now();
+    activeTurnStartedAtRef.current = startedAtMs;
+    activeTurnAssistantMessageIdRef.current = assistantMessageId;
+    setActiveTurnStartedAtMs(startedAtMs);
+  }, []);
+
+  const clearActiveTurn = useCallback(() => {
+    activeTurnStartedAtRef.current = null;
+    activeTurnAssistantMessageIdRef.current = null;
+    setActiveTurnStartedAtMs(null);
+  }, []);
+
+  const recordOptimisticTurnDuration = useCallback(
+    (assistantMessageId: string | null | undefined) => {
+      const startedAtMs = activeTurnStartedAtRef.current;
+      if (!assistantMessageId || startedAtMs === null) return;
+      const durationMs = Math.max(0, Date.now() - startedAtMs);
+      setOptimisticTurnDurations((current) => {
+        const next = new Map(current);
+        next.set(assistantMessageId, durationMs);
+        return next;
+      });
+    },
+    [],
+  );
 
   const prepareSendMessagesRequest = useCallback(
     ({
@@ -342,6 +376,7 @@ export function GoatSurface({
     experimental_throttle: 50,
     transport,
     onFinish: ({ message }) => {
+      recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
         setChatSessionId(sessionId);
@@ -395,8 +430,13 @@ export function GoatSurface({
     return overlay.length > 0 ? [...persistedMessages, ...overlay] : persistedMessages;
   }, [messages, persistedMessages]);
   const hasMessages = chatMessages.length > 0;
-  const showThinkingBubble =
-    (isGenerating || (isEngineChat && engineRunning)) && shouldShowThinkingBubble(chatMessages);
+  const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
+  const isAgentWorking = isGenerating || isEngineWorking;
+  const latestActiveTurnStartedAtMs = useMemo(
+    () => latestChatTurnStartedAtMs(chatMessages),
+    [chatMessages],
+  );
+  const activeTurnTimerStartedAtMs = activeTurnStartedAtMs ?? latestActiveTurnStartedAtMs;
   const trimmedNewChatPrompt = newChatPrompt.trim();
   const newChatPromptValid =
     trimmedNewChatPrompt.length > 0 &&
@@ -409,6 +449,29 @@ export function GoatSurface({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (isAgentWorking) {
+      wasAgentWorkingRef.current = true;
+      setActiveTurnStartedAtMs((current) => {
+        if (current !== null) {
+          activeTurnStartedAtRef.current = current;
+          return current;
+        }
+        const startedAtMs = latestActiveTurnStartedAtMs ?? Date.now();
+        activeTurnStartedAtRef.current = startedAtMs;
+        return startedAtMs;
+      });
+      return;
+    }
+
+    if (wasAgentWorkingRef.current) {
+      recordOptimisticTurnDuration(activeTurnAssistantMessageIdRef.current);
+    }
+    wasAgentWorkingRef.current = false;
+    clearActiveTurn();
+  }, [clearActiveTurn, isAgentWorking, latestActiveTurnStartedAtMs, recordOptimisticTurnDuration]);
+
   const chatTaskLookup = useMemo(
     () =>
       buildChatTaskLookup({
@@ -488,6 +551,8 @@ export function GoatSurface({
       applyCodexComposerUiState(nextCodexComposerState);
       setCodexSandboxStatus(null);
       setEngineRunning(false);
+      clearActiveTurn();
+      setOptimisticTurnDurations(new Map());
       setMessages([]);
       setLocallyStoppedAssistantMessageIds(new Set());
       clearError();
@@ -496,6 +561,7 @@ export function GoatSurface({
     [
       applyCodexComposerUiState,
       chatSessionId,
+      clearActiveTurn,
       clearError,
       codexComposerStateByChatId,
       codexGoalModeEnabled,
@@ -556,11 +622,11 @@ export function GoatSurface({
 
   useEffect(() => {
     if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
-    if (chatMessages.length === 0 && status !== "submitted" && status !== "streaming") return;
+    if (chatMessages.length === 0 && !isAgentWorking) return;
     const thread = threadRef.current;
     if (!thread || typeof thread.scrollTo !== "function") return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
-  }, [chatMessages, mode, status]);
+  }, [chatMessages, isAgentWorking, mode]);
 
   useEffect(() => {
     if (!chatError || chatError.message === lastError.current) return;
@@ -709,6 +775,7 @@ export function GoatSurface({
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
       const existingEngineSessionId = activeEngineChat?.chatSessionId ?? null;
+      beginActiveTurn();
       setEngineSubmitting(true);
       void sendEngineChatMessage({
         endpoint: config.messagesEndpoint,
@@ -721,6 +788,7 @@ export function GoatSurface({
         .then((result) => {
           setChatSessionId(result.sessionId);
           setEngineChatSession({ engine, chatSessionId: result.sessionId });
+          activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
           setEngineRunning(true);
           setCodexComposerStateByChatId((current) => {
             const next = new Map(current);
@@ -743,6 +811,7 @@ export function GoatSurface({
           router.refresh();
         })
         .catch((error) => {
+          clearActiveTurn();
           setInput(prompt);
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
@@ -758,7 +827,9 @@ export function GoatSurface({
     const message =
       mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
     const model = chatModel;
+    beginActiveTurn();
     void sendMessage(message, { body: { sessionId: chatSessionId, model } }).catch((error) => {
+      clearActiveTurn();
       setInput(prompt);
       setSelectedMentions(mentions);
       toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
@@ -1006,10 +1077,14 @@ export function GoatSurface({
                   message={message}
                   taskLookup={chatTaskLookup}
                   stopped={locallyStoppedAssistantMessageIds.has(message.id)}
+                  durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
                 />
               ))}
-              {showThinkingBubble ? (
-                <ThinkingIndicator {...(isEngineChat ? { label: "Codex is working" } : {})} />
+              {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
+                <ThinkingIndicator
+                  startedAtMs={activeTurnTimerStartedAtMs}
+                  label={isEngineChat ? "Codex is working" : "Goat is working"}
+                />
               ) : null}
             </div>
           </div>
@@ -1220,6 +1295,26 @@ function titleFromChatMessages(messages: readonly GoatChatUiMessage[]) {
     .find(Boolean);
   if (!firstLine) return null;
   return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57).trimEnd()}...`;
+}
+
+function chatMessageDurationMs(
+  message: GoatChatUiMessage,
+  optimisticTurnDurations: ReadonlyMap<string, number>,
+) {
+  if (message.role !== "assistant") return null;
+  const persistedDurationMs = message.metadata?.timing?.durationMs;
+  if (typeof persistedDurationMs === "number") return persistedDurationMs;
+  return optimisticTurnDurations.get(message.id) ?? null;
+}
+
+function latestChatTurnStartedAtMs(messages: readonly GoatChatUiMessage[]) {
+  for (const message of messages.toReversed()) {
+    const createdAt = message.metadata?.timing?.createdAt;
+    if (!createdAt) continue;
+    const startedAtMs = Date.parse(createdAt);
+    if (Number.isFinite(startedAtMs)) return startedAtMs;
+  }
+  return null;
 }
 
 type EngineChatMessageResponse = {

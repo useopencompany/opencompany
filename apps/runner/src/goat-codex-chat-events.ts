@@ -48,6 +48,7 @@ export type GoatCodexChatProjectorTarget = {
   model: string;
   leaseId: string;
   leaseOwner: string;
+  turnCreatedAt?: Date;
 };
 
 // Folds normalized Codex app-server events into the turn's assistant chat_messages row (the
@@ -69,6 +70,7 @@ export function createGoatCodexChatProjector(input: {
       error?: string | null;
       aborted?: boolean;
       usage?: GoatChatMessageDebugTrace["usage"];
+      durationMs?: number | undefined;
     } = {},
   ) => {
     const redactedParts = redactJson(parts, redact) as unknown[];
@@ -88,6 +90,7 @@ export function createGoatCodexChatProjector(input: {
       ...(options.error ? { error: redact(options.error) } : {}),
       ...(options.aborted ? { aborted: true } : {}),
       ...(options.usage ? { usage: options.usage } : {}),
+      ...(typeof options.durationMs === "number" ? { durationMs: options.durationMs } : {}),
     };
     assertRowsChanged(
       await getDb().execute(sql`
@@ -196,8 +199,9 @@ export function createGoatCodexChatProjector(input: {
     turnStatus: "completed" | "failed" | "interrupted";
     sessionStatus: GoatCodexChatSessionStatus;
     error: string | null;
+    completedAt?: Date;
   }) => {
-    const now = new Date();
+    const now = options.completedAt ?? new Date();
     assertRowsChanged(
       await getDb().execute(sql`
         UPDATE goat.codex_chat_turns AS turn
@@ -261,6 +265,7 @@ export function createGoatCodexChatProjector(input: {
     },
 
     async finalize(summary: CodexAppServerSummary) {
+      const completedAt = new Date();
       const usage = summary.usage
         ? {
             inputTokens: summary.usage.input_tokens,
@@ -274,29 +279,56 @@ export function createGoatCodexChatProjector(input: {
         if (!parts.some((part) => part.type === "text" && part.text.trim()) && summary.result) {
           parts = [...parts, { type: "text", text: summary.result }];
         }
-        await writeAssistantMessage({ error: null, usage });
-        await settleTurn({ turnStatus: "completed", sessionStatus: "idle", error: null });
+        await writeAssistantMessage({
+          error: null,
+          usage,
+          durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+        });
+        await settleTurn({
+          turnStatus: "completed",
+          sessionStatus: "idle",
+          error: null,
+          completedAt,
+        });
         return;
       }
       const error = summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`;
       parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-      await writeAssistantMessage({ error, usage });
-      await settleTurn({ turnStatus: "failed", sessionStatus: "idle", error });
+      await writeAssistantMessage({
+        error,
+        usage,
+        durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+      });
+      await settleTurn({ turnStatus: "failed", sessionStatus: "idle", error, completedAt });
     },
 
     async interrupted() {
+      const completedAt = new Date();
       parts = finalizeCodexUiMessageParts(parts, "interrupted").parts;
-      await writeAssistantMessage({ aborted: true });
-      await settleTurn({ turnStatus: "interrupted", sessionStatus: "interrupted", error: null });
+      await writeAssistantMessage({
+        aborted: true,
+        durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+      });
+      await settleTurn({
+        turnStatus: "interrupted",
+        sessionStatus: "interrupted",
+        error: null,
+        completedAt,
+      });
     },
 
     async fail(error: string, options: { sessionStatus?: GoatCodexChatSessionStatus } = {}) {
+      const completedAt = new Date();
       parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-      await writeAssistantMessage({ error });
+      await writeAssistantMessage({
+        error,
+        durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+      });
       await settleTurn({
         turnStatus: "failed",
         sessionStatus: options.sessionStatus ?? "idle",
         error,
+        completedAt,
       });
     },
   };
@@ -306,6 +338,11 @@ function assertRowsChanged(result: unknown) {
   if (rowsFromExecute(result).length === 0) {
     throw new GoatCodexChatLeaseLostError();
   }
+}
+
+function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
+  if (!startedAt || Number.isNaN(startedAt.getTime())) return undefined;
+  return Math.max(0, completedAt.getTime() - startedAt.getTime());
 }
 
 export async function loadCodexChatAssistantMessageParts(assistantMessageId: string) {
