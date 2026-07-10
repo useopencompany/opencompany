@@ -6,6 +6,7 @@
   --color-ink: #111111;
   --color-ink-muted: #6b6b6b;
   --color-ink-subtle: #9a9a96;
+  --color-ink-faint: #b6b6b0;
   --color-border: #e6e6e3;
   --color-border-subtle: #eaeae6;
   --color-border-strong: #d4d4cf;
@@ -27,6 +28,7 @@
   --color-ink: #f0f1ec;
   --color-ink-muted: #a8aca2;
   --color-ink-subtle: #7b8074;
+  --color-ink-faint: #5f635a;
   --color-border: #2b2e28;
   --color-border-subtle: #22251f;
   --color-border-strong: #3c4237;
@@ -49,6 +51,7 @@
     --color-ink: #f0f1ec;
     --color-ink-muted: #a8aca2;
     --color-ink-subtle: #7b8074;
+    --color-ink-faint: #5f635a;
     --color-border: #2b2e28;
     --color-border-subtle: #22251f;
     --color-border-strong: #3c4237;
