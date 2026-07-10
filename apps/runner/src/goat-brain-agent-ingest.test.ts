@@ -506,6 +506,38 @@ describe("runGmailThreadAgentIngest", () => {
     expect(goatGmailMock.getGoatGmailBrainSourceInstructions).not.toHaveBeenCalled();
     expect(result).toMatchObject({ skipped: true, hadInstructions: false });
   });
+
+  it("infers a skip when a Gmail run completes cleanly without mutations", async () => {
+    mockAgentRun({
+      finalText: "Routine transactional email; no durable brain update is needed.",
+      toolInvocations: [{ command: "query", args: ["transactional email", "--limit", "3"] }],
+    });
+
+    const result = await runGmailThreadAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        integrationId: "gint_gmail",
+        item: gmailItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "inferred_no_mutations",
+      reason: "No brain-worthy content identified; agent completed without brain mutations.",
+      mutations: 0,
+      toolCalls: 1,
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
+    expect(traceFromResult(result).toolCalls[0]).toMatchObject({
+      command: "query",
+      status: "completed",
+      mutating: false,
+    });
+  });
 });
 
 describe("runSlackConversationAgentIngest", () => {
@@ -551,6 +583,33 @@ describe("runSlackConversationAgentIngest", () => {
     );
 
     expect(result).toMatchObject({ skipped: true, mutations: 0 });
+  });
+
+  it("does not infer a skip when a mutating command fails", async () => {
+    mockAgentRun({
+      finalText: "No update made.",
+      toolInvocations: [{ command: "timeline-add", args: ["onboarding", "--body", "Ship it."] }],
+    });
+    const failingCli: GoatBrainAgentCliRunner = vi.fn(async () => ({
+      ok: false,
+      exitCode: 1,
+      stdout: "",
+      stderr: "missing page",
+      error: "goat-brain CLI failed.",
+    }));
+
+    await expect(
+      runSlackConversationAgentIngest(
+        {
+          userWorkosId: "user_123",
+          brainRef: "gbrain_123",
+          item: slackItem(),
+          env: { vercelAiGatewayApiKey: "gw_test" },
+        },
+        { runCli: failingCli },
+      ),
+    ).rejects.toThrow("attempted 1 mutating command");
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
   });
 });
 
@@ -942,24 +1001,29 @@ describe("runJamieMeetingAgentIngest", () => {
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalledTimes(1);
   });
 
-  it("fails when the agent neither writes nor skips so the job retries", async () => {
+  it("infers a skip when the agent completes without brain mutations", async () => {
     mockAgentRun({
       finalText: "All done!",
       toolInvocations: [{ command: "query", args: ["Ada"] }],
     });
 
-    await expect(
-      runJamieMeetingAgentIngest(
-        {
-          userWorkosId: "user_123",
-          brainRef: "gbrain_123",
-          item: jamieItem(),
-          env: { vercelAiGatewayApiKey: "gw_test" },
-        },
-        { runCli: okCli },
-      ),
-    ).rejects.toThrow(/without writing/);
-    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "inferred_no_mutations",
+      reason: "No brain-worthy content identified; agent completed without brain mutations.",
+      mutations: 0,
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
   });
 
   it("blocks disallowed tool invocations without running the CLI", async () => {
@@ -993,7 +1057,7 @@ describe("runJamieMeetingAgentIngest", () => {
             command: "delete",
             args: ["ada", "--force"],
             status: "blocked",
-            mutating: false,
+            mutating: true,
             errorPreview: expect.stringContaining("not available"),
           }),
           expect.objectContaining({
