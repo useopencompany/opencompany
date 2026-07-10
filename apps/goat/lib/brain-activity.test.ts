@@ -227,7 +227,7 @@ describe("buildGoatBrainActivityEvents", () => {
 function trace() {
   return {
     schemaVersion: "goat.brain_ingest_trace.v1",
-    model: "anthropic/claude-sonnet-4.6",
+    model: "anthropic/claude-sonnet-5",
     steps: 2,
     toolCallCount: 1,
     mutations: 0,

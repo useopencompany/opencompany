@@ -399,7 +399,7 @@ describe("runGoatChatCaptureAgentIngest", () => {
       summary: "Promoted the capture into concepts/usage-based-pricing.",
       trace: {
         schemaVersion: "goat.brain_ingest_trace.v1",
-        model: "anthropic/claude-sonnet-4.6",
+        model: "anthropic/claude-sonnet-5",
         steps: 2,
         toolCallCount: 2,
         mutations: 1,

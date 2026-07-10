@@ -57,7 +57,7 @@ import {
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-brain-agent-ingest" });
 
-export const GOAT_BRAIN_AGENT_INGEST_MODEL = "anthropic/claude-sonnet-4.6";
+export const GOAT_BRAIN_AGENT_INGEST_MODEL = "anthropic/claude-sonnet-5";
 export const GOAT_BRAIN_AGENT_INGEST_MAX_STEPS = 32;
 export const GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const GOAT_BRAIN_AGENT_SKIP_SENTINEL = "SKIP";
