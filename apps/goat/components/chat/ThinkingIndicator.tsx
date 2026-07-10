@@ -22,7 +22,7 @@ export function ThinkingIndicator({
         aria-label={label}
         className="-ml-1 inline-flex items-center gap-2 rounded-md px-1 py-0.5 text-[12px] font-medium leading-5 text-ink-muted"
       >
-        <ActivityGlyph active />
+        <ActivityGlyph />
         <span>{formatGoatChatDuration(durationMs)}</span>
       </div>
     </div>
@@ -34,9 +34,8 @@ export function TurnDuration({ durationMs }: { durationMs: number }) {
     <div className="flex justify-start">
       <div
         aria-label={`Turn completed in ${formatGoatChatDuration(durationMs)}`}
-        className="-ml-1 inline-flex items-center gap-2 rounded-md px-1 py-0.5 text-[12px] font-medium leading-5 text-ink-muted"
+        className="-ml-1 inline-flex items-center rounded-md px-1 py-0.5 text-[12px] font-medium leading-5 text-ink-muted"
       >
-        <ActivityGlyph />
         <span>{formatGoatChatDuration(durationMs)}</span>
       </div>
     </div>
@@ -54,7 +53,7 @@ function useElapsedDurationMs(startedAtMs: number) {
   return Math.max(0, nowMs - startedAtMs);
 }
 
-function ActivityGlyph({ active = false }: { active?: boolean }) {
+function ActivityGlyph() {
   return (
     <span
       aria-hidden="true"
@@ -63,10 +62,8 @@ function ActivityGlyph({ active = false }: { active?: boolean }) {
       {[0, 1, 2, 3, 4, 5].map((index) => (
         <span
           key={index}
-          className={`size-[2px] rounded-full bg-current ${
-            active ? "animate-[goat-timer-dot_1.2s_ease-in-out_infinite]" : ""
-          }`}
-          style={active ? { animationDelay: `${index * 120}ms` } : undefined}
+          className="size-[2px] rounded-full bg-current animate-[goat-timer-dot_1.2s_ease-in-out_infinite]"
+          style={{ animationDelay: `${index * 120}ms` }}
         />
       ))}
     </span>

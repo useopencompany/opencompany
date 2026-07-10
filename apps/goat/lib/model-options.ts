@@ -1,4 +1,4 @@
-import { AGENT_MODEL_CATALOG } from "@opencompany/agent-runtime";
+import { AGENT_MODEL_CATALOG, DEFAULT_CONTEXT_WINDOW_TOKENS } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 
 const GOAT_MODEL_IDS = [
@@ -23,4 +23,11 @@ export function normalizeGoatModel(value: unknown): AgentModelId {
     return value as AgentModelId;
   }
   return DEFAULT_GOAT_MODEL;
+}
+
+export function goatModelContextWindowTokens(modelId: string): number {
+  return (
+    AGENT_MODEL_CATALOG.find((model) => model.id === modelId)?.contextWindowTokens ??
+    DEFAULT_CONTEXT_WINDOW_TOKENS
+  );
 }

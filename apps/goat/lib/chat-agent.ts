@@ -116,6 +116,14 @@ export type OpenCompanyChatAgentDebugTrace = {
   toolCalls?: unknown[];
   toolResults?: unknown[];
   durationMs?: number;
+  // Token usage from the final generation step. The last step's input+output is the
+  // best proxy for how full the model's context window is after the turn, which drives
+  // the chat header's context meter.
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
   error?: string;
 };
 
@@ -601,6 +609,10 @@ export function createOpenCompanyChatDebugTrace(input: {
     ...(input.uiMessageParts?.length ? { uiMessageParts: input.uiMessageParts } : {}),
     toolCalls: compactStepValues(input.steps, "toolCalls"),
     toolResults: compactStepValues(input.steps, "toolResults"),
+    ...(() => {
+      const usage = usageFromSteps(input.steps);
+      return usage ? { usage } : {};
+    })(),
     ...(input.error ? { error: input.error } : {}),
   };
 }
@@ -714,6 +726,33 @@ function compactStepValues(steps: unknown, key: "toolCalls" | "toolResults") {
     const value = (step as Record<string, unknown>)[key];
     return Array.isArray(value) ? value.map(toJsonSafeValue) : [];
   });
+}
+
+// The last step's usage reflects the full context sent on the final model call
+// (all prior messages + tool results) plus the response, so it approximates how
+// full the context window is after the turn.
+function usageFromSteps(steps: unknown): OpenCompanyChatAgentDebugTrace["usage"] {
+  if (!Array.isArray(steps) || steps.length === 0) return undefined;
+  const lastStep = steps[steps.length - 1];
+  if (!lastStep || typeof lastStep !== "object") return undefined;
+  const usage = (lastStep as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const record = usage as Record<string, unknown>;
+  const inputTokens = nonNegativeInteger(record.inputTokens);
+  const outputTokens = nonNegativeInteger(record.outputTokens);
+  const totalTokens = nonNegativeInteger(record.totalTokens);
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) {
+    return undefined;
+  }
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function toJsonSafeValue(value: unknown) {
