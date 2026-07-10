@@ -19,6 +19,8 @@ import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { setGoatCodexChatWakeup, startGoatCodexChatWorker } from "./goat-codex-chat-worker";
+import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
+import { startGoatGmailPollWorker } from "./goat-gmail-poll-worker";
 import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
@@ -96,6 +98,8 @@ const goatCodexChatWorker = env.goatTaskWorkerEnabled ? startGoatCodexChatWorker
 const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
 const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
 const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
+const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
+const goatGmailFlushWorker = env.goatTaskWorkerEnabled ? startGoatGmailFlushWorker(env) : null;
 const goatTaskScheduleWorker =
   env.goatTaskWorkerEnabled && goatTaskWorker
     ? startGoatTaskScheduleWorker({ onTaskCreated: goatTaskWorker.notify })
@@ -157,6 +161,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatBrainIngestWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
+      goatGmailPollWorker?.stop() ?? Promise.resolve(),
+      goatGmailFlushWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])
       .then(() => Promise.allSettled([flushAllSessionStreams()]))

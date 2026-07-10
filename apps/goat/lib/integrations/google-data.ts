@@ -1,8 +1,11 @@
 import { getDb } from "@opencompany/db/client";
 import type { GoatIntegrationProvider, GoatTaskToolName } from "@opencompany/db/goat-schema";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
-import { and, eq, inArray } from "drizzle-orm";
-import type { GoatGoogleProviderState } from "@/lib/integration-state";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import type {
+  GoatGmailSourceProviderState,
+  GoatGoogleProviderState,
+} from "@/lib/integration-state";
 import { goatGoogleIntegrationStateFromRows } from "@/lib/integration-state";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
@@ -41,6 +44,47 @@ export async function getGoatGoogleIntegrationState(userWorkosId: string) {
     .orderBy(goatIntegrations.provider, goatIntegrations.updatedAt);
 
   return goatGoogleIntegrationStateFromRows(rows);
+}
+
+// Gmail-as-a-brain-source state: same integration rows as the Gmail tool
+// connection, but exposed with the integration id the brain-source picker and
+// save action key config rows on.
+export async function getGoatGmailSourceIntegrationState(
+  userWorkosId: string,
+): Promise<GoatGmailSourceProviderState> {
+  const [row] = await getDb()
+    .select({
+      id: goatIntegrations.id,
+      status: goatIntegrations.status,
+      accountEmail: goatIntegrations.accountEmail,
+      statusReason: goatIntegrations.statusReason,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(eq(goatIntegrations.userWorkosId, userWorkosId), eq(goatIntegrations.provider, "gmail")),
+    )
+    .orderBy(desc(goatIntegrations.updatedAt))
+    .limit(1);
+
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "gmail",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountEmail: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "gmail",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id,
+    accountEmail: row.accountEmail,
+    statusReason: row.statusReason,
+  };
 }
 
 export async function getGoatAvailableHarnessTools(

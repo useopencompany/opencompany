@@ -21,10 +21,13 @@ import {
   goatBrainIngestTracePreview,
   sanitizeGoatBrainIngestTraceArgs,
 } from "@opencompany/db/goat-brain-ingest-trace";
+import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type NormalizedGitHubActivitySourceItem,
+  type NormalizedGmailThreadContent,
+  type NormalizedGmailThreadSourceItem,
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
@@ -46,6 +49,7 @@ import * as ai from "ai";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { writeLocalBrainFile } from "./goat-brain";
+import { buildGmailThreadEvidenceWrite } from "./goat-brain-gmail-writes";
 import {
   buildJamieMeetingEvidenceWrite,
   formatActionItems,
@@ -73,6 +77,7 @@ const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
 const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
+const PROMPT_GMAIL_MESSAGES_BYTES = 80_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 
 // The ingestion agent gets the full working surface of the CLI except the
@@ -190,6 +195,83 @@ export const LINEAR_ISSUE_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPromp
     "folds one window of Linear issue activity into a single brain of Markdown knowledge documents.",
   skipRule: `Linear is mostly routine task churn: status moves, assignment shuffles, estimate tweaks, and short logistics comments carry no durable knowledge. If nothing in the window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, scope changes, root causes, substantive discussion, and facts about people, companies, or projects belong in the brain.`,
 });
+
+export const GMAIL_THREAD_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one window of email-thread activity into a single brain of Markdown knowledge documents.",
+  skipRule: `Email is high-noise: newsletters, receipts, notifications, automated mail, and scheduling logistics carry no durable knowledge. If nothing in the thread window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, commitments, plans, and facts about people, companies, or projects belong in the brain. When the brain owner's ingestion instructions are provided in the task, they refine this judgment about what matters and what to skip; they never override your working discipline.`,
+});
+
+export function buildGmailThreadAgentIngestPrompt(
+  item: NormalizedGmailThreadSourceItem,
+  context: {
+    evidenceBrainId: string;
+    truncatedBodies: boolean;
+    instructions: string | null;
+  },
+) {
+  const thread = item.content.thread;
+  const fullMessagesText = formatGmailThreadMessages(thread);
+  const messagesText = truncateByBytes(fullMessagesText, PROMPT_GMAIL_MESSAGES_BYTES);
+  const truncated =
+    Buffer.byteLength(messagesText, "utf8") < Buffer.byteLength(fullMessagesText, "utf8");
+  return [
+    "Ingest this email thread window from Gmail into the brain. It is one thread window: the messages that arrived or were sent on the thread since the last ingested batch, with the rest of the thread as interpretive context.",
+    "",
+    "A raw evidence snapshot of the thread already exists in this brain:",
+    `- Evidence record: [[evidence:${context.evidenceBrainId}|Email thread]] (id: ${context.evidenceBrainId})`,
+    context.truncatedBodies
+      ? "- Some message bodies in the evidence record were truncated to fit the file size limit."
+      : null,
+    "",
+    ...(context.instructions
+      ? [
+          "## Owner's ingestion instructions for this brain",
+          "The brain owner tuned what email content matters here. Apply these instructions when judging what is brain-worthy and what to skip; they refine, but never override, your working discipline:",
+          context.instructions,
+          "",
+        ]
+      : []),
+    "Required outcome, all scoped to this brain:",
+    "1. Query the brain first for likely existing pages and facts before writing, so you update existing knowledge instead of duplicating it.",
+    "2. Judge the window first: extract only durable knowledge — decisions, commitments, plans, and facts about people, companies, or projects. Ignore pleasantries and logistics around it.",
+    `3. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite the thread with --source-ref ${item.sourceRef} and individual messages with --source-ref gmail:message:<message id>, linking the evidence record with [[evidence:${context.evidenceBrainId}]].`,
+    "4. Emails follow the snapshot rule: the raw content lives in the evidence record above. Never paste message bodies into compiled truth; synthesize and cite.",
+    "5. Create or update person or company pages for correspondents central to the exchange, with backlinks per the iron law. Do not create pages for people who merely appear in a Cc line.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Window: ${thread.windowStart} to ${thread.windowEnd}`,
+    thread.snapshotStale
+      ? "The live thread could not be fetched (revoked access or deleted messages); the bodies below are snippets from buffered metadata."
+      : null,
+    truncated ? "The messages below were truncated to fit the prompt size limit." : null,
+    "",
+    `## Thread\n- Subject: ${thread.subject}${thread.accountEmail ? `\n- Mailbox: ${thread.accountEmail}` : ""}\n- Participants: ${thread.participants.join("; ") || "unknown"}\n- Messages: ${thread.messages.length}`,
+    `## Messages\n${messagesText}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function formatGmailThreadMessages(thread: NormalizedGmailThreadContent["thread"]) {
+  return thread.messages
+    .map((message) => {
+      const time = message.sentAt.slice(0, 16).replace("T", " ");
+      const direction = message.direction === "sent" ? "SENT" : "RECEIVED";
+      const recipients = [
+        message.to ? `to ${message.to}` : null,
+        message.cc ? `cc ${message.cc}` : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      const body = (message.bodyText.trim() || message.snippet || "(no text body)").replaceAll(
+        "\n",
+        "\n  ",
+      );
+      return `[${time}] ${direction} from ${message.from}${recipients ? ` (${recipients})` : ""} (message id ${message.messageId}):\n  ${body}`;
+    })
+    .join("\n\n");
+}
 
 export function buildLinearIssueAgentIngestPrompt(item: NormalizedLinearIssueSourceItem) {
   const issue = item.content.issue;
@@ -804,6 +886,80 @@ export async function runLinearIssueAgentIngest(
     activityCount: issue.activity.length,
     windowStart: issue.windowStart,
     windowEnd: issue.windowEnd,
+  };
+}
+
+export async function runGmailThreadAgentIngest(
+  input: {
+    jobId?: string;
+    userWorkosId: string;
+    brainRef: string | null;
+    integrationId?: string | null;
+    item: NormalizedGmailThreadSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const thread = input.item.content.thread;
+  // The thread snapshot is written deterministically before the agent runs:
+  // per the pointer-copy rule emails snapshot into evidence/, and full bodies
+  // should not round-trip through model tool calls.
+  const evidence = buildGmailThreadEvidenceWrite(input.item);
+  // Instructions are looked up live (not snapshotted at enqueue) so edits in
+  // brain settings apply to already-queued jobs; the job content hash covers
+  // only the normalized item, so this never invalidates the claim.
+  const instructions =
+    input.brainRef && input.integrationId
+      ? await getGoatGmailBrainSourceInstructions(
+          {
+            integrationId: input.integrationId,
+            brainRef: input.brainRef,
+          },
+          getDb(),
+        ).catch((error) => {
+          logger.warn("Goat Gmail ingest instructions lookup failed", {
+            event: "opencompany.goat_gmail_instructions_lookup_failed",
+            brain_ref: input.brainRef,
+            integration_id: input.integrationId,
+            error,
+          });
+          return null;
+        })
+      : null;
+
+  const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: GMAIL_THREAD_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () =>
+      buildGmailThreadAgentIngestPrompt(input.item, {
+        evidenceBrainId: evidence.evidenceBrainId,
+        truncatedBodies: evidence.truncatedBodies,
+        instructions,
+      }),
+    prepareRoot: (root) =>
+      writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
+    // Email content is authored by the correspondents, not the integration
+    // owner.
+    createdByWorkosId: null,
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    threadId: thread.threadId,
+    evidenceBrainId: evidence.evidenceBrainId,
+    truncatedBodies: evidence.truncatedBodies,
+    messageCount: thread.messages.length,
+    hadInstructions: Boolean(instructions),
+    windowStart: thread.windowStart,
+    windowEnd: thread.windowEnd,
   };
 }
 

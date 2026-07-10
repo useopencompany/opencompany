@@ -10,6 +10,12 @@ import {
   type GoatGitHubRepositoryRef,
   listGoatGitHubIntegrationRepositories,
 } from "@opencompany/db/goat-github";
+import {
+  GOAT_GMAIL_EVENT_TYPES,
+  type GoatGmailEventRef,
+  type GoatGmailEventType,
+  sanitizeGoatGmailInstructions,
+} from "@opencompany/db/goat-gmail";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
   GOAT_LINEAR_EVENT_TYPES,
@@ -31,6 +37,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import type {
+  GoatGmailSourceProviderState,
   GoatJamieProviderState,
   GoatLinearSourceProviderState,
   GoatSlackProviderState,
@@ -39,6 +46,7 @@ import {
   type GoatGitHubProviderState,
   getGoatGitHubIntegrationState,
 } from "@/lib/integrations/github";
+import { getGoatGmailSourceIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import {
   getGoatLinearSourceIntegrationState,
@@ -76,6 +84,9 @@ export type GoatBrainSourcesDetails = {
   github: {
     integration: GoatGitHubProviderState;
   };
+  gmail: {
+    integration: GoatGmailSourceProviderState;
+  };
 };
 
 function integrationProviderFor(
@@ -110,13 +121,14 @@ export async function getGoatBrainSourcesAction(
   const context = await requireAdminBrainContext(brainRef);
   if (!context) return null;
 
-  const [sources, jamieState, slackState, linearState, githubState, defaultBrain] =
+  const [sources, jamieState, slackState, linearState, githubState, gmailState, defaultBrain] =
     await Promise.all([
       listGoatBrainSourcesForBrain(brainRef),
       getGoatJamieIntegrationState(context.user.workosUserId),
       getGoatSlackIntegrationState(context.user.workosUserId),
       getGoatLinearSourceIntegrationState(context.user.workosUserId),
       getGoatGitHubIntegrationState(context.user.workosUserId),
+      getGoatGmailSourceIntegrationState(context.user.workosUserId),
       getDefaultGoatBrainForUser(context.user.workosUserId),
     ]);
 
@@ -147,6 +159,9 @@ export async function getGoatBrainSourcesAction(
     },
     github: {
       integration: githubState,
+    },
+    gmail: {
+      integration: gmailState,
     },
   };
 }
@@ -565,6 +580,71 @@ export async function setGoatBrainGitHubSourceAction(input: {
       error: error instanceof Error ? error.message : "Could not update the GitHub source.",
     };
   }
+}
+
+export async function setGoatBrainGmailSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+  enabled: boolean;
+  events: GoatGmailEventRef[];
+  instructions: string;
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireAdminBrainContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "Only workspace admins can configure brain sources." };
+  }
+
+  const [integration] = await getDb()
+    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, input.integrationId),
+        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
+        eq(goatIntegrations.provider, "gmail"),
+      ),
+    )
+    .limit(1);
+  if (!integration || integration.status === "disconnected") {
+    return { ok: false, error: "Connect Gmail in your settings first." };
+  }
+
+  try {
+    const instructions = sanitizeGoatGmailInstructions(input.instructions);
+    await upsertGoatBrainSource({
+      brainRef: input.brainRef,
+      provider: "gmail",
+      integrationId: input.integrationId,
+      userWorkosId: context.user.workosUserId,
+      createdByWorkosId: context.user.workosUserId,
+      enabled: input.enabled,
+      config: {
+        events: sanitizeGmailEventRefs(input.events),
+        ...(instructions ? { instructions } : {}),
+      },
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the Gmail source.",
+    };
+  }
+}
+
+function sanitizeGmailEventRefs(refs: GoatGmailEventRef[]): GoatGmailEventRef[] {
+  const allowed = new Set<GoatGmailEventType>(GOAT_GMAIL_EVENT_TYPES);
+  const seen = new Set<GoatGmailEventType>();
+  const sanitized: GoatGmailEventRef[] = [];
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id : "";
+    if (!allowed.has(id as GoatGmailEventType) || seen.has(id as GoatGmailEventType)) continue;
+    seen.add(id as GoatGmailEventType);
+    sanitized.push({ id: id as GoatGmailEventType });
+  }
+  return sanitized;
 }
 
 async function loadOwnLinearAccessToken(userWorkosId: string, integrationId: string) {

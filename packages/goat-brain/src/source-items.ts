@@ -1,13 +1,21 @@
 import { createHash } from "node:crypto";
 
-export type BrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack" | "linear" | "github";
+export type BrainSourceProvider =
+  | "jamie"
+  | "goat-chat"
+  | "upload"
+  | "slack"
+  | "linear"
+  | "github"
+  | "gmail";
 export type BrainSourceType =
   | "meeting"
   | "capture"
   | "asset"
   | "conversation"
   | "issue"
-  | "activity";
+  | "activity"
+  | "thread";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
   sourceProvider: BrainSourceProvider;
@@ -993,6 +1001,156 @@ function truncateUtf8Bytes(value: string, limit: number): string {
     result = result.slice(0, Math.max(0, Math.floor(result.length * 0.9) - 1));
   }
   return result;
+}
+
+export type NormalizedGmailThreadMessage = {
+  messageId: string;
+  direction: "sent" | "received";
+  from: string;
+  to?: string;
+  cc?: string;
+  sentAt: string;
+  /** text/plain body with quoted replies stripped best-effort; the evidence
+   * snapshot keeps the unstripped text. */
+  bodyText: string;
+  snippet?: string;
+};
+
+export type NormalizedGmailThreadContent = {
+  thread: {
+    /** The connected mailbox the window was polled from. */
+    accountEmail?: string;
+    threadId: string;
+    subject: string;
+    participants: string[];
+    /** True when the live thread snapshot could not be fetched (deleted
+     * message, revoked token); messages then reflect buffered metadata only. */
+    snapshotStale?: boolean;
+    windowStart: string;
+    windowEnd: string;
+    messages: NormalizedGmailThreadMessage[];
+  };
+};
+
+export type NormalizedGmailThreadSourceItem =
+  NormalizedBrainSourceItem<NormalizedGmailThreadContent> & {
+    sourceProvider: "gmail";
+    sourceType: "thread";
+  };
+
+export function normalizeGmailThreadWindow(input: {
+  // Minted per flush, so it doubles as the stable external id for dedupe: a
+  // thread that gains new messages later produces a fresh source item.
+  windowId: string;
+  threadId: string;
+  subject?: string;
+  messages: NormalizedGmailThreadMessage[];
+  flushedAt: string;
+  accountEmail?: string;
+  snapshotStale?: boolean;
+}): NormalizedGmailThreadSourceItem {
+  const windowId = input.windowId.trim();
+  if (!windowId) throw invalid("thread windowId must not be empty", "invalid_thread");
+  const threadId = input.threadId.trim();
+  if (!threadId) throw invalid("thread threadId must not be empty", "invalid_thread");
+  if (input.messages.length === 0) {
+    throw invalid("thread messages must not be empty", "invalid_thread");
+  }
+  const flushedAt = optionalIsoString(input.flushedAt);
+  if (!flushedAt) throw invalid("thread flushedAt must be a timestamp", "invalid_thread");
+
+  const messages = [...input.messages].sort(
+    (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime(),
+  );
+  const windowStart = messages[0]!.sentAt;
+  const windowEnd = messages[messages.length - 1]!.sentAt;
+  const subject = optionalString(input.subject) ?? "(no subject)";
+  const accountEmail = optionalString(input.accountEmail);
+  const participants = [
+    ...new Set(
+      messages.flatMap((message) =>
+        [message.from, message.to, message.cc].flatMap((header) =>
+          header ? splitAddressHeader(header) : [],
+        ),
+      ),
+    ),
+  ];
+
+  const contentHashInput = {
+    sourceProvider: "gmail",
+    sourceType: "thread",
+    threadId,
+    subject,
+    messages: messages.map((message) => ({
+      messageId: message.messageId,
+      direction: message.direction,
+      sentAt: message.sentAt,
+    })),
+  };
+
+  return {
+    sourceProvider: "gmail",
+    sourceType: "thread",
+    externalId: windowId,
+    sourceRef: `gmail:thread:${threadId}`,
+    title: subject,
+    occurredAt: windowStart,
+    capturedAt: flushedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: {
+      thread: {
+        ...(accountEmail ? { accountEmail } : {}),
+        threadId,
+        subject,
+        participants,
+        ...(input.snapshotStale ? { snapshotStale: true } : {}),
+        windowStart,
+        windowEnd,
+        messages,
+      },
+    },
+  };
+}
+
+export function isNormalizedGmailThreadSourceItem(
+  value: unknown,
+): value is NormalizedGmailThreadSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedGmailThreadSourceItem>;
+  if (
+    item.sourceProvider !== "gmail" ||
+    item.sourceType !== "thread" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const thread = (item.content as Partial<NormalizedGmailThreadContent>).thread;
+  return (
+    !!thread &&
+    typeof thread === "object" &&
+    typeof thread.threadId === "string" &&
+    typeof thread.subject === "string" &&
+    Array.isArray(thread.participants) &&
+    Array.isArray(thread.messages) &&
+    thread.messages.length > 0
+  );
+}
+
+// "Ada Lovelace <ada@example.com>, bob@example.com" -> both address entries,
+// trimmed, keeping display names so participants read naturally in the brain.
+function splitAddressHeader(header: string): string[] {
+  return header
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 export class BrainSourceNormalizationError extends Error {

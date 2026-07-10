@@ -13,6 +13,7 @@ import {
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
   isNormalizedGitHubActivitySourceItem,
+  isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
@@ -28,6 +29,7 @@ import type { RunnerEnv } from "./env";
 import {
   type GoatBrainAgentIngestEnv,
   runGitHubActivityAgentIngest,
+  runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
@@ -65,6 +67,10 @@ export type GoatBrainIngestHandlerInput<
   jobId: string;
   userWorkosId: string;
   brainRef: string | null;
+  // The integration the source item came through, when the source has one.
+  // Lets handlers look up per-(brain, integration) source config live at
+  // ingest time (e.g. Gmail ingestion instructions).
+  integrationId: string | null;
   item: TItem;
   env: GoatBrainAgentIngestEnv;
 };
@@ -121,6 +127,12 @@ const GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "activity",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "gmail",
+  sourceType: "thread",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -156,6 +168,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGitHubActivitySourceItem,
     run: runTypedGoatBrainIngestHandler(runGitHubActivityAgentIngest),
+  },
+  {
+    descriptor: GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGmailThreadSourceItem,
+    run: runTypedGoatBrainIngestHandler(runGmailThreadAgentIngest),
   },
 ];
 
@@ -415,6 +432,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       jobId: input.job.id,
       userWorkosId: input.job.userWorkosId,
       brainRef: input.job.brainRef ?? null,
+      integrationId: input.job.integrationId ?? null,
       item: input.job.normalizedPayload,
       env: {
         vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,

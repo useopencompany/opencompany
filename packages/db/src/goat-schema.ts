@@ -76,7 +76,8 @@ export type GoatBrainSourceProvider =
   | "upload"
   | "slack"
   | "linear"
-  | "github";
+  | "github"
+  | "gmail";
 export type GoatBrainSourceConfigProvider = "jamie" | "gmail" | "github" | "slack" | "linear";
 export type GoatBrainSourceType =
   | "meeting"
@@ -84,7 +85,9 @@ export type GoatBrainSourceType =
   | "asset"
   | "conversation"
   | "issue"
-  | "activity";
+  | "activity"
+  | "thread";
+export type GoatGmailMessageDirection = "sent" | "received";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
 export type GoatLinearEventAction = "create" | "update" | "remove";
@@ -955,11 +958,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue', 'activity')`,
+      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -1023,7 +1026,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -1137,6 +1140,71 @@ export const goatLinearIssueEvents = goat.table(
     ),
   }),
 );
+
+// Raw Gmail message buffer: the runner's poll worker inserts one row per new
+// message discovered via the Gmail history API; the flush sweeper batches
+// unflushed rows per thread into a thread-window source item after a quiet
+// period (source_item_id NULL = unflushed).
+export const goatGmailMessageEvents = goat.table(
+  "gmail_message_events",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    threadId: text("thread_id").notNull(),
+    messageId: text("message_id").notNull(),
+    // Classified at poll time from labelIds (SENT label); flush routing matches
+    // brain-source event filters against this without re-parsing labels.
+    direction: text("direction").$type<GoatGmailMessageDirection>().notNull(),
+    subject: text("subject"),
+    fromHeader: text("from_header"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // History polling can re-report a message across overlapping windows; the
+    // unique (integration, message id) index makes re-discovery a no-op.
+    integrationMessageIdx: uniqueIndex("goat_gmail_message_events_integration_message_idx").on(
+      table.integrationId,
+      table.messageId,
+    ),
+    pendingIdx: index("goat_gmail_message_events_pending_idx")
+      .on(table.integrationId, table.threadId, table.receivedAt)
+      .where(sql`${table.sourceItemId} IS NULL`),
+    sourceItemIdx: index("goat_gmail_message_events_source_item_idx").on(table.sourceItemId),
+    directionCheck: check(
+      "goat_gmail_message_events_direction_check",
+      sql`${table.direction} IN ('sent', 'received')`,
+    ),
+  }),
+);
+
+// Per-integration Gmail history cursor for the poll worker. history_id NULL =
+// first poll pending (ingestion starts from the moment of connection, no
+// backfill); last_reset_at records historyId-expiry resets for observability.
+export const goatGmailSyncState = goat.table("gmail_sync_state", {
+  integrationId: text("integration_id")
+    .primaryKey()
+    .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+  userWorkosId: text("user_workos_id")
+    .notNull()
+    .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+  emailAddress: text("email_address"),
+  historyId: text("history_id"),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+  lastResetAt: timestamp("last_reset_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const goatTaskSchedules = goat.table(
   "task_schedules",
