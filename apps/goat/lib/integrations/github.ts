@@ -38,6 +38,7 @@ export type GoatGitHubProviderState = {
   provider: "github";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
   accountName: string | null;
   statusReason: string | null;
 };
@@ -67,6 +68,7 @@ export async function getGoatGitHubIntegrationState(
 ): Promise<GoatGitHubProviderState> {
   const [row] = await getDb()
     .select({
+      id: goatIntegrations.id,
       status: goatIntegrations.status,
       accountName: goatIntegrations.accountName,
       statusReason: goatIntegrations.statusReason,
@@ -86,6 +88,7 @@ export async function getGoatGitHubIntegrationState(
       provider: GITHUB_PROVIDER,
       connected: false,
       status: "not_connected",
+      integrationId: null,
       accountName: null,
       statusReason: null,
     };
@@ -95,6 +98,7 @@ export async function getGoatGitHubIntegrationState(
     provider: GITHUB_PROVIDER,
     connected: row.status === "connected",
     status: row.status,
+    integrationId: row.id,
     accountName: row.accountName,
     statusReason: row.statusReason,
   };

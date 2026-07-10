@@ -1,5 +1,6 @@
 "use client";
 
+import type { GitHubActivityEventType } from "@opencompany/goat-brain";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Brain, Check, ChevronDown, ChevronRight, Copy, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
@@ -9,11 +10,14 @@ import { useHydrated } from "@/components/useHydrated";
 import {
   type GoatBrainSourcesDetails,
   type GoatBrainSourceView,
+  type GoatGitHubRepositoryListResult,
   type GoatLinearTeamListResult,
   type GoatSlackConversationListResult,
   getGoatBrainSourcesAction,
+  listGoatGitHubRepositoriesAction,
   listGoatLinearTeamsAction,
   listGoatSlackConversationsAction,
+  setGoatBrainGitHubSourceAction,
   setGoatBrainLinearSourceAction,
   setGoatBrainSlackSourceAction,
   setGoatBrainSourceEnabledAction,
@@ -299,6 +303,7 @@ function SourceProviderCard({
   const jamie = provider.id === "jamie" ? details?.jamie : undefined;
   const slack = provider.id === "slack" ? details?.slack : undefined;
   const linear = provider.id === "linear" ? details?.linear : undefined;
+  const github = provider.id === "github" ? details?.github : undefined;
   const connected =
     provider.id === "jamie"
       ? Boolean(jamie?.integration.connected)
@@ -306,7 +311,9 @@ function SourceProviderCard({
         ? Boolean(slack?.integration.connected)
         : provider.id === "linear"
           ? Boolean(linear?.integration.connected)
-          : false;
+          : provider.id === "github"
+            ? Boolean(github?.integration.connected)
+            : false;
   // Before any per-brain rows exist, Jamie deliveries follow legacy routing to
   // the user's default brain — surface that as an implicit "on" there.
   const legacyEnabled = Boolean(
@@ -321,7 +328,8 @@ function SourceProviderCard({
       source?.integrationId ??
       jamie?.integration.integrationId ??
       slack?.integration.integrationId ??
-      linear?.integration.integrationId;
+      linear?.integration.integrationId ??
+      github?.integration.integrationId;
     if (!integrationId) return;
     startTransition(async () => {
       const result = await setGoatBrainSourceEnabledAction({
@@ -405,6 +413,17 @@ function SourceProviderCard({
         <LinearTeamPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? linear.integration.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {provider.id === "github" &&
+      github?.integration.integrationId &&
+      (connected || source) &&
+      (source ? source.isOwnIntegration : true) ? (
+        <GitHubRepoPicker
+          brainRef={brainRef}
+          integrationId={source?.integrationId ?? github.integration.integrationId}
           source={source}
           onChanged={onChanged}
         />
@@ -646,6 +665,253 @@ function SlackChannelPicker({
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >
             {isPending ? "Saving…" : "Save channels"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function githubReposFromConfig(
+  config: Record<string, unknown> | undefined,
+): { id: string; fullName: string }[] {
+  const value = config?.repos;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.id !== "string" || !record.id) return [];
+    return [
+      {
+        id: record.id,
+        fullName: typeof record.fullName === "string" ? record.fullName : record.id,
+      },
+    ];
+  });
+}
+
+// Kept as literals so this client component has no runtime import from the
+// goat-brain package; the set must mirror GITHUB_ACTIVITY_EVENT_TYPES.
+const GITHUB_EVENT_OPTIONS: { id: GitHubActivityEventType; label: string }[] = [
+  { id: "pull_request_opened", label: "Pull request opened" },
+  { id: "pull_request_merged", label: "Pull request merged" },
+  { id: "pull_request_commented", label: "Pull request comment" },
+  { id: "issue_opened", label: "Issue created" },
+  { id: "issue_commented", label: "Issue comment" },
+];
+
+function githubEventsFromConfig(
+  config: Record<string, unknown> | undefined,
+): Set<GitHubActivityEventType> {
+  const known = new Set(GITHUB_EVENT_OPTIONS.map((option) => option.id));
+  const value = config?.events;
+  // Missing key (pre-filter configs or a fresh source) means all event types,
+  // matching the webhook router's default.
+  if (!Array.isArray(value)) return new Set(known);
+  return new Set(
+    value.filter(
+      (entry): entry is GitHubActivityEventType =>
+        typeof entry === "string" && known.has(entry as GitHubActivityEventType),
+    ),
+  );
+}
+
+function GitHubRepoPicker({
+  brainRef,
+  integrationId,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  integrationId: string;
+  source: GoatBrainSourceView | null;
+  onChanged: () => Promise<void>;
+}) {
+  const saved = useMemo(() => githubReposFromConfig(source?.config), [source]);
+  const savedEvents = useMemo(() => githubEventsFromConfig(source?.config), [source]);
+  const [expanded, setExpanded] = useState(false);
+  const [repos, setRepos] = useState<GoatGitHubRepositoryListResult | null>(null);
+  const [search, setSearch] = useState("");
+  const [selection, setSelection] = useState<Map<string, string>>(
+    () => new Map(saved.map((repo) => [repo.id, repo.fullName])),
+  );
+  const [events, setEvents] = useState<Set<GitHubActivityEventType>>(() => new Set(savedEvents));
+  const [dirty, setDirty] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (!expanded || repos) return;
+    let cancelled = false;
+    void listGoatGitHubRepositoriesAction(integrationId).then((result) => {
+      if (!cancelled) setRepos(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, repos, integrationId]);
+
+  const toggleRepo = (id: string, fullName: string) => {
+    setDirty(true);
+    setSelection((current) => {
+      const next = new Map(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.set(id, fullName);
+      }
+      return next;
+    });
+  };
+
+  const toggleEvent = (id: GitHubActivityEventType) => {
+    setDirty(true);
+    setEvents((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const save = () => {
+    startTransition(async () => {
+      const result = await setGoatBrainGitHubSourceAction({
+        brainRef,
+        integrationId,
+        enabled: source ? source.enabled : true,
+        repos: [...selection].map(([id, fullName]) => ({ id, fullName })),
+        events: [...events],
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setDirty(false);
+      toast.success("GitHub source updated.");
+      await onChanged();
+    });
+  };
+
+  const selectedCount = selection.size;
+  const eventSummary =
+    events.size === 0
+      ? "no events"
+      : GITHUB_EVENT_OPTIONS.filter((option) => events.has(option.id))
+          .map((option) => option.label.toLowerCase())
+          .join(", ");
+  const summary =
+    selectedCount === 0
+      ? "No repositories selected yet — nothing is ingested until you choose some."
+      : `${selectedCount} repositor${selectedCount === 1 ? "y" : "ies"} selected · ${eventSummary}.`;
+
+  if (!expanded) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-t border-ink/10 pt-2">
+        <p className="text-[11.5px] leading-4 text-ink-subtle">{summary}</p>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+        >
+          Configure
+        </button>
+      </div>
+    );
+  }
+
+  const query = search.trim().toLowerCase();
+  const repoOptions = (repos?.ok ? repos.repos : []).filter(
+    (repo) => !query || repo.fullName.toLowerCase().includes(query),
+  );
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search
+            size={13}
+            strokeWidth={2}
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-subtle"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search repositories"
+            className="w-full rounded-md border border-ink/10 bg-transparent py-1 pl-7 pr-2 text-[12.5px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          Collapse
+        </button>
+      </div>
+      {repos === null ? (
+        <div className="px-1 py-1.5 text-[12px] text-ink-subtle">Loading repositories…</div>
+      ) : !repos.ok ? (
+        <div className="px-1 py-1.5 text-[12px] text-warning">{repos.error}</div>
+      ) : (
+        <div className="flex max-h-[220px] flex-col gap-px overflow-y-auto rounded-md border border-ink/10 p-1">
+          {repoOptions.length === 0 ? (
+            <div className="px-2 py-1.5 text-[12px] text-ink-subtle">No repositories found.</div>
+          ) : (
+            repoOptions.map((repo) => (
+              <label
+                key={repo.id}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+              >
+                <input
+                  type="checkbox"
+                  checked={selection.has(repo.id)}
+                  onChange={() => toggleRepo(repo.id, repo.fullName)}
+                  className="accent-ink"
+                />
+                <span className="min-w-0 flex-1 truncate">{repo.fullName}</span>
+                {repo.private ? (
+                  <span className="shrink-0 text-[11px] text-ink-subtle">private</span>
+                ) : null}
+              </label>
+            ))
+          )}
+        </div>
+      )}
+      <div className="flex flex-col gap-1 rounded-md border border-ink/10 p-2">
+        <p className="text-[12px] font-medium text-ink">Events to ingest</p>
+        {GITHUB_EVENT_OPTIONS.map((option) => (
+          <label
+            key={option.id}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+          >
+            <input
+              type="checkbox"
+              checked={events.has(option.id)}
+              onChange={() => toggleEvent(option.id)}
+              className="accent-ink"
+            />
+            <span className="min-w-0 flex-1 truncate">{option.label}</span>
+          </label>
+        ))}
+        {events.size === 0 ? (
+          <p className="text-[11.5px] leading-4 text-ink-subtle">
+            No events selected — nothing is ingested from the chosen repositories.
+          </p>
+        ) : null}
+      </div>
+      {dirty ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={save}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {isPending ? "Saving…" : "Save GitHub source"}
           </button>
         </div>
       ) : null}

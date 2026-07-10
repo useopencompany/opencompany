@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 
-export type BrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack" | "linear";
-export type BrainSourceType = "meeting" | "capture" | "asset" | "conversation" | "issue";
+export type BrainSourceProvider = "jamie" | "goat-chat" | "upload" | "slack" | "linear" | "github";
+export type BrainSourceType =
+  | "meeting"
+  | "capture"
+  | "asset"
+  | "conversation"
+  | "issue"
+  | "activity";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
   sourceProvider: BrainSourceProvider;
@@ -669,6 +675,324 @@ export function isNormalizedLinearIssueSourceItem(
     issue.activity.length > 0 &&
     Array.isArray(issue.comments)
   );
+}
+
+export type NormalizedGitHubActivityKind = "pull_request" | "issue";
+
+// The subscribable GitHub event types. This is the contract between the
+// per-brain source config (which events a brain subscribes to), the webhook
+// router, and the normalizer — extend all three together.
+export const GITHUB_ACTIVITY_EVENT_TYPES = [
+  "pull_request_opened",
+  "pull_request_merged",
+  "pull_request_commented",
+  "issue_opened",
+  "issue_commented",
+] as const;
+export type GitHubActivityEventType = (typeof GITHUB_ACTIVITY_EVENT_TYPES)[number];
+
+export type NormalizedGitHubActivityContent = {
+  activity: {
+    kind: NormalizedGitHubActivityKind;
+    repository: { id: string; fullName: string; private: boolean };
+    title: string;
+    url: string;
+    state: "opened" | "merged" | "commented";
+    body: string;
+    truncatedBody: boolean;
+    author?: string;
+    number?: number;
+    mergedBy?: string;
+    baseRef?: string;
+    headRef?: string;
+    additions?: number;
+    deletions?: number;
+    changedFiles?: number;
+    commits?: number;
+    labels?: string[];
+  };
+};
+
+export type NormalizedGitHubActivitySourceItem =
+  NormalizedBrainSourceItem<NormalizedGitHubActivityContent> & {
+    sourceProvider: "github";
+    sourceType: "activity";
+  };
+
+export function githubActivityEventType(
+  activity: Pick<NormalizedGitHubActivityContent["activity"], "kind" | "state">,
+): GitHubActivityEventType {
+  if (activity.state === "commented") {
+    return activity.kind === "issue" ? "issue_commented" : "pull_request_commented";
+  }
+  if (activity.kind === "issue") return "issue_opened";
+  return activity.state === "merged" ? "pull_request_merged" : "pull_request_opened";
+}
+
+// Bodies stay bounded at normalize time: the tracker is the canonical live
+// home (pointer/copy contract), so the stored copy only needs to be large
+// enough for the ingestion agent to judge and synthesize from.
+const GITHUB_ACTIVITY_BODY_LIMIT_BYTES = 20_000;
+
+// Maps a GitHub App webhook delivery to a normalized source item. Returns null
+// for event/action combinations that are not ingested — only the subscribable
+// event types flow into the brain: a pull request opened, a pull request
+// merged, an issue opened, and a new comment on either. Throws on malformed
+// payloads for supported combinations.
+export function normalizeGitHubActivityWebhook(
+  eventName: string,
+  payload: unknown,
+  options: { capturedAt: string },
+): NormalizedGitHubActivitySourceItem | null {
+  if (eventName === "issue_comment") {
+    return normalizeGitHubIssueCommentWebhook(payload, options);
+  }
+  if (eventName !== "pull_request" && eventName !== "issues") {
+    return null;
+  }
+  const root = readObject(payload, "payload");
+  const action = typeof root.action === "string" ? root.action : "";
+
+  if (eventName === "pull_request") {
+    const merged = action === "closed";
+    if (action !== "opened" && !merged) return null;
+    const pullRequest = readObject(root.pull_request, "pull_request");
+    if (merged && pullRequest.merged !== true) return null;
+    return buildGitHubActivityItem({
+      kind: "pull_request",
+      repository: readGitHubRepository(root.repository),
+      refSegment: `pull:${readGitHubNumber(pullRequest.number, "pull_request.number")}`,
+      title: readString(pullRequest.title, "pull_request.title"),
+      url: readString(pullRequest.html_url, "pull_request.html_url"),
+      state: merged ? "merged" : "opened",
+      body: optionalString(pullRequest.body),
+      occurredAt: merged
+        ? optionalIsoString(pullRequest.merged_at)
+        : optionalIsoString(pullRequest.created_at),
+      capturedAt: options.capturedAt,
+      extras: {
+        author: githubLogin(pullRequest.user),
+        number: readGitHubNumber(pullRequest.number, "pull_request.number"),
+        ...(merged ? { mergedBy: githubLogin(pullRequest.merged_by) } : {}),
+        baseRef: optionalString(readObjectOrEmpty(pullRequest.base).ref),
+        headRef: optionalString(readObjectOrEmpty(pullRequest.head).ref),
+        additions: optionalNumber(pullRequest.additions),
+        deletions: optionalNumber(pullRequest.deletions),
+        changedFiles: optionalNumber(pullRequest.changed_files),
+        commits: optionalNumber(pullRequest.commits),
+        labels: githubLabelNames(pullRequest.labels),
+      },
+    });
+  }
+
+  if (action !== "opened") return null;
+  const issue = readObject(root.issue, "issue");
+  // Pull requests surface through the issues event too; the pull_request
+  // handler above is their single ingestion path.
+  if (issue.pull_request) return null;
+  return buildGitHubActivityItem({
+    kind: "issue",
+    repository: readGitHubRepository(root.repository),
+    refSegment: `issue:${readGitHubNumber(issue.number, "issue.number")}`,
+    title: readString(issue.title, "issue.title"),
+    url: readString(issue.html_url, "issue.html_url"),
+    state: "opened",
+    body: optionalString(issue.body),
+    occurredAt: optionalIsoString(issue.created_at),
+    capturedAt: options.capturedAt,
+    extras: {
+      author: githubLogin(issue.user),
+      number: readGitHubNumber(issue.number, "issue.number"),
+      labels: githubLabelNames(issue.labels),
+    },
+  });
+}
+
+// The `issue_comment` event fires for comments on both issues and pull
+// requests — GitHub models a PR as an issue, so a comment on a PR arrives here
+// with `issue.pull_request` set. We only ingest newly created comments; the
+// comment id makes each one a distinct source item from the parent artifact.
+function normalizeGitHubIssueCommentWebhook(
+  payload: unknown,
+  options: { capturedAt: string },
+): NormalizedGitHubActivitySourceItem | null {
+  const root = readObject(payload, "payload");
+  const action = typeof root.action === "string" ? root.action : "";
+  if (action !== "created") return null;
+  const issue = readObject(root.issue, "issue");
+  const comment = readObject(root.comment, "comment");
+  const isPullRequest = Boolean(issue.pull_request);
+  const number = readGitHubNumber(issue.number, "issue.number");
+  const commentId = readGitHubNumber(comment.id, "comment.id");
+  return buildGitHubActivityItem({
+    kind: isPullRequest ? "pull_request" : "issue",
+    repository: readGitHubRepository(root.repository),
+    refSegment: `${isPullRequest ? "pull" : "issue"}:${number}:comment:${commentId}`,
+    title: readString(issue.title, "issue.title"),
+    // The comment permalink deep-links into the still-live thread, so it
+    // remains a valid pointer home for the copy/pointer contract.
+    url: readString(comment.html_url, "comment.html_url"),
+    state: "commented",
+    body: optionalString(comment.body),
+    occurredAt: optionalIsoString(comment.created_at),
+    capturedAt: options.capturedAt,
+    extras: {
+      author: githubLogin(comment.user),
+      number,
+      labels: githubLabelNames(issue.labels),
+    },
+  });
+}
+
+export function isNormalizedGitHubActivitySourceItem(
+  value: unknown,
+): value is NormalizedGitHubActivitySourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedGitHubActivitySourceItem>;
+  if (
+    item.sourceProvider !== "github" ||
+    item.sourceType !== "activity" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const activity = (item.content as Partial<NormalizedGitHubActivityContent>).activity;
+  return (
+    !!activity &&
+    typeof activity === "object" &&
+    (activity.kind === "pull_request" || activity.kind === "issue") &&
+    !!activity.repository &&
+    typeof activity.repository === "object" &&
+    typeof activity.repository.id === "string" &&
+    typeof activity.repository.fullName === "string" &&
+    typeof activity.title === "string" &&
+    typeof activity.url === "string" &&
+    (activity.state === "opened" ||
+      activity.state === "merged" ||
+      activity.state === "commented") &&
+    typeof activity.body === "string"
+  );
+}
+
+function buildGitHubActivityItem(input: {
+  kind: NormalizedGitHubActivityKind;
+  repository: { id: string; fullName: string; private: boolean };
+  refSegment: string;
+  title: string;
+  url: string;
+  state: NormalizedGitHubActivityContent["activity"]["state"];
+  body: string | undefined;
+  occurredAt: string | undefined;
+  capturedAt: string;
+  extras: {
+    [K in keyof NormalizedGitHubActivityContent["activity"]]?:
+      | NormalizedGitHubActivityContent["activity"][K]
+      | undefined;
+  };
+}): NormalizedGitHubActivitySourceItem {
+  const capturedAt = optionalIsoString(input.capturedAt);
+  if (!capturedAt) throw invalid("activity capturedAt must be a timestamp", "invalid_activity");
+  const occurredAt = input.occurredAt ?? capturedAt;
+  const fullBody = input.body ?? "";
+  const body = truncateUtf8Bytes(fullBody, GITHUB_ACTIVITY_BODY_LIMIT_BYTES);
+  const externalId = `${input.repository.fullName}:${input.refSegment}`;
+  const extras = Object.fromEntries(
+    Object.entries(input.extras).filter(([, value]) => value !== undefined),
+  );
+
+  const activity: NormalizedGitHubActivityContent["activity"] = {
+    kind: input.kind,
+    repository: input.repository,
+    title: input.title,
+    url: input.url,
+    state: input.state,
+    body,
+    truncatedBody: body.length < fullBody.length,
+    ...extras,
+  };
+  const contentHashInput = {
+    sourceProvider: "github",
+    sourceType: "activity",
+    externalId,
+    state: input.state,
+    title: input.title,
+    body,
+    occurredAt,
+  };
+
+  const numberLabel = typeof activity.number === "number" ? `#${activity.number} ` : "";
+  return {
+    sourceProvider: "github",
+    sourceType: "activity",
+    externalId,
+    sourceRef: `github:${externalId}`,
+    title: `${input.repository.fullName} ${numberLabel}${input.state}: ${input.title}`,
+    occurredAt,
+    capturedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { activity },
+  };
+}
+
+function readGitHubRepository(value: unknown): { id: string; fullName: string; private: boolean } {
+  const repository = readObject(value, "repository");
+  const id = repository.id;
+  if (typeof id !== "number" && typeof id !== "string") {
+    throw invalid("repository.id must be a number or string", "invalid_activity");
+  }
+  return {
+    id: String(id),
+    fullName: readString(repository.full_name, "repository.full_name"),
+    private: repository.private === true,
+  };
+}
+
+function readGitHubNumber(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw invalid(`${path} must be a number`, "invalid_activity");
+  }
+  return value;
+}
+
+function githubLogin(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return optionalString((value as Record<string, unknown>).login);
+}
+
+function githubLabelNames(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const names = value.flatMap((label) => {
+    if (!label || typeof label !== "object" || Array.isArray(label)) return [];
+    const name = optionalString((label as Record<string, unknown>).name);
+    return name ? [name] : [];
+  });
+  return names.length > 0 ? names : undefined;
+}
+
+function readObjectOrEmpty(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function truncateUtf8Bytes(value: string, limit: number): string {
+  if (Buffer.byteLength(value, "utf8") <= limit) return value;
+  let result = value;
+  while (Buffer.byteLength(result, "utf8") > limit) {
+    result = result.slice(0, Math.max(0, Math.floor(result.length * 0.9) - 1));
+  }
+  return result;
 }
 
 export class BrainSourceNormalizationError extends Error {

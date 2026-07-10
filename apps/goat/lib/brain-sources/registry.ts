@@ -36,11 +36,11 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
   {
     id: "github",
     name: "GitHub",
-    description: "Ingest pull requests and issues into this brain.",
+    description: "New and merged pull requests and new issues from repos you choose.",
     icon: GitBranch,
     connectionKind: "oauth",
-    available: false,
-    connectHref: "/settings",
+    available: true,
+    connectHref: "/api/integrations/github/start?returnTo=/settings",
   },
   {
     id: "slack",
