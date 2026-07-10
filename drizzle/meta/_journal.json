@@ -813,6 +813,20 @@
       "when": 1783980700000,
       "tag": "0115_goat_brain_ingest_skipped",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1783980800000,
+      "tag": "0116_goat_codex_chat_turn_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1783980900000,
+      "tag": "0117_goat_codex_chat_event_states",
+      "breakpoints": true
     }
   ]
 }

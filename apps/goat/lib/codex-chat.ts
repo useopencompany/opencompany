@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import { goatChatSessions, goatCodexChatSessions } from "@opencompany/db/goat-schema";
+import {
+  type GoatCodexChatTurnSettings,
+  goatChatSessions,
+  goatCodexChatSessions,
+} from "@opencompany/db/goat-schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { CODEX_CHAT_DEFAULT_MODEL, CODEX_CHAT_PROMPT_MAX_LENGTH } from "@/lib/codex-chat-constants";
+import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { toGoatTaskTitle } from "@/lib/task-display";
 import { triggerGoatCodexChatWake } from "@/lib/task-runner";
 
@@ -35,6 +40,7 @@ export async function createGoatCodexChatMessage(input: {
   sessionId?: string | null;
   prompt: string;
   clientMessageId?: string | null;
+  settings?: unknown;
 }): Promise<CodexChatMessageResult> {
   const prompt = input.prompt.trim();
   if (!prompt) return { ok: false, status: 400, error: "Enter a message before sending." };
@@ -46,6 +52,9 @@ export async function createGoatCodexChatMessage(input: {
     return { ok: false, status: 409, error: CODEX_CHAT_DISCONNECTED_MESSAGE };
   }
 
+  const parsedSettings = parseCodexChatSettings(input.settings);
+  if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
+  const settings = parsedSettings.settings;
   let result: CodexChatMessageResult;
   if (input.sessionId) {
     const session = await loadCodexChatSessionForChat({
@@ -57,6 +66,7 @@ export async function createGoatCodexChatMessage(input: {
       userWorkosId: input.userWorkosId,
       prompt,
       clientMessageId: input.clientMessageId ?? null,
+      settings,
       session,
     });
   } else {
@@ -64,6 +74,7 @@ export async function createGoatCodexChatMessage(input: {
       userWorkosId: input.userWorkosId,
       prompt,
       clientMessageId: input.clientMessageId ?? null,
+      settings,
     });
   }
 
@@ -143,6 +154,7 @@ async function createFirstCodexChatTurn(input: {
   userWorkosId: string;
   prompt: string;
   clientMessageId: string | null;
+  settings: GoatCodexChatTurnSettings;
 }): Promise<CodexChatMessageResult> {
   const chatSessionId = `goat_chat_${randomUUID()}`;
   const codexChatSessionId = `goat_codex_chat_${randomUUID()}`;
@@ -203,7 +215,7 @@ async function createFirstCodexChatTurn(input: {
     )
     INSERT INTO goat.codex_chat_turns (
       id, user_workos_id, codex_chat_session_id, chat_session_id,
-      user_message_id, assistant_message_id, status, prompt, created_at, updated_at
+      user_message_id, assistant_message_id, status, prompt, settings, created_at, updated_at
     )
     VALUES (
       ${turnId},
@@ -214,6 +226,7 @@ async function createFirstCodexChatTurn(input: {
       ${assistantMessageId},
       'queued',
       ${input.prompt},
+      ${JSON.stringify(input.settings)}::jsonb,
       ${now},
       ${now}
     )
@@ -226,6 +239,7 @@ async function enqueueExistingCodexChatMessage(input: {
   userWorkosId: string;
   prompt: string;
   clientMessageId: string | null;
+  settings: GoatCodexChatTurnSettings;
   session: { id: string; chatSessionId: string; status: string };
 }): Promise<CodexChatMessageResult> {
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
@@ -257,7 +271,7 @@ async function enqueueExistingCodexChatMessage(input: {
     inserted_turn AS (
       INSERT INTO goat.codex_chat_turns (
         id, user_workos_id, codex_chat_session_id, chat_session_id,
-        user_message_id, assistant_message_id, status, prompt, created_at, updated_at
+        user_message_id, assistant_message_id, status, prompt, settings, created_at, updated_at
       )
       VALUES (
         ${turnId},
@@ -268,6 +282,7 @@ async function enqueueExistingCodexChatMessage(input: {
         ${assistantMessageId},
         'queued',
         ${input.prompt},
+        ${JSON.stringify(input.settings)}::jsonb,
         ${now},
         ${now}
       )

@@ -2,6 +2,8 @@
 
 import { useChat } from "@ai-sdk/react";
 import type { AgentModelId } from "@opencompany/agent-runtime";
+import { CODEX_REASONING_EFFORTS } from "@opencompany/agent-runtime";
+import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { GoatChatEngine, GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import {
   Command,
@@ -38,6 +40,7 @@ import {
   Settings,
   Sparkles,
   Square,
+  Target,
   Trash2,
   X,
 } from "lucide-react";
@@ -98,6 +101,8 @@ import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
+const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
+const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
 const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
 
 type ActiveMentionToken = {
@@ -111,6 +116,14 @@ type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue | CodexPicker
 // Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
 // engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
 type GoatEngineChatKind = "local_codex" | "codex";
+type CodexComposerSettings = {
+  reasoningEffort: CodexReasoningEffort;
+  planModeEnabled: boolean;
+  goalMode: {
+    objective: string;
+    tokenBudget?: number;
+  } | null;
+};
 
 const ENGINE_CHAT_CONFIG: Record<
   GoatEngineChatKind,
@@ -213,6 +226,11 @@ export function GoatSurface({
     const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
     return engine && initialChat ? { engine, chatSessionId: initialChat.id } : null;
   });
+  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>("medium");
+  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
+  const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
+  const [codexGoalObjective, setCodexGoalObjective] = useState("");
+  const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
   const [engineRunning, setEngineRunning] = useState(false);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
@@ -345,6 +363,7 @@ export function GoatSurface({
   const newChatPromptValid =
     trimmedNewChatPrompt.length > 0 &&
     trimmedNewChatPrompt.length <= BACKGROUND_CHAT_PROMPT_MAX_LENGTH;
+  const showCodexComposerControls = isEngineChat && !localCodexFeatureDisabledForChat;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -394,6 +413,10 @@ export function GoatSurface({
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
+      setCodexPlanModeEnabled(false);
+      setCodexGoalModeEnabled(false);
+      setCodexGoalObjective("");
+      setCodexGoalTokenBudget("");
       setEngineRunning(false);
       setMessages([]);
       setLocallyStoppedAssistantMessageIds(new Set());
@@ -583,6 +606,20 @@ export function GoatSurface({
     setMentionToken(null);
     setSelectedMentions([]);
     if (activeEngine) {
+      const settings = buildCodexComposerSettings({
+        prompt,
+        reasoningEffort: codexReasoningEffort,
+        planModeEnabled: codexPlanModeEnabled,
+        goalModeEnabled: codexGoalModeEnabled,
+        goalObjective: codexGoalObjective,
+        goalTokenBudget: codexGoalTokenBudget,
+      });
+      if (!settings.ok) {
+        setInput(prompt);
+        setSelectedMentions(mentions);
+        toast.error(settings.error);
+        return;
+      }
       const engine = activeEngine;
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
@@ -593,12 +630,17 @@ export function GoatSurface({
         errorLabel: config.label,
         prompt,
         sessionId: existingEngineSessionId,
+        settings: settings.settings,
         userMessageId,
       })
         .then((result) => {
           setChatSessionId(result.sessionId);
           setEngineChatSession({ engine, chatSessionId: result.sessionId });
           setEngineRunning(true);
+          setCodexPlanModeEnabled(false);
+          setCodexGoalModeEnabled(false);
+          setCodexGoalObjective("");
+          setCodexGoalTokenBudget("");
           setMessages((current) =>
             appendEngineOptimisticMessages(existingEngineSessionId ? current : [], {
               sessionId: result.sessionId,
@@ -965,12 +1007,40 @@ export function GoatSurface({
             </div>
             <GoatModelPicker
               value={chatModel}
-              onChange={setChatModel}
+              onChange={(model) => {
+                setChatModel(model);
+                if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
+                  setCodexPlanModeEnabled(false);
+                  setCodexGoalModeEnabled(false);
+                  setCodexGoalObjective("");
+                  setCodexGoalTokenBudget("");
+                }
+              }}
               disabled={isGenerating || Boolean(activeEngineChat)}
               localCodexBetaEnabled={localCodexBetaEnabled}
               codexConnected={codexConnected}
             />
-            {isEngineChat && engineRunning ? <EngineStopButton onStop={stopGeneration} /> : null}
+            {showCodexComposerControls ? (
+              <CodexComposerControls
+                reasoningEffort={codexReasoningEffort}
+                planModeEnabled={codexPlanModeEnabled}
+                goalModeEnabled={codexGoalModeEnabled}
+                goalObjective={codexGoalObjective}
+                goalTokenBudget={codexGoalTokenBudget}
+                disabled={engineSubmitting}
+                onReasoningEffortChange={setCodexReasoningEffort}
+                onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                onGoalObjectiveChange={setCodexGoalObjective}
+                onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+              />
+            ) : null}
+            {isEngineChat && engineRunning ? (
+              <EngineStopButton
+                label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+                onStop={stopGeneration}
+              />
+            ) : null}
             <SubmitButton
               disabled={!input.trim() || engineSubmitting || localCodexFeatureDisabledForChat}
               isGenerating={isGenerating}
@@ -1016,6 +1086,7 @@ async function sendEngineChatMessage(input: {
   errorLabel: string;
   prompt: string;
   sessionId: string | null;
+  settings: CodexComposerSettings;
   userMessageId: string;
 }): Promise<EngineChatMessageResponse> {
   const response = await fetch(input.endpoint, {
@@ -1028,6 +1099,7 @@ async function sendEngineChatMessage(input: {
         role: "user",
         parts: [{ type: "text", text: input.prompt }],
       },
+      settings: input.settings,
     }),
   });
   if (!response.ok) {
@@ -1065,6 +1137,49 @@ function appendEngineOptimisticMessages(
     });
   }
   return next;
+}
+
+function buildCodexComposerSettings(input: {
+  prompt: string;
+  reasoningEffort: CodexReasoningEffort;
+  planModeEnabled: boolean;
+  goalModeEnabled: boolean;
+  goalObjective: string;
+  goalTokenBudget: string;
+}): { ok: true; settings: CodexComposerSettings } | { ok: false; error: string } {
+  let goalMode: CodexComposerSettings["goalMode"] = null;
+  if (input.goalModeEnabled) {
+    const objective = (input.goalObjective.trim() || input.prompt).trim();
+    if (!objective) return { ok: false, error: "Goal mode needs an objective." };
+    if (objective.length > CODEX_GOAL_OBJECTIVE_MAX_LENGTH) {
+      return { ok: false, error: "Goal mode objectives can be at most 4,000 characters." };
+    }
+
+    const tokenBudget = input.goalTokenBudget.trim();
+    const parsedBudget = tokenBudget ? Number(tokenBudget) : null;
+    if (
+      parsedBudget !== null &&
+      (!Number.isInteger(parsedBudget) ||
+        parsedBudget <= 0 ||
+        parsedBudget > CODEX_GOAL_TOKEN_BUDGET_MAX)
+    ) {
+      return { ok: false, error: "Goal token budget must be a positive whole number." };
+    }
+
+    goalMode = {
+      objective,
+      ...(parsedBudget === null ? {} : { tokenBudget: parsedBudget }),
+    };
+  }
+
+  return {
+    ok: true,
+    settings: {
+      reasoningEffort: input.reasoningEffort,
+      planModeEnabled: input.planModeEnabled,
+      goalMode,
+    },
+  };
 }
 
 function isSupportedMention(mention: GoatChatMention): mention is GoatChatMention {
@@ -1117,6 +1232,158 @@ function renderComposerInputOverlay(value: string, highlightCodexMention: boolea
       </span>
       {value.slice(mentionEnd)}
     </>
+  );
+}
+
+function CodexComposerControls({
+  reasoningEffort,
+  planModeEnabled,
+  goalModeEnabled,
+  goalObjective,
+  goalTokenBudget,
+  disabled,
+  onReasoningEffortChange,
+  onPlanModeEnabledChange,
+  onGoalModeEnabledChange,
+  onGoalObjectiveChange,
+  onGoalTokenBudgetChange,
+}: {
+  reasoningEffort: CodexReasoningEffort;
+  planModeEnabled: boolean;
+  goalModeEnabled: boolean;
+  goalObjective: string;
+  goalTokenBudget: string;
+  disabled: boolean;
+  onReasoningEffortChange: (reasoningEffort: CodexReasoningEffort) => void;
+  onPlanModeEnabledChange: (enabled: boolean) => void;
+  onGoalModeEnabledChange: (enabled: boolean) => void;
+  onGoalObjectiveChange: (objective: string) => void;
+  onGoalTokenBudgetChange: (tokenBudget: string) => void;
+}) {
+  const reasoningLabel = codexReasoningLabel(reasoningEffort);
+  return (
+    <div className="mb-px flex shrink-0 items-center gap-1 border-l border-border pl-2">
+      <button
+        type="button"
+        aria-label={`Codex reasoning effort: ${reasoningLabel} (click to cycle)`}
+        title="Reasoning effort"
+        disabled={disabled}
+        onClick={() => onReasoningEffortChange(nextCodexReasoningEffort(reasoningEffort))}
+        className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <ReasoningBars effort={reasoningEffort} size={12} />
+        <span className="hidden sm:inline">{reasoningLabel}</span>
+      </button>
+      <button
+        type="button"
+        aria-label="Plan mode"
+        aria-pressed={planModeEnabled}
+        title="Plan mode for the next message"
+        disabled={disabled}
+        onClick={() => onPlanModeEnabledChange(!planModeEnabled)}
+        className={cn(
+          "flex h-7 items-center rounded-lg px-2 text-[12px] font-medium leading-none transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50",
+          planModeEnabled
+            ? "bg-ink text-canvas hover:bg-ink/90"
+            : "text-ink-muted hover:bg-surface-hover hover:text-ink",
+        )}
+      >
+        Plan
+      </button>
+      <Popover>
+        <PopoverTrigger
+          type="button"
+          aria-label="Goal mode"
+          aria-pressed={goalModeEnabled}
+          title="Goal mode for the next message"
+          disabled={disabled}
+          className={cn(
+            "flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink",
+            goalModeEnabled
+              ? "bg-ink text-canvas hover:bg-ink/90 data-[popup-open]:bg-ink data-[popup-open]:text-canvas"
+              : "text-ink-muted hover:bg-surface-hover hover:text-ink",
+          )}
+        >
+          <Target size={13} strokeWidth={2} className="shrink-0" />
+          <span className="hidden sm:inline">Goal</span>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          sideOffset={10}
+          className="w-[320px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-3 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+        >
+          <div className="flex flex-col gap-3">
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-[13px] font-medium leading-4 text-ink">Goal mode</span>
+              <input
+                type="checkbox"
+                checked={goalModeEnabled}
+                onChange={(event) => onGoalModeEnabledChange(event.target.checked)}
+                className="h-4 w-4 accent-ink"
+              />
+            </label>
+            <textarea
+              value={goalObjective}
+              onChange={(event) => onGoalObjectiveChange(event.target.value)}
+              placeholder="Objective"
+              maxLength={CODEX_GOAL_OBJECTIVE_MAX_LENGTH}
+              disabled={!goalModeEnabled}
+              className="min-h-24 resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:bg-surface-subtle disabled:text-ink-subtle"
+            />
+            <input
+              value={goalTokenBudget}
+              onChange={(event) => onGoalTokenBudgetChange(event.target.value)}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="Token budget"
+              disabled={!goalModeEnabled}
+              className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:bg-surface-subtle disabled:text-ink-subtle"
+            />
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+function codexReasoningLabel(effort: CodexReasoningEffort) {
+  return effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
+function nextCodexReasoningEffort(current: CodexReasoningEffort): CodexReasoningEffort {
+  const index = CODEX_REASONING_EFFORTS.indexOf(current);
+  return CODEX_REASONING_EFFORTS[(index + 1) % CODEX_REASONING_EFFORTS.length] ?? current;
+}
+
+function ReasoningBars({ effort, size = 12 }: { effort: CodexReasoningEffort; size?: number }) {
+  const activeBars = CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      {[
+        { x: 1, height: 4.5 },
+        { x: 5, height: 7 },
+        { x: 9, height: 9.5 },
+        { x: 13, height: 12 },
+      ].map((bar, index) => (
+        <rect
+          key={bar.x}
+          x={bar.x}
+          y={14 - bar.height}
+          width={2}
+          height={bar.height}
+          rx={1}
+          fill="currentColor"
+          opacity={index < activeBars ? 1 : 0.28}
+        />
+      ))}
+    </svg>
   );
 }
 
@@ -2037,12 +2304,12 @@ function SubmitButton({
   );
 }
 
-function EngineStopButton({ onStop }: { onStop: () => void }) {
+function EngineStopButton({ label, onStop }: { label: string; onStop: () => void }) {
   return (
     <button
       type="button"
-      aria-label="Interrupt Local Codex"
-      title="Interrupt Local Codex"
+      aria-label={`Interrupt ${label}`}
+      title={`Interrupt ${label}`}
       onClick={onStop}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >

@@ -1,4 +1,5 @@
-import { shellQuote } from "@opencompany/agent-runtime";
+import { isCodexReasoningEffort, shellQuote } from "@opencompany/agent-runtime";
+import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import {
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
@@ -100,6 +101,7 @@ export async function runGoatCodexChatTurn(input: {
 
   const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
+  const settings = normalizeTurnSettings(turn.settings);
   const redact = createKnownSecretRedactor([
     serializedAuthJson,
     auth.kind === "api" ? auth.apiKeyValue : null,
@@ -140,9 +142,9 @@ export async function runGoatCodexChatTurn(input: {
       skillFingerprint: GOAT_CODEX_CHAT_SKILL_FINGERPRINT,
       task: buildCodexChatTask({ prompt: turn.prompt, githubAvailable: Boolean(github) }),
       model: session.model || env.codexModel,
-      reasoningEffort: "medium",
-      planModeReasoningEffort: null,
-      goalMode: null,
+      reasoningEffort: settings.reasoningEffort,
+      planModeReasoningEffort: settings.planModeReasoningEffort,
+      goalMode: settings.goalMode,
       existingEngineSessionId: session.codexThreadId,
       auth,
       githubAuth: {
@@ -306,6 +308,41 @@ function buildCodexChatTask(input: { prompt: string; githubAvailable: boolean })
     .join("\n");
 }
 
+function normalizeTurnSettings(value: unknown): {
+  reasoningEffort: CodexReasoningEffort;
+  planModeReasoningEffort: CodexReasoningEffort | null;
+  goalMode: { objective: string; tokenBudget?: number | null } | null;
+} {
+  const record = isRecord(value) ? value : {};
+  return {
+    reasoningEffort: readReasoningEffort(record.reasoningEffort) ?? "medium",
+    planModeReasoningEffort: readReasoningEffort(record.planModeReasoningEffort),
+    goalMode: readGoalMode(record.goalMode),
+  };
+}
+
+function readReasoningEffort(value: unknown): CodexReasoningEffort | null {
+  return typeof value === "string" && isCodexReasoningEffort(value) ? value : null;
+}
+
+function readGoalMode(value: unknown): { objective: string; tokenBudget?: number | null } | null {
+  if (!isRecord(value)) return null;
+  const objective = typeof value.objective === "string" ? value.objective.trim() : "";
+  if (!objective) return null;
+  const tokenBudget =
+    typeof value.tokenBudget === "number" && Number.isInteger(value.tokenBudget)
+      ? value.tokenBudget
+      : null;
+  return {
+    objective,
+    ...(tokenBudget && tokenBudget > 0 ? { tokenBudget } : {}),
+  };
+}
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

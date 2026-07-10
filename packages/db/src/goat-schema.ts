@@ -263,6 +263,10 @@ export type GoatLocalCodexEventType =
   | "command.output"
   | "command.completed"
   | "command.failed"
+  | "plan.updated"
+  | "goal.updated"
+  | "question.requested"
+  | "approval.requested"
   | "turn.started"
   | "turn.completed"
   | "usage.updated"
@@ -275,6 +279,15 @@ export type GoatCodexChatEventType = Exclude<
   GoatLocalCodexEventType,
   "assistant.delta" | "command.output"
 >;
+
+export type GoatCodexChatTurnSettings = {
+  reasoningEffort?: CodexReasoningEffort;
+  planModeReasoningEffort?: CodexReasoningEffort | null;
+  goalMode?: {
+    objective: string;
+    tokenBudget?: number | null;
+  } | null;
+};
 
 export type GoatChatMessageDebugTrace = {
   schemaVersion?:
@@ -1715,6 +1728,10 @@ export const goatLocalCodexTurns = goat.table(
     codexTurnId: text("codex_turn_id"),
     status: text("status").$type<GoatLocalCodexTurnStatus>().notNull().default("queued"),
     prompt: text("prompt").notNull(),
+    settings: jsonb("settings")
+      .$type<GoatCodexChatTurnSettings>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     error: text("error"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1819,7 +1836,7 @@ export const goatLocalCodexEvents = goat.table(
     ),
     typeCheck: check(
       "goat_local_codex_events_type_check",
-      sql`${table.type} IN ('assistant.delta', 'assistant.completed', 'reasoning.completed', 'command.started', 'command.output', 'command.completed', 'command.failed', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+      sql`${table.type} IN ('assistant.delta', 'assistant.completed', 'reasoning.completed', 'command.started', 'command.output', 'command.completed', 'command.failed', 'plan.updated', 'goal.updated', 'question.requested', 'approval.requested', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
     ),
   }),
 );
@@ -1880,6 +1897,10 @@ export const goatCodexChatTurns = goat.table(
     codexTurnId: text("codex_turn_id"),
     status: text("status").$type<GoatCodexChatTurnStatus>().notNull().default("queued"),
     prompt: text("prompt").notNull(),
+    settings: jsonb("settings")
+      .$type<GoatCodexChatTurnSettings>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     error: text("error"),
     interruptRequestedAt: timestamp("interrupt_requested_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
@@ -1935,7 +1956,7 @@ export const goatCodexChatEvents = goat.table(
     ),
     typeCheck: check(
       "goat_codex_chat_events_type_check",
-      sql`${table.type} IN ('assistant.completed', 'reasoning.completed', 'command.started', 'command.completed', 'command.failed', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+      sql`${table.type} IN ('assistant.completed', 'reasoning.completed', 'command.started', 'command.completed', 'command.failed', 'plan.updated', 'goal.updated', 'question.requested', 'approval.requested', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
     ),
   }),
 );

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
+  type GoatCodexChatTurnSettings,
   goatCodexChatSessions,
 } from "@opencompany/db/goat-schema";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -38,6 +39,7 @@ type ClaimedTurnRow = {
   codex_turn_id: string | null;
   status: GoatCodexChatTurn["status"];
   prompt: string;
+  settings: GoatCodexChatTurnSettings;
   error: string | null;
   interrupt_requested_at: Date | string | null;
   attempts: number;
@@ -313,6 +315,7 @@ function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {
     codexTurnId: row.codex_turn_id,
     status: row.status,
     prompt: row.prompt,
+    settings: row.settings ?? {},
     error: row.error,
     interruptRequestedAt: dateFromRow(row.interrupt_requested_at),
     attempts: row.attempts,

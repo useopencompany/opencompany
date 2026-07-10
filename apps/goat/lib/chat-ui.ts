@@ -9,8 +9,12 @@ import type {
 import type { UIMessage } from "ai";
 
 export {
+  CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_COMMAND_TOOL_PART_TYPE,
+  CODEX_GOAL_TOOL_NAME,
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
   type CodexCommandToolInput,
   type CodexCommandToolOutput,
 } from "@opencompany/agent-runtime";
