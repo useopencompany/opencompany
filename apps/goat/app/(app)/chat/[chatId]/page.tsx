@@ -1,4 +1,5 @@
 import { GoatHomeRoute } from "@/components/GoatRoutes";
+import { loadCurrentGoatChatSessionById } from "@/lib/chat";
 
 type GoatChatPageProps = {
   params: Promise<{ chatId: string }>;
@@ -6,5 +7,7 @@ type GoatChatPageProps = {
 
 export default async function GoatChatPage({ params }: GoatChatPageProps) {
   const { chatId } = await params;
-  return <GoatHomeRoute chatId={chatId.trim() || null} />;
+  const trimmedChatId = chatId.trim();
+  const initialChat = trimmedChatId ? await loadCurrentGoatChatSessionById(trimmedChatId) : null;
+  return <GoatHomeRoute chatId={trimmedChatId || null} initialChat={initialChat} />;
 }

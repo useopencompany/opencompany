@@ -1,4 +1,8 @@
-import type { GoatChatSession, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type {
+  GoatChatSession,
+  GoatCodexChatTurnSettings,
+  GoatTaskStatus,
+} from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatChatSessionForUser,
@@ -246,6 +250,61 @@ describe("Goat chat history helpers", () => {
       ),
     ).resolves.toBeNull();
   });
+
+  it("includes latest Codex composer settings on loaded and recent chats", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
+    const { store, sessions } = createInMemoryChatStore({
+      codexSettingsBySessionId: {
+        goat_chat_codex_1: {
+          reasoningEffort: "high",
+          planModeReasoningEffort: "high",
+          goalMode: { objective: "Ship the fix", tokenBudget: 200000 },
+        },
+      },
+    });
+    try {
+      const now = new Date("2026-07-04T12:00:00.000Z");
+      sessions.push({
+        id: "goat_chat_codex_1",
+        userWorkosId: "user_1",
+        title: "Codex chat",
+        model: DEFAULT_GOAT_MODEL,
+        engine: "codex",
+        closedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await expect(
+        loadGoatChatSessionByIdForUser(
+          { userWorkosId: "user_1", sessionId: "goat_chat_codex_1" },
+          store,
+        ),
+      ).resolves.toMatchObject({
+        codexComposerSettings: {
+          reasoningEffort: "high",
+          planModeEnabled: true,
+          goalMode: { objective: "Ship the fix", tokenBudget: 200000 },
+        },
+      });
+
+      const summaries = await listRecentGoatChatsForUser(
+        { userWorkosId: "user_1", limit: 8 },
+        store,
+      );
+      expect(summaries[0]).toMatchObject({
+        id: "goat_chat_codex_1",
+        codexComposerSettings: {
+          reasoningEffort: "high",
+          planModeEnabled: true,
+          goalMode: { objective: "Ship the fix", tokenBudget: 200000 },
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function createInMemoryChatStore(
@@ -254,6 +313,7 @@ function createInMemoryChatStore(
       string,
       { displayId: string; name: string; prompt: string; status: GoatTaskStatus }
     >;
+    codexSettingsBySessionId?: Record<string, GoatCodexChatTurnSettings | null>;
   } = {},
 ) {
   const sessions: GoatChatSession[] = [];
@@ -298,6 +358,10 @@ function createInMemoryChatStore(
       };
       sessions.push(session);
       return session;
+    },
+
+    async loadLatestCodexTurnSettings(input) {
+      return options.codexSettingsBySessionId?.[input.sessionId] ?? null;
     },
 
     async listMessages(sessionId) {

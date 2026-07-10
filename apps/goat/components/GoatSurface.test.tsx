@@ -452,6 +452,71 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
   });
 
+  it("restores Codex composer controls when returning to a Codex chat", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex chat",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          codexComposerSettings: {
+            reasoningEffort: "high",
+            planModeEnabled: true,
+            goalMode: { objective: "Fix flaky tests", tokenBudget: 200000 },
+          },
+          messages: [],
+        }}
+        recentChats={[
+          {
+            id: "goat_chat_codex_1",
+            title: "Codex chat",
+            model: DEFAULT_GOAT_MODEL,
+            engine: "codex",
+            preview: "Run the failing suite",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Plan mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Goal mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    await nextAnimationFrame();
+    await user.click(screen.getByRole("link", { name: /Codex chat/ }));
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Plan mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "Goal mode" }));
+    expect(screen.getByRole("button", { name: "Goal mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByPlaceholderText("Objective")).toHaveValue("Fix flaky tests");
+    expect(screen.getByPlaceholderText("Token budget")).toHaveValue("200000");
+  });
+
   it("keeps existing local Codex chats read-only when the beta flag is disabled", () => {
     render(
       <GoatSurface
