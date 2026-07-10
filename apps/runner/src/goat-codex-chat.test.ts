@@ -1,6 +1,7 @@
+import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencompany/agent-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { runGoatCodexChatTurn } from "./goat-codex-chat";
+import { runGoatCodexChatTurn, summarizeCodexChatRecoveryProgress } from "./goat-codex-chat";
 
 const appServerMocks = vi.hoisted(() => ({
   runCodexAppServerTurn: vi.fn(),
@@ -125,6 +126,44 @@ describe("runGoatCodexChatTurn", () => {
     );
     expect(dbMocks.execute).not.toHaveBeenCalled();
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
+  });
+});
+
+describe("summarizeCodexChatRecoveryProgress", () => {
+  it("summarizes persisted assistant progress for a recovery prompt", () => {
+    const parts: CodexUiMessagePart[] = [
+      { type: "text", text: "I inspected the repo." },
+      {
+        type: CODEX_COMMAND_TOOL_PART_TYPE,
+        toolCallId: "cmd_1",
+        state: "output-available",
+        input: { command: "bun test" },
+        output: { status: "completed", exitCode: 0 },
+      },
+      {
+        type: CODEX_COMMAND_TOOL_PART_TYPE,
+        toolCallId: "cmd_2",
+        state: "input-available",
+        input: { command: "git push origin branch" },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: "codex_goal",
+        toolCallId: "goal_1",
+        state: "output-available",
+        input: { objective: "Open a PR" },
+        output: { status: "active", objective: "Open a PR" },
+      },
+    ];
+
+    expect(summarizeCodexChatRecoveryProgress(parts)).toContain("Assistant: I inspected the repo.");
+    expect(summarizeCodexChatRecoveryProgress(parts)).toContain(
+      "Command completed, exit 0: bun test",
+    );
+    expect(summarizeCodexChatRecoveryProgress(parts)).toContain(
+      "Command started without a persisted result: git push origin branch",
+    );
+    expect(summarizeCodexChatRecoveryProgress(parts)).toContain("codex_goal active: Open a PR");
   });
 });
 
