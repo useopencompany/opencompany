@@ -4,11 +4,8 @@ import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
 import { eq } from "drizzle-orm";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import * as z from "zod/v4-mini";
-import {
-  GOAT_BRAIN_READ_COMMANDS,
-  normalizeGoatBrainReadToolInput,
-} from "@/lib/brain-surface";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import { GOAT_BRAIN_READ_COMMANDS, normalizeGoatBrainReadToolInput } from "@/lib/brain-surface";
 import { GOAT_BRAIN_TOOL_NAME, type GoatBrainToolInput } from "@/lib/chat-ui";
 import {
   buildGoatMcpResourceMetadataPath,

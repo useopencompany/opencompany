@@ -10,9 +10,7 @@ describe("resolveGoatBrainSince", () => {
     expect(resolveGoatBrainSince("last 3 hours", now).toISOString()).toBe(
       "2026-07-10T09:00:00.000Z",
     );
-    expect(resolveGoatBrainSince("4 days", now).toISOString()).toBe(
-      "2026-07-06T12:00:00.000Z",
-    );
+    expect(resolveGoatBrainSince("4 days", now).toISOString()).toBe("2026-07-06T12:00:00.000Z");
   });
 
   it("accepts ISO timestamps and rejects invalid values", () => {

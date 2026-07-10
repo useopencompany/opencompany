@@ -6,6 +6,10 @@ import {
 } from "@opencompany/goat-observability";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
 import {
+  GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
+  normalizeGoatBrainReadToolInput,
+} from "@/lib/brain-surface";
+import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -28,10 +32,6 @@ import {
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
-import {
-  GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
-  normalizeGoatBrainReadToolInput,
-} from "@/lib/brain-surface";
 import {
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
