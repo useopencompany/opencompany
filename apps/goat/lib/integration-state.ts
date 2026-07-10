@@ -8,6 +8,18 @@ export type GoatGoogleProviderState = {
   accountName: string | null;
 };
 
+// The Gmail brain-source connection view: unlike GoatGoogleProviderState it
+// carries the integration id, which the brain-source picker and save action
+// need to key config rows on.
+export type GoatGmailSourceProviderState = {
+  provider: "gmail";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountEmail: string | null;
+  statusReason: string | null;
+};
+
 export type GoatLinearProviderState = {
   provider: "linear";
   connected: boolean;

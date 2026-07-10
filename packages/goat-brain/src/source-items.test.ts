@@ -3,11 +3,13 @@ import {
   BrainSourceNormalizationError,
   githubActivityEventType,
   isNormalizedGitHubActivitySourceItem,
+  isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   normalizeGitHubActivityWebhook,
+  normalizeGmailThreadWindow,
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
   normalizeLinearIssueWindow,
@@ -509,6 +511,98 @@ describe("Linear issue window normalization", () => {
   it("guards against other item shapes", () => {
     expect(isNormalizedLinearIssueSourceItem({ sourceProvider: "linear" })).toBe(false);
     expect(isNormalizedLinearIssueSourceItem(null)).toBe(false);
+  });
+});
+
+describe("Gmail thread window normalization", () => {
+  const input = {
+    windowId: "ggmwin_abc123",
+    threadId: "thread_789",
+    subject: "Series A term sheet",
+    accountEmail: "founder@acme.com",
+    messages: [
+      {
+        messageId: "msg_2",
+        direction: "sent" as const,
+        from: "Founder <founder@acme.com>",
+        to: "Ada Investor <ada@fund.vc>",
+        sentAt: "2026-07-13T10:05:00.000Z",
+        bodyText: "Thanks, reviewing the terms now.",
+      },
+      {
+        messageId: "msg_1",
+        direction: "received" as const,
+        from: "Ada Investor <ada@fund.vc>",
+        to: "founder@acme.com, cofounder@acme.com",
+        sentAt: "2026-07-13T10:00:00.000Z",
+        bodyText: "Attached is the term sheet we discussed.",
+        snippet: "Attached is the term sheet",
+      },
+    ],
+    flushedAt: "2026-07-13T10:30:00.000Z",
+  };
+
+  it("normalizes a window and sorts messages by time", () => {
+    const item = normalizeGmailThreadWindow(input);
+
+    expect(item.sourceProvider).toBe("gmail");
+    expect(item.sourceType).toBe("thread");
+    expect(item.externalId).toBe("ggmwin_abc123");
+    expect(item.sourceRef).toBe("gmail:thread:thread_789");
+    expect(item.title).toBe("Series A term sheet");
+    expect(item.content.thread.windowStart).toBe("2026-07-13T10:00:00.000Z");
+    expect(item.content.thread.windowEnd).toBe("2026-07-13T10:05:00.000Z");
+    expect(item.content.thread.messages.map((message) => message.messageId)).toEqual([
+      "msg_1",
+      "msg_2",
+    ]);
+    expect(item.content.thread.participants).toContain("Ada Investor <ada@fund.vc>");
+    expect(item.content.thread.participants).toContain("cofounder@acme.com");
+    expect(item.occurredAt).toBe("2026-07-13T10:00:00.000Z");
+    expect(item.capturedAt).toBe("2026-07-13T10:30:00.000Z");
+    expect(item.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(isNormalizedGmailThreadSourceItem(item)).toBe(true);
+  });
+
+  it("hashes message identity, not body enrichment", () => {
+    const base = normalizeGmailThreadWindow(input);
+    const enriched = normalizeGmailThreadWindow({
+      ...input,
+      messages: input.messages.map((message) => ({
+        ...message,
+        bodyText: `${message.bodyText} (edited)`,
+      })),
+    });
+    expect(enriched.contentHash).toBe(base.contentHash);
+    const differentWindow = normalizeGmailThreadWindow({
+      ...input,
+      messages: input.messages.slice(0, 1),
+    });
+    expect(differentWindow.contentHash).not.toBe(base.contentHash);
+  });
+
+  it("falls back to a placeholder subject and flags stale snapshots", () => {
+    const item = normalizeGmailThreadWindow({
+      ...input,
+      subject: "  ",
+      snapshotStale: true,
+    });
+    expect(item.title).toBe("(no subject)");
+    expect(item.content.thread.snapshotStale).toBe(true);
+    expect(isNormalizedGmailThreadSourceItem(item)).toBe(true);
+  });
+
+  it("rejects empty windows and malformed input", () => {
+    expect(() => normalizeGmailThreadWindow({ ...input, messages: [] })).toThrow(
+      BrainSourceNormalizationError,
+    );
+    expect(() => normalizeGmailThreadWindow({ ...input, windowId: " " })).toThrow(/windowId/);
+    expect(() => normalizeGmailThreadWindow({ ...input, flushedAt: "nope" })).toThrow(/timestamp/);
+  });
+
+  it("guards against other item shapes", () => {
+    expect(isNormalizedGmailThreadSourceItem({ sourceProvider: "gmail" })).toBe(false);
+    expect(isNormalizedGmailThreadSourceItem(null)).toBe(false);
   });
 });
 

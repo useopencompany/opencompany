@@ -27,11 +27,11 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
   {
     id: "gmail",
     name: "Gmail",
-    description: "Ingest selected email threads into this brain.",
+    description: "Ingest sent and received email into this brain, tuned by your instructions.",
     icon: Mail,
     connectionKind: "oauth",
-    available: false,
-    connectHref: "/settings",
+    available: true,
+    connectHref: "/api/integrations/gmail/start?returnTo=/settings",
   },
   {
     id: "github",

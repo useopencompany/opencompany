@@ -1,5 +1,6 @@
 import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import {
+  normalizeGmailThreadWindow,
   normalizeGoatChatCapture,
   normalizeJamieMeetingCompletedWebhook,
   normalizeSlackConversationWindow,
@@ -27,6 +28,9 @@ const workspacesMock = vi.hoisted(() => ({
 const localBrainMock = vi.hoisted(() => ({
   writeLocalBrainFile: vi.fn(async () => undefined),
 }));
+const goatGmailMock = vi.hoisted(() => ({
+  getGoatGmailBrainSourceInstructions: vi.fn(async () => null as string | null),
+}));
 
 vi.mock("ai", () => ({
   generateText: aiMock.generateText,
@@ -51,17 +55,24 @@ vi.mock("@opencompany/goat-brain/cli-bundle", () => ({
 }));
 vi.mock("./db", () => ({ getDb: () => ({}) }));
 vi.mock("./goat-brain", () => ({ writeLocalBrainFile: localBrainMock.writeLocalBrainFile }));
+vi.mock("@opencompany/db/goat-gmail", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getGoatGmailBrainSourceInstructions: goatGmailMock.getGoatGmailBrainSourceInstructions,
+}));
 
 import {
+  buildGmailThreadAgentIngestPrompt,
   buildGoatChatCaptureAgentIngestPrompt,
   buildJamieMeetingAgentIngestPrompt,
   buildSlackConversationAgentIngestPrompt,
   type GoatBrainAgentCliRunner,
+  runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
   runSlackConversationAgentIngest,
   validateGoatBrainAgentInvocation,
 } from "./goat-brain-agent-ingest";
+import { buildGmailThreadEvidenceWrite } from "./goat-brain-gmail-writes";
 import { buildJamieMeetingIds } from "./goat-brain-jamie-writes";
 
 function jamieItem() {
@@ -119,6 +130,34 @@ function slackItem() {
         userId: "U02",
         userName: "Ada",
         text: "We decided to ship the new flow next week.",
+      },
+    ],
+    flushedAt: "2026-07-13T10:30:00.000Z",
+  });
+}
+
+function gmailItem() {
+  return normalizeGmailThreadWindow({
+    windowId: "ggmwin_test1",
+    threadId: "thread_789",
+    subject: "Series A term sheet",
+    accountEmail: "founder@acme.com",
+    messages: [
+      {
+        messageId: "msg_1",
+        direction: "received",
+        from: "Ada Investor <ada@fund.vc>",
+        to: "founder@acme.com",
+        sentAt: "2026-07-13T10:00:00.000Z",
+        bodyText: "Attached is the term sheet we discussed.",
+      },
+      {
+        messageId: "msg_2",
+        direction: "sent",
+        from: "Founder <founder@acme.com>",
+        to: "Ada Investor <ada@fund.vc>",
+        sentAt: "2026-07-13T10:05:00.000Z",
+        bodyText: "Thanks, reviewing the terms now.",
       },
     ],
     flushedAt: "2026-07-13T10:30:00.000Z",
@@ -318,6 +357,126 @@ describe("buildSlackConversationAgentIngestPrompt", () => {
     expect(prompt).toContain("Do we want to launch onboarding next week?");
     expect(prompt).toContain("## Current window transcript");
     expect(prompt).toContain("Yes, let's ship that.");
+  });
+});
+
+describe("buildGmailThreadAgentIngestPrompt", () => {
+  it("carries the evidence pointer, per-message refs, and the owner's instructions", () => {
+    const item = gmailItem();
+    const prompt = buildGmailThreadAgentIngestPrompt(item, {
+      evidenceBrainId: "ev-gmail-test",
+      truncatedBodies: false,
+      instructions: "Ignore transactional mail; only investor and customer emails matter.",
+    });
+
+    expect(prompt).toContain("[[evidence:ev-gmail-test|Email thread]]");
+    expect(prompt).toContain(item.sourceRef);
+    expect(prompt).toContain("gmail:message:<message id>");
+    expect(prompt).toContain("## Owner's ingestion instructions for this brain");
+    expect(prompt).toContain(
+      "Ignore transactional mail; only investor and customer emails matter.",
+    );
+    expect(prompt).toContain("RECEIVED from Ada Investor <ada@fund.vc>");
+    expect(prompt).toContain("SENT from Founder <founder@acme.com>");
+    expect(prompt).toContain("Attached is the term sheet we discussed.");
+    expect(prompt).toContain("Never paste message bodies into compiled truth");
+  });
+
+  it("omits the instructions section when the owner set none", () => {
+    const prompt = buildGmailThreadAgentIngestPrompt(gmailItem(), {
+      evidenceBrainId: "ev-gmail-test",
+      truncatedBodies: false,
+      instructions: null,
+    });
+    expect(prompt).not.toContain("Owner's ingestion instructions");
+  });
+});
+
+describe("buildGmailThreadEvidenceWrite", () => {
+  it("derives a deterministic evidence id and snapshots full bodies", () => {
+    const item = gmailItem();
+    const first = buildGmailThreadEvidenceWrite(item);
+    const second = buildGmailThreadEvidenceWrite(item);
+
+    expect(first.evidenceBrainId).toBe(second.evidenceBrainId);
+    expect(first.evidenceBrainId).toMatch(/^ev-gmail-/);
+    expect(first.evidencePath).toContain("evidence/email/");
+    expect(first.evidenceContent).toContain("Series A term sheet");
+    expect(first.evidenceContent).toContain("Attached is the term sheet we discussed.");
+    expect(first.evidenceContent).toContain("gmail:message:msg_1");
+    expect(first.truncatedBodies).toBe(false);
+  });
+});
+
+describe("runGmailThreadAgentIngest", () => {
+  it("writes the evidence snapshot, looks up instructions live, and reports thread metadata", async () => {
+    goatGmailMock.getGoatGmailBrainSourceInstructions.mockResolvedValueOnce(
+      "Only investor emails.",
+    );
+    let seenPrompt = "";
+    aiMock.generateText.mockImplementationOnce(
+      async (options: {
+        tools: Record<string, CapturedTool>;
+        messages: Array<{ content: string }>;
+      }) => {
+        seenPrompt = options.messages[0]?.content ?? "";
+        await options.tools.goat_brain?.execute({
+          command: "timeline-add",
+          args: ["ada", "--body", "Term sheet received.", "--source-ref", "gmail:message:msg_1"],
+        });
+        return {
+          text: "Updated ada.",
+          steps: [{}, {}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+
+    const item = gmailItem();
+    const result = await runGmailThreadAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        integrationId: "gint_gmail",
+        item,
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(goatGmailMock.getGoatGmailBrainSourceInstructions).toHaveBeenCalledWith(
+      { integrationId: "gint_gmail", brainRef: "gbrain_123" },
+      expect.anything(),
+    );
+    expect(seenPrompt).toContain("Only investor emails.");
+    expect(localBrainMock.writeLocalBrainFile).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("evidence/email/"),
+      expect.stringContaining("Attached is the term sheet we discussed."),
+    );
+    expect(result).toMatchObject({
+      brainRef: "gbrain_123",
+      skipped: false,
+      threadId: "thread_789",
+      messageCount: 2,
+      hadInstructions: true,
+    });
+  });
+
+  it("skips the instructions lookup when the job has no integration id", async () => {
+    mockAgentRun({ finalText: "SKIP" });
+    const result = await runGmailThreadAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        integrationId: null,
+        item: gmailItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+    expect(goatGmailMock.getGoatGmailBrainSourceInstructions).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ skipped: true, hadInstructions: false });
   });
 });
 

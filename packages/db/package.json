@@ -52,6 +52,10 @@
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"
     },
+    "./goat-gmail": {
+      "types": "./src/goat-gmail.ts",
+      "default": "./src/goat-gmail.ts"
+    },
     "./goat-linear": {
       "types": "./src/goat-linear.ts",
       "default": "./src/goat-linear.ts"

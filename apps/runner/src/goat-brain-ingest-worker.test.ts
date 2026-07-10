@@ -133,8 +133,9 @@ describe("Goat Brain ingest worker", () => {
       jobId: "gbjob_123",
       userWorkosId: "user_123",
       brainRef: "gbrain_123",
+      integrationId: "gint_123",
       item: normalizedPayload,
-      env: { vercelAiGatewayApiKey: "gw_test" },
+      env: { vercelAiGatewayApiKey: "gw_test", blobReadWriteToken: undefined },
     });
     expect(complete).toHaveBeenCalledWith(expect.objectContaining({ result: { handled: true } }));
     expect(fail).not.toHaveBeenCalled();

@@ -18,6 +18,7 @@ import {
   listGoatLinearTeamsAction,
   listGoatSlackConversationsAction,
   setGoatBrainGitHubSourceAction,
+  setGoatBrainGmailSourceAction,
   setGoatBrainLinearSourceAction,
   setGoatBrainSlackSourceAction,
   setGoatBrainSourceEnabledAction,
@@ -304,6 +305,7 @@ function SourceProviderCard({
   const slack = provider.id === "slack" ? details?.slack : undefined;
   const linear = provider.id === "linear" ? details?.linear : undefined;
   const github = provider.id === "github" ? details?.github : undefined;
+  const gmail = provider.id === "gmail" ? details?.gmail : undefined;
   const connected =
     provider.id === "jamie"
       ? Boolean(jamie?.integration.connected)
@@ -313,7 +315,9 @@ function SourceProviderCard({
           ? Boolean(linear?.integration.connected)
           : provider.id === "github"
             ? Boolean(github?.integration.connected)
-            : false;
+            : provider.id === "gmail"
+              ? Boolean(gmail?.integration.connected)
+              : false;
   // Before any per-brain rows exist, Jamie deliveries follow legacy routing to
   // the user's default brain — surface that as an implicit "on" there.
   const legacyEnabled = Boolean(
@@ -329,7 +333,8 @@ function SourceProviderCard({
       jamie?.integration.integrationId ??
       slack?.integration.integrationId ??
       linear?.integration.integrationId ??
-      github?.integration.integrationId;
+      github?.integration.integrationId ??
+      gmail?.integration.integrationId;
     if (!integrationId) return;
     startTransition(async () => {
       const result = await setGoatBrainSourceEnabledAction({
@@ -424,6 +429,17 @@ function SourceProviderCard({
         <GitHubRepoPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? github.integration.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {provider.id === "gmail" &&
+      gmail?.integration.integrationId &&
+      (connected || source) &&
+      (source ? source.isOwnIntegration : true) ? (
+        <GmailSourceEditor
+          brainRef={brainRef}
+          integrationId={source?.integrationId ?? gmail.integration.integrationId}
           source={source}
           onChanged={onChanged}
         />
@@ -1195,6 +1211,192 @@ function LinearTeamPicker({
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >
             {isPending ? "Saving…" : "Save Linear source"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type GmailEventSelection = "email_received" | "email_sent";
+
+const GMAIL_EVENT_OPTIONS: Array<{ id: GmailEventSelection; label: string }> = [
+  { id: "email_received", label: "Email received" },
+  { id: "email_sent", label: "Email sent" },
+];
+
+const GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
+
+function gmailEventsFromConfig(config: Record<string, unknown> | undefined): GmailEventSelection[] {
+  const value = config?.events;
+  if (!Array.isArray(value)) return GMAIL_EVENT_OPTIONS.map((option) => option.id);
+  const allowed = new Set(GMAIL_EVENT_OPTIONS.map((option) => option.id));
+  const seen = new Set<GmailEventSelection>();
+  for (const entry of value) {
+    const id =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : null;
+    if (typeof id !== "string" || !allowed.has(id as GmailEventSelection)) continue;
+    seen.add(id as GmailEventSelection);
+  }
+  return [...seen];
+}
+
+function gmailInstructionsFromConfig(config: Record<string, unknown> | undefined): string {
+  const value = config?.instructions;
+  return typeof value === "string" ? value : "";
+}
+
+function GmailSourceEditor({
+  brainRef,
+  integrationId,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  integrationId: string;
+  source: GoatBrainSourceView | null;
+  onChanged: () => Promise<void>;
+}) {
+  const savedEvents = useMemo(() => gmailEventsFromConfig(source?.config), [source]);
+  const savedInstructions = useMemo(() => gmailInstructionsFromConfig(source?.config), [source]);
+  const [expanded, setExpanded] = useState(false);
+  const [eventSelection, setEventSelection] = useState<Set<GmailEventSelection>>(
+    () => new Set(savedEvents),
+  );
+  const [instructions, setInstructions] = useState(savedInstructions);
+  const [dirty, setDirty] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const toggleEvent = (eventId: GmailEventSelection) => {
+    setDirty(true);
+    setEventSelection((current) => {
+      const next = new Set(current);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  };
+
+  const save = () => {
+    startTransition(async () => {
+      const result = await setGoatBrainGmailSourceAction({
+        brainRef,
+        integrationId,
+        enabled: source ? source.enabled : true,
+        events: [...eventSelection].map((id) => ({ id })),
+        instructions,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setDirty(false);
+      toast.success("Gmail source updated.");
+      await onChanged();
+    });
+  };
+
+  const selectedLabels = GMAIL_EVENT_OPTIONS.filter((option) => eventSelection.has(option.id)).map(
+    (option) => option.label.toLowerCase(),
+  );
+  const summary =
+    selectedLabels.length === 0
+      ? "No email events selected yet - nothing is ingested until you choose some."
+      : `Ingesting ${selectedLabels.join(" and ")}${
+          savedInstructions.trim() ? ", tuned by your instructions" : ""
+        }.`;
+
+  if (!expanded) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-t border-ink/10 pt-2">
+        <p className="text-[11.5px] leading-4 text-ink-subtle">{summary}</p>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+        >
+          Choose events and instructions
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[12px] font-medium text-ink">Email ingestion</span>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          Collapse
+        </button>
+      </div>
+      <div className="flex flex-col gap-1 rounded-md border border-ink/10 p-1">
+        <div className="px-1 py-0.5 text-[12px] font-medium text-ink">Events</div>
+        <div className="grid grid-cols-1 gap-px sm:grid-cols-2">
+          {GMAIL_EVENT_OPTIONS.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+            >
+              <input
+                type="checkbox"
+                checked={eventSelection.has(option.id)}
+                onChange={() => toggleEvent(option.id)}
+                className="accent-ink"
+              />
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor={`gmail-instructions-${brainRef}`}
+          className="px-1 text-[12px] font-medium text-ink"
+        >
+          Ingestion instructions (optional)
+        </label>
+        <textarea
+          id={`gmail-instructions-${brainRef}`}
+          value={instructions}
+          maxLength={GMAIL_INSTRUCTIONS_MAX_LENGTH}
+          rows={3}
+          onChange={(event) => {
+            setInstructions(event.target.value);
+            setDirty(true);
+          }}
+          placeholder="Ignore transactional and automated messages; only capture investor and customer emails."
+          className="w-full resize-y rounded-md border border-ink/10 bg-transparent px-2 py-1.5 text-[12.5px] leading-5 text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        />
+        <p className="px-1 text-[11.5px] leading-4 text-ink-subtle">
+          Tell the ingestion agent what matters in your inbox. It reads every selected email event
+          and uses these instructions to decide what to remember and what to skip - newsletters,
+          receipts, and other noise are skipped by default.
+        </p>
+      </div>
+      <p className="text-[11.5px] leading-4 text-ink-subtle">
+        Ingested email content - including what other people write to you - is captured into this
+        brain and visible to everyone with access to it.
+      </p>
+      {dirty ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={save}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {isPending ? "Saving..." : "Save Gmail source"}
           </button>
         </div>
       ) : null}
