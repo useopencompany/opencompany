@@ -1,4 +1,9 @@
-import { isCodexReasoningEffort, shellQuote } from "@opencompany/agent-runtime";
+import {
+  CODEX_COMMAND_TOOL_PART_TYPE,
+  type CodexUiMessagePart,
+  isCodexReasoningEffort,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import {
   type GoatCodexChatSession,
@@ -44,6 +49,7 @@ export async function runGoatCodexChatTurn(input: {
   turn: GoatCodexChatTurn;
   session: GoatCodexChatSession;
   env: RunnerEnv;
+  recovery?: { reason: "lease_reclaimed" };
   shouldAbort?: () => Error | null;
 }) {
   const { turn, session, env, shouldAbort } = input;
@@ -53,6 +59,7 @@ export async function runGoatCodexChatTurn(input: {
     throw new Error(`Claimed codex chat turn ${turn.id} is missing its lease.`);
   }
 
+  const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
   const bareProjector = async () =>
     createGoatCodexChatProjector({
       target: {
@@ -66,7 +73,7 @@ export async function runGoatCodexChatTurn(input: {
         leaseOwner,
       },
       redact: (value) => value,
-      initialParts: await loadCodexChatAssistantMessageParts(turn.assistantMessageId),
+      initialParts,
     });
 
   const auth = await loadGoatCodexCliAuth(turn.userWorkosId);
@@ -125,7 +132,7 @@ export async function runGoatCodexChatTurn(input: {
     redact,
     // Resumes the parts already persisted for this message (normally empty; non-empty only if a
     // previous write landed before a transient failure of the same turn).
-    initialParts: await loadCodexChatAssistantMessageParts(turn.assistantMessageId),
+    initialParts,
   });
 
   try {
@@ -143,7 +150,13 @@ export async function runGoatCodexChatTurn(input: {
       codexWorkRoot: CODEX_CHAT_WORKDIR,
       codexHome: CODEX_CHAT_HOME,
       skillFingerprint: GOAT_CODEX_CHAT_SKILL_FINGERPRINT,
-      task: buildCodexChatTask({ prompt: turn.prompt, githubAvailable: Boolean(github) }),
+      task: input.recovery
+        ? buildCodexChatRecoveryTask({
+            prompt: turn.prompt,
+            githubAvailable: Boolean(github),
+            previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
+          })
+        : buildCodexChatTask({ prompt: turn.prompt, githubAvailable: Boolean(github) }),
       model: session.model || env.codexModel,
       reasoningEffort: settings.reasoningEffort,
       planModeReasoningEffort: settings.planModeReasoningEffort,
@@ -311,6 +324,86 @@ function buildCodexChatTask(input: { prompt: string; githubAvailable: boolean })
     .join("\n");
 }
 
+function buildCodexChatRecoveryTask(input: {
+  prompt: string;
+  githubAvailable: boolean;
+  previousProgress: string;
+}) {
+  return [
+    "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
+    "The previous runner process died while handling this same user message. Continue from the durable sandbox, filesystem, git state, app-server thread, and persisted progress below instead of starting over.",
+    "First inspect the current filesystem, git state, and any relevant external state. Do not repeat completed work or rerun side-effecting commands until inspection proves that it is necessary.",
+    input.githubAvailable
+      ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
+      : null,
+    "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
+    "",
+    "<original_user_message>",
+    input.prompt,
+    "</original_user_message>",
+    "",
+    "<last_persisted_progress>",
+    input.previousProgress || "No persisted assistant progress was available.",
+    "</last_persisted_progress>",
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+}
+
+export function summarizeCodexChatRecoveryProgress(parts: readonly CodexUiMessagePart[]) {
+  const lines: string[] = [];
+  for (const part of parts) {
+    if (part.type === "text") {
+      pushSummaryLine(lines, `Assistant: ${oneLine(part.text, 700)}`);
+      continue;
+    }
+    if (part.type === "reasoning") {
+      pushSummaryLine(lines, `Reasoning: ${oneLine(part.text, 260)}`);
+      continue;
+    }
+    if (part.type === CODEX_COMMAND_TOOL_PART_TYPE) {
+      const command = oneLine(part.input.command, 360);
+      if (part.state === "input-available") {
+        pushSummaryLine(lines, `Command started without a persisted result: ${command}`);
+      } else if (part.state === "output-error") {
+        pushSummaryLine(lines, `Command failed: ${command}`);
+      } else {
+        const status = part.output.status;
+        const exitCode =
+          typeof part.output.exitCode === "number" ? `, exit ${part.output.exitCode}` : "";
+        pushSummaryLine(lines, `Command ${status}${exitCode}: ${command}`);
+      }
+      continue;
+    }
+    if (part.type === "dynamic-tool") {
+      pushSummaryLine(lines, summarizeCodexStatusPart(part));
+    }
+  }
+  return lines.slice(-18).join("\n");
+}
+
+function summarizeCodexStatusPart(part: Extract<CodexUiMessagePart, { type: "dynamic-tool" }>) {
+  const input = isRecord(part.input) ? part.input : {};
+  const output = part.state === "output-available" && isRecord(part.output) ? part.output : {};
+  const objective = readString(output.objective) ?? readString(input.objective);
+  const status = readString(output.status) ?? readString(input.status);
+  const text = readString(output.text) ?? readString(input.text);
+  const detail = objective ?? text ?? readString(input.question) ?? readString(input.title);
+  const state = part.state === "output-available" ? "updated" : "active";
+  return `${part.toolName} ${status ?? state}: ${oneLine(detail ?? "no detail", 260)}`;
+}
+
+function pushSummaryLine(lines: string[], line: string) {
+  const trimmed = line.trim();
+  if (trimmed) lines.push(trimmed);
+}
+
+function oneLine(value: string, limit: number) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 3)).trimEnd()}...`;
+}
+
 function normalizeTurnSettings(value: unknown): {
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
@@ -344,6 +437,10 @@ function readGoalMode(value: unknown): { objective: string; tokenBudget?: number
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
