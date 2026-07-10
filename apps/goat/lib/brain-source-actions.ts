@@ -47,7 +47,10 @@ import {
   getGoatGitHubIntegrationState,
 } from "@/lib/integrations/github";
 import { getGoatGmailSourceIntegrationState } from "@/lib/integrations/google-data";
-import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
+import {
+  getGoatJamieIntegrationState,
+  isGoatJamieWebhookApiKeyConfigured,
+} from "@/lib/integrations/jamie";
 import {
   getGoatLinearSourceIntegrationState,
   linearGraphqlRequest,
@@ -148,7 +151,7 @@ export async function getGoatBrainSourcesAction(
     })),
     jamie: {
       integration: jamieState,
-      legacyDefaultDelivery: jamieState.connected && !jamieConfigured,
+      legacyDefaultDelivery: jamieState.apiKeyConfigured && !jamieConfigured,
       isDefaultBrain: defaultBrain?.id === brainRef,
     },
     slack: {
@@ -188,6 +191,7 @@ export async function setGoatBrainSourceEnabledAction(input: {
     .select({
       id: goatIntegrations.id,
       userWorkosId: goatIntegrations.userWorkosId,
+      externalId: goatIntegrations.externalId,
       status: goatIntegrations.status,
     })
     .from(goatIntegrations)
@@ -206,6 +210,15 @@ export async function setGoatBrainSourceEnabledAction(input: {
     .limit(1);
   if (!integration || integration.status === "disconnected") {
     return { ok: false, error: "Connect this integration in your settings first." };
+  }
+  if (
+    input.provider === "jamie" &&
+    !isGoatJamieWebhookApiKeyConfigured({
+      status: integration.status,
+      externalId: integration.externalId,
+    })
+  ) {
+    return { ok: false, error: "Save the Jamie API key before adding it as a brain source." };
   }
 
   try {

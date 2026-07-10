@@ -33,7 +33,7 @@ Jamie also offers signature verification for webhooks, but Goat's Jamie integrat
 
 ## Brain routing
 
-After the first valid delivery, Goat marks Jamie connected. If no per-brain source routing has been configured yet, Jamie deliveries continue to use the user's default brain. Once a Jamie source row exists on any brain, routing is explicit: enabled brain sources receive the meeting source item, and disabled sources do not enqueue ingestion.
+After the Jamie API key is saved, configure Jamie as a source from any brain's settings page. If no per-brain source routing has been configured yet, Jamie deliveries continue to use the user's default brain. Once a Jamie source row exists on any brain, routing is explicit: enabled brain sources receive the meeting source item, and disabled sources do not enqueue ingestion. The first valid delivery still marks webhook delivery health as connected.
 
 Configure routing from a brain settings page under Sources.
 

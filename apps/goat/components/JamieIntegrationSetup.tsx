@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Copy, RotateCw } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import type { GoatJamieProviderState } from "@/lib/integration-state";
@@ -17,7 +18,13 @@ type EndpointSetup = {
   apiKeyConfigured: boolean;
 };
 
-export function JamieIntegrationSetup({ initialState }: { initialState: GoatJamieProviderState }) {
+export function JamieIntegrationSetup({
+  initialState,
+  brainSourcesHref = null,
+}: {
+  initialState: GoatJamieProviderState;
+  brainSourcesHref?: string | null;
+}) {
   const router = useRouter();
   const [endpoint, setEndpoint] = useState<EndpointSetup | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -85,6 +92,17 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
             {status.badge}
           </span>
         </div>
+        {apiKeyConfigured && brainSourcesHref ? (
+          <div className="px-2 pt-1">
+            <Link
+              href={brainSourcesHref}
+              prefetch
+              className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+            >
+              Open Brain sources
+            </Link>
+          </div>
+        ) : null}
       </section>
 
       <section className="flex flex-col gap-3">
@@ -230,10 +248,9 @@ function setupStatus(
   }
   if (hasEndpoint && apiKeyConfigured) {
     return {
-      label: "Waiting for Jamie",
-      detail:
-        initialState.statusReason ?? "Send the first completed-meeting webhook to finish setup.",
-      badge: "Setup",
+      label: "Ready for Brain",
+      detail: "Enable Jamie from a brain's Sources settings to route completed meetings.",
+      badge: "Ready",
     };
   }
   if (hasEndpoint) {

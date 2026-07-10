@@ -94,9 +94,17 @@ export async function getGoatJamieIntegrationState(
     statusReason: row.statusReason,
     integrationId: row.id,
     webhookUrl: goatJamieWebhookUrl(),
-    apiKeyConfigured:
-      row.status === "connected" || row.externalId.startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX),
+    apiKeyConfigured: isGoatJamieWebhookApiKeyConfigured({
+      status: row.status,
+      externalId: row.externalId,
+    }),
   };
+}
+
+export function isGoatJamieWebhookApiKeyConfigured(input: { status: string; externalId: string }) {
+  return (
+    input.status === "connected" || input.externalId.startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX)
+  );
 }
 
 export async function createOrResetGoatJamieWebhookEndpoint(input: {

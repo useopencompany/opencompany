@@ -50,7 +50,9 @@ export function resolveGoatBrainSourceState(
             : providerId === "gmail"
               ? details?.gmail.integration
               : undefined;
-  const connected = Boolean(integration?.connected);
+  const jamieReady =
+    providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
+  const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
   // Before any per-brain rows exist, Jamie deliveries follow legacy routing to
   // the user's default brain — surface that as an implicit "on" there.
   const legacyEnabled = Boolean(
@@ -134,6 +136,15 @@ export function SourceProviderCard({
   const gmail = provider.id === "gmail" ? details?.gmail : undefined;
   const canToggle =
     provider.available && (source ? source.isOwnIntegration : connected) && !isPending;
+  const sourceNeedsSetup = Boolean(
+    source && source.integrationStatus !== "connected" && !(provider.id === "jamie" && connected),
+  );
+  const sourceStatusBadge =
+    sourceNeedsSetup && source
+      ? source.integrationStatus === "needs_reauth"
+        ? "Needs setup"
+        : "Sync issue"
+      : null;
 
   const toggle = () => {
     const integrationId = state.integrationId;
@@ -171,9 +182,9 @@ export function SourceProviderCard({
                 Coming soon
               </span>
             ) : null}
-            {source && source.integrationStatus !== "connected" ? (
+            {sourceStatusBadge ? (
               <span className="rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-ink-subtle">
-                {source.integrationStatus === "needs_reauth" ? "Needs setup" : "Sync issue"}
+                {sourceStatusBadge}
               </span>
             ) : null}
           </div>
@@ -181,7 +192,12 @@ export function SourceProviderCard({
         </div>
         {provider.available ? (
           connected || source ? (
-            <SourceToggle enabled={enabled} disabled={!canToggle} onToggle={toggle} />
+            <SourceToggle
+              enabled={enabled}
+              disabled={!canToggle}
+              onToggle={toggle}
+              label={`${provider.name} source`}
+            />
           ) : (
             <a
               href={provider.connectHref}
@@ -1210,16 +1226,19 @@ function SourceToggle({
   enabled,
   disabled,
   onToggle,
+  label,
 }: {
   enabled: boolean;
   disabled: boolean;
   onToggle: () => void;
+  label: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={enabled}
+      aria-label={label}
       disabled={disabled}
       onClick={onToggle}
       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 ${
