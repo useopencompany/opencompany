@@ -428,6 +428,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
   job: GoatBrainIngestJobWithSource;
   env: Pick<RunnerEnv, "jobLeaseTtlMs" | "vercelAiGatewayApiKey"> & {
     blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
+    exaApiKey?: RunnerEnv["exaApiKey"];
   };
   handlers?: readonly GoatBrainIngestHandler[];
   store?: GoatBrainIngestStore;
@@ -553,6 +554,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
         env: {
           vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
           blobReadWriteToken: input.env.blobReadWriteToken,
+          exaApiKey: input.env.exaApiKey,
         },
       }),
     );

@@ -41,6 +41,10 @@ export type GoatBrainIngestTrace = {
   finalText: string;
   toolCalls: GoatBrainIngestTraceToolCall[];
   truncatedToolCalls: number;
+  // Web-search enrichment usage for this ingest (0 when enrichment is disabled,
+  // unavailable, or unused). Optional so existing v1 traces normalize cleanly.
+  webSearchCount?: number;
+  webSearchCostUsdMicros?: number;
   createdAt: string;
 };
 
@@ -68,6 +72,8 @@ export function normalizeGoatBrainIngestTrace(value: unknown): GoatBrainIngestTr
     ),
     toolCalls,
     truncatedToolCalls: readNonNegativeInteger(record.truncatedToolCalls),
+    webSearchCount: readNonNegativeInteger(record.webSearchCount),
+    webSearchCostUsdMicros: readNonNegativeInteger(record.webSearchCostUsdMicros),
     createdAt: readString(record.createdAt),
   };
 }

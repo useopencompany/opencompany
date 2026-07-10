@@ -12,6 +12,7 @@ import {
   listGoatWorkspacesForUser,
   removeGoatWorkspaceMember,
   replaceGoatBrainMembers,
+  updateGoatBrainEnrichmentEnabled,
   updateGoatBrainVisibility,
   updateGoatWorkspaceName,
 } from "@opencompany/db/goat-workspaces";
@@ -197,6 +198,46 @@ export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise
     memberWorkosIds,
     workspaceMembers,
   };
+}
+
+export async function getGoatBrainEnrichmentEnabledAction(
+  brainRef: string,
+): Promise<{ enabled: boolean } | null> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") return null;
+  const access = await getGoatBrainAccess({
+    userWorkosId: context.user.workosUserId,
+    brainRef,
+  });
+  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
+  return { enabled: access.brain.enrichmentEnabled };
+}
+
+export async function setGoatBrainEnrichmentAction(input: {
+  brainRef: string;
+  enabled: boolean;
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can change enrichment." };
+  }
+  const access = await getGoatBrainAccess({
+    userWorkosId: context.user.workosUserId,
+    brainRef: input.brainRef,
+  });
+  if (!access || access.brain.workspaceId !== context.workspace.id) {
+    return { ok: false, error: "Brain not found in this workspace." };
+  }
+  try {
+    await updateGoatBrainEnrichmentEnabled({
+      brainRef: input.brainRef,
+      enabled: input.enabled,
+    });
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return errorResult(error, "Could not update enrichment.");
+  }
 }
 
 export async function listGoatWorkspaceMembersAction(): Promise<GoatWorkspaceMemberView[]> {

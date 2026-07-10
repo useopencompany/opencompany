@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { type ExaSearchResult, executeExaSearchRequest } from "@opencompany/agent-runtime";
 import {
   type GoatBrainSyncPage,
   getGoatBrainFile,
@@ -23,7 +24,10 @@ import {
   sanitizeGoatBrainIngestTraceArgs,
 } from "@opencompany/db/goat-brain-ingest-trace";
 import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail";
-import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
+import {
+  getDefaultGoatBrainForUser,
+  getGoatBrainEnrichmentEnabled,
+} from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type GoatBrainFolderManifestEntry,
@@ -68,6 +72,10 @@ export const GOAT_BRAIN_AGENT_INGEST_MODEL = "anthropic/claude-sonnet-5";
 export const GOAT_BRAIN_AGENT_INGEST_MAX_STEPS = 32;
 export const GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const GOAT_BRAIN_AGENT_SKIP_SENTINEL = "SKIP";
+// Hard per-ingest cap on web-search enrichment calls. Bounds cost and stops the
+// agent from spelunking; enforced in code, not just prompt.
+export const GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT = 4;
+const ENRICHMENT_RESULT_HIGHLIGHTS_LIMIT = 4;
 const AGENT_CLI_TIMEOUT_MS = 60_000;
 const AGENT_CLI_STDOUT_LIMIT = 24_000;
 const AGENT_CLI_STDERR_LIMIT = 4_000;
@@ -121,6 +129,9 @@ export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> &
   // Needed only by handlers that fetch blob bytes (uploaded assets); optional
   // so text-only profiles and tests need not provide it.
   blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
+  // Enables web-search enrichment during ingest. Absent → enrichment tool is
+  // never registered and the agent works source-only.
+  exaApiKey?: RunnerEnv["exaApiKey"];
 };
 
 export type GoatBrainAgentCliResult = {
@@ -172,6 +183,21 @@ function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: st
     "When you are done, reply with a short plain-text summary of the pages you created or updated (one line per page). Do not include markdown headings in that final reply.",
   ].join("\n");
 }
+
+// Appended to the base system prompt only when web-search enrichment is active
+// for this ingest (brain toggle on + Exa key present). Kept out of the static
+// per-profile constants so it never appears when the tool is unavailable.
+export const GOAT_BRAIN_ENRICHMENT_SYSTEM_ADDENDUM = [
+  "",
+  "Web-search enrichment (optional):",
+  "- You have a `web_search` tool for enriching entities with public web context. It is an aid, not an obligation; most ingests need it zero times.",
+  "- Identity gate: only search when the source itself identifies the entity precisely enough to resolve it uniquely — a full personal name plus an employer or role, or a company/product name plus a domain or unambiguous context. Never search on a bare first name, initials, or a common/generic name.",
+  "- Products and projects have no dedicated search category and are easy to confuse: enrich one only when the source anchors it to a known company or domain (search category `general`). Use category `people` for individuals and `company` for organizations.",
+  "- Corroboration: a result only counts if it matches the source's anchors (e.g. the name AND the company/domain line up). If the top results are ambiguous, conflicting, or do not match those anchors, write nothing from the search and move on. A sparse-but-correct page beats an enriched-but-wrong one.",
+  "- Provenance: write enriched facts as evidence with append-evidence --source-ref web:<canonical-url> (strip tracking params), and cite them in compiled truth as [[source:web:<url>|Label]]. Summarize the finding in your own words — do not paste page text verbatim.",
+  "- No fabrication still governs: never fold an unattributed web claim into a page, and never let a search invent an entity the source did not establish.",
+  `- Budget: at most ${GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT} web searches for this whole ingest. When the budget is exhausted the tool refuses further calls; finish with what you have.`,
+].join("\n");
 
 export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
@@ -692,6 +718,20 @@ async function runBrainAgentIngestSession(input: {
     await input.prepareRoot?.(root);
     const folderPrompt = await buildGoatBrainFolderInventoryPrompt(root);
 
+    // Live read (not snapshotted at enqueue) so an owner toggling enrichment off
+    // applies to already-queued jobs. The Exa key gates whether it can run at all.
+    const exaApiKey = input.env.exaApiKey?.trim() || null;
+    const enrichmentEnabled = exaApiKey
+      ? await getGoatBrainEnrichmentEnabled(brainRef, db).catch((error) => {
+          logger.warn("Goat Brain enrichment flag lookup failed", {
+            event: "opencompany.goat_brain_enrichment_flag_lookup_failed",
+            brain_ref: brainRef,
+            error,
+          });
+          return false;
+        })
+      : false;
+
     const loop = await runIngestAgentLoop({
       root,
       cliPath: path.join(root, "goat-brain.mjs"),
@@ -704,6 +744,7 @@ async function runBrainAgentIngestSession(input: {
       ...(input.commands ? { commands: input.commands } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
+      ...(enrichmentEnabled && exaApiKey ? { exaApiKey } : {}),
     });
 
     const outcome = brainAgentIngestCompletionOutcome({
@@ -1195,6 +1236,9 @@ async function runIngestAgentLoop(input: {
   commands?: readonly string[];
   signal?: AbortSignal;
   runCli?: GoatBrainAgentCliRunner;
+  // When set, the web_search enrichment tool is registered and the enrichment
+  // discipline is appended to the system prompt. Absent → source-only ingest.
+  exaApiKey?: string;
 }) {
   const { generateText } = getBraintrustAISDK(ai);
   const gateway = ai.createGateway({ apiKey: input.gatewayApiKey });
@@ -1223,6 +1267,8 @@ async function runIngestAgentLoop(input: {
   let toolCalls = 0;
   let mutations = 0;
   let failedMutatingToolCalls = 0;
+  let webSearchCount = 0;
+  let webSearchCostUsdMicros = 0;
   let cliQueue: Promise<void> = Promise.resolve();
   const traceToolCalls: GoatBrainIngestTraceToolCall[] = [];
   const runCli = input.runCli ?? runGoatBrainAgentCli;
@@ -1358,12 +1404,92 @@ async function runIngestAgentLoop(input: {
     }),
   };
 
+  // Enrichment is opt-in per ingest: the web_search tool exists (and the
+  // enrichment discipline is appended to the prompt) only when an Exa key was
+  // threaded in, which itself requires the brain's enrichment toggle to be on.
+  const exaApiKey = input.exaApiKey ?? "";
+  const enrichmentEnabled = exaApiKey.length > 0;
+  const enrichmentTools = enrichmentEnabled
+    ? {
+        web_search: ai.tool({
+          description: [
+            "Enrich a confidently identified entity with public web context.",
+            `Budget: ${GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT} searches for the whole ingest.`,
+            "Only search when the source names the entity precisely enough to resolve it uniquely (full name + employer/role, or company/product + domain). Use category 'people' for individuals, 'company' for organizations, 'general' for products/projects anchored to a known company or domain.",
+            "Returns titles, URLs, highlights, and summaries. Only use a result if it matches the source's anchors; cite what you keep via append-evidence --source-ref web:<url>.",
+          ].join(" "),
+          inputSchema: ai.jsonSchema<{
+            query: string;
+            category?: "people" | "company" | "general";
+            numResults?: number;
+          }>({
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query with disambiguating anchors." },
+              category: {
+                type: "string",
+                enum: ["people", "company", "general"],
+                description:
+                  "'people' for individuals, 'company' for organizations, 'general' for products/projects.",
+              },
+              numResults: {
+                type: "number",
+                description: "How many results to return (1-10, default 5).",
+              },
+            },
+            required: ["query"],
+            additionalProperties: false,
+          }),
+          execute: async (args) => {
+            if (webSearchCount >= GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT) {
+              return {
+                ok: false,
+                error: `web search budget exhausted (${GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT} max); finish with what you have`,
+              };
+            }
+            // Reserve the slot before awaiting so a failed search still counts —
+            // this caps cost and prevents retry loops on a bad query.
+            webSearchCount += 1;
+            const category = args.category === "general" ? undefined : args.category;
+            try {
+              const { output, usage } = await executeExaSearchRequest({
+                apiKey: exaApiKey,
+                args: {
+                  query: args.query,
+                  ...(category ? { category } : {}),
+                  ...(typeof args.numResults === "number" ? { numResults: args.numResults } : {}),
+                  type: "fast",
+                },
+                signal: abort.signal,
+                defaults: { type: "fast", numResults: 5 },
+              });
+              webSearchCostUsdMicros += usage.costUsdMicros;
+              return {
+                ok: true,
+                searchesUsed: webSearchCount,
+                searchesRemaining: GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT - webSearchCount,
+                results: output.results.map(formatEnrichmentResult),
+              };
+            } catch (error) {
+              return {
+                ok: false,
+                error: error instanceof Error ? error.message : "web search failed",
+              };
+            }
+          },
+        }),
+      }
+    : {};
+  const system = enrichmentEnabled
+    ? `${input.system}\n${GOAT_BRAIN_ENRICHMENT_SYSTEM_ADDENDUM}`
+    : input.system;
+
   try {
     const result = await generateText({
       model: gateway(GOAT_BRAIN_AGENT_INGEST_MODEL),
-      system: input.system,
+      system,
       messages: [{ role: "user", content: input.prompt }],
-      tools,
+      tools: { ...tools, ...enrichmentTools },
       stopWhen: [ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS)],
       abortSignal: abort.signal,
       providerOptions: goatGatewayProviderOptions(attribution),
@@ -1385,8 +1511,19 @@ async function runIngestAgentLoop(input: {
       finalText: goatBrainIngestTracePreview(finalText, GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH),
       toolCalls: traceToolCalls,
       truncatedToolCalls: Math.max(0, toolCalls - traceToolCalls.length),
+      webSearchCount,
+      webSearchCostUsdMicros,
       createdAt: new Date().toISOString(),
     };
+    if (webSearchCount > 0) {
+      logger.info("Goat Brain ingestion enrichment used", {
+        event: "opencompany.goat_brain_ingest_enrichment_used",
+        brain_ref: input.brainRef,
+        ingest_job_id: input.ingestJobId,
+        web_search_count: webSearchCount,
+        web_search_cost_usd_micros: webSearchCostUsdMicros,
+      });
+    }
     return {
       finalText,
       steps: result.steps.length,
@@ -1394,6 +1531,8 @@ async function runIngestAgentLoop(input: {
       mutations,
       failedMutatingToolCalls,
       usage: normalizedUsage,
+      webSearchCount,
+      webSearchCostUsdMicros,
       trace,
     };
   } finally {
@@ -1514,4 +1653,19 @@ const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
 function truncate(value: string, limit: number) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit)}\n[truncated]`;
+}
+
+// Compact projection of an Exa result for the enrichment tool: enough for the
+// agent to judge corroboration and cite the URL, without dumping page bytes.
+function formatEnrichmentResult(result: ExaSearchResult) {
+  return {
+    ...(result.title ? { title: result.title } : {}),
+    ...(result.url ? { url: result.url } : {}),
+    ...(result.author ? { author: result.author } : {}),
+    ...(result.publishedDate ? { publishedDate: result.publishedDate } : {}),
+    ...(result.highlights?.length
+      ? { highlights: result.highlights.slice(0, ENRICHMENT_RESULT_HIGHLIGHTS_LIMIT) }
+      : {}),
+    ...(result.summary ? { summary: result.summary } : {}),
+  };
 }
