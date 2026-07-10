@@ -304,14 +304,15 @@ function integrationStatus(
 function integrationConnectHref(
   provider: GoatGoogleProviderState["provider"] | "linear" | "github" | "jamie" | "slack",
 ) {
-  if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings";
+  if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
-    return "/api/integrations/google-calendar/start?returnTo=/settings";
+    return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
   }
-  if (provider === "github") return "/api/integrations/github/start?returnTo=/settings";
+  if (provider === "github")
+    return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
-  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings";
-  return "/api/integrations/linear/start?returnTo=/settings";
+  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
+  return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 
 function buttonLabel(status: string, isPending: boolean) {
