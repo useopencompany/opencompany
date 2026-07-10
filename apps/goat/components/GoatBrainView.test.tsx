@@ -342,6 +342,15 @@ describe("GoatBrainView", () => {
         documents={[
           {
             ...inboxCaptureDocument,
+            id: "doc_unrelated_note",
+            brainId: "unrelated-note",
+            folderPath: "thoughts",
+            path: "thoughts/unrelated-note.md",
+            title: "Unrelated note",
+            body: "This should not become selected.",
+          },
+          {
+            ...inboxCaptureDocument,
             folderPath: "thoughts",
             path: "thoughts/customer-feedback.md",
           },
