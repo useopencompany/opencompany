@@ -68,6 +68,12 @@ export const GOAT_BRAIN_AGENT_INGEST_MODEL = "anthropic/claude-sonnet-5";
 export const GOAT_BRAIN_AGENT_INGEST_MAX_STEPS = 32;
 export const GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const GOAT_BRAIN_AGENT_SKIP_SENTINEL = "SKIP";
+// Agent-driven captures snapshot into a provenance subfolder of the evidence
+// zone, so the raw pile is organized by source instead of dumped into the
+// "evidence/" root. Mirrors the deterministic connector evidence folders
+// (evidence/document for Jamie, evidence/email for Gmail).
+export const GOAT_CHAT_CAPTURE_EVIDENCE_FOLDER = "evidence/chat";
+export const GOAT_SLACK_EVIDENCE_FOLDER = "evidence/slack";
 const AGENT_CLI_TIMEOUT_MS = 60_000;
 const AGENT_CLI_STDOUT_LIMIT = 24_000;
 const AGENT_CLI_STDERR_LIMIT = 4_000;
@@ -457,7 +463,7 @@ export function buildSlackConversationAgentIngestPrompt(
     "2. Judge the current window first: extract only durable knowledge — decisions, plans, commitments, facts about people, companies, or projects, and substantive shared content. Ignore chit-chat around it.",
     `3. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite individual messages with --source-ref slack:message:${conversation.teamId}:${conversation.channelId}:<message ts>.`,
     "4. You may cite context messages only when they materially support a durable point from the current window. Do not ingest context-only chatter by itself.",
-    "5. Snapshot with append-evidence only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.",
+    `5. Snapshot with append-evidence --folder ${GOAT_SLACK_EVIDENCE_FOLDER} only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.`,
     "6. Create or update person, company, or project pages for entities central to the conversation, with backlinks per the iron law. Do not create pages for people who merely posted a message.",
     "",
     `Source ref: ${item.sourceRef}`,
@@ -584,7 +590,7 @@ export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCa
     "Required outcome, all scoped to this brain:",
     "1. Find the capture's home: query the brain for pages that already cover this content and for the entities it mentions.",
     `2. If an existing page is the natural home, fold the capture into it (rewrite its compiled truth or timeline-add with --source-ref ${item.sourceRef}), then retire the draft with merge --from ${capture.draftBrainId} --into <that-page>. Do not leave the same content living in two places.`,
-    "3. Otherwise curate the draft in place, in this order: use append-evidence to snapshot the raw capture text as a sourced evidence record linked to the draft; rewrite the draft's compiled truth into a durable synthesis that cites that evidence record with [[evidence:...]] and links entities with [[page:...]]; use set to give it a clear title and the right type; move it out of the inbox to the folder where it belongs; then set --status active. Leave it in the inbox as a draft only when it genuinely fits nowhere yet.",
+    `3. Otherwise curate the draft in place, in this order: use append-evidence with --folder ${GOAT_CHAT_CAPTURE_EVIDENCE_FOLDER} to snapshot the raw capture text as a sourced evidence record linked to the draft (chat captures live in that provenance subfolder, not the evidence root); rewrite the draft's compiled truth into a durable synthesis that cites that evidence record with [[evidence:...]] and links entities with [[page:...]]; use set to give it a clear title and the right type; move it out of the inbox to the folder where it belongs; then set --status active. Leave it in the inbox as a draft only when it genuinely fits nowhere yet.`,
     "4. Apply the small-team idea rule: user-authored ideas and thoughts belong in Brain even when rough, but they do not get a new kind. If the capture is a reusable abstraction, file it as type concept in concepts. If it is a concrete initiative or product bet, update or create the relevant project page. If it records a choice or rationale, update the natural subject or file the draft in decisions with the best existing type. If it is a durable reflection, take, or raw idea with no better home yet, file it as type note in thoughts. If it is still uncurated raw capture, keep it as a draft note in inbox.",
     "5. Create or update person, company, or project pages for entities central to the capture, with backlinks per the iron law. Do not create pages for entities that are merely mentioned in passing.",
     "",

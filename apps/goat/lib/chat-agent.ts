@@ -93,22 +93,17 @@ type DeleteTaskScheduleRunner = (
   input: DeleteTaskScheduleToolInput,
 ) => Promise<DeleteTaskScheduleToolOutput>;
 
-const GOAT_BRAIN_CLI_COMMANDS = [
+// Main chat (and the MCP connector) get a read-only brain surface: recall and
+// inspect only. Every write path — new content and edits to existing records —
+// goes through save_to_brain, which enqueues the durable ingestion/curation
+// agent. That agent owns the full CLI write surface (create, rewrite, merge,
+// link, move, delete, …) in the runner worker, so the chat tool never needs it.
+const GOAT_BRAIN_CHAT_COMMANDS = [
   "help",
   "list",
   "get",
   "timeline",
   "query",
-  "append-evidence",
-  "rewrite",
-  "set",
-  "alias",
-  "timeline-add",
-  "append-timeline",
-  "link",
-  "merge",
-  "move",
-  "delete",
   "doctor",
 ] as const satisfies readonly GoatBrainCliCommand[];
 
@@ -227,7 +222,6 @@ export function createOpenCompanyChatToolContext(input: {
   startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
   requestedEngine?: GoatHarnessEngine;
   latestUserMessage?: string;
-  brainCommands?: readonly GoatBrainCliCommand[];
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
@@ -241,7 +235,7 @@ export function createOpenCompanyChatToolContext(input: {
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
-  const brainCommands = input.brainCommands ?? GOAT_BRAIN_CLI_COMMANDS;
+  const brainCommands = GOAT_BRAIN_CHAT_COMMANDS;
 
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
@@ -657,7 +651,6 @@ export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput 
   const command = normalizeGoatBrainCommand(record.command);
   if (!command) throw new Error("goat_brain command is invalid.");
   const flags = normalizeGoatBrainFlags(record.flags);
-  validateGoatBrainMainChatFlags(command, flags);
   const stdin = typeof record.stdin === "string" ? record.stdin : "";
   return {
     command,
@@ -668,7 +661,7 @@ export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput 
 
 function normalizeGoatBrainCommand(value: unknown): GoatBrainCliCommand | null {
   if (typeof value !== "string") return null;
-  return (GOAT_BRAIN_CLI_COMMANDS as readonly string[]).includes(value)
+  return (GOAT_BRAIN_CHAT_COMMANDS as readonly string[]).includes(value)
     ? (value as GoatBrainCliCommand)
     : null;
 }
@@ -699,19 +692,6 @@ function normalizeGoatBrainFlags(value: unknown): Record<string, GoatBrainToolFl
     }
   }
   return out;
-}
-
-function validateGoatBrainMainChatFlags(
-  command: GoatBrainCliCommand,
-  flags: Record<string, GoatBrainToolFlagValue>,
-) {
-  if (command !== "help") return;
-  const topic = typeof flags.topic === "string" ? flags.topic : flags.command;
-  if (topic === "create" || topic === "folder") {
-    throw new Error(
-      `goat_brain ${topic} is not available from main chat. Use save_to_brain for new content.`,
-    );
-  }
 }
 
 function toStartTaskToolOutput(
