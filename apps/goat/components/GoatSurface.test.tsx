@@ -617,6 +617,25 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
+  it("keeps the home screen clean when there is no activity", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userName="Louis"
+      />,
+    );
+
+    expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Chats" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Routines" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Results" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No chats yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No recurring tasks yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
+  });
+
   it("renders recent chat history with links to each chat", () => {
     render(
       <GoatSurface
@@ -894,7 +913,7 @@ describe("GoatSurface chat streaming UI", () => {
     await nextAnimationFrame();
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
-    expect(screen.getByText("No results yet.")).toBeInTheDocument();
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
     expect(routerMock.replace).toHaveBeenCalledWith("/");
     expect(closeGoatChatSessionAction).not.toHaveBeenCalled();
   });
@@ -926,7 +945,7 @@ describe("GoatSurface chat streaming UI", () => {
     await nextAnimationFrame();
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
-    expect(screen.getByText("No results yet.")).toBeInTheDocument();
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
 
   it("disables input and exposes a stop button while streaming", async () => {

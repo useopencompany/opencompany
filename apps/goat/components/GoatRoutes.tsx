@@ -32,6 +32,7 @@ import { updateGoatLocalCodexBetaAction } from "@/lib/user-preferences";
 
 export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
   const data = useGoatAppData();
+  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const initialChat = useMemo(() => {
     if (!chatId) return null;
     const summary = data.recentChats.find((chat) => chat.id === chatId);
@@ -55,6 +56,7 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
         codexConnected={data.codexConnected}
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         chatResumeEnabled={data.chatResumeEnabled}
+        userName={userName}
       />
     </main>
   );

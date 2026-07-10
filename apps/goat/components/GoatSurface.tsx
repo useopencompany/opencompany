@@ -85,7 +85,6 @@ import {
   type GoatCodexChatSessionRow,
   type GoatLocalCodexSessionRow,
   type GoatTaskRow,
-  type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
@@ -185,6 +184,7 @@ export function GoatSurface({
   codexConnected = false,
   localCodexBetaEnabled = false,
   chatResumeEnabled = false,
+  userName = "there",
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
@@ -194,6 +194,7 @@ export function GoatSurface({
   codexConnected?: boolean;
   localCodexBetaEnabled?: boolean;
   chatResumeEnabled?: boolean;
+  userName?: string;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -257,6 +258,18 @@ export function GoatSurface({
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
   const [, startArchiveTransition] = useTransition();
+  const homeChats = useMemo(
+    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds),
+    [optimisticallyArchivedChatIds, recentChats],
+  );
+  const homeSchedules = useMemo(() => visibleHomeSchedules(schedules), [schedules]);
+  const homeResults = useMemo(
+    () => visibleHomeResults(tasks, optimisticallyArchivedIds),
+    [optimisticallyArchivedIds, tasks],
+  );
+  const hasHomeActivity =
+    homeChats.length > 0 || homeSchedules.length > 0 || homeResults.length > 0;
+  const homeGreetingName = userName.trim() || "there";
 
   const prepareSendMessagesRequest = useCallback(
     ({
@@ -846,35 +859,44 @@ export function GoatSurface({
       {mode === "home" ? (
         <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
           <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
-            <section className="flex flex-col gap-1">
-              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Chats
-              </h2>
-              <ChatHistoryList
-                chats={recentChats}
-                optimisticallyArchivedChatIds={optimisticallyArchivedChatIds}
-                onSelect={openChat}
-                onArchive={archiveChat}
-              />
-            </section>
+            {hasHomeActivity ? (
+              <>
+                {homeChats.length > 0 ? (
+                  <section className="flex flex-col gap-1">
+                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                      Chats
+                    </h2>
+                    <ChatHistoryList
+                      chats={homeChats}
+                      onSelect={openChat}
+                      onArchive={archiveChat}
+                    />
+                  </section>
+                ) : null}
 
-            <section className="flex flex-col gap-1">
-              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Routines
-              </h2>
-              <LiveSchedulesList schedules={schedules} />
-            </section>
+                {homeSchedules.length > 0 ? (
+                  <section className="flex flex-col gap-1">
+                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                      Routines
+                    </h2>
+                    <ScheduleRows schedules={homeSchedules} />
+                  </section>
+                ) : null}
 
-            <section className="flex flex-col gap-1">
-              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Results
-              </h2>
-              <LiveResultsList
-                tasks={tasks}
-                optimisticallyArchivedIds={optimisticallyArchivedIds}
-                onArchive={archiveTask}
-              />
-            </section>
+                {homeResults.length > 0 ? (
+                  <section className="flex flex-col gap-1">
+                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                      Results
+                    </h2>
+                    <ResultRows tasks={homeResults} onArchive={archiveTask} />
+                  </section>
+                ) : null}
+              </>
+            ) : (
+              <p className="px-2 text-[15px] leading-6 text-ink-muted">
+                welcome back, {homeGreetingName}
+              </p>
+            )}
           </div>
         </div>
       ) : (
@@ -1076,6 +1098,36 @@ function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefin
 
 function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
+}
+
+function visibleHomeChats(
+  chats: readonly GoatChatSummaryView[],
+  optimisticallyArchivedChatIds: ReadonlySet<string>,
+) {
+  return chats
+    .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
+    .filter((chat) => isRecentGoatHomeActivity(chat.updatedAt))
+    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function visibleHomeSchedules(schedules: readonly GoatTaskScheduleView[]) {
+  return schedules
+    .filter((schedule) => schedule.id)
+    .toSorted((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime());
+}
+
+function visibleHomeResults(
+  tasks: readonly GoatTaskView[],
+  optimisticallyArchivedIds: ReadonlySet<string>,
+) {
+  return tasks
+    .filter(
+      (task) =>
+        !optimisticallyArchivedIds.has(task.id) &&
+        !task.archivedAt &&
+        isRecentGoatHomeActivity(task.createdAt),
+    )
+    .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 function titleFromChatMessages(messages: readonly GoatChatUiMessage[]) {
@@ -1663,28 +1715,18 @@ function LiveChatTaskSubscriber({
 
 function ChatHistoryList({
   chats,
-  optimisticallyArchivedChatIds,
   onSelect,
   onArchive,
 }: {
   chats: readonly GoatChatSummaryView[];
-  optimisticallyArchivedChatIds: ReadonlySet<string>;
   onSelect: (chat: GoatChatSummaryView) => void;
   onArchive: (chat: GoatChatSummaryView) => void;
 }) {
   const router = useRouter();
-  const visibleChats = chats
-    .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
-    .filter((chat) => isRecentGoatHomeActivity(chat.updatedAt))
-    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-
-  if (visibleChats.length === 0) {
-    return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No chats yet.</p>;
-  }
 
   return (
     <div className="flex flex-col">
-      {visibleChats.map((chat) => {
+      {chats.map((chat) => {
         const href = chatHref(chat.id);
         const prefetchChat = () => router.prefetch(href);
         return (
@@ -1734,41 +1776,8 @@ function ChatHistoryList({
   );
 }
 
-function LiveSchedulesList({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
-  const hydrated = useHydrated();
-  if (!hydrated) return <ScheduleRows schedules={schedules} />;
-  return <LiveSchedulesSubscriber initialSchedules={schedules} />;
-}
-
-function LiveSchedulesSubscriber({
-  initialSchedules,
-}: {
-  initialSchedules: readonly GoatTaskScheduleView[];
-}) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows, isLoading } = useLiveQuery((q) =>
-    q.from({ schedule: collections.taskSchedules }),
-  );
-  const liveSchedules = useMemo(
-    () => (rows ?? []).filter((row) => !row.deleted_at).map(taskScheduleRowToView),
-    [rows],
-  );
-  const schedules = isLoading && initialSchedules.length > 0 ? initialSchedules : liveSchedules;
-  return <ScheduleRows schedules={schedules} />;
-}
-
 function ScheduleRows({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
-  const visible = schedules
-    .filter((schedule) => schedule.id)
-    .toSorted((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime());
-
-  if (visible.length === 0) {
-    return (
-      <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No recurring tasks yet.</p>
-    );
-  }
-
-  return visible.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} />);
+  return schedules.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} />);
 }
 
 function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
@@ -1960,22 +1969,6 @@ function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
   );
 }
 
-function taskScheduleRowToView(row: GoatTaskScheduleRow): GoatTaskScheduleView {
-  return {
-    id: row.id,
-    name: row.name,
-    sourceDescription: row.source_description,
-    cron: row.cron,
-    timezone: row.timezone,
-    prompt: row.prompt,
-    enabled: row.enabled,
-    lastRunAt: row.last_run_at,
-    nextRunAt: row.next_run_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 function formatScheduleNextRun(value: string) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "Next run unknown";
@@ -1987,80 +1980,14 @@ function formatScheduleNextRun(value: string) {
   return `Next in ${days}d`;
 }
 
-function LiveResultsList({
-  tasks,
-  optimisticallyArchivedIds,
-  onArchive,
-}: {
-  tasks: readonly GoatTaskView[];
-  optimisticallyArchivedIds: ReadonlySet<string>;
-  onArchive: (task: GoatTaskView) => void;
-}) {
-  const hydrated = useHydrated();
-  if (!hydrated) {
-    return (
-      <ResultRows
-        tasks={tasks}
-        optimisticallyArchivedIds={optimisticallyArchivedIds}
-        onArchive={onArchive}
-      />
-    );
-  }
-  return (
-    <LiveResultsSubscriber
-      initialTasks={tasks}
-      optimisticallyArchivedIds={optimisticallyArchivedIds}
-      onArchive={onArchive}
-    />
-  );
-}
-
-function LiveResultsSubscriber({
-  initialTasks,
-  optimisticallyArchivedIds,
-  onArchive,
-}: {
-  initialTasks: readonly GoatTaskView[];
-  optimisticallyArchivedIds: ReadonlySet<string>;
-  onArchive: (task: GoatTaskView) => void;
-}) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows, isLoading } = useLiveQuery((q) => q.from({ task: collections.tasks }));
-  const liveTasks = useMemo(() => (rows ?? []).map(taskRowToView), [rows]);
-  const tasks = isLoading && initialTasks.length > 0 ? initialTasks : liveTasks;
-
-  return (
-    <ResultRows
-      tasks={tasks}
-      optimisticallyArchivedIds={optimisticallyArchivedIds}
-      onArchive={onArchive}
-    />
-  );
-}
-
 function ResultRows({
   tasks,
-  optimisticallyArchivedIds,
   onArchive,
 }: {
   tasks: readonly GoatTaskView[];
-  optimisticallyArchivedIds: ReadonlySet<string>;
   onArchive: (task: GoatTaskView) => void;
 }) {
-  const sortedTasks = tasks
-    .filter(
-      (task) =>
-        !optimisticallyArchivedIds.has(task.id) &&
-        !task.archivedAt &&
-        isRecentGoatHomeActivity(task.createdAt),
-    )
-    .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  if (sortedTasks.length === 0) {
-    return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No results yet.</p>;
-  }
-
-  return sortedTasks.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchive} />);
+  return tasks.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchive} />);
 }
 
 function taskRowToView(row: GoatTaskRow): GoatTaskView {
