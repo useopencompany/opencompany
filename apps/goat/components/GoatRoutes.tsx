@@ -4,15 +4,12 @@ import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
-  ChevronRight,
   CircleUserRound,
   Code2,
   Download,
-  FileText,
   Loader2,
   Mail,
   UserRound,
-  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,6 +17,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
+import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { GoatSpendOverview } from "@/components/GoatSpendOverview";
 import { GoatSurface } from "@/components/GoatSurface";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
@@ -63,105 +61,98 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
 }
 
 export function GoatSettingsRoute() {
-  const { featureFlags, integrations, user, workspace } = useGoatAppData();
+  const { user } = useGoatAppData();
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
   const initials = getInitials(user.firstName, user.lastName, user.email);
 
   return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[560px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <header className="flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              {user.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.avatarUrl}
-                  alt=""
-                  className="h-12 w-12 rounded-full bg-surface-muted object-cover"
-                />
-              ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted text-[15px] font-semibold text-ink">
-                  {initials}
-                </div>
-              )}
-              <div className="min-w-0">
-                <h1 className="truncate text-[34px] font-semibold leading-tight tracking-normal text-ink">
-                  Settings
-                </h1>
-                <p className="truncate text-[13px] leading-5 text-ink-subtle">{displayName}</p>
-              </div>
-            </div>
-          </header>
-
-          <section className="flex flex-col gap-1">
-            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              Account
-            </h2>
-            <AccountRow icon={Mail} label="Email" value={user.email} />
-            <AccountRow icon={UserRound} label="Name" value={name || "Not set"} />
-            <AccountRow
-              icon={CircleUserRound}
-              label="First name"
-              value={user.firstName?.trim() || "Not set"}
-            />
-            <AccountRow
-              icon={CircleUserRound}
-              label="Last name"
-              value={user.lastName?.trim() || "Not set"}
-            />
-          </section>
-
-          <section className="flex flex-col gap-1">
-            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              Workspace
-            </h2>
-            <Link
-              href="/settings/workspace"
-              prefetch
-              className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-surface-hover"
-            >
-              <Users size={14} strokeWidth={1.75} className="shrink-0 text-ink/50" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] leading-tight text-ink/90">
-                  {workspace.name}
-                </span>
-                <span className="block truncate text-[11px] leading-tight text-ink-subtle">
-                  Members, invitations, and brain access
-                </span>
-              </span>
-              <ChevronRight
-                size={14}
-                strokeWidth={1.75}
-                className="shrink-0 text-ink/40 transition-colors group-hover:text-ink/70"
-              />
-            </Link>
-          </section>
-
-          <GoatSpendOverview />
-
-          <section className="flex flex-col gap-1">
-            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              Personal integrations
-            </h2>
-            <IntegrationRows integrations={integrations} />
-          </section>
-
-          <section className="flex flex-col gap-1">
-            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              Beta features
-            </h2>
-            <BetaFeatureSwitch
-              icon={Code2}
-              label="Local Codex bridge"
-              description="Local Codex engine mode"
-              checked={featureFlags.localCodexBridge}
-            />
-          </section>
+    <GoatSettingsContent title="Account" description="Your personal profile for this workspace.">
+      <section className="flex items-center gap-3">
+        {user.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={user.avatarUrl}
+            alt=""
+            className="h-14 w-14 rounded-full bg-surface-muted object-cover"
+          />
+        ) : (
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-surface-muted text-[17px] font-semibold text-ink">
+            {initials}
+          </div>
+        )}
+        <div className="min-w-0">
+          <div className="truncate text-[15px] font-semibold leading-tight text-ink">
+            {displayName}
+          </div>
+          <div className="truncate text-[12.5px] leading-5 text-ink-subtle">{user.email}</div>
         </div>
-      </div>
-    </main>
+      </section>
+
+      <section className="flex flex-col gap-1">
+        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Profile
+        </h2>
+        <AccountRow icon={Mail} label="Email" value={user.email} />
+        <AccountRow icon={UserRound} label="Name" value={name || "Not set"} />
+        <AccountRow
+          icon={CircleUserRound}
+          label="First name"
+          value={user.firstName?.trim() || "Not set"}
+        />
+        <AccountRow
+          icon={CircleUserRound}
+          label="Last name"
+          value={user.lastName?.trim() || "Not set"}
+        />
+      </section>
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatIntegrationsSettingsRoute() {
+  const { integrations } = useGoatAppData();
+
+  return (
+    <GoatSettingsContent
+      title="Integrations"
+      description="Connect the tools Goat can read from and act on."
+    >
+      <section className="flex flex-col gap-1">
+        <IntegrationRows integrations={integrations} />
+      </section>
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatUsageSettingsRoute() {
+  return (
+    <GoatSettingsContent
+      title="Usage"
+      description="Track spend across chat, tasks, and brain ingestion."
+    >
+      <GoatSpendOverview />
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatPreferencesSettingsRoute() {
+  const { featureFlags } = useGoatAppData();
+
+  return (
+    <GoatSettingsContent title="Preferences" description="Experimental features and app behavior.">
+      <section className="flex flex-col gap-1">
+        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Beta features
+        </h2>
+        <BetaFeatureSwitch
+          icon={Code2}
+          label="Local Codex bridge"
+          description="Local Codex engine mode"
+          checked={featureFlags.localCodexBridge}
+        />
+      </section>
+    </GoatSettingsContent>
   );
 }
 
@@ -169,27 +160,13 @@ export function GoatJamieSettingsRoute() {
   const { integrations } = useGoatAppData();
 
   return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[560px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/settings" label="Settings" />
-
-          <header className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted text-ink">
-              <FileText size={21} strokeWidth={2} />
-            </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-[34px] font-semibold leading-tight tracking-normal text-ink">
-                Jamie
-              </h1>
-              <p className="text-[13px] leading-5 text-ink-subtle">Meeting notes for Goat Brain</p>
-            </div>
-          </header>
-
-          <JamieIntegrationSetup initialState={integrations.jamie} />
-        </div>
-      </div>
-    </main>
+    <GoatSettingsContent
+      title="Jamie"
+      description="Meeting notes for Goat Brain"
+      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+    >
+      <JamieIntegrationSetup initialState={integrations.jamie} />
+    </GoatSettingsContent>
   );
 }
 

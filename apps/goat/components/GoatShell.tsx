@@ -4,6 +4,7 @@ import { PanelLeft } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import { GoatNavInsetProvider } from "@/components/GoatNavInset";
+import { GoatSettingsSidebar } from "@/components/GoatSettingsChrome";
 import { GoatSidebar } from "@/components/GoatSidebar";
 
 const SIDEBAR_STORAGE_KEY = "goat-sidebar-collapsed";
@@ -69,6 +70,7 @@ export function GoatShell({ children }: { children: ReactNode }) {
 
   // On mobile the sidebar's desktop width-collapse is replaced by an off-canvas drawer.
   const pathname = usePathname();
+  const inSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Close the drawer on navigation (covers sidebar link taps). Adjust during render
@@ -110,12 +112,21 @@ export function GoatShell({ children }: { children: ReactNode }) {
             : "shrink-0"
         }
       >
-        <GoatSidebar
-          collapsed={isMobile ? false : collapsed}
-          onToggleCollapsed={
-            isMobile ? () => setDrawerOpen(false) : () => persistSidebarCollapsed(!collapsed)
-          }
-        />
+        {inSettings ? (
+          <GoatSettingsSidebar
+            collapsed={isMobile ? false : collapsed}
+            onToggleCollapsed={
+              isMobile ? () => setDrawerOpen(false) : () => persistSidebarCollapsed(!collapsed)
+            }
+          />
+        ) : (
+          <GoatSidebar
+            collapsed={isMobile ? false : collapsed}
+            onToggleCollapsed={
+              isMobile ? () => setDrawerOpen(false) : () => persistSidebarCollapsed(!collapsed)
+            }
+          />
+        )}
       </div>
 
       {isMobile && drawerOpen ? (

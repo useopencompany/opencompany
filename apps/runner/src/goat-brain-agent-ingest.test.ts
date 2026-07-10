@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import {
   normalizeGmailThreadWindow,
@@ -15,7 +17,7 @@ const aiMock = vi.hoisted(() => ({
   tool: vi.fn((definition: unknown) => definition),
 }));
 const brainFilesMock = vi.hoisted(() => ({
-  materializeGoatBrainFilesToRoot: vi.fn(async () => []),
+  materializeGoatBrainFilesToRoot: vi.fn(async (_input?: { root: string }) => []),
   syncGoatBrainFilesFromRoot: vi.fn(async () => ({
     upserted: 3,
     deleted: 0,
@@ -65,6 +67,7 @@ import {
   buildGoatChatCaptureAgentIngestPrompt,
   buildJamieMeetingAgentIngestPrompt,
   buildSlackConversationAgentIngestPrompt,
+  formatGoatBrainFolderInventoryPrompt,
   type GoatBrainAgentCliRunner,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
@@ -196,6 +199,15 @@ const okCli: GoatBrainAgentCliRunner = vi.fn(async () => ({
   stderr: "",
 }));
 
+async function writeFolderManifest(root: string, folders: Array<{ path: string; source: string }>) {
+  await mkdir(path.join(root, ".brain"), { recursive: true });
+  await writeFile(
+    path.join(root, ".brain/folders.json"),
+    `${JSON.stringify({ schemaVersion: "goat.brain.folders.v1", folders }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 function traceFromResult(result: Record<string, unknown>): GoatBrainIngestTrace {
   const trace = result.trace;
   if (!trace || typeof trace !== "object") {
@@ -280,6 +292,22 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     expect(prompt).toContain("type concept in concepts");
     expect(prompt).toContain("file the draft in decisions with the best existing type");
     expect(prompt).toContain("type note in thoughts");
+  });
+});
+
+describe("formatGoatBrainFolderInventoryPrompt", () => {
+  it("surfaces custom folders as routing context", () => {
+    const prompt = formatGoatBrainFolderInventoryPrompt([
+      { path: "inbox", source: "system" },
+      { path: "product", source: "custom" },
+      { path: "product/goat", source: "custom" },
+    ]);
+
+    expect(prompt).toContain("## Current brain folders");
+    expect(prompt).toContain("Custom folders are deliberate user-created structure");
+    expect(prompt).toContain("- product/ (custom)");
+    expect(prompt).toContain("- product/goat/ (custom)");
+    expect(prompt).toContain("create a focused subfolder");
   });
 });
 
@@ -527,6 +555,55 @@ describe("runSlackConversationAgentIngest", () => {
 });
 
 describe("runGoatChatCaptureAgentIngest", () => {
+  it("prepends the current custom folder inventory to the agent prompt", async () => {
+    brainFilesMock.materializeGoatBrainFilesToRoot.mockImplementationOnce(
+      async (input?: { root: string }) => {
+        if (!input) throw new Error("Expected materialize input.");
+        await writeFolderManifest(input.root, [
+          { path: "inbox", source: "system" },
+          { path: "companies", source: "system" },
+          { path: "product", source: "custom" },
+        ]);
+        return [];
+      },
+    );
+    let seenPrompt = "";
+    aiMock.generateText.mockImplementationOnce(
+      async (options: {
+        tools: Record<string, CapturedTool>;
+        messages: Array<{ content: string }>;
+      }) => {
+        seenPrompt = options.messages[0]?.content ?? "";
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--type", "concept", "--status", "active"],
+        });
+        return {
+          text: "Promoted the capture.",
+          steps: [{}, {}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+
+    await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(seenPrompt).toContain("## Current brain folders");
+    expect(seenPrompt).toContain("- product/ (custom)");
+    expect(seenPrompt).toContain("Custom folders are deliberate user-created structure");
+    expect(seenPrompt.indexOf("## Current brain folders")).toBeLessThan(
+      seenPrompt.indexOf("Curate this chat capture into the brain"),
+    );
+  });
+
   it("runs the capture curation loop and syncs the brain", async () => {
     mockAgentRun({
       finalText: "Promoted the capture into concepts/usage-based-pricing.",
