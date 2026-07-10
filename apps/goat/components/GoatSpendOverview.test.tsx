@@ -71,6 +71,11 @@ describe("GoatSpendOverview", () => {
     render(<GoatSpendOverview />);
 
     expect(await screen.findByText("$1.7500")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /Jul 9 spend \$1\.2500\. Chat \$0\.7500, Task \$0\.5000, Brain \$0\.0000/,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Planning chat")).toBeInTheDocument();
     expect(screen.getByText("GOAT-1 Research")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Planning chat/ })).toHaveAttribute(
@@ -137,6 +142,9 @@ function dailyRow(day: string, totalCostUsdMicros: number, requestCount: number)
     day,
     totalCostUsdMicros,
     marketCostUsdMicros: totalCostUsdMicros,
+    chatCostUsdMicros: day.endsWith("-09") ? 750_000 : 0,
+    taskCostUsdMicros: day.endsWith("-09") ? 500_000 : 0,
+    brainCostUsdMicros: day.endsWith("-08") ? totalCostUsdMicros : 0,
     surchargeCostUsdMicros: 0,
     gatewayCostUsdMicros: 0,
     inputTokens: 0,
