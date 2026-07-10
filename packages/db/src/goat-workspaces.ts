@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { normalizeGoatBrainId } from "../../goat-brain/src/index";
 import { getDb } from "./client";
@@ -20,6 +20,8 @@ type DbClient = any;
 
 export const DEFAULT_GOAT_BRAIN_NAME = "General";
 export const DEFAULT_GOAT_BRAIN_SLUG = "general";
+const GOAT_BRAIN_ID_SUFFIX_LENGTH = 12;
+const GOAT_BRAIN_ID_MAX_LENGTH = 80;
 
 export type GoatWorkspaceWithRole = {
   workspace: GoatWorkspace;
@@ -40,8 +42,22 @@ export function newGoatWorkspaceId() {
   return `goat_ws_${randomUUID()}`;
 }
 
-export function newGoatBrainId() {
-  return `goat_brain_${randomUUID()}`;
+export function newGoatBrainId(name = "brain") {
+  return readableGoatBrainId(name, randomUUID());
+}
+
+export function defaultGoatBrainIdForUser(userWorkosId: string) {
+  return readableGoatBrainId(DEFAULT_GOAT_BRAIN_SLUG, userWorkosId);
+}
+
+function readableGoatBrainId(name: string, entropy: string) {
+  const suffix = createHash("sha256")
+    .update(entropy)
+    .digest("hex")
+    .slice(0, GOAT_BRAIN_ID_SUFFIX_LENGTH);
+  const base = normalizeGoatBrainId(name) || "brain";
+  const baseMaxLength = GOAT_BRAIN_ID_MAX_LENGTH - suffix.length - 1;
+  return `${base.slice(0, baseMaxLength).replace(/-+$/g, "")}-${suffix}`;
 }
 
 // Canonical brain access predicate: a brain is readable/writable when it is
@@ -171,6 +187,7 @@ export async function createDefaultGoatWorkspaceForUser(
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
+  const brainId = defaultGoatBrainIdForUser(input.userWorkosId);
   await db
     .insert(goatWorkspaces)
     .values({
@@ -191,7 +208,7 @@ export async function createDefaultGoatWorkspaceForUser(
   await db
     .insert(goatBrains)
     .values({
-      id: `goat_brain_${input.userWorkosId}`,
+      id: brainId,
       workspaceId: `goat_ws_${input.userWorkosId}`,
       name: DEFAULT_GOAT_BRAIN_NAME,
       slug: DEFAULT_GOAT_BRAIN_SLUG,
@@ -201,7 +218,7 @@ export async function createDefaultGoatWorkspaceForUser(
     .onConflictDoNothing();
   await seedDefaultGoatBrainFolders(
     {
-      brainRef: `goat_brain_${input.userWorkosId}`,
+      brainRef: brainId,
       userWorkosId: input.userWorkosId,
     },
     { db },
@@ -272,7 +289,7 @@ export async function createGoatBrain(
   const rows = await db
     .insert(goatBrains)
     .values({
-      id: newGoatBrainId(),
+      id: newGoatBrainId(slug),
       workspaceId: input.workspaceId,
       name,
       slug,

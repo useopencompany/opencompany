@@ -140,6 +140,7 @@ function runnerEnv(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     opencodeTimeoutMs: 1_200_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
+    goatCodexChatIdleTimeoutMs: 1_800_000,
     toolArgRepairEnabled: false,
     jobLeaseTtlMs: 300_000,
     jobMaxLeaseBusyAttempts: 10,

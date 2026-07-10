@@ -19,6 +19,7 @@ const chatMock = vi.hoisted(() => ({
   stop: vi.fn(),
   finishSessionId: null as string | null,
   preparedRequestBodies: [] as unknown[],
+  lastResume: null as boolean | null,
 }));
 
 const routerMock = vi.hoisted(() => ({
@@ -62,6 +63,7 @@ vi.mock("@ai-sdk/react", async () => {
   return {
     useChat: (options: {
       messages?: GoatChatUiMessage[];
+      resume?: boolean;
       onFinish?: (event: { message: GoatChatUiMessage }) => void;
       transport?: {
         prepareSendMessagesRequest?: (request: {
@@ -80,6 +82,7 @@ vi.mock("@ai-sdk/react", async () => {
       const [messages, setMessages] = React.useState<GoatChatUiMessage[]>(
         () => options.messages ?? [],
       );
+      chatMock.lastResume = options.resume ?? false;
       const transportRef = React.useRef(options.transport);
 
       return {
@@ -248,6 +251,98 @@ describe("GoatSurface chat streaming UI", () => {
         parts: [{ type: "text", text: "Inspect" }],
       },
     });
+  });
+
+  it("shows the Codex engine only when Codex is connected", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByText("Cloud Codex sandbox")).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.getByText("Cloud Codex sandbox")).toBeInTheDocument();
+  });
+
+  it("submits Codex engine chats to the codex-chat endpoint", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: "goat_chat_codex_1",
+          userMessageId: "goat_chat_msg_codex_user",
+          assistantMessageId: "goat_chat_msg_codex_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Clone my repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      message: {
+        id: expect.stringMatching(/^goat_chat_msg_/),
+        role: "user",
+        parts: [{ type: "text", text: "Clone my repo" }],
+      },
+    });
+  });
+
+  it("opens existing Codex chats in codex mode without enabling resume", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        chatResumeEnabled
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex chat",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(chatMock.lastResume).toBe(false);
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
   });
 
   it("keeps existing local Codex chats read-only when the beta flag is disabled", () => {

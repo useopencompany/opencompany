@@ -72,7 +72,7 @@ export type GoatChatSessionRow = {
   user_workos_id: string;
   title: string;
   model: string;
-  engine: "opencompany" | "local_codex";
+  engine: "opencompany" | "local_codex" | "codex";
   closed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -86,6 +86,20 @@ export type GoatLocalCodexSessionRow = {
   repository_path: string | null;
   worktree_path: string | null;
   model: string;
+  codex_thread_id: string | null;
+  active_turn_id: string | null;
+  status: "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatCodexChatSessionRow = {
+  id: string;
+  user_workos_id: string;
+  chat_session_id: string;
+  model: string;
+  sandbox_id: string | null;
   codex_thread_id: string | null;
   active_turn_id: string | null;
   status: "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
@@ -406,6 +420,15 @@ function createLocalCodexSessionCollection(chatSessionId: string) {
   });
 }
 
+function createCodexChatSessionCollection(chatSessionId: string) {
+  return createGoatElectricCollection<GoatCodexChatSessionRow>({
+    id: `goat:codex_chat_sessions:${chatSessionId}`,
+    table: "goat.codex_chat_sessions",
+    params: { chat_session_id: chatSessionId },
+    getKey: (row) => row.id,
+  });
+}
+
 const taskRunCollectionsByTaskId = new Map<string, ReturnType<typeof createTaskRunCollections>>();
 const chatMessageCollectionsBySessionId = new Map<
   string,
@@ -414,6 +437,10 @@ const chatMessageCollectionsBySessionId = new Map<
 const localCodexSessionCollectionsByChatSessionId = new Map<
   string,
   ReturnType<typeof createLocalCodexSessionCollection>
+>();
+const codexChatSessionCollectionsByChatSessionId = new Map<
+  string,
+  ReturnType<typeof createCodexChatSessionCollection>
 >();
 const brainCollectionsByBrainRef = new Map<string, ReturnType<typeof createBrainCollections>>();
 
@@ -450,6 +477,15 @@ function getLocalCodexSessionCollection(chatSessionId: string) {
 
   const collection = createLocalCodexSessionCollection(chatSessionId);
   localCodexSessionCollectionsByChatSessionId.set(chatSessionId, collection);
+  return collection;
+}
+
+function getCodexChatSessionCollection(chatSessionId: string) {
+  const cached = codexChatSessionCollectionsByChatSessionId.get(chatSessionId);
+  if (cached) return cached;
+
+  const collection = createCodexChatSessionCollection(chatSessionId);
+  codexChatSessionCollectionsByChatSessionId.set(chatSessionId, collection);
   return collection;
 }
 
@@ -503,6 +539,7 @@ function buildGoatCollections() {
     taskRunCollections: getTaskRunCollections,
     chatMessages: getChatMessageCollection,
     localCodexSessions: getLocalCodexSessionCollection,
+    codexChatSessions: getCodexChatSessionCollection,
     integrations,
     brainCollections: getBrainCollections,
     brainSourceItems,

@@ -1,6 +1,7 @@
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import { describe, expect, it } from "vitest";
 import {
+  CODEX_COMMAND_TOOL_PART_TYPE,
   type GoatStoredChatMessage,
   START_TASK_TOOL_PART_TYPE,
   toGoatChatUiMessage,
@@ -77,6 +78,65 @@ describe("toGoatChatUiMessage", () => {
     expect(parts[2]).toEqual({
       type: "text",
       text: "Added to Results as TASK-26. It'll pull the Goat team's Linear board.",
+    });
+  });
+
+  it("replays persisted codex turns with reasoning and command parts", () => {
+    const message = storedAssistantMessage({
+      content: "The repo has three apps.",
+      debugTrace: {
+        schemaVersion: "goat.codex_chat.debug.v1",
+        model: "gpt-5.5",
+        uiMessageParts: [
+          { type: "reasoning", text: "Scanning the repository layout." },
+          {
+            type: CODEX_COMMAND_TOOL_PART_TYPE,
+            toolCallId: "cmd_1",
+            state: "output-available",
+            input: { command: "ls apps" },
+            output: { status: "completed", exitCode: 0 },
+          },
+          { type: "text", text: "The repo has three apps." },
+        ],
+      },
+    });
+
+    const parts = toGoatChatUiMessage(message).parts;
+    expect(parts.map((part) => part.type)).toEqual([
+      "reasoning",
+      CODEX_COMMAND_TOOL_PART_TYPE,
+      "text",
+    ]);
+    expect(parts[0]).toEqual({
+      type: "reasoning",
+      text: "Scanning the repository layout.",
+      state: "done",
+    });
+    // Content mirror must not be re-appended: a non-empty text part already exists.
+    expect(parts.filter((part) => part.type === "text")).toHaveLength(1);
+  });
+
+  it("keeps an in-flight codex command part renderable as running", () => {
+    const message = storedAssistantMessage({
+      content: "",
+      debugTrace: {
+        schemaVersion: "goat.codex_chat.debug.v1",
+        model: "gpt-5.5",
+        uiMessageParts: [
+          {
+            type: CODEX_COMMAND_TOOL_PART_TYPE,
+            toolCallId: "cmd_1",
+            state: "input-available",
+            input: { command: "bun test" },
+          },
+        ],
+      },
+    });
+
+    expect(toGoatChatUiMessage(message).parts[0]).toMatchObject({
+      type: CODEX_COMMAND_TOOL_PART_TYPE,
+      state: "input-available",
+      input: { command: "bun test" },
     });
   });
 

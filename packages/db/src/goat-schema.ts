@@ -223,7 +223,7 @@ export type GoatTaskDebugTrace = {
 };
 
 export type GoatChatRole = "user" | "assistant";
-export type GoatChatEngine = "opencompany" | "local_codex";
+export type GoatChatEngine = "opencompany" | "local_codex" | "codex";
 
 export type GoatLocalCodexSessionStatus =
   | "starting"
@@ -254,14 +254,31 @@ export type GoatLocalCodexEventType =
   | "error"
   | "unknown";
 
+export type GoatCodexChatSessionStatus = GoatLocalCodexSessionStatus;
+export type GoatCodexChatTurnStatus = GoatLocalCodexTurnStatus;
+export type GoatCodexChatEventType = Exclude<
+  GoatLocalCodexEventType,
+  "assistant.delta" | "command.output"
+>;
+
 export type GoatChatMessageDebugTrace = {
-  schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1" | "goat.local_codex.debug.v1";
+  schemaVersion?:
+    | "opencompany.chat.debug.v1"
+    | "goat.chat.debug.v1"
+    | "goat.local_codex.debug.v1"
+    | "goat.local_codex.debug.v2"
+    | "goat.codex_chat.debug.v1";
   model?: string;
   aborted?: boolean;
   finishReason?: string;
   uiMessageParts?: unknown[];
   toolCalls?: unknown[];
   toolResults?: unknown[];
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
   error?: string;
 };
 
@@ -367,7 +384,7 @@ export const goatBrainMembers = goat.table(
     id: text("id").primaryKey(),
     brainId: text("brain_id")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
@@ -392,7 +409,7 @@ export const goatBrainFolders = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     path: text("path").notNull(),
     source: text("source").$type<GoatBrainFolderSource>().notNull().default("custom"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -427,7 +444,7 @@ export const goatBrainDocuments = goat.table(
     }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     brainId: text("brain_id").notNull(),
     folderPath: text("folder_path").notNull(),
     title: text("title"),
@@ -530,7 +547,7 @@ export const goatBrainTimelineEntries = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     brainId: text("brain_id").notNull(),
     evidenceId: text("evidence_id").notNull(),
     at: timestamp("at", { withTimezone: true }).notNull(),
@@ -566,7 +583,7 @@ export const goatBrainEdges = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     documentId: text("document_id")
       .notNull()
       .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
@@ -616,7 +633,7 @@ export const goatBrainDocumentEmbeddings = goat.table(
       .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
     embedding: vector("embedding").notNull(),
@@ -634,7 +651,10 @@ export const goatBrainDocumentVersions = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    brainRef: text("brain_ref").references(() => goatBrains.id, { onDelete: "set null" }),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
     documentId: text("document_id").references(() => goatBrainDocuments.id, {
       onDelete: "set null",
     }),
@@ -825,7 +845,7 @@ export const goatBrainSources = goat.table(
     id: text("id").primaryKey(),
     brainId: text("brain_id")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     provider: text("provider").$type<GoatBrainSourceConfigProvider>().notNull(),
     integrationId: text("integration_id").notNull(),
     // Owner of the referenced integration (integrations are user-scoped;
@@ -951,7 +971,10 @@ export const goatBrainIngestJobs = goat.table(
     integrationId: text("integration_id"),
     // Target brain for the job (principle: ingestion is per-brain). Null means
     // the handler resolves the user's default brain at run time.
-    brainRef: text("brain_ref").references(() => goatBrains.id, { onDelete: "set null" }),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
     kind: text("kind").$type<GoatBrainIngestJobKind>().notNull(),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<GoatBrainIngestJobStatus>().notNull().default("queued"),
@@ -1503,7 +1526,7 @@ export const goatChatSessions = goat.table(
     ),
     engineCheck: check(
       "goat_chat_sessions_engine_check",
-      sql`${table.engine} IN ('opencompany', 'local_codex')`,
+      sql`${table.engine} IN ('opencompany', 'local_codex', 'codex')`,
     ),
   }),
 );
@@ -1717,6 +1740,122 @@ export const goatLocalCodexEvents = goat.table(
     typeCheck: check(
       "goat_local_codex_events_type_check",
       sql`${table.type} IN ('assistant.delta', 'assistant.completed', 'reasoning.completed', 'command.started', 'command.output', 'command.completed', 'command.failed', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+    ),
+  }),
+);
+
+export const goatCodexChatSessions = goat.table(
+  "codex_chat_sessions",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    model: text("model").notNull().default("gpt-5.5"),
+    sandboxId: text("sandbox_id"),
+    codexThreadId: text("codex_thread_id"),
+    activeTurnId: text("active_turn_id"),
+    status: text("status").$type<GoatCodexChatSessionStatus>().notNull().default("starting"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    chatSessionIdx: uniqueIndex("goat_codex_chat_sessions_chat_session_idx").on(
+      table.chatSessionId,
+    ),
+    userUpdatedIdx: index("goat_codex_chat_sessions_user_updated_idx").on(
+      table.userWorkosId,
+      table.updatedAt,
+    ),
+    statusCheck: check(
+      "goat_codex_chat_sessions_status_check",
+      sql`${table.status} IN ('starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
+    ),
+  }),
+);
+
+export const goatCodexChatTurns = goat.table(
+  "codex_chat_turns",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    codexChatSessionId: text("codex_chat_session_id")
+      .notNull()
+      .references(() => goatCodexChatSessions.id, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id")
+      .notNull()
+      .references(() => goatChatMessages.id, { onDelete: "cascade" }),
+    assistantMessageId: text("assistant_message_id")
+      .notNull()
+      .references(() => goatChatMessages.id, { onDelete: "cascade" }),
+    codexTurnId: text("codex_turn_id"),
+    status: text("status").$type<GoatCodexChatTurnStatus>().notNull().default("queued"),
+    prompt: text("prompt").notNull(),
+    error: text("error"),
+    interruptRequestedAt: timestamp("interrupt_requested_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    claimIdx: index("goat_codex_chat_turns_claim_idx").on(table.status, table.createdAt),
+    sessionCreatedIdx: index("goat_codex_chat_turns_session_created_idx").on(
+      table.codexChatSessionId,
+      table.createdAt,
+    ),
+    assistantMessageIdx: uniqueIndex("goat_codex_chat_turns_assistant_message_idx").on(
+      table.assistantMessageId,
+    ),
+    statusCheck: check(
+      "goat_codex_chat_turns_status_check",
+      sql`${table.status} IN ('queued', 'running', 'completed', 'failed', 'interrupted')`,
+    ),
+  }),
+);
+
+export const goatCodexChatEvents = goat.table(
+  "codex_chat_events",
+  {
+    id: serial("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    codexChatSessionId: text("codex_chat_session_id")
+      .notNull()
+      .references(() => goatCodexChatSessions.id, { onDelete: "cascade" }),
+    codexChatTurnId: text("codex_chat_turn_id").references(() => goatCodexChatTurns.id, {
+      onDelete: "set null",
+    }),
+    type: text("type").$type<GoatCodexChatEventType>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    rawEvent: jsonb("raw_event").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionCreatedIdx: index("goat_codex_chat_events_session_created_idx").on(
+      table.codexChatSessionId,
+      table.createdAt,
+    ),
+    turnCreatedIdx: index("goat_codex_chat_events_turn_created_idx").on(
+      table.codexChatTurnId,
+      table.createdAt,
+    ),
+    typeCheck: check(
+      "goat_codex_chat_events_type_check",
+      sql`${table.type} IN ('assistant.completed', 'reasoning.completed', 'command.started', 'command.completed', 'command.failed', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
     ),
   }),
 );
@@ -2076,6 +2215,60 @@ export const goatLocalCodexEventsRelations = relations(goatLocalCodexEvents, ({ 
   }),
 }));
 
+export const goatCodexChatSessionsRelations = relations(goatCodexChatSessions, ({ one, many }) => ({
+  user: one(goatUsers, {
+    fields: [goatCodexChatSessions.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  chatSession: one(goatChatSessions, {
+    fields: [goatCodexChatSessions.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  turns: many(goatCodexChatTurns),
+  events: many(goatCodexChatEvents),
+}));
+
+export const goatCodexChatTurnsRelations = relations(goatCodexChatTurns, ({ one, many }) => ({
+  user: one(goatUsers, {
+    fields: [goatCodexChatTurns.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  codexChatSession: one(goatCodexChatSessions, {
+    fields: [goatCodexChatTurns.codexChatSessionId],
+    references: [goatCodexChatSessions.id],
+  }),
+  chatSession: one(goatChatSessions, {
+    fields: [goatCodexChatTurns.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  userMessage: one(goatChatMessages, {
+    fields: [goatCodexChatTurns.userMessageId],
+    references: [goatChatMessages.id],
+    relationName: "goat_codex_chat_turns_user_message",
+  }),
+  assistantMessage: one(goatChatMessages, {
+    fields: [goatCodexChatTurns.assistantMessageId],
+    references: [goatChatMessages.id],
+    relationName: "goat_codex_chat_turns_assistant_message",
+  }),
+  events: many(goatCodexChatEvents),
+}));
+
+export const goatCodexChatEventsRelations = relations(goatCodexChatEvents, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatCodexChatEvents.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  codexChatSession: one(goatCodexChatSessions, {
+    fields: [goatCodexChatEvents.codexChatSessionId],
+    references: [goatCodexChatSessions.id],
+  }),
+  codexChatTurn: one(goatCodexChatTurns, {
+    fields: [goatCodexChatEvents.codexChatTurnId],
+    references: [goatCodexChatTurns.id],
+  }),
+}));
+
 export const goatCodexCredentialsRelations = relations(goatCodexCredentials, ({ one }) => ({
   user: one(goatUsers, {
     fields: [goatCodexCredentials.userWorkosId],
@@ -2309,6 +2502,9 @@ export type GoatLocalCodexSession = typeof goatLocalCodexSessions.$inferSelect;
 export type GoatLocalCodexTurn = typeof goatLocalCodexTurns.$inferSelect;
 export type GoatLocalCodexCommand = typeof goatLocalCodexCommands.$inferSelect;
 export type GoatLocalCodexEvent = typeof goatLocalCodexEvents.$inferSelect;
+export type GoatCodexChatSession = typeof goatCodexChatSessions.$inferSelect;
+export type GoatCodexChatTurn = typeof goatCodexChatTurns.$inferSelect;
+export type GoatCodexChatEvent = typeof goatCodexChatEvents.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;
 export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$inferSelect;
 export type GoatBrainSourceItem = typeof goatBrainSourceItems.$inferSelect;

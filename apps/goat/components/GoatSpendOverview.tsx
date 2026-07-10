@@ -10,6 +10,9 @@ const DEFAULT_DAYS = 14;
 type DailyUsageRow = {
   day: string;
   totalCostUsdMicros: number;
+  chatCostUsdMicros: number;
+  taskCostUsdMicros: number;
+  brainCostUsdMicros: number;
   marketCostUsdMicros: number;
   surchargeCostUsdMicros: number;
   gatewayCostUsdMicros: number;
@@ -48,6 +51,24 @@ type UsageLoadState = {
   data: UsageResponse | null;
   error: string | null;
 };
+
+const SPEND_CATEGORIES = [
+  {
+    key: "chatCostUsdMicros",
+    label: "Chat",
+    color: "#2563eb",
+  },
+  {
+    key: "taskCostUsdMicros",
+    label: "Task",
+    color: "#16a34a",
+  },
+  {
+    key: "brainCostUsdMicros",
+    label: "Brain",
+    color: "#d97706",
+  },
+] as const;
 
 export function GoatSpendOverview() {
   const range = useMemo(() => defaultUsageRange(), []);
@@ -139,28 +160,62 @@ export function GoatSpendOverview() {
             </div>
           </div>
 
+          <div className="flex items-center gap-3 px-2" aria-label="Spend categories">
+            {SPEND_CATEGORIES.map((category) => (
+              <span
+                key={category.key}
+                className="inline-flex min-w-0 items-center gap-1.5 text-[11.5px] leading-4 text-ink-subtle"
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-[2px]"
+                  style={{ backgroundColor: category.color }}
+                />
+                {category.label}
+              </span>
+            ))}
+          </div>
+
           <div className="flex h-24 items-end gap-1.5 px-2" aria-label="Daily spend chart">
             {days.map((day) => {
               const height = Math.max(8, Math.round((day.totalCostUsdMicros / maxDailySpend) * 80));
               const active = day.day === selectedDay;
+              const categoryTotal = spendCategoryTotal(day);
               return (
                 <button
                   key={day.day}
                   type="button"
-                  aria-label={`${formatDateLabel(day.day)} spend ${formatUsdMicros(
-                    day.totalCostUsdMicros,
-                  )}`}
+                  aria-label={dailySpendAriaLabel(day)}
                   aria-pressed={active}
-                  title={`${formatDateLabel(day.day)} - ${formatUsdMicros(day.totalCostUsdMicros)}`}
+                  title={dailySpendTitle(day)}
                   onClick={() => setSelectedDay(day.day)}
                   className="group flex h-24 min-w-0 flex-1 items-end justify-center rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/25"
                 >
                   <span
-                    className={`block w-full rounded-sm transition-colors ${
-                      active ? "bg-ink" : "bg-ink/20 group-hover:bg-ink/35"
+                    className={`flex w-full flex-col-reverse overflow-hidden rounded-sm bg-ink/10 transition-opacity ${
+                      active ? "opacity-100" : "opacity-55 group-hover:opacity-80"
                     }`}
                     style={{ height }}
-                  />
+                  >
+                    {categoryTotal > 0 ? (
+                      SPEND_CATEGORIES.map((category) => {
+                        const value = day[category.key];
+                        if (value <= 0) return null;
+                        return (
+                          <span
+                            key={category.key}
+                            className="block min-h-px w-full"
+                            title={`${category.label}: ${formatUsdMicros(value)}`}
+                            style={{
+                              backgroundColor: category.color,
+                              flexBasis: `${(value / categoryTotal) * 100}%`,
+                            }}
+                          />
+                        );
+                      })
+                    ) : (
+                      <span className="block h-full w-full bg-ink/20" />
+                    )}
+                  </span>
                 </button>
               );
             })}
@@ -240,5 +295,25 @@ function formatDateLabel(day: string) {
 function formatKind(kind: DrilldownItem["kind"]) {
   if (kind === "chat") return "Chat";
   if (kind === "task") return "Task";
-  return "Ingest";
+  return "Brain";
+}
+
+function spendCategoryTotal(day: DailyUsageRow) {
+  return day.chatCostUsdMicros + day.taskCostUsdMicros + day.brainCostUsdMicros;
+}
+
+function dailySpendAriaLabel(day: DailyUsageRow) {
+  return `${formatDateLabel(day.day)} spend ${formatUsdMicros(
+    day.totalCostUsdMicros,
+  )}. Chat ${formatUsdMicros(day.chatCostUsdMicros)}, Task ${formatUsdMicros(
+    day.taskCostUsdMicros,
+  )}, Brain ${formatUsdMicros(day.brainCostUsdMicros)}`;
+}
+
+function dailySpendTitle(day: DailyUsageRow) {
+  return `${formatDateLabel(day.day)} - ${formatUsdMicros(
+    day.totalCostUsdMicros,
+  )} | Chat ${formatUsdMicros(day.chatCostUsdMicros)} | Task ${formatUsdMicros(
+    day.taskCostUsdMicros,
+  )} | Brain ${formatUsdMicros(day.brainCostUsdMicros)}`;
 }

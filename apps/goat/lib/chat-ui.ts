@@ -1,3 +1,4 @@
+import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type {
   GoatChatEngine,
@@ -6,6 +7,13 @@ import type {
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
+
+export {
+  CODEX_COMMAND_TOOL_NAME,
+  CODEX_COMMAND_TOOL_PART_TYPE,
+  type CodexCommandToolInput,
+  type CodexCommandToolOutput,
+} from "@opencompany/agent-runtime";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
@@ -241,6 +249,10 @@ export type GoatChatTools = {
     input: WebSearchToolInput;
     output: WebSearchToolOutput;
   };
+  codex_command: {
+    input: CodexCommandToolInput;
+    output: CodexCommandToolOutput;
+  };
 };
 
 export type GoatChatUiMessage = UIMessage<
@@ -356,6 +368,10 @@ function parseDebugTraceUiMessageParts(value: unknown): GoatChatUiMessage["parts
     if (!isRecord(part)) continue;
     if (part.type === "text" && typeof part.text === "string") {
       parts.push({ type: "text", text: part.text });
+      continue;
+    }
+    if (part.type === "reasoning" && typeof part.text === "string") {
+      parts.push({ type: "reasoning", text: part.text, state: "done" });
       continue;
     }
     if (isPersistedToolPart(part)) {

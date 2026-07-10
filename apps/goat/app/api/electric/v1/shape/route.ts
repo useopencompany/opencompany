@@ -8,6 +8,7 @@ import {
   goatElectricBaseUrl,
   goatElectricBrainRef,
   goatElectricChatMessagesSessionId,
+  goatElectricCodexChatSessionId,
   goatElectricLocalCodexChatSessionId,
   hasInvalidElectricCloudSecretPair,
 } from "@/lib/electric";
@@ -80,7 +81,8 @@ async function authorizeChatSessionShape(input: {
 }): Promise<string | null> {
   const sessionId =
     goatElectricChatMessagesSessionId(input.requestUrl) ??
-    goatElectricLocalCodexChatSessionId(input.requestUrl);
+    goatElectricLocalCodexChatSessionId(input.requestUrl) ??
+    goatElectricCodexChatSessionId(input.requestUrl);
   if (!sessionId) return null;
 
   const [session] = await getDb()

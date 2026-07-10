@@ -1,6 +1,8 @@
 import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 import { GOAT_SPANS, recordGoatTaskDispatch, startGoatSpan } from "@opencompany/goat-observability";
 
+const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
+
 type RunnerContext = {
   task_id: string;
   event?: string;
@@ -129,6 +131,37 @@ export async function triggerGoatTaskRun(
     event: context.event ?? "goat.runner_request_accepted",
     task_id: taskId,
   });
+}
+
+export async function triggerGoatCodexChatWake() {
+  const baseUrl = runnerInternalBaseUrl();
+  const token = runnerToken();
+  if (!baseUrl || !token) {
+    console.warn("Goat codex chat wake skipped because the runner is not configured.", {
+      event: "goat.codex_chat_wake_unconfigured",
+    });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CODEX_CHAT_WAKE_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/internal/goat/codex-chat/wake`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Goat codex chat wake failed with ${response.status}: ${details}`);
+  }
 }
 
 export async function triggerGoatBrainIngestWake() {

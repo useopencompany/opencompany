@@ -54,6 +54,10 @@ export type RunnerEnv = {
   // opencode timeout behavior: timeouts surface partial output but never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
+  // Idle timeout for persistent Goat codex-chat sandboxes. Unlike per-task sandboxes (killed after
+  // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
+  // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
+  goatCodexChatIdleTimeoutMs: number;
   // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
   // validation + coercion always run; this only gates the small-model fallback. Default on.
   toolArgRepairEnabled: boolean;
@@ -109,6 +113,10 @@ export function loadEnv(): RunnerEnv {
     opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.5",
+    goatCodexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
+      "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
+      30 * 60_000,
+    ),
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),
