@@ -2,7 +2,9 @@ import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import { describe, expect, it } from "vitest";
 import {
   CODEX_COMMAND_TOOL_PART_TYPE,
+  compareGoatChatMessageOrder,
   type GoatStoredChatMessage,
+  nextGoatChatMessageCreatedAt,
   START_TASK_TOOL_PART_TYPE,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
@@ -158,6 +160,29 @@ describe("toGoatChatUiMessage", () => {
         status: "succeeded",
       },
     });
+  });
+});
+
+describe("compareGoatChatMessageOrder", () => {
+  it("keeps equal-timestamp Codex turn placeholders in user-then-assistant order", () => {
+    const createdAt = "2026-07-10T08:00:00.000Z";
+    const messages = [
+      { id: "assistant_1", role: "assistant" as const, createdAt },
+      { id: "user_1", role: "user" as const, createdAt },
+    ];
+
+    expect(messages.toSorted(compareGoatChatMessageOrder).map((message) => message.id)).toEqual([
+      "user_1",
+      "assistant_1",
+    ]);
+  });
+
+  it("creates a strictly later timestamp for pre-created assistant placeholders", () => {
+    const userCreatedAt = new Date("2026-07-10T08:00:00.000Z");
+
+    expect(nextGoatChatMessageCreatedAt(userCreatedAt).toISOString()).toBe(
+      "2026-07-10T08:00:00.001Z",
+    );
   });
 });
 

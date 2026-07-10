@@ -61,6 +61,7 @@ import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import {
+  compareGoatChatMessageOrder,
   type GoatChatMention,
   type GoatChatMessageMetadata,
   type GoatChatSessionView,
@@ -1183,7 +1184,12 @@ function LiveChatMessageSubscriber({
   );
   const liveMessages = useMemo(() => {
     return ((rows ?? []) as GoatChatMessageRow[])
-      .toSorted((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .toSorted((a, b) =>
+        compareGoatChatMessageOrder(
+          { id: a.id, role: a.role, createdAt: a.created_at },
+          { id: b.id, role: b.role, createdAt: b.created_at },
+        ),
+      )
       .map(chatMessageRowToUiMessage);
   }, [rows]);
 

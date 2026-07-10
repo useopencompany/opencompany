@@ -4,6 +4,7 @@ import { getDb } from "@opencompany/db/client";
 import { goatChatSessions, goatCodexChatSessions } from "@opencompany/db/goat-schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
+import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { CODEX_CHAT_DEFAULT_MODEL, CODEX_CHAT_PROMPT_MAX_LENGTH } from "@/lib/codex-chat-constants";
 import { toGoatTaskTitle } from "@/lib/task-display";
@@ -149,12 +150,21 @@ async function createFirstCodexChatTurn(input: {
   const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
   const assistantMessageId = newGoatChatMessageId();
   const now = new Date();
+  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   const title = toGoatTaskTitle(input.prompt);
 
   await getDb().execute(sql`
     WITH created_chat AS (
       INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, created_at, updated_at)
-      VALUES (${chatSessionId}, ${input.userWorkosId}, ${title}, ${CODEX_CHAT_SESSION_MODEL}, 'codex', ${now}, ${now})
+      VALUES (
+        ${chatSessionId},
+        ${input.userWorkosId},
+        ${title},
+        ${CODEX_CHAT_SESSION_MODEL},
+        'codex',
+        ${now},
+        ${assistantCreatedAt}
+      )
       RETURNING id
     ),
     inserted_user_message AS (
@@ -170,8 +180,8 @@ async function createFirstCodexChatTurn(input: {
         'assistant',
         '',
         ${JSON.stringify(emptyAssistantDebugTrace())}::jsonb,
-        ${now},
-        ${now}
+        ${assistantCreatedAt},
+        ${assistantCreatedAt}
       )
       RETURNING id
     ),
@@ -222,6 +232,7 @@ async function enqueueExistingCodexChatMessage(input: {
   const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
   const assistantMessageId = newGoatChatMessageId();
   const now = new Date();
+  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   const running = input.session.status === "running" || input.session.status === "starting";
 
   await getDb().execute(sql`
@@ -238,8 +249,8 @@ async function enqueueExistingCodexChatMessage(input: {
         'assistant',
         '',
         ${JSON.stringify(emptyAssistantDebugTrace())}::jsonb,
-        ${now},
-        ${now}
+        ${assistantCreatedAt},
+        ${assistantCreatedAt}
       )
       RETURNING id
     ),
@@ -263,7 +274,7 @@ async function enqueueExistingCodexChatMessage(input: {
       RETURNING id
     )
     UPDATE goat.chat_sessions
-    SET updated_at = ${now}
+    SET updated_at = ${assistantCreatedAt}
     WHERE id = ${input.session.chatSessionId}
       AND user_workos_id = ${input.userWorkosId}
   `);

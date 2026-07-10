@@ -288,6 +288,29 @@ export type GoatStoredChatMessage = Pick<
   taskStatus: GoatTaskStatus | null;
 };
 
+export type GoatChatMessageOrderInput = {
+  id: string;
+  role: "user" | "assistant";
+  createdAt: Date | string;
+};
+
+export function compareGoatChatMessageOrder(
+  left: GoatChatMessageOrderInput,
+  right: GoatChatMessageOrderInput,
+) {
+  const timeDiff = chatMessageCreatedAtMs(left.createdAt) - chatMessageCreatedAtMs(right.createdAt);
+  if (timeDiff !== 0) return timeDiff;
+
+  const roleDiff = chatMessageRoleOrder(left.role) - chatMessageRoleOrder(right.role);
+  if (roleDiff !== 0) return roleDiff;
+
+  return left.id.localeCompare(right.id);
+}
+
+export function nextGoatChatMessageCreatedAt(createdAt: Date) {
+  return new Date(createdAt.getTime() + 1);
+}
+
 export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "parts">) {
   return message.parts
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
@@ -387,6 +410,14 @@ function isPersistedToolPart(value: Record<string, unknown>) {
     typeof value.type === "string" &&
     (value.type === "dynamic-tool" || value.type.startsWith("tool-"))
   );
+}
+
+function chatMessageCreatedAtMs(value: Date | string) {
+  return value instanceof Date ? value.getTime() : new Date(value).getTime();
+}
+
+function chatMessageRoleOrder(role: "user" | "assistant") {
+  return role === "user" ? 0 : 1;
 }
 
 function legacyTaskOrderedParts(
