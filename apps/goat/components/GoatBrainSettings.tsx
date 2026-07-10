@@ -229,25 +229,28 @@ function BrainAccessSection({
 }
 
 function EnrichmentSection({ brainRef }: { brainRef: string }) {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [enrichmentState, setEnrichmentState] = useState<{
+    brainRef: string;
+    enabled: boolean | null;
+  }>(() => ({ brainRef, enabled: null }));
   const [isPending, startTransition] = useTransition();
+  const enabled = enrichmentState.brainRef === brainRef ? enrichmentState.enabled : null;
 
   useEffect(() => {
     let cancelled = false;
-    setEnabled(null);
     void getGoatBrainEnrichmentEnabledAction(brainRef)
       .then((details) => {
         if (cancelled) return;
         if (!details) {
-          setEnabled(false);
+          setEnrichmentState({ brainRef, enabled: false });
           toast.error("Could not load enrichment setting.");
           return;
         }
-        setEnabled(details.enabled);
+        setEnrichmentState({ brainRef, enabled: details.enabled });
       })
       .catch(() => {
         if (cancelled) return;
-        setEnabled(false);
+        setEnrichmentState({ brainRef, enabled: false });
         toast.error("Could not load enrichment setting.");
       });
     return () => {
@@ -258,11 +261,13 @@ function EnrichmentSection({ brainRef }: { brainRef: string }) {
   const toggle = () => {
     if (enabled === null) return;
     const next = !enabled;
-    setEnabled(next);
+    setEnrichmentState({ brainRef, enabled: next });
     startTransition(async () => {
       const result = await setGoatBrainEnrichmentAction({ brainRef, enabled: next });
       if (!result.ok) {
-        setEnabled(!next);
+        setEnrichmentState((current) =>
+          current.brainRef === brainRef ? { brainRef, enabled: !next } : current,
+        );
         toast.error(result.error);
         return;
       }
