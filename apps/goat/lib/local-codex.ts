@@ -25,6 +25,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
+import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { LOCAL_CODEX_DEFAULT_MODEL, LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
 import { extractLocalRepositoryPath, hashLocalBridgeToken } from "@/lib/local-codex-utils";
 import { toGoatTaskTitle } from "@/lib/task-display";
@@ -553,6 +554,7 @@ async function createFirstLocalCodexTurn(input: {
   const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
   const assistantMessageId = newGoatChatMessageId();
   const now = new Date();
+  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   const title = toGoatTaskTitle(input.prompt);
 
   await getDb().execute(sql`
@@ -573,7 +575,7 @@ async function createFirstLocalCodexTurn(input: {
         ${LOCAL_CODEX_CHAT_MODEL},
         'local_codex',
         ${now},
-        ${now}
+        ${assistantCreatedAt}
       )
       RETURNING id
     ),
@@ -605,8 +607,8 @@ async function createFirstLocalCodexTurn(input: {
         'assistant',
         '',
         ${JSON.stringify({ schemaVersion: "goat.local_codex.debug.v1", model: LOCAL_CODEX_DEFAULT_MODEL })}::jsonb,
-        ${now},
-        ${now}
+        ${assistantCreatedAt},
+        ${assistantCreatedAt}
       )
       RETURNING id
     ),
@@ -780,6 +782,7 @@ async function enqueueExistingLocalCodexMessage(input: {
 
   const turnId = `goat_local_codex_turn_${randomUUID()}`;
   const assistantMessageId = newGoatChatMessageId();
+  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   await getDb().execute(sql`
     WITH inserted_user_message AS (
       INSERT INTO goat.chat_messages (
@@ -816,8 +819,8 @@ async function enqueueExistingLocalCodexMessage(input: {
         'assistant',
         '',
         ${JSON.stringify({ schemaVersion: "goat.local_codex.debug.v1", model: input.localSession.model })}::jsonb,
-        ${now},
-        ${now}
+        ${assistantCreatedAt},
+        ${assistantCreatedAt}
       )
       RETURNING id
     ),
@@ -858,7 +861,7 @@ async function enqueueExistingLocalCodexMessage(input: {
     ),
     touched_chat AS (
       UPDATE goat.chat_sessions
-      SET updated_at = ${now}
+      SET updated_at = ${assistantCreatedAt}
       WHERE id = ${input.localSession.chatSessionId}
       RETURNING id
     )
