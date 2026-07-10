@@ -14,7 +14,11 @@ import {
   recordGoatModelUsageTokens,
   withGoatSpan,
 } from "@opencompany/goat-observability";
-import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
+import {
+  flushBraintrust,
+  getBraintrustAISDK,
+  traceBraintrust,
+} from "@opencompany/observability/braintrust";
 import * as ai from "ai";
 import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
 import type { RunnerEnv } from "./env";
@@ -151,6 +155,29 @@ export type GoatTaskExecutorResult = {
 export async function executeGoatTask(
   input: GoatTaskExecutorInput,
 ): Promise<GoatTaskExecutorResult> {
+  // Open one Braintrust root span per task run so the planner (generateObject) and
+  // the execution stream (streamText) nest under a single trace. Without a root,
+  // wrapAISDK (logger is setCurrent:false) starts each call as its own root trace.
+  const userIdHash = hashGoatUserId(input.task.userWorkosId);
+  try {
+    return await traceBraintrust(
+      {
+        name: GOAT_SPANS.taskRun,
+        type: "task",
+        metadata: {
+          task_id: input.task.id,
+          queued_model: input.task.model,
+          ...(userIdHash ? { user_id_hash: userIdHash } : {}),
+        },
+      },
+      () => executeGoatTaskInner(input),
+    );
+  } finally {
+    await flushBraintrust();
+  }
+}
+
+async function executeGoatTaskInner(input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> {
   await input.reportStage("planning");
   await input.sink.appendEvent({
     type: "task.status",
