@@ -234,10 +234,22 @@ function EnrichmentSection({ brainRef }: { brainRef: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    void getGoatBrainEnrichmentEnabledAction(brainRef).then((details) => {
-      if (cancelled || !details) return;
-      setEnabled(details.enabled);
-    });
+    setEnabled(null);
+    void getGoatBrainEnrichmentEnabledAction(brainRef)
+      .then((details) => {
+        if (cancelled) return;
+        if (!details) {
+          setEnabled(false);
+          toast.error("Could not load enrichment setting.");
+          return;
+        }
+        setEnabled(details.enabled);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEnabled(false);
+        toast.error("Could not load enrichment setting.");
+      });
     return () => {
       cancelled = true;
     };

@@ -353,6 +353,12 @@ body {
   flex: 0 0 auto;
   opacity: 0.55;
 }
+/* Filled brand marks (e.g. GitHub) need a touch more weight to read clearly. */
+.tiptap-brain .wiki-brain-chip-icon-github {
+  width: 0.86em;
+  height: 0.86em;
+  opacity: 0.75;
+}
 .tiptap-brain .wiki-brain-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
