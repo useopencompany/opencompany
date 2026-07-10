@@ -381,6 +381,32 @@ function GoatBrainEditor({
     replaceCurrentUrl(brainDocumentUrl(document, selectedBrainId));
   };
 
+  // Resolve an internal brain href (as produced by brainDocumentUrl/brainFolderUrl)
+  // to a target in the current brain and select it via local state — same instant
+  // path the sidebar uses. Returns false for anything not in this brain so the
+  // caller can fall back to a full navigation.
+  const navigateToBrainHref = (href: string): boolean => {
+    const document = documents.find(
+      (candidate) => brainDocumentUrl(candidate, selectedBrainId) === href,
+    );
+    if (document) {
+      selectDocument(document);
+      return true;
+    }
+    const folder = folders.find(
+      (candidate) => brainFolderUrl(candidate.path, selectedBrainId) === href,
+    );
+    if (folder) {
+      if (canEditBrain) saveRef.current();
+      setSelectedFolder(folder.path);
+      setSelectedDocumentId(null);
+      setExpandedPaths((current) => withAncestorFolders(current, folder.path));
+      replaceCurrentUrl(brainFolderUrl(folder.path, selectedBrainId));
+      return true;
+    }
+    return false;
+  };
+
   const toggleFolder = (path: string) => {
     setSelectedFolder(path);
     setExpandedPaths((current) => {
@@ -972,6 +998,7 @@ function GoatBrainEditor({
           readOnly={!canEditBrain}
           onEditorChange={(value) => setDocPanelState((state) => ({ ...state, value }))}
           onRenameTitle={renameDocument}
+          onNavigateInternal={navigateToBrainHref}
         />
       </div>
       {folderDialog && canEditBrain ? (
@@ -1149,6 +1176,7 @@ function BrainDocumentPanel({
   readOnly,
   onEditorChange,
   onRenameTitle,
+  onNavigateInternal,
 }: {
   selectedDocument: GoatBrainDocumentView | null;
   documents: GoatBrainDocumentView[];
@@ -1162,6 +1190,7 @@ function BrainDocumentPanel({
   readOnly: boolean;
   onEditorChange: (value: string) => void;
   onRenameTitle: (title: string) => void;
+  onNavigateInternal: (href: string) => boolean;
 }) {
   if (!selectedDocument) {
     return (
@@ -1200,6 +1229,7 @@ function BrainDocumentPanel({
                   onChange={onEditorChange}
                   brainLinks={brainLinks}
                   readOnly={readOnly}
+                  onNavigateInternal={onNavigateInternal}
                 />
               </div>
             </div>
