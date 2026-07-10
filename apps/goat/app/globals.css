@@ -18,6 +18,7 @@
   --color-danger: #a33929;
   --color-danger-bg: #fff5f3;
   --color-danger-border: #f0c0b8;
+  --color-success: #216b35;
 }
 
 :root[data-theme="dark"] {
@@ -38,6 +39,7 @@
   --color-danger: #ffb4a8;
   --color-danger-bg: #3a1c18;
   --color-danger-border: #633128;
+  --color-success: #9fdaa8;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -59,6 +61,7 @@
     --color-danger: #ffb4a8;
     --color-danger-bg: #3a1c18;
     --color-danger-border: #633128;
+    --color-success: #9fdaa8;
   }
 }
 
