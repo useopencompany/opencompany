@@ -470,6 +470,33 @@ describe("GoatBrainView", () => {
     );
   });
 
+  it("resolves source pointers to their canonical source URLs", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={folders}
+        documents={[documentWithGitHubSource]}
+        initialFolderPath="projects"
+        initialBrainId="github-source-note"
+      />,
+    );
+
+    expect(screen.getByTestId("brain-link:source:github:acme/api:pull:123")).toHaveAttribute(
+      "href",
+      "https://github.com/acme/api/pull/123",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Toggle file details" }));
+
+    expect(screen.getByRole("link", { name: "acme/api #123" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/api/pull/123",
+    );
+  });
+
   it("expands the timeline inside the details sidebar", async () => {
     const user = userEvent.setup();
 
@@ -719,6 +746,31 @@ const evidenceDocument: GoatBrainDocumentView = {
   kind: "evidence",
   type: "source",
   status: "active",
+  aliases: [],
+  contentHash: "hash",
+  sizeBytes: 128,
+  createdAt: "2026-07-06T12:00:00.000Z",
+  updatedAt: "2026-07-06T12:00:00.000Z",
+};
+
+const documentWithGitHubSource: GoatBrainDocumentView = {
+  id: "doc_github_source",
+  brainId: "github-source-note",
+  folderPath: "projects",
+  path: "projects/github-source-note.md",
+  title: "GitHub Source Note",
+  content: "",
+  body: "Review [[source:github:acme/api:pull:123|PR #123]].",
+  timeline: [],
+  format: "markdown",
+  mimeType: "text/markdown",
+  originalFileName: null,
+  assetStorageKey: null,
+  relations: [],
+  sources: [{ ref: "github:acme/api:pull:123", title: "acme/api #123" }],
+  kind: "page",
+  type: "project",
+  status: "draft",
   aliases: [],
   contentHash: "hash",
   sizeBytes: 128,

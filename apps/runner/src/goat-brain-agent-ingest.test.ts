@@ -777,6 +777,54 @@ describe("runGoatChatCaptureAgentIngest", () => {
     expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
   });
 
+  it("serializes concurrent brain CLI tool calls from one model step", async () => {
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { tools: Record<string, CapturedTool> }) => {
+        await Promise.all([
+          options.tools.goat_brain?.execute({
+            command: "move",
+            args: ["pricing-teardown-reference", "--folder", "decisions"],
+          }),
+          options.tools.goat_brain?.execute({
+            command: "set",
+            args: ["pricing-teardown-reference", "--status", "active"],
+          }),
+        ]);
+        return {
+          text: "Moved and promoted the capture.",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+    const order: string[] = [];
+    let active = false;
+    const serializedCli: GoatBrainAgentCliRunner = vi.fn(async (input) => {
+      if (active) throw new Error("brain CLI calls overlapped");
+      active = true;
+      order.push(input.argv.join(" "));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active = false;
+      return { ok: true, exitCode: 0, stdout: "ok", stderr: "" };
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: serializedCli },
+    );
+
+    expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
+    expect(order).toEqual([
+      "move pricing-teardown-reference --folder decisions",
+      "set pricing-teardown-reference --status active",
+    ]);
+  });
+
   it("bounds trace previews for long args, stdin, output, and final text", async () => {
     const longArg = "a".repeat(500);
     const longText = "body ".repeat(500);

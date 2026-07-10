@@ -120,6 +120,7 @@ export type OpenCompanyChatAgentDebugTrace = {
   uiMessageParts?: unknown[];
   toolCalls?: unknown[];
   toolResults?: unknown[];
+  durationMs?: number;
   error?: string;
 };
 

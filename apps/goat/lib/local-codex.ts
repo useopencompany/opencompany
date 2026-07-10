@@ -395,6 +395,7 @@ export async function completeLocalCodexCommand(input: {
         assistantMessageId: turn.assistantMessageId,
         outcome: assistantFinalization.outcome,
         error: assistantFinalization.error,
+        durationMs: elapsedTurnDurationMs(turn.createdAt, now),
         now,
       });
     }
@@ -1086,6 +1087,13 @@ async function applyLocalCodexEventToChat(input: {
         model: input.localSession.model,
         outcome: status,
         error: error || null,
+        durationMs: elapsedTurnDurationMs(input.turn.createdAt, input.now),
+        now: input.now,
+      });
+    } else {
+      await writeAssistantMessageDuration({
+        assistantMessageId: input.turn.assistantMessageId,
+        durationMs: elapsedTurnDurationMs(input.turn.createdAt, input.now),
         now: input.now,
       });
     }
@@ -1167,6 +1175,7 @@ async function finalizeAssistantMessageParts(input: {
   model?: string | null;
   outcome: "failed" | "interrupted";
   error: string | null;
+  durationMs?: number;
   now: Date;
 }) {
   const message = await loadAssistantMessageForProjection(input.assistantMessageId);
@@ -1182,6 +1191,25 @@ async function finalizeAssistantMessageParts(input: {
     content: projection.content,
     error: input.outcome === "failed" ? (input.error ?? "Local Codex turn failed.") : null,
     aborted: input.outcome === "interrupted",
+    durationMs: input.durationMs,
+    now: input.now,
+  });
+}
+
+async function writeAssistantMessageDuration(input: {
+  assistantMessageId: string;
+  durationMs?: number;
+  now: Date;
+}) {
+  if (typeof input.durationMs !== "number") return;
+  const message = await loadAssistantMessageForProjection(input.assistantMessageId);
+  if (!message) return;
+  await writeAssistantMessageProjection({
+    assistantMessageId: input.assistantMessageId,
+    existingTrace: message.debugTrace,
+    parts: assistantProjectionParts(message),
+    content: message.content,
+    durationMs: input.durationMs,
     now: input.now,
   });
 }
@@ -1194,6 +1222,7 @@ async function writeAssistantMessageProjection(input: {
   content: string;
   error?: string | null;
   aborted?: boolean;
+  durationMs?: number | undefined;
   now: Date;
 }) {
   const debugTrace: GoatChatMessageDebugTrace = {
@@ -1209,6 +1238,9 @@ async function writeAssistantMessageProjection(input: {
   if (input.aborted !== undefined) {
     if (input.aborted) debugTrace.aborted = true;
     else delete debugTrace.aborted;
+  }
+  if (typeof input.durationMs === "number") {
+    debugTrace.durationMs = input.durationMs;
   }
   await getDb()
     .update(goatChatMessages)
@@ -1232,6 +1264,10 @@ function assistantProjectionParts(message: {
 
 function stringPayload(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function elapsedTurnDurationMs(startedAt: Date, completedAt: Date) {
+  return Math.max(0, completedAt.getTime() - startedAt.getTime());
 }
 
 function safeClientMessageId(value: string | null | undefined) {

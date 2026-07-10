@@ -58,7 +58,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { buildChatTaskLookup, shouldShowThinkingBubble } from "@/components/chat/assistant-items";
+import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useHydrated } from "@/components/useHydrated";
@@ -75,6 +75,7 @@ import {
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
+import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
@@ -117,13 +118,13 @@ type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue | CodexPicker
 // Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
 // engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
 type GoatEngineChatKind = "local_codex" | "codex";
-type CodexComposerSettings = {
+type CodexComposerSettings = GoatCodexComposerSettingsView;
+type CodexComposerUiState = {
   reasoningEffort: CodexReasoningEffort;
   planModeEnabled: boolean;
-  goalMode: {
-    objective: string;
-    tokenBudget?: number;
-  } | null;
+  goalModeEnabled: boolean;
+  goalObjective: string;
+  goalTokenBudget: string;
 };
 
 const ENGINE_CHAT_CONFIG: Record<
@@ -206,6 +207,10 @@ export function GoatSurface({
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(false);
   const pendingInputCaretRef = useRef<number | null>(null);
+  const initialCodexComposerUiState = codexComposerUiStateForChat(initialChat);
+  const activeTurnStartedAtRef = useRef<number | null>(null);
+  const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
+  const wasAgentWorkingRef = useRef(false);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
@@ -233,11 +238,27 @@ export function GoatSurface({
     const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
     return engine && initialChat ? { engine, chatSessionId: initialChat.id } : null;
   });
-  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>("medium");
-  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
-  const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
-  const [codexGoalObjective, setCodexGoalObjective] = useState("");
-  const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
+  const [codexComposerStateByChatId, setCodexComposerStateByChatId] = useState<
+    ReadonlyMap<string, CodexComposerUiState>
+  >(() => {
+    if (!initialChat || !initialChat.codexComposerSettings) return new Map();
+    return new Map([[initialChat.id, initialCodexComposerUiState]]);
+  });
+  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
+    initialCodexComposerUiState.reasoningEffort,
+  );
+  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(
+    initialCodexComposerUiState.planModeEnabled,
+  );
+  const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(
+    initialCodexComposerUiState.goalModeEnabled,
+  );
+  const [codexGoalObjective, setCodexGoalObjective] = useState(
+    initialCodexComposerUiState.goalObjective,
+  );
+  const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState(
+    initialCodexComposerUiState.goalTokenBudget,
+  );
   const [codexSandboxStatus, setCodexSandboxStatus] = useState<GoatCodexSandboxStatus | null>(null);
   const [engineRunning, setEngineRunning] = useState(false);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
@@ -257,6 +278,10 @@ export function GoatSurface({
     ReadonlySet<string>
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
+  const [activeTurnStartedAtMs, setActiveTurnStartedAtMs] = useState<number | null>(null);
+  const [optimisticTurnDurations, setOptimisticTurnDurations] = useState<
+    ReadonlyMap<string, number>
+  >(() => new Map());
   const [, startArchiveTransition] = useTransition();
   const homeChats = useMemo(
     () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds),
@@ -270,6 +295,33 @@ export function GoatSurface({
   const hasHomeActivity =
     homeChats.length > 0 || homeSchedules.length > 0 || homeResults.length > 0;
   const homeGreetingName = userName.trim() || "there";
+
+  const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
+    const startedAtMs = Date.now();
+    activeTurnStartedAtRef.current = startedAtMs;
+    activeTurnAssistantMessageIdRef.current = assistantMessageId;
+    setActiveTurnStartedAtMs(startedAtMs);
+  }, []);
+
+  const clearActiveTurn = useCallback(() => {
+    activeTurnStartedAtRef.current = null;
+    activeTurnAssistantMessageIdRef.current = null;
+    setActiveTurnStartedAtMs(null);
+  }, []);
+
+  const recordOptimisticTurnDuration = useCallback(
+    (assistantMessageId: string | null | undefined) => {
+      const startedAtMs = activeTurnStartedAtRef.current;
+      if (!assistantMessageId || startedAtMs === null) return;
+      const durationMs = Math.max(0, Date.now() - startedAtMs);
+      setOptimisticTurnDurations((current) => {
+        const next = new Map(current);
+        next.set(assistantMessageId, durationMs);
+        return next;
+      });
+    },
+    [],
+  );
 
   const prepareSendMessagesRequest = useCallback(
     ({
@@ -324,6 +376,7 @@ export function GoatSurface({
     experimental_throttle: 50,
     transport,
     onFinish: ({ message }) => {
+      recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
         setChatSessionId(sessionId);
@@ -377,8 +430,13 @@ export function GoatSurface({
     return overlay.length > 0 ? [...persistedMessages, ...overlay] : persistedMessages;
   }, [messages, persistedMessages]);
   const hasMessages = chatMessages.length > 0;
-  const showThinkingBubble =
-    (isGenerating || (isEngineChat && engineRunning)) && shouldShowThinkingBubble(chatMessages);
+  const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
+  const isAgentWorking = isGenerating || isEngineWorking;
+  const latestActiveTurnStartedAtMs = useMemo(
+    () => latestChatTurnStartedAtMs(chatMessages),
+    [chatMessages],
+  );
+  const activeTurnTimerStartedAtMs = activeTurnStartedAtMs ?? latestActiveTurnStartedAtMs;
   const trimmedNewChatPrompt = newChatPrompt.trim();
   const newChatPromptValid =
     trimmedNewChatPrompt.length > 0 &&
@@ -391,6 +449,29 @@ export function GoatSurface({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (isAgentWorking) {
+      wasAgentWorkingRef.current = true;
+      setActiveTurnStartedAtMs((current) => {
+        if (current !== null) {
+          activeTurnStartedAtRef.current = current;
+          return current;
+        }
+        const startedAtMs = latestActiveTurnStartedAtMs ?? Date.now();
+        activeTurnStartedAtRef.current = startedAtMs;
+        return startedAtMs;
+      });
+      return;
+    }
+
+    if (wasAgentWorkingRef.current) {
+      recordOptimisticTurnDuration(activeTurnAssistantMessageIdRef.current);
+    }
+    wasAgentWorkingRef.current = false;
+    clearActiveTurn();
+  }, [clearActiveTurn, isAgentWorking, latestActiveTurnStartedAtMs, recordOptimisticTurnDuration]);
+
   const chatTaskLookup = useMemo(
     () =>
       buildChatTaskLookup({
@@ -418,9 +499,40 @@ export function GoatSurface({
     activeEngine ??
     "opencompany";
 
+  const applyCodexComposerUiState = useCallback((state: CodexComposerUiState) => {
+    setCodexReasoningEffort(state.reasoningEffort);
+    setCodexPlanModeEnabled(state.planModeEnabled);
+    setCodexGoalModeEnabled(state.goalModeEnabled);
+    setCodexGoalObjective(state.goalObjective);
+    setCodexGoalTokenBudget(state.goalTokenBudget);
+  }, []);
+
   const openChat = useCallback(
-    (chat: { id: string; model: string; engine?: GoatChatEngine } | null) => {
+    (
+      chat: {
+        id: string;
+        model: string;
+        engine?: GoatChatEngine;
+        codexComposerSettings?: CodexComposerSettings | null;
+      } | null,
+    ) => {
+      if (chatSessionId && isEngineChat && !localCodexFeatureDisabledForChat) {
+        const currentComposerState = currentCodexComposerUiState({
+          reasoningEffort: codexReasoningEffort,
+          planModeEnabled: codexPlanModeEnabled,
+          goalModeEnabled: codexGoalModeEnabled,
+          goalObjective: codexGoalObjective,
+          goalTokenBudget: codexGoalTokenBudget,
+        });
+        setCodexComposerStateByChatId((current) => {
+          const next = new Map(current);
+          next.set(chatSessionId, currentComposerState);
+          return next;
+        });
+      }
+
       const engineTarget = engineChatKindFromChat(chat, localCodexBetaEnabled);
+      const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
       setChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? "goat-chat-main");
       setChatModel(
@@ -433,18 +545,33 @@ export function GoatSurface({
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
-      setCodexPlanModeEnabled(false);
-      setCodexGoalModeEnabled(false);
-      setCodexGoalObjective("");
-      setCodexGoalTokenBudget("");
+      applyCodexComposerUiState(nextCodexComposerState);
       setCodexSandboxStatus(null);
       setEngineRunning(false);
+      clearActiveTurn();
+      setOptimisticTurnDurations(new Map());
       setMessages([]);
       setLocallyStoppedAssistantMessageIds(new Set());
       clearError();
       setMode(chat ? "chat" : "home");
     },
-    [clearError, defaultModel, localCodexBetaEnabled, setMessages],
+    [
+      applyCodexComposerUiState,
+      chatSessionId,
+      clearActiveTurn,
+      clearError,
+      codexComposerStateByChatId,
+      codexGoalModeEnabled,
+      codexGoalObjective,
+      codexGoalTokenBudget,
+      codexPlanModeEnabled,
+      codexReasoningEffort,
+      defaultModel,
+      isEngineChat,
+      localCodexBetaEnabled,
+      localCodexFeatureDisabledForChat,
+      setMessages,
+    ],
   );
 
   // Adopt URL-driven chat changes (history links, back/forward). This reacts
@@ -492,11 +619,11 @@ export function GoatSurface({
 
   useEffect(() => {
     if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
-    if (chatMessages.length === 0 && status !== "submitted" && status !== "streaming") return;
+    if (chatMessages.length === 0 && !isAgentWorking) return;
     const thread = threadRef.current;
     if (!thread || typeof thread.scrollTo !== "function") return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
-  }, [chatMessages, mode, status]);
+  }, [chatMessages, isAgentWorking, mode]);
 
   useEffect(() => {
     if (!chatError || chatError.message === lastError.current) return;
@@ -645,6 +772,7 @@ export function GoatSurface({
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
       const existingEngineSessionId = activeEngineChat?.chatSessionId ?? null;
+      beginActiveTurn();
       setEngineSubmitting(true);
       void sendEngineChatMessage({
         endpoint: config.messagesEndpoint,
@@ -657,7 +785,13 @@ export function GoatSurface({
         .then((result) => {
           setChatSessionId(result.sessionId);
           setEngineChatSession({ engine, chatSessionId: result.sessionId });
+          activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
           setEngineRunning(true);
+          setCodexComposerStateByChatId((current) => {
+            const next = new Map(current);
+            next.set(result.sessionId, codexComposerUiStateFromSettings(settings.settings));
+            return next;
+          });
           setCodexPlanModeEnabled(false);
           setCodexGoalModeEnabled(false);
           setCodexGoalObjective("");
@@ -674,6 +808,7 @@ export function GoatSurface({
           router.refresh();
         })
         .catch((error) => {
+          clearActiveTurn();
           setInput(prompt);
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
@@ -689,7 +824,9 @@ export function GoatSurface({
     const message =
       mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
     const model = chatModel;
+    beginActiveTurn();
     void sendMessage(message, { body: { sessionId: chatSessionId, model } }).catch((error) => {
+      clearActiveTurn();
       setInput(prompt);
       setSelectedMentions(mentions);
       toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
@@ -937,10 +1074,14 @@ export function GoatSurface({
                   message={message}
                   taskLookup={chatTaskLookup}
                   stopped={locallyStoppedAssistantMessageIds.has(message.id)}
+                  durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
                 />
               ))}
-              {showThinkingBubble ? (
-                <ThinkingIndicator {...(isEngineChat ? { label: "Codex is working" } : {})} />
+              {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
+                <ThinkingIndicator
+                  startedAtMs={activeTurnTimerStartedAtMs}
+                  label={isEngineChat ? "Codex is working" : "Goat is working"}
+                />
               ) : null}
             </div>
           </div>
@@ -1153,6 +1294,26 @@ function titleFromChatMessages(messages: readonly GoatChatUiMessage[]) {
   return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57).trimEnd()}...`;
 }
 
+function chatMessageDurationMs(
+  message: GoatChatUiMessage,
+  optimisticTurnDurations: ReadonlyMap<string, number>,
+) {
+  if (message.role !== "assistant") return null;
+  const persistedDurationMs = message.metadata?.timing?.durationMs;
+  if (typeof persistedDurationMs === "number") return persistedDurationMs;
+  return optimisticTurnDurations.get(message.id) ?? null;
+}
+
+function latestChatTurnStartedAtMs(messages: readonly GoatChatUiMessage[]) {
+  for (const message of messages.toReversed()) {
+    const createdAt = message.metadata?.timing?.createdAt;
+    if (!createdAt) continue;
+    const startedAtMs = Date.parse(createdAt);
+    if (Number.isFinite(startedAtMs)) return startedAtMs;
+  }
+  return null;
+}
+
 type EngineChatMessageResponse = {
   ok: true;
   sessionId: string;
@@ -1217,6 +1378,51 @@ function appendEngineOptimisticMessages(
     });
   }
   return next;
+}
+
+function defaultCodexComposerUiState(): CodexComposerUiState {
+  return {
+    reasoningEffort: "medium",
+    planModeEnabled: false,
+    goalModeEnabled: false,
+    goalObjective: "",
+    goalTokenBudget: "",
+  };
+}
+
+function codexComposerUiStateForChat(
+  chat:
+    | {
+        id?: string | null;
+        codexComposerSettings?: CodexComposerSettings | null;
+      }
+    | null
+    | undefined,
+  savedByChatId?: ReadonlyMap<string, CodexComposerUiState>,
+): CodexComposerUiState {
+  if (chat?.id) {
+    const saved = savedByChatId?.get(chat.id);
+    if (saved) return saved;
+  }
+  return codexComposerUiStateFromSettings(chat?.codexComposerSettings ?? null);
+}
+
+function codexComposerUiStateFromSettings(
+  settings: CodexComposerSettings | null | undefined,
+): CodexComposerUiState {
+  if (!settings) return defaultCodexComposerUiState();
+  const goalMode = settings.goalMode ?? null;
+  return {
+    reasoningEffort: settings.reasoningEffort,
+    planModeEnabled: settings.planModeEnabled,
+    goalModeEnabled: goalMode !== null,
+    goalObjective: goalMode?.objective ?? "",
+    goalTokenBudget: goalMode?.tokenBudget == null ? "" : String(goalMode.tokenBudget),
+  };
+}
+
+function currentCodexComposerUiState(input: CodexComposerUiState): CodexComposerUiState {
+  return { ...input };
 }
 
 function buildCodexComposerSettings(input: {

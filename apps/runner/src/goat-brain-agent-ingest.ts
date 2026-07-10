@@ -1223,9 +1223,26 @@ async function runIngestAgentLoop(input: {
   let toolCalls = 0;
   let mutations = 0;
   let failedMutatingToolCalls = 0;
+  let cliQueue: Promise<void> = Promise.resolve();
   const traceToolCalls: GoatBrainIngestTraceToolCall[] = [];
   const runCli = input.runCli ?? runGoatBrainAgentCli;
   const commands = input.commands ?? AGENT_CLI_COMMANDS;
+  const runSerializedCli = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const previous = cliQueue.catch(() => {});
+    let release!: () => void;
+    cliQueue = previous.then(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  };
   const tools = {
     goat_brain: ai.tool({
       description: [
@@ -1259,7 +1276,7 @@ async function runIngestAgentLoop(input: {
       execute: async (args) => {
         toolCalls += 1;
         const traceId = `goat_brain_call_${toolCalls}`;
-        const startedAt = new Date().toISOString();
+        let startedAt = new Date().toISOString();
         const sanitizedArgs = sanitizeGoatBrainIngestTraceArgs(args.args ?? []);
         const stdinPreview =
           typeof args.stdin === "string" && args.stdin
@@ -1289,14 +1306,17 @@ async function runIngestAgentLoop(input: {
           });
           return { ok: false, error: invalid };
         }
-        const result = await runCli({
-          cliPath: input.cliPath,
-          root: input.root,
-          argv: [args.command, ...(args.args ?? [])],
-          gatewayApiKey: input.gatewayApiKey,
-          reporting: brainQueryAttribution,
-          ...(args.stdin ? { stdin: args.stdin } : {}),
-          signal: abort.signal,
+        const result = await runSerializedCli(() => {
+          startedAt = new Date().toISOString();
+          return runCli({
+            cliPath: input.cliPath,
+            root: input.root,
+            argv: [args.command, ...(args.args ?? [])],
+            gatewayApiKey: input.gatewayApiKey,
+            reporting: brainQueryAttribution,
+            ...(args.stdin ? { stdin: args.stdin } : {}),
+            signal: abort.signal,
+          });
         });
         if (result.ok && mutating) {
           mutations += 1;

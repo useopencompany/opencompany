@@ -82,6 +82,16 @@ body {
   }
 }
 
+@keyframes goat-timer-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  45% {
+    opacity: 1;
+  }
+}
+
 .session-markdown {
   max-width: 100%;
 }

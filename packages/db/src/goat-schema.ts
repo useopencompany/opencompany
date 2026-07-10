@@ -302,6 +302,7 @@ export type GoatChatMessageDebugTrace = {
   uiMessageParts?: unknown[];
   toolCalls?: unknown[];
   toolResults?: unknown[];
+  durationMs?: number;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
