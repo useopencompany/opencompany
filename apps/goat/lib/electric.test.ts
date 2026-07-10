@@ -122,15 +122,30 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url?.searchParams.get("params[2]")).toBe("goat_task_1");
   });
 
-  it("scopes goat.integrations to the authenticated WorkOS user", () => {
+  it("scopes goat.integrations to the user's personal rows plus the active workspace", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.integrations"),
+      userWorkosId: "user_123",
+      workspaceId: "gws_123",
+    });
+
+    expect(url?.searchParams.get("table")).toBe("goat.integrations");
+    expect(url?.searchParams.get("where")).toBe(
+      '("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2',
+    );
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    expect(url?.searchParams.get("params[2]")).toBe("gws_123");
+  });
+
+  it("scopes goat.integrations to personal rows only without a workspace context", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.integrations"),
       userWorkosId: "user_123",
     });
 
-    expect(url?.searchParams.get("table")).toBe("goat.integrations");
-    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
+    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1 AND "workspace_id" IS NULL');
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
     expect(url?.searchParams.get("params[2]")).toBeNull();
   });

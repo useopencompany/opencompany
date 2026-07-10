@@ -122,16 +122,14 @@ export function GoatSettingsRoute() {
 }
 
 export function GoatIntegrationsSettingsRoute() {
-  const { integrations } = useGoatAppData();
+  const { integrations, workspace } = useGoatAppData();
 
   return (
     <GoatSettingsContent
       title="Integrations"
       description="Connect the tools Goat can read from and act on."
     >
-      <section className="flex flex-col gap-1">
-        <IntegrationRows integrations={integrations} />
-      </section>
+      <IntegrationRows integrations={integrations} isWorkspaceAdmin={workspace.role === "admin"} />
     </GoatSettingsContent>
   );
 }
@@ -168,7 +166,7 @@ export function GoatPreferencesSettingsRoute() {
 }
 
 export function GoatJamieSettingsRoute() {
-  const { activeBrain, integrations } = useGoatAppData();
+  const { activeBrain, integrations, workspace } = useGoatAppData();
   const brainSourcesHref = activeBrain
     ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
     : null;
@@ -182,6 +180,7 @@ export function GoatJamieSettingsRoute() {
       <JamieIntegrationSetup
         initialState={integrations.jamie}
         brainSourcesHref={brainSourcesHref}
+        canManage={workspace.role === "admin"}
       />
     </GoatSettingsContent>
   );
@@ -515,8 +514,19 @@ function localBridgeName() {
   return platform ? `Local Codex (${platform})` : "Local Codex bridge";
 }
 
-function IntegrationRows({ integrations }: { integrations: GoatIntegrationState }) {
-  return <SettingsIntegrationsPanel initialIntegrations={integrations} />;
+function IntegrationRows({
+  integrations,
+  isWorkspaceAdmin,
+}: {
+  integrations: GoatIntegrationState;
+  isWorkspaceAdmin: boolean;
+}) {
+  return (
+    <SettingsIntegrationsPanel
+      initialIntegrations={integrations}
+      isWorkspaceAdmin={isWorkspaceAdmin}
+    />
+  );
 }
 
 function TaskRouteSkeleton({ label }: { label: string }) {

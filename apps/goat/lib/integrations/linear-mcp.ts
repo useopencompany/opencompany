@@ -12,7 +12,7 @@ import {
   saveGoatIntegrationCredential,
 } from "@opencompany/db/goat-integrations";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getGoatAppUrl } from "@/lib/workos";
 
 export const GOAT_LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
@@ -210,6 +210,8 @@ async function upsertGoatLinearIntegration(input: {
         goatIntegrations.provider,
         goatIntegrations.externalId,
       ],
+      // The personal-uniqueness index is partial; the arbiter must match it.
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
       set: {
         connectionLabel: "Linear",
         accountName: "Linear",
