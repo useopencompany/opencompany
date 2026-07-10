@@ -1,8 +1,8 @@
 "use client";
 
 import { Check, Copy, RotateCw } from "lucide-react";
-import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
 import type { GoatJamieProviderState } from "@/lib/integration-state";
 import {
   createOrResetJamieWebhookEndpointAction,
@@ -159,9 +159,7 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
         <ol className="list-decimal space-y-2 pl-6 text-[13px] leading-5 text-ink-subtle">
           <li>Create a Jamie webhook for completed meetings and paste the endpoint URL.</li>
           <li>Set the event to meeting.completed.</li>
-          <li>
-            Select API Key authentication and leave the header name as x-jamie-api-key.
-          </li>
+          <li>Select API Key authentication and leave the header name as x-jamie-api-key.</li>
           <li>Copy the sk_ API key Jamie shows once, paste it here, and save it.</li>
         </ol>
       </section>

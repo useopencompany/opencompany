@@ -1,6 +1,6 @@
 import { loadGoatJamieWebhookContextForApiKey } from "@/lib/integrations/jamie";
-import { handleGoatJamieWebhookDelivery } from "@/lib/integrations/jamie-webhook";
 import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
+import { handleGoatJamieWebhookDelivery } from "@/lib/integrations/jamie-webhook";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

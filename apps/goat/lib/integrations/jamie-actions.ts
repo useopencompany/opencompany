@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import {
   createOrResetGoatJamieWebhookEndpoint,
-  saveGoatJamieWebhookApiKey,
   type GoatJamieWebhookSetup,
+  saveGoatJamieWebhookApiKey,
 } from "@/lib/integrations/jamie";
 
 export type JamieWebhookEndpointActionResult =

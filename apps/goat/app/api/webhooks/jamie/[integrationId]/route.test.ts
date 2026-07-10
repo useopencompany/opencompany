@@ -169,7 +169,6 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     );
     expect(triggerGoatBrainIngestWake).not.toHaveBeenCalled();
   });
-
 });
 
 function routeContext() {
