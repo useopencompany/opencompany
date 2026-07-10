@@ -3,6 +3,7 @@ export * from "./agent-file";
 export * from "./attachments";
 export * from "./brain";
 export * from "./codex-app-server-events";
+export * from "./codex-ui-message-parts";
 export * from "./config";
 export * from "./events";
 export * from "./exa-search";

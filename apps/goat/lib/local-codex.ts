@@ -1,15 +1,21 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
+  applyCodexEventToUiMessageParts,
   type CodexAppServerNormalizedEvent,
+  type CodexUiMessagePart,
+  finalizeCodexUiMessageParts,
   normalizeCodexAppServerEvent,
+  parseCodexUiMessageParts,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import {
+  type GoatChatMessageDebugTrace,
   type GoatLocalBridge,
   type GoatLocalCodexCommandKind,
   type GoatLocalCodexCommandStatus,
   type GoatLocalCodexSession,
+  goatChatMessages,
   goatChatSessions,
   goatLocalBridges,
   goatLocalCodexCommands,
@@ -349,16 +355,21 @@ export async function completeLocalCodexCommand(input: {
     if (!turn) return { ok: true, status: 200, error: null };
 
     const turnPatch: Partial<typeof goatLocalCodexTurns.$inferInsert> = { updatedAt: now };
+    let assistantFinalization: {
+      outcome: "failed" | "interrupted";
+      error: string | null;
+    } | null = null;
     if (input.codexTurnId) turnPatch.codexTurnId = input.codexTurnId;
     if (input.status === "failed") {
       turnPatch.status = "failed";
       turnPatch.error = input.error ?? "Local Codex command failed.";
       turnPatch.completedAt = now;
-      await appendAssistantActivity(turn, `Codex error: ${turnPatch.error}`);
+      assistantFinalization = { outcome: "failed", error: turnPatch.error };
     } else if (command.kind === "interrupt" || command.kind === "close") {
       turnPatch.status = "interrupted";
       turnPatch.error = null;
       turnPatch.completedAt = now;
+      assistantFinalization = { outcome: "interrupted", error: null };
     }
     await getDb()
       .update(goatLocalCodexTurns)
@@ -370,6 +381,14 @@ export async function completeLocalCodexCommand(input: {
           eq(goatLocalCodexTurns.localCodexSessionId, command.localCodexSessionId),
         ),
       );
+    if (assistantFinalization) {
+      await finalizeAssistantMessageParts({
+        assistantMessageId: turn.assistantMessageId,
+        outcome: assistantFinalization.outcome,
+        error: assistantFinalization.error,
+        now,
+      });
+    }
   }
 
   return { ok: true, status: 200, error: null };
@@ -955,16 +974,12 @@ async function applyLocalCodexEventToChat(input: {
     return;
   }
 
-  if (input.event.type === "assistant.completed") {
-    const content = stringPayload(input.event.payload.content);
-    if (content) await setAssistantContent(input.turn.assistantMessageId, content);
-    return;
-  }
-
-  const activity = activityFromLocalCodexEvent(input.event);
-  if (activity) {
-    await appendAssistantActivity(input.turn, activity);
-  }
+  await projectEventIntoAssistantMessage({
+    assistantMessageId: input.turn.assistantMessageId,
+    model: input.localSession.model,
+    event: input.event,
+    now: input.now,
+  });
 
   if (input.event.type === "turn.started") {
     const codexTurnId = stringPayload(input.event.payload.turnId);
@@ -1046,7 +1061,15 @@ async function applyLocalCodexEventToChat(input: {
           eq(goatChatSessions.userWorkosId, input.localSession.userWorkosId),
         ),
       );
-    await setAssistantContentFromCompletedEvent(input.turn.id, input.turn.assistantMessageId);
+    if (status !== "completed") {
+      await finalizeAssistantMessageParts({
+        assistantMessageId: input.turn.assistantMessageId,
+        model: input.localSession.model,
+        outcome: status,
+        error: error || null,
+        now: input.now,
+      });
+    }
   }
 }
 
@@ -1089,89 +1112,107 @@ async function loadLocalCodexTurnForSession(input: {
   return turn ?? null;
 }
 
-async function appendAssistantActivity(turn: LocalCodexTurnRow, activity: string) {
-  const text = `\n\n${activity}`;
-  await appendAssistantContent(turn.assistantMessageId, text);
+async function loadAssistantMessageForProjection(assistantMessageId: string) {
+  const [message] = await getDb()
+    .select({ content: goatChatMessages.content, debugTrace: goatChatMessages.debugTrace })
+    .from(goatChatMessages)
+    .where(and(eq(goatChatMessages.id, assistantMessageId), eq(goatChatMessages.role, "assistant")))
+    .limit(1);
+  return message ?? null;
 }
 
-async function appendAssistantContent(messageId: string, delta: string) {
-  if (!delta) return;
-  const now = new Date();
-  await getDb().execute(sql`
-    UPDATE goat.chat_messages
-    SET content = content || ${delta},
-        updated_at = ${now}
-    WHERE id = ${messageId}
-      AND role = 'assistant'
-  `);
+async function projectEventIntoAssistantMessage(input: {
+  assistantMessageId: string;
+  model: string;
+  event: CodexAppServerNormalizedEvent;
+  now: Date;
+}) {
+  const message = await loadAssistantMessageForProjection(input.assistantMessageId);
+  if (!message) return;
+  const parts = assistantProjectionParts(message);
+  const projection = applyCodexEventToUiMessageParts(parts, input.event);
+  if (!projection.changed) return;
+  await writeAssistantMessageProjection({
+    assistantMessageId: input.assistantMessageId,
+    existingTrace: message.debugTrace,
+    model: input.model,
+    parts: projection.parts,
+    content: projection.content,
+    error: projection.error,
+    now: input.now,
+  });
 }
 
-async function setAssistantContent(messageId: string, content: string) {
-  const now = new Date();
-  await getDb().execute(sql`
-    UPDATE goat.chat_messages
-    SET content = ${content},
-        updated_at = ${now}
-    WHERE id = ${messageId}
-      AND role = 'assistant'
-  `);
+async function finalizeAssistantMessageParts(input: {
+  assistantMessageId: string;
+  model?: string | null;
+  outcome: "failed" | "interrupted";
+  error: string | null;
+  now: Date;
+}) {
+  const message = await loadAssistantMessageForProjection(input.assistantMessageId);
+  if (!message) return;
+  const parts = assistantProjectionParts(message);
+  const projection = finalizeCodexUiMessageParts(parts, input.outcome, input.error);
+  // Always write: even without dangling command parts the error/aborted metadata must land.
+  await writeAssistantMessageProjection({
+    assistantMessageId: input.assistantMessageId,
+    existingTrace: message.debugTrace,
+    model: input.model ?? null,
+    parts: projection.parts,
+    content: projection.content,
+    error: input.outcome === "failed" ? (input.error ?? "Local Codex turn failed.") : null,
+    aborted: input.outcome === "interrupted",
+    now: input.now,
+  });
 }
 
-async function setAssistantContentFromCompletedEvent(turnId: string, assistantMessageId: string) {
-  const [event] = await getDb()
-    .select({ payload: goatLocalCodexEvents.payload })
-    .from(goatLocalCodexEvents)
+async function writeAssistantMessageProjection(input: {
+  assistantMessageId: string;
+  existingTrace: GoatChatMessageDebugTrace | null;
+  model?: string | null;
+  parts: unknown[];
+  content: string;
+  error?: string | null;
+  aborted?: boolean;
+  now: Date;
+}) {
+  const debugTrace: GoatChatMessageDebugTrace = {
+    ...(input.existingTrace ?? {}),
+    schemaVersion: "goat.local_codex.debug.v2",
+    model: input.model ?? input.existingTrace?.model ?? LOCAL_CODEX_DEFAULT_MODEL,
+    uiMessageParts: input.parts,
+  };
+  if (input.error !== undefined) {
+    if (input.error) debugTrace.error = input.error;
+    else delete debugTrace.error;
+  }
+  if (input.aborted !== undefined) {
+    if (input.aborted) debugTrace.aborted = true;
+    else delete debugTrace.aborted;
+  }
+  await getDb()
+    .update(goatChatMessages)
+    .set({ content: input.content, debugTrace, updatedAt: input.now })
     .where(
       and(
-        eq(goatLocalCodexEvents.localCodexTurnId, turnId),
-        eq(goatLocalCodexEvents.type, "assistant.completed"),
+        eq(goatChatMessages.id, input.assistantMessageId),
+        eq(goatChatMessages.role, "assistant"),
       ),
-    )
-    .orderBy(desc(goatLocalCodexEvents.createdAt))
-    .limit(1);
-  const content = stringPayload(event?.payload?.content);
-  if (content) await setAssistantContent(assistantMessageId, content);
+    );
 }
 
-function activityFromLocalCodexEvent(event: CodexAppServerNormalizedEvent) {
-  if (event.type === "reasoning.completed") {
-    const text = truncateActivity(stringPayload(event.payload.text));
-    return text ? `Codex reasoning: ${text}` : "Codex reasoning completed.";
-  }
-  if (event.type === "command.started") {
-    return `Codex command started: ${formatCommand(event.payload.command)}`;
-  }
-  if (event.type === "command.completed") {
-    return `Codex command completed: ${formatCommand(event.payload.command)}`;
-  }
-  if (event.type === "command.failed") {
-    const error = truncateActivity(stringPayload(event.payload.error));
-    return `Codex command failed: ${formatCommand(event.payload.command)}${error ? ` - ${error}` : ""}`;
-  }
-  if (event.type === "turn.completed") {
-    const status = stringPayload(event.payload.status) || "completed";
-    if (status === "completed") return null;
-    const error = truncateActivity(stringPayload(event.payload.error));
-    return `Codex turn ${status}${error ? `: ${error}` : "."}`;
-  }
-  if (event.type === "error") {
-    return `Codex error: ${truncateActivity(stringPayload(event.payload.message))}`;
-  }
-  return null;
-}
-
-function formatCommand(value: unknown) {
-  const text = truncateActivity(stringPayload(value)) || "command";
-  return `\`${text.replaceAll("`", "\\`")}\``;
+function assistantProjectionParts(message: {
+  content: string;
+  debugTrace: GoatChatMessageDebugTrace | null;
+}): CodexUiMessagePart[] {
+  const parts = parseCodexUiMessageParts(message.debugTrace?.uiMessageParts);
+  if (parts.length > 0) return parts;
+  return message.content.trim() ? [{ type: "text", text: message.content }] : [];
 }
 
 function stringPayload(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function truncateActivity(value: string, max = 220) {
-  const compact = value.replace(/\s+/g, " ").trim();
-  return compact.length > max ? `${compact.slice(0, max - 3).trimEnd()}...` : compact;
 }
 
 function safeClientMessageId(value: string | null | undefined) {
