@@ -148,6 +148,12 @@ describe("GoatBrainActivity", () => {
 
     expect(screen.getByText("Agent run trace")).toBeInTheDocument();
     const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveClass("flex", "flex-col", "overflow-hidden");
+    expect(screen.getByTestId("brain-ingest-trace-scroll")).toHaveClass(
+      "min-h-0",
+      "flex-1",
+      "overflow-y-auto",
+    );
     expect(within(dialog).getByText("Pricing teardown reference")).toBeInTheDocument();
     expect(within(dialog).getByText("Trace ID")).toBeInTheDocument();
     expect(within(dialog).getByText("gbjob_1")).toBeInTheDocument();
