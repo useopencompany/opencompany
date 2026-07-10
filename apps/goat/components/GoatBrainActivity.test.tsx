@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainActivity } from "./GoatBrainActivity";
 
 const queryRows = vi.hoisted(() => ({
@@ -49,6 +49,10 @@ describe("GoatBrainActivity", () => {
   beforeEach(() => {
     queryRows.jobs = [];
     queryRows.items = [];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("renders quick links for pages on filed entries", () => {
@@ -126,6 +130,45 @@ describe("GoatBrainActivity", () => {
     expect(screen.getByText("Filing into brain…")).toBeInTheDocument();
     expect(screen.getAllByText("Trace ID")).toHaveLength(2);
     expect(screen.getAllByText("gbjob_1")).toHaveLength(2);
+  });
+
+  it("loads brain-scoped source metadata when the user-scoped source item is absent", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          sourceItems: [
+            item({
+              source_provider: "linear",
+              source_type: "issue",
+              title: "G-57 pricing model follow-up",
+            }),
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    queryRows.jobs = [
+      job({
+        source_provider: "linear",
+        status: "succeeded",
+        completed_at: "2026-07-09T10:01:00.000Z",
+        result: {
+          summary: "Filed one page.",
+        },
+      }),
+    ];
+    queryRows.items = [];
+
+    render(<GoatBrainActivity brainRef="goat_brain_1" />);
+
+    expect(await screen.findAllByText("G-57 pricing model follow-up")).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe("/api/brain-activity/source-items");
+    expect(url.searchParams.get("brain_ref")).toBe("goat_brain_1");
+    expect(url.searchParams.get("source_item_ids")).toBe("gbsrc_1");
+
+    fetchMock.mockRestore();
   });
 
   it("opens a completed agent trace with collapsed details and raw JSON", async () => {
