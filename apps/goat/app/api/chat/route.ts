@@ -10,6 +10,7 @@ import {
   recordGoatCounter,
   startGoatSpan,
 } from "@opencompany/goat-observability";
+import { createLogger } from "@opencompany/observability";
 import { convertToModelMessages, createGateway, smoothStream, stepCountIs, streamText } from "ai";
 import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
@@ -71,6 +72,8 @@ const GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS = [
   "query",
   "doctor",
 ] as const satisfies readonly GoatBrainCliCommand[];
+
+const logger = createLogger({ service: "opencompany-goat", runtime: "goat-chat" });
 
 type ChatRequestBody = {
   sessionId?: unknown;
@@ -134,8 +137,10 @@ export async function POST(request: Request): Promise<Response> {
     const failureCategory =
       outcome === "failure" && error
         ? chatSpan.fail(error, attributes)
-        : (attributes["goat.failure_category"] as string | undefined);
-    const finalAttributes = {
+        : outcome === "failure"
+          ? ((attributes["goat.failure_category"] as string | undefined) ?? "unknown")
+          : (attributes["goat.failure_category"] as string | undefined);
+    const finalAttributes: Record<string, string | number | boolean | null | undefined> = {
       ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
       "goat.model": parsed.value.model,
       "goat.outcome": outcome,
@@ -148,6 +153,22 @@ export async function POST(request: Request): Promise<Response> {
       outcome,
       attributes: finalAttributes,
     });
+    const logFields = {
+      event: "opencompany.goat_chat_turn_finished",
+      outcome,
+      ...(failureCategory ? { failure_category: failureCategory } : {}),
+      chat_session_id: finalAttributes["goat.chat_session_id"],
+      chat_message_id: finalAttributes["goat.chat_message_id"],
+      task_id: finalAttributes["goat.task_id"],
+      model: finalAttributes["goat.model"],
+      task_started: finalAttributes["goat.task_started"],
+      duration_ms: durationMs,
+    };
+    if (outcome === "success") {
+      logger.info("Goat chat turn finished", logFields);
+    } else {
+      logger.warn("Goat chat turn finished", logFields);
+    }
   };
 
   let turn: Awaited<ReturnType<typeof createGoatChatUserTurn>>;
@@ -413,13 +434,17 @@ export async function POST(request: Request): Promise<Response> {
       error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
       finishReason,
     };
-    finishChatTelemetry(generationSignal.aborted ? "aborted" : "failure", {
-      "goat.chat_session_id": turn.session.id,
-      "goat.chat_message_id": turn.userMessage.id,
-      "goat.model": turn.session.model,
-      "goat.task_started": Boolean(startedTask),
-      "goat.task_id": startedTask?.id,
-    });
+    finishChatTelemetry(
+      generationSignal.aborted ? "aborted" : "failure",
+      {
+        "goat.chat_session_id": turn.session.id,
+        "goat.chat_message_id": turn.userMessage.id,
+        "goat.model": turn.session.model,
+        "goat.task_started": Boolean(startedTask),
+        "goat.task_id": startedTask?.id,
+      },
+      error,
+    );
     assistantPersistPromise = Promise.resolve(
       persistGoatChatAssistantMessage(
         {

@@ -152,6 +152,74 @@ inputs, and tool results are captured verbatim. Input/output capture is governed
 `wrapAISDK` defaults (`recordInputs`/`recordOutputs`). Treat Braintrust access as production data
 access, and keep Braintrust disabled in environments where full AI content must not leave the platform.
 
+## Goat Run Outcomes
+
+Goat chat turns, task runs, and Brain agent ingest jobs emit a first-layer health signal through
+`@opencompany/goat-observability` when `GOAT_OBSERVABILITY_ENABLED=true` and
+`GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+
+Use SigNoz for the aggregate view:
+
+- `goat.runs_total` grouped by `goat.surface`, `goat.outcome`, and `goat.failure_category`
+- `goat.run_duration_ms` grouped by `goat.surface`
+- `goat.chat.turns_total` and `goat.chat.turn_duration_ms`
+- `goat.task_runs_total` and `goat.task_run_duration_ms`
+- `goat.brain_ingest_runs_total` and `goat.brain_ingest_run_duration_ms` for Brain agent ingest jobs
+
+Safe metric dimensions are intentionally low-cardinality: surface, outcome, failure category, model,
+status, stage, task-started boolean, Brain ingest kind/source provider/source type, and web-search
+provider/operation. Do not put run IDs, user IDs, source refs, prompts, tool args, or result text on
+metrics.
+
+Use traces or structured logs for investigation IDs:
+
+| Surface | Terminal event | Primary DB lookup IDs |
+|---|---|---|
+| Goat chat | `opencompany.goat_chat_turn_finished` | `chat_session_id`, `chat_message_id`, optional `task_id` |
+| Goat task | `opencompany.goat_task_run_finished` | `task_id`, `display_id` |
+| Brain agent ingest | `opencompany.goat_brain_ingest_run_finished` | `job_id`, `source_item_id`, `brain_ref` |
+
+Suggested SigNoz dashboard panels:
+
+- Total Goat runs: `sum(goat.runs_total)` grouped by `goat.surface`
+- Success rate: successful runs divided by total runs, grouped by `goat.surface`
+- Failure rate: failed runs divided by total runs, grouped by `goat.surface`
+- Failures by category: `sum(goat.runs_total{goat.outcome="failure"})` grouped by
+  `goat.surface` and `goat.failure_category`
+- p95 duration: `p95(goat.run_duration_ms)` grouped by `goat.surface`
+- Brain agent ingest failures by source: `goat.brain_ingest_runs_total` grouped by
+  `goat.source_provider` and `goat.source_type`
+
+Suggested first alerts:
+
+- Goat failure rate above 10% for 15 minutes, grouped by `goat.surface`.
+- Brain agent ingest has zero successful runs for 30 minutes while failures are present.
+- Any `goat.failure_category="auth"` spike, grouped by surface.
+- p95 `goat.run_duration_ms` doubles against the previous hour for chat or tasks.
+
+For DB follow-up:
+
+```sql
+-- Goat chat
+select id, title, model, engine, closed_at, updated_at
+from goat.chat_sessions
+where id = '<chat_session_id>';
+
+select id, role, task_id, created_at, updated_at
+from goat.chat_messages
+where id = '<chat_message_id>';
+
+-- Goat task
+select id, display_id, status, stage, error, model, updated_at
+from goat.tasks
+where id = '<task_id>' or display_id = '<display_id>';
+
+-- Brain ingest
+select id, source_item_id, status, attempts, last_error, completed_at, updated_at
+from goat.brain_ingest_jobs
+where id = '<job_id>';
+```
+
 ## Failed Agent Run Checklist
 
 When a user reports that an agent failed:

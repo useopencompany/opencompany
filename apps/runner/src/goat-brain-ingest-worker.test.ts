@@ -7,6 +7,29 @@ import {
 } from "./goat-brain-ingest-worker";
 import { buildJamieMeetingBrainWrites } from "./goat-brain-jamie-writes";
 
+const telemetry = vi.hoisted(() => ({
+  recordGoatBrainIngestRun: vi.fn(),
+  startGoatSpan: vi.fn(() => ({
+    setAttributes: vi.fn(),
+    runInContext: vi.fn((run: () => unknown) => run()),
+    fail: vi.fn(() => "unknown"),
+    end: vi.fn(),
+  })),
+  withGoatSpan: vi.fn(async (_name: string, _attributes: unknown, run: () => Promise<unknown>) =>
+    run(),
+  ),
+}));
+
+vi.mock("@opencompany/goat-observability", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
+  return {
+    ...actual,
+    recordGoatBrainIngestRun: telemetry.recordGoatBrainIngestRun,
+    startGoatSpan: telemetry.startGoatSpan,
+    withGoatSpan: telemetry.withGoatSpan,
+  };
+});
+
 function jamieItem(segmentCount = 2) {
   return normalizeJamieMeetingCompletedWebhook(
     {
@@ -141,6 +164,19 @@ describe("Goat Brain ingest worker", () => {
       env: { vercelAiGatewayApiKey: "gw_test", blobReadWriteToken: undefined },
     });
     expect(complete).toHaveBeenCalledWith(expect.objectContaining({ result: { handled: true } }));
+    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "success",
+        attributes: expect.objectContaining({
+          "goat.brain_ingest_job_id": "gbjob_123",
+          "goat.brain_source_item_id": "gbsrc_123",
+          "goat.status": "succeeded",
+          "goat.ingest_kind": "brain_source_item_ingest",
+          "goat.source_provider": "jamie",
+          "goat.source_type": "meeting",
+        }),
+      }),
+    );
     expect(skip).not.toHaveBeenCalled();
     expect(fail).not.toHaveBeenCalled();
   });
@@ -228,8 +264,110 @@ describe("Goat Brain ingest worker", () => {
       });
 
       expect(skip).toHaveBeenCalledWith(expect.objectContaining({ result, reason }));
+      expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: "skipped",
+          attributes: expect.objectContaining({
+            "goat.brain_ingest_job_id": "gbjob_123",
+            "goat.brain_source_item_id": "gbsrc_123",
+            "goat.status": "skipped",
+          }),
+        }),
+      );
       expect(complete).not.toHaveBeenCalled();
       expect(fail).not.toHaveBeenCalled();
     }
+  });
+
+  it("records failed brain ingest attempts with investigation ids", async () => {
+    const normalizedPayload = {
+      sourceProvider: "jamie" as const,
+      sourceType: "meeting" as const,
+      externalId: "external_123",
+      sourceRef: "jamie:meeting:external_123",
+      title: "Registry Test",
+      occurredAt: "2026-01-01T10:00:00.000Z",
+      capturedAt: "2026-01-01T10:01:00.000Z",
+      contentHash: "hash_123",
+      contentHashInput: {},
+      content: {},
+    };
+    const run = vi.fn(async () => {
+      throw new Error("gateway stream failed");
+    });
+    const complete = vi.fn(async () => true);
+    const skip = vi.fn(async () => true);
+    const fail = vi.fn(async () => true);
+    const store: GoatBrainIngestStore = {
+      claimNext: vi.fn(async () => null),
+      heartbeat: vi.fn(async () => true),
+      complete,
+      skip,
+      fail,
+    };
+
+    await expect(
+      runClaimedGoatBrainIngestJob({
+        env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
+        store,
+        handlers: [
+          {
+            descriptor: {
+              kind: "brain_agent_ingest",
+              sourceProvider: "jamie",
+              sourceType: "meeting",
+            },
+            isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+            run,
+          },
+        ],
+        job: {
+          id: "gbjob_123",
+          sourceItemId: "gbsrc_123",
+          userWorkosId: "user_123",
+          sourceProvider: "jamie",
+          sourceConnectionId: "gint_123",
+          integrationId: "gint_123",
+          brainRef: "gbrain_123",
+          sourceType: "meeting",
+          kind: "brain_agent_ingest",
+          contentHash: "hash_123",
+          status: "running",
+          attempts: 5,
+          nextRunAt: new Date("2026-01-01T10:00:00.000Z"),
+          leaseId: "lease_123",
+          leaseOwner: "runner_123",
+          leaseExpiresAt: new Date("2026-01-01T10:05:00.000Z"),
+          lastError: null,
+          result: {},
+          completedAt: null,
+          createdAt: new Date("2026-01-01T10:00:00.000Z"),
+          updatedAt: new Date("2026-01-01T10:00:00.000Z"),
+          normalizedPayload,
+        },
+      }),
+    ).rejects.toThrow("gateway stream failed");
+
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "gbjob_123",
+        sourceItemId: "gbsrc_123",
+        attempts: 5,
+        error: "gateway stream failed",
+      }),
+    );
+    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "failure",
+        attributes: expect.objectContaining({
+          "goat.brain_ingest_job_id": "gbjob_123",
+          "goat.brain_source_item_id": "gbsrc_123",
+          "goat.status": "failed",
+          "goat.failure_category": "unknown",
+        }),
+      }),
+    );
+    expect(complete).not.toHaveBeenCalled();
+    expect(skip).not.toHaveBeenCalled();
   });
 });

@@ -52,6 +52,7 @@
     "setup:dev": "node scripts/setup.mjs --dev",
     "setup:personal": "node scripts/setup.mjs --personal-env",
     "setup:stripe": "node scripts/setup.mjs --stripe",
+    "mcp:configure": "node scripts/configure-agent-mcp.mjs",
     "env:pull": "node scripts/setup.mjs --pull-env",
     "github:tunnel": "node scripts/github-tunnel.mjs",
     "db:generate": "bun --filter @opencompany/db db:generate",

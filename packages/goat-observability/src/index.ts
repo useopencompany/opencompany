@@ -21,9 +21,14 @@ export const GOAT_SPANS = {
   taskToolCall: "goat.task.tool_call",
   taskComplete: "goat.task.complete",
   taskFail: "goat.task.fail",
+  brainIngestRun: "goat.brain_ingest.run",
+  brainIngestComplete: "goat.brain_ingest.complete",
+  brainIngestFail: "goat.brain_ingest.fail",
 } as const;
 
 export const GOAT_METRICS = {
+  runsTotal: "goat.runs_total",
+  runDurationMs: "goat.run_duration_ms",
   chatTurnsTotal: "goat.chat.turns_total",
   chatTurnDurationMs: "goat.chat.turn_duration_ms",
   chatTasksStartedTotal: "goat.chat.tasks_started_total",
@@ -34,11 +39,14 @@ export const GOAT_METRICS = {
   taskRunsTotal: "goat.task_runs_total",
   taskRunDurationMs: "goat.task_run_duration_ms",
   taskStageDurationMs: "goat.task_stage_duration_ms",
+  brainIngestRunsTotal: "goat.brain_ingest_runs_total",
+  brainIngestRunDurationMs: "goat.brain_ingest_run_duration_ms",
   toolCallsTotal: "goat.tool_calls_total",
   toolCallDurationMs: "goat.tool_call_duration_ms",
   modelUsageTokens: "goat.model_usage_tokens",
 } as const;
 
+export type GoatRunSurface = "chat" | "task" | "brain_ingest";
 export type GoatOutcome = "success" | "failure" | "skipped" | "aborted";
 
 export type GoatFailureCategory =
@@ -115,6 +123,23 @@ const SENSITIVE_ATTRIBUTE_PARTS = [
 ];
 
 const SAFE_ATTRIBUTE_KEYS = new Set(["goat.token_direction"]);
+const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
+  "goat.surface",
+  "goat.outcome",
+  "goat.failure_category",
+  "goat.model",
+  "goat.engine",
+  "goat.status",
+  "goat.stage",
+  "goat.attempt",
+  "goat.task_started",
+  "goat.ingest_kind",
+  "goat.source_provider",
+  "goat.source_type",
+  "goat.web_search_provider",
+  "goat.web_search_operation",
+  "goat.token_direction",
+]);
 
 export function isGoatObservabilityEnabled(env: EnvLike = readEnv()) {
   return enabledFromEnv(env.GOAT_OBSERVABILITY_ENABLED);
@@ -189,6 +214,19 @@ export function sanitizeGoatAttributes(attributes: GoatAttributes | undefined): 
   const sanitized: Attributes = {};
   for (const [key, value] of Object.entries(attributes)) {
     if (!isSafeAttributeKey(key)) continue;
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+export function sanitizeGoatMetricAttributes(attributes: GoatAttributes | undefined): Attributes {
+  if (!attributes) return {};
+  const sanitized: Attributes = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (!LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS.has(key)) continue;
     if (value === null || value === undefined) continue;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
       sanitized[key] = value;
@@ -322,14 +360,44 @@ export function recordGoatCounter(name: string, value = 1, attributes?: GoatAttr
   if (!isGoatObservabilityEnabled()) return;
   const counter = counters.get(name) ?? meter.createCounter(name);
   counters.set(name, counter);
-  counter.add(value, sanitizeGoatAttributes(attributes));
+  counter.add(value, sanitizeGoatMetricAttributes(attributes));
 }
 
 export function recordGoatHistogram(name: string, value: number, attributes?: GoatAttributes) {
   if (!isGoatObservabilityEnabled()) return;
   const histogram = histograms.get(name) ?? meter.createHistogram(name, { unit: "ms" });
   histograms.set(name, histogram);
-  histogram.record(value, sanitizeGoatAttributes(attributes));
+  histogram.record(value, sanitizeGoatMetricAttributes(attributes));
+}
+
+export function recordGoatRunOutcome(input: {
+  surface: GoatRunSurface;
+  durationMs: number;
+  outcome: GoatOutcome;
+  attributes?: GoatAttributes;
+}) {
+  const attributes = {
+    ...input.attributes,
+    "goat.surface": input.surface,
+    "goat.outcome": input.outcome,
+  };
+  recordGoatCounter(GOAT_METRICS.runsTotal, 1, attributes);
+  recordGoatHistogram(GOAT_METRICS.runDurationMs, input.durationMs, attributes);
+
+  if (input.surface === "chat") {
+    recordGoatCounter(GOAT_METRICS.chatTurnsTotal, 1, attributes);
+    recordGoatHistogram(GOAT_METRICS.chatTurnDurationMs, input.durationMs, attributes);
+    return;
+  }
+
+  if (input.surface === "task") {
+    recordGoatCounter(GOAT_METRICS.taskRunsTotal, 1, attributes);
+    recordGoatHistogram(GOAT_METRICS.taskRunDurationMs, input.durationMs, attributes);
+    return;
+  }
+
+  recordGoatCounter(GOAT_METRICS.brainIngestRunsTotal, 1, attributes);
+  recordGoatHistogram(GOAT_METRICS.brainIngestRunDurationMs, input.durationMs, attributes);
 }
 
 export function recordGoatChatTurn(input: {
@@ -337,9 +405,7 @@ export function recordGoatChatTurn(input: {
   outcome: GoatOutcome;
   attributes?: GoatAttributes;
 }) {
-  const attributes = { ...input.attributes, "goat.outcome": input.outcome };
-  recordGoatCounter(GOAT_METRICS.chatTurnsTotal, 1, attributes);
-  recordGoatHistogram(GOAT_METRICS.chatTurnDurationMs, input.durationMs, attributes);
+  recordGoatRunOutcome({ ...input, surface: "chat" });
 }
 
 export function recordGoatTaskDispatch(input: {
@@ -357,9 +423,15 @@ export function recordGoatTaskRun(input: {
   outcome: GoatOutcome;
   attributes?: GoatAttributes;
 }) {
-  const attributes = { ...input.attributes, "goat.outcome": input.outcome };
-  recordGoatCounter(GOAT_METRICS.taskRunsTotal, 1, attributes);
-  recordGoatHistogram(GOAT_METRICS.taskRunDurationMs, input.durationMs, attributes);
+  recordGoatRunOutcome({ ...input, surface: "task" });
+}
+
+export function recordGoatBrainIngestRun(input: {
+  durationMs: number;
+  outcome: GoatOutcome;
+  attributes?: GoatAttributes;
+}) {
+  recordGoatRunOutcome({ ...input, surface: "brain_ingest" });
 }
 
 export function recordGoatToolCall(input: {

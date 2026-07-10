@@ -7,7 +7,9 @@ import {
   hashGoatUserId,
   isGoatObservabilityEnabled,
   recordGoatCounter,
+  recordGoatRunOutcome,
   sanitizeGoatAttributes,
+  sanitizeGoatMetricAttributes,
   startGoatSpan,
 } from ".";
 
@@ -33,6 +35,27 @@ describe("@opencompany/goat-observability", () => {
       "goat.tool_name": "exa_search",
       "goat.token_direction": "input",
       "goat.count": 2,
+    });
+  });
+
+  it("keeps metric labels low-cardinality", () => {
+    expect(
+      sanitizeGoatMetricAttributes({
+        "goat.surface": "task",
+        "goat.outcome": "failure",
+        "goat.failure_category": "tool",
+        "goat.task_id": "goat_task_1",
+        "goat.chat_session_id": "goat_chat_1",
+        "goat.brain_ingest_job_id": "goat_brain_ingest_1",
+        "goat.user_id_hash": "abc123",
+        "goat.stage": "running",
+        "goat.prompt": "secret prompt",
+      }),
+    ).toEqual({
+      "goat.surface": "task",
+      "goat.outcome": "failure",
+      "goat.failure_category": "tool",
+      "goat.stage": "running",
     });
   });
 
@@ -122,6 +145,14 @@ describe("@opencompany/goat-observability", () => {
     vi.stubEnv("GOAT_OBSERVABILITY_ENABLED", "false");
     expect(isGoatObservabilityEnabled()).toBe(false);
     expect(() => recordGoatCounter("goat.test", 1, { "goat.task_id": "task" })).not.toThrow();
+    expect(() =>
+      recordGoatRunOutcome({
+        surface: "brain_ingest",
+        durationMs: 1,
+        outcome: "success",
+        attributes: { "goat.brain_ingest_job_id": "job" },
+      }),
+    ).not.toThrow();
     const span = startGoatSpan("goat.test", { "goat.task_id": "task" });
     expect(() => {
       span.setAttributes({ "goat.status": "running" });

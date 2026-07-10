@@ -898,6 +898,32 @@ export async function runClaimedGoatTask(input: {
   let latestDebugTrace: GoatTaskDebugTrace | undefined =
     Object.keys(input.task.debugTrace).length > 0 ? input.task.debugTrace : undefined;
 
+  const logTaskRunFinished = (input: {
+    outcome: "success" | "failure" | "aborted";
+    status: string;
+    stage: string;
+    failureCategory?: string;
+  }) => {
+    const durationMs = Math.round(performance.now() - runStartedAt);
+    const logFields = {
+      event: "opencompany.goat_task_run_finished",
+      outcome: input.outcome,
+      ...(input.failureCategory ? { failure_category: input.failureCategory } : {}),
+      task_id: baseAttributes["goat.task_id"],
+      display_id: baseAttributes["goat.display_id"],
+      model: currentModel,
+      status: input.status,
+      stage: input.stage,
+      attempts: baseAttributes["goat.attempt"],
+      duration_ms: durationMs,
+    };
+    if (input.outcome === "success") {
+      logger.info("Goat task run finished", logFields);
+    } else {
+      logger.warn("Goat task run finished", logFields);
+    }
+  };
+
   const recordCurrentStageDuration = () => {
     recordGoatHistogram(
       GOAT_METRICS.taskStageDurationMs,
@@ -923,6 +949,12 @@ export async function runClaimedGoatTask(input: {
         ...baseAttributes,
         "goat.failure_category": "lease_lost",
       },
+    });
+    logTaskRunFinished({
+      outcome: "aborted",
+      status: "running",
+      stage: currentStage,
+      failureCategory: "lease_lost",
     });
   };
 
@@ -1314,6 +1346,11 @@ export async function runClaimedGoatTask(input: {
         "goat.stage": "completed",
       },
     });
+    logTaskRunFinished({
+      outcome: "success",
+      status: "succeeded",
+      stage: "completed",
+    });
   } catch (error) {
     if (leaseActive) {
       const active = await runSpan.runInContext(() =>
@@ -1352,6 +1389,12 @@ export async function runClaimedGoatTask(input: {
           "goat.stage": "failed",
           "goat.failure_category": failureCategory,
         },
+      });
+      logTaskRunFinished({
+        outcome: "failure",
+        status: "failed",
+        stage: "failed",
+        failureCategory,
       });
     } else {
       finishAbortedTelemetry();

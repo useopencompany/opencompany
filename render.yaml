@@ -44,6 +44,13 @@ services:
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
+      # Optional Goat OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.
+      - key: GOAT_OBSERVABILITY_ENABLED
+        sync: false
+      - key: GOAT_OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: GOAT_OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
       # LLM broker (llm-broker.ts). The broker URL defaults to Render's own
       # RENDER_EXTERNAL_URL, so these are optional overrides: the kill switch reverts
       # sandboxed CLIs to direct key injection without a deploy, and the codex key is the
