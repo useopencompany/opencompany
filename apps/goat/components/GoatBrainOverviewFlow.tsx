@@ -1,7 +1,14 @@
 "use client";
 
 import { Brain, Settings2, UserRound, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { GoatBrainSummaryView, GoatWorkspaceView } from "@/components/GoatAppDataProvider";
 import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
 import {
@@ -31,6 +38,20 @@ type FlowLink = {
   kind: "source" | "person";
   active: boolean;
 };
+
+function subscribeToReducedMotion(onStoreChange: () => void) {
+  const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+  query.addEventListener("change", onStoreChange);
+  return () => query.removeEventListener("change", onStoreChange);
+}
+
+function usePrefersReducedMotion() {
+  return useSyncExternalStore(
+    subscribeToReducedMotion,
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    () => false,
+  );
+}
 
 export function GoatBrainOverviewFlow({
   brain,
@@ -117,15 +138,7 @@ function FlowDiagram({
   const personRefs = useRef(new Map<string, HTMLDivElement>());
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [links, setLinks] = useState<FlowLink[]>([]);
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduceMotion(query.matches);
-    const onChange = (event: MediaQueryListEvent) => setReduceMotion(event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
+  const reduceMotion = usePrefersReducedMotion();
 
   const visiblePeople = people ? people.slice(0, MAX_VISIBLE_PEOPLE) : [];
   const overflowCount = people ? people.length - visiblePeople.length : 0;
