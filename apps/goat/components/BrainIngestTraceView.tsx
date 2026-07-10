@@ -39,15 +39,18 @@ export function BrainIngestTraceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(760px,calc(100vh-48px))] max-w-[760px] gap-0 overflow-hidden p-0">
-        <DialogHeader className="border-b border-border px-5 py-4">
+      <DialogContent className="flex max-h-[min(760px,calc(100vh-48px))] max-w-[760px] flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
           <DialogTitle className="text-[15px]">Agent run trace</DialogTitle>
           <DialogDescription className="text-[12px]">
             {trace.model} - {trace.steps} {trace.steps === 1 ? "step" : "steps"} -{" "}
             {trace.toolCallCount} {trace.toolCallCount === 1 ? "tool call" : "tool calls"}
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 overflow-y-auto px-5 py-4">
+        <div
+          data-testid="brain-ingest-trace-scroll"
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+        >
           <BrainIngestTraceView trace={trace} traceId={traceId} sourceTitle={sourceTitle} />
         </div>
       </DialogContent>
