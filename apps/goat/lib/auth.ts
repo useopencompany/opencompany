@@ -14,6 +14,7 @@ import {
   listAccessibleGoatBrains,
   listGoatWorkspacesForUser,
 } from "@opencompany/db/goat-workspaces";
+import { recordGoatSignup } from "@opencompany/goat-observability";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import type { User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
@@ -39,34 +40,43 @@ export type GoatAuthContext = {
 export async function syncGoatUser(authUser: WorkOSUser) {
   const db = getDb();
   const now = new Date();
+  const values = {
+    workosUserId: authUser.id,
+    email: authUser.email,
+    firstName: authUser.firstName,
+    lastName: authUser.lastName,
+    avatarUrl: authUser.profilePictureUrl,
+    updatedAt: now,
+  };
 
-  const [user] = await db
+  const [insertedUser] = await db
     .insert(goatUsers)
-    .values({
-      workosUserId: authUser.id,
-      email: authUser.email,
-      firstName: authUser.firstName,
-      lastName: authUser.lastName,
-      avatarUrl: authUser.profilePictureUrl,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: goatUsers.workosUserId,
-      set: {
-        email: authUser.email,
-        firstName: authUser.firstName,
-        lastName: authUser.lastName,
-        avatarUrl: authUser.profilePictureUrl,
-        updatedAt: now,
-      },
-    })
+    .values(values)
+    .onConflictDoNothing({ target: goatUsers.workosUserId })
     .returning();
 
-  if (!user) {
+  if (insertedUser) {
+    recordGoatSignup({ source: "user_sync" });
+    return insertedUser;
+  }
+
+  const [updatedUser] = await db
+    .update(goatUsers)
+    .set({
+      email: values.email,
+      firstName: values.firstName,
+      lastName: values.lastName,
+      avatarUrl: values.avatarUrl,
+      updatedAt: values.updatedAt,
+    })
+    .where(eq(goatUsers.workosUserId, authUser.id))
+    .returning();
+
+  if (!updatedUser) {
     throw new Error("Unable to sync the Goat user.");
   }
 
-  return user;
+  return updatedUser;
 }
 
 function defaultWorkspaceName(user: typeof goatUsers.$inferSelect) {
