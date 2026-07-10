@@ -115,7 +115,7 @@ export function loadEnv(): RunnerEnv {
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.5",
     goatCodexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
-      30 * 60_000,
+      5 * 60_000,
     ),
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
