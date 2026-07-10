@@ -395,16 +395,11 @@ describe("POST /api/chat", () => {
         },
       }),
     );
-    const output = await brainToolPromise;
 
     expect(response.status).toBe(200);
-    expect(output).toEqual({
-      ok: false,
-      exitCode: null,
-      stdout: "",
-      stderr: "",
-      error: "Only workspace admins can edit the brain.",
-    });
+    // Write commands are not in the read-only enum, so they never reach the
+    // runner: normalization rejects them before runBrainCli is called.
+    await expect(brainToolPromise).rejects.toThrow("goat_brain command is invalid");
     expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
     expect(captureToGoatBrainInbox).not.toHaveBeenCalled();
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
