@@ -97,7 +97,8 @@ This is the main automated path. Both source kinds run on the same queue and wor
 
 ```text
 Jamie webhook (meeting.completed)
-  POST /api/webhooks/jamie/[integrationId]
+  POST /api/webhooks/jamie
+    resolve integration from saved x-jamie-api-key hash
     normalize payload -> upsert goat.brain_source_items (idempotent on content hash)
     enqueue goat.brain_ingest_jobs (kind: brain_agent_ingest)
     wake the runner via /internal/goat/brain-ingest/wake

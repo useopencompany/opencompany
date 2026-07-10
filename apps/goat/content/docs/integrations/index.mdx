@@ -1,0 +1,22 @@
+---
+title: Integrations
+description: How external tools connect to Goat and feed the Brain.
+---
+
+## What integrations do
+
+Integrations connect external systems to Goat so chat, tasks, and Brain ingestion can work from live company context. Some integrations expose tools to agents; others feed source items into the Brain ingestion queue.
+
+## Current categories
+
+- **OAuth tool connectors** let Goat call a provider API on the user's behalf. Gmail, Google Calendar, GitHub, Linear MCP, and Slack use this shape.
+- **Brain source connectors** turn external activity into `goat.brain_source_items` and enqueue durable Brain ingestion. Jamie meeting notes, Slack conversations, Linear issue activity, and chat captures use this shape.
+- **Webhook connectors** receive provider deliveries at Goat API routes. Incoming payloads must authenticate at the route boundary before they can enqueue work.
+
+## Setup docs
+
+- [Jamie](/docs/integrations/jamie) covers the completed-meeting webhook that feeds Goat Brain ingestion.
+
+## Where to configure
+
+Personal OAuth integrations live in `/settings`. Brain source routing lives on each brain's settings page under Sources. Jamie setup starts in `/settings/jamie`, then the source can be enabled or disabled per brain once the connection exists.

@@ -1,8 +1,10 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import {
   createOrResetGoatJamieWebhookEndpoint,
+  saveGoatJamieWebhookApiKey,
   type GoatJamieWebhookSetup,
 } from "@/lib/integrations/jamie";
 
@@ -19,17 +21,42 @@ export type JamieWebhookEndpointActionResult =
 export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWebhookEndpointActionResult> {
   const { user } = await currentGoatUser();
   try {
+    const setup = await createOrResetGoatJamieWebhookEndpoint({
+      userWorkosId: user.workosUserId,
+    });
+    revalidatePath("/", "layout");
     return {
       ok: true,
-      setup: await createOrResetGoatJamieWebhookEndpoint({
-        userWorkosId: user.workosUserId,
-      }),
+      setup,
     };
   } catch (error) {
     console.error("[goat-jamie] Failed to create Jamie webhook endpoint", error);
     return {
       ok: false,
       error: "Could not create a Jamie webhook endpoint.",
+    };
+  }
+}
+
+export async function saveJamieWebhookApiKeyAction(
+  apiKey: string,
+): Promise<JamieWebhookEndpointActionResult> {
+  const { user } = await currentGoatUser();
+  try {
+    const setup = await saveGoatJamieWebhookApiKey({
+      userWorkosId: user.workosUserId,
+      apiKey,
+    });
+    revalidatePath("/", "layout");
+    return {
+      ok: true,
+      setup,
+    };
+  } catch (error) {
+    console.error("[goat-jamie] Failed to save Jamie webhook API key", error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not save the Jamie API key.",
     };
   }
 }

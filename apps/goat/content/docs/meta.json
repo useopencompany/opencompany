@@ -1,4 +1,4 @@
 {
   "title": "Goat docs",
-  "pages": ["index", "architecture", "brain", "docs-workflow"]
+  "pages": ["index", "architecture", "brain", "integrations", "docs-workflow"]
 }

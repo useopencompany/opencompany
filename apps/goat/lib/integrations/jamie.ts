@@ -23,8 +23,9 @@ export {
   GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
 };
 
-const JAMIE_EXTERNAL_ID = "jamie_webhook";
 const JAMIE_SETUP_STATUS_REASON = "Waiting for Jamie to send the first valid webhook delivery.";
+const JAMIE_UNBOUND_EXTERNAL_ID_PREFIX = "jamie_webhook:";
+const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
 
 type JamieWebhookCredentialPayload = {
   apiKeyHash: string | null;
@@ -37,6 +38,7 @@ export type GoatJamieWebhookSetup = {
   integrationId: string;
   webhookUrl: string;
   headerName: typeof GOAT_JAMIE_WEBHOOK_SECRET_HEADER;
+  apiKeyConfigured: boolean;
 };
 
 export type GoatJamieWebhookContext = {
@@ -47,8 +49,8 @@ export type GoatJamieWebhookContext = {
 };
 
 export type GoatJamieWebhookApiKeyVerification =
-  | { valid: true; shouldBind: boolean; apiKey: string }
-  | { valid: false; shouldBind: false; apiKey: null };
+  | { valid: true; apiKey: string }
+  | { valid: false; apiKey: null };
 
 export async function getGoatJamieIntegrationState(
   userWorkosId: string,
@@ -56,6 +58,7 @@ export async function getGoatJamieIntegrationState(
   const [row] = await getDb()
     .select({
       id: goatIntegrations.id,
+      externalId: goatIntegrations.externalId,
       status: goatIntegrations.status,
       accountName: goatIntegrations.accountName,
       statusReason: goatIntegrations.statusReason,
@@ -79,6 +82,7 @@ export async function getGoatJamieIntegrationState(
       statusReason: null,
       integrationId: null,
       webhookUrl: null,
+      apiKeyConfigured: false,
     };
   }
 
@@ -89,7 +93,9 @@ export async function getGoatJamieIntegrationState(
     accountName: row.accountName,
     statusReason: row.statusReason,
     integrationId: row.id,
-    webhookUrl: goatJamieWebhookUrl(row.id),
+    webhookUrl: goatJamieWebhookUrl(),
+    apiKeyConfigured:
+      row.status === "connected" || row.externalId.startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX),
   };
 }
 
@@ -98,38 +104,56 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
 }): Promise<GoatJamieWebhookSetup> {
   const db = getDb();
   const now = new Date();
+  const [existing] = await db
+    .select({ id: goatIntegrations.id })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        ne(goatIntegrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(goatIntegrations.updatedAt))
+    .limit(1);
 
-  const [integration] = await db
-    .insert(goatIntegrations)
-    .values({
-      id: newGoatIntegrationId(),
-      userWorkosId: input.userWorkosId,
-      provider: GOAT_JAMIE_PROVIDER,
-      externalId: JAMIE_EXTERNAL_ID,
-      connectionLabel: "Jamie",
-      accountName: "Jamie",
-      accountType: "webhook",
-      status: "needs_reauth",
-      statusReason: JAMIE_SETUP_STATUS_REASON,
-      scopes: [],
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
-      set: {
-        connectionLabel: "Jamie",
-        accountName: "Jamie",
-        accountType: "webhook",
-        status: "needs_reauth",
-        statusReason: JAMIE_SETUP_STATUS_REASON,
-        updatedAt: now,
-      },
-    })
-    .returning({ id: goatIntegrations.id });
+  const integrationId = existing?.id ?? newGoatIntegrationId();
+  const integrationValues = {
+    connectionLabel: "Jamie",
+    accountName: "Jamie",
+    accountType: "webhook",
+    externalId: unboundJamieExternalId(integrationId),
+    status: "needs_reauth" as const,
+    statusReason: JAMIE_SETUP_STATUS_REASON,
+    scopes: [] as string[],
+    updatedAt: now,
+  };
+
+  const integration = existing
+    ? (
+        await db
+          .update(goatIntegrations)
+          .set(integrationValues)
+          .where(
+            and(
+              eq(goatIntegrations.id, integrationId),
+              eq(goatIntegrations.userWorkosId, input.userWorkosId),
+              eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+            ),
+          )
+          .returning({ id: goatIntegrations.id })
+      )[0]
+    : (
+        await db
+          .insert(goatIntegrations)
+          .values({
+            id: integrationId,
+            userWorkosId: input.userWorkosId,
+            provider: GOAT_JAMIE_PROVIDER,
+            ...integrationValues,
+          })
+          .returning({ id: goatIntegrations.id })
+      )[0];
 
   if (!integration) throw new Error("Could not persist Jamie integration.");
 
@@ -162,8 +186,90 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
 
   return {
     integrationId: integration.id,
-    webhookUrl: goatJamieWebhookUrl(integration.id),
+    webhookUrl: goatJamieWebhookUrl(),
     headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+    apiKeyConfigured: false,
+  };
+}
+
+export async function saveGoatJamieWebhookApiKey(input: {
+  userWorkosId: string;
+  apiKey: string;
+}): Promise<GoatJamieWebhookSetup> {
+  const apiKey = input.apiKey.trim();
+  if (!isValidJamieProviderApiKey(apiKey)) {
+    throw new Error("Jamie API keys must start with sk_ followed by 64 lowercase hex characters.");
+  }
+
+  const db = getDb();
+  const now = new Date();
+  const [integration] = await db
+    .select({ id: goatIntegrations.id })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        ne(goatIntegrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(goatIntegrations.updatedAt))
+    .limit(1);
+
+  if (!integration) {
+    throw new Error("Create a Jamie webhook endpoint before saving the API key.");
+  }
+
+  try {
+    await saveGoatIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: GOAT_JAMIE_PROVIDER,
+      kind: GOAT_JAMIE_CREDENTIAL_KIND,
+      payload: {
+        apiKeyHash: hashGoatJamieWebhookApiKey(apiKey),
+        headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+        createdAt: now.toISOString(),
+      },
+      db,
+      now,
+    });
+    await db
+      .update(goatIntegrations)
+      .set({
+        externalId: jamieExternalIdForApiKey(apiKey),
+        connectionLabel: "Jamie",
+        accountName: "Jamie",
+        accountType: "webhook",
+        status: "needs_reauth",
+        statusReason: JAMIE_SETUP_STATUS_REASON,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(goatIntegrations.id, integration.id),
+          eq(goatIntegrations.userWorkosId, input.userWorkosId),
+          eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        ),
+      );
+  } catch (error) {
+    await markGoatIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: GOAT_JAMIE_PROVIDER,
+      status: "sync_failed",
+      statusReason: "Failed to save Jamie webhook API key.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return {
+    integrationId: integration.id,
+    webhookUrl: goatJamieWebhookUrl(),
+    headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+    apiKeyConfigured: true,
   };
 }
 
@@ -187,6 +293,91 @@ export async function loadGoatJamieWebhookContext(
 
   if (!integration) return null;
 
+  return loadGoatJamieWebhookContextForIntegration(integration);
+}
+
+export async function loadGoatJamieWebhookContextForApiKey(
+  apiKey: string | null,
+): Promise<GoatJamieWebhookContext | null> {
+  if (!apiKey || !isValidJamieProviderApiKey(apiKey)) return null;
+
+  const directIntegrations = await getDb()
+    .select({
+      id: goatIntegrations.id,
+      userWorkosId: goatIntegrations.userWorkosId,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(goatIntegrations.externalId, jamieExternalIdForApiKey(apiKey)),
+        ne(goatIntegrations.status, "disconnected"),
+      ),
+    )
+    .limit(2);
+
+  if (directIntegrations.length > 1) return null;
+  const [directIntegration] = directIntegrations;
+  if (directIntegration) {
+    return loadGoatJamieWebhookContextForIntegration(directIntegration);
+  }
+
+  const integrations = await getDb()
+    .select({
+      id: goatIntegrations.id,
+      userWorkosId: goatIntegrations.userWorkosId,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        ne(goatIntegrations.status, "disconnected"),
+      ),
+    );
+
+  const matches: GoatJamieWebhookContext[] = [];
+  for (const integration of integrations) {
+    const context = await loadGoatJamieWebhookContextForIntegration(integration);
+    if (!context) continue;
+    const verification = verifyGoatJamieWebhookApiKey({
+      candidate: apiKey,
+      apiKeyHash: context.apiKeyHash,
+      legacySecretHash: context.legacySecretHash,
+    });
+    if (verification.valid) matches.push(context);
+  }
+
+  if (matches.length !== 1) return null;
+  const [matched] = matches;
+  if (!matched) return null;
+
+  try {
+    await getDb()
+      .update(goatIntegrations)
+      .set({
+        externalId: jamieExternalIdForApiKey(apiKey),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(goatIntegrations.id, matched.integrationId),
+          eq(goatIntegrations.userWorkosId, matched.userWorkosId),
+          eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        ),
+      );
+  } catch (error) {
+    console.warn("[goat-jamie] Failed to backfill Jamie API key lookup hash", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return matched;
+}
+
+async function loadGoatJamieWebhookContextForIntegration(integration: {
+  id: string;
+  userWorkosId: string;
+}): Promise<GoatJamieWebhookContext | null> {
   const credential = await loadGoatIntegrationCredential({
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
@@ -204,27 +395,6 @@ export async function loadGoatJamieWebhookContext(
     apiKeyHash: payload.apiKeyHash,
     legacySecretHash: payload.legacySecretHash,
   };
-}
-
-export async function bindGoatJamieWebhookApiKey(input: {
-  integrationId: string;
-  userWorkosId: string;
-  apiKey: string;
-  now?: Date;
-}) {
-  const now = input.now ?? new Date();
-  await saveGoatIntegrationCredential({
-    userWorkosId: input.userWorkosId,
-    integrationId: input.integrationId,
-    provider: GOAT_JAMIE_PROVIDER,
-    kind: GOAT_JAMIE_CREDENTIAL_KIND,
-    payload: {
-      apiKeyHash: hashGoatJamieWebhookApiKey(input.apiKey),
-      headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
-      createdAt: now.toISOString(),
-    },
-    now,
-  });
 }
 
 export async function markGoatJamieWebhookConnected(input: {
@@ -258,23 +428,19 @@ export function verifyGoatJamieWebhookApiKey(input: {
   apiKeyHash: string | null;
   legacySecretHash?: string | null;
 }): GoatJamieWebhookApiKeyVerification {
-  if (!input.candidate) return { valid: false, shouldBind: false, apiKey: null };
+  if (!input.candidate) return { valid: false, apiKey: null };
 
   if (input.apiKeyHash) {
     return timingSafeHashMatch(input.candidate, input.apiKeyHash)
-      ? { valid: true, shouldBind: false, apiKey: input.candidate }
-      : { valid: false, shouldBind: false, apiKey: null };
+      ? { valid: true, apiKey: input.candidate }
+      : { valid: false, apiKey: null };
   }
 
   if (input.legacySecretHash && timingSafeHashMatch(input.candidate, input.legacySecretHash)) {
-    return { valid: true, shouldBind: false, apiKey: input.candidate };
+    return { valid: true, apiKey: input.candidate };
   }
 
-  if (!isValidJamieProviderApiKey(input.candidate)) {
-    return { valid: false, shouldBind: false, apiKey: null };
-  }
-
-  return { valid: true, shouldBind: true, apiKey: input.candidate };
+  return { valid: false, apiKey: null };
 }
 
 export function hashGoatJamieWebhookApiKey(apiKey: string) {
@@ -292,8 +458,8 @@ function timingSafeHashMatch(candidate: string, expectedHash: string) {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export function goatJamieWebhookUrl(integrationId: string) {
-  return `${getGoatAppUrl()}/api/webhooks/jamie/${integrationId}`;
+export function goatJamieWebhookUrl() {
+  return `${getGoatAppUrl()}/api/webhooks/jamie`;
 }
 
 function parseJamieWebhookCredentialPayload(
@@ -336,4 +502,12 @@ function parseJamieWebhookCredentialPayload(
 
 function newGoatIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "")}`;
+}
+
+function unboundJamieExternalId(integrationId: string) {
+  return `${JAMIE_UNBOUND_EXTERNAL_ID_PREFIX}${integrationId}`;
+}
+
+function jamieExternalIdForApiKey(apiKey: string) {
+  return `${JAMIE_API_KEY_EXTERNAL_ID_PREFIX}${hashGoatJamieWebhookApiKey(apiKey)}`;
 }
