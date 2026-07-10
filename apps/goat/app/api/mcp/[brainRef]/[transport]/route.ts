@@ -1,5 +1,5 @@
 import { getDb } from "@opencompany/db/client";
-import { goatBrains } from "@opencompany/db/goat-schema";
+import { goatBrains, goatWorkspaces } from "@opencompany/db/goat-schema";
 import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
 import { eq } from "drizzle-orm";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
@@ -10,6 +10,7 @@ import {
   resolveGoatAuthKitDomain,
   userWorkosIdFromMcpAuth,
   verifyGoatMcpBearerToken,
+  workosOrganizationIdFromMcpAuth,
 } from "@/lib/mcp-oauth";
 
 export const runtime = "nodejs";
@@ -37,10 +38,11 @@ type BrainAccessResult =
   | {
       ok: true;
       brain: McpBrain;
+      workosOrganizationId: string;
     }
   | {
       ok: false;
-      status: 403 | 404;
+      status: 403 | 404 | 503;
       error: string;
     };
 
@@ -61,10 +63,17 @@ async function handleMcpRequest(request: Request, context: RouteContext) {
       if (!userWorkosId) {
         return Response.json({ error: "Invalid MCP authentication context." }, { status: 401 });
       }
+      const tokenOrganizationId = workosOrganizationIdFromMcpAuth(authenticatedRequest.auth);
 
       const access = await loadMcpBrainAccess({ userWorkosId, brainRef });
       if (!access.ok) {
         return Response.json({ error: access.error }, { status: access.status });
+      }
+      if (!tokenOrganizationId || tokenOrganizationId !== access.workosOrganizationId) {
+        return Response.json(
+          { error: "MCP token was issued for a different workspace." },
+          { status: 403 },
+        );
       }
 
       const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
@@ -185,9 +194,23 @@ async function loadMcpBrainAccess(input: {
     userWorkosId: input.userWorkosId,
     brainRef: input.brainRef,
   });
-  if (access) return { ok: true, brain: access.brain };
-
   const db = getDb();
+  if (access) {
+    const [workspace] = await db
+      .select({ workosOrganizationId: goatWorkspaces.workosOrganizationId })
+      .from(goatWorkspaces)
+      .where(eq(goatWorkspaces.id, access.brain.workspaceId))
+      .limit(1);
+    if (!workspace?.workosOrganizationId) {
+      return { ok: false, status: 503, error: "Workspace organization is not configured." };
+    }
+    return {
+      ok: true,
+      brain: access.brain,
+      workosOrganizationId: workspace.workosOrganizationId,
+    };
+  }
+
   const [brain] = await db
     .select({ id: goatBrains.id })
     .from(goatBrains)

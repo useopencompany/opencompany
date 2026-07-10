@@ -17,7 +17,8 @@ import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
-  const { authUser, user, workspace, role, brains, activeBrain } = await currentGoatUser();
+  const { authUser, user, workspace, role, workspaces, brains, activeBrain } =
+    await currentGoatUser();
   const [
     tasks,
     schedules,
@@ -54,6 +55,11 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       name: workspace.name,
       role,
     },
+    workspaces: workspaces.map((entry) => ({
+      id: entry.workspace.id,
+      name: entry.workspace.name,
+      role: entry.role,
+    })),
     workspaceMembers: workspaceMembers.map(({ user: member }) => ({
       workosUserId: member.workosUserId,
       email: member.email,

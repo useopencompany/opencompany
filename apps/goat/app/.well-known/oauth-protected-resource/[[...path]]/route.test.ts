@@ -6,7 +6,7 @@ afterEach(() => {
 });
 
 describe("GET /.well-known/oauth-protected-resource", () => {
-  it("returns path-suffixed OAuth protected resource metadata", async () => {
+  it("returns stable OAuth protected resource metadata for path-suffixed requests", async () => {
     vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "https://example.authkit.app");
 
     const response = GET(
@@ -18,7 +18,7 @@ describe("GET /.well-known/oauth-protected-resource", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     await expect(response.json()).resolves.toEqual({
-      resource: "https://goat.example.com/api/mcp/goat_brain_123/mcp",
+      resource: "https://goat.example.com/api/mcp",
       authorization_servers: ["https://example.authkit.app"],
       bearer_methods_supported: ["header"],
     });

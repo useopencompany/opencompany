@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildGoatMcpEndpointPath,
   buildGoatMcpResourceMetadataPath,
+  goatMcpProtectedResourceMetadata,
+  goatMcpResourceIndicatorUrlFromRequest,
   goatMcpResourceUrlFromMetadataRequest,
   resolveGoatAuthKitDomain,
+  workosOrganizationIdFromMcpAuth,
 } from "@/lib/mcp-oauth";
 
 describe("resolveGoatAuthKitDomain", () => {
@@ -48,5 +51,54 @@ describe("Goat MCP metadata URLs", () => {
     expect(goatMcpResourceUrlFromMetadataRequest(request)).toBe(
       "https://goat.example.com/api/mcp/goat_brain_123/mcp",
     );
+  });
+
+  it("derives the stable MCP resource indicator URL from endpoint requests", () => {
+    const request = new Request("http://internal.local/api/mcp/goat_brain_123/mcp?cursor=1", {
+      headers: {
+        "x-forwarded-host": "goat.example.com",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    expect(goatMcpResourceIndicatorUrlFromRequest(request)).toBe(
+      "https://goat.example.com/api/mcp",
+    );
+  });
+
+  it("uses the stable MCP resource indicator in protected-resource metadata", () => {
+    const request = new Request(
+      "https://goat.example.com/.well-known/oauth-protected-resource/api/mcp/goat_brain_123/mcp",
+    );
+
+    expect(goatMcpProtectedResourceMetadata(request, "https://authkit.example.com")).toMatchObject({
+      resource: "https://goat.example.com/api/mcp",
+      authorization_servers: ["https://authkit.example.com"],
+      bearer_methods_supported: ["header"],
+    });
+  });
+});
+
+describe("workosOrganizationIdFromMcpAuth", () => {
+  it("extracts a selected WorkOS organization from MCP auth extras", () => {
+    expect(
+      workosOrganizationIdFromMcpAuth({
+        token: "token",
+        clientId: "user_1",
+        scopes: [],
+        extra: { workosOrganizationId: "org_123" },
+      }),
+    ).toBe("org_123");
+  });
+
+  it("returns null when no organization claim is present", () => {
+    expect(
+      workosOrganizationIdFromMcpAuth({
+        token: "token",
+        clientId: "user_1",
+        scopes: [],
+        extra: {},
+      }),
+    ).toBeNull();
   });
 });

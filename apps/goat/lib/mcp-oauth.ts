@@ -57,10 +57,18 @@ export function goatMcpResourceUrlFromMetadataRequest(request: Request) {
   return publicUrl.toString();
 }
 
+export function goatMcpResourceIndicatorUrlFromRequest(request: Request) {
+  const publicUrl = getPublicUrl(request);
+  publicUrl.pathname = "/api/mcp";
+  publicUrl.search = "";
+  publicUrl.hash = "";
+  return publicUrl.toString();
+}
+
 export function goatMcpProtectedResourceMetadata(request: Request, authKitDomain: string) {
   return generateProtectedResourceMetadata({
     authServerUrls: [authKitDomain],
-    resourceUrl: goatMcpResourceUrlFromMetadataRequest(request),
+    resourceUrl: goatMcpResourceIndicatorUrlFromRequest(request),
     additionalMetadata: {
       bearer_methods_supported: ["header"],
     },
@@ -81,9 +89,11 @@ export async function verifyGoatMcpBearerToken(
   try {
     const { payload } = await jwtVerify(bearerToken, jwksForAuthKitDomain(domain.domain), {
       issuer: domain.domain,
+      audience: goatMcpResourceIndicatorUrlFromRequest(_request),
     });
     const userWorkosId = workosUserIdFromPayload(payload);
     if (!userWorkosId) return undefined;
+    const workosOrganizationId = workosOrganizationIdFromPayload(payload);
 
     return {
       token: bearerToken,
@@ -92,6 +102,7 @@ export async function verifyGoatMcpBearerToken(
       ...(typeof payload.exp === "number" ? { expiresAt: payload.exp } : {}),
       extra: {
         userWorkosId,
+        workosOrganizationId,
       },
     };
   } catch {
@@ -103,6 +114,14 @@ export function userWorkosIdFromMcpAuth(auth: AuthInfo | undefined) {
   const extraUserId = auth?.extra?.userWorkosId;
   if (typeof extraUserId === "string" && extraUserId.trim()) return extraUserId;
   return auth?.clientId || null;
+}
+
+export function workosOrganizationIdFromMcpAuth(auth: AuthInfo | undefined) {
+  const extraOrganizationId = auth?.extra?.workosOrganizationId;
+  if (typeof extraOrganizationId === "string" && extraOrganizationId.trim()) {
+    return extraOrganizationId;
+  }
+  return null;
 }
 
 function jwksForAuthKitDomain(authKitDomain: string) {
@@ -117,6 +136,11 @@ function jwksForAuthKitDomain(authKitDomain: string) {
 
 function workosUserIdFromPayload(payload: JWTPayload) {
   return typeof payload.sub === "string" && payload.sub.trim() ? payload.sub : null;
+}
+
+function workosOrganizationIdFromPayload(payload: JWTPayload) {
+  const organizationId = payload.org_id;
+  return typeof organizationId === "string" && organizationId.trim() ? organizationId : null;
 }
 
 function scopesFromPayload(payload: JWTPayload) {

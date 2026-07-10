@@ -1,11 +1,23 @@
 "use client";
 
+import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
+import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
-import { House, PanelLeft, Settings } from "lucide-react";
+import {
+  Building2,
+  Check,
+  ChevronsUpDown,
+  House,
+  Loader2,
+  PanelLeft,
+  Settings,
+} from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
+import { switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function SidebarNavRow({
   href,
@@ -77,6 +89,10 @@ export function GoatSidebar({
           </span>
         </div>
 
+        <div className="px-2 pb-2">
+          <GoatWorkspaceSwitcher />
+        </div>
+
         {/* Primary nav */}
         <nav aria-label="Goat primary" className="flex flex-col gap-px px-2 pt-2">
           <SidebarNavRow href="/" icon={House} label="Home" active={homeActive} />
@@ -133,6 +149,103 @@ export function GoatSidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+function GoatWorkspaceSwitcher() {
+  const { workspace, workspaces } = useGoatAppData();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const switchWorkspace = (workspaceId: string) => {
+    if (workspaceId === workspace.id) {
+      setOpen(false);
+      return;
+    }
+    startTransition(async () => {
+      const result = await switchGoatWorkspaceAction(workspaceId);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setOpen(false);
+      router.push("/");
+      router.refresh();
+    });
+  };
+
+  if (workspaces.length <= 1) {
+    return (
+      <Link
+        href="/settings/workspace"
+        prefetch
+        className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Building2 size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium leading-tight">{workspace.name}</span>
+          <span className="block truncate text-[11px] leading-tight text-ink-subtle">
+            {workspace.role}
+          </span>
+        </span>
+      </Link>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        disabled={isPending}
+        className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60 data-[popup-open]:bg-surface-active data-[popup-open]:text-ink"
+      >
+        <Building2 size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium leading-tight">{workspace.name}</span>
+          <span className="block truncate text-[11px] leading-tight text-ink-subtle">
+            {workspace.role}
+          </span>
+        </span>
+        {isPending ? (
+          <Loader2 size={13} strokeWidth={1.75} className="shrink-0 animate-spin text-ink/45" />
+        ) : (
+          <ChevronsUpDown size={13} strokeWidth={1.75} className="shrink-0 text-ink/45" />
+        )}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="w-[232px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        <div className="max-h-[280px] overflow-y-auto">
+          {workspaces.map((entry) => {
+            const active = entry.id === workspace.id;
+            return (
+              <button
+                type="button"
+                key={entry.id}
+                disabled={isPending}
+                onClick={() => switchWorkspace(entry.id)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Check
+                  size={13}
+                  strokeWidth={2}
+                  className={`shrink-0 text-ink ${active ? "opacity-100" : "opacity-0"}`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium leading-4">{entry.name}</span>
+                  <span className="block truncate text-[11px] leading-4 text-ink-subtle">
+                    {entry.role}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

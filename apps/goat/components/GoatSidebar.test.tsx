@@ -17,6 +17,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/workspace-actions", () => ({
   switchGoatBrainAction: vi.fn(),
+  switchGoatWorkspaceAction: vi.fn(),
   createGoatBrainAction: vi.fn(),
   setGoatBrainAccessAction: vi.fn(),
   getGoatBrainAccessDetailsAction: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       avatarUrl: null,
     },
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
+    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
     brains: [
       {
