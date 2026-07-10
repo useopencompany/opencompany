@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainView } from "@/components/GoatBrainView";
-import { GoatBrainRoute, GoatSettingsRoute } from "./GoatRoutes";
+import { GoatBrainRoute, GoatPreferencesSettingsRoute, GoatUsageSettingsRoute } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -106,9 +106,7 @@ describe("GoatSettingsRoute", () => {
 
   it("shows the Local Codex bridge beta switch and persists changes", async () => {
     const user = userEvent.setup();
-    render(<GoatSettingsRoute />);
-
-    expect(screen.getByTestId("spend-overview")).toBeInTheDocument();
+    render(<GoatPreferencesSettingsRoute />);
 
     const toggle = screen.getByRole("switch", { name: "Local Codex bridge" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -125,7 +123,7 @@ describe("GoatSettingsRoute", () => {
     const clickMock = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     const user = userEvent.setup();
-    render(<GoatSettingsRoute />);
+    render(<GoatPreferencesSettingsRoute />);
 
     await user.click(screen.getByRole("button", { name: "Download Mac launcher" }));
 
@@ -140,6 +138,12 @@ describe("GoatSettingsRoute", () => {
     expect(toastMock.success).toHaveBeenCalledWith("Bridge launcher downloaded.");
 
     clickMock.mockRestore();
+  });
+
+  it("shows usage spend on the usage settings route", () => {
+    render(<GoatUsageSettingsRoute />);
+
+    expect(screen.getByTestId("spend-overview")).toBeInTheDocument();
   });
 });
 
