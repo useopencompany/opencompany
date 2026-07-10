@@ -11,6 +11,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Bold, Code, Heading1, Heading2, Italic } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { isExternalHref, sourceHrefForRef } from "@/lib/brain-source-links";
 
 export function MarkdownGoatBrainEditor({
   content,
@@ -167,7 +168,7 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
                       class: href
                         ? "wiki-brain-link"
                         : "wiki-brain-link wiki-brain-link-unresolved",
-                      title: href ? "Open brain link" : "Unresolved brain link",
+                      title: href ? linkTitle(link.kind, href) : unresolvedLinkTitle(link.kind),
                       ...(href ? { "data-brain-href": href } : {}),
                     }),
                   );
@@ -177,7 +178,7 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
                 // Collapsed: hide the raw markup and render a compact chip in its place.
                 decorations.push(Decoration.inline(start, end, { class: "wiki-brain-hidden" }));
                 decorations.push(
-                  Decoration.widget(start, () => buildWikiChip(label, href), {
+                  Decoration.widget(start, () => buildWikiChip(label, href, link.kind), {
                     side: -1,
                     marks: [],
                     key: `wiki:${href || "unresolved"}:${label}`,
@@ -193,7 +194,7 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
             const href = target?.closest("[data-brain-href]")?.getAttribute("data-brain-href");
             if (!href) return false;
             event.preventDefault();
-            window.location.href = href;
+            openDecoratedHref(href);
             return true;
           },
         },
@@ -202,10 +203,14 @@ const WikiLinkDecoration = Extension.create<{ brainLinks: Record<string, string>
   },
 });
 
-function buildWikiChip(label: string, href: string): HTMLElement {
+function buildWikiChip(
+  label: string,
+  href: string,
+  kind: ReturnType<typeof parseGoatBrainInlineLinks>[number]["kind"],
+): HTMLElement {
   const chip = document.createElement("span");
   chip.className = href ? "wiki-brain-chip" : "wiki-brain-chip wiki-brain-chip-unresolved";
-  chip.title = href ? "Open brain link" : "Unresolved brain link";
+  chip.title = href ? linkTitle(kind, href) : unresolvedLinkTitle(kind);
   chip.innerHTML = WIKI_LINK_ICON;
   const text = document.createElement("span");
   text.className = "wiki-brain-chip-label";
@@ -216,10 +221,30 @@ function buildWikiChip(label: string, href: string): HTMLElement {
     chip.setAttribute("role", "link");
     chip.addEventListener("mousedown", (event) => {
       event.preventDefault();
-      window.location.href = href;
+      openDecoratedHref(href);
     });
   }
   return chip;
+}
+
+function linkTitle(
+  kind: ReturnType<typeof parseGoatBrainInlineLinks>[number]["kind"],
+  href: string,
+) {
+  if (kind === "source" || isExternalHref(href)) return "Open source";
+  return "Open brain link";
+}
+
+function unresolvedLinkTitle(kind: ReturnType<typeof parseGoatBrainInlineLinks>[number]["kind"]) {
+  return kind === "source" ? "Unresolved source link" : "Unresolved brain link";
+}
+
+function openDecoratedHref(href: string) {
+  if (isExternalHref(href)) {
+    window.open(href, "_blank", "noopener,noreferrer");
+    return;
+  }
+  window.location.href = href;
 }
 
 // Offsets of the visible label within a raw link token like `[[page:slug|Title]]`.
@@ -252,7 +277,11 @@ function inlineLinkHref(
   link: ReturnType<typeof parseGoatBrainInlineLinks>[number],
   links: Record<string, string>,
 ) {
-  return links[`${link.kind}:${link.target}`] ?? (link.kind === "page" ? links[link.target] : "");
+  const mapped = links[`${link.kind}:${link.target}`];
+  if (mapped) return mapped;
+  if (link.kind === "page") return links[link.target] ?? "";
+  if (link.kind === "source") return sourceHrefForRef(link.target) ?? "";
+  return "";
 }
 
 function FormatButton({

@@ -27,6 +27,10 @@
       "types": "./src/inline-links.ts",
       "default": "./src/inline-links.ts"
     },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "default": "./src/schema.ts"
+    },
     "./usage": {
       "types": "./src/usage.ts",
       "default": "./src/usage.ts"

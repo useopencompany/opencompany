@@ -10,6 +10,7 @@ import {
   evidenceLinkTargets,
   formatGoatBrainEvidenceLink,
   pageLinkTargets,
+  sourceLinkTargets,
 } from "@opencompany/goat-brain/inline-links";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
@@ -69,6 +70,7 @@ import {
   uploadBrainAssetBlob,
   validateBrainAssetFile,
 } from "@/lib/brain-asset-upload";
+import { isExternalHref, sourceHrefForRef } from "@/lib/brain-source-links";
 import {
   createGoatCollections,
   type GoatBrainDocumentRow,
@@ -1361,10 +1363,7 @@ function BrainMetadataSidebar({
             {document.brainId}
           </code>
           <MetadataRow label="Aliases" value={document.aliases.join(", ") || "-"} />
-          <MetadataRow
-            label="Sources"
-            value={document.sources?.map((item) => item.ref).join(", ") || "-"}
-          />
+          <MetadataSourcesRow sources={document.sources} />
           {document.format !== "markdown" ? (
             <>
               <MetadataRow label="File" value={document.originalFileName ?? "-"} />
@@ -1412,6 +1411,50 @@ function MetadataRow({ label, value }: { label: string; value: string }) {
       <span title={value} className="min-w-0 truncate text-ink">
         {value}
       </span>
+    </>
+  );
+}
+
+function MetadataSourcesRow({ sources }: { sources: GoatBrainDocumentView["sources"] }) {
+  return (
+    <>
+      <span className="text-ink-subtle">Sources</span>
+      {sources.length > 0 ? (
+        <span className="flex min-w-0 flex-col gap-1">
+          {sources.map((source, index) => {
+            const href = sourceHrefForRef(source.ref);
+            const label = source.title || source.ref;
+            const title = source.title ? `${source.title} (${source.ref})` : source.ref;
+            if (!href) {
+              return (
+                <span
+                  // biome-ignore lint/suspicious/noArrayIndexKey: duplicate source refs are valid.
+                  key={`${source.ref}:${index}`}
+                  title={title}
+                  className="min-w-0 truncate text-ink"
+                >
+                  {label}
+                </span>
+              );
+            }
+            return (
+              <a
+                // biome-ignore lint/suspicious/noArrayIndexKey: duplicate source refs are valid.
+                key={`${source.ref}:${index}`}
+                href={href}
+                title={title}
+                target={isExternalHref(href) ? "_blank" : undefined}
+                rel={isExternalHref(href) ? "noreferrer noopener" : undefined}
+                className="min-w-0 truncate text-ink underline-offset-2 hover:underline"
+              >
+                {label}
+              </a>
+            );
+          })}
+        </span>
+      ) : (
+        <span className="min-w-0 truncate text-ink">-</span>
+      )}
     </>
   );
 }
@@ -1920,12 +1963,25 @@ function brainLinkMap(
     addBrainLinkTarget(links, `wiki/${folderTarget}.md`, href);
     if (document.kind === "evidence") links[`evidence:${document.brainId}`] = href;
   }
+  for (const document of documents) {
+    for (const source of document.sources ?? []) {
+      addSourceLinkTarget(links, source.ref);
+    }
+    for (const target of sourceLinkTargets(documentInlineLinkText(document))) {
+      addSourceLinkTarget(links, target);
+    }
+  }
   return links;
 }
 
 function addBrainLinkTarget(links: Record<string, string>, target: string, href: string) {
   links[target] = href;
   links[`page:${target}`] = href;
+}
+
+function addSourceLinkTarget(links: Record<string, string>, ref: string) {
+  const href = sourceHrefForRef(ref);
+  if (href) links[`source:${ref}`] = href;
 }
 
 function brainPathUrl(pathSegments: string[], routeBrainId?: string | null) {
