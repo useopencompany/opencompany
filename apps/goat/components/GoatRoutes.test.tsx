@@ -53,6 +53,10 @@ vi.mock("@/components/GoatSurface", () => ({
   GoatSurface: () => null,
 }));
 
+vi.mock("@/components/GoatSpendOverview", () => ({
+  GoatSpendOverview: () => <div data-testid="spend-overview" />,
+}));
+
 vi.mock("@/components/JamieIntegrationSetup", () => ({
   JamieIntegrationSetup: () => null,
 }));
@@ -102,6 +106,8 @@ describe("GoatSettingsRoute", () => {
   it("shows the Local Codex bridge beta switch and persists changes", async () => {
     const user = userEvent.setup();
     render(<GoatSettingsRoute />);
+
+    expect(screen.getByTestId("spend-overview")).toBeInTheDocument();
 
     const toggle = screen.getByRole("switch", { name: "Local Codex bridge" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
