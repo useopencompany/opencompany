@@ -6,8 +6,10 @@ import {
   type GoatChatMessageDebugTrace,
   type GoatChatRole,
   type GoatChatSession,
+  type GoatCodexChatTurnSettings,
   goatChatMessages,
   goatChatSessions,
+  goatCodexChatTurns,
   goatTasks,
 } from "@opencompany/db/goat-schema";
 import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
@@ -19,6 +21,7 @@ import {
   type GoatStoredChatMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
+import { codexComposerSettingsFromTurnSettings } from "@/lib/codex-chat-settings";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { toGoatTaskTitle } from "@/lib/task-display";
 
@@ -54,6 +57,10 @@ export type GoatChatStore = {
     model: AgentModelId;
     title: string;
   }): Promise<GoatChatSession>;
+  loadLatestCodexTurnSettings?(input: {
+    userWorkosId: string;
+    sessionId: string;
+  }): Promise<GoatCodexChatTurnSettings | null>;
   listMessages(sessionId: string): Promise<GoatStoredChatMessage[]>;
   insertMessage(input: {
     id?: string;
@@ -73,8 +80,15 @@ export async function loadCurrentGoatChatSession(): Promise<GoatChatSessionView 
   const session = await store.findOpenSession({ userWorkosId: user.workosUserId });
   if (!session) return null;
 
-  const messages = await store.listMessages(session.id);
-  return toChatSessionView(session, messages);
+  const [messages, codexComposerSettings] = await Promise.all([
+    store.listMessages(session.id),
+    loadCodexComposerSettingsForChatSession({
+      store,
+      userWorkosId: user.workosUserId,
+      session,
+    }),
+  ]);
+  return toChatSessionView(session, messages, codexComposerSettings);
 }
 
 export async function loadCurrentGoatChatSessionById(
@@ -100,8 +114,15 @@ export async function loadGoatChatSessionByIdForUser(
   });
   if (!session) return null;
 
-  const messages = await store.listMessages(session.id);
-  return toChatSessionView(session, messages);
+  const [messages, codexComposerSettings] = await Promise.all([
+    store.listMessages(session.id),
+    loadCodexComposerSettingsForChatSession({
+      store,
+      userWorkosId: input.userWorkosId,
+      session,
+    }),
+  ]);
+  return toChatSessionView(session, messages, codexComposerSettings);
 }
 
 export async function listCurrentUserRecentGoatChats(
@@ -127,8 +148,15 @@ export async function listRecentGoatChatsForUser(
   });
   const summaries = await Promise.all(
     sessions.map(async (session) => {
-      const messages = await store.listMessages(session.id);
-      return toChatSummaryView(session, messages);
+      const [messages, codexComposerSettings] = await Promise.all([
+        store.listMessages(session.id),
+        loadCodexComposerSettingsForChatSession({
+          store,
+          userWorkosId: input.userWorkosId,
+          session,
+        }),
+      ]);
+      return toChatSummaryView(session, messages, codexComposerSettings);
     }),
   );
   return summaries;
@@ -260,6 +288,21 @@ export function createDbGoatChatStore(): GoatChatStore {
       return session;
     },
 
+    async loadLatestCodexTurnSettings(input) {
+      const [turn] = await getDb()
+        .select({ settings: goatCodexChatTurns.settings })
+        .from(goatCodexChatTurns)
+        .where(
+          and(
+            eq(goatCodexChatTurns.userWorkosId, input.userWorkosId),
+            eq(goatCodexChatTurns.chatSessionId, input.sessionId),
+          ),
+        )
+        .orderBy(desc(goatCodexChatTurns.createdAt))
+        .limit(1);
+      return turn?.settings ?? null;
+    },
+
     async listMessages(sessionId) {
       const messages = await getDb()
         .select({
@@ -333,12 +376,14 @@ export function newGoatChatMessageId() {
 function toChatSessionView(
   session: GoatChatSession,
   messages: readonly GoatStoredChatMessage[],
+  codexComposerSettings: ReturnType<typeof codexComposerSettingsFromTurnSettings> | null = null,
 ): GoatChatSessionView {
   return {
     id: session.id,
     title: session.title,
     model: session.model,
     engine: session.engine,
+    codexComposerSettings,
     messages: messages.map(toGoatChatUiMessage),
   };
 }
@@ -346,15 +391,30 @@ function toChatSessionView(
 function toChatSummaryView(
   session: GoatChatSession,
   messages: readonly GoatStoredChatMessage[],
+  codexComposerSettings: ReturnType<typeof codexComposerSettingsFromTurnSettings> | null = null,
 ): GoatChatSummaryView {
   return {
     id: session.id,
     title: session.title,
     model: session.model,
     engine: session.engine,
+    codexComposerSettings,
     preview: previewFromMessages(messages),
     updatedAt: session.updatedAt.toISOString(),
   };
+}
+
+async function loadCodexComposerSettingsForChatSession(input: {
+  store: GoatChatStore;
+  userWorkosId: string;
+  session: GoatChatSession;
+}) {
+  if (input.session.engine !== "codex") return null;
+  const settings = await input.store.loadLatestCodexTurnSettings?.({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.session.id,
+  });
+  return settings ? codexComposerSettingsFromTurnSettings(settings) : null;
 }
 
 function previewFromMessages(messages: readonly Pick<GoatStoredChatMessage, "content">[]) {

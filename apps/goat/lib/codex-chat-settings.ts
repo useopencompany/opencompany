@@ -23,6 +23,12 @@ type NormalizedCodexChatSettings = {
   goalMode: CodexGoalMode | null;
 };
 
+export type GoatCodexComposerSettingsView = {
+  reasoningEffort: CodexReasoningEffort;
+  planModeEnabled: boolean;
+  goalMode: CodexGoalMode | null;
+};
+
 export function parseCodexChatSettings(value: unknown): CodexChatSettingsResult {
   if (value == null) {
     return { ok: true, settings: { reasoningEffort: DEFAULT_CODEX_CHAT_REASONING_EFFORT } };
@@ -54,6 +60,17 @@ export function normalizeCodexChatSettings(
       readReasoningEffort(value?.reasoningEffort) ?? DEFAULT_CODEX_CHAT_REASONING_EFFORT,
     planModeReasoningEffort: readReasoningEffort(value?.planModeReasoningEffort) ?? null,
     goalMode: normalizeGoalMode(value?.goalMode),
+  };
+}
+
+export function codexComposerSettingsFromTurnSettings(
+  value: GoatCodexChatTurnSettings | null | undefined,
+): GoatCodexComposerSettingsView {
+  const settings = normalizeCodexChatSettings(value);
+  return {
+    reasoningEffort: settings.reasoningEffort,
+    planModeEnabled: settings.planModeReasoningEffort !== null,
+    goalMode: settings.goalMode,
   };
 }
 

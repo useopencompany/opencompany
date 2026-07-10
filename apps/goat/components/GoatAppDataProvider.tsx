@@ -121,6 +121,7 @@ export function GoatAppDataProvider({
           title: row.title,
           model: row.model as AgentModelId,
           engine: row.engine,
+          codexComposerSettings: initial?.codexComposerSettings ?? null,
           preview: initial?.preview ?? "No messages yet.",
           updatedAt: row.updated_at,
         };

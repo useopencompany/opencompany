@@ -221,6 +221,7 @@ async function failReclaimedTurn(input: {
       model: input.session.model,
       leaseId: input.leaseId,
       leaseOwner: input.leaseOwner,
+      turnCreatedAt: input.turn.createdAt,
     },
     redact: (value) => value,
     // Keep whatever partial parts the dead worker already streamed; only finalize them.

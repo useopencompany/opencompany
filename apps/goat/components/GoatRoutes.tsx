@@ -25,25 +25,34 @@ import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPane
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";
 import type { GoatBrainSnapshot } from "@/lib/brain";
+import type { GoatChatSessionView } from "@/lib/chat-ui";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import { updateGoatLocalCodexBetaAction } from "@/lib/user-preferences";
 
-export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
+export function GoatHomeRoute({
+  chatId,
+  initialChat: routeInitialChat = null,
+}: {
+  chatId: string | null;
+  initialChat?: GoatChatSessionView | null;
+}) {
   const data = useGoatAppData();
   const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const initialChat = useMemo(() => {
     if (!chatId) return null;
+    if (routeInitialChat?.id === chatId) return routeInitialChat;
     const summary = data.recentChats.find((chat) => chat.id === chatId);
     return {
       id: chatId,
       title: summary?.title ?? "Goat",
       model: summary?.model ?? DEFAULT_GOAT_MODEL,
       engine: summary?.engine ?? "opencompany",
+      codexComposerSettings: summary?.codexComposerSettings ?? null,
       messages: [],
     };
-  }, [chatId, data.recentChats]);
+  }, [chatId, data.recentChats, routeInitialChat]);
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
