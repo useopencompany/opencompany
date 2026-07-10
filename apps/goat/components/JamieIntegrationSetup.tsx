@@ -123,31 +123,48 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Jamie API key
         </h2>
+        {apiKeyConfigured ? (
+          <div className="mx-2 flex items-start gap-2 rounded-md border border-border bg-surface-muted px-2.5 py-2">
+            <Check size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink" />
+            <div className="min-w-0">
+              <span className="block text-[13px] font-medium leading-5 text-ink">
+                API key saved
+              </span>
+              <span className="block text-[12px] leading-4 text-ink-subtle">
+                Paste a new Jamie API key below to update it.
+              </span>
+            </div>
+          </div>
+        ) : null}
         <label className="flex flex-col gap-1 px-2">
-          <span className="text-[12px] leading-4 text-ink-subtle">API key</span>
+          <span className="text-[12px] leading-4 text-ink-subtle">
+            {apiKeyConfigured ? "New API key" : "API key"}
+          </span>
           <input
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
             type="password"
             autoComplete="off"
             spellCheck={false}
-            placeholder="sk_..."
+            placeholder={apiKeyConfigured ? "Paste a new sk_ key" : "sk_..."}
             disabled={!webhookUrl || isPending}
             className="h-9 rounded-md border border-border bg-surface px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-border-strong disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
-        <div className="flex items-center justify-between gap-3 px-2">
-          <span className="text-[12px] leading-4 text-ink-subtle">
-            {apiKeyConfigured ? "API key saved." : "Save the key Jamie shows after creation."}
+        <div className="flex flex-col items-start gap-3 px-2 sm:flex-row sm:items-center sm:justify-between">
+          <span className="min-w-0 text-[12px] leading-4 text-ink-subtle">
+            {apiKeyConfigured
+              ? "Leave blank to keep the saved key."
+              : "Save the key Jamie shows after creation."}
           </span>
           <button
             type="button"
             onClick={saveApiKey}
             disabled={!webhookUrl || isPending || apiKey.trim().length === 0}
-            className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Check size={14} strokeWidth={2} />
-            Save API key
+            {apiKeyConfigured ? "Update API key" : "Save API key"}
           </button>
         </div>
       </section>
