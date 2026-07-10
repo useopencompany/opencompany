@@ -3,6 +3,7 @@ import { executeGoatGoogleTool } from "./goat-google-tools";
 import { createGoatToolToken } from "./goat-tool-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
+import { getSandboxLifecycleStatus } from "./sandbox";
 import { createServer } from "./server";
 
 vi.mock("./agent-loop", () => ({
@@ -24,6 +25,10 @@ vi.mock("./goat-worker", () => ({
 vi.mock("./goat-google-tools", () => ({
   executeGoatGoogleTool: vi.fn(async () => ({ messages: [] })),
   isGoatGoogleToolName: (name: string) => name === "gmail_search",
+}));
+
+vi.mock("./sandbox", () => ({
+  getSandboxLifecycleStatus: vi.fn(async () => "running"),
 }));
 
 const env = {
@@ -156,6 +161,24 @@ describe("internal Goat task run endpoint", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ ok: true });
     expect(wakeGoatTaskWorker).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("internal Goat Codex sandbox status endpoint", () => {
+  it("returns the E2B sandbox lifecycle status", async () => {
+    vi.mocked(getSandboxLifecycleStatus).mockResolvedValue("sleeping");
+    const server = createServer(goatEnv);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/internal/goat/codex-chat/sandboxes/sbx_123/status",
+      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, status: "sleeping" });
+    expect(getSandboxLifecycleStatus).toHaveBeenCalledWith("sbx_123");
   });
 });
 

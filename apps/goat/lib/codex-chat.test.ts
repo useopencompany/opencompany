@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoatCodexChatMessage, interruptGoatCodexChatSession } from "@/lib/codex-chat";
+import {
+  createGoatCodexChatMessage,
+  getGoatCodexChatSandboxStatus,
+  interruptGoatCodexChatSession,
+} from "@/lib/codex-chat";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
   selectResults: [] as unknown[][],
   codexConnected: vi.fn(),
+  getSandboxStatus: vi.fn(),
   wake: vi.fn(),
 }));
 
@@ -21,6 +26,7 @@ vi.mock("@/lib/codex-auth", () => ({
 }));
 
 vi.mock("@/lib/task-runner", () => ({
+  getGoatCodexSandboxStatus: mocks.getSandboxStatus,
   triggerGoatCodexChatWake: mocks.wake,
 }));
 
@@ -171,5 +177,57 @@ describe("interruptGoatCodexChatSession", () => {
     expect(result).toMatchObject({ ok: true, status: 202 });
     // One UPDATE for the running turn's interrupt flag, one CTE for queued-turn cancellation.
     expect(mocks.execute).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("getGoatCodexChatSandboxStatus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.selectResults.length = 0;
+    mocks.getSandboxStatus.mockResolvedValue("running");
+    mocks.select.mockImplementation(() => createSelectBuilder(mocks.selectResults.shift() ?? []));
+  });
+
+  it("returns null before a sandbox has been persisted", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          sandboxId: null,
+          status: "starting",
+        },
+      },
+    ]);
+
+    await expect(
+      getGoatCodexChatSandboxStatus({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toEqual({ ok: true, status: null });
+    expect(mocks.getSandboxStatus).not.toHaveBeenCalled();
+  });
+
+  it("loads the runner status for the session sandbox", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          sandboxId: "sbx_123",
+          status: "idle",
+        },
+      },
+    ]);
+    mocks.getSandboxStatus.mockResolvedValue("sleeping");
+
+    await expect(
+      getGoatCodexChatSandboxStatus({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toEqual({ ok: true, status: "sleeping" });
+    expect(mocks.getSandboxStatus).toHaveBeenCalledWith("sbx_123");
   });
 });

@@ -13,7 +13,11 @@ import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { CODEX_CHAT_DEFAULT_MODEL, CODEX_CHAT_PROMPT_MAX_LENGTH } from "@/lib/codex-chat-constants";
 import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { toGoatTaskTitle } from "@/lib/task-display";
-import { triggerGoatCodexChatWake } from "@/lib/task-runner";
+import {
+  type GoatCodexSandboxStatus,
+  getGoatCodexSandboxStatus,
+  triggerGoatCodexChatWake,
+} from "@/lib/task-runner";
 
 export { CODEX_CHAT_DEFAULT_MODEL, CODEX_PICKER_VALUE } from "@/lib/codex-chat-constants";
 
@@ -132,6 +136,34 @@ export async function interruptGoatCodexChatSession(input: {
       AND message.role = 'assistant'
   `);
   return { ok: true, status: 202, error: null };
+}
+
+export async function getGoatCodexChatSandboxStatus(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}): Promise<
+  | { ok: true; status: GoatCodexSandboxStatus | null }
+  | { ok: false; statusCode: number; error: string }
+> {
+  const session = await loadCodexChatSessionForChat({
+    userWorkosId: input.userWorkosId,
+    chatSessionId: input.chatSessionId,
+  });
+  if (!session) return { ok: false, statusCode: 404, error: "Codex chat session not found." };
+  if (!session.sandboxId) return { ok: true, status: null };
+
+  try {
+    return {
+      ok: true,
+      status: await getGoatCodexSandboxStatus(session.sandboxId),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      statusCode: 502,
+      error: error instanceof Error ? error.message : "Unable to load Codex sandbox status.",
+    };
+  }
 }
 
 async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSessionId: string }) {

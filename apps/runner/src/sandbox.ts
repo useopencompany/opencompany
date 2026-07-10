@@ -99,6 +99,7 @@ export async function createOrConnectSandbox(input: {
   sandboxId?: string | null;
   template?: string | undefined;
   envs: Record<string, string>;
+  metadata?: Record<string, string> | undefined;
   idleTimeoutMs: number;
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
@@ -157,11 +158,13 @@ export async function connectSandbox(input: {
 async function createSandbox(input: {
   template?: string | undefined;
   envs: Record<string, string>;
+  metadata?: Record<string, string> | undefined;
   idleTimeoutMs: number;
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   const options = {
     envs: input.envs,
+    ...(input.metadata ? { metadata: input.metadata } : {}),
     timeoutMs: input.idleTimeoutMs,
     lifecycle: {
       onTimeout: "pause" as const,
@@ -195,6 +198,22 @@ async function createSandbox(input: {
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
   });
   return sandbox;
+}
+
+export type SandboxLifecycleStatus = "running" | "sleeping" | "deleted";
+
+export async function getSandboxLifecycleStatus(
+  sandboxId: string,
+): Promise<SandboxLifecycleStatus> {
+  try {
+    const info = await Sandbox.getInfo(sandboxId, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    return info.state === "paused" ? "sleeping" : "running";
+  } catch (error) {
+    if (isSandboxNotFound(error)) return "deleted";
+    throw error;
+  }
 }
 
 function emitSandboxLatency(

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getGoatCodexSandboxStatus,
   goatRunnerConfigured,
   triggerGoatCodexChatWake,
   triggerGoatTaskRun,
@@ -151,5 +152,33 @@ describe("triggerGoatCodexChatWake", () => {
     await vi.advanceTimersByTimeAsync(5_000);
 
     await wake;
+  });
+});
+
+describe("getGoatCodexSandboxStatus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("fetches sandbox status from the runner", async () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner.example.com/");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
+    const fetchMock = vi.fn(async () =>
+      Response.json({ ok: true, status: "sleeping" }, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getGoatCodexSandboxStatus("sbx_123")).resolves.toBe("sleeping");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://runner.example.com/internal/goat/codex-chat/sandboxes/sbx_123/status",
+      expect.objectContaining({
+        method: "GET",
+        headers: { Authorization: "Bearer token" },
+        signal: expect.any(AbortSignal),
+      }),
+    );
   });
 });
