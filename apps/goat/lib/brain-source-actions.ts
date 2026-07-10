@@ -29,11 +29,12 @@ import {
   type GoatIntegrationProvider,
   type GoatIntegrationStatus,
   goatIntegrations,
+  isWorkspaceOwnedGoatIntegrationProvider,
 } from "@opencompany/db/goat-schema";
 import type { GoatSlackConversationRef } from "@opencompany/db/goat-slack";
 import { getDefaultGoatBrainForUser, getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
 import { GITHUB_ACTIVITY_EVENT_TYPES, type GitHubActivityEventType } from "@opencompany/goat-brain";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import type {
@@ -63,7 +64,11 @@ export type GoatBrainSourceView = {
   integrationId: string;
   enabled: boolean;
   connectedByName: string;
-  isOwnIntegration: boolean;
+  // "workspace" = installation-bound connection owned by the workspace (any
+  // admin manages it); "user" = a member's personal connection (only they can
+  // change or rewire it).
+  ownerKind: "workspace" | "user";
+  canManage: boolean;
   integrationStatus: GoatIntegrationStatus;
   config: Record<string, unknown>;
 };
@@ -118,26 +123,80 @@ async function requireAdminBrainContext(brainRef: string) {
   return context;
 }
 
+type AdminBrainContext = NonNullable<Awaited<ReturnType<typeof requireAdminBrainContext>>>;
+
+// Ownership filter for integrations usable as brain sources: workspace-owned
+// providers (github, jamie) are available to every admin of the workspace;
+// identity-bound providers only to the member who connected them.
+function sourceIntegrationOwnerWhere(
+  provider: GoatIntegrationProvider,
+  context: Pick<AdminBrainContext, "user" | "workspace">,
+): SQL | undefined {
+  return isWorkspaceOwnedGoatIntegrationProvider(provider)
+    ? eq(goatIntegrations.workspaceId, context.workspace.id)
+    : and(
+        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
+        isNull(goatIntegrations.workspaceId),
+      );
+}
+
+// Resolves an integration the acting admin may bind to a brain. Returns the
+// row's user_workos_id because brain_sources mirrors it in a composite FK —
+// for workspace-owned rows that is the original connector, not the actor.
+async function loadSourceIntegrationForContext(input: {
+  integrationId: string;
+  provider: GoatIntegrationProvider;
+  context: Pick<AdminBrainContext, "user" | "workspace">;
+}) {
+  const [integration] = await getDb()
+    .select({
+      id: goatIntegrations.id,
+      userWorkosId: goatIntegrations.userWorkosId,
+      externalId: goatIntegrations.externalId,
+      status: goatIntegrations.status,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, input.integrationId),
+        eq(goatIntegrations.provider, input.provider),
+        sourceIntegrationOwnerWhere(input.provider, input.context),
+        // Provider "linear" also covers the MCP connector row; only the
+        // ingestion connection (keyed on the organization id) can feed brains.
+        ...(input.provider === "linear"
+          ? [ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID)]
+          : []),
+      ),
+    )
+    .limit(1);
+  return integration ?? null;
+}
+
 export async function getGoatBrainSourcesAction(
   brainRef: string,
 ): Promise<GoatBrainSourcesDetails | null> {
   const context = await requireAdminBrainContext(brainRef);
   if (!context) return null;
 
-  const [sources, jamieState, slackState, linearState, githubState, gmailState, defaultBrain] =
-    await Promise.all([
+  const [sources, jamieState, slackState, linearState, githubState, gmailState] = await Promise.all(
+    [
       listGoatBrainSourcesForBrain(brainRef),
-      getGoatJamieIntegrationState(context.user.workosUserId),
+      getGoatJamieIntegrationState(context.workspace.id),
       getGoatSlackIntegrationState(context.user.workosUserId),
       getGoatLinearSourceIntegrationState(context.user.workosUserId),
-      getGoatGitHubIntegrationState(context.user.workosUserId),
+      getGoatGitHubIntegrationState(context.workspace.id),
       getGoatGmailSourceIntegrationState(context.user.workosUserId),
-      getDefaultGoatBrainForUser(context.user.workosUserId),
-    ]);
+    ],
+  );
 
   const jamieConfigured = jamieState.integrationId
     ? await hasAnyBrainSourceForIntegration(jamieState.integrationId)
     : false;
+  // Legacy Jamie routing delivers to the *connector's* default brain (the
+  // webhook handler resolves it the same way), which may not be the actor's.
+  const jamieOwnerDefaultBrain = jamieState.integrationId
+    ? await getDefaultGoatBrainForIntegrationOwner(jamieState.integrationId)
+    : null;
 
   return {
     sources: sources.map((source) => ({
@@ -145,14 +204,17 @@ export async function getGoatBrainSourcesAction(
       integrationId: source.integrationId,
       enabled: source.enabled,
       connectedByName: source.ownerName ?? source.ownerEmail ?? "Unknown",
-      isOwnIntegration: source.userWorkosId === context.user.workosUserId,
+      ownerKind: source.integrationWorkspaceId ? ("workspace" as const) : ("user" as const),
+      canManage: source.integrationWorkspaceId
+        ? source.integrationWorkspaceId === context.workspace.id
+        : source.userWorkosId === context.user.workosUserId,
       integrationStatus: source.integrationStatus,
       config: source.config,
     })),
     jamie: {
       integration: jamieState,
       legacyDefaultDelivery: jamieState.apiKeyConfigured && !jamieConfigured,
-      isDefaultBrain: defaultBrain?.id === brainRef,
+      isDefaultBrain: jamieOwnerDefaultBrain?.id === brainRef,
     },
     slack: {
       integration: slackState,
@@ -187,27 +249,11 @@ export async function setGoatBrainSourceEnabledAction(input: {
     return { ok: false, error: "This source is not available yet." };
   }
 
-  const [integration] = await getDb()
-    .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      externalId: goatIntegrations.externalId,
-      status: goatIntegrations.status,
-    })
-    .from(goatIntegrations)
-    .where(
-      and(
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
-        eq(goatIntegrations.provider, integrationProvider),
-        // Provider "linear" also covers the MCP connector row; only the
-        // ingestion connection (keyed on the organization id) can feed brains.
-        ...(integrationProvider === "linear"
-          ? [ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID)]
-          : []),
-      ),
-    )
-    .limit(1);
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: integrationProvider,
+    context,
+  });
   if (!integration || integration.status === "disconnected") {
     return { ok: false, error: "Connect this integration in your settings first." };
   }
@@ -226,15 +272,16 @@ export async function setGoatBrainSourceEnabledAction(input: {
 
     // First explicit row for this integration ends the legacy default-brain
     // routing; materialize the default brain's row so delivery there doesn't
-    // silently stop. Only Jamie ever had that implicit routing.
+    // silently stop. Only Jamie ever had that implicit routing, and it targets
+    // the connector's default brain (the webhook resolves it the same way).
     if (!hadExplicitConfig && input.provider === "jamie") {
-      const defaultBrain = await getDefaultGoatBrainForUser(context.user.workosUserId);
+      const defaultBrain = await getDefaultGoatBrainForUser(integration.userWorkosId);
       if (defaultBrain && defaultBrain.id !== input.brainRef) {
         await upsertGoatBrainSource({
           brainRef: defaultBrain.id,
           provider: input.provider,
           integrationId: input.integrationId,
-          userWorkosId: context.user.workosUserId,
+          userWorkosId: integration.userWorkosId,
           createdByWorkosId: context.user.workosUserId,
           enabled: true,
         });
@@ -245,7 +292,7 @@ export async function setGoatBrainSourceEnabledAction(input: {
       brainRef: input.brainRef,
       provider: input.provider,
       integrationId: input.integrationId,
-      userWorkosId: context.user.workosUserId,
+      userWorkosId: integration.userWorkosId,
       createdByWorkosId: context.user.workosUserId,
       enabled: input.enabled,
     });
@@ -368,17 +415,11 @@ export async function setGoatBrainSlackSourceAction(input: {
     return { ok: false, error: "Only workspace admins can configure brain sources." };
   }
 
-  const [integration] = await getDb()
-    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
-    .from(goatIntegrations)
-    .where(
-      and(
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
-        eq(goatIntegrations.provider, "slack"),
-      ),
-    )
-    .limit(1);
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "slack",
+    context,
+  });
   if (!integration || integration.status === "disconnected") {
     return { ok: false, error: "Connect Slack in your settings first." };
   }
@@ -388,7 +429,7 @@ export async function setGoatBrainSlackSourceAction(input: {
       brainRef: input.brainRef,
       provider: "slack",
       integrationId: input.integrationId,
-      userWorkosId: context.user.workosUserId,
+      userWorkosId: integration.userWorkosId,
       createdByWorkosId: context.user.workosUserId,
       enabled: input.enabled,
       config: {
@@ -475,18 +516,11 @@ export async function setGoatBrainLinearSourceAction(input: {
     return { ok: false, error: "Only workspace admins can configure brain sources." };
   }
 
-  const [integration] = await getDb()
-    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
-    .from(goatIntegrations)
-    .where(
-      and(
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
-        eq(goatIntegrations.provider, "linear"),
-        ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
-      ),
-    )
-    .limit(1);
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "linear",
+    context,
+  });
   if (!integration || integration.status === "disconnected") {
     return { ok: false, error: "Connect Linear in your settings first." };
   }
@@ -496,7 +530,7 @@ export async function setGoatBrainLinearSourceAction(input: {
       brainRef: input.brainRef,
       provider: "linear",
       integrationId: input.integrationId,
-      userWorkosId: context.user.workosUserId,
+      userWorkosId: integration.userWorkosId,
       createdByWorkosId: context.user.workosUserId,
       enabled: input.enabled,
       config: {
@@ -523,17 +557,14 @@ export async function listGoatGitHubRepositoriesAction(
   integrationId: string,
 ): Promise<GoatGitHubRepositoryListResult> {
   const context = await currentGoatUser();
-  const [integration] = await getDb()
-    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
-    .from(goatIntegrations)
-    .where(
-      and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
-        eq(goatIntegrations.provider, "github"),
-      ),
-    )
-    .limit(1);
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can configure brain sources." };
+  }
+  const integration = await loadSourceIntegrationForContext({
+    integrationId,
+    provider: "github",
+    context,
+  });
   if (!integration || integration.status !== "connected") {
     return { ok: false, error: "Connect GitHub in your settings first." };
   }
@@ -556,17 +587,11 @@ export async function setGoatBrainGitHubSourceAction(input: {
     return { ok: false, error: "Only workspace admins can configure brain sources." };
   }
 
-  const [integration] = await getDb()
-    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
-    .from(goatIntegrations)
-    .where(
-      and(
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
-        eq(goatIntegrations.provider, "github"),
-      ),
-    )
-    .limit(1);
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "github",
+    context,
+  });
   if (!integration || integration.status === "disconnected") {
     return { ok: false, error: "Connect GitHub in your settings first." };
   }
@@ -576,7 +601,7 @@ export async function setGoatBrainGitHubSourceAction(input: {
       brainRef: input.brainRef,
       provider: "github",
       integrationId: input.integrationId,
-      userWorkosId: context.user.workosUserId,
+      userWorkosId: integration.userWorkosId,
       createdByWorkosId: context.user.workosUserId,
       enabled: input.enabled,
       config: {
@@ -607,17 +632,11 @@ export async function setGoatBrainGmailSourceAction(input: {
     return { ok: false, error: "Only workspace admins can configure brain sources." };
   }
 
-  const [integration] = await getDb()
-    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
-    .from(goatIntegrations)
-    .where(
-      and(
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
-        eq(goatIntegrations.provider, "gmail"),
-      ),
-    )
-    .limit(1);
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "gmail",
+    context,
+  });
   if (!integration || integration.status === "disconnected") {
     return { ok: false, error: "Connect Gmail in your settings first." };
   }
@@ -628,7 +647,7 @@ export async function setGoatBrainGmailSourceAction(input: {
       brainRef: input.brainRef,
       provider: "gmail",
       integrationId: input.integrationId,
-      userWorkosId: context.user.workosUserId,
+      userWorkosId: integration.userWorkosId,
       createdByWorkosId: context.user.workosUserId,
       enabled: input.enabled,
       config: {
@@ -658,6 +677,16 @@ function sanitizeGmailEventRefs(refs: GoatGmailEventRef[]): GoatGmailEventRef[] 
     sanitized.push({ id: id as GoatGmailEventType });
   }
   return sanitized;
+}
+
+async function getDefaultGoatBrainForIntegrationOwner(integrationId: string) {
+  const [row] = await getDb()
+    .select({ userWorkosId: goatIntegrations.userWorkosId })
+    .from(goatIntegrations)
+    .where(eq(goatIntegrations.id, integrationId))
+    .limit(1);
+  if (!row) return null;
+  return getDefaultGoatBrainForUser(row.userWorkosId);
 }
 
 async function loadOwnLinearAccessToken(userWorkosId: string, integrationId: string) {

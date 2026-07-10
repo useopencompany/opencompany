@@ -33,7 +33,7 @@ beforeEach(() => {
         onConflictDoUpdate: vi.fn((options) => {
           db.conflictUpdates.push({ table, options });
           return {
-            returning: vi.fn(async () => [{ id: "gint_123" }]),
+            returning: vi.fn(async () => [{ id: "gint_123", userWorkosId: "user_123" }]),
           };
         }),
       };
@@ -59,11 +59,13 @@ describe("Goat GitHub integration", () => {
   it("round-trips signed state for a Goat user", () => {
     const state = createGoatGitHubIntegrationState({
       userWorkosId: "user_123",
+      workspaceId: "gws_123",
       returnTo: "/settings",
     });
 
     expect(verifyGoatGitHubIntegrationState(state)).toMatchObject({
       userWorkosId: "user_123",
+      workspaceId: "gws_123",
       returnTo: "/settings",
     });
   });
@@ -71,6 +73,7 @@ describe("Goat GitHub integration", () => {
   it("syncs repositories into Goat integration resources", async () => {
     await syncGoatGitHubIntegrationRepositories({
       userWorkosId: "user_123",
+      workspaceId: "gws_123",
       installationId: "12345",
       accountLogin: "octo",
       accountType: "User",
