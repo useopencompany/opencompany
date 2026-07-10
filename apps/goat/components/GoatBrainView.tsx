@@ -368,10 +368,26 @@ function GoatBrainEditor({
       .toSorted((a, b) => (a.title ?? a.brainId).localeCompare(b.title ?? b.brainId));
   }, [documents, query]);
   const isSearching = Boolean(query.trim());
-  const visibleExpandedPaths = useMemo(
-    () => (isSearching ? new Set(collectFolderPaths(tree)) : expandedPaths),
-    [expandedPaths, isSearching, tree],
-  );
+  const selectedDocumentFolderPath = selectedDocument?.folderPath ?? null;
+  const visibleExpandedPaths = useMemo(() => {
+    if (isSearching) return new Set(collectFolderPaths(tree));
+    return selectedDocumentFolderPath
+      ? withAncestorFolders(expandedPaths, selectedDocumentFolderPath, true)
+      : expandedPaths;
+  }, [expandedPaths, isSearching, selectedDocumentFolderPath, tree]);
+  const selectedDocumentUrl = selectedDocument
+    ? brainDocumentUrl(selectedDocument, selectedBrainId)
+    : null;
+
+  useEffect(() => {
+    if (!selectedDocument || !selectedDocumentUrl) return;
+    if (
+      window.location.pathname !== selectedDocumentUrl &&
+      currentUrlTargetsDocument(selectedDocument.brainId, selectedBrainId)
+    ) {
+      replaceCurrentUrl(selectedDocumentUrl);
+    }
+  }, [selectedBrainId, selectedDocument, selectedDocumentUrl]);
 
   const selectDocument = (document: GoatBrainDocumentView) => {
     if (canEditBrain) saveRef.current(); // flush pending edits on the outgoing document
@@ -1940,17 +1956,19 @@ function resolveInitialDocument(
   initialFolderPath: string | null,
   initialBrainId: string | null,
 ) {
+  if (initialBrainId) {
+    return (
+      documents.find(
+        (document) =>
+          document.brainId === initialBrainId &&
+          (!initialFolderPath || document.folderPath === initialFolderPath),
+      ) ??
+      documents.find((document) => document.brainId === initialBrainId) ??
+      null
+    );
+  }
   return (
-    (initialBrainId
-      ? documents.find(
-          (document) =>
-            document.brainId === initialBrainId &&
-            (!initialFolderPath || document.folderPath === initialFolderPath),
-        )
-      : null) ??
-    documents.find((document) => document.folderPath === initialFolderPath) ??
-    documents[0] ??
-    null
+    documents.find((document) => document.folderPath === initialFolderPath) ?? documents[0] ?? null
   );
 }
 
@@ -1964,6 +1982,26 @@ function brainFolderUrl(folderPath: string, routeBrainId?: string | null) {
 
 function replaceCurrentUrl(href: string) {
   window.history.replaceState(window.history.state, "", href);
+}
+
+function currentUrlTargetsDocument(brainId: string, routeBrainId?: string | null) {
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  if (segments[0] !== "brain") return false;
+  const brainPathSegments = segments.slice(1);
+  const pathSegments =
+    routeBrainId && brainPathSegments[0] === encodeURIComponent(routeBrainId)
+      ? brainPathSegments.slice(1)
+      : brainPathSegments;
+  if (pathSegments.length < 2) return false;
+  return safeDecodePathSegment(pathSegments.at(-1) ?? "") === brainId;
+}
+
+function safeDecodePathSegment(segment: string) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
@@ -2093,11 +2131,13 @@ function ancestorFolderPaths(path: string) {
 
 function withAncestorFolders(current: Set<string>, folderPath: string, includeFolder = false) {
   const next = new Set(current);
+  let changed = false;
   const ancestors = ancestorFolderPaths(folderPath);
   for (const path of includeFolder ? ancestors : ancestors.slice(0, -1)) {
+    if (!next.has(path)) changed = true;
     next.add(path);
   }
-  return next;
+  return changed ? next : current;
 }
 
 function documentViewFromRow(
