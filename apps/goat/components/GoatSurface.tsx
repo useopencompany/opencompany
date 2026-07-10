@@ -2046,7 +2046,7 @@ function ChatHistoryList({
                   <span className="truncate text-[14px] font-medium leading-tight text-ink">
                     {chat.title}
                   </span>
-                  <span className="shrink-0 text-[12px] leading-tight text-ink-subtle transition-opacity duration-150 group-hover/chat:opacity-0 group-focus-within/chat:opacity-0">
+                  <span className="shrink-0 text-[12px] leading-tight text-ink-faint transition-opacity duration-150 group-hover/chat:opacity-0 group-focus-within/chat:opacity-0">
                     {formatRelativeTime(chat.updatedAt)}
                   </span>
                 </div>
