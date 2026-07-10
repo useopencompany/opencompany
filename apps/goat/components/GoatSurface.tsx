@@ -74,8 +74,8 @@ import {
   textFromGoatChatUiMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
-import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
+import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
@@ -532,10 +532,7 @@ export function GoatSurface({
       }
 
       const engineTarget = engineChatKindFromChat(chat, localCodexBetaEnabled);
-      const nextCodexComposerState = codexComposerUiStateForChat(
-        chat,
-        codexComposerStateByChatId,
-      );
+      const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
       setChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? "goat-chat-main");
       setChatModel(

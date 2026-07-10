@@ -7,8 +7,8 @@ import type {
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
-import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { finiteDurationMs } from "@/lib/chat-timing";
+import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 
 export {
   CODEX_APPROVAL_TOOL_NAME,
