@@ -640,6 +640,113 @@ describe("GitHub activity normalization", () => {
     expect(normalizeGitHubActivityWebhook("issues", asPullRequest, { capturedAt })).toBeNull();
   });
 
+  function issueCommentPayload(
+    overrides: {
+      pullRequest?: boolean;
+      comment?: Record<string, unknown>;
+      issue?: Record<string, unknown>;
+    } = {},
+  ) {
+    return {
+      action: "created",
+      repository: { id: 4242, full_name: "acme/api", private: false },
+      issue: {
+        number: 45,
+        title: "Billing webhook drops retries",
+        html_url: "https://github.com/acme/api/issues/45",
+        labels: [{ name: "bug" }],
+        ...(overrides.pullRequest ? { pull_request: { url: "https://api.github.com/..." } } : {}),
+        ...overrides.issue,
+      },
+      comment: {
+        id: 987654321,
+        body: "We decided to drop retries older than 24h and alert on the rest.",
+        html_url: "https://github.com/acme/api/issues/45#issuecomment-987654321",
+        user: { login: "grace" },
+        created_at: "2026-07-02T08:15:00Z",
+        ...overrides.comment,
+      },
+      installation: { id: 777 },
+    };
+  }
+
+  it("normalizes a comment on an issue", () => {
+    const item = normalizeGitHubActivityWebhook("issue_comment", issueCommentPayload(), {
+      capturedAt,
+    });
+    expect(item?.externalId).toBe("acme/api:issue:45:comment:987654321");
+    expect(item?.sourceRef).toBe("github:acme/api:issue:45:comment:987654321");
+    expect(item?.occurredAt).toBe("2026-07-02T08:15:00Z");
+    expect(item?.content.activity).toMatchObject({
+      kind: "issue",
+      state: "commented",
+      author: "grace",
+      number: 45,
+      title: "Billing webhook drops retries",
+      url: "https://github.com/acme/api/issues/45#issuecomment-987654321",
+    });
+    expect(item ? githubActivityEventType(item.content.activity) : null).toBe("issue_commented");
+    expect(isNormalizedGitHubActivitySourceItem(item)).toBe(true);
+  });
+
+  it("normalizes a comment on a pull request via the issue_comment event", () => {
+    const item = normalizeGitHubActivityWebhook(
+      "issue_comment",
+      issueCommentPayload({ pullRequest: true }),
+      { capturedAt },
+    );
+    expect(item?.externalId).toBe("acme/api:pull:45:comment:987654321");
+    expect(item?.content.activity).toMatchObject({ kind: "pull_request", state: "commented" });
+    expect(item ? githubActivityEventType(item.content.activity) : null).toBe(
+      "pull_request_commented",
+    );
+  });
+
+  it("ignores edited and deleted comments", () => {
+    expect(
+      normalizeGitHubActivityWebhook(
+        "issue_comment",
+        { ...issueCommentPayload(), action: "edited" },
+        { capturedAt },
+      ),
+    ).toBeNull();
+    expect(
+      normalizeGitHubActivityWebhook(
+        "issue_comment",
+        { ...issueCommentPayload(), action: "deleted" },
+        { capturedAt },
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps distinct comments on the same thread as separate items", () => {
+    const first = normalizeGitHubActivityWebhook("issue_comment", issueCommentPayload(), {
+      capturedAt,
+    });
+    const second = normalizeGitHubActivityWebhook(
+      "issue_comment",
+      issueCommentPayload({ comment: { id: 111222333 } }),
+      { capturedAt },
+    );
+    expect(first?.externalId).not.toBe(second?.externalId);
+    expect(first?.contentHash).not.toBe(second?.contentHash);
+  });
+
+  it("throws on comment payloads missing the comment id", () => {
+    expect(() =>
+      normalizeGitHubActivityWebhook(
+        "issue_comment",
+        {
+          action: "created",
+          repository: { id: 1, full_name: "acme/api" },
+          issue: { number: 1, title: "x", html_url: "https://x" },
+          comment: { body: "hi", html_url: "https://x", created_at: "2026-07-02T08:15:00Z" },
+        },
+        { capturedAt },
+      ),
+    ).toThrow(BrainSourceNormalizationError);
+  });
+
   it("derives stable content hashes and truncates oversized bodies", () => {
     const first = normalizeGitHubActivityWebhook("pull_request", pullRequestPayload(), {
       capturedAt,

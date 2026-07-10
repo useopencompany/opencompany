@@ -695,7 +695,9 @@ function githubReposFromConfig(
 const GITHUB_EVENT_OPTIONS: { id: GitHubActivityEventType; label: string }[] = [
   { id: "pull_request_opened", label: "Pull request opened" },
   { id: "pull_request_merged", label: "Pull request merged" },
+  { id: "pull_request_commented", label: "Pull request comment" },
   { id: "issue_opened", label: "Issue created" },
+  { id: "issue_commented", label: "Issue comment" },
 ];
 
 function githubEventsFromConfig(

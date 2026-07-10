@@ -685,7 +685,9 @@ export type NormalizedGitHubActivityKind = "pull_request" | "issue";
 export const GITHUB_ACTIVITY_EVENT_TYPES = [
   "pull_request_opened",
   "pull_request_merged",
+  "pull_request_commented",
   "issue_opened",
+  "issue_commented",
 ] as const;
 export type GitHubActivityEventType = (typeof GITHUB_ACTIVITY_EVENT_TYPES)[number];
 
@@ -695,7 +697,7 @@ export type NormalizedGitHubActivityContent = {
     repository: { id: string; fullName: string; private: boolean };
     title: string;
     url: string;
-    state: "opened" | "merged";
+    state: "opened" | "merged" | "commented";
     body: string;
     truncatedBody: boolean;
     author?: string;
@@ -720,6 +722,9 @@ export type NormalizedGitHubActivitySourceItem =
 export function githubActivityEventType(
   activity: Pick<NormalizedGitHubActivityContent["activity"], "kind" | "state">,
 ): GitHubActivityEventType {
+  if (activity.state === "commented") {
+    return activity.kind === "issue" ? "issue_commented" : "pull_request_commented";
+  }
   if (activity.kind === "issue") return "issue_opened";
   return activity.state === "merged" ? "pull_request_merged" : "pull_request_opened";
 }
@@ -732,13 +737,16 @@ const GITHUB_ACTIVITY_BODY_LIMIT_BYTES = 20_000;
 // Maps a GitHub App webhook delivery to a normalized source item. Returns null
 // for event/action combinations that are not ingested — only the subscribable
 // event types flow into the brain: a pull request opened, a pull request
-// merged, an issue opened. Throws on malformed payloads for supported
-// combinations.
+// merged, an issue opened, and a new comment on either. Throws on malformed
+// payloads for supported combinations.
 export function normalizeGitHubActivityWebhook(
   eventName: string,
   payload: unknown,
   options: { capturedAt: string },
 ): NormalizedGitHubActivitySourceItem | null {
+  if (eventName === "issue_comment") {
+    return normalizeGitHubIssueCommentWebhook(payload, options);
+  }
   if (eventName !== "pull_request" && eventName !== "issues") {
     return null;
   }
@@ -800,6 +808,42 @@ export function normalizeGitHubActivityWebhook(
   });
 }
 
+// The `issue_comment` event fires for comments on both issues and pull
+// requests — GitHub models a PR as an issue, so a comment on a PR arrives here
+// with `issue.pull_request` set. We only ingest newly created comments; the
+// comment id makes each one a distinct source item from the parent artifact.
+function normalizeGitHubIssueCommentWebhook(
+  payload: unknown,
+  options: { capturedAt: string },
+): NormalizedGitHubActivitySourceItem | null {
+  const root = readObject(payload, "payload");
+  const action = typeof root.action === "string" ? root.action : "";
+  if (action !== "created") return null;
+  const issue = readObject(root.issue, "issue");
+  const comment = readObject(root.comment, "comment");
+  const isPullRequest = Boolean(issue.pull_request);
+  const number = readGitHubNumber(issue.number, "issue.number");
+  const commentId = readGitHubNumber(comment.id, "comment.id");
+  return buildGitHubActivityItem({
+    kind: isPullRequest ? "pull_request" : "issue",
+    repository: readGitHubRepository(root.repository),
+    refSegment: `${isPullRequest ? "pull" : "issue"}:${number}:comment:${commentId}`,
+    title: readString(issue.title, "issue.title"),
+    // The comment permalink deep-links into the still-live thread, so it
+    // remains a valid pointer home for the copy/pointer contract.
+    url: readString(comment.html_url, "comment.html_url"),
+    state: "commented",
+    body: optionalString(comment.body),
+    occurredAt: optionalIsoString(comment.created_at),
+    capturedAt: options.capturedAt,
+    extras: {
+      author: githubLogin(comment.user),
+      number,
+      labels: githubLabelNames(issue.labels),
+    },
+  });
+}
+
 export function isNormalizedGitHubActivitySourceItem(
   value: unknown,
 ): value is NormalizedGitHubActivitySourceItem {
@@ -830,7 +874,9 @@ export function isNormalizedGitHubActivitySourceItem(
     typeof activity.repository.fullName === "string" &&
     typeof activity.title === "string" &&
     typeof activity.url === "string" &&
-    typeof activity.state === "string" &&
+    (activity.state === "opened" ||
+      activity.state === "merged" ||
+      activity.state === "commented") &&
     typeof activity.body === "string"
   );
 }
@@ -841,7 +887,7 @@ function buildGitHubActivityItem(input: {
   refSegment: string;
   title: string;
   url: string;
-  state: "opened" | "merged";
+  state: NormalizedGitHubActivityContent["activity"]["state"];
   body: string | undefined;
   occurredAt: string | undefined;
   capturedAt: string;
