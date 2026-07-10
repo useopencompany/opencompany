@@ -204,8 +204,7 @@ export function GoatBrainRoute({
   selectedBrain: GoatBrainSummaryView | null;
   initialBrainSnapshot: GoatBrainSnapshot | null;
 }) {
-  // "settings" is a reserved segment directly after an explicit brain id
-  // (brain ids contain underscores, so they can never collide with folder names).
+  // "settings" is a reserved segment directly after an explicit brain id.
   if (routeBrainId && selectedBrain && path[0] === "settings") {
     return <GoatBrainSettingsRoute brain={selectedBrain} />;
   }

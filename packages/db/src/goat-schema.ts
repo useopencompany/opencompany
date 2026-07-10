@@ -384,7 +384,7 @@ export const goatBrainMembers = goat.table(
     id: text("id").primaryKey(),
     brainId: text("brain_id")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
@@ -409,7 +409,7 @@ export const goatBrainFolders = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     path: text("path").notNull(),
     source: text("source").$type<GoatBrainFolderSource>().notNull().default("custom"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -444,7 +444,7 @@ export const goatBrainDocuments = goat.table(
     }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     brainId: text("brain_id").notNull(),
     folderPath: text("folder_path").notNull(),
     title: text("title"),
@@ -547,7 +547,7 @@ export const goatBrainTimelineEntries = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     brainId: text("brain_id").notNull(),
     evidenceId: text("evidence_id").notNull(),
     at: timestamp("at", { withTimezone: true }).notNull(),
@@ -583,7 +583,7 @@ export const goatBrainEdges = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     documentId: text("document_id")
       .notNull()
       .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
@@ -633,7 +633,7 @@ export const goatBrainDocumentEmbeddings = goat.table(
       .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
     embedding: vector("embedding").notNull(),
@@ -651,7 +651,10 @@ export const goatBrainDocumentVersions = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    brainRef: text("brain_ref").references(() => goatBrains.id, { onDelete: "set null" }),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
     documentId: text("document_id").references(() => goatBrainDocuments.id, {
       onDelete: "set null",
     }),
@@ -842,7 +845,7 @@ export const goatBrainSources = goat.table(
     id: text("id").primaryKey(),
     brainId: text("brain_id")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade" }),
+      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     provider: text("provider").$type<GoatBrainSourceConfigProvider>().notNull(),
     integrationId: text("integration_id").notNull(),
     // Owner of the referenced integration (integrations are user-scoped;
@@ -968,7 +971,10 @@ export const goatBrainIngestJobs = goat.table(
     integrationId: text("integration_id"),
     // Target brain for the job (principle: ingestion is per-brain). Null means
     // the handler resolves the user's default brain at run time.
-    brainRef: text("brain_ref").references(() => goatBrains.id, { onDelete: "set null" }),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
     kind: text("kind").$type<GoatBrainIngestJobKind>().notNull(),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<GoatBrainIngestJobStatus>().notNull().default("queued"),
