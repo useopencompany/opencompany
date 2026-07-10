@@ -318,7 +318,7 @@ export type GoatBrainSourceItemRow = {
   source_provider: string;
   source_type: string;
   external_id: string;
-  title: string;
+  title: string | null;
   occurred_at: string;
   captured_at: string;
   content_hash: string;
