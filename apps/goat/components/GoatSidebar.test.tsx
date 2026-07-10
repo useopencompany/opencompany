@@ -66,7 +66,7 @@ describe("GoatSidebar", () => {
     pathnameMock.value = "/";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    expect(screen.getByText("opencompany v2")).toBeInTheDocument();
+    expect(screen.getByText("Ada's Workspace")).toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "Goat primary" });
     const home = within(nav).getByRole("link", { name: "Home" });
