@@ -1,5 +1,6 @@
 import type {
   GoatBrainFolderSource,
+  GoatChatMessageAttachment,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
   GoatTaskEventType,
@@ -63,6 +64,7 @@ export type GoatChatMessageRow = {
   content: string;
   task_id: string | null;
   debug_trace: Record<string, unknown> | null;
+  attachments: GoatChatMessageAttachment[] | null;
   created_at: string;
   updated_at: string;
 };

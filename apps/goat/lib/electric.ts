@@ -72,6 +72,20 @@ const BRAIN_DOCUMENT_COLUMNS = [
   "updated_at",
 ] as const;
 
+// Chat messages sync everything except attachment_texts: docx/xlsx extracted
+// text (up to 64KB per attachment) only the chat model needs, never the UI.
+const CHAT_MESSAGE_COLUMNS = [
+  "id",
+  "session_id",
+  "role",
+  "content",
+  "task_id",
+  "debug_trace",
+  "attachments",
+  "created_at",
+  "updated_at",
+] as const;
+
 const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"] as const;
 
 const SHAPE_SCOPES = {
@@ -134,10 +148,12 @@ const SHAPE_SCOPES = {
   chat_messages: {
     table: "goat.chat_messages",
     where: scopedChatMessageWhere,
+    columns: CHAT_MESSAGE_COLUMNS,
   },
   "goat.chat_messages": {
     table: "goat.chat_messages",
     where: scopedChatMessageWhere,
+    columns: CHAT_MESSAGE_COLUMNS,
   },
   chat_sessions: {
     table: "goat.chat_sessions",

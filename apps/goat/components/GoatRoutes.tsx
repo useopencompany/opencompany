@@ -66,6 +66,7 @@ export function GoatHomeRoute({
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         chatResumeEnabled={data.chatResumeEnabled}
         userName={userName}
+        userWorkosId={data.user.workosUserId}
       />
     </main>
   );

@@ -217,6 +217,8 @@ function storedAssistantMessage(
     content: "Done.",
     taskId: null,
     debugTrace: null,
+    attachments: null,
+    attachmentTexts: null,
     createdAt: now,
     updatedAt: now,
     taskDisplayId: null,

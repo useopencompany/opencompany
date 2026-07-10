@@ -1,17 +1,24 @@
 import { upload } from "@vercel/blob/client";
+import {
+  GOAT_CHAT_ATTACHMENT_ACCEPT,
+  validateGoatChatAttachmentCandidate,
+} from "@/lib/chat-attachment-formats";
 
 // Client-side half of the brain asset upload: the browser uploads directly to
 // the private Blob store (token minted by /api/brain-assets/upload), then the
 // caller registers the document via uploadGoatBrainAssetAction. Limits mirror
-// the server-side checks in lib/brain-assets.ts.
-export const BRAIN_ASSET_ACCEPT = "application/pdf";
+// the server-side checks in lib/brain-assets.ts; the accepted set is the same
+// core set the chat composer takes (pdf/docx/xlsx/images).
+export const BRAIN_ASSET_ACCEPT = GOAT_CHAT_ATTACHMENT_ACCEPT;
 export const BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 
 export function validateBrainAssetFile(file: File): string | null {
-  if (file.type !== "application/pdf") return "Only PDF uploads are supported right now.";
-  if (file.size > BRAIN_ASSET_MAX_BYTES) return "Uploads are limited to 20 MB.";
   if (file.size === 0) return "That file is empty.";
-  return null;
+  const validation = validateGoatChatAttachmentCandidate({
+    mediaType: file.type,
+    sizeBytes: file.size,
+  });
+  return validation.ok ? null : validation.message;
 }
 
 export async function uploadBrainAssetBlob(

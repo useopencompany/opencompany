@@ -2,10 +2,13 @@ export const GOAT_BRAIN_TOOL_DESCRIPTION =
   "Read-only access to the user's durable Goat Brain (structured memory stored as Markdown files). Use it to recall and inspect existing knowledge, never to write. Use query for recall/search, list for inventory, get for a known brain id, timeline for a record's history, help for command-specific usage, and doctor for validation. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. To add or edit Brain content — new pages, evidence, corrections, links, or merges — use save_to_brain instead; the background curation agent files it. Do not treat Brain as a chat scratchpad.";
 
 export const SAVE_TO_BRAIN_TOOL_DESCRIPTION =
-  "Save something the user wants remembered - a reference, idea, thought, note, decision, or pasted content - into their Brain. This captures the content as a draft page in the inbox immediately and queues a background curation agent that files it properly (title, type, folder, links to related pages). Use this whenever the user says things like 'save this', 'remember this', 'note this down', or shares a reference, idea, or thought worth keeping. Do not rewrite or summarize the content; capture what the user gave you.";
+  "Save something the user wants remembered - a reference, idea, thought, note, decision, pasted content, or an attached file - into their Brain. This captures the content as a draft page in the inbox immediately and queues a background curation agent that files it properly (title, type, folder, links to related pages). Use this whenever the user says things like 'save this', 'remember this', 'note this down', or shares a reference, idea, or thought worth keeping. Do not rewrite or summarize the content; capture what the user gave you. To save files attached in this conversation, pass their attachment ids via attachmentIds instead of copying the content field.";
 
 export const SAVE_TO_BRAIN_CONTENT_DESCRIPTION =
-  "The content to save, verbatim or lightly cleaned. Preserve the user's wording, links, and details; do not summarize away specifics.";
+  "The content to save, verbatim or lightly cleaned. Preserve the user's wording, links, and details; do not summarize away specifics. Omit when saving attached files via attachmentIds.";
+
+export const SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION =
+  "Ids of files attached in this conversation to save into the Brain as assets (each attachment's id is shown next to it in the conversation). The file itself is copied into the Brain and ingested in the background; do not also paste its content into the content field.";
 
 export const SAVE_TO_BRAIN_TITLE_DESCRIPTION =
   "Optional short title for the capture. Omit it to derive one from the content.";

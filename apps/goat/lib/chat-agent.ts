@@ -36,6 +36,7 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
+  SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
   SAVE_TO_BRAIN_INTENT_DESCRIPTION,
   SAVE_TO_BRAIN_TITLE_DESCRIPTION,
@@ -368,26 +369,42 @@ export function createOpenCompanyChatToolContext(input: {
             type: "string",
             description: SAVE_TO_BRAIN_INTENT_DESCRIPTION,
           },
+          attachmentIds: {
+            type: "array",
+            items: { type: "string" },
+            description: SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
+          },
         },
-        required: ["content"],
       }),
       execute: async (args) => {
         visibleToolActivity = true;
         const content = typeof args.content === "string" ? args.content.trim() : "";
-        if (!content) return { ok: false, error: "save_to_brain content must not be empty." };
+        const attachmentIds = Array.isArray(args.attachmentIds)
+          ? [
+              ...new Set(
+                args.attachmentIds.filter(
+                  (id): id is string => typeof id === "string" && id.trim().length > 0,
+                ),
+              ),
+            ]
+          : [];
+        if (!content && attachmentIds.length === 0) {
+          return { ok: false, error: "save_to_brain needs content or attachmentIds." };
+        }
         const title = typeof args.title === "string" ? args.title.trim() : "";
         const intent = typeof args.intent === "string" ? args.intent.trim() : "";
 
         // Duplicate calls within one turn return the first capture instead of
-        // minting another inbox draft.
-        const key = `${title}\n${content}`;
+        // minting another inbox draft / asset copy.
+        const key = `${title}\n${content}\n${attachmentIds.join(",")}`;
         const already = capturedByKey.get(key);
         if (already?.ok) return { ...already, status: "already_captured" };
 
         const output = await saveToBrain({
-          content,
+          ...(content ? { content } : {}),
           ...(title ? { title } : {}),
           ...(intent ? { intent } : {}),
+          ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
         });
         if (output.ok) capturedByKey.set(key, output);
         return output;

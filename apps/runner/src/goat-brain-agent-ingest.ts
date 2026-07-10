@@ -641,23 +641,30 @@ export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCa
 
 export function buildUploadAssetAgentIngestPrompt(
   item: NormalizedUploadAssetSourceItem,
-  context: { extractedText: string; truncatedText: boolean },
+  context: { extractedText: string; truncatedText: boolean; format?: string },
 ) {
   const asset = item.content.asset;
   const extracted = context.extractedText.trim();
+  const isImage = (context.format ?? asset.format) === "image";
   return [
-    "Ingest this file the user uploaded into the brain.",
+    isImage
+      ? "Ingest this image the user uploaded into the brain."
+      : "Ingest this file the user uploaded into the brain.",
     "",
     `The file already exists as a page in this brain: id "${asset.brainId}" in the "${asset.folderPath}" folder (format: ${asset.format}, original file: ${asset.originalFileName}).`,
-    'The page\'s materialized file ends with a generated "Extracted text" block mirroring the text below; it is machine-derived and any edits to it are discarded, so never write into it.',
+    isImage
+      ? "The image itself is attached to this message: read it directly — describe what it shows and extract any text, figures, tables, or structure it contains."
+      : 'The page\'s materialized file ends with a generated "Extracted text" block mirroring the text below; it is machine-derived and any edits to it are discarded, so never write into it.',
     "",
     "Required outcome, all scoped to this brain:",
-    `1. Rewrite that page's compiled truth into a durable synthesis of the document: what it is, who it involves, the key facts, claims, and figures, and why it matters — with [[page:...]] links to every entity page. Do not paste the extracted text; synthesize it.`,
+    isImage
+      ? `1. Rewrite that page's compiled truth into a durable synthesis of the image: what it shows, who it involves, the key facts, claims, and figures, and why it matters — with [[page:...]] links to every entity page.`
+      : `1. Rewrite that page's compiled truth into a durable synthesis of the document: what it is, who it involves, the key facts, claims, and figures, and why it matters — with [[page:...]] links to every entity page. Do not paste the extracted text; synthesize it.`,
     "2. Give the page the right type for what the document represents (an external artifact is `source`) and a clear human title. Keep its id and folder unchanged unless another folder is clearly the better home.",
     `3. Create or update person, company, or project pages for entities central to the document, with the document on their timelines (timeline-add with --source-ref ${item.sourceRef}). Do not create pages for entities merely mentioned in passing.`,
     "4. Backlinks between all of these pages per the iron law.",
     "",
-    extracted
+    extracted || isImage
       ? null
       : "No text could be extracted from this file (it may be scanned or image-only). Write a minimal compiled truth stating what the file is, judged from its name and metadata, and leave the page as draft.",
     context.truncatedText
@@ -668,7 +675,7 @@ export function buildUploadAssetAgentIngestPrompt(
     `Uploaded at: ${item.capturedAt}`,
     "",
     `## File\n- Name: ${asset.originalFileName}\n- Type: ${asset.mimeType}\n- Size: ${asset.sizeBytes} bytes`,
-    `## Extracted text\n${extracted || "(none)"}`,
+    ...(isImage ? [] : [`## Extracted text\n${extracted || "(none)"}`]),
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -705,6 +712,9 @@ async function runBrainAgentIngestSession(input: {
   env: GoatBrainAgentIngestEnv;
   system: string;
   buildPrompt: () => string;
+  // Binary parts attached to the agent's user message (e.g. an image asset so
+  // the multimodal ingest model can see it).
+  files?: readonly { mediaType: string; data: Buffer }[];
   commands?: readonly string[];
   prepareRoot?: (root: string) => Promise<void>;
   noMutationOutcome?: BrainAgentNoMutationOutcome;
@@ -756,6 +766,7 @@ async function runBrainAgentIngestSession(input: {
       ingestJobId: input.jobId,
       system: input.system,
       prompt: appendGoatBrainFolderInventory(input.buildPrompt(), folderPrompt),
+      ...(input.files?.length ? { files: input.files } : {}),
       ...(input.commands ? { commands: input.commands } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
@@ -1157,9 +1168,10 @@ export async function runUploadAssetAgentIngest(
 
   // Stage 1 (deterministic): fetch the bytes, extract text, record it on the
   // row so materialization inside the agent session includes the generated
-  // extracted-text block and retrieval can index it.
+  // extracted-text block and retrieval can index it. Images have no text to
+  // extract — the bytes go to the (multimodal) agent as an image part instead.
   const bytes = await downloadGoatBrainAssetBytes(row.assetStorageKey, input.env);
-  const extractedText = row.format === "pdf" ? await extractPdfText(bytes) : "";
+  const extractedText = await extractAssetText(row.format, bytes);
   await updateGoatBrainAssetExtraction(
     {
       brainRef,
@@ -1184,7 +1196,11 @@ export async function runUploadAssetAgentIngest(
       buildUploadAssetAgentIngestPrompt(input.item, {
         extractedText: truncateByBytes(extractedText, PROMPT_ASSET_TEXT_BYTES),
         truncatedText,
+        format: row.format,
       }),
+    ...(row.format === "image"
+      ? { files: [{ mediaType: row.mimeType ?? "image/png", data: bytes }] }
+      : {}),
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });
@@ -1224,19 +1240,38 @@ async function downloadGoatBrainAssetBytes(
   return Buffer.concat(chunks);
 }
 
-async function extractPdfText(bytes: Buffer): Promise<string> {
+async function extractAssetText(format: string, bytes: Buffer): Promise<string> {
   try {
-    const { extractText, getDocumentProxy } = await import("unpdf");
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
-    const { text } = await extractText(pdf, { mergePages: true });
-    return typeof text === "string" ? text.trim() : "";
+    switch (format) {
+      case "pdf":
+        return await extractPdfText(bytes);
+      case "docx": {
+        const { extractDocxText } = await import("@opencompany/file-extract");
+        return await extractDocxText(bytes);
+      }
+      case "xlsx": {
+        const { extractXlsxText } = await import("@opencompany/file-extract");
+        return await extractXlsxText(bytes);
+      }
+      default:
+        // Images (and any future format without a text plane) extract nothing.
+        return "";
+    }
   } catch (error) {
     logger.warn("Goat Brain asset text extraction failed", {
       event: "opencompany.goat_brain_asset_extraction_failed",
+      format,
       error,
     });
     return "";
   }
+}
+
+async function extractPdfText(bytes: Buffer): Promise<string> {
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const { text } = await extractText(pdf, { mergePages: true });
+  return typeof text === "string" ? text.trim() : "";
 }
 
 async function runIngestAgentLoop(input: {
@@ -1248,6 +1283,7 @@ async function runIngestAgentLoop(input: {
   ingestJobId: string;
   system: string;
   prompt: string;
+  files?: readonly { mediaType: string; data: Buffer }[];
   commands?: readonly string[];
   signal?: AbortSignal;
   runCli?: GoatBrainAgentCliRunner;
@@ -1526,7 +1562,21 @@ async function runIngestAgentLoop(input: {
     const result = await generateText({
       model: gateway(GOAT_BRAIN_AGENT_INGEST_MODEL),
       system,
-      messages: [{ role: "user", content: input.prompt }],
+      messages: [
+        {
+          role: "user",
+          content: input.files?.length
+            ? [
+                { type: "text" as const, text: input.prompt },
+                ...input.files.map((file) => ({
+                  type: "image" as const,
+                  image: new Uint8Array(file.data),
+                  mediaType: file.mediaType,
+                })),
+              ]
+            : input.prompt,
+        },
+      ],
       tools: { ...tools, ...enrichmentTools },
       stopWhen: [ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS)],
       abortSignal: abort.signal,

@@ -13,9 +13,11 @@ export function validateGoatChatInput(input: {
   prompt: unknown;
   model: unknown;
   sessionId?: unknown;
+  // Attachment-only sends are allowed: the file parts carry the payload.
+  hasAttachments?: boolean;
 }): { ok: true; value: GoatChatInput } | { ok: false; error: string } {
   const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
-  if (!prompt) {
+  if (!prompt && !input.hasAttachments) {
     return { ok: false, error: "Enter a message before sending." };
   }
   if (prompt.length > GOAT_CHAT_PROMPT_MAX_LENGTH) {

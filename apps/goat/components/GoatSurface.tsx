@@ -37,6 +37,7 @@ import {
   MessageSquarePlus,
   Pause,
   Play,
+  Plus,
   Settings,
   Sparkles,
   Square,
@@ -59,10 +60,16 @@ import {
   useTransition,
 } from "react";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
+import {
+  GoatComposerAttachments,
+  GoatComposerDropOverlay,
+} from "@/components/chat/ChatComposerAttachments";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
   compareGoatChatMessageOrder,
   type GoatChatMention,
@@ -186,6 +193,7 @@ export function GoatSurface({
   localCodexBetaEnabled = false,
   chatResumeEnabled = false,
   userName = "there",
+  userWorkosId = "",
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
@@ -196,6 +204,8 @@ export function GoatSurface({
   localCodexBetaEnabled?: boolean;
   chatResumeEnabled?: boolean;
   userName?: string;
+  // Scopes chat attachment uploads; attachments are disabled when absent.
+  userWorkosId?: string;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -414,6 +424,14 @@ export function GoatSurface({
       chatSessionId === initialChat.id &&
       initialChat.engine === "local_codex",
   );
+  const attachmentsEnabled =
+    Boolean(userWorkosId) && !isEngineChat && !localCodexFeatureDisabledForChat;
+  const composerAttachments = useGoatChatAttachments({
+    userWorkosId,
+    modelName: String(chatModel),
+    enabled: attachmentsEnabled,
+  });
+  const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   // Render list: Electric-synced rows are the source of truth for persisted
   // messages; the useChat overlay contributes only entries Electric has not
   // delivered yet (the in-flight turn and optimistic sends).
@@ -736,9 +754,25 @@ export function GoatSurface({
     if (isGenerating || engineSubmitting) return;
 
     const prompt = input.trim();
-    if (!prompt) return;
+    const pendingAttachments = composerAttachments.attachments;
+    const readyAttachments = pendingAttachments.filter(
+      (attachment) => attachment.status === "ready",
+    );
+    if (!prompt && readyAttachments.length === 0) return;
     if (localCodexFeatureDisabledForChat) {
       toast.error(LOCAL_CODEX_BETA_DISABLED_MESSAGE);
+      return;
+    }
+    if (pendingAttachments.length > 0 && activeEngine) {
+      toast.error("Attachments are not supported in engine chats yet.");
+      return;
+    }
+    if (composerAttachments.isUploading) {
+      toast.error("Wait for attachments to finish uploading.");
+      return;
+    }
+    if (composerAttachments.hasFailed) {
+      toast.error("Remove failed attachments before sending.");
       return;
     }
     const mentions =
@@ -821,14 +855,35 @@ export function GoatSurface({
       return;
     }
 
+    // previewUrl rides along for the optimistic bubble render; the server
+    // ignores it and re-mints attachment ids on persist.
+    const attachmentsMetadata = readyAttachments.map((attachment) => ({
+      id: attachment.id,
+      kind: attachment.kind,
+      mediaType: attachment.mediaType,
+      filename: attachment.filename,
+      sizeBytes: attachment.sizeBytes,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobUrl: attachment.blobUrl!,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobPathname: attachment.blobPathname!,
+      ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
+    }));
+    const metadata: GoatChatMessageMetadata = {
+      ...(mentions.length > 0 ? { mentions } : {}),
+      ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
+    };
     const message =
-      mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
+      Object.keys(metadata).length > 0 ? { text: prompt, metadata } : { text: prompt };
     const model = chatModel;
     beginActiveTurn();
+    // Clear without revoking previews: the optimistic bubble still shows them.
+    composerAttachments.setAttachments([]);
     void sendMessage(message, { body: { sessionId: chatSessionId, model } }).catch((error) => {
       clearActiveTurn();
       setInput(prompt);
       setSelectedMentions(mentions);
+      composerAttachments.setAttachments(pendingAttachments);
       toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
     });
   };
@@ -1151,7 +1206,21 @@ export function GoatSurface({
               </button>
             </div>
           ) : null}
-          <div className="flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
+          <div
+            {...composerAttachments.dragHandlers}
+            className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
+          >
+            {composerAttachments.isDragActive && attachmentsEnabled ? (
+              <GoatComposerDropOverlay />
+            ) : null}
+            {composerAttachments.attachments.length > 0 ? (
+              <div className="px-3.5 pt-3">
+                <GoatComposerAttachments
+                  attachments={composerAttachments.attachments}
+                  onRemove={composerAttachments.removeAttachment}
+                />
+              </div>
+            ) : null}
             <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
               <div className="relative min-w-0 flex-1 self-center">
                 {input ? (
@@ -1180,6 +1249,9 @@ export function GoatSurface({
                     )
                   }
                   onKeyDown={onKeyDown}
+                  onPaste={(event) => {
+                    composerAttachments.handlePasteFiles(event);
+                  }}
                   onSelect={(event) =>
                     updateMentionToken(
                       event.currentTarget.value,
@@ -1190,7 +1262,6 @@ export function GoatSurface({
                   className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
                   style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                   maxLength={10_000}
-                  required
                 />
               </div>
               {isEngineChat && engineRunning ? (
@@ -1200,12 +1271,45 @@ export function GoatSurface({
                 />
               ) : null}
               <SubmitButton
-                disabled={!input.trim() || engineSubmitting || localCodexFeatureDisabledForChat}
+                disabled={
+                  (!input.trim() &&
+                    !composerAttachments.attachments.some(
+                      (attachment) => attachment.status === "ready",
+                    )) ||
+                  composerAttachments.isUploading ||
+                  engineSubmitting ||
+                  localCodexFeatureDisabledForChat
+                }
                 isGenerating={isGenerating}
                 onStop={stopGeneration}
               />
             </div>
             <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+              {attachmentsEnabled ? (
+                <>
+                  <input
+                    ref={attachmentFileInputRef}
+                    type="file"
+                    multiple
+                    accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
+                    className="hidden"
+                    onChange={(event) => {
+                      const files = Array.from(event.currentTarget.files ?? []);
+                      event.currentTarget.value = "";
+                      if (files.length > 0) composerAttachments.acceptFiles(files);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Attach files"
+                    disabled={isGenerating}
+                    onClick={() => attachmentFileInputRef.current?.click()}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                  >
+                    <Plus size={16} strokeWidth={1.9} />
+                  </button>
+                </>
+              ) : null}
               <GoatModelPicker
                 value={chatModel}
                 onChange={(model) => {
@@ -2235,6 +2339,9 @@ function chatMessageRowToUiMessage(row: GoatChatMessageRow): GoatChatUiMessage {
     content: row.content,
     taskId: row.task_id,
     debugTrace: row.debug_trace as GoatStoredChatMessage["debugTrace"],
+    attachments: row.attachments ?? null,
+    // attachment_texts is server-only (excluded from the Electric shape).
+    attachmentTexts: null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     taskDisplayId: null,
