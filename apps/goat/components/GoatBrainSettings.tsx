@@ -11,7 +11,9 @@ import { useHydrated } from "@/components/useHydrated";
 import {
   type GoatWorkspaceMemberView,
   getGoatBrainAccessDetailsAction,
+  getGoatBrainEnrichmentEnabledAction,
   setGoatBrainAccessAction,
+  setGoatBrainEnrichmentAction,
 } from "@/lib/workspace-actions";
 
 export function GoatBrainSettings({
@@ -56,6 +58,10 @@ export function GoatBrainSettings({
         <div className="flex w-full max-w-[640px] flex-col gap-8">
           <SettingsSection title="Access">
             <BrainAccessSection brain={brain} workspace={workspace} />
+          </SettingsSection>
+
+          <SettingsSection title="Enrichment">
+            <EnrichmentSection brainRef={brain.id} />
           </SettingsSection>
 
           <SettingsSection title="Claude connector">
@@ -219,6 +225,74 @@ function BrainAccessSection({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function EnrichmentSection({ brainRef }: { brainRef: string }) {
+  const [enrichmentState, setEnrichmentState] = useState<{
+    brainRef: string;
+    enabled: boolean | null;
+  }>(() => ({ brainRef, enabled: null }));
+  const [isPending, startTransition] = useTransition();
+  const enabled = enrichmentState.brainRef === brainRef ? enrichmentState.enabled : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void getGoatBrainEnrichmentEnabledAction(brainRef)
+      .then((details) => {
+        if (cancelled) return;
+        if (!details) {
+          setEnrichmentState({ brainRef, enabled: false });
+          toast.error("Could not load enrichment setting.");
+          return;
+        }
+        setEnrichmentState({ brainRef, enabled: details.enabled });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEnrichmentState({ brainRef, enabled: false });
+        toast.error("Could not load enrichment setting.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [brainRef]);
+
+  const toggle = () => {
+    if (enabled === null) return;
+    const next = !enabled;
+    setEnrichmentState({ brainRef, enabled: next });
+    startTransition(async () => {
+      const result = await setGoatBrainEnrichmentAction({ brainRef, enabled: next });
+      if (!result.ok) {
+        setEnrichmentState((current) =>
+          current.brainRef === brainRef ? { brainRef, enabled: !next } : current,
+        );
+        toast.error(result.error);
+        return;
+      }
+      toast.success(next ? "Enrichment enabled." : "Enrichment disabled.");
+    });
+  };
+
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-md border border-ink/10 p-3">
+      <input
+        type="checkbox"
+        checked={enabled === true}
+        disabled={enabled === null || isPending}
+        onChange={toggle}
+        className="mt-0.5 accent-ink"
+      />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-[13px] font-medium text-ink">Web-search enrichment</span>
+        <span className="text-[12px] leading-5 text-ink-subtle">
+          Let the ingestion agent use web search to enrich people, companies, and projects with
+          confidently-identified public info. Facts are cited to their source URLs; ambiguous
+          matches are skipped.
+        </span>
+      </span>
+    </label>
   );
 }
 

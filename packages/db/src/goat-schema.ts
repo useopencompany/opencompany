@@ -388,6 +388,10 @@ export const goatBrains = goat.table(
     slug: text("slug").notNull(),
     description: text("description"),
     visibility: text("visibility").$type<GoatBrainVisibility>().notNull().default("workspace"),
+    // When true, the ingestion agent may use web search to enrich confidently
+    // identified people, companies, and projects. Owner escape-hatch; the real
+    // safety is the identity gate + per-ingest search cap in the runner.
+    enrichmentEnabled: boolean("enrichment_enabled").notNull().default(true),
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
