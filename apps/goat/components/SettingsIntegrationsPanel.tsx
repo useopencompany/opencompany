@@ -293,6 +293,7 @@ function integrationStatus(
     | GoatSlackProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
+  if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
   if (integration.provider === "jamie" && integration.status === "needs_reauth")
     return "Finish setup";
   if (integration.status === "needs_reauth" || integration.status === "sync_failed") {

@@ -159,7 +159,10 @@ export function GoatPreferencesSettingsRoute() {
 }
 
 export function GoatJamieSettingsRoute() {
-  const { integrations } = useGoatAppData();
+  const { activeBrain, integrations } = useGoatAppData();
+  const brainSourcesHref = activeBrain
+    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+    : null;
 
   return (
     <GoatSettingsContent
@@ -167,7 +170,10 @@ export function GoatJamieSettingsRoute() {
       description="Meeting notes for Goat Brain"
       backLink={{ href: "/settings/integrations", label: "Integrations" }}
     >
-      <JamieIntegrationSetup initialState={integrations.jamie} />
+      <JamieIntegrationSetup
+        initialState={integrations.jamie}
+        brainSourcesHref={brainSourcesHref}
+      />
     </GoatSettingsContent>
   );
 }

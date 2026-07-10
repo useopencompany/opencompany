@@ -105,6 +105,8 @@ type IntegrationStateRow = {
   status: GoatIntegrationStatus;
 };
 
+const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
+
 export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[]) {
   const byProvider = new Map<GoatIntegrationProvider, IntegrationStateRow>();
   for (const row of rows) {
@@ -244,8 +246,10 @@ function jamieProviderState(row: IntegrationStateRow | undefined): GoatJamieProv
     status: row.status,
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
-    integrationId: null,
+    integrationId: row.id ?? null,
     webhookUrl: null,
-    apiKeyConfigured: row.status === "connected",
+    apiKeyConfigured:
+      row.status === "connected" ||
+      (row.externalId ?? row.external_id ?? "").startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX),
   };
 }

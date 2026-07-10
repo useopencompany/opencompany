@@ -49,6 +49,30 @@ describe("JamieIntegrationSetup", () => {
     expect(screen.getByText("Save the key Jamie shows after creation.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save API key" })).toBeDisabled();
   });
+
+  it("treats a saved Jamie API key as ready for Brain routing", () => {
+    render(
+      <JamieIntegrationSetup
+        initialState={jamieState({
+          connected: false,
+          status: "needs_reauth",
+          apiKeyConfigured: true,
+          statusReason: "Waiting for Jamie to send the first valid webhook delivery.",
+        })}
+        brainSourcesHref="/brain/goat_brain_1/settings"
+      />,
+    );
+
+    expect(screen.getByText("Ready for Brain")).toBeInTheDocument();
+    expect(
+      screen.getByText("Enable Jamie from a brain's Sources settings to route completed meetings."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for Jamie")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Brain sources" })).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1/settings",
+    );
+  });
 });
 
 function jamieState(overrides: Partial<GoatJamieProviderState> = {}): GoatJamieProviderState {
