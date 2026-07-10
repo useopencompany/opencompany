@@ -139,7 +139,7 @@ export function GoatUsageSettingsRoute() {
   return (
     <GoatSettingsContent
       title="Usage"
-      description="Track spend across chat, tasks, and brain ingestion."
+      description="Track accumulated workspace spend across chat, tasks, and brain ingestion."
     >
       <GoatSpendOverview />
     </GoatSettingsContent>
