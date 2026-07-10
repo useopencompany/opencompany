@@ -55,6 +55,21 @@ export type GoatIntegrationProvider =
   | "github"
   | "jamie"
   | "slack";
+// Ownership is a property of the integration's binding, not a per-connect
+// choice. Identity-bound connections (OAuth acting as a person: Gmail,
+// Calendar, Slack user token, Linear) are always personal. Installation-bound
+// connections (GitHub App org installs, Jamie webhook secrets) are workspace
+// plumbing: they carry no human identity, must survive the connecting admin
+// leaving, and are manageable by any workspace admin.
+export const WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS = [
+  "github",
+  "jamie",
+] as const satisfies readonly GoatIntegrationProvider[];
+export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegrationProvider) {
+  return (
+    WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS as readonly GoatIntegrationProvider[]
+  ).includes(provider);
+}
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
 export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
@@ -174,7 +189,7 @@ export type GoatBrainSource = {
   title?: string;
   capturedAt?: string;
 };
-export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx";
+export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "image";
 export type GoatBrainStatus = "draft" | "active" | "archived" | "merged";
 export type GoatBrainFrontmatterProjection = Record<string, unknown>;
 export type GoatBrainTimelineEntry = {
@@ -240,6 +255,17 @@ export type GoatTaskDebugTrace = {
 export type GoatChatRole = "user" | "assistant";
 export type GoatChatEngine = "opencompany" | "local_codex" | "codex";
 
+export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx";
+export type GoatChatMessageAttachment = {
+  id: string;
+  kind: GoatChatAttachmentKind;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  blobPathname: string;
+  blobUrl: string;
+};
+
 export type GoatLocalCodexSessionStatus =
   | "starting"
   | "idle"
@@ -302,6 +328,7 @@ export type GoatChatMessageDebugTrace = {
   uiMessageParts?: unknown[];
   toolCalls?: unknown[];
   toolResults?: unknown[];
+  durationMs?: number;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -387,6 +414,10 @@ export const goatBrains = goat.table(
     slug: text("slug").notNull(),
     description: text("description"),
     visibility: text("visibility").$type<GoatBrainVisibility>().notNull().default("workspace"),
+    // When true, the ingestion agent may use web search to enrich confidently
+    // identified people, companies, and projects. Owner escape-hatch; the real
+    // safety is the identity gate + per-ingest search cap in the runner.
+    enrichmentEnabled: boolean("enrichment_enabled").notNull().default(true),
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
@@ -542,7 +573,7 @@ export const goatBrainDocuments = goat.table(
     ),
     formatCheck: check(
       "goat_brain_documents_format_check",
-      sql`${table.format} IN ('markdown', 'pdf', 'docx')`,
+      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'image')`,
     ),
     statusCheck: check(
       "goat_brain_documents_status_check",
@@ -717,9 +748,20 @@ export const goatIntegrations = goat.table(
   "integrations",
   {
     id: text("id").primaryKey(),
+    // The user who connected this integration. For personal integrations this
+    // is the owner; for workspace-owned rows it is attribution only (the
+    // credential AAD is also keyed on it, so it stays set either way).
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    // Set for workspace-owned integrations (installation-bound providers:
+    // github, jamie). NULL = personal integration owned by user_workos_id.
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "cascade",
+    }),
+    // Foundation for offering a personal integration to workspace admins as a
+    // brain-source option without transferring ownership. No UI yet.
+    sharedWithWorkspace: boolean("shared_with_workspace").notNull().default(false),
     provider: text("provider").$type<GoatIntegrationProvider>().notNull(),
     externalId: text("external_id").notNull(),
     connectionLabel: text("connection_label"),
@@ -738,11 +780,12 @@ export const goatIntegrations = goat.table(
       table.userWorkosId,
       table.provider,
     ),
-    userProviderExternalIdx: uniqueIndex("goat_integrations_user_provider_external_idx").on(
-      table.userWorkosId,
-      table.provider,
-      table.externalId,
-    ),
+    // One personal connection per external account per user. Partial so a
+    // workspace-owned row never blocks (or gets matched by) personal upserts —
+    // workspace rows are constrained by the workspace index below instead.
+    userProviderExternalIdx: uniqueIndex("goat_integrations_user_provider_external_idx")
+      .on(table.userWorkosId, table.provider, table.externalId)
+      .where(sql`${table.workspaceId} IS NULL`),
     integrationUserProviderIdx: uniqueIndex("goat_integrations_id_user_provider_idx").on(
       table.id,
       table.userWorkosId,
@@ -751,6 +794,15 @@ export const goatIntegrations = goat.table(
     providerExternalIdx: index("goat_integrations_provider_external_idx").on(
       table.provider,
       table.externalId,
+    ),
+    // One connection per external account per workspace, regardless of which
+    // admin connected it.
+    workspaceProviderExternalIdx: uniqueIndex("goat_integrations_workspace_provider_external_idx")
+      .on(table.workspaceId, table.provider, table.externalId)
+      .where(sql`${table.workspaceId} IS NOT NULL`),
+    workspaceProviderIdx: index("goat_integrations_workspace_provider_idx").on(
+      table.workspaceId,
+      table.provider,
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
@@ -866,7 +918,7 @@ export const goatIntegrationResources = goat.table(
   }),
 );
 
-// Per-brain source configuration: which user-owned integration feeds which brain.
+// Per-brain source configuration: which integration feeds which brain.
 export const goatBrainSources = goat.table(
   "brain_sources",
   {
@@ -876,8 +928,9 @@ export const goatBrainSources = goat.table(
       .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
     provider: text("provider").$type<GoatBrainSourceConfigProvider>().notNull(),
     integrationId: text("integration_id").notNull(),
-    // Owner of the referenced integration (integrations are user-scoped;
-    // brains are workspace-shared, so the row records whose connection feeds the brain).
+    // user_workos_id of the referenced integration row (its owner for personal
+    // integrations, the connecting admin for workspace-owned ones). Part of the
+    // composite FK below, so it must mirror the integration row exactly.
     userWorkosId: text("user_workos_id").notNull(),
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
@@ -1635,6 +1688,10 @@ export const goatChatMessages = goat.table(
     content: text("content").notNull().default(""),
     taskId: text("task_id").references(() => goatTasks.id, { onDelete: "set null" }),
     debugTrace: jsonb("debug_trace").$type<GoatChatMessageDebugTrace | null>(),
+    attachments: jsonb("attachments").$type<GoatChatMessageAttachment[] | null>(),
+    // docx/xlsx extracted text keyed by attachment id; server-side model context
+    // only — excluded from the Electric shape.
+    attachmentTexts: jsonb("attachment_texts").$type<Record<string, string> | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

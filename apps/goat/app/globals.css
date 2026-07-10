@@ -6,6 +6,7 @@
   --color-ink: #111111;
   --color-ink-muted: #6b6b6b;
   --color-ink-subtle: #9a9a96;
+  --color-ink-faint: #b6b6b0;
   --color-border: #e6e6e3;
   --color-border-subtle: #eaeae6;
   --color-border-strong: #d4d4cf;
@@ -27,6 +28,7 @@
   --color-ink: #f0f1ec;
   --color-ink-muted: #a8aca2;
   --color-ink-subtle: #7b8074;
+  --color-ink-faint: #5f635a;
   --color-border: #2b2e28;
   --color-border-subtle: #22251f;
   --color-border-strong: #3c4237;
@@ -49,6 +51,7 @@
     --color-ink: #f0f1ec;
     --color-ink-muted: #a8aca2;
     --color-ink-subtle: #7b8074;
+    --color-ink-faint: #5f635a;
     --color-border: #2b2e28;
     --color-border-subtle: #22251f;
     --color-border-strong: #3c4237;
@@ -79,6 +82,16 @@ body {
   }
   100% {
     background-position: -60% 0;
+  }
+}
+
+@keyframes goat-timer-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  45% {
+    opacity: 1;
   }
 }
 
@@ -342,6 +355,12 @@ body {
   height: 0.82em;
   flex: 0 0 auto;
   opacity: 0.55;
+}
+/* Filled brand marks (e.g. GitHub) need a touch more weight to read clearly. */
+.tiptap-brain .wiki-brain-chip-icon-github {
+  width: 0.86em;
+  height: 0.86em;
+  opacity: 0.75;
 }
 .tiptap-brain .wiki-brain-chip-label {
   overflow: hidden;

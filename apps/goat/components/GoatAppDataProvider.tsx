@@ -18,6 +18,8 @@ import {
 import type { GoatTaskScheduleView } from "@/lib/task-schedules";
 
 type GoatUserView = {
+  // Scopes client-side chat attachment uploads (blob prefix goat-chat/{id}/).
+  workosUserId: string;
   email: string;
   firstName: string | null;
   lastName: string | null;
@@ -121,6 +123,7 @@ export function GoatAppDataProvider({
           title: row.title,
           model: row.model as AgentModelId,
           engine: row.engine,
+          codexComposerSettings: initial?.codexComposerSettings ?? null,
           preview: initial?.preview ?? "No messages yet.",
           updatedAt: row.updated_at,
         };

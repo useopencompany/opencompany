@@ -341,6 +341,33 @@ export async function updateGoatBrainVisibility(
   }
 }
 
+// Read live at ingest time so an owner toggling enrichment off applies to
+// already-queued jobs. Missing rows fail closed.
+export async function getGoatBrainEnrichmentEnabled(
+  brainRef: string,
+  db: DbClient = getDb(),
+): Promise<boolean> {
+  const rows = await db
+    .select({ enrichmentEnabled: goatBrains.enrichmentEnabled })
+    .from(goatBrains)
+    .where(eq(goatBrains.id, brainRef))
+    .limit(1);
+  return rows[0]?.enrichmentEnabled ?? false;
+}
+
+export async function updateGoatBrainEnrichmentEnabled(
+  input: { brainRef: string; enabled: boolean },
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .update(goatBrains)
+    .set({ enrichmentEnabled: input.enabled, updatedAt: new Date() })
+    .where(eq(goatBrains.id, input.brainRef))
+    .returning({ id: goatBrains.id });
+  if (rows.length === 0) throw new Error("Brain not found.");
+}
+
 export async function replaceGoatBrainMembers(
   input: { brainRef: string; userWorkosIds: string[]; addedByWorkosId: string },
   options: { db?: DbClient } = {},

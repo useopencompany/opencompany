@@ -28,5 +28,8 @@ export default defineConfig({
     globals: true,
     exclude: ["node_modules/**", ".next/**"],
     clearMocks: true,
+    // userEvent-driven component tests can exceed the 5s default under CI load.
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
 });

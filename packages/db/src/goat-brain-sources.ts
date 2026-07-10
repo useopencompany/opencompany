@@ -21,6 +21,9 @@ export type GoatBrainSourceWithIntegration = {
   config: Record<string, unknown>;
   integrationStatus: GoatIntegrationStatus;
   integrationAccountName: string | null;
+  // Set when the backing integration is workspace-owned (github, jamie); null
+  // for personal connections.
+  integrationWorkspaceId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
 };
@@ -40,6 +43,7 @@ export async function listGoatBrainSourcesForBrain(
       config: goatBrainSources.config,
       integrationStatus: goatIntegrations.status,
       integrationAccountName: goatIntegrations.accountName,
+      integrationWorkspaceId: goatIntegrations.workspaceId,
       ownerFirstName: goatUsers.firstName,
       ownerLastName: goatUsers.lastName,
       ownerEmail: goatUsers.email,
@@ -59,6 +63,7 @@ export async function listGoatBrainSourcesForBrain(
     config: row.config,
     integrationStatus: row.integrationStatus,
     integrationAccountName: row.integrationAccountName,
+    integrationWorkspaceId: row.integrationWorkspaceId,
     ownerName: [row.ownerFirstName, row.ownerLastName].filter(Boolean).join(" ").trim() || null,
     ownerEmail: row.ownerEmail,
   }));

@@ -10,7 +10,19 @@ const serviceId = requiredEnv("RENDER_SERVICE_ID");
 const apiKey = requiredEnv("RENDER_API_KEY");
 const timeoutMs = positiveNumberEnv("RENDER_DEPLOY_TIMEOUT_MS", 900000);
 const pollMs = positiveNumberEnv("RENDER_DEPLOY_POLL_MS", 10000);
+const staleMs = positiveNumberEnv("RENDER_DEPLOY_STALE_MS", 600000);
 const args = parseArgs(process.argv.slice(2));
+
+// Render runs one deploy at a time per service, so a hung build blocks every
+// deploy queued behind it. Releases always target the latest main commit, so
+// any deploy still in flight after `staleMs` is hung or superseded.
+const IN_FLIGHT_STATUSES = new Set([
+  "created",
+  "queued",
+  "build_in_progress",
+  "pre_deploy_in_progress",
+  "update_in_progress",
+]);
 
 await main().catch((error) => {
   console.error(error.message);
@@ -29,6 +41,8 @@ async function main() {
     await waitForDeploy(args.deployId, releaseSha);
     return;
   }
+
+  await cancelStaleInFlightDeploys();
 
   const deploy = await triggerDeploy(releaseSha);
   console.log(`Triggered Render deploy ${deploy.id} for ${shortSha(releaseSha)}.`);
@@ -78,6 +92,24 @@ async function waitForTriggeredDeploy(releaseSha) {
   );
 }
 
+async function cancelStaleInFlightDeploys() {
+  const response = await renderRequest(`/services/${serviceId}/deploys?limit=10`);
+  const deploys = Array.isArray(response) ? response.map((item) => item.deploy ?? item) : [];
+  const cutoff = Date.now() - staleMs;
+
+  for (const deploy of deploys) {
+    if (!IN_FLIGHT_STATUSES.has(deploy.status)) continue;
+
+    const createdAt = Date.parse(deploy.createdAt ?? "");
+    if (!Number.isFinite(createdAt) || createdAt > cutoff) continue;
+
+    console.warn(
+      `Render deploy ${deploy.id} has been ${deploy.status} since ${deploy.createdAt}; cancelling it so it cannot block this release.`,
+    );
+    await cancelDeploy(deploy.id);
+  }
+}
+
 async function findDeployForRelease(releaseSha) {
   const response = await renderRequest(`/services/${serviceId}/deploys`);
   const deploys = Array.isArray(response) ? response.map((item) => item.deploy ?? item) : [];
@@ -107,6 +139,11 @@ async function waitForDeploy(deployId, releaseSha) {
     }
 
     await sleep(pollMs);
+  }
+
+  if (IN_FLIGHT_STATUSES.has(lastDeploy?.status)) {
+    console.warn(`Cancelling Render deploy ${deployId} so it does not block the next release.`);
+    await cancelDeploy(deployId);
   }
 
   throw new Error(

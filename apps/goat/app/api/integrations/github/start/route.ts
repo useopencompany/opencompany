@@ -8,9 +8,17 @@ import {
 } from "@/lib/integrations/github";
 
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
+  const { user, workspace, role } = await currentGoatUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+
+  // GitHub App installations are workspace-owned plumbing; only admins may
+  // connect them.
+  if (role !== "admin") {
+    return NextResponse.redirect(
+      new URL(appendGoatGitHubIntegrationStatus(returnTo, "error", "admin_required"), url),
+    );
+  }
 
   if (!isGoatGitHubIntegrationConfigured()) {
     return NextResponse.redirect(
@@ -20,6 +28,7 @@ export async function GET(request: Request) {
 
   const state = createGoatGitHubIntegrationState({
     userWorkosId: user.workosUserId,
+    workspaceId: workspace.id,
     returnTo,
   });
 

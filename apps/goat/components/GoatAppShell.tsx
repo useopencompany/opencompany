@@ -36,8 +36,8 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     listCurrentUserRecentGoatChats(),
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
-    getGoatGitHubIntegrationState(user.workosUserId),
-    getGoatJamieIntegrationState(user.workosUserId),
+    getGoatGitHubIntegrationState(workspace.id),
+    getGoatJamieIntegrationState(workspace.id),
     getGoatSlackIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
@@ -45,6 +45,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
 
   const initialData: GoatAppInitialData = {
     user: {
+      workosUserId: user.workosUserId,
       email: user.email,
       firstName: authUser.firstName,
       lastName: authUser.lastName,

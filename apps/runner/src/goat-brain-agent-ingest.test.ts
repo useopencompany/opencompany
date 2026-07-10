@@ -16,6 +16,9 @@ const aiMock = vi.hoisted(() => ({
   stepCountIs: vi.fn((steps: number) => ({ steps })),
   tool: vi.fn((definition: unknown) => definition),
 }));
+const agentRuntimeMock = vi.hoisted(() => ({
+  executeExaSearchRequest: vi.fn(),
+}));
 const brainFilesMock = vi.hoisted(() => ({
   materializeGoatBrainFilesToRoot: vi.fn(async (_input?: { root: string }) => []),
   syncGoatBrainFilesFromRoot: vi.fn(async () => ({
@@ -26,6 +29,7 @@ const brainFilesMock = vi.hoisted(() => ({
 }));
 const workspacesMock = vi.hoisted(() => ({
   getDefaultGoatBrainForUser: vi.fn(async () => ({ id: "gbrain_default" })),
+  getGoatBrainEnrichmentEnabled: vi.fn(async () => true),
 }));
 const localBrainMock = vi.hoisted(() => ({
   writeLocalBrainFile: vi.fn(async () => undefined),
@@ -44,6 +48,9 @@ vi.mock("ai", () => ({
 vi.mock("@opencompany/observability/braintrust", () => ({
   getBraintrustAISDK: <T>(sdk: T) => sdk,
 }));
+vi.mock("@opencompany/agent-runtime", () => ({
+  executeExaSearchRequest: agentRuntimeMock.executeExaSearchRequest,
+}));
 vi.mock("@opencompany/db/goat-brain-files", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   materializeGoatBrainFilesToRoot: brainFilesMock.materializeGoatBrainFilesToRoot,
@@ -51,6 +58,7 @@ vi.mock("@opencompany/db/goat-brain-files", async (importOriginal) => ({
 }));
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   getDefaultGoatBrainForUser: workspacesMock.getDefaultGoatBrainForUser,
+  getGoatBrainEnrichmentEnabled: workspacesMock.getGoatBrainEnrichmentEnabled,
 }));
 vi.mock("@opencompany/goat-brain/cli-bundle", () => ({
   getGoatBrainCliSource: () => "// cli bundle",
@@ -168,10 +176,7 @@ function gmailItem() {
 }
 
 type CapturedTool = {
-  execute: (args: { command: string; args?: string[]; stdin?: string }) => Promise<{
-    ok: boolean;
-    error?: string;
-  }>;
+  execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 
 function mockAgentRun(input: {
@@ -225,6 +230,8 @@ beforeEach(() => {
     conflicts: [],
   });
   workspacesMock.getDefaultGoatBrainForUser.mockResolvedValue({ id: "gbrain_default" });
+  workspacesMock.getGoatBrainEnrichmentEnabled.mockResolvedValue(true);
+  agentRuntimeMock.executeExaSearchRequest.mockReset();
 });
 
 describe("validateGoatBrainAgentInvocation", () => {
@@ -293,6 +300,12 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     expect(prompt).toContain("file the draft in decisions with the best existing type");
     expect(prompt).toContain("type note in thoughts");
   });
+
+  it("routes the raw evidence snapshot into the evidence/chat provenance subfolder", () => {
+    const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem());
+
+    expect(prompt).toContain("append-evidence with --folder evidence/chat");
+  });
 });
 
 describe("formatGoatBrainFolderInventoryPrompt", () => {
@@ -323,6 +336,12 @@ describe("buildSlackConversationAgentIngestPrompt", () => {
     expect(prompt).toContain("Jamie (ts 1783950060.000100): Where did we land on onboarding?");
     expect(prompt).toContain("↳ [");
     expect(prompt).toContain("We decided to ship the new flow next week.");
+  });
+
+  it("routes standalone evidence snapshots into the evidence/slack provenance subfolder", () => {
+    const prompt = buildSlackConversationAgentIngestPrompt(slackItem());
+
+    expect(prompt).toContain("append-evidence --folder evidence/slack");
   });
 
   it("omits the permalink hint without a team domain", () => {
@@ -506,6 +525,38 @@ describe("runGmailThreadAgentIngest", () => {
     expect(goatGmailMock.getGoatGmailBrainSourceInstructions).not.toHaveBeenCalled();
     expect(result).toMatchObject({ skipped: true, hadInstructions: false });
   });
+
+  it("infers a skip when a Gmail run completes cleanly without mutations", async () => {
+    mockAgentRun({
+      finalText: "Routine transactional email; no durable brain update is needed.",
+      toolInvocations: [{ command: "query", args: ["transactional email", "--limit", "3"] }],
+    });
+
+    const result = await runGmailThreadAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        integrationId: "gint_gmail",
+        item: gmailItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "inferred_no_mutations",
+      reason: "No brain-worthy content identified; agent completed without brain mutations.",
+      mutations: 0,
+      toolCalls: 1,
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
+    expect(traceFromResult(result).toolCalls[0]).toMatchObject({
+      command: "query",
+      status: "completed",
+      mutating: false,
+    });
+  });
 });
 
 describe("runSlackConversationAgentIngest", () => {
@@ -551,6 +602,33 @@ describe("runSlackConversationAgentIngest", () => {
     );
 
     expect(result).toMatchObject({ skipped: true, mutations: 0 });
+  });
+
+  it("does not infer a skip when a mutating command fails", async () => {
+    mockAgentRun({
+      finalText: "No update made.",
+      toolInvocations: [{ command: "timeline-add", args: ["onboarding", "--body", "Ship it."] }],
+    });
+    const failingCli: GoatBrainAgentCliRunner = vi.fn(async () => ({
+      ok: false,
+      exitCode: 1,
+      stdout: "",
+      stderr: "missing page",
+      error: "goat-brain CLI failed.",
+    }));
+
+    await expect(
+      runSlackConversationAgentIngest(
+        {
+          userWorkosId: "user_123",
+          brainRef: "gbrain_123",
+          item: slackItem(),
+          env: { vercelAiGatewayApiKey: "gw_test" },
+        },
+        { runCli: failingCli },
+      ),
+    ).rejects.toThrow("attempted 1 mutating command");
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
   });
 });
 
@@ -718,6 +796,54 @@ describe("runGoatChatCaptureAgentIngest", () => {
     expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
   });
 
+  it("serializes concurrent brain CLI tool calls from one model step", async () => {
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { tools: Record<string, CapturedTool> }) => {
+        await Promise.all([
+          options.tools.goat_brain?.execute({
+            command: "move",
+            args: ["pricing-teardown-reference", "--folder", "decisions"],
+          }),
+          options.tools.goat_brain?.execute({
+            command: "set",
+            args: ["pricing-teardown-reference", "--status", "active"],
+          }),
+        ]);
+        return {
+          text: "Moved and promoted the capture.",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+    const order: string[] = [];
+    let active = false;
+    const serializedCli: GoatBrainAgentCliRunner = vi.fn(async (input) => {
+      if (active) throw new Error("brain CLI calls overlapped");
+      active = true;
+      order.push(input.argv.join(" "));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active = false;
+      return { ok: true, exitCode: 0, stdout: "ok", stderr: "" };
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: serializedCli },
+    );
+
+    expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
+    expect(order).toEqual([
+      "move pricing-teardown-reference --folder decisions",
+      "set pricing-teardown-reference --status active",
+    ]);
+  });
+
   it("bounds trace previews for long args, stdin, output, and final text", async () => {
     const longArg = "a".repeat(500);
     const longText = "body ".repeat(500);
@@ -795,6 +921,132 @@ describe("runGoatChatCaptureAgentIngest", () => {
       ),
     ).rejects.toThrow("finished without writing");
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
+  });
+
+  it("omits web search when brain enrichment is disabled", async () => {
+    workspacesMock.getGoatBrainEnrichmentEnabled.mockResolvedValueOnce(false);
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { system: string; tools: Record<string, CapturedTool> }) => {
+        expect(options.system).not.toContain("Web-search enrichment");
+        expect(options.tools.web_search).toBeUndefined();
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--status", "active"],
+        });
+        return {
+          text: "Promoted the capture.",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test", exaApiKey: "exa_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({ mutations: 1 });
+    expect(agentRuntimeMock.executeExaSearchRequest).not.toHaveBeenCalled();
+  });
+
+  it("registers bounded web search when brain enrichment is enabled", async () => {
+    workspacesMock.getGoatBrainEnrichmentEnabled.mockResolvedValueOnce(true);
+    agentRuntimeMock.executeExaSearchRequest.mockResolvedValue({
+      output: {
+        searchType: "fast",
+        costDollars: 0.0005,
+        results: [
+          {
+            title: "Ada Example",
+            url: "https://example.com/ada",
+            highlights: ["Ada leads product at Example."],
+            summary: "Ada is a product leader.",
+          },
+        ],
+      },
+      usage: {
+        provider: "exa",
+        operation: "search",
+        costUsdMicros: 500,
+        rawUsage: {},
+      },
+    });
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { system: string; tools: Record<string, CapturedTool> }) => {
+        expect(options.system).toContain("Web-search enrichment");
+        const search = options.tools.web_search;
+        expect(search).toBeDefined();
+        if (!search) throw new Error("Expected web_search tool.");
+
+        const first = await search.execute({
+          entityName: "Ada Example",
+          anchor: "ExampleCo",
+          category: "people",
+          numResults: 3,
+        });
+        expect(first).toMatchObject({
+          ok: true,
+          searchesUsed: 1,
+          searchesRemaining: 3,
+          results: [{ url: "https://example.com/ada" }],
+        });
+        await search.execute({
+          entityName: "ExampleCo",
+          anchor: "example.com",
+          category: "company",
+        });
+        await search.execute({
+          entityName: "Project Atlas",
+          anchor: "example.com",
+          category: "general",
+        });
+        await search.execute({ entityName: "Fourth search", anchor: "ExampleCo" });
+        await expect(
+          search.execute({ entityName: "Fifth search", anchor: "ExampleCo" }),
+        ).resolves.toMatchObject({
+          ok: false,
+          error: expect.stringContaining("budget exhausted"),
+        });
+
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--status", "active"],
+        });
+        return {
+          text: "Promoted the capture.",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test", exaApiKey: " exa_test " },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({ mutations: 1 });
+    const resultTrace = traceFromResult(result);
+    expect(resultTrace.webSearchCount).toBe(4);
+    expect(resultTrace.webSearchCostUsdMicros).toBe(2000);
+    expect(agentRuntimeMock.executeExaSearchRequest).toHaveBeenCalledTimes(4);
+    expect(agentRuntimeMock.executeExaSearchRequest).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        args: expect.not.objectContaining({ category: expect.anything() }),
+      }),
+    );
   });
 });
 
@@ -894,24 +1146,29 @@ describe("runJamieMeetingAgentIngest", () => {
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalledTimes(1);
   });
 
-  it("fails when the agent neither writes nor skips so the job retries", async () => {
+  it("infers a skip when the agent completes without brain mutations", async () => {
     mockAgentRun({
       finalText: "All done!",
       toolInvocations: [{ command: "query", args: ["Ada"] }],
     });
 
-    await expect(
-      runJamieMeetingAgentIngest(
-        {
-          userWorkosId: "user_123",
-          brainRef: "gbrain_123",
-          item: jamieItem(),
-          env: { vercelAiGatewayApiKey: "gw_test" },
-        },
-        { runCli: okCli },
-      ),
-    ).rejects.toThrow(/without writing/);
-    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "inferred_no_mutations",
+      reason: "No brain-worthy content identified; agent completed without brain mutations.",
+      mutations: 0,
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
   });
 
   it("blocks disallowed tool invocations without running the CLI", async () => {
@@ -945,7 +1202,7 @@ describe("runJamieMeetingAgentIngest", () => {
             command: "delete",
             args: ["ada", "--force"],
             status: "blocked",
-            mutating: false,
+            mutating: true,
             errorPreview: expect.stringContaining("not available"),
           }),
           expect.objectContaining({

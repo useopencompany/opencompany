@@ -25,25 +25,34 @@ import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPane
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";
 import type { GoatBrainSnapshot } from "@/lib/brain";
+import type { GoatChatSessionView } from "@/lib/chat-ui";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import { updateGoatLocalCodexBetaAction } from "@/lib/user-preferences";
 
-export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
+export function GoatHomeRoute({
+  chatId,
+  initialChat: routeInitialChat = null,
+}: {
+  chatId: string | null;
+  initialChat?: GoatChatSessionView | null;
+}) {
   const data = useGoatAppData();
   const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const initialChat = useMemo(() => {
     if (!chatId) return null;
+    if (routeInitialChat?.id === chatId) return routeInitialChat;
     const summary = data.recentChats.find((chat) => chat.id === chatId);
     return {
       id: chatId,
       title: summary?.title ?? "Goat",
       model: summary?.model ?? DEFAULT_GOAT_MODEL,
       engine: summary?.engine ?? "opencompany",
+      codexComposerSettings: summary?.codexComposerSettings ?? null,
       messages: [],
     };
-  }, [chatId, data.recentChats]);
+  }, [chatId, data.recentChats, routeInitialChat]);
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -57,6 +66,7 @@ export function GoatHomeRoute({ chatId }: { chatId: string | null }) {
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         chatResumeEnabled={data.chatResumeEnabled}
         userName={userName}
+        userWorkosId={data.user.workosUserId}
       />
     </main>
   );
@@ -113,16 +123,14 @@ export function GoatSettingsRoute() {
 }
 
 export function GoatIntegrationsSettingsRoute() {
-  const { integrations } = useGoatAppData();
+  const { integrations, workspace } = useGoatAppData();
 
   return (
     <GoatSettingsContent
       title="Integrations"
       description="Connect the tools Goat can read from and act on."
     >
-      <section className="flex flex-col gap-1">
-        <IntegrationRows integrations={integrations} />
-      </section>
+      <IntegrationRows integrations={integrations} isWorkspaceAdmin={workspace.role === "admin"} />
     </GoatSettingsContent>
   );
 }
@@ -131,7 +139,7 @@ export function GoatUsageSettingsRoute() {
   return (
     <GoatSettingsContent
       title="Usage"
-      description="Track spend across chat, tasks, and brain ingestion."
+      description="Track accumulated workspace spend across chat, tasks, and brain ingestion."
     >
       <GoatSpendOverview />
     </GoatSettingsContent>
@@ -159,7 +167,7 @@ export function GoatPreferencesSettingsRoute() {
 }
 
 export function GoatJamieSettingsRoute() {
-  const { activeBrain, integrations } = useGoatAppData();
+  const { activeBrain, integrations, workspace } = useGoatAppData();
   const brainSourcesHref = activeBrain
     ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
     : null;
@@ -173,6 +181,7 @@ export function GoatJamieSettingsRoute() {
       <JamieIntegrationSetup
         initialState={integrations.jamie}
         brainSourcesHref={brainSourcesHref}
+        canManage={workspace.role === "admin"}
       />
     </GoatSettingsContent>
   );
@@ -506,8 +515,19 @@ function localBridgeName() {
   return platform ? `Local Codex (${platform})` : "Local Codex bridge";
 }
 
-function IntegrationRows({ integrations }: { integrations: GoatIntegrationState }) {
-  return <SettingsIntegrationsPanel initialIntegrations={integrations} />;
+function IntegrationRows({
+  integrations,
+  isWorkspaceAdmin,
+}: {
+  integrations: GoatIntegrationState;
+  isWorkspaceAdmin: boolean;
+}) {
+  return (
+    <SettingsIntegrationsPanel
+      initialIntegrations={integrations}
+      isWorkspaceAdmin={isWorkspaceAdmin}
+    />
+  );
 }
 
 function TaskRouteSkeleton({ label }: { label: string }) {

@@ -53,6 +53,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       description: null,
       visibility: "workspace",
     },
+    recentChats: [],
   }),
 }));
 
@@ -67,6 +68,7 @@ describe("GoatSidebar", () => {
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByText("Ada's Workspace")).toBeInTheDocument();
+    expect(screen.queryByText("admin")).not.toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "Goat primary" });
     const home = within(nav).getByRole("link", { name: "Home" });
@@ -127,6 +129,7 @@ describe("GoatSidebar", () => {
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
+    expect(screen.queryByText("member")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New brain" })).not.toBeInTheDocument();
   });
 

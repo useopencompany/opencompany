@@ -21,9 +21,13 @@ type EndpointSetup = {
 export function JamieIntegrationSetup({
   initialState,
   brainSourcesHref = null,
+  canManage = true,
 }: {
   initialState: GoatJamieProviderState;
   brainSourcesHref?: string | null;
+  // Jamie is a workspace-owned integration; members see status only while
+  // admins get the webhook + API key setup.
+  canManage?: boolean;
 }) {
   const router = useRouter();
   const [endpoint, setEndpoint] = useState<EndpointSetup | null>(null);
@@ -103,8 +107,59 @@ export function JamieIntegrationSetup({
             </Link>
           </div>
         ) : null}
+        {canManage ? null : (
+          <p className="px-2 text-[12px] leading-4 text-ink-subtle">
+            Jamie is a workspace integration managed by workspace admins.
+          </p>
+        )}
       </section>
 
+      {canManage ? (
+        <ManageJamieSections
+          webhookUrl={webhookUrl}
+          headerName={headerName}
+          apiKeyConfigured={apiKeyConfigured}
+          apiKey={apiKey}
+          error={error}
+          copiedKey={copiedKey}
+          isPending={isPending}
+          onApiKeyChange={setApiKey}
+          onCreateEndpoint={createEndpoint}
+          onSaveApiKey={saveApiKey}
+          onCopy={copyValue}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ManageJamieSections({
+  webhookUrl,
+  headerName,
+  apiKeyConfigured,
+  apiKey,
+  error,
+  copiedKey,
+  isPending,
+  onApiKeyChange,
+  onCreateEndpoint,
+  onSaveApiKey,
+  onCopy,
+}: {
+  webhookUrl: string | null;
+  headerName: string;
+  apiKeyConfigured: boolean;
+  apiKey: string;
+  error: string | null;
+  copiedKey: string | null;
+  isPending: boolean;
+  onApiKeyChange: (value: string) => void;
+  onCreateEndpoint: () => void;
+  onSaveApiKey: () => void;
+  onCopy: (key: string, value: string | null) => Promise<void>;
+}) {
+  return (
+    <>
       <section className="flex flex-col gap-3">
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Jamie webhook
@@ -114,20 +169,20 @@ export function JamieIntegrationSetup({
           value={webhookUrl ?? "Create an endpoint first"}
           copyable={Boolean(webhookUrl)}
           copied={copiedKey === "url"}
-          onCopy={() => copyValue("url", webhookUrl)}
+          onCopy={() => onCopy("url", webhookUrl)}
         />
         <SetupValue
           label="Header name"
           value={headerName}
           copyable
           copied={copiedKey === "header"}
-          onCopy={() => copyValue("header", headerName)}
+          onCopy={() => onCopy("header", headerName)}
         />
         {error ? <p className="px-2 text-[12px] leading-4 text-red-600">{error}</p> : null}
         <div className="pt-1">
           <button
             type="button"
-            onClick={createEndpoint}
+            onClick={onCreateEndpoint}
             disabled={isPending}
             className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -160,7 +215,7 @@ export function JamieIntegrationSetup({
           </span>
           <input
             value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
+            onChange={(event) => onApiKeyChange(event.target.value)}
             type="password"
             autoComplete="off"
             spellCheck={false}
@@ -177,7 +232,7 @@ export function JamieIntegrationSetup({
           </span>
           <button
             type="button"
-            onClick={saveApiKey}
+            onClick={onSaveApiKey}
             disabled={!webhookUrl || isPending || apiKey.trim().length === 0}
             className="inline-flex shrink-0 items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -198,7 +253,7 @@ export function JamieIntegrationSetup({
           <li>Copy the sk_ API key Jamie shows once, paste it here, and save it.</li>
         </ol>
       </section>
-    </div>
+    </>
   );
 }
 

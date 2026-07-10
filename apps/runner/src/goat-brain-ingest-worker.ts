@@ -31,10 +31,12 @@ import {
   withGoatSpan,
 } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
+import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
+  GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS,
   GOAT_BRAIN_AGENT_SKIP_SENTINEL,
   type GoatBrainAgentIngestEnv,
   runGitHubActivityAgentIngest,
@@ -54,7 +56,16 @@ import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-brain-ingest" });
 
-export const GOAT_BRAIN_INGEST_LEASE_TTL_MS = 5 * 60 * 1000;
+// A running job's lease must outlive one full agent-ingest attempt so a transient
+// heartbeat outage (DB blip, brief event-loop stall) can't let a second worker
+// re-claim and double-run a job that is still executing. The agent self-aborts at
+// GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS, which stays comfortably inside this window.
+// Intentionally decoupled from the shared RUNNER_JOB_LEASE_TTL_MS: brain ingests run
+// far longer than typical leased jobs and a delayed retry on a genuinely dead worker
+// is preferable to concurrent double-processing.
+export const GOAT_BRAIN_INGEST_LEASE_BUFFER_MS = 2 * 60 * 1000;
+export const GOAT_BRAIN_INGEST_LEASE_TTL_MS =
+  GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS + GOAT_BRAIN_INGEST_LEASE_BUFFER_MS;
 export const GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS = 5_000;
 export const GOAT_BRAIN_INGEST_MAX_ATTEMPTS = 5;
 const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
@@ -428,6 +439,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
   job: GoatBrainIngestJobWithSource;
   env: Pick<RunnerEnv, "jobLeaseTtlMs" | "vercelAiGatewayApiKey"> & {
     blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
+    exaApiKey?: RunnerEnv["exaApiKey"];
   };
   handlers?: readonly GoatBrainIngestHandler[];
   store?: GoatBrainIngestStore;
@@ -506,7 +518,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       leaseId,
       leaseOwner,
       now,
-      leaseExpiresAt: new Date(now.getTime() + input.env.jobLeaseTtlMs),
+      leaseExpiresAt: new Date(now.getTime() + GOAT_BRAIN_INGEST_LEASE_TTL_MS),
     });
     if (!active) leaseActive = false;
   };
@@ -543,18 +555,40 @@ export async function runClaimedGoatBrainIngestJob(input: {
       throw new Error("Goat Brain ingest job content hash does not match its source payload.");
     }
 
+    // Open one Braintrust root span per job run so every model + tool span the
+    // handler emits nests under a single trace. Without a root, wrapAISDK (logger
+    // is setCurrent:false) starts each generateText as its own root, fragmenting
+    // one ingestion across many trace ids.
     const result = await runSpan.runInContext(() =>
-      handler.run({
-        jobId: input.job.id,
-        userWorkosId: input.job.userWorkosId,
-        brainRef: input.job.brainRef ?? null,
-        integrationId: input.job.integrationId ?? null,
-        item: normalizedPayload,
-        env: {
-          vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
-          blobReadWriteToken: input.env.blobReadWriteToken,
+      traceBraintrust(
+        {
+          name: GOAT_SPANS.brainIngestRun,
+          type: "task",
+          metadata: {
+            job_id: input.job.id,
+            source_item_id: input.job.sourceItemId,
+            brain_ref: input.job.brainRef ?? null,
+            kind: input.job.kind,
+            source_provider: input.job.sourceProvider,
+            source_type: input.job.sourceType,
+            attempt: input.job.attempts,
+            ...(userIdHash ? { user_id_hash: userIdHash } : {}),
+          },
         },
-      }),
+        () =>
+          handler.run({
+            jobId: input.job.id,
+            userWorkosId: input.job.userWorkosId,
+            brainRef: input.job.brainRef ?? null,
+            integrationId: input.job.integrationId ?? null,
+            item: normalizedPayload,
+            env: {
+              vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
+              blobReadWriteToken: input.env.blobReadWriteToken,
+              exaApiKey: input.env.exaApiKey,
+            },
+          }),
+      ),
     );
     if (!leaseActive) {
       finishTelemetry("aborted", {
@@ -640,6 +674,9 @@ export async function runClaimedGoatBrainIngestJob(input: {
     throw error;
   } finally {
     clearInterval(heartbeatTimer);
+    // Flush the job's spans promptly; the runner is long-lived and may not shut
+    // down (its only other flush point) for a long time. No-ops when disabled.
+    await flushBraintrust();
   }
 }
 
@@ -695,7 +732,7 @@ export function startGoatBrainIngestWorker(
             leaseOwner: env.instanceId,
             supportedJobs,
             store,
-            leaseTtlMs: env.jobLeaseTtlMs,
+            leaseTtlMs: GOAT_BRAIN_INGEST_LEASE_TTL_MS,
           });
           if (!job) break;
           const running = runClaimedGoatBrainIngestJob({ job, env, handlers, store })
