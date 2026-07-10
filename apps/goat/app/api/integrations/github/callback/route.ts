@@ -33,6 +33,15 @@ export async function GET(request: Request) {
     );
   }
 
+  // The installation lands on the workspace the flow started in; the finishing
+  // session must still be an admin of that workspace.
+  const membership = current.workspaces.find((entry) => entry.workspace.id === state.workspaceId);
+  if (!membership || membership.role !== "admin") {
+    return NextResponse.redirect(
+      new URL(appendGoatGitHubIntegrationStatus(state.returnTo, "error", "admin_required"), url),
+    );
+  }
+
   if (!isGoatGitHubIntegrationConfigured()) {
     return NextResponse.redirect(
       new URL(appendGoatGitHubIntegrationStatus(state.returnTo, "error", "not_configured"), url),
@@ -60,6 +69,7 @@ export async function GET(request: Request) {
   if (!code) {
     const nextState = createGoatGitHubIntegrationState({
       userWorkosId: state.userWorkosId,
+      workspaceId: state.workspaceId,
       returnTo: state.returnTo,
       installationId,
     });
@@ -77,6 +87,7 @@ export async function GET(request: Request) {
 
     await syncGoatGitHubIntegrationRepositories({
       userWorkosId: current.user.workosUserId,
+      workspaceId: state.workspaceId,
       installationId,
       accountLogin: installation.account?.login ?? verifiedInstallation.account?.login ?? null,
       accountType: installation.account?.type ?? verifiedInstallation.account?.type ?? null,

@@ -6,7 +6,7 @@ import {
   encryptJson,
   loadEncryptionKey,
 } from "@opencompany/crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getDb } from "./client";
 import type * as goatSchema from "./goat-schema";
@@ -89,6 +89,8 @@ export async function connectGoatGoogleIntegration(input: {
         goatIntegrations.provider,
         goatIntegrations.externalId,
       ],
+      // The personal-uniqueness index is partial; the arbiter must match it.
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.accountName,
@@ -184,6 +186,8 @@ export async function connectGoatSlackIntegration(input: {
         goatIntegrations.provider,
         goatIntegrations.externalId,
       ],
+      // The personal-uniqueness index is partial; the arbiter must match it.
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.accountName,
@@ -294,6 +298,8 @@ export async function connectGoatLinearIngestIntegration(input: {
         goatIntegrations.provider,
         goatIntegrations.externalId,
       ],
+      // The personal-uniqueness index is partial; the arbiter must match it.
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.viewerName,

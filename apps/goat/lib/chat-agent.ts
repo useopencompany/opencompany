@@ -6,6 +6,10 @@ import {
 } from "@opencompany/goat-observability";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
 import {
+  GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
+  normalizeGoatBrainReadToolInput,
+} from "@/lib/brain-surface";
+import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -13,8 +17,6 @@ import {
   type EditTaskScheduleToolInput,
   type EditTaskScheduleToolOutput,
   GOAT_BRAIN_TOOL_NAME,
-  type GoatBrainCliCommand,
-  type GoatBrainToolFlagValue,
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
@@ -34,7 +36,6 @@ import {
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
-  GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
@@ -66,6 +67,8 @@ export {
 
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
+const GOAT_BRAIN_READ_TOOL_AI_SCHEMA =
+  GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0];
 
 type OpenCompanyChatAgentMessage = {
   role: "user" | "assistant";
@@ -99,15 +102,6 @@ type DeleteTaskScheduleRunner = (
 // goes through save_to_brain, which enqueues the durable ingestion/curation
 // agent. That agent owns the full CLI write surface (create, rewrite, merge,
 // link, move, delete, …) in the runner worker, so the chat tool never needs it.
-const GOAT_BRAIN_CHAT_COMMANDS = [
-  "help",
-  "list",
-  "get",
-  "timeline",
-  "query",
-  "doctor",
-] as const satisfies readonly GoatBrainCliCommand[];
-
 export type OpenCompanyChatAgentDebugTrace = {
   schemaVersion: typeof OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION;
   model: string;
@@ -117,6 +111,14 @@ export type OpenCompanyChatAgentDebugTrace = {
   toolCalls?: unknown[];
   toolResults?: unknown[];
   durationMs?: number;
+  // Token usage from the final generation step. The last step's input+output is the
+  // best proxy for how full the model's context window is after the turn, which drives
+  // the chat header's context meter.
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
   error?: string;
 };
 
@@ -236,41 +238,11 @@ export function createOpenCompanyChatToolContext(input: {
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
-  const brainCommands = GOAT_BRAIN_CHAT_COMMANDS;
 
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
       description: GOAT_BRAIN_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<GoatBrainToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          command: {
-            type: "string",
-            enum: [...brainCommands],
-            description: GOAT_BRAIN_TOOL_ARGS_DESCRIPTION,
-          },
-          flags: {
-            type: "object",
-            additionalProperties: {
-              anyOf: [
-                { type: "string" },
-                { type: "number" },
-                { type: "boolean" },
-                { type: "array", items: { type: "string" } },
-              ],
-            },
-            description:
-              "CLI flags for the command, without leading dashes. Use camelCase or kebab-case names, for example sourceTitle or source-title.",
-          },
-          stdin: {
-            type: "string",
-            description:
-              "Optional stdin for commands that use *-stdin flags, such as create --truth-stdin, append-evidence --body-stdin, or rewrite --truth-stdin.",
-          },
-        },
-        required: ["command"],
-      }),
+      inputSchema: jsonSchema<GoatBrainToolInput>(GOAT_BRAIN_READ_TOOL_AI_SCHEMA),
       execute: async (args, executionContext?: unknown) => {
         if (!input.runBrainCli) {
           throw new Error("goat_brain is not configured for this chat.");
@@ -618,6 +590,10 @@ export function createOpenCompanyChatDebugTrace(input: {
     ...(input.uiMessageParts?.length ? { uiMessageParts: input.uiMessageParts } : {}),
     toolCalls: compactStepValues(input.steps, "toolCalls"),
     toolResults: compactStepValues(input.steps, "toolResults"),
+    ...(() => {
+      const usage = usageFromSteps(input.steps);
+      return usage ? { usage } : {};
+    })(),
     ...(input.error ? { error: input.error } : {}),
   };
 }
@@ -661,54 +637,7 @@ function inferStartTaskEngine(value: string | undefined): GoatHarnessEngine | un
 }
 
 export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput {
-  if (!input || typeof input !== "object") {
-    throw new Error("goat_brain command is required.");
-  }
-  const record = input as Record<string, unknown>;
-  const command = normalizeGoatBrainCommand(record.command);
-  if (!command) throw new Error("goat_brain command is invalid.");
-  const flags = normalizeGoatBrainFlags(record.flags);
-  const stdin = typeof record.stdin === "string" ? record.stdin : "";
-  return {
-    command,
-    ...(Object.keys(flags).length > 0 ? { flags } : {}),
-    ...(stdin ? { stdin } : {}),
-  };
-}
-
-function normalizeGoatBrainCommand(value: unknown): GoatBrainCliCommand | null {
-  if (typeof value !== "string") return null;
-  return (GOAT_BRAIN_CHAT_COMMANDS as readonly string[]).includes(value)
-    ? (value as GoatBrainCliCommand)
-    : null;
-}
-
-function normalizeGoatBrainFlags(value: unknown): Record<string, GoatBrainToolFlagValue> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const out: Record<string, GoatBrainToolFlagValue> = {};
-  for (const [key, raw] of Object.entries(value)) {
-    if (!key.trim()) continue;
-    if (typeof raw === "string") {
-      const trimmed = raw.trim();
-      if (trimmed) out[key] = trimmed;
-      continue;
-    }
-    if (typeof raw === "number") {
-      if (Number.isFinite(raw)) out[key] = raw;
-      continue;
-    }
-    if (typeof raw === "boolean") {
-      out[key] = raw;
-      continue;
-    }
-    if (Array.isArray(raw)) {
-      const values = raw.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
-      );
-      if (values.length > 0) out[key] = values.map((item) => item.trim());
-    }
-  }
-  return out;
+  return normalizeGoatBrainReadToolInput(input);
 }
 
 function toStartTaskToolOutput(
@@ -731,6 +660,33 @@ function compactStepValues(steps: unknown, key: "toolCalls" | "toolResults") {
     const value = (step as Record<string, unknown>)[key];
     return Array.isArray(value) ? value.map(toJsonSafeValue) : [];
   });
+}
+
+// The last step's usage reflects the full context sent on the final model call
+// (all prior messages + tool results) plus the response, so it approximates how
+// full the context window is after the turn.
+function usageFromSteps(steps: unknown): OpenCompanyChatAgentDebugTrace["usage"] {
+  if (!Array.isArray(steps) || steps.length === 0) return undefined;
+  const lastStep = steps[steps.length - 1];
+  if (!lastStep || typeof lastStep !== "object") return undefined;
+  const usage = (lastStep as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const record = usage as Record<string, unknown>;
+  const inputTokens = nonNegativeInteger(record.inputTokens);
+  const outputTokens = nonNegativeInteger(record.outputTokens);
+  const totalTokens = nonNegativeInteger(record.totalTokens);
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) {
+    return undefined;
+  }
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function toJsonSafeValue(value: unknown) {

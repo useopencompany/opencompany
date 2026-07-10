@@ -45,6 +45,9 @@ export type GoatGitHubProviderState = {
 
 export type GoatGitHubIntegrationStatePayload = {
   userWorkosId: string;
+  // GitHub App installations are workspace-owned: the workspace the connecting
+  // admin was acting in when the flow started.
+  workspaceId: string;
   returnTo: string;
   installationId?: string;
   expiresAt: number;
@@ -64,7 +67,7 @@ const GITHUB_WORK_INTEGRATION_ENVS = [
 ] as const;
 
 export async function getGoatGitHubIntegrationState(
-  userWorkosId: string,
+  workspaceId: string,
 ): Promise<GoatGitHubProviderState> {
   const [row] = await getDb()
     .select({
@@ -76,7 +79,7 @@ export async function getGoatGitHubIntegrationState(
     .from(goatIntegrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
+        eq(goatIntegrations.workspaceId, workspaceId),
         eq(goatIntegrations.provider, GITHUB_PROVIDER),
       ),
     )
@@ -247,6 +250,7 @@ export async function getGoatGitHubInstallationToken(installationId: string) {
 
 export async function syncGoatGitHubIntegrationRepositories(input: {
   userWorkosId: string;
+  workspaceId: string;
   installationId: string;
   accountLogin: string | null;
   accountType: string | null;
@@ -255,6 +259,9 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
   const db = getDb();
   const now = new Date();
   const connectionLabel = input.accountLogin?.trim() || "GitHub";
+  // On reconnect (possibly by a different admin) user_workos_id stays as the
+  // original connector: brain_sources rows reference it via a composite FK and
+  // GitHub keeps no per-user credential, so there is nothing to re-key.
   const incompleteIntegrationUpdate = {
     connectionLabel,
     accountName: input.accountLogin,
@@ -269,6 +276,7 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
     .values({
       id: newGoatIntegrationId(),
       userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId,
       provider: GITHUB_PROVIDER,
       externalId: input.installationId,
       connectionLabel,
@@ -283,13 +291,14 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
     })
     .onConflictDoUpdate({
       target: [
-        goatIntegrations.userWorkosId,
+        goatIntegrations.workspaceId,
         goatIntegrations.provider,
         goatIntegrations.externalId,
       ],
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL`,
       set: incompleteIntegrationUpdate,
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId });
 
   if (!integration) {
     throw new Error("Could not persist Goat GitHub integration.");
@@ -297,7 +306,7 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
 
   const resourceValues = input.repositories.map((repository) => ({
     id: newGoatIntegrationResourceId(),
-    userWorkosId: input.userWorkosId,
+    userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
     provider: GITHUB_PROVIDER,
     resourceType: GITHUB_REPOSITORY_RESOURCE_TYPE,
@@ -325,7 +334,7 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
           goatIntegrationResources.externalId,
         ],
         set: {
-          userWorkosId: input.userWorkosId,
+          userWorkosId: integration.userWorkosId,
           integrationId: integration.id,
           provider: GITHUB_PROVIDER,
           resourceType: GITHUB_REPOSITORY_RESOURCE_TYPE,
@@ -349,7 +358,7 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
 
   const staleWhere = and(
     eq(goatIntegrationResources.integrationId, integration.id),
-    eq(goatIntegrationResources.userWorkosId, input.userWorkosId),
+    eq(goatIntegrationResources.userWorkosId, integration.userWorkosId),
     eq(goatIntegrationResources.provider, GITHUB_PROVIDER),
     eq(goatIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
   );
@@ -381,7 +390,7 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
     })
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        eq(goatIntegrations.workspaceId, input.workspaceId),
         eq(goatIntegrations.provider, GITHUB_PROVIDER),
         eq(goatIntegrations.id, integration.id),
       ),
@@ -467,6 +476,7 @@ function isGoatGitHubIntegrationStatePayload(
   const record = value as Record<string, unknown>;
   return (
     typeof record.userWorkosId === "string" &&
+    typeof record.workspaceId === "string" &&
     typeof record.returnTo === "string" &&
     typeof record.expiresAt === "number" &&
     typeof record.nonce === "string" &&

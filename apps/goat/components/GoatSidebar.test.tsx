@@ -53,6 +53,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       description: null,
       visibility: "workspace",
     },
+    recentChats: [],
   }),
 }));
 

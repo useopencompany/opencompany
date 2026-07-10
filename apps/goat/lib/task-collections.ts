@@ -220,6 +220,8 @@ export type GoatTaskSandboxUsageRow = {
 export type GoatIntegrationRow = {
   id: string;
   user_workos_id: string;
+  workspace_id: string | null;
+  shared_with_workspace: boolean;
   provider: GoatIntegrationProvider;
   external_id: string;
   connection_label: string | null;

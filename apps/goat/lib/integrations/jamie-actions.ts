@@ -19,10 +19,15 @@ export type JamieWebhookEndpointActionResult =
     };
 
 export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWebhookEndpointActionResult> {
-  const { user } = await currentGoatUser();
+  const { user, workspace, role } = await currentGoatUser();
+  // Jamie webhooks are workspace-owned plumbing; only admins manage them.
+  if (role !== "admin") {
+    return { ok: false, error: "Only workspace admins can manage the Jamie integration." };
+  }
   try {
     const setup = await createOrResetGoatJamieWebhookEndpoint({
       userWorkosId: user.workosUserId,
+      workspaceId: workspace.id,
     });
     revalidatePath("/", "layout");
     return {
@@ -41,10 +46,13 @@ export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWe
 export async function saveJamieWebhookApiKeyAction(
   apiKey: string,
 ): Promise<JamieWebhookEndpointActionResult> {
-  const { user } = await currentGoatUser();
+  const { workspace, role } = await currentGoatUser();
+  if (role !== "admin") {
+    return { ok: false, error: "Only workspace admins can manage the Jamie integration." };
+  }
   try {
     const setup = await saveGoatJamieWebhookApiKey({
-      userWorkosId: user.workosUserId,
+      workspaceId: workspace.id,
       apiKey,
     });
     revalidatePath("/", "layout");

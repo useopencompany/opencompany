@@ -78,6 +78,9 @@ export type GoatChatMessageMetadata = {
     updatedAt?: string;
     durationMs?: number;
   };
+  // Approximate context-window occupancy after this turn (input + output tokens of
+  // the final model call), used to render the chat header's context meter.
+  contextTokens?: number;
   error?: string;
   aborted?: boolean;
 };
@@ -402,12 +405,14 @@ export function toGoatChatMessageMetadata(
   const aborted = message.debugTrace?.aborted === true;
   const timing = toGoatChatMessageTiming(message);
   const attachments = toGoatChatUiAttachments(message.attachments);
+  const contextTokens = contextTokensFromUsage(message.debugTrace?.usage);
 
   if (
     !message.sessionId &&
     !message.taskId &&
     !task &&
     !timing &&
+    contextTokens === undefined &&
     !error &&
     !aborted &&
     !attachments
@@ -420,6 +425,7 @@ export function toGoatChatMessageMetadata(
     ...(message.taskId ? { taskId: message.taskId } : {}),
     ...(task ? { task } : {}),
     ...(timing ? { timing } : {}),
+    ...(contextTokens !== undefined ? { contextTokens } : {}),
     ...(error ? { error } : {}),
     ...(aborted ? { aborted } : {}),
   };
@@ -438,6 +444,15 @@ function toGoatChatUiAttachments(
     filename: attachment.filename,
     sizeBytes: attachment.sizeBytes,
   }));
+}
+
+function contextTokensFromUsage(
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null | undefined,
+): number | undefined {
+  if (!usage) return undefined;
+  if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) return usage.totalTokens;
+  const sum = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  return sum > 0 ? sum : undefined;
 }
 
 function toGoatChatMessageTiming(
