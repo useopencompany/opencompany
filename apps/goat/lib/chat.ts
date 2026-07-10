@@ -13,6 +13,7 @@ import {
 import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
+  compareGoatChatMessageOrder,
   type GoatChatSessionView,
   type GoatChatSummaryView,
   type GoatStoredChatMessage,
@@ -260,7 +261,7 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async listMessages(sessionId) {
-      return getDb()
+      const messages = await getDb()
         .select({
           id: goatChatMessages.id,
           sessionId: goatChatMessages.sessionId,
@@ -279,6 +280,7 @@ export function createDbGoatChatStore(): GoatChatStore {
         .leftJoin(goatTasks, eq(goatChatMessages.taskId, goatTasks.id))
         .where(eq(goatChatMessages.sessionId, sessionId))
         .orderBy(asc(goatChatMessages.createdAt));
+      return messages.toSorted(compareGoatChatMessageOrder);
     },
 
     async insertMessage(input) {
