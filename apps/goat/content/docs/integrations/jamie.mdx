@@ -1,0 +1,51 @@
+---
+title: Jamie
+description: Connect Jamie completed-meeting webhooks to Goat Brain ingestion.
+---
+
+## What the connection does
+
+Jamie sends Goat a `meeting.completed` webhook whenever meeting notes are ready. Goat validates Jamie's `x-jamie-api-key` header, normalizes the meeting payload into a Brain source item, and enqueues the durable Brain ingestion agent.
+
+The public webhook URL is stable:
+
+```text
+/api/webhooks/jamie
+```
+
+The saved Jamie API key routes the delivery to the right Goat integration. Do not use the legacy `/api/webhooks/jamie/<integration-id>` URL for new setups.
+
+## Setup steps
+
+1. Open Goat settings, then Jamie.
+2. Click Create endpoint and copy the Endpoint URL.
+3. In Jamie, open Settings, then Integrations, then Webhooks.
+4. Create a webhook for completed meetings.
+5. Paste the Goat Endpoint URL.
+6. Set the event to `meeting.completed`.
+7. Choose API Key as the authentication method.
+8. Keep Jamie's default header name, `x-jamie-api-key`.
+9. Finish webhook creation in Jamie.
+10. Copy the generated `sk_...` API key Jamie shows once.
+11. Paste that API key back into Goat's Jamie settings and save it.
+
+Jamie also offers signature verification for webhooks, but Goat's Jamie integration expects the API Key method for this setup.
+
+## Brain routing
+
+After the first valid delivery, Goat marks Jamie connected. If no per-brain source routing has been configured yet, Jamie deliveries continue to use the user's default brain. Once a Jamie source row exists on any brain, routing is explicit: enabled brain sources receive the meeting source item, and disabled sources do not enqueue ingestion.
+
+Configure routing from a brain settings page under Sources.
+
+## Troubleshooting
+
+If Jamie shows successful deliveries but Goat does not ingest meetings, check these in order:
+
+- The webhook URL is `/api/webhooks/jamie`.
+- The event is `meeting.completed`.
+- The authentication method is API Key, not signature verification.
+- The header name is `x-jamie-api-key`.
+- The `sk_...` key shown by Jamie has been saved in Goat.
+- At least one target brain source is enabled, or no explicit Jamie brain source routing exists yet.
+
+Jamie webhook behavior is documented at [docs.meetjamie.ai/developers/webhooks/webhooks](https://docs.meetjamie.ai/developers/webhooks/webhooks).

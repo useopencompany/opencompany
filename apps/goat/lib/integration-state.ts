@@ -46,6 +46,7 @@ export type GoatJamieProviderState = {
   statusReason: string | null;
   integrationId: string | null;
   webhookUrl: string | null;
+  apiKeyConfigured: boolean;
 };
 
 export type GoatSlackProviderState = {
@@ -221,6 +222,7 @@ function jamieProviderState(row: IntegrationStateRow | undefined): GoatJamieProv
       statusReason: null,
       integrationId: null,
       webhookUrl: null,
+      apiKeyConfigured: false,
     };
   }
 
@@ -232,5 +234,6 @@ function jamieProviderState(row: IntegrationStateRow | undefined): GoatJamieProv
     statusReason: row.statusReason ?? row.status_reason ?? null,
     integrationId: null,
     webhookUrl: null,
+    apiKeyConfigured: row.status === "connected",
   };
 }

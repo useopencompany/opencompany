@@ -128,13 +128,17 @@ export function GoatAppDataProvider({
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
+    const liveIntegrations = goatIntegrationStateFromRows(
+      (integrationRows ?? []) as GoatIntegrationRow[],
+    );
     return {
-      ...goatIntegrationStateFromRows((integrationRows ?? []) as GoatIntegrationRow[]),
+      ...liveIntegrations,
       codex: initialData.integrations.codex,
       jamie: {
-        ...goatIntegrationStateFromRows((integrationRows ?? []) as GoatIntegrationRow[]).jamie,
+        ...liveIntegrations.jamie,
         integrationId: initialData.integrations.jamie.integrationId,
         webhookUrl: initialData.integrations.jamie.webhookUrl,
+        apiKeyConfigured: initialData.integrations.jamie.apiKeyConfigured,
       },
     };
   }, [initialData.integrations, integrationRows, integrationsLoading]);

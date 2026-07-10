@@ -6,7 +6,6 @@ import {
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  bindGoatJamieWebhookApiKey,
   loadGoatJamieWebhookContext,
   markGoatJamieWebhookConnected,
   verifyGoatJamieWebhookApiKey,
@@ -15,7 +14,6 @@ import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 import { POST } from "./route";
 
 vi.mock("@/lib/integrations/jamie", () => ({
-  bindGoatJamieWebhookApiKey: vi.fn(),
   loadGoatJamieWebhookContext: vi.fn(),
   markGoatJamieWebhookConnected: vi.fn(),
   verifyGoatJamieWebhookApiKey: vi.fn(),
@@ -50,7 +48,6 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     });
     vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
       valid: true,
-      shouldBind: false,
       apiKey: jamieApiKey(),
     });
     vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
@@ -64,7 +61,6 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     vi.mocked(getDefaultGoatBrainForUser).mockResolvedValue({
       id: "gbrain_123",
     } as Awaited<ReturnType<typeof getDefaultGoatBrainForUser>>);
-    vi.mocked(bindGoatJamieWebhookApiKey).mockResolvedValue(undefined);
     vi.mocked(markGoatJamieWebhookConnected).mockResolvedValue(undefined);
   });
 
@@ -80,7 +76,6 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
   it("returns 401 for a missing or wrong Jamie API key", async () => {
     vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
       valid: false,
-      shouldBind: false,
       apiKey: null,
     });
 
@@ -173,32 +168,6 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
       expect.objectContaining({ brainRefs: [] }),
     );
     expect(triggerGoatBrainIngestWake).not.toHaveBeenCalled();
-  });
-
-  it("binds the Jamie API key on the first valid delivery", async () => {
-    vi.mocked(loadGoatJamieWebhookContext).mockResolvedValue({
-      integrationId: "gint_123",
-      userWorkosId: "user_123",
-      apiKeyHash: null,
-      legacySecretHash: null,
-    });
-    vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
-      valid: true,
-      shouldBind: true,
-      apiKey: jamieApiKey(),
-    });
-
-    const response = await POST(jamieRequest(jamiePayload()), routeContext());
-
-    expect(response.status).toBe(200);
-    expect(bindGoatJamieWebhookApiKey).toHaveBeenCalledWith(
-      expect.objectContaining({
-        integrationId: "gint_123",
-        userWorkosId: "user_123",
-        apiKey: jamieApiKey(),
-      }),
-    );
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledTimes(1);
   });
 });
 

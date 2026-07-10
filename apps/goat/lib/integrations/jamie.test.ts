@@ -8,24 +8,18 @@ import {
 describe("Goat Jamie webhook API keys", () => {
   const jamieApiKey = "sk_0000000000000000000000000000000000000000000000000000000000000000";
 
-  it("accepts Jamie-issued API keys before a key is bound", () => {
+  it("recognizes Jamie-issued API key shape", () => {
     expect(isValidJamieProviderApiKey(jamieApiKey)).toBe(true);
+  });
+
+  it("rejects delivery API keys before a key is saved", () => {
+    expect(isValidJamieProviderApiKey("jwhsec_legacy")).toBe(false);
     expect(
       verifyGoatJamieWebhookApiKey({
         candidate: jamieApiKey,
         apiKeyHash: null,
       }),
-    ).toEqual({ valid: true, shouldBind: true, apiKey: jamieApiKey });
-  });
-
-  it("rejects non-Jamie API keys before a key is bound", () => {
-    expect(isValidJamieProviderApiKey("jwhsec_legacy")).toBe(false);
-    expect(
-      verifyGoatJamieWebhookApiKey({
-        candidate: "jwhsec_legacy",
-        apiKeyHash: null,
-      }),
-    ).toEqual({ valid: false, shouldBind: false, apiKey: null });
+    ).toEqual({ valid: false, apiKey: null });
   });
 
   it("verifies bound Jamie API keys without storing plaintext in the hash", () => {
@@ -38,12 +32,12 @@ describe("Goat Jamie webhook API keys", () => {
         candidate: jamieApiKey,
         apiKeyHash,
       }),
-    ).toEqual({ valid: true, shouldBind: false, apiKey: jamieApiKey });
+    ).toEqual({ valid: true, apiKey: jamieApiKey });
     expect(
       verifyGoatJamieWebhookApiKey({
         candidate: `${jamieApiKey}0`,
         apiKeyHash,
       }),
-    ).toEqual({ valid: false, shouldBind: false, apiKey: null });
+    ).toEqual({ valid: false, apiKey: null });
   });
 });

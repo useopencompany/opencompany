@@ -45,9 +45,16 @@ function LiveSettingsIntegrations({
   );
   const integrations = useMemo(() => {
     if (isLoading && !rows?.length) return initialIntegrations;
+    const liveIntegrations = goatIntegrationStateFromRows((rows ?? []) as GoatIntegrationRow[]);
     return {
-      ...goatIntegrationStateFromRows((rows ?? []) as GoatIntegrationRow[]),
+      ...liveIntegrations,
       codex: initialIntegrations.codex,
+      jamie: {
+        ...liveIntegrations.jamie,
+        integrationId: initialIntegrations.jamie.integrationId,
+        webhookUrl: initialIntegrations.jamie.webhookUrl,
+        apiKeyConfigured: initialIntegrations.jamie.apiKeyConfigured,
+      },
     };
   }, [initialIntegrations, isLoading, rows]);
 
