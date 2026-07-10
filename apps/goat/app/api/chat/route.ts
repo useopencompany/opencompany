@@ -43,7 +43,6 @@ import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
   type DeleteTaskScheduleToolOutput,
   type EditTaskScheduleToolOutput,
-  type GoatBrainCliCommand,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
   textFromGoatChatUiMessage,
@@ -63,15 +62,6 @@ import { createGoatTaskForUser } from "@/lib/tasks";
 
 export const maxDuration = 240;
 export const runtime = "nodejs";
-
-const GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS = [
-  "help",
-  "list",
-  "get",
-  "timeline",
-  "query",
-  "doctor",
-] as const satisfies readonly GoatBrainCliCommand[];
 
 const logger = createLogger({ service: "opencompany-goat", runtime: "goat-chat" });
 
@@ -224,7 +214,9 @@ export async function POST(request: Request): Promise<Response> {
     model: turn.session.model,
     latestUserMessage: parsed.value.prompt,
     ...(requestedEngine ? { requestedEngine } : {}),
-    ...(canManageWorkspaceBrain ? {} : { brainCommands: GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS }),
+    // goat_brain is read-only for everyone (recall/inspect). The only write path
+    // in chat is save_to_brain, which is wired below for admins and enqueues the
+    // durable ingestion agent. No per-command role branching needed here.
     runBrainCli: (toolInput, toolExecutionContext) => {
       const toolCallId = goatBrainToolCallId(toolExecutionContext);
       const activeBrain = context.activeBrain;
@@ -235,15 +227,6 @@ export async function POST(request: Request): Promise<Response> {
           stdout: "",
           stderr: "",
           error: "You do not have access to any brain in this workspace.",
-        });
-      }
-      if (!canManageWorkspaceBrain && !isMemberReadOnlyGoatBrainCommand(toolInput.command)) {
-        return Promise.resolve({
-          ok: false,
-          exitCode: null,
-          stdout: "",
-          stderr: "",
-          error: "Only workspace admins can edit the brain.",
         });
       }
       return runGoatBrainToolForUser({
@@ -500,7 +483,7 @@ export async function POST(request: Request): Promise<Response> {
             readOnly: !canManageWorkspaceBrain,
           }
         : null,
-      brainWriteEnabled: canManageWorkspaceBrain,
+      brainCaptureEnabled: canManageWorkspaceBrain,
       taskToolsEnabled: canManageWorkspaceBrain,
       scheduleToolsEnabled: canManageWorkspaceBrain,
       recurringSchedules,
@@ -739,10 +722,6 @@ async function executeGoatChatExaSearch(input: {
 function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
   if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
   return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function isMemberReadOnlyGoatBrainCommand(command: GoatBrainCliCommand) {
-  return (GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS as readonly string[]).includes(command);
 }
 
 function resolveChatScheduleTarget(
