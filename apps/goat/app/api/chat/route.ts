@@ -120,6 +120,7 @@ export async function POST(request: Request): Promise<Response> {
   const startedAt = performance.now();
   const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
+  const elapsedChatDurationMs = () => Math.max(0, Math.round(performance.now() - startedAt));
   const chatSpan = startGoatSpan(GOAT_SPANS.chatTurn, {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
     "goat.model": parsed.value.model,
@@ -133,7 +134,7 @@ export async function POST(request: Request): Promise<Response> {
   ) => {
     if (chatFinished) return;
     chatFinished = true;
-    const durationMs = Math.round(performance.now() - startedAt);
+    const durationMs = elapsedChatDurationMs();
     const failureCategory =
       outcome === "failure" && error
         ? chatSpan.fail(error, attributes)
@@ -430,6 +431,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const fallbackTrace = {
       ...debugTrace,
+      durationMs: elapsedChatDurationMs(),
       ...(generationSignal.aborted ? { aborted: true } : {}),
       error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
       finishReason,
@@ -604,6 +606,7 @@ export async function POST(request: Request): Promise<Response> {
       const responseMessageId = safeClientMessageId(responseMessage.id);
       const finalTrace = {
         ...debugTrace,
+        durationMs: elapsedChatDurationMs(),
         ...(isAborted ? { aborted: true } : {}),
         ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
