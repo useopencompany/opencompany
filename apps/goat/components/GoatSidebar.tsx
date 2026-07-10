@@ -4,6 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/compone
 import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
+  Archive,
   Building2,
   Check,
   ChevronsUpDown,
@@ -17,6 +18,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
+import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import { switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function SidebarNavRow({
@@ -153,11 +155,29 @@ function GoatSidebarRecentChats() {
   const { recentChats } = useGoatAppData();
   const pathname = usePathname();
   const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [archivingId, setArchivingId] = useState<string | null>(null);
 
   // Keep the footer pinned to the bottom when there is nothing to show.
   if (recentChats.length === 0) {
     return <div className="min-h-0 flex-1" />;
   }
+
+  const archiveChat = (chatId: string, chatTitle: string, href: string) => {
+    setArchivingId(chatId);
+    startTransition(async () => {
+      const result = await closeGoatChatSessionAction(chatId);
+      setArchivingId((current) => (current === chatId ? null : current));
+      if (!result.ok) {
+        toast.error(result.error ?? `Could not archive "${chatTitle}".`);
+        return;
+      }
+      // If we archived the chat we're currently viewing, drop back to home.
+      if (pathname === href) {
+        router.push("/");
+      }
+    });
+  };
 
   return (
     <div className="mt-4 flex min-h-0 flex-1 flex-col">
@@ -172,22 +192,38 @@ function GoatSidebarRecentChats() {
           const href = chatHref(chat.id);
           const active = pathname === href;
           const prefetchChat = () => router.prefetch(href);
+          const archiving = archivingId === chat.id;
           return (
-            <Link
-              key={chat.id}
-              href={href}
-              prefetch
-              onMouseEnter={prefetchChat}
-              onFocus={prefetchChat}
-              aria-current={active ? "page" : undefined}
-              className={`group flex w-full items-center rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                active
-                  ? "bg-surface-active text-ink"
-                  : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-              }`}
-            >
-              <span className="truncate tracking-[-0.005em]">{chat.title}</span>
-            </Link>
+            <div key={chat.id} className="group relative">
+              <Link
+                href={href}
+                prefetch
+                onMouseEnter={prefetchChat}
+                onFocus={prefetchChat}
+                aria-current={active ? "page" : undefined}
+                className={`flex w-full items-center rounded-md py-[5px] pl-2 pr-8 text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                  active
+                    ? "bg-surface-active text-ink"
+                    : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+                }`}
+              >
+                <span className="truncate tracking-[-0.005em]">{chat.title}</span>
+              </Link>
+              <button
+                type="button"
+                aria-label={`Archive ${chat.title}`}
+                title="Archive chat"
+                disabled={archiving}
+                onClick={() => archiveChat(chat.id, chat.title, href)}
+                className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-ink/50 opacity-0 transition-[opacity,color,background-color] duration-150 hover:bg-surface-active hover:text-ink focus:outline-none focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-100"
+              >
+                {archiving ? (
+                  <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
+                ) : (
+                  <Archive size={13} strokeWidth={1.75} />
+                )}
+              </button>
+            </div>
           );
         })}
       </nav>
