@@ -1010,80 +1010,92 @@ export function GoatSurface({
               </button>
             </div>
           ) : null}
-          <div className="flex items-end gap-2.5 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
-            <div className="relative min-w-0 flex-1 self-center">
-              {input ? (
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                >
-                  {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
-                </div>
+          <div className="flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
+            <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
+              <div className="relative min-w-0 flex-1 self-center">
+                {input ? (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                  >
+                    {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
+                  </div>
+                ) : null}
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  id="prompt"
+                  name="prompt"
+                  value={input}
+                  placeholder={
+                    mode === "chat" ? "Reply..." : "Ask a question or describe a task..."
+                  }
+                  onChange={onInputChange}
+                  onBlur={() => setMentionToken(null)}
+                  onClick={(event) =>
+                    updateMentionToken(
+                      event.currentTarget.value,
+                      event.currentTarget.selectionStart,
+                    )
+                  }
+                  onKeyDown={onKeyDown}
+                  onSelect={(event) =>
+                    updateMentionToken(
+                      event.currentTarget.value,
+                      event.currentTarget.selectionStart,
+                    )
+                  }
+                  disabled={isGenerating || localCodexFeatureDisabledForChat}
+                  className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                  maxLength={10_000}
+                  required
+                />
+              </div>
+              {isEngineChat && engineRunning ? (
+                <EngineStopButton
+                  label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+                  onStop={stopGeneration}
+                />
               ) : null}
-              <textarea
-                ref={inputRef}
-                rows={1}
-                id="prompt"
-                name="prompt"
-                value={input}
-                placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
-                onChange={onInputChange}
-                onBlur={() => setMentionToken(null)}
-                onClick={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                onKeyDown={onKeyDown}
-                onSelect={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                disabled={isGenerating || localCodexFeatureDisabledForChat}
-                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                maxLength={10_000}
-                required
-              />
-            </div>
-            <GoatModelPicker
-              value={chatModel}
-              onChange={(model) => {
-                setChatModel(model);
-                if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
-                  setCodexPlanModeEnabled(false);
-                  setCodexGoalModeEnabled(false);
-                  setCodexGoalObjective("");
-                  setCodexGoalTokenBudget("");
-                }
-              }}
-              disabled={isGenerating || Boolean(activeEngineChat)}
-              localCodexBetaEnabled={localCodexBetaEnabled}
-              codexConnected={codexConnected}
-            />
-            {showCodexComposerControls ? (
-              <CodexComposerControls
-                reasoningEffort={codexReasoningEffort}
-                planModeEnabled={codexPlanModeEnabled}
-                goalModeEnabled={codexGoalModeEnabled}
-                goalObjective={codexGoalObjective}
-                goalTokenBudget={codexGoalTokenBudget}
-                disabled={engineSubmitting}
-                onReasoningEffortChange={setCodexReasoningEffort}
-                onPlanModeEnabledChange={setCodexPlanModeEnabled}
-                onGoalModeEnabledChange={setCodexGoalModeEnabled}
-                onGoalObjectiveChange={setCodexGoalObjective}
-                onGoalTokenBudgetChange={setCodexGoalTokenBudget}
-              />
-            ) : null}
-            {isEngineChat && engineRunning ? (
-              <EngineStopButton
-                label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+              <SubmitButton
+                disabled={!input.trim() || engineSubmitting || localCodexFeatureDisabledForChat}
+                isGenerating={isGenerating}
                 onStop={stopGeneration}
               />
-            ) : null}
-            <SubmitButton
-              disabled={!input.trim() || engineSubmitting || localCodexFeatureDisabledForChat}
-              isGenerating={isGenerating}
-              onStop={stopGeneration}
-            />
+            </div>
+            <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+              <GoatModelPicker
+                value={chatModel}
+                onChange={(model) => {
+                  setChatModel(model);
+                  if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
+                    setCodexPlanModeEnabled(false);
+                    setCodexGoalModeEnabled(false);
+                    setCodexGoalObjective("");
+                    setCodexGoalTokenBudget("");
+                  }
+                }}
+                disabled={isGenerating || Boolean(activeEngineChat)}
+                localCodexBetaEnabled={localCodexBetaEnabled}
+                codexConnected={codexConnected}
+              />
+              {showCodexComposerControls ? (
+                <CodexComposerControls
+                  reasoningEffort={codexReasoningEffort}
+                  planModeEnabled={codexPlanModeEnabled}
+                  goalModeEnabled={codexGoalModeEnabled}
+                  goalObjective={codexGoalObjective}
+                  goalTokenBudget={codexGoalTokenBudget}
+                  disabled={engineSubmitting}
+                  onReasoningEffortChange={setCodexReasoningEffort}
+                  onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                  onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                  onGoalObjectiveChange={setCodexGoalObjective}
+                  onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+                />
+              ) : null}
+            </div>
           </div>
         </div>
       </form>
