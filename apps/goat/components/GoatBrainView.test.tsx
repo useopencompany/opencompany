@@ -256,6 +256,7 @@ describe("GoatBrainView", () => {
 
   it("selects same-brain documents instantly and syncs the URL with browser history", async () => {
     const user = userEvent.setup();
+    window.history.pushState(null, "", "/brain/people/ada-lovelace");
     const replaceState = vi.spyOn(window.history, "replaceState");
 
     render(
@@ -281,6 +282,82 @@ describe("GoatBrainView", () => {
     );
     expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/projects/roadmap");
     expect(routerMock.replace).not.toHaveBeenCalled();
+    replaceState.mockRestore();
+  });
+
+  it("opens a stale inbox document route after the filing agent moved it", async () => {
+    const movedCapture = {
+      ...inboxCaptureDocument,
+      folderPath: "thoughts",
+      path: "thoughts/customer-feedback.md",
+    };
+    window.history.pushState(null, "", "/brain/inbox/customer-feedback");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={[folder("inbox", "system"), folder("thoughts", "custom")]}
+        documents={[movedCapture]}
+        initialFolderPath="inbox"
+        initialBrainId="customer-feedback"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Customer wants searchable meeting notes.",
+    );
+    expect(screen.getByTitle("thoughts/customer-feedback.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/thoughts/customer-feedback");
+    });
+    replaceState.mockRestore();
+  });
+
+  it("keeps an open inbox item selected when live filing moves it away", async () => {
+    window.history.pushState(null, "", "/brain/inbox/customer-feedback");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const { rerender } = render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={[folder("inbox", "system"), folder("thoughts", "custom")]}
+        documents={[inboxCaptureDocument]}
+        initialFolderPath="inbox"
+        initialBrainId="customer-feedback"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Customer wants searchable meeting notes.",
+    );
+    expect(replaceState).not.toHaveBeenCalled();
+
+    rerender(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={[folder("inbox", "system"), folder("thoughts", "custom")]}
+        documents={[
+          {
+            ...inboxCaptureDocument,
+            folderPath: "thoughts",
+            path: "thoughts/customer-feedback.md",
+          },
+        ]}
+        initialFolderPath="inbox"
+        initialBrainId="customer-feedback"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Customer wants searchable meeting notes.",
+    );
+    expect(screen.getByTitle("thoughts/customer-feedback.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/thoughts/customer-feedback");
+    });
     replaceState.mockRestore();
   });
 
@@ -720,6 +797,31 @@ const documentLinkingToAda: GoatBrainDocumentView = {
   sources: [],
   kind: "page",
   type: "project",
+  status: "draft",
+  aliases: [],
+  contentHash: "hash",
+  sizeBytes: 128,
+  createdAt: "2026-07-06T12:00:00.000Z",
+  updatedAt: "2026-07-06T12:00:00.000Z",
+};
+
+const inboxCaptureDocument: GoatBrainDocumentView = {
+  id: "doc_customer_feedback",
+  brainId: "customer-feedback",
+  folderPath: "inbox",
+  path: "inbox/customer-feedback.md",
+  title: "Customer feedback",
+  content: "",
+  body: "Customer wants searchable meeting notes.",
+  timeline: [],
+  format: "markdown",
+  mimeType: "text/markdown",
+  originalFileName: null,
+  assetStorageKey: null,
+  relations: [],
+  sources: [],
+  kind: "page",
+  type: "note",
   status: "draft",
   aliases: [],
   contentHash: "hash",
