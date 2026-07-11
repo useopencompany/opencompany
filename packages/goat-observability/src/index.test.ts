@@ -7,6 +7,7 @@ import {
   hashGoatUserId,
   isGoatObservabilityEnabled,
   recordGoatCounter,
+  recordGoatModelCost,
   recordGoatRunOutcome,
   recordGoatSignup,
   sanitizeGoatAttributes,
@@ -43,6 +44,7 @@ describe("@opencompany/goat-observability", () => {
     expect(
       sanitizeGoatMetricAttributes({
         "goat.surface": "task",
+        "goat.model": "openai/gpt-5.5",
         "goat.outcome": "failure",
         "goat.failure_category": "tool",
         "goat.task_id": "goat_task_1",
@@ -55,6 +57,7 @@ describe("@opencompany/goat-observability", () => {
       }),
     ).toEqual({
       "goat.surface": "task",
+      "goat.model": "openai/gpt-5.5",
       "goat.outcome": "failure",
       "goat.failure_category": "tool",
       "goat.stage": "running",
@@ -148,6 +151,12 @@ describe("@opencompany/goat-observability", () => {
     vi.stubEnv("GOAT_OBSERVABILITY_ENABLED", "false");
     expect(isGoatObservabilityEnabled()).toBe(false);
     expect(() => recordGoatCounter("goat.test", 1, { "goat.task_id": "task" })).not.toThrow();
+    expect(() =>
+      recordGoatModelCost({
+        costUsdMicros: 42,
+        attributes: { "goat.model": "openai/gpt-5.5", "goat.surface": "task" },
+      }),
+    ).not.toThrow();
     expect(() => recordGoatSignup({ source: "user_sync" })).not.toThrow();
     expect(() =>
       recordGoatRunOutcome({

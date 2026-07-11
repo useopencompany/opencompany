@@ -19,6 +19,7 @@
     "@ai-sdk/react": "3.0.191",
     "@modelcontextprotocol/sdk": "1.26.0",
     "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/billing": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/file-extract": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
