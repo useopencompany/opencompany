@@ -46,7 +46,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   type Dispatch,
   type FormEvent,
@@ -213,6 +213,8 @@ export function GoatSurface({
   userWorkosId?: string;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -391,12 +393,14 @@ export function GoatSurface({
     experimental_throttle: 50,
     transport,
     onFinish: ({ message }) => {
+      if (!mountedRef.current) return;
       recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
         setChatSessionId(sessionId);
-        router.replace(chatHref(sessionId));
       }
+      if (!isGoatChatSurfacePath(pathnameRef.current)) return;
+      if (sessionId) router.replace(chatHref(sessionId));
       router.refresh();
     },
     onError: (error) => {
@@ -472,6 +476,10 @@ export function GoatSurface({
       mountedRef.current = false;
     };
   }, []);
+
+  useLayoutEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
 
   useEffect(() => {
     if (isAgentWorking) {
@@ -853,8 +861,10 @@ export function GoatSurface({
               prompt,
             }),
           );
-          router.replace(chatHref(result.sessionId));
-          router.refresh();
+          if (isGoatChatSurfacePath(pathnameRef.current)) {
+            router.replace(chatHref(result.sessionId));
+            router.refresh();
+          }
         })
         .catch((error) => {
           clearActiveTurn();
@@ -1375,6 +1385,10 @@ function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefin
 
 function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
+}
+
+function isGoatChatSurfacePath(pathname: string) {
+  return pathname === "/" || pathname.startsWith("/chat/");
 }
 
 function visibleHomeChats(
