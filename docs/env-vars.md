@@ -31,7 +31,7 @@ gitignored Claude Code and Codex MCP config for Conductor workspaces.
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `SIGNOZ_MCP_REGION` | No | SigNoz Cloud region used to build `https://mcp.<region>.signoz.cloud/mcp`. If unset, setup can infer the region from `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` when it uses `https://ingest.<region>.signoz.cloud:443`. |
+| `SIGNOZ_MCP_REGION` | No | SigNoz Cloud region used to build `https://mcp.<region>.signoz.cloud/mcp`. If unset, setup can infer the region from `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` when it uses `https://ingest.<region>.signoz.cloud:443`, then falls back to the project default `eu2`. |
 | `SIGNOZ_MCP_URL` | No | Full hosted SigNoz MCP URL. Overrides `SIGNOZ_MCP_REGION` for non-standard endpoints. Do not include API keys or auth headers here. |
 
 ## Must Match Across Services

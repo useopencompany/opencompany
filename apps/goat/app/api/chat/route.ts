@@ -1,4 +1,5 @@
 import { executeExaSearchRequest, modelSupportsAttachments } from "@opencompany/agent-runtime";
+import { calculateModelUsageCost } from "@opencompany/billing";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
@@ -8,10 +9,18 @@ import {
   hashGoatUserId,
   recordGoatChatTurn,
   recordGoatCounter,
+  recordGoatModelCost,
   startGoatSpan,
 } from "@opencompany/goat-observability";
 import { createLogger } from "@opencompany/observability";
-import { convertToModelMessages, createGateway, smoothStream, stepCountIs, streamText } from "ai";
+import {
+  convertToModelMessages,
+  createGateway,
+  type LanguageModelUsage,
+  smoothStream,
+  stepCountIs,
+  streamText,
+} from "ai";
 import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
@@ -555,6 +564,10 @@ export async function POST(request: Request): Promise<Response> {
     providerOptions: goatGatewayProviderOptions(gatewayAttribution),
     onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
+      recordChatModelCost({
+        model: turn.session.model,
+        usage: event.totalUsage,
+      });
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
         steps: event.steps,
@@ -779,6 +792,29 @@ async function executeGoatChatExaSearch(input: {
 function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
   if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
   return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function recordChatModelCost(input: { model: string; usage?: LanguageModelUsage }) {
+  if (!input.usage) return;
+  const cost = calculateModelUsageCost({
+    modelName: input.model,
+    inputTokens: readUsageNumber(input.usage.inputTokens),
+    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
+    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
+    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
+    outputTokens: readUsageNumber(input.usage.outputTokens),
+  });
+  recordGoatModelCost({
+    costUsdMicros: cost.totalCostUsdMicros,
+    attributes: {
+      "goat.model": input.model,
+      "goat.surface": "chat",
+    },
+  });
+}
+
+function readUsageNumber(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function resolveChatScheduleTarget(

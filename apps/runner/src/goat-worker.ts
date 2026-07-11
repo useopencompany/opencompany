@@ -19,6 +19,7 @@ import {
   GOAT_SPANS,
   hashGoatUserId,
   recordGoatHistogram,
+  recordGoatModelCost,
   recordGoatTaskRun,
   startGoatSpan,
   withGoatSpan,
@@ -1202,6 +1203,13 @@ export async function runClaimedGoatTask(input: {
               }),
               "record model usage",
             );
+            recordGoatModelCost({
+              costUsdMicros: calculatedCost.totalCostUsdMicros,
+              attributes: {
+                "goat.model": usageInput.modelName,
+                "goat.surface": "task",
+              },
+            });
           },
           recordToolUsage: async (usageInput) => {
             const cost = calculateHostedToolUsageCost({
