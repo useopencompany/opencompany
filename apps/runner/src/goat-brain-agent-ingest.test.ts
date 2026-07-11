@@ -30,6 +30,7 @@ const brainFilesMock = vi.hoisted(() => ({
 const workspacesMock = vi.hoisted(() => ({
   getDefaultGoatBrainForUser: vi.fn(async () => ({ id: "gbrain_default" })),
   getGoatBrainEnrichmentEnabled: vi.fn(async () => true),
+  getGoatUserDisplayName: vi.fn(async () => "Louis Morgner" as string | null),
 }));
 const localBrainMock = vi.hoisted(() => ({
   writeLocalBrainFile: vi.fn(async () => undefined),
@@ -59,6 +60,7 @@ vi.mock("@opencompany/db/goat-brain-files", async (importOriginal) => ({
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   getDefaultGoatBrainForUser: workspacesMock.getDefaultGoatBrainForUser,
   getGoatBrainEnrichmentEnabled: workspacesMock.getGoatBrainEnrichmentEnabled,
+  getGoatUserDisplayName: workspacesMock.getGoatUserDisplayName,
 }));
 vi.mock("@opencompany/goat-brain/cli-bundle", () => ({
   getGoatBrainCliSource: () => "// cli bundle",
@@ -305,6 +307,22 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem());
 
     expect(prompt).toContain("append-evidence with --folder evidence/chat");
+  });
+
+  it("names the capturing user when their display name is known", () => {
+    const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem(), {
+      capturedByName: "Ada Lovelace",
+    });
+
+    expect(prompt).toContain("Ada Lovelace explicitly asked to save it");
+    expect(prompt).toContain("attribute the idea or capture to Ada Lovelace");
+    expect(prompt).not.toContain("The user explicitly asked to save it");
+  });
+
+  it("falls back to anonymous phrasing without a display name", () => {
+    const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem(), { capturedByName: null });
+
+    expect(prompt).toContain("The user explicitly asked to save it during a chat conversation.");
   });
 });
 
