@@ -368,6 +368,7 @@ async function executeGoatBrainReadCommand(
         ...(flagBoolean(flags["lexical-only"]) ? { lexicalOnly: true } : {}),
         ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
         ...(flagBoolean(flags["include-archived"]) ? { includeArchived: true } : {}),
+        ...(flagBoolean(flags["include-conflicts"]) ? { includeConflicts: true } : {}),
       });
       return { stdout: renderQueryHits(hits), parsed: { hits } };
     }
@@ -428,6 +429,7 @@ async function executeGoatBrainReadCommand(
         ...(kind ? { kind: kind as GoatBrainKind } : {}),
         ...(limit !== undefined ? { limit } : {}),
         ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
+        ...(flagBoolean(flags["include-conflicts"]) ? { includeConflicts: true } : {}),
       });
       const stdout = documents.length
         ? documents
@@ -634,7 +636,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "status",
     "json",
   ],
-  list: ["folder", "type", "kind", "limit", "include-merged", "json"],
+  list: ["folder", "type", "kind", "limit", "include-merged", "include-conflicts", "json"],
   get: ["id", "section", "json"],
   query: [
     "text",
@@ -651,6 +653,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "include-invalid",
     "include-merged",
     "include-archived",
+    "include-conflicts",
     "json",
   ],
   timeline: ["id", "limit", "since", "json"],

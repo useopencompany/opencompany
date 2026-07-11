@@ -109,6 +109,10 @@ export type GoatBrainSearchOptions = {
   hops?: number;
   includeMerged?: boolean;
   includeArchived?: boolean;
+  // Conflict copies (pages carrying a conflicts_with relation, written when a
+  // sync loses a same-page race) are pending curation, not knowledge; they are
+  // hidden from search/list by default so they cannot outrank the canonical page.
+  includeConflicts?: boolean;
   lexicalOnly?: boolean;
 };
 
@@ -451,6 +455,7 @@ export async function listGoatBrainDocuments(
     limit?: number;
     includeMerged?: boolean;
     includeArchived?: boolean;
+    includeConflicts?: boolean;
   } = {},
 ): Promise<GoatBrainDocumentSummary[]> {
   const db = ctx.db ?? getDb();
@@ -474,7 +479,7 @@ function documentFilters(
   brainRef: string,
   options: Pick<
     GoatBrainSearchOptions,
-    "folder" | "type" | "kind" | "since" | "includeMerged" | "includeArchived"
+    "folder" | "type" | "kind" | "since" | "includeMerged" | "includeArchived" | "includeConflicts"
   >,
   hops: number,
   now: number,
@@ -500,6 +505,19 @@ function documentFilters(
   }
   if (!options.includeMerged) conditions.push(ne(goatBrainDocuments.status, "merged"));
   if (!options.includeArchived) conditions.push(ne(goatBrainDocuments.status, "archived"));
+  if (!options.includeConflicts) {
+    // A conflict copy declares a conflicts_with relation to the canonical page
+    // (see upsertConflictDocument); the projection turns that into a brain_edges
+    // row, so exclusion is a plain anti-join.
+    conditions.push(
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${goatBrainEdges} AS conflict_edge
+        WHERE conflict_edge.document_id = ${goatBrainDocuments.id}
+          AND conflict_edge.relation_type = 'conflicts_with'
+          AND conflict_edge.source_kind = 'relation'
+      )`,
+    );
+  }
   return conditions.filter((condition): condition is SQL => condition !== undefined);
 }
 

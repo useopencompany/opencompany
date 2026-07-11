@@ -81,6 +81,42 @@ describe("goat brain retrieval", () => {
     );
   });
 
+  it("hides conflict copies from query results unless explicitly included", async () => {
+    await writeDoc("companies/acme.md", {
+      id: "acme",
+      folder: "companies",
+      type: "company",
+      title: "Acme",
+      truth: "Acme is evaluating enterprise search.",
+      relations: [],
+    });
+    await writeDoc("companies/acme-conflict-1a2b3c4d.md", {
+      id: "acme-conflict-1a2b3c4d",
+      folder: "companies",
+      type: "company",
+      title: "Acme conflict",
+      truth: "Acme is evaluating enterprise search.",
+      status: "draft",
+      relations: [{ type: "conflicts_with", to: "acme" }],
+    });
+
+    const hits = await queryGoatBrain(root, { text: "enterprise search", lexicalOnly: true });
+    expect(hits).toEqual(expect.arrayContaining([expect.objectContaining({ id: "acme" })]));
+    expect(hits).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "acme-conflict-1a2b3c4d" })]),
+    );
+
+    await expect(
+      queryGoatBrain(root, {
+        text: "enterprise search",
+        lexicalOnly: true,
+        includeConflicts: true,
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "acme-conflict-1a2b3c4d" })]),
+    );
+  });
+
   it("can constrain graph expansion to outgoing edges", async () => {
     await writeDoc("companies/acme.md", {
       id: "acme",

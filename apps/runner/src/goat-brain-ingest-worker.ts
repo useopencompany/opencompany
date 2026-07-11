@@ -69,6 +69,9 @@ export const GOAT_BRAIN_INGEST_LEASE_TTL_MS =
 export const GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS = 5_000;
 export const GOAT_BRAIN_INGEST_MAX_ATTEMPTS = 5;
 const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
+// Per-entry cap for result.attemptErrors; the full text of the latest failure
+// still lives in last_error.
+const ATTEMPT_ERROR_MAX_CHARS = 500;
 
 export type GoatBrainIngestJobWithSource = GoatBrainIngestJob & {
   sourceType: GoatBrainSourceType;
@@ -261,6 +264,21 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
               OR (job.status = 'running' AND job.lease_expires_at < ${input.now})
             )
             AND (${supportedJobsWhere})
+            -- Serialize ingest runs per brain: agent runs materialize the whole
+            -- brain and sync it back, so two concurrent runs against the same
+            -- brain conflict on shared pages and waste full agent attempts.
+            -- Jobs for other brains stay claimable. NULL brain_ref resolves to
+            -- the user's default brain at run time, so NULLs serialize per user
+            -- via IS NOT DISTINCT FROM.
+            AND NOT EXISTS (
+              SELECT 1
+              FROM goat.brain_ingest_jobs AS running
+              WHERE running.status = 'running'
+                AND running.lease_expires_at >= ${input.now}
+                AND running.id <> job.id
+                AND running.user_workos_id = job.user_workos_id
+                AND running.brain_ref IS NOT DISTINCT FROM job.brain_ref
+            )
           ORDER BY job.next_run_at ASC, job.created_at ASC
           FOR UPDATE OF job SKIP LOCKED
           LIMIT 1
@@ -311,7 +329,11 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
               lease_owner = NULL,
               lease_expires_at = NULL,
               last_error = NULL,
-              result = ${resultJson}::jsonb,
+              -- Keep the per-attempt error history a retried job accumulated;
+              -- without it a succeeded job carries no trace of why earlier
+              -- attempts failed.
+              result = ${resultJson}::jsonb
+                || jsonb_strip_nulls(jsonb_build_object('attemptErrors', result->'attemptErrors')),
               completed_at = ${input.now},
               updated_at = ${input.now}
           WHERE id = ${input.id}
@@ -346,7 +368,8 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
               lease_owner = NULL,
               lease_expires_at = NULL,
               last_error = NULL,
-              result = ${resultJson}::jsonb,
+              result = ${resultJson}::jsonb
+                || jsonb_strip_nulls(jsonb_build_object('attemptErrors', result->'attemptErrors')),
               completed_at = ${input.now},
               updated_at = ${input.now}
           WHERE id = ${input.id}
@@ -374,6 +397,16 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
     async fail(input) {
       const terminal = input.attempts >= (input.maxAttempts ?? GOAT_BRAIN_INGEST_MAX_ATTEMPTS);
       const nextRunAt = terminal ? input.now : nextRetryAt(input.now, input.attempts);
+      // Append this attempt's error to result.attemptErrors so retry causes
+      // survive the retries (last_error alone is overwritten per attempt and
+      // cleared when a later attempt succeeds or skips).
+      const attemptErrorJson = JSON.stringify([
+        {
+          attempt: input.attempts,
+          at: input.now.toISOString(),
+          error: input.error.slice(0, ATTEMPT_ERROR_MAX_CHARS),
+        },
+      ]);
       const result = await getDb().execute(sql`
         WITH failed_job AS (
           UPDATE goat.brain_ingest_jobs
@@ -383,6 +416,10 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
               lease_expires_at = NULL,
               next_run_at = ${nextRunAt},
               last_error = ${input.error},
+              result = result || jsonb_build_object(
+                'attemptErrors',
+                COALESCE(result->'attemptErrors', '[]'::jsonb) || ${attemptErrorJson}::jsonb
+              ),
               completed_at = ${terminal ? input.now : null},
               updated_at = ${input.now}
           WHERE id = ${input.id}
