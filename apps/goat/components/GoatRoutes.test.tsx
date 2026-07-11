@@ -29,6 +29,13 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
+const themeMock = vi.hoisted(() => ({
+  value: "system" as "system" | "light" | "dark",
+  setTheme: vi.fn((theme: "system" | "light" | "dark") => {
+    themeMock.value = theme;
+  }),
+}));
+
 const toastMock = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -82,6 +89,14 @@ vi.mock("@/lib/user-preferences", () => ({
   updateGoatLocalCodexBetaAction: userPreferencesMock.updateGoatLocalCodexBetaAction,
 }));
 
+vi.mock("@/components/ThemeProvider", () => ({
+  useTheme: () => ({
+    theme: themeMock.value,
+    resolvedTheme: themeMock.value === "dark" ? "dark" : "light",
+    setTheme: themeMock.setTheme,
+  }),
+}));
+
 describe("GoatSettingsRoute", () => {
   const fetchMock = vi.fn();
   const createObjectUrlMock = vi.fn(() => "blob:bridge-launcher");
@@ -89,6 +104,8 @@ describe("GoatSettingsRoute", () => {
 
   beforeEach(() => {
     appDataMock.value.featureFlags.localCodexBridge = false;
+    themeMock.value = "system";
+    themeMock.setTheme.mockClear();
     routerMock.refresh.mockReset();
     userPreferencesMock.updateGoatLocalCodexBetaAction.mockClear();
     toastMock.success.mockClear();
@@ -102,6 +119,22 @@ describe("GoatSettingsRoute", () => {
       createObjectURL: createObjectUrlMock,
       revokeObjectURL: revokeObjectUrlMock,
     });
+  });
+
+  it("shows the appearance theme selector and updates the selected theme", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<GoatPreferencesSettingsRoute />);
+
+    expect(screen.getByRole("radio", { name: "System" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    expect(themeMock.setTheme).toHaveBeenCalledWith("dark");
+
+    rerender(<GoatPreferencesSettingsRoute />);
+    expect(screen.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("shows the Local Codex bridge beta switch and persists changes", async () => {
