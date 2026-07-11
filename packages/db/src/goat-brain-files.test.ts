@@ -404,6 +404,133 @@ describe("goat brain file sync", () => {
     expect(result.pages[0]?.brainId).toMatch(/^acme-conflict-/);
   });
 
+  it("does not conflict on concurrently changed files the sync leaves untouched", async () => {
+    const baseContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Base.",
+    });
+    const currentContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Current changed independently.",
+    });
+    const otherContent = createGoatBrainMarkdownContent({
+      id: "ada",
+      folderPath: "people",
+      title: "Ada",
+      type: "person",
+      status: "draft",
+      compiledTruth: "Agent wrote an unrelated page.",
+    });
+    const db = syncMutableDb([
+      {
+        id: "doc_1",
+        userWorkosId: "user_1",
+        brainRef: "goat_brain_user_1",
+        brainId: "acme",
+        folderPath: "companies",
+        content: currentContent,
+        contentHash: hashGoatBrainContent(currentContent),
+        sizeBytes: Buffer.byteLength(currentContent, "utf8"),
+        title: "Acme",
+        kind: "page",
+        entityType: "company",
+        status: "draft",
+      },
+    ]);
+
+    // The agent never touched companies/acme.md (its root copy still matches the
+    // base snapshot), so the concurrent stored change must not abort the sync.
+    const result = await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      files: [
+        { path: "companies/acme.md", content: baseContent },
+        { path: "people/ada.md", content: otherContent },
+      ],
+      baseSnapshot: [
+        {
+          id: "doc_1",
+          brainId: "acme",
+          folderPath: "companies",
+          path: "companies/acme.md",
+          contentHash: hashGoatBrainContent(baseContent),
+        },
+      ],
+      db,
+    });
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.deleted).toBe(0);
+    expect(result.upserted).toBe(1);
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0]).toMatchObject({ brainId: "ada", action: "created" });
+  });
+
+  it("still aborts when a concurrently changed file was deleted by the sync", async () => {
+    const baseContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Base.",
+    });
+    const currentContent = createGoatBrainMarkdownContent({
+      id: "acme",
+      folderPath: "companies",
+      title: "Acme",
+      type: "company",
+      status: "draft",
+      compiledTruth: "Current changed independently.",
+    });
+    const db = syncMutableDb([
+      {
+        id: "doc_1",
+        userWorkosId: "user_1",
+        brainRef: "goat_brain_user_1",
+        brainId: "acme",
+        folderPath: "companies",
+        content: currentContent,
+        contentHash: hashGoatBrainContent(currentContent),
+        sizeBytes: Buffer.byteLength(currentContent, "utf8"),
+        title: "Acme",
+        kind: "page",
+        entityType: "company",
+        status: "draft",
+      },
+    ]);
+
+    const result = await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      files: [],
+      baseSnapshot: [
+        {
+          id: "doc_1",
+          brainId: "acme",
+          folderPath: "companies",
+          path: "companies/acme.md",
+          contentHash: hashGoatBrainContent(baseContent),
+        },
+      ],
+      db,
+    });
+
+    expect(result.conflicts).toEqual([
+      { path: "companies/acme.md", reason: "changed_since_materialize" },
+    ]);
+    expect(result.upserted).toBe(0);
+    expect(result.deleted).toBe(0);
+  });
+
   it("materializes invalid stored markdown as a raw file that can be deleted", async () => {
     const content = "---\n---\n";
     const db = materializeSelectDb([

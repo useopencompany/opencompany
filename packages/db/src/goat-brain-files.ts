@@ -1008,17 +1008,21 @@ export async function syncGoatBrainFiles(input: {
 
   const conflicts: GoatBrainSyncConflict[] = [];
   const handledConflictPaths = new Set<string>();
-  for (const [pathName] of nextByPath) {
-    const next = nextByPath.get(pathName);
+  for (const [pathName, next] of nextByPath) {
+    // Files the agent left untouched are never written by this sync, so a
+    // concurrent change to their stored row is not a write conflict — the
+    // newer stored version simply stays. Only files this sync would actually
+    // write (modified) or remove (handled below) can conflict.
+    if (next.skip) continue;
     const current = currentByPath.get(pathName);
     const base = baseByPath.get(pathName);
     if (current && base && current.contentHash !== base.contentHash) {
       conflicts.push({ path: pathName, reason: "changed_since_materialize" });
-      if (!next?.skip) handledConflictPaths.add(pathName);
+      handledConflictPaths.add(pathName);
     }
     if (current && !base) {
       conflicts.push({ path: pathName, reason: "created_since_materialize" });
-      if (!next?.skip) handledConflictPaths.add(pathName);
+      handledConflictPaths.add(pathName);
     }
   }
   for (const [pathName] of baseByPath) {
