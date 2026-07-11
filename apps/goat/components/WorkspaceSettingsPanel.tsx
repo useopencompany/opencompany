@@ -4,6 +4,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import { Mail, Trash2, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import {
   type GoatWorkspaceInvitationView,
   type GoatWorkspaceMemberView,
@@ -79,146 +80,133 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
   };
 
   return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[560px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <header className="flex flex-col gap-1">
-            <h1 className="text-[34px] font-semibold leading-tight tracking-normal text-ink">
-              Workspace
-            </h1>
-            <p className="text-[13px] leading-5 text-ink-subtle">
-              Manage the people who share this workspace and its brains.
-            </p>
-          </header>
+    <GoatSettingsContent
+      title="Members"
+      description="Manage the people who share this workspace and its brains."
+    >
+      <section className="flex flex-col gap-2">
+        <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Name
+        </h2>
+        <div className="flex items-center gap-2">
+          <input
+            value={name}
+            disabled={!isAdmin}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={saveName}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") saveName();
+            }}
+            className="flex-1 rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25 disabled:opacity-70"
+          />
+        </div>
+      </section>
 
-          <section className="flex flex-col gap-2">
-            <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              Name
-            </h2>
-            <div className="flex items-center gap-2">
-              <input
-                value={name}
-                disabled={!isAdmin}
-                onChange={(event) => setName(event.target.value)}
-                onBlur={saveName}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") saveName();
-                }}
-                className="flex-1 rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25 disabled:opacity-70"
-              />
-            </div>
-          </section>
+      {isAdmin ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Invite people
+          </h2>
+          <div className="flex items-center gap-2">
+            <input
+              type="email"
+              value={inviteEmail}
+              onChange={(event) => setInviteEmail(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") invite();
+              }}
+              placeholder="teammate@company.com"
+              className="flex-1 rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+            />
+            <button
+              type="button"
+              disabled={isPending || !inviteEmail.trim()}
+              onClick={invite}
+              className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
+            >
+              Invite
+            </button>
+          </div>
+          <p className="text-[11.5px] leading-4 text-ink-subtle">
+            Invited people get an email and join this workspace when they sign up. They see every
+            brain that is open to the workspace.
+          </p>
+        </section>
+      ) : null}
 
-          {isAdmin ? (
-            <section className="flex flex-col gap-2">
-              <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Invite people
-              </h2>
-              <div className="flex items-center gap-2">
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(event) => setInviteEmail(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") invite();
-                  }}
-                  placeholder="teammate@company.com"
-                  className="flex-1 rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
-                />
+      {initial.invitations.length > 0 ? (
+        <section className="flex flex-col gap-1">
+          <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Pending invitations
+          </h2>
+          {initial.invitations.map((invitation) => (
+            <div key={invitation.id} className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
+              <Mail size={14} strokeWidth={1.75} className="shrink-0 text-ink/50" />
+              <span className="min-w-0 flex-1 truncate text-[13px] text-ink/90">
+                {invitation.email}
+              </span>
+              {isAdmin ? (
                 <button
                   type="button"
-                  disabled={isPending || !inviteEmail.trim()}
-                  onClick={invite}
-                  className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
+                  aria-label={`Revoke invitation for ${invitation.email}`}
+                  disabled={isPending}
+                  onClick={() => revokeInvitation(invitation.id)}
+                  className="rounded-md p-1 text-ink/40 transition-colors hover:bg-surface-hover hover:text-ink/80"
                 >
-                  Invite
+                  <X size={13} strokeWidth={1.75} />
                 </button>
-              </div>
-              <p className="text-[11.5px] leading-4 text-ink-subtle">
-                Invited people get an email and join this workspace when they sign up. They see
-                every brain that is open to the workspace.
-              </p>
-            </section>
-          ) : null}
+              ) : null}
+            </div>
+          ))}
+        </section>
+      ) : null}
 
-          {initial.invitations.length > 0 ? (
-            <section className="flex flex-col gap-1">
-              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Pending invitations
-              </h2>
-              {initial.invitations.map((invitation) => (
-                <div
-                  key={invitation.id}
-                  className="flex items-center gap-2.5 rounded-md px-2 py-1.5"
-                >
-                  <Mail size={14} strokeWidth={1.75} className="shrink-0 text-ink/50" />
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-ink/90">
-                    {invitation.email}
-                  </span>
-                  {isAdmin ? (
-                    <button
-                      type="button"
-                      aria-label={`Revoke invitation for ${invitation.email}`}
-                      disabled={isPending}
-                      onClick={() => revokeInvitation(invitation.id)}
-                      className="rounded-md p-1 text-ink/40 transition-colors hover:bg-surface-hover hover:text-ink/80"
-                    >
-                      <X size={13} strokeWidth={1.75} />
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-            </section>
-          ) : null}
-
-          <section className="flex flex-col gap-1">
-            <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              Members
-            </h2>
-            {initial.members.map((member) => (
-              <div
-                key={member.userWorkosId}
-                className="flex items-center gap-2.5 rounded-md px-2 py-1.5"
+      <section className="flex flex-col gap-1">
+        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Members
+        </h2>
+        {initial.members.map((member) => (
+          <div
+            key={member.userWorkosId}
+            className="flex items-center gap-2.5 rounded-md px-2 py-1.5"
+          >
+            {member.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={member.avatarUrl}
+                alt=""
+                className="h-6 w-6 shrink-0 rounded-full bg-surface-muted object-cover"
+              />
+            ) : (
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-muted">
+                <UserRound size={13} strokeWidth={1.75} className="text-ink/60" />
+              </span>
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] leading-tight text-ink/90">
+                {member.name}
+              </span>
+              <span className="block truncate text-[11px] leading-tight text-ink-subtle">
+                {member.email}
+              </span>
+            </span>
+            <span className="shrink-0 text-[11px] uppercase tracking-wide text-ink-subtle">
+              {member.role}
+            </span>
+            {isAdmin ? (
+              <button
+                type="button"
+                aria-label={`Remove ${member.name}`}
+                disabled={isPending}
+                onClick={() => removeMember(member)}
+                className="rounded-md p-1 text-ink/40 transition-colors hover:bg-surface-hover hover:text-red-600"
               >
-                {member.avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={member.avatarUrl}
-                    alt=""
-                    className="h-6 w-6 shrink-0 rounded-full bg-surface-muted object-cover"
-                  />
-                ) : (
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-muted">
-                    <UserRound size={13} strokeWidth={1.75} className="text-ink/60" />
-                  </span>
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] leading-tight text-ink/90">
-                    {member.name}
-                  </span>
-                  <span className="block truncate text-[11px] leading-tight text-ink-subtle">
-                    {member.email}
-                  </span>
-                </span>
-                <span className="shrink-0 text-[11px] uppercase tracking-wide text-ink-subtle">
-                  {member.role}
-                </span>
-                {isAdmin ? (
-                  <button
-                    type="button"
-                    aria-label={`Remove ${member.name}`}
-                    disabled={isPending}
-                    onClick={() => removeMember(member)}
-                    className="rounded-md p-1 text-ink/40 transition-colors hover:bg-surface-hover hover:text-red-600"
-                  >
-                    <Trash2 size={13} strokeWidth={1.75} />
-                  </button>
-                ) : null}
-              </div>
-            ))}
-          </section>
-        </div>
-      </div>
-    </main>
+                <Trash2 size={13} strokeWidth={1.75} />
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </section>
+    </GoatSettingsContent>
   );
 }

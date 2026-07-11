@@ -3,11 +3,14 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatChatMessage,
+  type GoatChatMessageAttachment,
   type GoatChatMessageDebugTrace,
   type GoatChatRole,
   type GoatChatSession,
+  type GoatCodexChatTurnSettings,
   goatChatMessages,
   goatChatSessions,
+  goatCodexChatTurns,
   goatTasks,
 } from "@opencompany/db/goat-schema";
 import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
@@ -19,6 +22,7 @@ import {
   type GoatStoredChatMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
+import { codexComposerSettingsFromTurnSettings } from "@/lib/codex-chat-settings";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { toGoatTaskTitle } from "@/lib/task-display";
 
@@ -54,6 +58,10 @@ export type GoatChatStore = {
     model: AgentModelId;
     title: string;
   }): Promise<GoatChatSession>;
+  loadLatestCodexTurnSettings?(input: {
+    userWorkosId: string;
+    sessionId: string;
+  }): Promise<GoatCodexChatTurnSettings | null>;
   listMessages(sessionId: string): Promise<GoatStoredChatMessage[]>;
   insertMessage(input: {
     id?: string;
@@ -62,6 +70,8 @@ export type GoatChatStore = {
     content: string;
     taskId?: string | null;
     debugTrace?: GoatChatMessageDebugTrace | null;
+    attachments?: GoatChatMessageAttachment[] | null;
+    attachmentTexts?: Record<string, string> | null;
   }): Promise<GoatChatMessage>;
   touchSession(input: { sessionId: string; now: Date }): Promise<void>;
   closeSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
@@ -73,8 +83,15 @@ export async function loadCurrentGoatChatSession(): Promise<GoatChatSessionView 
   const session = await store.findOpenSession({ userWorkosId: user.workosUserId });
   if (!session) return null;
 
-  const messages = await store.listMessages(session.id);
-  return toChatSessionView(session, messages);
+  const [messages, codexComposerSettings] = await Promise.all([
+    store.listMessages(session.id),
+    loadCodexComposerSettingsForChatSession({
+      store,
+      userWorkosId: user.workosUserId,
+      session,
+    }),
+  ]);
+  return toChatSessionView(session, messages, codexComposerSettings);
 }
 
 export async function loadCurrentGoatChatSessionById(
@@ -100,8 +117,15 @@ export async function loadGoatChatSessionByIdForUser(
   });
   if (!session) return null;
 
-  const messages = await store.listMessages(session.id);
-  return toChatSessionView(session, messages);
+  const [messages, codexComposerSettings] = await Promise.all([
+    store.listMessages(session.id),
+    loadCodexComposerSettingsForChatSession({
+      store,
+      userWorkosId: input.userWorkosId,
+      session,
+    }),
+  ]);
+  return toChatSessionView(session, messages, codexComposerSettings);
 }
 
 export async function listCurrentUserRecentGoatChats(
@@ -127,8 +151,15 @@ export async function listRecentGoatChatsForUser(
   });
   const summaries = await Promise.all(
     sessions.map(async (session) => {
-      const messages = await store.listMessages(session.id);
-      return toChatSummaryView(session, messages);
+      const [messages, codexComposerSettings] = await Promise.all([
+        store.listMessages(session.id),
+        loadCodexComposerSettingsForChatSession({
+          store,
+          userWorkosId: input.userWorkosId,
+          session,
+        }),
+      ]);
+      return toChatSummaryView(session, messages, codexComposerSettings);
     }),
   );
   return summaries;
@@ -141,6 +172,8 @@ export async function createGoatChatUserTurn(
     model: AgentModelId;
     sessionId?: string | null;
     messageId?: string | null;
+    attachments?: GoatChatMessageAttachment[] | null;
+    attachmentTexts?: Record<string, string> | null;
   },
   store: GoatChatStore = createDbGoatChatStore(),
 ) {
@@ -150,6 +183,7 @@ export async function createGoatChatUserTurn(
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     model: input.model,
     prompt: input.prompt,
+    firstAttachmentName: input.attachments?.[0]?.filename ?? null,
   });
   const previousMessages = await store.listMessages(session.id);
   const userMessage = await store.insertMessage({
@@ -157,17 +191,18 @@ export async function createGoatChatUserTurn(
     sessionId: session.id,
     role: "user",
     content: input.prompt,
+    attachments: input.attachments ?? null,
+    attachmentTexts: input.attachmentTexts ?? null,
   });
   const now = new Date();
   await store.touchSession({ sessionId: session.id, now });
 
+  const storedMessages = [...previousMessages, toStoredChatMessage(userMessage)];
   return {
     session,
     userMessage,
-    messages: [
-      ...previousMessages.map((message) => toGoatChatUiMessage(message)),
-      toGoatChatUiMessage(toStoredChatMessage(userMessage)),
-    ],
+    storedMessages,
+    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
   };
 }
 
@@ -260,6 +295,21 @@ export function createDbGoatChatStore(): GoatChatStore {
       return session;
     },
 
+    async loadLatestCodexTurnSettings(input) {
+      const [turn] = await getDb()
+        .select({ settings: goatCodexChatTurns.settings })
+        .from(goatCodexChatTurns)
+        .where(
+          and(
+            eq(goatCodexChatTurns.userWorkosId, input.userWorkosId),
+            eq(goatCodexChatTurns.chatSessionId, input.sessionId),
+          ),
+        )
+        .orderBy(desc(goatCodexChatTurns.createdAt))
+        .limit(1);
+      return turn?.settings ?? null;
+    },
+
     async listMessages(sessionId) {
       const messages = await getDb()
         .select({
@@ -269,6 +319,8 @@ export function createDbGoatChatStore(): GoatChatStore {
           content: goatChatMessages.content,
           taskId: goatChatMessages.taskId,
           debugTrace: goatChatMessages.debugTrace,
+          attachments: goatChatMessages.attachments,
+          attachmentTexts: goatChatMessages.attachmentTexts,
           createdAt: goatChatMessages.createdAt,
           updatedAt: goatChatMessages.updatedAt,
           taskDisplayId: goatTasks.displayId,
@@ -294,6 +346,8 @@ export function createDbGoatChatStore(): GoatChatStore {
           content: input.content,
           taskId: input.taskId ?? null,
           debugTrace: input.debugTrace ?? null,
+          attachments: input.attachments ?? null,
+          attachmentTexts: input.attachmentTexts ?? null,
           createdAt: now,
           updatedAt: now,
         })
@@ -333,12 +387,14 @@ export function newGoatChatMessageId() {
 function toChatSessionView(
   session: GoatChatSession,
   messages: readonly GoatStoredChatMessage[],
+  codexComposerSettings: ReturnType<typeof codexComposerSettingsFromTurnSettings> | null = null,
 ): GoatChatSessionView {
   return {
     id: session.id,
     title: session.title,
     model: session.model,
     engine: session.engine,
+    codexComposerSettings,
     messages: messages.map(toGoatChatUiMessage),
   };
 }
@@ -346,15 +402,30 @@ function toChatSessionView(
 function toChatSummaryView(
   session: GoatChatSession,
   messages: readonly GoatStoredChatMessage[],
+  codexComposerSettings: ReturnType<typeof codexComposerSettingsFromTurnSettings> | null = null,
 ): GoatChatSummaryView {
   return {
     id: session.id,
     title: session.title,
     model: session.model,
     engine: session.engine,
+    codexComposerSettings,
     preview: previewFromMessages(messages),
     updatedAt: session.updatedAt.toISOString(),
   };
+}
+
+async function loadCodexComposerSettingsForChatSession(input: {
+  store: GoatChatStore;
+  userWorkosId: string;
+  session: GoatChatSession;
+}) {
+  if (input.session.engine !== "codex") return null;
+  const settings = await input.store.loadLatestCodexTurnSettings?.({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.session.id,
+  });
+  return settings ? codexComposerSettingsFromTurnSettings(settings) : null;
 }
 
 function previewFromMessages(messages: readonly Pick<GoatStoredChatMessage, "content">[]) {
@@ -374,6 +445,7 @@ async function findOrCreateOpenSession(input: {
   sessionId?: string | null;
   model: AgentModelId;
   prompt: string;
+  firstAttachmentName?: string | null;
 }) {
   if (input.sessionId) {
     const existing = await input.store.findOpenSession({
@@ -386,16 +458,16 @@ async function findOrCreateOpenSession(input: {
   return input.store.createSession({
     userWorkosId: input.userWorkosId,
     model: input.model,
-    title: titleFromPrompt(input.prompt),
+    title: titleFromPrompt(input.prompt, input.firstAttachmentName ?? null),
   });
 }
 
-function titleFromPrompt(prompt: string) {
+function titleFromPrompt(prompt: string, firstAttachmentName: string | null = null) {
   const title = prompt
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  return toGoatTaskTitle(title ?? "New chat");
+  return toGoatTaskTitle(title ?? firstAttachmentName ?? "New chat");
 }
 
 function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
@@ -406,6 +478,8 @@ function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
     content: message.content,
     taskId: message.taskId,
     debugTrace: message.debugTrace,
+    attachments: message.attachments,
+    attachmentTexts: message.attachmentTexts,
     createdAt: message.createdAt,
     updatedAt: message.updatedAt,
     taskDisplayId: null,

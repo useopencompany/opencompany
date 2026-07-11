@@ -92,6 +92,8 @@ export type GoatIntegrationState = {
 type IntegrationStateRow = {
   id?: string;
   provider: GoatIntegrationProvider;
+  workspaceId?: string | null;
+  workspace_id?: string | null;
   externalId?: string | null;
   external_id?: string | null;
   accountEmail?: string | null;
@@ -105,6 +107,8 @@ type IntegrationStateRow = {
   status: GoatIntegrationStatus;
 };
 
+const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
+
 export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[]) {
   const byProvider = new Map<GoatIntegrationProvider, IntegrationStateRow>();
   for (const row of rows) {
@@ -113,6 +117,14 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     // reflect the MCP connector row (external_id "linear_mcp"). Linear
     // brain-source rows are surfaced through the brain settings page instead.
     if (row.provider === "linear" && (row.externalId ?? row.external_id) !== "linear_mcp") {
+      continue;
+    }
+    // GitHub and Jamie are workspace-owned; personal rows for those providers
+    // are pre-ownership leftovers and must not shadow the workspace connection.
+    if (
+      (row.provider === "github" || row.provider === "jamie") &&
+      !(row.workspaceId ?? row.workspace_id)
+    ) {
       continue;
     }
     byProvider.set(row.provider, row);
@@ -244,8 +256,10 @@ function jamieProviderState(row: IntegrationStateRow | undefined): GoatJamieProv
     status: row.status,
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
-    integrationId: null,
+    integrationId: row.id ?? null,
     webhookUrl: null,
-    apiKeyConfigured: row.status === "connected",
+    apiKeyConfigured:
+      row.status === "connected" ||
+      (row.externalId ?? row.external_id ?? "").startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX),
   };
 }

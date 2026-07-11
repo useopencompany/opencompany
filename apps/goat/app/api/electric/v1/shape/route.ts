@@ -45,6 +45,7 @@ export async function GET(request: Request): Promise<Response> {
     electricUrl,
     requestUrl,
     userWorkosId: context.user.workosUserId,
+    workspaceId: context.workspace.id,
     authorizedChatSessionId,
     authorizedBrainRef,
     sourceId,

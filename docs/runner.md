@@ -266,6 +266,7 @@ Required environment variables:
 - `OPENCOMPANY_CODEX_E2B_TEMPLATE` (optional; Codex sessions default to E2B's `codex` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
+- `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` (optional, defaults to `300000`; persistent Goat Codex chat sandboxes pause on idle and auto-resume on the next message)
 - `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Public runner URL for E2B sandbox callbacks: the LLM broker (`/broker/*`) and Goat Google tools (`/goat/tools/*`). Unset locally unless the local runner port is exposed through a public tunnel.)
 - `RUNNER_LLM_BROKER_ENABLED` (optional, defaults to `true`; no-deploy kill switch back to direct key injection)
 - `RUNNER_GOAT_TASK_WORKER_ENABLED` (optional, defaults to `false`; set `true` only for runner deployments meant to execute Goat tasks. `bun run dev:goat` injects it locally.)
@@ -297,6 +298,8 @@ URL while the stack still exists.
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to
 `RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.
+Persistent Goat Codex chat sandboxes use `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` instead, defaulting
+to 5 minutes, so completed chat turns pause quickly while preserving the session sandbox for resume.
 If the stored E2B sandbox id has already disappeared, the runner creates a fresh sandbox instead of
 retrying the stale id.
 

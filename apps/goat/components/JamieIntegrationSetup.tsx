@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Copy, RotateCw } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import type { GoatJamieProviderState } from "@/lib/integration-state";
@@ -17,7 +18,17 @@ type EndpointSetup = {
   apiKeyConfigured: boolean;
 };
 
-export function JamieIntegrationSetup({ initialState }: { initialState: GoatJamieProviderState }) {
+export function JamieIntegrationSetup({
+  initialState,
+  brainSourcesHref = null,
+  canManage = true,
+}: {
+  initialState: GoatJamieProviderState;
+  brainSourcesHref?: string | null;
+  // Jamie is a workspace-owned integration; members see status only while
+  // admins get the webhook + API key setup.
+  canManage?: boolean;
+}) {
   const router = useRouter();
   const [endpoint, setEndpoint] = useState<EndpointSetup | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -85,8 +96,70 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
             {status.badge}
           </span>
         </div>
+        {apiKeyConfigured && brainSourcesHref ? (
+          <div className="px-2 pt-1">
+            <Link
+              href={brainSourcesHref}
+              prefetch
+              className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+            >
+              Open Brain sources
+            </Link>
+          </div>
+        ) : null}
+        {canManage ? null : (
+          <p className="px-2 text-[12px] leading-4 text-ink-subtle">
+            Jamie is a workspace integration managed by workspace admins.
+          </p>
+        )}
       </section>
 
+      {canManage ? (
+        <ManageJamieSections
+          webhookUrl={webhookUrl}
+          headerName={headerName}
+          apiKeyConfigured={apiKeyConfigured}
+          apiKey={apiKey}
+          error={error}
+          copiedKey={copiedKey}
+          isPending={isPending}
+          onApiKeyChange={setApiKey}
+          onCreateEndpoint={createEndpoint}
+          onSaveApiKey={saveApiKey}
+          onCopy={copyValue}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ManageJamieSections({
+  webhookUrl,
+  headerName,
+  apiKeyConfigured,
+  apiKey,
+  error,
+  copiedKey,
+  isPending,
+  onApiKeyChange,
+  onCreateEndpoint,
+  onSaveApiKey,
+  onCopy,
+}: {
+  webhookUrl: string | null;
+  headerName: string;
+  apiKeyConfigured: boolean;
+  apiKey: string;
+  error: string | null;
+  copiedKey: string | null;
+  isPending: boolean;
+  onApiKeyChange: (value: string) => void;
+  onCreateEndpoint: () => void;
+  onSaveApiKey: () => void;
+  onCopy: (key: string, value: string | null) => Promise<void>;
+}) {
+  return (
+    <>
       <section className="flex flex-col gap-3">
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Jamie webhook
@@ -96,20 +169,20 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
           value={webhookUrl ?? "Create an endpoint first"}
           copyable={Boolean(webhookUrl)}
           copied={copiedKey === "url"}
-          onCopy={() => copyValue("url", webhookUrl)}
+          onCopy={() => onCopy("url", webhookUrl)}
         />
         <SetupValue
           label="Header name"
           value={headerName}
           copyable
           copied={copiedKey === "header"}
-          onCopy={() => copyValue("header", headerName)}
+          onCopy={() => onCopy("header", headerName)}
         />
         {error ? <p className="px-2 text-[12px] leading-4 text-red-600">{error}</p> : null}
         <div className="pt-1">
           <button
             type="button"
-            onClick={createEndpoint}
+            onClick={onCreateEndpoint}
             disabled={isPending}
             className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -123,31 +196,48 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Jamie API key
         </h2>
+        {apiKeyConfigured ? (
+          <div className="mx-2 flex items-start gap-2 rounded-md border border-border bg-surface-muted px-2.5 py-2">
+            <Check size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink" />
+            <div className="min-w-0">
+              <span className="block text-[13px] font-medium leading-5 text-ink">
+                API key saved
+              </span>
+              <span className="block text-[12px] leading-4 text-ink-subtle">
+                Paste a new Jamie API key below to update it.
+              </span>
+            </div>
+          </div>
+        ) : null}
         <label className="flex flex-col gap-1 px-2">
-          <span className="text-[12px] leading-4 text-ink-subtle">API key</span>
+          <span className="text-[12px] leading-4 text-ink-subtle">
+            {apiKeyConfigured ? "New API key" : "API key"}
+          </span>
           <input
             value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
+            onChange={(event) => onApiKeyChange(event.target.value)}
             type="password"
             autoComplete="off"
             spellCheck={false}
-            placeholder="sk_..."
+            placeholder={apiKeyConfigured ? "Paste a new sk_ key" : "sk_..."}
             disabled={!webhookUrl || isPending}
             className="h-9 rounded-md border border-border bg-surface px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-border-strong disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
-        <div className="flex items-center justify-between gap-3 px-2">
-          <span className="text-[12px] leading-4 text-ink-subtle">
-            {apiKeyConfigured ? "API key saved." : "Save the key Jamie shows after creation."}
+        <div className="flex flex-col items-start gap-3 px-2 sm:flex-row sm:items-center sm:justify-between">
+          <span className="min-w-0 text-[12px] leading-4 text-ink-subtle">
+            {apiKeyConfigured
+              ? "Leave blank to keep the saved key."
+              : "Save the key Jamie shows after creation."}
           </span>
           <button
             type="button"
-            onClick={saveApiKey}
+            onClick={onSaveApiKey}
             disabled={!webhookUrl || isPending || apiKey.trim().length === 0}
-            className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-2 rounded-md bg-ink px-3 py-2 text-[13px] font-medium leading-none text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Check size={14} strokeWidth={2} />
-            Save API key
+            {apiKeyConfigured ? "Update API key" : "Save API key"}
           </button>
         </div>
       </section>
@@ -163,7 +253,7 @@ export function JamieIntegrationSetup({ initialState }: { initialState: GoatJami
           <li>Copy the sk_ API key Jamie shows once, paste it here, and save it.</li>
         </ol>
       </section>
-    </div>
+    </>
   );
 }
 
@@ -213,10 +303,9 @@ function setupStatus(
   }
   if (hasEndpoint && apiKeyConfigured) {
     return {
-      label: "Waiting for Jamie",
-      detail:
-        initialState.statusReason ?? "Send the first completed-meeting webhook to finish setup.",
-      badge: "Setup",
+      label: "Ready for Brain",
+      detail: "Enable Jamie from a brain's Sources settings to route completed meetings.",
+      badge: "Ready",
     };
   }
   if (hasEndpoint) {

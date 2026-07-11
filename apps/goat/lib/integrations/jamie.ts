@@ -53,7 +53,7 @@ export type GoatJamieWebhookApiKeyVerification =
   | { valid: false; apiKey: null };
 
 export async function getGoatJamieIntegrationState(
-  userWorkosId: string,
+  workspaceId: string,
 ): Promise<GoatJamieProviderState> {
   const [row] = await getDb()
     .select({
@@ -66,7 +66,7 @@ export async function getGoatJamieIntegrationState(
     .from(goatIntegrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
+        eq(goatIntegrations.workspaceId, workspaceId),
         eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
       ),
     )
@@ -94,22 +94,31 @@ export async function getGoatJamieIntegrationState(
     statusReason: row.statusReason,
     integrationId: row.id,
     webhookUrl: goatJamieWebhookUrl(),
-    apiKeyConfigured:
-      row.status === "connected" || row.externalId.startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX),
+    apiKeyConfigured: isGoatJamieWebhookApiKeyConfigured({
+      status: row.status,
+      externalId: row.externalId,
+    }),
   };
+}
+
+export function isGoatJamieWebhookApiKeyConfigured(input: { status: string; externalId: string }) {
+  return (
+    input.status === "connected" || input.externalId.startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX)
+  );
 }
 
 export async function createOrResetGoatJamieWebhookEndpoint(input: {
   userWorkosId: string;
+  workspaceId: string;
 }): Promise<GoatJamieWebhookSetup> {
   const db = getDb();
   const now = new Date();
   const [existing] = await db
-    .select({ id: goatIntegrations.id })
+    .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })
     .from(goatIntegrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        eq(goatIntegrations.workspaceId, input.workspaceId),
         eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
         ne(goatIntegrations.status, "disconnected"),
       ),
@@ -118,6 +127,9 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
     .limit(1);
 
   const integrationId = existing?.id ?? newGoatIntegrationId();
+  // A reset by a different admin keeps the original connector on the row: the
+  // credential AAD and brain_sources composite FK are keyed on it.
+  const connectorWorkosId = existing?.userWorkosId ?? input.userWorkosId;
   const integrationValues = {
     connectionLabel: "Jamie",
     accountName: "Jamie",
@@ -137,7 +149,7 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
           .where(
             and(
               eq(goatIntegrations.id, integrationId),
-              eq(goatIntegrations.userWorkosId, input.userWorkosId),
+              eq(goatIntegrations.workspaceId, input.workspaceId),
               eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
             ),
           )
@@ -148,7 +160,8 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
           .insert(goatIntegrations)
           .values({
             id: integrationId,
-            userWorkosId: input.userWorkosId,
+            userWorkosId: connectorWorkosId,
+            workspaceId: input.workspaceId,
             provider: GOAT_JAMIE_PROVIDER,
             ...integrationValues,
           })
@@ -159,7 +172,7 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
 
   try {
     await saveGoatIntegrationCredential({
-      userWorkosId: input.userWorkosId,
+      userWorkosId: connectorWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
       kind: GOAT_JAMIE_CREDENTIAL_KIND,
@@ -173,7 +186,7 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
     });
   } catch (error) {
     await markGoatIntegrationStatus({
-      userWorkosId: input.userWorkosId,
+      userWorkosId: connectorWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
       status: "sync_failed",
@@ -193,7 +206,7 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
 }
 
 export async function saveGoatJamieWebhookApiKey(input: {
-  userWorkosId: string;
+  workspaceId: string;
   apiKey: string;
 }): Promise<GoatJamieWebhookSetup> {
   const apiKey = input.apiKey.trim();
@@ -204,11 +217,11 @@ export async function saveGoatJamieWebhookApiKey(input: {
   const db = getDb();
   const now = new Date();
   const [integration] = await db
-    .select({ id: goatIntegrations.id })
+    .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })
     .from(goatIntegrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        eq(goatIntegrations.workspaceId, input.workspaceId),
         eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
         ne(goatIntegrations.status, "disconnected"),
       ),
@@ -221,8 +234,10 @@ export async function saveGoatJamieWebhookApiKey(input: {
   }
 
   try {
+    // Credential ops key on the row's original connector, not the acting
+    // admin: the encrypted payload AAD is bound to that user id.
     await saveGoatIntegrationCredential({
-      userWorkosId: input.userWorkosId,
+      userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
       kind: GOAT_JAMIE_CREDENTIAL_KIND,
@@ -248,13 +263,13 @@ export async function saveGoatJamieWebhookApiKey(input: {
       .where(
         and(
           eq(goatIntegrations.id, integration.id),
-          eq(goatIntegrations.userWorkosId, input.userWorkosId),
+          eq(goatIntegrations.workspaceId, input.workspaceId),
           eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
         ),
       );
   } catch (error) {
     await markGoatIntegrationStatus({
-      userWorkosId: input.userWorkosId,
+      userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
       status: "sync_failed",

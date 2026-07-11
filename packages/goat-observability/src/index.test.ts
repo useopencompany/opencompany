@@ -8,6 +8,7 @@ import {
   isGoatObservabilityEnabled,
   recordGoatCounter,
   recordGoatRunOutcome,
+  recordGoatSignup,
   sanitizeGoatAttributes,
   sanitizeGoatMetricAttributes,
   startGoatSpan,
@@ -49,6 +50,7 @@ describe("@opencompany/goat-observability", () => {
         "goat.brain_ingest_job_id": "goat_brain_ingest_1",
         "goat.user_id_hash": "abc123",
         "goat.stage": "running",
+        "goat.signup_source": "user_sync",
         "goat.prompt": "secret prompt",
       }),
     ).toEqual({
@@ -56,6 +58,7 @@ describe("@opencompany/goat-observability", () => {
       "goat.outcome": "failure",
       "goat.failure_category": "tool",
       "goat.stage": "running",
+      "goat.signup_source": "user_sync",
     });
   });
 
@@ -145,6 +148,7 @@ describe("@opencompany/goat-observability", () => {
     vi.stubEnv("GOAT_OBSERVABILITY_ENABLED", "false");
     expect(isGoatObservabilityEnabled()).toBe(false);
     expect(() => recordGoatCounter("goat.test", 1, { "goat.task_id": "task" })).not.toThrow();
+    expect(() => recordGoatSignup({ source: "user_sync" })).not.toThrow();
     expect(() =>
       recordGoatRunOutcome({
         surface: "brain_ingest",

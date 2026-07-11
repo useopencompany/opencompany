@@ -15,7 +15,7 @@ describe("Goat Gateway usage reporting", () => {
     vi.clearAllMocks();
   });
 
-  it("fills empty UTC days from Vercel daily report rows", async () => {
+  it("sums Vercel daily report rows across workspace users", async () => {
     const responses = [
       {
         results: [
@@ -34,11 +34,33 @@ describe("Goat Gateway usage reporting", () => {
           },
         ],
       },
+      {
+        results: [
+          {
+            day: "2026-07-09",
+            total_cost: 0.75,
+            market_cost: 0.75,
+            surcharge_cost: 0,
+            gateway_cost: 0,
+            input_tokens: 50,
+            output_tokens: 10,
+            cached_input_tokens: 5,
+            cache_creation_input_tokens: 2,
+            reasoning_tokens: 1,
+            request_count: 1,
+          },
+        ],
+      },
       { results: [{ day: "2026-07-09", total_cost: 0.5 }] },
       { results: [{ day: "2026-07-09", total_cost: 0.125 }] },
       { results: [{ day: "2026-07-09", total_cost: 0.25 }] },
       { results: [{ day: "2026-07-09", total_cost: 0.2 }] },
       { results: [{ day: "2026-07-09", total_cost: 0.175 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.1 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.05 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.2 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.03 }] },
+      { results: [{ day: "2026-07-09", total_cost: 0.02 }] },
     ];
     vi.stubGlobal(
       "fetch",
@@ -48,7 +70,7 @@ describe("Goat Gateway usage reporting", () => {
     await expect(
       getGoatDailyUsage({
         apiKey: "gateway-key",
-        userWorkosId: "user_123",
+        userWorkosIds: ["user_123", "user_456"],
         start: "2026-07-08",
         end: "2026-07-09",
       }),
@@ -60,13 +82,13 @@ describe("Goat Gateway usage reporting", () => {
       }),
       expect.objectContaining({
         day: "2026-07-09",
-        totalCostUsdMicros: 1_250_000,
-        chatCostUsdMicros: 625_000,
-        taskCostUsdMicros: 250_000,
-        brainCostUsdMicros: 375_000,
-        inputTokens: 100,
-        outputTokens: 25,
-        requestCount: 2,
+        totalCostUsdMicros: 2_000_000,
+        chatCostUsdMicros: 775_000,
+        taskCostUsdMicros: 450_000,
+        brainCostUsdMicros: 425_000,
+        inputTokens: 150,
+        outputTokens: 35,
+        requestCount: 3,
       }),
     ]);
 
@@ -75,11 +97,19 @@ describe("Goat Gateway usage reporting", () => {
     expect(url.searchParams.get("tags")).toBe("app:goat");
     expect(url.searchParams.get("tags_match")).toBe("all");
     expect(url.searchParams.get("user_id")).toMatch(/^goat-[0-9a-f]{16}$/);
+    const secondUserUrl = new URL(String(vi.mocked(fetch).mock.calls[1]?.[0]));
+    expect(secondUserUrl.searchParams.get("user_id")).toMatch(/^goat-[0-9a-f]{16}$/);
+    expect(secondUserUrl.searchParams.get("user_id")).not.toBe(url.searchParams.get("user_id"));
     const featureTags = vi
       .mocked(fetch)
-      .mock.calls.slice(1)
+      .mock.calls.slice(2)
       .map((call) => new URL(String(call[0])).searchParams.get("tags"));
     expect(featureTags).toEqual([
+      "app:goat,feature:chat",
+      "app:goat,feature:chat-title",
+      "app:goat,feature:task",
+      "app:goat,feature:brain-ingest",
+      "app:goat,feature:brain-query",
       "app:goat,feature:chat",
       "app:goat,feature:chat-title",
       "app:goat,feature:task",
@@ -88,20 +118,24 @@ describe("Goat Gateway usage reporting", () => {
     ]);
   });
 
-  it("returns contextual tag drilldown rows without summing all tags", async () => {
+  it("returns contextual tag drilldown rows across workspace users without leaking labels", async () => {
+    const responses = [
+      {
+        results: [
+          { tag: "chat:session_1", total_cost: 0.5, request_count: 1 },
+          { tag: "task:task_1", total_cost: 0.75, request_count: 2 },
+          { tag: "ingest:ingest_1", total_cost: 0.25, request_count: 1 },
+          { tag: "feature:chat", total_cost: 1.5, request_count: 4 },
+          { tag: "app:goat", total_cost: 1.5, request_count: 4 },
+        ],
+      },
+      {
+        results: [{ tag: "chat:session_2", total_cost: 0.125, request_count: 1 }],
+      },
+    ];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        Response.json({
-          results: [
-            { tag: "chat:session_1", total_cost: 0.5, request_count: 1 },
-            { tag: "task:task_1", total_cost: 0.75, request_count: 2 },
-            { tag: "ingest:ingest_1", total_cost: 0.25, request_count: 1 },
-            { tag: "feature:chat", total_cost: 1.5, request_count: 4 },
-            { tag: "app:goat", total_cost: 1.5, request_count: 4 },
-          ],
-        }),
-      ),
+      vi.fn(async () => Response.json(responses.shift() ?? { results: [] })),
     );
     dbMock.getDb.mockReturnValue({
       select: vi
@@ -118,7 +152,8 @@ describe("Goat Gateway usage reporting", () => {
     await expect(
       getGoatUsageDrilldown({
         apiKey: "gateway-key",
-        userWorkosId: "user_123",
+        userWorkosIds: ["user_123", "user_456"],
+        currentUserWorkosId: "user_123",
         day: "2026-07-09",
       }),
     ).resolves.toEqual([
@@ -149,10 +184,20 @@ describe("Goat Gateway usage reporting", () => {
         totalCostUsdMicros: 250_000,
         requestCount: 1,
       },
+      {
+        tag: "chat:session_2",
+        kind: "chat",
+        id: "session_2",
+        label: "Chat usage",
+        href: null,
+        totalCostUsdMicros: 125_000,
+        requestCount: 1,
+      },
     ]);
 
     const url = new URL(String(vi.mocked(fetch).mock.calls[0]?.[0]));
     expect(url.searchParams.get("group_by")).toBe("tag");
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   });
 });
 

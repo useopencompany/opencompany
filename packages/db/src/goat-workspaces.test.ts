@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { defaultGoatBrainIdForUser, newGoatBrainId } from "./goat-workspaces";
+import { describe, expect, it, vi } from "vitest";
+import {
+  defaultGoatBrainIdForUser,
+  getGoatBrainEnrichmentEnabled,
+  newGoatBrainId,
+  updateGoatBrainEnrichmentEnabled,
+} from "./goat-workspaces";
 
 describe("Goat brain ids", () => {
   it("generates readable default brain ids without embedding the WorkOS user id", () => {
@@ -23,3 +28,49 @@ describe("Goat brain ids", () => {
     expect(id).toHaveLength(80);
   });
 });
+
+describe("Goat brain enrichment flag", () => {
+  it("returns the stored enrichment setting when the brain exists", async () => {
+    const db = selectRowsDb([{ enrichmentEnabled: false }]);
+
+    await expect(getGoatBrainEnrichmentEnabled("gbrain_123", db)).resolves.toBe(false);
+  });
+
+  it("fails closed when the brain row is missing", async () => {
+    const db = selectRowsDb([]);
+
+    await expect(getGoatBrainEnrichmentEnabled("gbrain_missing", db)).resolves.toBe(false);
+  });
+
+  it("throws when updating a missing brain", async () => {
+    const db = updateRowsDb([]);
+
+    await expect(
+      updateGoatBrainEnrichmentEnabled({ brainRef: "gbrain_missing", enabled: true }, { db }),
+    ).rejects.toThrow("Brain not found.");
+  });
+});
+
+function selectRowsDb(rows: Array<{ enrichmentEnabled: boolean }>) {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => rows),
+        })),
+      })),
+    })),
+  };
+}
+
+function updateRowsDb(rows: Array<{ id: string }>) {
+  return {
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: vi.fn(async () => rows),
+        })),
+      })),
+    })),
+  };
+}

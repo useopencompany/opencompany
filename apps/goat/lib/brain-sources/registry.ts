@@ -31,7 +31,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     icon: Mail,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/gmail/start?returnTo=/settings",
+    connectHref: "/api/integrations/gmail/start?returnTo=/settings/integrations",
   },
   {
     id: "github",
@@ -40,7 +40,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     icon: GitBranch,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/github/start?returnTo=/settings",
+    connectHref: "/api/integrations/github/start?returnTo=/settings/integrations",
   },
   {
     id: "slack",
@@ -49,7 +49,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     icon: MessageSquare,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/slack/start?returnTo=/settings",
+    connectHref: "/api/integrations/slack/start?returnTo=/settings/integrations",
   },
   {
     id: "linear",
@@ -58,6 +58,6 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     icon: ListTodo,
     connectionKind: "oauth",
     available: true,
-    connectHref: "/api/integrations/linear-ingest/start?returnTo=/settings",
+    connectHref: "/api/integrations/linear-ingest/start?returnTo=/settings/integrations",
   },
 ];

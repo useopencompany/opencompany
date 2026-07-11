@@ -10,6 +10,7 @@ import {
   evidenceLinkTargets,
   formatGoatBrainEvidenceLink,
   pageLinkTargets,
+  sourceLinkTargets,
 } from "@opencompany/goat-brain/inline-links";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
@@ -69,6 +70,7 @@ import {
   uploadBrainAssetBlob,
   validateBrainAssetFile,
 } from "@/lib/brain-asset-upload";
+import { isExternalHref, sourceHrefForRef } from "@/lib/brain-source-links";
 import {
   createGoatCollections,
   type GoatBrainDocumentRow,
@@ -366,10 +368,26 @@ function GoatBrainEditor({
       .toSorted((a, b) => (a.title ?? a.brainId).localeCompare(b.title ?? b.brainId));
   }, [documents, query]);
   const isSearching = Boolean(query.trim());
-  const visibleExpandedPaths = useMemo(
-    () => (isSearching ? new Set(collectFolderPaths(tree)) : expandedPaths),
-    [expandedPaths, isSearching, tree],
-  );
+  const selectedDocumentFolderPath = selectedDocument?.folderPath ?? null;
+  const visibleExpandedPaths = useMemo(() => {
+    if (isSearching) return new Set(collectFolderPaths(tree));
+    return selectedDocumentFolderPath
+      ? withAncestorFolders(expandedPaths, selectedDocumentFolderPath, true)
+      : expandedPaths;
+  }, [expandedPaths, isSearching, selectedDocumentFolderPath, tree]);
+  const selectedDocumentUrl = selectedDocument
+    ? brainDocumentUrl(selectedDocument, selectedBrainId)
+    : null;
+
+  useEffect(() => {
+    if (!selectedDocument || !selectedDocumentUrl) return;
+    if (
+      window.location.pathname !== selectedDocumentUrl &&
+      currentUrlTargetsDocument(selectedDocument.brainId, selectedBrainId)
+    ) {
+      replaceCurrentUrl(selectedDocumentUrl);
+    }
+  }, [selectedBrainId, selectedDocument, selectedDocumentUrl]);
 
   const selectDocument = (document: GoatBrainDocumentView) => {
     if (canEditBrain) saveRef.current(); // flush pending edits on the outgoing document
@@ -377,6 +395,32 @@ function GoatBrainEditor({
     setSelectedDocumentId(document.id);
     setExpandedPaths((current) => withAncestorFolders(current, document.folderPath));
     replaceCurrentUrl(brainDocumentUrl(document, selectedBrainId));
+  };
+
+  // Resolve an internal brain href (as produced by brainDocumentUrl/brainFolderUrl)
+  // to a target in the current brain and select it via local state — same instant
+  // path the sidebar uses. Returns false for anything not in this brain so the
+  // caller can fall back to a full navigation.
+  const navigateToBrainHref = (href: string): boolean => {
+    const document = documents.find(
+      (candidate) => brainDocumentUrl(candidate, selectedBrainId) === href,
+    );
+    if (document) {
+      selectDocument(document);
+      return true;
+    }
+    const folder = folders.find(
+      (candidate) => brainFolderUrl(candidate.path, selectedBrainId) === href,
+    );
+    if (folder) {
+      if (canEditBrain) saveRef.current();
+      setSelectedFolder(folder.path);
+      setSelectedDocumentId(null);
+      setExpandedPaths((current) => withAncestorFolders(current, folder.path));
+      replaceCurrentUrl(brainFolderUrl(folder.path, selectedBrainId));
+      return true;
+    }
+    return false;
   };
 
   const toggleFolder = (path: string) => {
@@ -970,6 +1014,7 @@ function GoatBrainEditor({
           readOnly={!canEditBrain}
           onEditorChange={(value) => setDocPanelState((state) => ({ ...state, value }))}
           onRenameTitle={renameDocument}
+          onNavigateInternal={navigateToBrainHref}
         />
       </div>
       {folderDialog && canEditBrain ? (
@@ -1147,6 +1192,7 @@ function BrainDocumentPanel({
   readOnly,
   onEditorChange,
   onRenameTitle,
+  onNavigateInternal,
 }: {
   selectedDocument: GoatBrainDocumentView | null;
   documents: GoatBrainDocumentView[];
@@ -1160,6 +1206,7 @@ function BrainDocumentPanel({
   readOnly: boolean;
   onEditorChange: (value: string) => void;
   onRenameTitle: (title: string) => void;
+  onNavigateInternal: (href: string) => boolean;
 }) {
   if (!selectedDocument) {
     return (
@@ -1198,6 +1245,7 @@ function BrainDocumentPanel({
                   onChange={onEditorChange}
                   brainLinks={brainLinks}
                   readOnly={readOnly}
+                  onNavigateInternal={onNavigateInternal}
                 />
               </div>
             </div>
@@ -1253,6 +1301,15 @@ function BrainAssetViewer({
           src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
           className="min-h-0 w-full flex-1 border-0 bg-surface-muted"
         />
+      ) : document.format === "image" ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-surface-muted p-6">
+          {/* eslint-disable-next-line @next/next/no-img-element -- auth-scoped byte route; next/image can't optimize it. */}
+          <img
+            src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+            alt={document.title ?? document.brainId}
+            className="max-h-full max-w-full rounded-md object-contain"
+          />
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-ink-muted">
           No inline preview for this file type yet — use Download.
@@ -1361,10 +1418,7 @@ function BrainMetadataSidebar({
             {document.brainId}
           </code>
           <MetadataRow label="Aliases" value={document.aliases.join(", ") || "-"} />
-          <MetadataRow
-            label="Sources"
-            value={document.sources?.map((item) => item.ref).join(", ") || "-"}
-          />
+          <MetadataSourcesRow sources={document.sources} />
           {document.format !== "markdown" ? (
             <>
               <MetadataRow label="File" value={document.originalFileName ?? "-"} />
@@ -1412,6 +1466,50 @@ function MetadataRow({ label, value }: { label: string; value: string }) {
       <span title={value} className="min-w-0 truncate text-ink">
         {value}
       </span>
+    </>
+  );
+}
+
+function MetadataSourcesRow({ sources }: { sources: GoatBrainDocumentView["sources"] }) {
+  return (
+    <>
+      <span className="text-ink-subtle">Sources</span>
+      {sources.length > 0 ? (
+        <span className="flex min-w-0 flex-col gap-1">
+          {sources.map((source, index) => {
+            const href = sourceHrefForRef(source.ref);
+            const label = source.title || source.ref;
+            const title = source.title ? `${source.title} (${source.ref})` : source.ref;
+            if (!href) {
+              return (
+                <span
+                  // biome-ignore lint/suspicious/noArrayIndexKey: duplicate source refs are valid.
+                  key={`${source.ref}:${index}`}
+                  title={title}
+                  className="min-w-0 truncate text-ink"
+                >
+                  {label}
+                </span>
+              );
+            }
+            return (
+              <a
+                // biome-ignore lint/suspicious/noArrayIndexKey: duplicate source refs are valid.
+                key={`${source.ref}:${index}`}
+                href={href}
+                title={title}
+                target={isExternalHref(href) ? "_blank" : undefined}
+                rel={isExternalHref(href) ? "noreferrer noopener" : undefined}
+                className="min-w-0 truncate text-ink underline-offset-2 hover:underline"
+              >
+                {label}
+              </a>
+            );
+          })}
+        </span>
+      ) : (
+        <span className="min-w-0 truncate text-ink">-</span>
+      )}
     </>
   );
 }
@@ -1867,17 +1965,19 @@ function resolveInitialDocument(
   initialFolderPath: string | null,
   initialBrainId: string | null,
 ) {
+  if (initialBrainId) {
+    return (
+      documents.find(
+        (document) =>
+          document.brainId === initialBrainId &&
+          (!initialFolderPath || document.folderPath === initialFolderPath),
+      ) ??
+      documents.find((document) => document.brainId === initialBrainId) ??
+      null
+    );
+  }
   return (
-    (initialBrainId
-      ? documents.find(
-          (document) =>
-            document.brainId === initialBrainId &&
-            (!initialFolderPath || document.folderPath === initialFolderPath),
-        )
-      : null) ??
-    documents.find((document) => document.folderPath === initialFolderPath) ??
-    documents[0] ??
-    null
+    documents.find((document) => document.folderPath === initialFolderPath) ?? documents[0] ?? null
   );
 }
 
@@ -1893,8 +1993,36 @@ function replaceCurrentUrl(href: string) {
   window.history.replaceState(window.history.state, "", href);
 }
 
+function currentUrlTargetsDocument(brainId: string, routeBrainId?: string | null) {
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  if (segments[0] !== "brain") return false;
+  const brainPathSegments = segments.slice(1);
+  const pathSegments =
+    routeBrainId && brainPathSegments[0] === encodeURIComponent(routeBrainId)
+      ? brainPathSegments.slice(1)
+      : brainPathSegments;
+  if (pathSegments.length < 2) return false;
+  return safeDecodePathSegment(pathSegments.at(-1) ?? "") === brainId;
+}
+
+function safeDecodePathSegment(segment: string) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
-  const extension = document.format === "markdown" ? "md" : document.format;
+  // "image" is a format, not an extension — recover the real one (png/jpg/…)
+  // from the original filename.
+  const originalExtension = document.originalFileName?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const extension =
+    document.format === "markdown"
+      ? "md"
+      : document.format === "image"
+        ? (originalExtension ?? "png")
+        : document.format;
   return `${document.folderPath}/${document.brainId}.${extension}`;
 }
 
@@ -1920,12 +2048,25 @@ function brainLinkMap(
     addBrainLinkTarget(links, `wiki/${folderTarget}.md`, href);
     if (document.kind === "evidence") links[`evidence:${document.brainId}`] = href;
   }
+  for (const document of documents) {
+    for (const source of document.sources ?? []) {
+      addSourceLinkTarget(links, source.ref);
+    }
+    for (const target of sourceLinkTargets(documentInlineLinkText(document))) {
+      addSourceLinkTarget(links, target);
+    }
+  }
   return links;
 }
 
 function addBrainLinkTarget(links: Record<string, string>, target: string, href: string) {
   links[target] = href;
   links[`page:${target}`] = href;
+}
+
+function addSourceLinkTarget(links: Record<string, string>, ref: string) {
+  const href = sourceHrefForRef(ref);
+  if (href) links[`source:${ref}`] = href;
 }
 
 function brainPathUrl(pathSegments: string[], routeBrainId?: string | null) {
@@ -2007,11 +2148,13 @@ function ancestorFolderPaths(path: string) {
 
 function withAncestorFolders(current: Set<string>, folderPath: string, includeFolder = false) {
   const next = new Set(current);
+  let changed = false;
   const ancestors = ancestorFolderPaths(folderPath);
   for (const path of includeFolder ? ancestors : ancestors.slice(0, -1)) {
+    if (!next.has(path)) changed = true;
     next.add(path);
   }
-  return next;
+  return changed ? next : current;
 }
 
 function documentViewFromRow(
@@ -2153,7 +2296,7 @@ function normalizeTimeline(
 }
 
 function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
-  if (value === "pdf" || value === "docx") return value;
+  if (value === "pdf" || value === "docx" || value === "xlsx" || value === "image") return value;
   return "markdown";
 }
 

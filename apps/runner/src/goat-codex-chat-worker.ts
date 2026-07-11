@@ -18,6 +18,7 @@ import {
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat-worker" });
+const GOAT_CODEX_CHAT_RECOVERY_ATTEMPT = 2;
 
 let registeredWakeup: (() => void) | null = null;
 
@@ -126,7 +127,7 @@ export async function heartbeatGoatCodexChatTurn(input: {
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }
 
-async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
+export async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) throw new Error(`Claimed turn ${turn.id} is missing its lease.`);
@@ -143,11 +144,21 @@ async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
     .limit(1);
   if (!session) throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
 
-  // A reclaimed turn already ran (at least partially) on a worker that died. Re-running would
-  // double-execute side-effecting commands, so surface the restart instead.
-  if (turn.attempts > 1) {
+  // Reclaimed attempt 2 gets one durable continuation pass. The continuation reuses the warm
+  // sandbox/thread when available and asks Codex to inspect current state before side effects.
+  // If recovery is reclaimed again, surface a terminal failure instead of looping forever.
+  if (turn.attempts > GOAT_CODEX_CHAT_RECOVERY_ATTEMPT) {
     await failReclaimedTurn({ turn, session, leaseId, leaseOwner });
     return;
+  }
+  if (turn.attempts === GOAT_CODEX_CHAT_RECOVERY_ATTEMPT) {
+    logger.info("Recovering reclaimed Goat Codex chat turn", {
+      event: "opencompany.goat_codex_chat_turn_recovery_started",
+      turn_id: turn.id,
+      codex_chat_session_id: session.id,
+      has_sandbox: Boolean(session.sandboxId),
+      has_codex_thread: Boolean(session.codexThreadId),
+    });
   }
 
   let heartbeatAbort: GoatCodexChatLeaseLostError | null = null;
@@ -184,6 +195,9 @@ async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
       turn,
       session,
       env,
+      ...(turn.attempts === GOAT_CODEX_CHAT_RECOVERY_ATTEMPT
+        ? { recovery: { reason: "lease_reclaimed" as const } }
+        : {}),
       shouldAbort: () => heartbeatAbort,
     });
   } finally {
@@ -207,6 +221,7 @@ async function failReclaimedTurn(input: {
       model: input.session.model,
       leaseId: input.leaseId,
       leaseOwner: input.leaseOwner,
+      turnCreatedAt: input.turn.createdAt,
     },
     redact: (value) => value,
     // Keep whatever partial parts the dead worker already streamed; only finalize them.

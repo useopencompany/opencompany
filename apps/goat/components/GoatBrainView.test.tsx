@@ -256,6 +256,7 @@ describe("GoatBrainView", () => {
 
   it("selects same-brain documents instantly and syncs the URL with browser history", async () => {
     const user = userEvent.setup();
+    window.history.pushState(null, "", "/brain/people/ada-lovelace");
     const replaceState = vi.spyOn(window.history, "replaceState");
 
     render(
@@ -281,6 +282,91 @@ describe("GoatBrainView", () => {
     );
     expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/projects/roadmap");
     expect(routerMock.replace).not.toHaveBeenCalled();
+    replaceState.mockRestore();
+  });
+
+  it("opens a stale inbox document route after the filing agent moved it", async () => {
+    const movedCapture = {
+      ...inboxCaptureDocument,
+      folderPath: "thoughts",
+      path: "thoughts/customer-feedback.md",
+    };
+    window.history.pushState(null, "", "/brain/inbox/customer-feedback");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={[folder("inbox", "system"), folder("thoughts", "custom")]}
+        documents={[movedCapture]}
+        initialFolderPath="inbox"
+        initialBrainId="customer-feedback"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Customer wants searchable meeting notes.",
+    );
+    expect(screen.getByTitle("thoughts/customer-feedback.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/thoughts/customer-feedback");
+    });
+    replaceState.mockRestore();
+  });
+
+  it("keeps an open inbox item selected when live filing moves it away", async () => {
+    window.history.pushState(null, "", "/brain/inbox/customer-feedback");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const { rerender } = render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={[folder("inbox", "system"), folder("thoughts", "custom")]}
+        documents={[inboxCaptureDocument]}
+        initialFolderPath="inbox"
+        initialBrainId="customer-feedback"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Customer wants searchable meeting notes.",
+    );
+    expect(replaceState).not.toHaveBeenCalled();
+
+    rerender(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={[folder("inbox", "system"), folder("thoughts", "custom")]}
+        documents={[
+          {
+            ...inboxCaptureDocument,
+            id: "doc_unrelated_note",
+            brainId: "unrelated-note",
+            folderPath: "thoughts",
+            path: "thoughts/unrelated-note.md",
+            title: "Unrelated note",
+            body: "This should not become selected.",
+          },
+          {
+            ...inboxCaptureDocument,
+            folderPath: "thoughts",
+            path: "thoughts/customer-feedback.md",
+          },
+        ]}
+        initialFolderPath="inbox"
+        initialBrainId="customer-feedback"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Brain body" })).toHaveValue(
+      "Customer wants searchable meeting notes.",
+    );
+    expect(screen.getByTitle("thoughts/customer-feedback.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/thoughts/customer-feedback");
+    });
     replaceState.mockRestore();
   });
 
@@ -467,6 +553,33 @@ describe("GoatBrainView", () => {
     expect(screen.getByTestId("brain-link:folder:people")).toHaveAttribute(
       "href",
       "/brain/goat_brain_1/people",
+    );
+  });
+
+  it("resolves source pointers to their canonical source URLs", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={folders}
+        documents={[documentWithGitHubSource]}
+        initialFolderPath="projects"
+        initialBrainId="github-source-note"
+      />,
+    );
+
+    expect(screen.getByTestId("brain-link:source:github:acme/api:pull:123")).toHaveAttribute(
+      "href",
+      "https://github.com/acme/api/pull/123",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Toggle file details" }));
+
+    expect(screen.getByRole("link", { name: "acme/api #123" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/api/pull/123",
     );
   });
 
@@ -701,6 +814,31 @@ const documentLinkingToAda: GoatBrainDocumentView = {
   updatedAt: "2026-07-06T12:00:00.000Z",
 };
 
+const inboxCaptureDocument: GoatBrainDocumentView = {
+  id: "doc_customer_feedback",
+  brainId: "customer-feedback",
+  folderPath: "inbox",
+  path: "inbox/customer-feedback.md",
+  title: "Customer feedback",
+  content: "",
+  body: "Customer wants searchable meeting notes.",
+  timeline: [],
+  format: "markdown",
+  mimeType: "text/markdown",
+  originalFileName: null,
+  assetStorageKey: null,
+  relations: [],
+  sources: [],
+  kind: "page",
+  type: "note",
+  status: "draft",
+  aliases: [],
+  contentHash: "hash",
+  sizeBytes: 128,
+  createdAt: "2026-07-06T12:00:00.000Z",
+  updatedAt: "2026-07-06T12:00:00.000Z",
+};
+
 const evidenceDocument: GoatBrainDocumentView = {
   id: "doc_evidence_platform_planning_chat",
   brainId: "ev-platform-planning-chat",
@@ -719,6 +857,31 @@ const evidenceDocument: GoatBrainDocumentView = {
   kind: "evidence",
   type: "source",
   status: "active",
+  aliases: [],
+  contentHash: "hash",
+  sizeBytes: 128,
+  createdAt: "2026-07-06T12:00:00.000Z",
+  updatedAt: "2026-07-06T12:00:00.000Z",
+};
+
+const documentWithGitHubSource: GoatBrainDocumentView = {
+  id: "doc_github_source",
+  brainId: "github-source-note",
+  folderPath: "projects",
+  path: "projects/github-source-note.md",
+  title: "GitHub Source Note",
+  content: "",
+  body: "Review [[source:github:acme/api:pull:123|PR #123]].",
+  timeline: [],
+  format: "markdown",
+  mimeType: "text/markdown",
+  originalFileName: null,
+  assetStorageKey: null,
+  relations: [],
+  sources: [{ ref: "github:acme/api:pull:123", title: "acme/api #123" }],
+  kind: "page",
+  type: "project",
+  status: "draft",
   aliases: [],
   contentHash: "hash",
   sizeBytes: 128,

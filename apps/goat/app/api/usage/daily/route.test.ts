@@ -1,7 +1,12 @@
+import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { getGoatDailyUsage, getGoatUsageDrilldown } from "@/lib/gateway-usage";
 import { GET } from "./route";
+
+vi.mock("@opencompany/db/goat-workspaces", () => ({
+  listGoatWorkspaceMembers: vi.fn(),
+}));
 
 vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
@@ -18,7 +23,18 @@ describe("GET /api/usage/daily", () => {
     vi.clearAllMocks();
     vi.mocked(currentGoatUser as unknown as () => Promise<unknown>).mockResolvedValue({
       user: { workosUserId: "user_123" },
+      workspace: { id: "goat_ws_123" },
     });
+    vi.mocked(listGoatWorkspaceMembers).mockResolvedValue([
+      {
+        member: { id: "member_1", role: "admin", createdAt: new Date("2026-07-09T00:00:00Z") },
+        user: { workosUserId: "user_123" },
+      },
+      {
+        member: { id: "member_2", role: "member", createdAt: new Date("2026-07-09T00:00:00Z") },
+        user: { workosUserId: "user_456" },
+      },
+    ] as Awaited<ReturnType<typeof listGoatWorkspaceMembers>>);
     vi.mocked(getGoatDailyUsage).mockResolvedValue([
       {
         day: "2026-07-09",
@@ -51,7 +67,7 @@ describe("GET /api/usage/daily", () => {
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "gateway-key");
   });
 
-  it("returns daily usage and optional drilldown for the current user", async () => {
+  it("returns daily usage and optional drilldown for the current workspace", async () => {
     const response = await GET(
       new Request(
         "http://goat.test/api/usage/daily?start=2026-07-09&end=2026-07-09&day=2026-07-09",
@@ -68,11 +84,18 @@ describe("GET /api/usage/daily", () => {
         items: [expect.objectContaining({ tag: "chat:session_1" })],
       },
     });
+    expect(listGoatWorkspaceMembers).toHaveBeenCalledWith("goat_ws_123");
     expect(getGoatDailyUsage).toHaveBeenCalledWith({
       apiKey: "gateway-key",
-      userWorkosId: "user_123",
+      userWorkosIds: ["user_123", "user_456"],
       start: "2026-07-09",
       end: "2026-07-09",
+    });
+    expect(getGoatUsageDrilldown).toHaveBeenCalledWith({
+      apiKey: "gateway-key",
+      userWorkosIds: ["user_123", "user_456"],
+      currentUserWorkosId: "user_123",
+      day: "2026-07-09",
     });
   });
 

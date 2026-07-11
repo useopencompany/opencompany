@@ -827,6 +827,27 @@
       "when": 1783980900000,
       "tag": "0117_goat_codex_chat_event_states",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1783981000000,
+      "tag": "0118_goat_brain_enrichment_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1783981100000,
+      "tag": "0119_goat_integration_workspace_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1783981200000,
+      "tag": "0120_goat_chat_attachments",
+      "breakpoints": true
     }
   ]
 }

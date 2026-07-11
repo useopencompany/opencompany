@@ -37,6 +37,7 @@ import {
   MessageSquarePlus,
   Pause,
   Play,
+  Plus,
   Settings,
   Sparkles,
   Square,
@@ -58,11 +59,17 @@ import {
   useState,
   useTransition,
 } from "react";
-import { buildChatTaskLookup, shouldShowThinkingBubble } from "@/components/chat/assistant-items";
+import { buildChatTaskLookup } from "@/components/chat/assistant-items";
+import {
+  GoatComposerAttachments,
+  GoatComposerDropOverlay,
+} from "@/components/chat/ChatComposerAttachments";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
   compareGoatChatMessageOrder,
   type GoatChatMention,
@@ -75,17 +82,22 @@ import {
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
+import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
-import { DEFAULT_GOAT_MODEL, GOAT_MODELS, normalizeGoatModel } from "@/lib/model-options";
+import {
+  DEFAULT_GOAT_MODEL,
+  GOAT_MODELS,
+  goatModelContextWindowTokens,
+  normalizeGoatModel,
+} from "@/lib/model-options";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
   type GoatCodexChatSessionRow,
   type GoatLocalCodexSessionRow,
   type GoatTaskRow,
-  type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
@@ -118,13 +130,13 @@ type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue | CodexPicker
 // Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
 // engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
 type GoatEngineChatKind = "local_codex" | "codex";
-type CodexComposerSettings = {
+type CodexComposerSettings = GoatCodexComposerSettingsView;
+type CodexComposerUiState = {
   reasoningEffort: CodexReasoningEffort;
   planModeEnabled: boolean;
-  goalMode: {
-    objective: string;
-    tokenBudget?: number;
-  } | null;
+  goalModeEnabled: boolean;
+  goalObjective: string;
+  goalTokenBudget: string;
 };
 
 const ENGINE_CHAT_CONFIG: Record<
@@ -185,6 +197,8 @@ export function GoatSurface({
   codexConnected = false,
   localCodexBetaEnabled = false,
   chatResumeEnabled = false,
+  userName = "there",
+  userWorkosId = "",
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
@@ -194,6 +208,9 @@ export function GoatSurface({
   codexConnected?: boolean;
   localCodexBetaEnabled?: boolean;
   chatResumeEnabled?: boolean;
+  userName?: string;
+  // Scopes chat attachment uploads; attachments are disabled when absent.
+  userWorkosId?: string;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -205,6 +222,10 @@ export function GoatSurface({
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(false);
   const pendingInputCaretRef = useRef<number | null>(null);
+  const initialCodexComposerUiState = codexComposerUiStateForChat(initialChat);
+  const activeTurnStartedAtRef = useRef<number | null>(null);
+  const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
+  const wasAgentWorkingRef = useRef(false);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
@@ -232,11 +253,27 @@ export function GoatSurface({
     const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
     return engine && initialChat ? { engine, chatSessionId: initialChat.id } : null;
   });
-  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>("medium");
-  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
-  const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
-  const [codexGoalObjective, setCodexGoalObjective] = useState("");
-  const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
+  const [codexComposerStateByChatId, setCodexComposerStateByChatId] = useState<
+    ReadonlyMap<string, CodexComposerUiState>
+  >(() => {
+    if (!initialChat || !initialChat.codexComposerSettings) return new Map();
+    return new Map([[initialChat.id, initialCodexComposerUiState]]);
+  });
+  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
+    initialCodexComposerUiState.reasoningEffort,
+  );
+  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(
+    initialCodexComposerUiState.planModeEnabled,
+  );
+  const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(
+    initialCodexComposerUiState.goalModeEnabled,
+  );
+  const [codexGoalObjective, setCodexGoalObjective] = useState(
+    initialCodexComposerUiState.goalObjective,
+  );
+  const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState(
+    initialCodexComposerUiState.goalTokenBudget,
+  );
   const [codexSandboxStatus, setCodexSandboxStatus] = useState<GoatCodexSandboxStatus | null>(null);
   const [engineRunning, setEngineRunning] = useState(false);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
@@ -256,7 +293,50 @@ export function GoatSurface({
     ReadonlySet<string>
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly GoatTaskView[] | null>(null);
+  const [activeTurnStartedAtMs, setActiveTurnStartedAtMs] = useState<number | null>(null);
+  const [optimisticTurnDurations, setOptimisticTurnDurations] = useState<
+    ReadonlyMap<string, number>
+  >(() => new Map());
   const [, startArchiveTransition] = useTransition();
+  const homeChats = useMemo(
+    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds),
+    [optimisticallyArchivedChatIds, recentChats],
+  );
+  const homeSchedules = useMemo(() => visibleHomeSchedules(schedules), [schedules]);
+  const homeResults = useMemo(
+    () => visibleHomeResults(tasks, optimisticallyArchivedIds),
+    [optimisticallyArchivedIds, tasks],
+  );
+  const hasHomeActivity =
+    homeChats.length > 0 || homeSchedules.length > 0 || homeResults.length > 0;
+  const homeGreetingName = userName.trim() || "there";
+
+  const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
+    const startedAtMs = Date.now();
+    activeTurnStartedAtRef.current = startedAtMs;
+    activeTurnAssistantMessageIdRef.current = assistantMessageId;
+    setActiveTurnStartedAtMs(startedAtMs);
+  }, []);
+
+  const clearActiveTurn = useCallback(() => {
+    activeTurnStartedAtRef.current = null;
+    activeTurnAssistantMessageIdRef.current = null;
+    setActiveTurnStartedAtMs(null);
+  }, []);
+
+  const recordOptimisticTurnDuration = useCallback(
+    (assistantMessageId: string | null | undefined) => {
+      const startedAtMs = activeTurnStartedAtRef.current;
+      if (!assistantMessageId || startedAtMs === null) return;
+      const durationMs = Math.max(0, Date.now() - startedAtMs);
+      setOptimisticTurnDurations((current) => {
+        const next = new Map(current);
+        next.set(assistantMessageId, durationMs);
+        return next;
+      });
+    },
+    [],
+  );
 
   const prepareSendMessagesRequest = useCallback(
     ({
@@ -311,6 +391,7 @@ export function GoatSurface({
     experimental_throttle: 50,
     transport,
     onFinish: ({ message }) => {
+      recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       if (sessionId) {
         setChatSessionId(sessionId);
@@ -348,6 +429,14 @@ export function GoatSurface({
       chatSessionId === initialChat.id &&
       initialChat.engine === "local_codex",
   );
+  const attachmentsEnabled =
+    Boolean(userWorkosId) && !isEngineChat && !localCodexFeatureDisabledForChat;
+  const composerAttachments = useGoatChatAttachments({
+    userWorkosId,
+    modelName: String(chatModel),
+    enabled: attachmentsEnabled,
+  });
+  const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   // Render list: Electric-synced rows are the source of truth for persisted
   // messages; the useChat overlay contributes only entries Electric has not
   // delivered yet (the in-flight turn and optimistic sends).
@@ -364,8 +453,13 @@ export function GoatSurface({
     return overlay.length > 0 ? [...persistedMessages, ...overlay] : persistedMessages;
   }, [messages, persistedMessages]);
   const hasMessages = chatMessages.length > 0;
-  const showThinkingBubble =
-    (isGenerating || (isEngineChat && engineRunning)) && shouldShowThinkingBubble(chatMessages);
+  const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
+  const isAgentWorking = isGenerating || isEngineWorking;
+  const latestActiveTurnStartedAtMs = useMemo(
+    () => latestChatTurnStartedAtMs(chatMessages),
+    [chatMessages],
+  );
+  const activeTurnTimerStartedAtMs = activeTurnStartedAtMs ?? latestActiveTurnStartedAtMs;
   const trimmedNewChatPrompt = newChatPrompt.trim();
   const newChatPromptValid =
     trimmedNewChatPrompt.length > 0 &&
@@ -378,6 +472,29 @@ export function GoatSurface({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (isAgentWorking) {
+      wasAgentWorkingRef.current = true;
+      setActiveTurnStartedAtMs((current) => {
+        if (current !== null) {
+          activeTurnStartedAtRef.current = current;
+          return current;
+        }
+        const startedAtMs = latestActiveTurnStartedAtMs ?? Date.now();
+        activeTurnStartedAtRef.current = startedAtMs;
+        return startedAtMs;
+      });
+      return;
+    }
+
+    if (wasAgentWorkingRef.current) {
+      recordOptimisticTurnDuration(activeTurnAssistantMessageIdRef.current);
+    }
+    wasAgentWorkingRef.current = false;
+    clearActiveTurn();
+  }, [clearActiveTurn, isAgentWorking, latestActiveTurnStartedAtMs, recordOptimisticTurnDuration]);
+
   const chatTaskLookup = useMemo(
     () =>
       buildChatTaskLookup({
@@ -404,10 +521,51 @@ export function GoatSurface({
     (initialChat?.id === chatSessionId ? initialChat.engine : null) ??
     activeEngine ??
     "opencompany";
+  // Context-window occupancy: the most recent assistant turn that reported usage
+  // reflects the current fill level. Undefined until the first turn completes.
+  const currentContextTokens = useMemo(() => {
+    for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
+      const tokens = chatMessages[index]?.metadata?.contextTokens;
+      if (typeof tokens === "number" && tokens > 0) return tokens;
+    }
+    return 0;
+  }, [chatMessages]);
+  const contextMaxTokens = goatModelContextWindowTokens(activeChatModel);
+
+  const applyCodexComposerUiState = useCallback((state: CodexComposerUiState) => {
+    setCodexReasoningEffort(state.reasoningEffort);
+    setCodexPlanModeEnabled(state.planModeEnabled);
+    setCodexGoalModeEnabled(state.goalModeEnabled);
+    setCodexGoalObjective(state.goalObjective);
+    setCodexGoalTokenBudget(state.goalTokenBudget);
+  }, []);
 
   const openChat = useCallback(
-    (chat: { id: string; model: string; engine?: GoatChatEngine } | null) => {
+    (
+      chat: {
+        id: string;
+        model: string;
+        engine?: GoatChatEngine;
+        codexComposerSettings?: CodexComposerSettings | null;
+      } | null,
+    ) => {
+      if (chatSessionId && isEngineChat && !localCodexFeatureDisabledForChat) {
+        const currentComposerState = currentCodexComposerUiState({
+          reasoningEffort: codexReasoningEffort,
+          planModeEnabled: codexPlanModeEnabled,
+          goalModeEnabled: codexGoalModeEnabled,
+          goalObjective: codexGoalObjective,
+          goalTokenBudget: codexGoalTokenBudget,
+        });
+        setCodexComposerStateByChatId((current) => {
+          const next = new Map(current);
+          next.set(chatSessionId, currentComposerState);
+          return next;
+        });
+      }
+
       const engineTarget = engineChatKindFromChat(chat, localCodexBetaEnabled);
+      const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
       setChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? "goat-chat-main");
       setChatModel(
@@ -420,18 +578,33 @@ export function GoatSurface({
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
-      setCodexPlanModeEnabled(false);
-      setCodexGoalModeEnabled(false);
-      setCodexGoalObjective("");
-      setCodexGoalTokenBudget("");
+      applyCodexComposerUiState(nextCodexComposerState);
       setCodexSandboxStatus(null);
       setEngineRunning(false);
+      clearActiveTurn();
+      setOptimisticTurnDurations(new Map());
       setMessages([]);
       setLocallyStoppedAssistantMessageIds(new Set());
       clearError();
       setMode(chat ? "chat" : "home");
     },
-    [clearError, defaultModel, localCodexBetaEnabled, setMessages],
+    [
+      applyCodexComposerUiState,
+      chatSessionId,
+      clearActiveTurn,
+      clearError,
+      codexComposerStateByChatId,
+      codexGoalModeEnabled,
+      codexGoalObjective,
+      codexGoalTokenBudget,
+      codexPlanModeEnabled,
+      codexReasoningEffort,
+      defaultModel,
+      isEngineChat,
+      localCodexBetaEnabled,
+      localCodexFeatureDisabledForChat,
+      setMessages,
+    ],
   );
 
   // Adopt URL-driven chat changes (history links, back/forward). This reacts
@@ -479,11 +652,11 @@ export function GoatSurface({
 
   useEffect(() => {
     if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
-    if (chatMessages.length === 0 && status !== "submitted" && status !== "streaming") return;
+    if (chatMessages.length === 0 && !isAgentWorking) return;
     const thread = threadRef.current;
     if (!thread || typeof thread.scrollTo !== "function") return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
-  }, [chatMessages, mode, status]);
+  }, [chatMessages, isAgentWorking, mode]);
 
   useEffect(() => {
     if (!chatError || chatError.message === lastError.current) return;
@@ -596,9 +769,25 @@ export function GoatSurface({
     if (isGenerating || engineSubmitting) return;
 
     const prompt = input.trim();
-    if (!prompt) return;
+    const pendingAttachments = composerAttachments.attachments;
+    const readyAttachments = pendingAttachments.filter(
+      (attachment) => attachment.status === "ready",
+    );
+    if (!prompt && readyAttachments.length === 0) return;
     if (localCodexFeatureDisabledForChat) {
       toast.error(LOCAL_CODEX_BETA_DISABLED_MESSAGE);
+      return;
+    }
+    if (pendingAttachments.length > 0 && activeEngine) {
+      toast.error("Attachments are not supported in engine chats yet.");
+      return;
+    }
+    if (composerAttachments.isUploading) {
+      toast.error("Wait for attachments to finish uploading.");
+      return;
+    }
+    if (composerAttachments.hasFailed) {
+      toast.error("Remove failed attachments before sending.");
       return;
     }
     const mentions =
@@ -632,6 +821,7 @@ export function GoatSurface({
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
       const existingEngineSessionId = activeEngineChat?.chatSessionId ?? null;
+      beginActiveTurn();
       setEngineSubmitting(true);
       void sendEngineChatMessage({
         endpoint: config.messagesEndpoint,
@@ -644,7 +834,13 @@ export function GoatSurface({
         .then((result) => {
           setChatSessionId(result.sessionId);
           setEngineChatSession({ engine, chatSessionId: result.sessionId });
+          activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
           setEngineRunning(true);
+          setCodexComposerStateByChatId((current) => {
+            const next = new Map(current);
+            next.set(result.sessionId, codexComposerUiStateFromSettings(settings.settings));
+            return next;
+          });
           setCodexPlanModeEnabled(false);
           setCodexGoalModeEnabled(false);
           setCodexGoalObjective("");
@@ -661,6 +857,7 @@ export function GoatSurface({
           router.refresh();
         })
         .catch((error) => {
+          clearActiveTurn();
           setInput(prompt);
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
@@ -673,12 +870,35 @@ export function GoatSurface({
       return;
     }
 
+    // previewUrl rides along for the optimistic bubble render; the server
+    // ignores it and re-mints attachment ids on persist.
+    const attachmentsMetadata = readyAttachments.map((attachment) => ({
+      id: attachment.id,
+      kind: attachment.kind,
+      mediaType: attachment.mediaType,
+      filename: attachment.filename,
+      sizeBytes: attachment.sizeBytes,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobUrl: attachment.blobUrl!,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobPathname: attachment.blobPathname!,
+      ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
+    }));
+    const metadata: GoatChatMessageMetadata = {
+      ...(mentions.length > 0 ? { mentions } : {}),
+      ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
+    };
     const message =
-      mentions.length > 0 ? { text: prompt, metadata: { mentions } } : { text: prompt };
+      Object.keys(metadata).length > 0 ? { text: prompt, metadata } : { text: prompt };
     const model = chatModel;
+    beginActiveTurn();
+    // Clear without revoking previews: the optimistic bubble still shows them.
+    composerAttachments.setAttachments([]);
     void sendMessage(message, { body: { sessionId: chatSessionId, model } }).catch((error) => {
+      clearActiveTurn();
       setInput(prompt);
       setSelectedMentions(mentions);
+      composerAttachments.setAttachments(pendingAttachments);
       toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
     });
   };
@@ -846,53 +1066,67 @@ export function GoatSurface({
       {mode === "home" ? (
         <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
           <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
-            <section className="flex flex-col gap-1">
-              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Chats
-              </h2>
-              <ChatHistoryList
-                chats={recentChats}
-                optimisticallyArchivedChatIds={optimisticallyArchivedChatIds}
-                onSelect={openChat}
-                onArchive={archiveChat}
-              />
-            </section>
+            {hasHomeActivity ? (
+              <>
+                {homeChats.length > 0 ? (
+                  <section className="flex flex-col gap-1">
+                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                      Chats
+                    </h2>
+                    <ChatHistoryList
+                      chats={homeChats}
+                      onSelect={openChat}
+                      onArchive={archiveChat}
+                    />
+                  </section>
+                ) : null}
 
-            <section className="flex flex-col gap-1">
-              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Routines
-              </h2>
-              <LiveSchedulesList schedules={schedules} />
-            </section>
+                {homeSchedules.length > 0 ? (
+                  <section className="flex flex-col gap-1">
+                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                      Routines
+                    </h2>
+                    <ScheduleRows schedules={homeSchedules} />
+                  </section>
+                ) : null}
 
-            <section className="flex flex-col gap-1">
-              <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                Results
-              </h2>
-              <LiveResultsList
-                tasks={tasks}
-                optimisticallyArchivedIds={optimisticallyArchivedIds}
-                onArchive={archiveTask}
-              />
-            </section>
+                {homeResults.length > 0 ? (
+                  <section className="flex flex-col gap-1">
+                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                      Results
+                    </h2>
+                    <ResultRows tasks={homeResults} onArchive={archiveTask} />
+                  </section>
+                ) : null}
+              </>
+            ) : (
+              <p className="px-2 text-[15px] leading-6 text-ink-muted">
+                welcome back, {homeGreetingName}
+              </p>
+            )}
           </div>
         </div>
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
           <div className="w-full px-6 pb-2 pt-5">
-            <div className="mx-auto flex w-full max-w-[720px] items-center justify-between gap-3">
+            <div className="flex w-full items-center justify-between gap-3">
               <ChatTitleHeader
                 title={activeChatTitle}
                 model={activeChatModel}
                 engine={activeChatEngine}
               />
-              {activeEngineChat?.engine === "codex" ? (
-                <CodexSandboxStatusIndicator
-                  status={
-                    codexSandboxStatus ?? (engineRunning || engineSubmitting ? "running" : null)
-                  }
-                />
-              ) : null}
+              <div className="flex shrink-0 items-center gap-2">
+                {activeEngineChat?.engine === "codex" ? (
+                  <CodexSandboxStatusIndicator
+                    status={
+                      codexSandboxStatus ?? (engineRunning || engineSubmitting ? "running" : null)
+                    }
+                  />
+                ) : null}
+                {currentContextTokens > 0 ? (
+                  <ChatContextMeter used={currentContextTokens} max={contextMaxTokens} />
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -915,10 +1149,14 @@ export function GoatSurface({
                   message={message}
                   taskLookup={chatTaskLookup}
                   stopped={locallyStoppedAssistantMessageIds.has(message.id)}
+                  durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
                 />
               ))}
-              {showThinkingBubble ? (
-                <ThinkingIndicator {...(isEngineChat ? { label: "Codex is working" } : {})} />
+              {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
+                <ThinkingIndicator
+                  startedAtMs={activeTurnTimerStartedAtMs}
+                  label={isEngineChat ? "Codex is working" : "Goat is working"}
+                />
               ) : null}
             </div>
           </div>
@@ -988,80 +1226,141 @@ export function GoatSurface({
               </button>
             </div>
           ) : null}
-          <div className="flex items-end gap-2.5 rounded-2xl border border-border bg-surface px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong">
-            <div className="relative min-w-0 flex-1 self-center">
-              {input ? (
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                >
-                  {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
-                </div>
-              ) : null}
-              <textarea
-                ref={inputRef}
-                rows={1}
-                id="prompt"
-                name="prompt"
-                value={input}
-                placeholder={mode === "chat" ? "Reply..." : "Ask a question or describe a task..."}
-                onChange={onInputChange}
-                onBlur={() => setMentionToken(null)}
-                onClick={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                onKeyDown={onKeyDown}
-                onSelect={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                disabled={isGenerating || localCodexFeatureDisabledForChat}
-                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                maxLength={10_000}
-                required
-              />
-            </div>
-            <GoatModelPicker
-              value={chatModel}
-              onChange={(model) => {
-                setChatModel(model);
-                if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
-                  setCodexPlanModeEnabled(false);
-                  setCodexGoalModeEnabled(false);
-                  setCodexGoalObjective("");
-                  setCodexGoalTokenBudget("");
-                }
-              }}
-              disabled={isGenerating || Boolean(activeEngineChat)}
-              localCodexBetaEnabled={localCodexBetaEnabled}
-              codexConnected={codexConnected}
-            />
-            {showCodexComposerControls ? (
-              <CodexComposerControls
-                reasoningEffort={codexReasoningEffort}
-                planModeEnabled={codexPlanModeEnabled}
-                goalModeEnabled={codexGoalModeEnabled}
-                goalObjective={codexGoalObjective}
-                goalTokenBudget={codexGoalTokenBudget}
-                disabled={engineSubmitting}
-                onReasoningEffortChange={setCodexReasoningEffort}
-                onPlanModeEnabledChange={setCodexPlanModeEnabled}
-                onGoalModeEnabledChange={setCodexGoalModeEnabled}
-                onGoalObjectiveChange={setCodexGoalObjective}
-                onGoalTokenBudgetChange={setCodexGoalTokenBudget}
-              />
+          <div
+            {...composerAttachments.dragHandlers}
+            className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
+          >
+            {composerAttachments.isDragActive && attachmentsEnabled ? (
+              <GoatComposerDropOverlay />
             ) : null}
-            {isEngineChat && engineRunning ? (
-              <EngineStopButton
-                label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+            {composerAttachments.attachments.length > 0 ? (
+              <div className="px-3.5 pt-3">
+                <GoatComposerAttachments
+                  attachments={composerAttachments.attachments}
+                  onRemove={composerAttachments.removeAttachment}
+                />
+              </div>
+            ) : null}
+            <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
+              <div className="relative min-w-0 flex-1 self-center">
+                {input ? (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                  >
+                    {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
+                  </div>
+                ) : null}
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  id="prompt"
+                  name="prompt"
+                  value={input}
+                  placeholder={
+                    mode === "chat" ? "Reply..." : "Ask a question or describe a task..."
+                  }
+                  onChange={onInputChange}
+                  onBlur={() => setMentionToken(null)}
+                  onClick={(event) =>
+                    updateMentionToken(
+                      event.currentTarget.value,
+                      event.currentTarget.selectionStart,
+                    )
+                  }
+                  onKeyDown={onKeyDown}
+                  onPaste={(event) => {
+                    composerAttachments.handlePasteFiles(event);
+                  }}
+                  onSelect={(event) =>
+                    updateMentionToken(
+                      event.currentTarget.value,
+                      event.currentTarget.selectionStart,
+                    )
+                  }
+                  disabled={isGenerating || localCodexFeatureDisabledForChat}
+                  className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                  maxLength={10_000}
+                />
+              </div>
+              {isEngineChat && engineRunning ? (
+                <EngineStopButton
+                  label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+                  onStop={stopGeneration}
+                />
+              ) : null}
+              <SubmitButton
+                disabled={
+                  (!input.trim() &&
+                    !composerAttachments.attachments.some(
+                      (attachment) => attachment.status === "ready",
+                    )) ||
+                  composerAttachments.isUploading ||
+                  engineSubmitting ||
+                  localCodexFeatureDisabledForChat
+                }
+                isGenerating={isGenerating}
                 onStop={stopGeneration}
               />
-            ) : null}
-            <SubmitButton
-              disabled={!input.trim() || engineSubmitting || localCodexFeatureDisabledForChat}
-              isGenerating={isGenerating}
-              onStop={stopGeneration}
-            />
+            </div>
+            <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+              {attachmentsEnabled ? (
+                <>
+                  <input
+                    ref={attachmentFileInputRef}
+                    type="file"
+                    multiple
+                    accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
+                    className="hidden"
+                    onChange={(event) => {
+                      const files = Array.from(event.currentTarget.files ?? []);
+                      event.currentTarget.value = "";
+                      if (files.length > 0) composerAttachments.acceptFiles(files);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Attach files"
+                    disabled={isGenerating}
+                    onClick={() => attachmentFileInputRef.current?.click()}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                  >
+                    <Plus size={16} strokeWidth={1.9} />
+                  </button>
+                </>
+              ) : null}
+              <GoatModelPicker
+                value={chatModel}
+                onChange={(model) => {
+                  setChatModel(model);
+                  if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
+                    setCodexPlanModeEnabled(false);
+                    setCodexGoalModeEnabled(false);
+                    setCodexGoalObjective("");
+                    setCodexGoalTokenBudget("");
+                  }
+                }}
+                disabled={isGenerating || Boolean(activeEngineChat)}
+                localCodexBetaEnabled={localCodexBetaEnabled}
+                codexConnected={codexConnected}
+              />
+              {showCodexComposerControls ? (
+                <CodexComposerControls
+                  reasoningEffort={codexReasoningEffort}
+                  planModeEnabled={codexPlanModeEnabled}
+                  goalModeEnabled={codexGoalModeEnabled}
+                  goalObjective={codexGoalObjective}
+                  goalTokenBudget={codexGoalTokenBudget}
+                  disabled={engineSubmitting}
+                  onReasoningEffortChange={setCodexReasoningEffort}
+                  onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                  onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                  onGoalObjectiveChange={setCodexGoalObjective}
+                  onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+                />
+              ) : null}
+            </div>
           </div>
         </div>
       </form>
@@ -1078,6 +1377,36 @@ function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
 }
 
+function visibleHomeChats(
+  chats: readonly GoatChatSummaryView[],
+  optimisticallyArchivedChatIds: ReadonlySet<string>,
+) {
+  return chats
+    .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
+    .filter((chat) => isRecentGoatHomeActivity(chat.updatedAt))
+    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function visibleHomeSchedules(schedules: readonly GoatTaskScheduleView[]) {
+  return schedules
+    .filter((schedule) => schedule.id)
+    .toSorted((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime());
+}
+
+function visibleHomeResults(
+  tasks: readonly GoatTaskView[],
+  optimisticallyArchivedIds: ReadonlySet<string>,
+) {
+  return tasks
+    .filter(
+      (task) =>
+        !optimisticallyArchivedIds.has(task.id) &&
+        !task.archivedAt &&
+        isRecentGoatHomeActivity(task.createdAt),
+    )
+    .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
 function titleFromChatMessages(messages: readonly GoatChatUiMessage[]) {
   const firstUserMessage = messages.find((message) => message.role === "user");
   const text = firstUserMessage ? textFromGoatChatUiMessage(firstUserMessage) : "";
@@ -1087,6 +1416,26 @@ function titleFromChatMessages(messages: readonly GoatChatUiMessage[]) {
     .find(Boolean);
   if (!firstLine) return null;
   return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57).trimEnd()}...`;
+}
+
+function chatMessageDurationMs(
+  message: GoatChatUiMessage,
+  optimisticTurnDurations: ReadonlyMap<string, number>,
+) {
+  if (message.role !== "assistant") return null;
+  const persistedDurationMs = message.metadata?.timing?.durationMs;
+  if (typeof persistedDurationMs === "number") return persistedDurationMs;
+  return optimisticTurnDurations.get(message.id) ?? null;
+}
+
+function latestChatTurnStartedAtMs(messages: readonly GoatChatUiMessage[]) {
+  for (const message of messages.toReversed()) {
+    const createdAt = message.metadata?.timing?.createdAt;
+    if (!createdAt) continue;
+    const startedAtMs = Date.parse(createdAt);
+    if (Number.isFinite(startedAtMs)) return startedAtMs;
+  }
+  return null;
 }
 
 type EngineChatMessageResponse = {
@@ -1153,6 +1502,51 @@ function appendEngineOptimisticMessages(
     });
   }
   return next;
+}
+
+function defaultCodexComposerUiState(): CodexComposerUiState {
+  return {
+    reasoningEffort: "medium",
+    planModeEnabled: false,
+    goalModeEnabled: false,
+    goalObjective: "",
+    goalTokenBudget: "",
+  };
+}
+
+function codexComposerUiStateForChat(
+  chat:
+    | {
+        id?: string | null;
+        codexComposerSettings?: CodexComposerSettings | null;
+      }
+    | null
+    | undefined,
+  savedByChatId?: ReadonlyMap<string, CodexComposerUiState>,
+): CodexComposerUiState {
+  if (chat?.id) {
+    const saved = savedByChatId?.get(chat.id);
+    if (saved) return saved;
+  }
+  return codexComposerUiStateFromSettings(chat?.codexComposerSettings ?? null);
+}
+
+function codexComposerUiStateFromSettings(
+  settings: CodexComposerSettings | null | undefined,
+): CodexComposerUiState {
+  if (!settings) return defaultCodexComposerUiState();
+  const goalMode = settings.goalMode ?? null;
+  return {
+    reasoningEffort: settings.reasoningEffort,
+    planModeEnabled: settings.planModeEnabled,
+    goalModeEnabled: goalMode !== null,
+    goalObjective: goalMode?.objective ?? "",
+    goalTokenBudget: goalMode?.tokenBudget == null ? "" : String(goalMode.tokenBudget),
+  };
+}
+
+function currentCodexComposerUiState(input: CodexComposerUiState): CodexComposerUiState {
+  return { ...input };
 }
 
 function buildCodexComposerSettings(input: {
@@ -1413,7 +1807,7 @@ function ChatTitleHeader({
   engine: GoatChatEngine;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-ink shadow-[0_1px_3px_rgba(15,15,15,0.04)]">
+    <div className="flex min-w-0 items-center gap-2 text-ink">
       {engine === "local_codex" ? (
         <Code2 size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : engine === "codex" ? (
@@ -1431,6 +1825,61 @@ function ChatTitleHeader({
       </span>
     </div>
   );
+}
+
+// A small ring that fills to the share of the model's context window in use. The
+// exact "used / max" figure stays out of the chrome and is surfaced on hover
+// (native title), keeping the header quiet — mirrors the web app's meter.
+function ChatContextMeter({ used, max }: { used: number; max: number }) {
+  const fraction = max > 0 ? Math.min(1, used / max) : 0;
+  const size = 14;
+  const strokeWidth = 2;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const detail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
+    fraction * 100,
+  )}%`;
+  return (
+    <span
+      className="flex shrink-0 items-center text-ink-muted"
+      title={detail}
+      aria-label={`Context window usage: ${detail}`}
+    >
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          stroke="currentColor"
+          className="text-ink/15"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - fraction)}
+          className="text-ink/70 transition-[stroke-dashoffset] duration-500"
+        />
+      </svg>
+    </span>
+  );
+}
+
+// Compact token formatter: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".
+function formatCompactTokens(value: number): string {
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return `${value}`;
 }
 
 function CodexSandboxStatusIndicator({ status }: { status: GoatCodexSandboxStatus | null }) {
@@ -1663,28 +2112,18 @@ function LiveChatTaskSubscriber({
 
 function ChatHistoryList({
   chats,
-  optimisticallyArchivedChatIds,
   onSelect,
   onArchive,
 }: {
   chats: readonly GoatChatSummaryView[];
-  optimisticallyArchivedChatIds: ReadonlySet<string>;
   onSelect: (chat: GoatChatSummaryView) => void;
   onArchive: (chat: GoatChatSummaryView) => void;
 }) {
   const router = useRouter();
-  const visibleChats = chats
-    .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
-    .filter((chat) => isRecentGoatHomeActivity(chat.updatedAt))
-    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-
-  if (visibleChats.length === 0) {
-    return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No chats yet.</p>;
-  }
 
   return (
     <div className="flex flex-col">
-      {visibleChats.map((chat) => {
+      {chats.map((chat) => {
         const href = chatHref(chat.id);
         const prefetchChat = () => router.prefetch(href);
         return (
@@ -1711,7 +2150,7 @@ function ChatHistoryList({
                   <span className="truncate text-[14px] font-medium leading-tight text-ink">
                     {chat.title}
                   </span>
-                  <span className="shrink-0 text-[12px] leading-tight text-ink-subtle transition-opacity duration-150 group-hover/chat:opacity-0 group-focus-within/chat:opacity-0">
+                  <span className="shrink-0 text-[12px] leading-tight text-ink-faint transition-opacity duration-150 group-hover/chat:opacity-0 group-focus-within/chat:opacity-0">
                     {formatRelativeTime(chat.updatedAt)}
                   </span>
                 </div>
@@ -1734,41 +2173,8 @@ function ChatHistoryList({
   );
 }
 
-function LiveSchedulesList({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
-  const hydrated = useHydrated();
-  if (!hydrated) return <ScheduleRows schedules={schedules} />;
-  return <LiveSchedulesSubscriber initialSchedules={schedules} />;
-}
-
-function LiveSchedulesSubscriber({
-  initialSchedules,
-}: {
-  initialSchedules: readonly GoatTaskScheduleView[];
-}) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows, isLoading } = useLiveQuery((q) =>
-    q.from({ schedule: collections.taskSchedules }),
-  );
-  const liveSchedules = useMemo(
-    () => (rows ?? []).filter((row) => !row.deleted_at).map(taskScheduleRowToView),
-    [rows],
-  );
-  const schedules = isLoading && initialSchedules.length > 0 ? initialSchedules : liveSchedules;
-  return <ScheduleRows schedules={schedules} />;
-}
-
 function ScheduleRows({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
-  const visible = schedules
-    .filter((schedule) => schedule.id)
-    .toSorted((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime());
-
-  if (visible.length === 0) {
-    return (
-      <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No recurring tasks yet.</p>
-    );
-  }
-
-  return visible.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} />);
+  return schedules.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} />);
 }
 
 function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
@@ -1960,22 +2366,6 @@ function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
   );
 }
 
-function taskScheduleRowToView(row: GoatTaskScheduleRow): GoatTaskScheduleView {
-  return {
-    id: row.id,
-    name: row.name,
-    sourceDescription: row.source_description,
-    cron: row.cron,
-    timezone: row.timezone,
-    prompt: row.prompt,
-    enabled: row.enabled,
-    lastRunAt: row.last_run_at,
-    nextRunAt: row.next_run_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 function formatScheduleNextRun(value: string) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "Next run unknown";
@@ -1987,80 +2377,14 @@ function formatScheduleNextRun(value: string) {
   return `Next in ${days}d`;
 }
 
-function LiveResultsList({
-  tasks,
-  optimisticallyArchivedIds,
-  onArchive,
-}: {
-  tasks: readonly GoatTaskView[];
-  optimisticallyArchivedIds: ReadonlySet<string>;
-  onArchive: (task: GoatTaskView) => void;
-}) {
-  const hydrated = useHydrated();
-  if (!hydrated) {
-    return (
-      <ResultRows
-        tasks={tasks}
-        optimisticallyArchivedIds={optimisticallyArchivedIds}
-        onArchive={onArchive}
-      />
-    );
-  }
-  return (
-    <LiveResultsSubscriber
-      initialTasks={tasks}
-      optimisticallyArchivedIds={optimisticallyArchivedIds}
-      onArchive={onArchive}
-    />
-  );
-}
-
-function LiveResultsSubscriber({
-  initialTasks,
-  optimisticallyArchivedIds,
-  onArchive,
-}: {
-  initialTasks: readonly GoatTaskView[];
-  optimisticallyArchivedIds: ReadonlySet<string>;
-  onArchive: (task: GoatTaskView) => void;
-}) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows, isLoading } = useLiveQuery((q) => q.from({ task: collections.tasks }));
-  const liveTasks = useMemo(() => (rows ?? []).map(taskRowToView), [rows]);
-  const tasks = isLoading && initialTasks.length > 0 ? initialTasks : liveTasks;
-
-  return (
-    <ResultRows
-      tasks={tasks}
-      optimisticallyArchivedIds={optimisticallyArchivedIds}
-      onArchive={onArchive}
-    />
-  );
-}
-
 function ResultRows({
   tasks,
-  optimisticallyArchivedIds,
   onArchive,
 }: {
   tasks: readonly GoatTaskView[];
-  optimisticallyArchivedIds: ReadonlySet<string>;
   onArchive: (task: GoatTaskView) => void;
 }) {
-  const sortedTasks = tasks
-    .filter(
-      (task) =>
-        !optimisticallyArchivedIds.has(task.id) &&
-        !task.archivedAt &&
-        isRecentGoatHomeActivity(task.createdAt),
-    )
-    .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  if (sortedTasks.length === 0) {
-    return <p className="px-2 py-2 text-[13px] leading-5 text-ink-subtle">No results yet.</p>;
-  }
-
-  return sortedTasks.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchive} />);
+  return tasks.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchive} />);
 }
 
 function taskRowToView(row: GoatTaskRow): GoatTaskView {
@@ -2090,6 +2414,9 @@ function chatMessageRowToUiMessage(row: GoatChatMessageRow): GoatChatUiMessage {
     content: row.content,
     taskId: row.task_id,
     debugTrace: row.debug_trace as GoatStoredChatMessage["debugTrace"],
+    attachments: row.attachments ?? null,
+    // attachment_texts is server-only (excluded from the Electric shape).
+    attachmentTexts: null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     taskDisplayId: null,

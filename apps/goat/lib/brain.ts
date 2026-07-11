@@ -58,7 +58,7 @@ export type GoatBrainDocumentView = {
   content: string;
   body: string;
   timeline: GoatBrainTimelineEntry[];
-  format: "markdown" | "pdf" | "docx";
+  format: "markdown" | "pdf" | "docx" | "xlsx" | "image";
   mimeType: string;
   originalFileName?: string | null;
   assetStorageKey?: string | null;

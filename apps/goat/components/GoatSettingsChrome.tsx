@@ -1,0 +1,202 @@
+"use client";
+
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  Blocks,
+  CircleDollarSign,
+  PanelLeft,
+  SlidersHorizontal,
+  UserRound,
+  Users,
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
+
+type SettingsNavItem = {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  isActive: (pathname: string) => boolean;
+};
+
+type SettingsNavGroup = {
+  label: string;
+  items: SettingsNavItem[];
+};
+
+const NAV_GROUPS: SettingsNavGroup[] = [
+  {
+    label: "Personal",
+    items: [
+      {
+        href: "/settings",
+        icon: UserRound,
+        label: "Account",
+        isActive: (pathname) => pathname === "/settings",
+      },
+      {
+        href: "/settings/integrations",
+        icon: Blocks,
+        label: "Integrations",
+        isActive: (pathname) =>
+          pathname === "/settings/integrations" || pathname.startsWith("/settings/jamie"),
+      },
+      {
+        href: "/settings/preferences",
+        icon: SlidersHorizontal,
+        label: "Preferences",
+        isActive: (pathname) => pathname === "/settings/preferences",
+      },
+    ],
+  },
+  {
+    label: "Workspace",
+    items: [
+      {
+        href: "/settings/workspace/usage",
+        icon: CircleDollarSign,
+        label: "Usage",
+        isActive: (pathname) => pathname === "/settings/workspace/usage",
+      },
+      {
+        href: "/settings/workspace",
+        icon: Users,
+        label: "Members",
+        isActive: (pathname) => pathname === "/settings/workspace",
+      },
+    ],
+  },
+];
+
+function SettingsNavRow({ item, active }: { item: SettingsNavItem; active: boolean }) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      prefetch
+      aria-current={active ? "page" : undefined}
+      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+      }`}
+    >
+      <Icon
+        size={14}
+        strokeWidth={1.75}
+        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
+      />
+      <span className="truncate tracking-[-0.005em]">{item.label}</span>
+    </Link>
+  );
+}
+
+// Settings-scoped sidebar. GoatShell swaps this in for the primary GoatSidebar while the user is
+// anywhere under /settings, so the whole left rail becomes a table of contents for settings.
+export function GoatSettingsSidebar({
+  collapsed,
+  onToggleCollapsed,
+}: {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
+  const pathname = usePathname();
+
+  return (
+    <aside
+      className={`relative h-full shrink-0 overflow-hidden bg-sidebar transition-[width] duration-200 ease-out ${
+        collapsed ? "w-0" : "w-[256px]"
+      }`}
+      aria-hidden={collapsed}
+    >
+      <div className="flex h-full w-[256px] flex-col">
+        {/* Header: collapse control + return to the app */}
+        <div className="flex items-center gap-1 px-2 pb-2 pt-3">
+          <button
+            type="button"
+            aria-label="Collapse sidebar"
+            aria-expanded={!collapsed}
+            onClick={onToggleCollapsed}
+            className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <PanelLeft size={15} strokeWidth={1.75} />
+          </button>
+          <Link
+            href="/"
+            prefetch
+            className="group flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] text-ink/80 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <ArrowLeft
+              size={14}
+              strokeWidth={1.75}
+              className="shrink-0 text-ink/60 transition-colors group-hover:text-ink/80"
+            />
+            <span className="truncate font-medium tracking-[-0.005em]">Back to app</span>
+          </Link>
+        </div>
+
+        <div className="px-3 pb-1 pt-3">
+          <span className="text-[15px] font-semibold tracking-[-0.01em] text-ink">Settings</span>
+        </div>
+
+        <nav
+          aria-label="Settings"
+          className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-2 pb-6 pt-3"
+        >
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label} className="flex flex-col gap-px">
+              <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+                {group.label}
+              </div>
+              {group.items.map((item) => (
+                <SettingsNavRow key={item.href} item={item} active={item.isActive(pathname)} />
+              ))}
+            </div>
+          ))}
+        </nav>
+      </div>
+    </aside>
+  );
+}
+
+// Shared content shell for every settings sub-page: a scrollable, left-aligned column with a
+// consistent header. Nav lives in GoatSettingsSidebar, so pages only own their body.
+export function GoatSettingsContent({
+  title,
+  description,
+  backLink,
+  children,
+}: {
+  title: string;
+  description?: string;
+  backLink?: { href: string; label: string };
+  children: ReactNode;
+}) {
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 overflow-y-auto px-6 md:px-10">
+        <div className="mx-auto flex w-full max-w-[680px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
+          {backLink ? (
+            <Link
+              href={backLink.href}
+              prefetch
+              className="-mb-4 inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <ArrowLeft size={14} strokeWidth={2} />
+              {backLink.label}
+            </Link>
+          ) : null}
+          <header className="flex flex-col gap-1.5">
+            <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
+              {title}
+            </h1>
+            {description ? (
+              <p className="text-[13px] leading-5 text-ink-subtle">{description}</p>
+            ) : null}
+          </header>
+          {children}
+        </div>
+      </div>
+    </main>
+  );
+}

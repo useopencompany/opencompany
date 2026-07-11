@@ -31,6 +31,8 @@ vi.mock("ai", () => ({
 
 vi.mock("@opencompany/observability/braintrust", () => ({
   getBraintrustAISDK: <T>(sdk: T) => sdk,
+  traceBraintrust: <T>(_input: unknown, run: () => Promise<T>) => run(),
+  flushBraintrust: async () => {},
 }));
 
 vi.mock("./goat-brain", () => goatBrainMock);

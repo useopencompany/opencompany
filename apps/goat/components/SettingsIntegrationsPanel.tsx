@@ -26,18 +26,31 @@ import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-colle
 
 export function SettingsIntegrationsPanel({
   initialIntegrations,
+  isWorkspaceAdmin,
 }: {
   initialIntegrations: GoatIntegrationState;
+  isWorkspaceAdmin: boolean;
 }) {
   const hydrated = useHydrated();
-  if (!hydrated) return <IntegrationRows integrations={initialIntegrations} />;
-  return <LiveSettingsIntegrations initialIntegrations={initialIntegrations} />;
+  if (!hydrated) {
+    return (
+      <IntegrationRows integrations={initialIntegrations} isWorkspaceAdmin={isWorkspaceAdmin} />
+    );
+  }
+  return (
+    <LiveSettingsIntegrations
+      initialIntegrations={initialIntegrations}
+      isWorkspaceAdmin={isWorkspaceAdmin}
+    />
+  );
 }
 
 function LiveSettingsIntegrations({
   initialIntegrations,
+  isWorkspaceAdmin,
 }: {
   initialIntegrations: GoatIntegrationState;
+  isWorkspaceAdmin: boolean;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const { data: rows, isLoading } = useLiveQuery((q) =>
@@ -58,23 +71,56 @@ function LiveSettingsIntegrations({
     };
   }, [initialIntegrations, isLoading, rows]);
 
-  return <IntegrationRows integrations={integrations} />;
+  return <IntegrationRows integrations={integrations} isWorkspaceAdmin={isWorkspaceAdmin} />;
 }
 
-function IntegrationRows({ integrations }: { integrations: GoatIntegrationState }) {
+function IntegrationRows({
+  integrations,
+  isWorkspaceAdmin,
+}: {
+  integrations: GoatIntegrationState;
+  isWorkspaceAdmin: boolean;
+}) {
   return (
     <>
-      <IntegrationRow icon={Mail} label="Gmail" integration={integrations.gmail} />
-      <IntegrationRow
-        icon={CalendarDays}
-        label="Google Calendar"
-        integration={integrations.google_calendar}
-      />
-      <IntegrationRow icon={ListTodo} label="Linear" integration={integrations.linear} />
-      <IntegrationRow icon={GitBranch} label="GitHub" integration={integrations.github} />
-      <IntegrationRow icon={FileText} label="Jamie" integration={integrations.jamie} />
-      <IntegrationRow icon={SlackIcon} label="Slack" integration={integrations.slack} />
-      <CodexIntegrationRow integration={integrations.codex} />
+      <section className="flex flex-col gap-1">
+        <h2 className="mb-0.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Workspace
+        </h2>
+        <p className="mb-1 px-2 text-[12px] leading-5 text-ink-subtle">
+          Shared connections that feed the brains in this workspace.
+          {isWorkspaceAdmin ? "" : " Managed by workspace admins."}
+        </p>
+        <IntegrationRow
+          icon={GitBranch}
+          label="GitHub"
+          integration={integrations.github}
+          canConnect={isWorkspaceAdmin}
+        />
+        <IntegrationRow
+          icon={FileText}
+          label="Jamie"
+          integration={integrations.jamie}
+          canConnect={isWorkspaceAdmin}
+        />
+      </section>
+      <section className="mt-4 flex flex-col gap-1">
+        <h2 className="mb-0.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Personal
+        </h2>
+        <p className="mb-1 px-2 text-[12px] leading-5 text-ink-subtle">
+          Connections that act as you. Only you can manage them or wire them into brains.
+        </p>
+        <IntegrationRow icon={Mail} label="Gmail" integration={integrations.gmail} />
+        <IntegrationRow
+          icon={CalendarDays}
+          label="Google Calendar"
+          integration={integrations.google_calendar}
+        />
+        <IntegrationRow icon={ListTodo} label="Linear" integration={integrations.linear} />
+        <IntegrationRow icon={SlackIcon} label="Slack" integration={integrations.slack} />
+        <CodexIntegrationRow integration={integrations.codex} />
+      </section>
     </>
   );
 }
@@ -83,6 +129,7 @@ function IntegrationRow({
   icon: Icon,
   label,
   integration,
+  canConnect = true,
 }: {
   // Lucide icons and @opencompany/ui brand icons share this prop surface.
   icon: IconComponent;
@@ -93,6 +140,8 @@ function IntegrationRow({
     | GoatGitHubProviderState
     | GoatJamieProviderState
     | GoatSlackProviderState;
+  // Workspace-owned integrations render read-only for non-admin members.
+  canConnect?: boolean;
 }) {
   const status = integrationStatus(integration);
   const connectHref = integrationConnectHref(integration.provider);
@@ -121,9 +170,9 @@ function IntegrationRow({
             </span>
           ) : null}
         </div>
-        {status === "Connected" ? (
+        {status === "Connected" || !canConnect ? (
           <span className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
-            {status}
+            {status === "Connected" ? status : "Not connected"}
           </span>
         ) : (
           <a
@@ -293,6 +342,7 @@ function integrationStatus(
     | GoatSlackProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
+  if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
   if (integration.provider === "jamie" && integration.status === "needs_reauth")
     return "Finish setup";
   if (integration.status === "needs_reauth" || integration.status === "sync_failed") {
@@ -304,14 +354,15 @@ function integrationStatus(
 function integrationConnectHref(
   provider: GoatGoogleProviderState["provider"] | "linear" | "github" | "jamie" | "slack",
 ) {
-  if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings";
+  if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
-    return "/api/integrations/google-calendar/start?returnTo=/settings";
+    return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
   }
-  if (provider === "github") return "/api/integrations/github/start?returnTo=/settings";
+  if (provider === "github")
+    return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
-  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings";
-  return "/api/integrations/linear/start?returnTo=/settings";
+  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
+  return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 
 function buttonLabel(status: string, isPending: boolean) {

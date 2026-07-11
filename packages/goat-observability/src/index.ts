@@ -12,6 +12,7 @@ export const GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS = 60_000;
 export const GOAT_OTEL_TRACE_SAMPLE_RATE = 1;
 
 export const GOAT_SPANS = {
+  signupCompleted: "goat.signup.completed",
   chatTurn: "goat.chat.turn",
   taskDispatch: "goat.task.dispatch",
   taskClaim: "goat.task.claim",
@@ -27,6 +28,7 @@ export const GOAT_SPANS = {
 } as const;
 
 export const GOAT_METRICS = {
+  signupsTotal: "goat.signups_total",
   runsTotal: "goat.runs_total",
   runDurationMs: "goat.run_duration_ms",
   chatTurnsTotal: "goat.chat.turns_total",
@@ -47,6 +49,7 @@ export const GOAT_METRICS = {
 } as const;
 
 export type GoatRunSurface = "chat" | "task" | "brain_ingest";
+export type GoatSignupSource = "user_sync";
 export type GoatOutcome = "success" | "failure" | "skipped" | "aborted";
 
 export type GoatFailureCategory =
@@ -139,6 +142,7 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
   "goat.web_search_provider",
   "goat.web_search_operation",
   "goat.token_direction",
+  "goat.signup_source",
 ]);
 
 export function isGoatObservabilityEnabled(env: EnvLike = readEnv()) {
@@ -398,6 +402,19 @@ export function recordGoatRunOutcome(input: {
 
   recordGoatCounter(GOAT_METRICS.brainIngestRunsTotal, 1, attributes);
   recordGoatHistogram(GOAT_METRICS.brainIngestRunDurationMs, input.durationMs, attributes);
+}
+
+export function recordGoatSignup(
+  input: { source?: GoatSignupSource; attributes?: GoatAttributes } = {},
+) {
+  const attributes: GoatAttributes = {
+    ...input.attributes,
+    "goat.signup_source": input.source ?? "user_sync",
+    "goat.outcome": "success",
+  };
+  const span = startGoatSpan(GOAT_SPANS.signupCompleted, attributes);
+  span.end(attributes);
+  recordGoatCounter(GOAT_METRICS.signupsTotal, 1, attributes);
 }
 
 export function recordGoatChatTurn(input: {

@@ -154,33 +154,41 @@ access, and keep Braintrust disabled in environments where full AI content must 
 
 ## Goat Run Outcomes
 
-Goat chat turns, task runs, and Brain agent ingest jobs emit a first-layer health signal through
-`@opencompany/goat-observability` when `GOAT_OBSERVABILITY_ENABLED=true` and
+Goat signups, chat turns, task runs, and Brain agent ingest jobs emit a first-layer health signal
+through `@opencompany/goat-observability` when `GOAT_OBSERVABILITY_ENABLED=true` and
 `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
-Use SigNoz for the aggregate view:
+For the SigNoz dashboard, saved trace views, MCP prompts, and event inventory, see
+[signoz-goat-observability.md](./signoz-goat-observability.md).
 
+Use SigNoz for the aggregate view. The current production dashboard starts with trace-backed
+aggregates because those are live and drill down to investigation IDs. Add metric-native panels for
+these series once fresh counter data is present:
+
+- `goat.signups_total` grouped by `goat.signup_source`
 - `goat.runs_total` grouped by `goat.surface`, `goat.outcome`, and `goat.failure_category`
 - `goat.run_duration_ms` grouped by `goat.surface`
 - `goat.chat.turns_total` and `goat.chat.turn_duration_ms`
 - `goat.task_runs_total` and `goat.task_run_duration_ms`
 - `goat.brain_ingest_runs_total` and `goat.brain_ingest_run_duration_ms` for Brain agent ingest jobs
 
-Safe metric dimensions are intentionally low-cardinality: surface, outcome, failure category, model,
-status, stage, task-started boolean, Brain ingest kind/source provider/source type, and web-search
-provider/operation. Do not put run IDs, user IDs, source refs, prompts, tool args, or result text on
-metrics.
+Safe metric dimensions are intentionally low-cardinality: signup source, surface, outcome, failure
+category, model, status, stage, task-started boolean, Brain ingest kind/source provider/source type,
+and web-search provider/operation. Do not put run IDs, user IDs, source refs, prompts, tool args, or
+result text on metrics.
 
 Use traces or structured logs for investigation IDs:
 
 | Surface | Terminal event | Primary DB lookup IDs |
 |---|---|---|
+| Goat signup | `goat.signup.completed` | none |
 | Goat chat | `opencompany.goat_chat_turn_finished` | `chat_session_id`, `chat_message_id`, optional `task_id` |
 | Goat task | `opencompany.goat_task_run_finished` | `task_id`, `display_id` |
 | Brain agent ingest | `opencompany.goat_brain_ingest_run_finished` | `job_id`, `source_item_id`, `brain_ref` |
 
 Suggested SigNoz dashboard panels:
 
+- New Goat signups per day: count spans named `goat.signup.completed` with a 1 day interval
 - Total Goat runs: `sum(goat.runs_total)` grouped by `goat.surface`
 - Success rate: successful runs divided by total runs, grouped by `goat.surface`
 - Failure rate: failed runs divided by total runs, grouped by `goat.surface`

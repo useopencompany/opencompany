@@ -1,5 +1,6 @@
 import type {
   GoatBrainFolderSource,
+  GoatChatMessageAttachment,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
   GoatTaskEventType,
@@ -63,6 +64,7 @@ export type GoatChatMessageRow = {
   content: string;
   task_id: string | null;
   debug_trace: Record<string, unknown> | null;
+  attachments: GoatChatMessageAttachment[] | null;
   created_at: string;
   updated_at: string;
 };
@@ -218,6 +220,8 @@ export type GoatTaskSandboxUsageRow = {
 export type GoatIntegrationRow = {
   id: string;
   user_workos_id: string;
+  workspace_id: string | null;
+  shared_with_workspace: boolean;
   provider: GoatIntegrationProvider;
   external_id: string;
   connection_label: string | null;
@@ -318,7 +322,7 @@ export type GoatBrainSourceItemRow = {
   source_provider: string;
   source_type: string;
   external_id: string;
-  title: string;
+  title: string | null;
   occurred_at: string;
   captured_at: string;
   content_hash: string;

@@ -1,4 +1,4 @@
-import { executeExaSearchRequest } from "@opencompany/agent-runtime";
+import { executeExaSearchRequest, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
@@ -31,6 +31,12 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
+import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
+import {
+  extractGoatChatAttachmentTexts,
+  hydrateGoatChatAttachmentParts,
+  parseGoatChatAttachmentsInput,
+} from "@/lib/chat-attachments";
 import {
   clearActiveGoatChatStream,
   getGoatChatStreamContext,
@@ -43,7 +49,6 @@ import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
   type DeleteTaskScheduleToolOutput,
   type EditTaskScheduleToolOutput,
-  type GoatBrainCliCommand,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
   textFromGoatChatUiMessage,
@@ -63,15 +68,6 @@ import { createGoatTaskForUser } from "@/lib/tasks";
 
 export const maxDuration = 240;
 export const runtime = "nodejs";
-
-const GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS = [
-  "help",
-  "list",
-  "get",
-  "timeline",
-  "query",
-  "doctor",
-] as const satisfies readonly GoatBrainCliCommand[];
 
 const logger = createLogger({ service: "opencompany-goat", runtime: "goat-chat" });
 
@@ -94,17 +90,40 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Invalid chat message.", { status: 400 });
   }
 
+  const parsedAttachments = parseGoatChatAttachmentsInput(
+    message.metadata?.attachments,
+    context.user.workosUserId,
+  );
+  if (!parsedAttachments.ok) return new Response(parsedAttachments.error, { status: 400 });
+  const attachments = parsedAttachments.attachments;
+
   const parsed = validateGoatChatInput({
     prompt: textFromGoatChatUiMessage(message),
     model: body.value.model,
     sessionId: body.value.sessionId,
+    hasAttachments: attachments.length > 0,
   });
   if (!parsed.ok) return new Response(parsed.error, { status: 400 });
+
+  const attachmentCapabilities = modelSupportsAttachments(parsed.value.model);
+  if (
+    attachments.some((attachment) => attachment.kind === "image") &&
+    !attachmentCapabilities.images
+  ) {
+    return new Response("The selected model does not support image attachments.", { status: 400 });
+  }
+  if (attachments.some((attachment) => attachment.kind === "pdf") && !attachmentCapabilities.pdf) {
+    return new Response("The selected model does not support PDF attachments.", { status: 400 });
+  }
+
   const mentionEngine = readGoatChatMentionEngine(body.value.mentions);
   const requestedEngine =
     mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
       ? "codex"
       : undefined;
+  if (requestedEngine && attachments.length > 0) {
+    return new Response("Attachments are not supported in engine chats yet.", { status: 400 });
+  }
 
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
@@ -120,6 +139,7 @@ export async function POST(request: Request): Promise<Response> {
   const startedAt = performance.now();
   const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
+  const elapsedChatDurationMs = () => Math.max(0, Math.round(performance.now() - startedAt));
   const chatSpan = startGoatSpan(GOAT_SPANS.chatTurn, {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
     "goat.model": parsed.value.model,
@@ -133,7 +153,7 @@ export async function POST(request: Request): Promise<Response> {
   ) => {
     if (chatFinished) return;
     chatFinished = true;
-    const durationMs = Math.round(performance.now() - startedAt);
+    const durationMs = elapsedChatDurationMs();
     const failureCategory =
       outcome === "failure" && error
         ? chatSpan.fail(error, attributes)
@@ -173,6 +193,10 @@ export async function POST(request: Request): Promise<Response> {
 
   let turn: Awaited<ReturnType<typeof createGoatChatUserTurn>>;
   try {
+    // Extract docx/xlsx text once at submit time; every later turn reads the
+    // stored text instead of re-downloading the blob.
+    const attachmentTexts =
+      attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;
     turn = await createGoatChatUserTurn(
       {
         userWorkosId: context.user.workosUserId,
@@ -180,6 +204,8 @@ export async function POST(request: Request): Promise<Response> {
         model: parsed.value.model,
         sessionId: parsed.value.sessionId,
         messageId: safeClientMessageId(message.id),
+        attachments: attachments.length > 0 ? attachments : null,
+        attachmentTexts,
       },
       store,
     );
@@ -223,7 +249,9 @@ export async function POST(request: Request): Promise<Response> {
     model: turn.session.model,
     latestUserMessage: parsed.value.prompt,
     ...(requestedEngine ? { requestedEngine } : {}),
-    ...(canManageWorkspaceBrain ? {} : { brainCommands: GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS }),
+    // goat_brain is read-only for everyone (recall/inspect). The only write path
+    // in chat is save_to_brain, which is wired below for admins and enqueues the
+    // durable ingestion agent. No per-command role branching needed here.
     runBrainCli: (toolInput, toolExecutionContext) => {
       const toolCallId = goatBrainToolCallId(toolExecutionContext);
       const activeBrain = context.activeBrain;
@@ -234,15 +262,6 @@ export async function POST(request: Request): Promise<Response> {
           stdout: "",
           stderr: "",
           error: "You do not have access to any brain in this workspace.",
-        });
-      }
-      if (!canManageWorkspaceBrain && !isMemberReadOnlyGoatBrainCommand(toolInput.command)) {
-        return Promise.resolve({
-          ok: false,
-          exitCode: null,
-          stdout: "",
-          stderr: "",
-          error: "Only workspace admins can edit the brain.",
         });
       }
       return runGoatBrainToolForUser({
@@ -267,10 +286,26 @@ export async function POST(request: Request): Promise<Response> {
                 error: "You do not have access to any brain in this workspace.",
               };
             }
+            const attachmentIds = toolInput.attachmentIds ?? [];
+            if (attachmentIds.length > 0) {
+              return saveChatAttachmentsToGoatBrain({
+                brainRef: activeBrain.id,
+                userWorkosId: context.user.workosUserId,
+                attachmentIds,
+                sessionMessages: turn.storedMessages,
+              });
+            }
+            const content = toolInput.content?.trim();
+            if (!content) {
+              return {
+                ok: false,
+                error: "Provide content or attachmentIds to save.",
+              };
+            }
             const captured = await captureToGoatBrainInbox({
               brainRef: activeBrain.id,
               userWorkosId: context.user.workosUserId,
-              text: toolInput.content,
+              text: content,
               ...(toolInput.title ? { title: toolInput.title } : {}),
               ...(toolInput.intent ? { intent: toolInput.intent } : {}),
               chatSessionId: turn.session.id,
@@ -430,6 +465,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const fallbackTrace = {
       ...debugTrace,
+      durationMs: elapsedChatDurationMs(),
       ...(generationSignal.aborted ? { aborted: true } : {}),
       error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
       finishReason,
@@ -498,12 +534,18 @@ export async function POST(request: Request): Promise<Response> {
             readOnly: !canManageWorkspaceBrain,
           }
         : null,
-      brainWriteEnabled: canManageWorkspaceBrain,
+      brainCaptureEnabled: canManageWorkspaceBrain,
       taskToolsEnabled: canManageWorkspaceBrain,
       scheduleToolsEnabled: canManageWorkspaceBrain,
       recurringSchedules,
     }),
-    messages: await convertToModelMessages(turn.messages),
+    messages: await convertToModelMessages(
+      await hydrateGoatChatAttachmentParts({
+        uiMessages: turn.messages,
+        storedMessages: turn.storedMessages,
+        modelId: turn.session.model,
+      }),
+    ),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     // Providers deliver tokens in bursts; re-chunk to word-level with a small
     // delay so streamed text reads as a steady flow instead of jumps.
@@ -604,6 +646,7 @@ export async function POST(request: Request): Promise<Response> {
       const responseMessageId = safeClientMessageId(responseMessage.id);
       const finalTrace = {
         ...debugTrace,
+        durationMs: elapsedChatDurationMs(),
         ...(isAborted ? { aborted: true } : {}),
         ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
@@ -736,10 +779,6 @@ async function executeGoatChatExaSearch(input: {
 function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
   if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
   return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function isMemberReadOnlyGoatBrainCommand(command: GoatBrainCliCommand) {
-  return (GOAT_BRAIN_MEMBER_READ_ONLY_COMMANDS as readonly string[]).includes(command);
 }
 
 function resolveChatScheduleTarget(

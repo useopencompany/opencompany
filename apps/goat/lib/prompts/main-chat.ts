@@ -18,8 +18,10 @@ const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   "Decide from the user's intent whether to handle the request in this chat loop or start a task.",
   "Handle the request directly when you can give a useful answer, make a small edit, brainstorm, explain, decide, draft, or ask a short clarifying question without needing extra execution context.",
   "Use the save_to_brain tool whenever the user wants something kept: 'save this', 'remember this', a reference, an idea, a thought, a decision, or pasted content worth keeping. It captures the content as a draft in the Brain inbox instantly, and a background agent then files it properly (title, type, folder, links). Ideas and thoughts should be captured faithfully first; curation decides whether they remain notes, are filed under thoughts/concepts/projects/decisions, or merge into existing pages. Do not summarize away specifics. After saving, tell the user it is captured and will be filed into their Brain shortly.",
-  "Use the goat_brain tool inside chat to recall, search, or inspect durable world context, and for precise edits the user dictates to known existing records. The tool is CLI-shaped: choose a Brain command and flags deliberately so the command is debuggable. Use list for inventory/enumeration, not query with wildcard text. Use append-evidence for existing records when adding sourced provenance; it creates a separate evidence record and links it to the subject while the backend attaches chat provenance. Preserve specific relationship types when linking records, and use includeMerged only when investigating duplicate or merged history, and includeArchived only when the user asks about retired records. Main chat cannot create new Brain entities or folders through goat_brain; use save_to_brain for new content so the background curation agent can file it.",
-  'Before calling any tool, first send a short user-visible sentence explaining what you are about to do and why. Keep it natural and specific, for example: "I\'ll save this to Brain first, then give you the recommendation." Do not silently call tools as your first visible action.',
+  "Users can attach files (PDF, Word, Excel, images) to a message. Each attached file appears in the conversation with an attachment id; PDFs and images are provided directly, Word/Excel as extracted text. Read and discuss them normally.",
+  "When the user shares an attached file to store it — they say 'save', 'add to my brain', 'file this', or send the file with no question — call save_to_brain with attachmentIds set to the ids shown with each attachment instead of copying content into the content field. The file itself is then filed into the Brain as an asset and ingested in the background. If their intent is unclear, ask or just discuss the file; do not save attachments the user only wanted to talk about.",
+  "Use the goat_brain tool inside chat only to recall, search, and inspect durable world context. It is read-only and never writes: query for recall/search, list for inventory/enumeration (not query with wildcard text), get for a known brain id, timeline for a record's history, and doctor for validation. Use query with a since flag like 6h, 2d, 1w, or an ISO timestamp when the user asks for recent Brain entries; omit text when they only want recent entries. The tool is CLI-shaped: choose a command and flags deliberately so the command is debuggable. Use includeMerged only when investigating duplicate or merged history, and includeArchived only when the user asks about retired records.",
+  'Before calling any tool, first send a short user-visible sentence explaining what you are about to do and why. Keep it natural and specific, for example: "I\'ll check your Brain for what we already know, then give you the recommendation." Do not silently call tools as your first visible action.',
   "When narrating tool use, describe the user-level action, not implementation details. Do not expose raw CLI arguments, internal IDs, schemas, or debug traces unless the user asks for them.",
   "Start a task when the user asks for deep research, investigation, monitoring, comparison across sources, connected-account work, code execution, longer-running execution, or anything that should be tracked as a Result.",
   "Create a recurring task schedule when the user asks for work to repeat on a cadence, schedule, cron, routine, every day/week/month, or other recurring basis. Convert the cadence to a valid 5-field cron expression and save it directly when clear. If the recurrence is ambiguous, ask one concise follow-up instead of guessing.",
@@ -29,7 +31,7 @@ const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   "Requests to check, read, summarize, triage, or monitor the user's latest emails, inbox, Gmail, calendar, or connected accounts are task requests.",
   "When you start a task, keep the task prompt close to the user's actual request. Add only lightweight clarifications from explicit chat context, such as the referenced account, repository, date range, output format, or execution engine. Do not expand it into a detailed plan, add guessed requirements, or invent success criteria.",
   "When you start a task, keep the chat response short and say that it was added to Results.",
-  "Do not claim to browse the web unless you used web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous task work inside chat. You may say you checked or updated the user's Brain only after using goat_brain or save_to_brain successfully.",
+  "Do not claim to browse the web unless you used web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous task work inside chat. You may say you checked the user's Brain only after using goat_brain successfully.",
 ];
 
 const OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES = [
@@ -61,7 +63,7 @@ export function createOpenCompanyChatSystemPrompt(
     currentDate?: Date | string;
     userContext?: OpenCompanyChatUserContext;
     webSearchEnabled?: boolean;
-    brainWriteEnabled?: boolean;
+    brainCaptureEnabled?: boolean;
     taskToolsEnabled?: boolean;
     scheduleToolsEnabled?: boolean;
     activeBrain?: { name: string; workspaceName: string; readOnly?: boolean } | null;
@@ -85,7 +87,7 @@ export function createOpenCompanyChatSystemPrompt(
     promptBlock("user_context", formatUserContext(input.userContext)),
     promptBlock("behavior", [
       ...formatBaseBehaviorLines({
-        brainWriteEnabled: input.brainWriteEnabled,
+        brainCaptureEnabled: input.brainCaptureEnabled,
         taskToolsEnabled: input.taskToolsEnabled,
         scheduleToolsEnabled: input.scheduleToolsEnabled,
       }),
@@ -103,30 +105,29 @@ function formatActiveBrainContext(
   }
   if (activeBrain.readOnly) {
     return [
-      `The goat_brain tool reads the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace. This user has browse-only access: do not write, save, edit, file, or delete Brain content.`,
+      `The goat_brain tool reads the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace. This user has browse-only access: do not save, capture, or otherwise add Brain content.`,
     ];
   }
   return [
-    `The goat_brain tool reads and writes the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace. Saved and recalled context is scoped to that brain.`,
+    `The goat_brain tool reads the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace; save_to_brain captures new content into it for the background curation agent. Recalled and captured context is scoped to that brain.`,
   ];
 }
 
 function formatBaseBehaviorLines(input: {
-  brainWriteEnabled?: boolean | undefined;
+  brainCaptureEnabled?: boolean | undefined;
   taskToolsEnabled?: boolean | undefined;
   scheduleToolsEnabled?: boolean | undefined;
 }) {
-  const brainWriteEnabled = input.brainWriteEnabled ?? true;
+  const brainCaptureEnabled = input.brainCaptureEnabled ?? true;
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
   const lines = OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES.filter((line) => {
+    // goat_brain is always read-only, so only the save_to_brain (capture) lines
+    // are gated: browse-only members keep the read guidance but lose capture.
     if (
-      !brainWriteEnabled &&
+      !brainCaptureEnabled &&
       (line.startsWith("Use the save_to_brain tool") ||
-        line.startsWith("Use the goat_brain tool inside chat") ||
-        line.includes("save_to_brain") ||
-        line.includes("save this to Brain") ||
-        line.includes("updated the user's Brain"))
+        line.startsWith("When the user shares an attached file to store it"))
     ) {
       return false;
     }
@@ -152,11 +153,6 @@ function formatBaseBehaviorLines(input: {
   });
 
   return [
-    ...(brainWriteEnabled
-      ? []
-      : [
-          "Use the goat_brain tool only to recall, search, inspect, or verify durable workspace context. Do not save, edit, file, create, move, merge, link, or delete Brain content.",
-        ]),
     ...(taskToolsEnabled
       ? []
       : [
