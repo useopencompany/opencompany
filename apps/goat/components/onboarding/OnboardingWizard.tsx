@@ -18,19 +18,14 @@ import {
   CalendarDays,
   Check,
   Copy,
-  FileText,
   FlaskConical,
   Folder,
-  GitBranch,
   GripVertical,
   History,
   Inbox,
   Lightbulb,
   Link2,
-  ListTodo,
   Lock,
-  Mail,
-  MessageSquare,
   MessagesSquare,
   Plus,
   ShieldCheck,
@@ -39,8 +34,17 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
+import {
+  type GoatBrainSourcesDetails,
+  getGoatBrainSourcesAction,
+} from "@/lib/brain-source-actions";
+import {
+  GOAT_BRAIN_SOURCE_PROVIDERS,
+  type GoatBrainSourceProviderDef,
+} from "@/lib/brain-sources/registry";
 import {
   checkGoatWorkspaceSlugAction,
   finishGoatOnboardingAction,
@@ -48,6 +52,14 @@ import {
   saveGoatOnboardingContextAction,
   saveGoatOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
+import {
+  GOAT_ONBOARDING_CONNECTION_MESSAGE,
+  GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
+  type GoatOnboardingConnectionMessage,
+  type GoatOnboardingConnectionResult,
+  goatOnboardingConnectHref,
+  goatOnboardingConnectionError,
+} from "@/lib/onboarding-integrations";
 
 type OnboardingUser = {
   name: string;
@@ -97,7 +109,8 @@ export function OnboardingWizard({
   initialCompanyDomain,
   initialContextUrls,
   initialReferral,
-  connectedProviders,
+  initialSourceDetails,
+  initialConnectionResult,
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
@@ -109,7 +122,8 @@ export function OnboardingWizard({
   initialCompanyDomain: string;
   initialContextUrls: string[];
   initialReferral: string | null;
-  connectedProviders: string[];
+  initialSourceDetails: GoatBrainSourcesDetails | null;
+  initialConnectionResult: GoatOnboardingConnectionResult | null;
 }) {
   const router = useRouter();
   const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
@@ -124,7 +138,6 @@ export function OnboardingWizard({
   const [workingFolders, setWorkingFolders] = useState<string[]>(() => [
     ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
   ]);
-  const [connectedSources] = useState<Set<string>>(() => new Set(connectedProviders));
   const [companyDomain, setCompanyDomain] = useState(initialCompanyDomain);
   const [contextUrls, setContextUrls] = useState<string[]>(
     initialContextUrls.length > 0 ? initialContextUrls : [""],
@@ -132,7 +145,10 @@ export function OnboardingWizard({
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [slugCheck, setSlugCheck] = useState<{ slug: string; available: boolean } | null>(null);
+  const [slugCheck, setSlugCheck] = useState<{
+    slug: string;
+    available: boolean;
+  } | null>(null);
 
   const step = STEPS[stepIndex] ?? STEPS[0]!;
   const isLast = stepIndex === STEPS.length - 1;
@@ -184,7 +200,9 @@ export function OnboardingWizard({
       return r.ok || toastFail(r.error);
     }
     if (step.key === "brain") {
-      const r = await saveGoatOnboardingBrainFoldersAction({ folders: workingFolders });
+      const r = await saveGoatOnboardingBrainFoldersAction({
+        folders: workingFolders,
+      });
       return r.ok || toastFail(r.error);
     }
     if (step.key === "finish") {
@@ -198,7 +216,10 @@ export function OnboardingWizard({
     // Leaving the context step saves answers, then plays the import animation once.
     if (step.key === "context" && !imported) {
       startTransition(async () => {
-        const r = await saveGoatOnboardingContextAction({ companyDomain, contextUrls });
+        const r = await saveGoatOnboardingContextAction({
+          companyDomain,
+          contextUrls,
+        });
         if (!r.ok) {
           toast.error(r.error);
           return;
@@ -262,7 +283,13 @@ export function OnboardingWizard({
               {step.key === "brain" && (
                 <BrainStep workingFolders={workingFolders} onChange={setWorkingFolders} />
               )}
-              {step.key === "sources" && <SourcesStep connected={connectedSources} />}
+              {step.key === "sources" && (
+                <SourcesStep
+                  brainRef={brainRef}
+                  initialDetails={initialSourceDetails}
+                  initialConnectionResult={initialConnectionResult}
+                />
+              )}
               {step.key === "context" && (
                 <ContextStep
                   domain={companyDomain}
@@ -723,7 +750,9 @@ function LockedTreeRow({ path }: { path: string }) {
           className="shrink-0 text-ink-subtle opacity-0 transition-opacity group-hover:opacity-60"
         />
       </TooltipTrigger>
-      <TooltipContent>Default folder — part of every brain and can&apos;t be removed.</TooltipContent>
+      <TooltipContent>
+        Default folder — part of every brain and can&apos;t be removed.
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -785,81 +814,170 @@ function NewFolderControl({ onAdd }: { onAdd: (value: string) => boolean }) {
 // Step — Sources
 // ---------------------------------------------------------------------------
 
-type SourceDef = {
-  id: string;
-  name: string;
-  description: string;
-  icon: LucideIcon;
-  available: boolean;
-};
-
-const SOURCES: SourceDef[] = [
-  {
-    id: "jamie",
-    name: "Jamie",
-    description: "Meeting notes flow in after every call.",
-    icon: FileText,
-    available: true,
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    description: "Channel conversations you pick.",
-    icon: MessageSquare,
-    available: true,
-  },
-  {
-    id: "gmail",
-    name: "Gmail",
-    description: "Sent and received email, on your terms.",
-    icon: Mail,
-    available: true,
-  },
-  {
-    id: "linear",
-    name: "Linear",
-    description: "Issues and comments from your teams.",
-    icon: ListTodo,
-    available: true,
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    description: "Pull requests and issues from your repos.",
-    icon: GitBranch,
-    available: true,
-  },
-];
-
 const SOURCE_GOAL = 3;
+const POPUP_WIDTH = 560;
+const POPUP_HEIGHT = 760;
 
-// Real connect surfaces. OAuth providers hit their (ungated) /api start route and
-// return to /onboarding; Jamie is webhook-based and set up in settings.
-const SOURCE_CONNECT_HREF: Record<string, string> = {
-  jamie: "/settings/jamie",
-  slack: "/api/integrations/slack/start?returnTo=/onboarding",
-  gmail: "/api/integrations/gmail/start?returnTo=/onboarding",
-  linear: "/api/integrations/linear-ingest/start?returnTo=/onboarding",
-  github: "/api/integrations/github/start?returnTo=/onboarding",
-};
+function SourcesStep({
+  brainRef,
+  initialDetails,
+  initialConnectionResult,
+}: {
+  brainRef: string | null;
+  initialDetails: GoatBrainSourcesDetails | null;
+  initialConnectionResult: GoatOnboardingConnectionResult | null;
+}) {
+  const [details, setDetails] = useState(initialDetails);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(() =>
+    initialConnectionResult?.status === "error"
+      ? goatOnboardingConnectionError(
+          initialConnectionResult.provider,
+          initialConnectionResult.reason,
+        )
+      : null,
+  );
+  const [connectionNotice, setConnectionNotice] = useState<string | null>(() =>
+    initialConnectionResult?.status === "connected"
+      ? "Account authorized. Now choose what should feed this Brain."
+      : null,
+  );
+  const connectingRef = useRef<string | null>(null);
+  const popupRef = useRef<Window | null>(null);
+  const popupPollRef = useRef<number | null>(null);
 
-function SourcesStep({ connected }: { connected: Set<string> }) {
-  const count = connected.size;
+  const reload = useCallback(async () => {
+    if (!brainRef) return null;
+    const next = await getGoatBrainSourcesAction(brainRef);
+    setDetails(next);
+    return next;
+  }, [brainRef]);
+
+  useEffect(() => {
+    function handleConnection(message: GoatOnboardingConnectionMessage | undefined) {
+      if (!message || message.type !== GOAT_ONBOARDING_CONNECTION_MESSAGE) return;
+      if (connectingRef.current && message.provider !== connectingRef.current) return;
+
+      popupRef.current?.close();
+      popupRef.current = null;
+      connectingRef.current = null;
+      setConnectingId(null);
+      if (message.status === "connected") {
+        setConnectionError(null);
+        setConnectionNotice("Account authorized. Now choose what should feed this Brain.");
+        void reload();
+      } else {
+        setConnectionNotice(null);
+        setConnectionError(goatOnboardingConnectionError(message.provider, message.reason));
+      }
+    }
+
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      handleConnection(event.data as GoatOnboardingConnectionMessage | undefined);
+    }
+
+    function onStorage(event: StorageEvent) {
+      if (event.key !== GOAT_ONBOARDING_CONNECTION_STORAGE_KEY || !event.newValue) return;
+      try {
+        handleConnection(JSON.parse(event.newValue) as GoatOnboardingConnectionMessage);
+      } catch {
+        // Ignore malformed local state; OAuth state remains server-verified.
+      }
+    }
+
+    window.addEventListener("message", onMessage);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [reload]);
+
+  useEffect(
+    () => () => {
+      if (popupPollRef.current !== null) window.clearInterval(popupPollRef.current);
+    },
+    [],
+  );
+
+  const openConnection = (provider: GoatBrainSourceProviderDef) => {
+    setConnectionError(null);
+    setConnectionNotice(null);
+
+    if (provider.connectionKind !== "oauth") {
+      window.location.assign(provider.onboardingConnectHref ?? provider.connectHref);
+      return;
+    }
+
+    const connectHref = goatOnboardingConnectHref(provider.connectHref);
+    const left = window.screenX + Math.max(0, (window.outerWidth - POPUP_WIDTH) / 2);
+    const top = window.screenY + Math.max(0, (window.outerHeight - POPUP_HEIGHT) / 2);
+    const popup = window.open(
+      connectHref,
+      "goat-onboarding-connect",
+      `width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${left},top=${top}`,
+    );
+
+    if (!popup) {
+      window.location.assign(connectHref);
+      return;
+    }
+
+    setConnectingId(provider.id);
+    popupRef.current = popup;
+    connectingRef.current = provider.id;
+    if (popupPollRef.current !== null) window.clearInterval(popupPollRef.current);
+    popupPollRef.current = window.setInterval(() => {
+      if (!popup.closed) return;
+      if (popupPollRef.current !== null) window.clearInterval(popupPollRef.current);
+      popupPollRef.current = null;
+      if (connectingRef.current !== provider.id) return;
+
+      connectingRef.current = null;
+      popupRef.current = null;
+      setConnectingId(null);
+      void reload().then((next) => {
+        const connected = resolveGoatBrainSourceState(provider.id, next).connected;
+        if (!connected) {
+          setConnectionError(`${provider.name} authorization was not completed.`);
+        }
+      });
+    }, 500);
+  };
+
+  const count = GOAT_BRAIN_SOURCE_PROVIDERS.filter(
+    (provider) => resolveGoatBrainSourceState(provider.id, details).enabled,
+  ).length;
+  const authorizedCount = GOAT_BRAIN_SOURCE_PROVIDERS.filter(
+    (provider) => resolveGoatBrainSourceState(provider.id, details).connected,
+  ).length;
   const pct = Math.min(100, (count / SOURCE_GOAL) * 100);
 
   return (
     <div>
       <StepHeader
         title="Connect your sources"
-        subtitle="Every source you connect earns +50 free pages. You decide exactly what flows in — nothing is ingested without your say."
+        subtitle="Authorize an account, then choose exactly what should flow into this Brain. Each configured source adds 50 free pages."
       />
 
-      <div className="mb-5 rounded-xl border border-border bg-surface p-3.5">
+      {connectionError ? (
+        <div className="mb-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger">
+          {connectionError}
+        </div>
+      ) : null}
+      {connectionNotice ? (
+        <div className="mb-4 rounded-md border border-success-border bg-success-bg px-3 py-2 text-[12px] leading-4 text-success">
+          {connectionNotice}
+        </div>
+      ) : null}
+
+      <div className="mb-5 rounded-lg border border-border bg-surface p-3.5">
         <div className="flex items-center justify-between text-[12.5px]">
           <span className="font-medium text-ink">
             {count >= SOURCE_GOAL
-              ? "Nice — your brain will be well fed."
-              : `Connect ${SOURCE_GOAL - count} more to get the most out of your brain`}
+              ? "Your Brain has a strong starting set of sources."
+              : `Configure ${SOURCE_GOAL - count} more to get the most out of your Brain`}
           </span>
           <span className="font-medium text-success">+{count * PAGES_PER_SOURCE} pages</span>
         </div>
@@ -869,57 +987,33 @@ function SourcesStep({ connected }: { connected: Set<string> }) {
             style={{ width: `${pct}%` }}
           />
         </div>
+        <p className="mt-2 text-[11.5px] leading-4 text-ink-subtle">
+          {authorizedCount} authorized · {count} feeding this Brain
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-        {SOURCES.map((source) => {
-          const Icon = source.icon;
-          const on = connected.has(source.id);
-          return (
-            <div
-              key={source.id}
-              className={`flex flex-col gap-3 rounded-xl border p-3.5 transition-colors ${
-                on ? "border-ink bg-surface" : "border-border bg-surface"
-              } ${!source.available ? "opacity-60" : ""}`}
-            >
-              <div className="flex items-start gap-2.5">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-muted text-ink">
-                  <Icon size={17} strokeWidth={1.9} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[13px] font-semibold text-ink">{source.name}</span>
-                    {source.available && (
-                      <span className="rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold text-success">
-                        +{PAGES_PER_SOURCE}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-[12px] leading-4 text-ink-subtle">
-                    {source.description}
-                  </p>
-                </div>
-              </div>
-              {!source.available ? (
-                <span className="inline-flex items-center justify-center rounded-lg bg-surface-muted px-3 py-1.5 text-[12.5px] font-medium text-ink-subtle">
-                  Coming soon
-                </span>
-              ) : on ? (
-                <span className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-surface-active/60 px-3 py-1.5 text-[12.5px] font-medium text-ink">
-                  <Check size={14} strokeWidth={2.4} /> Connected
-                </span>
-              ) : (
-                <a
-                  href={SOURCE_CONNECT_HREF[source.id] ?? "/settings/integrations"}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-canvas transition-opacity hover:opacity-90"
-                >
-                  Connect
-                </a>
-              )}
-            </div>
-          );
-        })}
+      <div className="flex flex-col gap-2">
+        {GOAT_BRAIN_SOURCE_PROVIDERS.map((provider) => (
+          <SourceProviderCard
+            key={provider.id}
+            brainRef={brainRef ?? ""}
+            provider={provider}
+            details={details}
+            onChanged={async () => {
+              await reload();
+            }}
+            onConnect={() => openConnection(provider)}
+            connectPending={connectingId === provider.id}
+            connectDisabled={connectingId !== null}
+          />
+        ))}
       </div>
+
+      {!brainRef ? (
+        <p className="mt-3 text-[12px] leading-4 text-danger">
+          A Brain is required before sources can be configured.
+        </p>
+      ) : null}
     </div>
   );
 }

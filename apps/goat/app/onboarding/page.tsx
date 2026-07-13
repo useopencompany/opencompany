@@ -3,18 +3,20 @@ import { cookies } from "next/headers";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { currentGoatUser } from "@/lib/auth";
-import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
-import { getGoatGmailSourceIntegrationState } from "@/lib/integrations/google-data";
-import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
-import { getGoatLinearSourceIntegrationState } from "@/lib/integrations/linear-ingest";
-import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
+import { getGoatBrainSourcesAction } from "@/lib/brain-source-actions";
+import type { GoatOnboardingConnectionResult } from "@/lib/onboarding-integrations";
 
 export const dynamic = "force-dynamic";
 
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ variant?: string }>;
+  searchParams: Promise<{
+    variant?: string;
+    integration?: string;
+    setup?: string;
+    reason?: string;
+  }>;
 }) {
   const context = await currentGoatUser();
   const userWorkosId = context.user.workosUserId;
@@ -25,7 +27,8 @@ export default async function OnboardingPage({
   // Real signal for "came from an invite": the active workspace was created by
   // someone else, so this user joined it rather than starting it.
   const joinedByInvite = context.workspace.createdByWorkosId !== userWorkosId;
-  const override = (await searchParams).variant;
+  const params = await searchParams;
+  const override = params.variant;
   const variant: "owner" | "member" =
     override === "member"
       ? "member"
@@ -37,30 +40,30 @@ export default async function OnboardingPage({
 
   // Hydrate anything already persisted so the flow resumes cleanly (e.g. after an
   // OAuth round-trip when connecting a source).
-  const [onboarding, jamie, slack, github, linear, gmail, cookieStore] = await Promise.all([
+  const [onboarding, sourceDetails, cookieStore] = await Promise.all([
     getGoatOnboarding(userWorkosId),
-    getGoatJamieIntegrationState(userWorkosId),
-    getGoatSlackIntegrationState(userWorkosId),
-    getGoatGitHubIntegrationState(userWorkosId),
-    getGoatLinearSourceIntegrationState(userWorkosId),
-    getGoatGmailSourceIntegrationState(userWorkosId),
+    context.activeBrain ? getGoatBrainSourcesAction(context.activeBrain.id) : null,
     cookies(),
   ]);
-
-  const connectedProviders = [
-    jamie.connected ? "jamie" : null,
-    slack.connected ? "slack" : null,
-    gmail.connected ? "gmail" : null,
-    linear.connected ? "linear" : null,
-    github.connected ? "github" : null,
-  ].filter((p): p is string => p !== null);
+  const connectionResult: GoatOnboardingConnectionResult | null =
+    params.setup === "connected" || params.setup === "error"
+      ? {
+          provider: params.integration ?? null,
+          status: params.setup,
+          reason: params.reason ?? null,
+        }
+      : null;
 
   const savedSlug = context.workspace.slug ?? "";
   const stepCookie = Number.parseInt(cookieStore.get(ONBOARDING_STEP_COOKIE)?.value ?? "", 10);
 
   return (
     <OnboardingWizard
-      user={{ name, email: context.user.email, avatarUrl: context.user.avatarUrl }}
+      user={{
+        name,
+        email: context.user.email,
+        avatarUrl: context.user.avatarUrl,
+      }}
       currentWorkspaceName={context.workspace.name}
       brainRef={context.activeBrain?.id ?? null}
       variant={variant}
@@ -72,7 +75,8 @@ export default async function OnboardingPage({
       initialCompanyDomain={onboarding?.companyDomain ?? ""}
       initialContextUrls={onboarding?.contextUrls ?? []}
       initialReferral={onboarding?.referralSource ?? null}
-      connectedProviders={connectedProviders}
+      initialSourceDetails={sourceDetails}
+      initialConnectionResult={connectionResult}
     />
   );
 }
