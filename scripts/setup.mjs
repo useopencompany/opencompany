@@ -1,5 +1,6 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { argv, exit, versions } from "node:process";
 import {
@@ -109,10 +110,21 @@ const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
 ];
 const STRIPE_ENV_KEYS = ["STRIPE_SECRET_KEY"];
 const STRIPE_OPTIONAL_ENV_KEYS = [
+  "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_PRO_PRICE_ID",
+  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "CRON_SECRET",
   "STRIPE_LISTEN_DISABLED",
   "STRIPE_LISTEN_EVENTS",
   "STRIPE_CLI_PROJECT_NAME",
 ];
+const GOAT_BILLING_LOCAL_ENV_KEYS = [
+  "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_PRO_PRICE_ID",
+  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "CRON_SECRET",
+];
+const GOAT_PRO_PRICE_LOOKUP_KEY = "goat_pro_monthly_eur";
 const OBSERVABILITY_ENV_KEYS = [
   "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
@@ -203,6 +215,10 @@ const GOAT_LOCAL_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
   "RUNNER_INTERNAL_TOKEN",
+  "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_PRO_PRICE_ID",
+  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "CRON_SECRET",
   ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
   ...INTEGRATION_CREDENTIAL_ENV_KEYS,
   "ELECTRIC_URL",
@@ -349,6 +365,7 @@ function inspectState() {
   const githubIntegrationMissing = GITHUB_WORK_INTEGRATION_ENV_KEYS.filter((k) =>
     isPlaceholder(env[k]),
   );
+  const goatBillingMissing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -366,6 +383,8 @@ function inspectState() {
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
     stripeSecretKey: isPlaceholder(env.STRIPE_SECRET_KEY) ? "placeholder" : "set",
     stripeWebhookSecret: isPlaceholder(env.STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
+    goatBilling: goatBillingMissing.length === 0 ? "ready" : "placeholder",
+    goatBillingMissingKeys: goatBillingMissing,
   };
 }
 
@@ -440,7 +459,8 @@ function readStripeSecretKeyFromCli() {
 
   const config = parseStripeConfigList(result.stdout);
   const projectName = stripeCliProjectName() || config.activeProjectName;
-  const key = config.projects.get(projectName)?.test_mode_api_key?.trim();
+  const project = config.projects.get(projectName);
+  const key = project?.test_mode_api_key?.trim();
   if (!key || !/^(sk|rk)_test_/.test(key)) {
     return {
       ok: false,
@@ -448,7 +468,12 @@ function readStripeSecretKeyFromCli() {
     };
   }
 
-  return { ok: true, key, projectName };
+  return {
+    ok: true,
+    key,
+    projectName,
+    expiresAt: project?.test_mode_key_expires_at?.trim() || null,
+  };
 }
 
 function readStripeWebhookSecretFromCli() {
@@ -479,6 +504,107 @@ function readStripeWebhookSecretFromCli() {
   }
 
   return { ok: true, secret };
+}
+
+function runStripeCliJson(args) {
+  const result = runCapture("stripe", stripeCliArgs(args), { timeout: 20_000 });
+  if (result.error?.code === "ENOENT") {
+    return { ok: false, message: "Stripe CLI is not installed or not on PATH." };
+  }
+  if (result.error) return { ok: false, message: result.error.message };
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      message: result.stderr.trim() || "Stripe CLI request failed. Run `stripe login` first.",
+    };
+  }
+  try {
+    return { ok: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { ok: false, message: "Stripe CLI returned an unexpected response." };
+  }
+}
+
+function isExpectedGoatProPrice(price) {
+  return (
+    price?.active === true &&
+    price.currency === "eur" &&
+    price.unit_amount === 1_500 &&
+    price.tax_behavior === "exclusive" &&
+    price.recurring?.interval === "month" &&
+    price.recurring?.interval_count === 1 &&
+    price.recurring?.usage_type === "licensed"
+  );
+}
+
+function ensureGoatProTestPrice() {
+  const listed = runStripeCliJson([
+    "prices",
+    "list",
+    "--lookup-keys",
+    GOAT_PRO_PRICE_LOOKUP_KEY,
+    "--limit",
+    "10",
+  ]);
+  if (!listed.ok) return listed;
+
+  const existing = listed.value?.data?.find(
+    (price) => price.lookup_key === GOAT_PRO_PRICE_LOOKUP_KEY,
+  );
+  if (existing) {
+    if (!isExpectedGoatProPrice(existing)) {
+      return {
+        ok: false,
+        message:
+          `Stripe test Price lookup key "${GOAT_PRO_PRICE_LOOKUP_KEY}" already exists with unexpected billing terms. ` +
+          "Inspect it in Stripe before continuing.",
+      };
+    }
+    return { ok: true, priceId: existing.id, created: false };
+  }
+
+  const product = runStripeCliJson([
+    "products",
+    "create",
+    "--name",
+    "OpenCompany Pro",
+    "--description",
+    "200 workspace ingestions per UTC day; billed per active workspace member.",
+    "-d",
+    "metadata[billingProduct]=goat",
+    "-d",
+    "metadata[plan]=pro",
+    "--confirm",
+  ]);
+  if (!product.ok) return product;
+
+  const price = runStripeCliJson([
+    "prices",
+    "create",
+    "--currency",
+    "eur",
+    "--unit-amount",
+    "1500",
+    "--product",
+    product.value.id,
+    "--nickname",
+    "OpenCompany Pro monthly per seat",
+    "--tax-behavior",
+    "exclusive",
+    "--lookup-key",
+    GOAT_PRO_PRICE_LOOKUP_KEY,
+    "-d",
+    "recurring[interval]=month",
+    "-d",
+    "recurring[usage_type]=licensed",
+    "-d",
+    "metadata[billingProduct]=goat",
+    "-d",
+    "metadata[plan]=pro",
+    "--confirm",
+  ]);
+  if (!price.ok) return price;
+  return { ok: true, priceId: price.value.id, created: true };
 }
 
 async function ensureEnvFile(state) {
@@ -626,6 +752,31 @@ function pullSharedDevEnvFromInfisical({
   );
 }
 
+function pullGoatBillingDevEnvFromInfisical() {
+  if (!existsSync(".infisical.json")) return [];
+
+  const current = readEffectiveLocalEnv();
+  const missing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(current[key]));
+  if (missing.length === 0) return [];
+
+  const result = spawnSync(
+    "infisical",
+    ["export", "--env", INFISICAL_DEV_ENV, "--path", "/web", "--format", "json"],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+  if (result.status !== 0) return [];
+
+  const wanted = new Set(missing);
+  const values = {};
+  for (const secret of JSON.parse(result.stdout || "[]")) {
+    if (wanted.has(secret?.key) && !isPlaceholder(secret.value)) {
+      values[secret.key] = secret.value;
+    }
+  }
+  if (Object.keys(values).length > 0) writeEnvValues(".env.local", values);
+  return Object.keys(values);
+}
+
 function pullSharedDevEnv(options = {}) {
   if (canPullSharedDevEnvFromInfisical()) {
     pullSharedDevEnvFromInfisical(options);
@@ -761,11 +912,21 @@ async function ensureSharedDatabaseUrl(state) {
 async function ensureStripe(state) {
   step("Stripe local credentials");
 
+  const pulledGoatBillingKeys = pullGoatBillingDevEnvFromInfisical();
+  if (pulledGoatBillingKeys.length > 0) {
+    ok(`Loaded Goat billing values from Infisical dev: ${pulledGoatBillingKeys.join(", ")}`);
+  }
+
   const updates = {};
+  let cliCredentials;
+  const getCliCredentials = () => {
+    cliCredentials ??= readStripeSecretKeyFromCli();
+    return cliCredentials;
+  };
   if (state.stripeSecretKey === "set") {
     ok("STRIPE_SECRET_KEY is set");
   } else {
-    const result = readStripeSecretKeyFromCli();
+    const result = getCliCredentials();
     if (result.ok) {
       updates.STRIPE_SECRET_KEY = result.key;
       ok(`Will write STRIPE_SECRET_KEY from Stripe CLI profile "${result.projectName}"`);
@@ -775,6 +936,57 @@ async function ensureStripe(state) {
           "Credit checkout will fail until it is set.",
       );
     }
+  }
+
+  const env = { ...readEffectiveLocalEnv(), ...updates };
+  if (isPlaceholder(env.GOAT_STRIPE_API_KEY)) {
+    const result = getCliCredentials();
+    if (result.ok && (result.key.startsWith("rk_test_") || result.expiresAt)) {
+      updates.GOAT_STRIPE_API_KEY = result.key;
+      if (result.key.startsWith("rk_test_")) {
+        ok(`Will use restricted Stripe CLI profile "${result.projectName}" for local Goat billing`);
+      } else {
+        warn(
+          `Will use the expiring Stripe CLI test key from profile "${result.projectName}" for local Goat billing only. Hosted environments still require a dedicated restricted key.`,
+        );
+      }
+    } else if (result.ok) {
+      warn(
+        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for Goat billing and store it in Infisical dev /web.",
+      );
+    } else {
+      warn(`GOAT_STRIPE_API_KEY is missing: ${result.message}`);
+    }
+  } else {
+    ok("GOAT_STRIPE_API_KEY is set");
+  }
+
+  if (isPlaceholder(env.GOAT_STRIPE_PRO_PRICE_ID)) {
+    const result = ensureGoatProTestPrice();
+    if (result.ok) {
+      updates.GOAT_STRIPE_PRO_PRICE_ID = result.priceId;
+      ok(
+        result.created
+          ? "Created the OpenCompany Pro test Price"
+          : "Found the OpenCompany Pro test Price",
+      );
+    } else {
+      warn(`GOAT_STRIPE_PRO_PRICE_ID is missing: ${result.message}`);
+    }
+  } else {
+    ok("GOAT_STRIPE_PRO_PRICE_ID is set");
+  }
+
+  if (isPlaceholder(env.GOAT_STRIPE_CHECKOUT_ENABLED)) {
+    updates.GOAT_STRIPE_CHECKOUT_ENABLED = "false";
+    ok("Will keep live Goat Checkout disabled by default");
+  }
+
+  if (isPlaceholder(env.CRON_SECRET)) {
+    updates.CRON_SECRET = randomBytes(32).toString("hex");
+    ok("Will generate CRON_SECRET for local billing reconciliation");
+  } else {
+    ok("CRON_SECRET is set");
   }
 
   if (state.stripeWebhookSecret === "set") {
@@ -794,7 +1006,7 @@ async function ensureStripe(state) {
 
   if (Object.keys(updates).length > 0) {
     writeEnvValues(".env.local", updates);
-    ok("Updated .env.local with local Stripe credentials");
+    ok("Updated .env.local with local Stripe and Goat billing credentials");
   }
 }
 
@@ -989,6 +1201,7 @@ async function main() {
     await ensureEnvFile(inspectState());
     await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
+    await ensureGoatEnvFile();
     return;
   }
 
@@ -1027,6 +1240,12 @@ async function main() {
       nextSteps.push({
         command: "bun run setup:stripe",
         reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,
+      });
+    }
+    if (state.goatBilling === "placeholder") {
+      nextSteps.push({
+        command: "bun run setup:stripe",
+        reason: `configure local Goat billing (${state.goatBillingMissingKeys.join(", ")})`,
       });
     }
     if (!SHARED_DATABASE_MODE && state.neonProject === "set") {

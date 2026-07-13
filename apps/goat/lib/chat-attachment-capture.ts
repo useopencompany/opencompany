@@ -25,6 +25,7 @@ export async function saveChatAttachmentsToGoatBrain(input: {
   );
 
   const assets: Array<{ documentId: string; path: string; title: string }> = [];
+  let quotaPaused = false;
   for (const attachmentId of input.attachmentIds) {
     const attachment = attachmentsById.get(attachmentId);
     if (!attachment) {
@@ -66,6 +67,7 @@ export async function saveChatAttachmentsToGoatBrain(input: {
     if (!created.document || !created.path) {
       return { ok: false, error: `Attachment "${attachment.filename}" could not be filed.` };
     }
+    quotaPaused ||= Boolean(created.quotaPaused);
     assets.push({
       documentId: created.document.id,
       path: created.path,
@@ -80,5 +82,15 @@ export async function saveChatAttachmentsToGoatBrain(input: {
     });
   });
 
-  return { ok: true, status: "captured", assets };
+  return {
+    ok: true,
+    status: quotaPaused ? "paused_by_plan" : "captured",
+    ...(quotaPaused
+      ? {
+          message:
+            "Saved to the brain. Ingestion is paused by the workspace plan; see Settings → Usage or Billing to review the limit or upgrade.",
+        }
+      : {}),
+    assets,
+  };
 }

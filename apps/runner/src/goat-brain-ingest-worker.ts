@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
 import {
   goatBrainFilePathFor,
   listGoatBrainFiles,
@@ -81,7 +82,12 @@ const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
 // still lives in last_error.
 const ATTEMPT_ERROR_MAX_CHARS = 500;
 
-export type GoatBrainIngestJobWithSource = GoatBrainIngestJob & {
+export type GoatBrainIngestJobWithSource = Omit<
+  GoatBrainIngestJob,
+  "workspaceId" | "planPaused"
+> & {
+  workspaceId?: string | null;
+  planPaused?: boolean;
   sourceType: GoatBrainSourceType;
   normalizedPayload: unknown;
 };
@@ -277,12 +283,19 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
           SELECT job.id
           FROM goat.brain_ingest_jobs AS job
           INNER JOIN goat.brain_source_items AS source ON source.id = job.source_item_id
+          LEFT JOIN goat.workspace_ingestion_reservations AS reservation
+            ON reservation.workspace_id = job.workspace_id
+           AND reservation.source_item_id = job.source_item_id
           WHERE
             (
               (job.status = 'queued' AND job.next_run_at <= ${input.now})
               OR (job.status = 'running' AND job.lease_expires_at < ${input.now})
             )
             AND (${supportedJobsWhere})
+            -- Legacy jobs without workspace attribution predate plan quotas and
+            -- remain runnable. Every new workspace-attributed job requires a
+            -- consumed reservation; pending reservations are the durable pause.
+            AND (job.workspace_id IS NULL OR reservation.status = 'consumed')
             -- Serialize ingest runs per brain: agent runs materialize the whole
             -- brain and sync it back, so two concurrent runs against the same
             -- brain conflict on shared pages and waste full agent attempts.
@@ -305,6 +318,7 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
         claimed AS (
           UPDATE goat.brain_ingest_jobs AS job
           SET status = 'running',
+              plan_paused = false,
               attempts = job.attempts + 1,
               lease_id = ${input.leaseId},
               lease_owner = ${input.leaseOwner},
@@ -482,7 +496,11 @@ export async function claimNextGoatBrainIngestJob(input: {
 }) {
   const now = new Date();
   const leaseId = newGoatBrainIngestLeaseId();
-  return (input.store ?? createDbGoatBrainIngestStore()).claimNext({
+  const store = input.store ?? createDbGoatBrainIngestStore();
+  if (!input.store) {
+    await releasePendingGoatIngestionReservations({ now, maxWorkspaces: 50 });
+  }
+  return store.claimNext({
     leaseId,
     leaseOwner: input.leaseOwner,
     now,
@@ -964,10 +982,12 @@ const goatBrainIngestJobColumnsSql = sql`
   job.source_provider AS "sourceProvider",
   job.source_connection_id AS "sourceConnectionId",
   job.integration_id AS "integrationId",
+  job.workspace_id AS "workspaceId",
   job.brain_ref AS "brainRef",
   job.kind,
   job.content_hash AS "contentHash",
   job.status,
+  job.plan_paused AS "planPaused",
   job.attempts,
   job.next_run_at AS "nextRunAt",
   job.lease_id AS "leaseId",

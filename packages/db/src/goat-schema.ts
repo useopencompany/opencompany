@@ -178,6 +178,17 @@ export type GoatHarnessSpec = {
 
 export type GoatWorkspaceRole = "admin" | "member";
 export type GoatMcpClient = "claude" | "chatgpt" | "cursor";
+export type GoatWorkspacePlan = "free" | "pro";
+export type GoatStripeSubscriptionStatus =
+  | "incomplete"
+  | "incomplete_expired"
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "unpaid"
+  | "paused";
+export type GoatIngestionReservationStatus = "pending" | "consumed";
 export type GoatBrainVisibility = "workspace" | "restricted";
 export type GoatBrainFolderSource = "system" | "custom";
 export type GoatBrainEntityType =
@@ -444,6 +455,56 @@ export const goatWorkspaceMembers = goat.table(
     ),
   }),
 );
+
+// Stripe is authoritative for subscription lifecycle; this row is the local
+// entitlement projection used by Goat's latency-sensitive quota checks.
+export const goatWorkspaceBilling = goat.table(
+  "workspace_billing",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    plan: text("plan").$type<GoatWorkspacePlan>().notNull().default("free"),
+    planStartedAt: timestamp("plan_started_at", { withTimezone: true }).notNull().defaultNow(),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    stripeSubscriptionItemId: text("stripe_subscription_item_id"),
+    stripePriceId: text("stripe_price_id"),
+    subscriptionStatus: text("subscription_status").$type<GoatStripeSubscriptionStatus>(),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    desiredSeatQuantity: integer("desired_seat_quantity").notNull().default(1),
+    stripeSeatQuantity: integer("stripe_seat_quantity"),
+    seatSyncPendingAt: timestamp("seat_sync_pending_at", { withTimezone: true }),
+    paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
+    lastStripeEventCreated: timestamp("last_stripe_event_created", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    customerIdx: uniqueIndex("goat_workspace_billing_customer_idx").on(table.stripeCustomerId),
+    subscriptionIdx: uniqueIndex("goat_workspace_billing_subscription_idx").on(
+      table.stripeSubscriptionId,
+    ),
+    seatSyncIdx: index("goat_workspace_billing_seat_sync_idx").on(table.seatSyncPendingAt),
+    planCheck: check("goat_workspace_billing_plan_check", sql`${table.plan} IN ('free', 'pro')`),
+    desiredSeatQuantityCheck: check(
+      "goat_workspace_billing_desired_seat_quantity_check",
+      sql`${table.desiredSeatQuantity} > 0`,
+    ),
+    subscriptionStatusCheck: check(
+      "goat_workspace_billing_subscription_status_check",
+      sql`${table.subscriptionStatus} IS NULL OR ${table.subscriptionStatus} IN ('incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused')`,
+    ),
+  }),
+);
+
+export const goatStripeWebhookEvents = goat.table("stripe_webhook_events", {
+  eventId: text("event_id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  eventCreatedAt: timestamp("event_created_at", { withTimezone: true }).notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // Naming convention: on the brain content tables below, `brain_id` is the
 // DOCUMENT slug (legacy name, e.g. "alice-smith"), while `brain_ref` is the
@@ -1027,6 +1088,10 @@ export const goatBrainSourceItems = goat.table(
     contentHash: text("content_hash").notNull(),
     rawPayload: jsonb("raw_payload").$type<unknown>().notNull(),
     normalizedPayload: jsonb("normalized_payload").$type<unknown>().notNull(),
+    // Number of selected provider events represented by this normalized item.
+    // Direct webhooks, captures, and uploads are one; buffered windows pass the
+    // exact number of claimed source rows.
+    rawEventCount: integer("raw_event_count").notNull().default(1),
     lastIngestJobId: text("last_ingest_job_id"),
     lastIngestStatus: text("last_ingest_status").$type<GoatBrainSourceItemIngestStatus>(),
     lastIngestedAt: timestamp("last_ingested_at", { withTimezone: true }),
@@ -1095,6 +1160,9 @@ export const goatBrainIngestJobs = goat.table(
     sourceProvider: text("source_provider").$type<GoatBrainSourceProvider>().notNull(),
     sourceConnectionId: text("source_connection_id").notNull(),
     integrationId: text("integration_id"),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "cascade",
+    }),
     // Target brain for the job (principle: ingestion is per-brain). Null means
     // the handler resolves the user's default brain at run time.
     brainRef: text("brain_ref").references(() => goatBrains.id, {
@@ -1104,6 +1172,7 @@ export const goatBrainIngestJobs = goat.table(
     kind: text("kind").$type<GoatBrainIngestJobKind>().notNull(),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<GoatBrainIngestJobStatus>().notNull().default("queued"),
+    planPaused: boolean("plan_paused").notNull().default(false),
     attempts: integer("attempts").notNull().default(0),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
     leaseId: text("lease_id"),
@@ -1135,6 +1204,10 @@ export const goatBrainIngestJobs = goat.table(
       table.userWorkosId,
       table.createdAt,
     ),
+    workspaceCreatedIdx: index("goat_brain_ingest_jobs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
       sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
@@ -1146,6 +1219,58 @@ export const goatBrainIngestJobs = goat.table(
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",
       sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'skipped')`,
+    ),
+  }),
+);
+
+// One reservation per normalized source item and workspace. Fan-out to several
+// brains in the same workspace therefore consumes the raw events exactly once.
+export const goatWorkspaceIngestionReservations = goat.table(
+  "workspace_ingestion_reservations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    sourceItemId: text("source_item_id")
+      .notNull()
+      .references(() => goatBrainSourceItems.id, { onDelete: "cascade" }),
+    sourceProvider: text("source_provider").$type<GoatBrainSourceProvider>().notNull(),
+    rawEventCount: integer("raw_event_count").notNull(),
+    status: text("status").$type<GoatIngestionReservationStatus>().notNull().default("pending"),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceSourceIdx: uniqueIndex("goat_ingestion_reservations_workspace_source_idx").on(
+      table.workspaceId,
+      table.sourceItemId,
+    ),
+    workspaceStatusCreatedIdx: index("goat_ingestion_reservations_status_created_idx").on(
+      table.workspaceId,
+      table.status,
+      table.createdAt,
+    ),
+    workspaceConsumedIdx: index("goat_ingestion_reservations_consumed_idx").on(
+      table.workspaceId,
+      table.consumedAt,
+    ),
+    statusCheck: check(
+      "goat_ingestion_reservations_status_check",
+      sql`${table.status} IN ('pending', 'consumed')`,
+    ),
+    rawEventCountCheck: check(
+      "goat_ingestion_reservations_raw_event_count_check",
+      sql`${table.rawEventCount} > 0 AND ${table.rawEventCount} <= 200`,
+    ),
+    sourceProviderCheck: check(
+      "goat_ingestion_reservations_source_provider_check",
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
+    ),
+    consumptionStateCheck: check(
+      "goat_ingestion_reservations_consumption_state_check",
+      sql`(${table.status} = 'consumed' AND ${table.consumedAt} IS NOT NULL) OR (${table.status} = 'pending' AND ${table.consumedAt} IS NULL)`,
     ),
   }),
 );
@@ -2320,7 +2445,16 @@ export const goatWorkspacesRelations = relations(goatWorkspaces, ({ one, many })
     references: [goatUsers.workosUserId],
   }),
   members: many(goatWorkspaceMembers),
+  billing: one(goatWorkspaceBilling),
+  ingestionReservations: many(goatWorkspaceIngestionReservations),
   brains: many(goatBrains),
+}));
+
+export const goatWorkspaceBillingRelations = relations(goatWorkspaceBilling, ({ one }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatWorkspaceBilling.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
 }));
 
 export const goatWorkspaceMembersRelations = relations(goatWorkspaceMembers, ({ one }) => ({
@@ -2655,7 +2789,22 @@ export const goatBrainSourceItemsRelations = relations(goatBrainSourceItems, ({ 
     references: [goatIntegrations.id],
   }),
   ingestJobs: many(goatBrainIngestJobs),
+  workspaceReservations: many(goatWorkspaceIngestionReservations),
 }));
+
+export const goatWorkspaceIngestionReservationsRelations = relations(
+  goatWorkspaceIngestionReservations,
+  ({ one }) => ({
+    workspace: one(goatWorkspaces, {
+      fields: [goatWorkspaceIngestionReservations.workspaceId],
+      references: [goatWorkspaces.id],
+    }),
+    sourceItem: one(goatBrainSourceItems, {
+      fields: [goatWorkspaceIngestionReservations.sourceItemId],
+      references: [goatBrainSourceItems.id],
+    }),
+  }),
+);
 
 export const goatBrainIngestJobsRelations = relations(goatBrainIngestJobs, ({ one }) => ({
   user: one(goatUsers, {
@@ -2816,6 +2965,9 @@ export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
 export type GoatOnboarding = typeof goatOnboarding.$inferSelect;
 export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
+export type GoatWorkspaceBilling = typeof goatWorkspaceBilling.$inferSelect;
+export type GoatWorkspaceIngestionReservation =
+  typeof goatWorkspaceIngestionReservations.$inferSelect;
 export type GoatBrain = typeof goatBrains.$inferSelect;
 export type GoatBrainMember = typeof goatBrainMembers.$inferSelect;
 export type GoatBrainFolder = typeof goatBrainFolders.$inferSelect;

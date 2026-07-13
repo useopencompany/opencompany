@@ -1,3 +1,4 @@
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   createGoatBrainMarkdownContent,
   goatBrainFilePathFor,
@@ -23,6 +24,7 @@ export type GoatBrainCaptureResult =
       title: string;
       jobId: string | null;
       enqueued: boolean;
+      quotaPaused?: boolean;
     }
   | {
       ok: false;
@@ -88,6 +90,7 @@ export async function captureToGoatBrainInbox(input: {
     kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
     brainRef: input.brainRef,
   });
+  captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
 
   if (result.enqueued) {
     triggerGoatBrainIngestWake().catch((error) => {
@@ -105,6 +108,7 @@ export async function captureToGoatBrainInbox(input: {
     title,
     jobId: result.jobId,
     enqueued: result.enqueued,
+    quotaPaused: Boolean(result.paused),
   };
 }
 

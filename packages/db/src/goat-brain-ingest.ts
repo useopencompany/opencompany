@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import type { NormalizedBrainSourceItem } from "../../goat-brain/src/index";
 import { getDb } from "./client";
+import { reserveGoatWorkspaceIngestion } from "./goat-billing";
 import {
   type GoatBrainIngestJobKind,
   type GoatBrainIngestJobStatus,
   goatBrainIngestJobs,
   goatBrainSourceItems,
+  goatBrains,
 } from "./goat-schema";
 
 type DbLike = any;
@@ -28,6 +30,19 @@ export type UpsertGoatBrainSourceItemResult = {
   jobIds: string[];
   enqueued: boolean;
   skipped: boolean;
+  paused?: boolean;
+  pausedWorkspaceIds?: string[];
+  quotaUpdates?: GoatIngestionQuotaUpdate[];
+};
+
+export type GoatIngestionQuotaUpdate = {
+  workspaceId: string;
+  plan: "free" | "pro";
+  usedBefore: number;
+  usedAfter: number;
+  limit: number;
+  pendingUnits: number;
+  paused: boolean;
 };
 
 export async function upsertGoatBrainSourceItemAndEnqueue(input: {
@@ -45,16 +60,31 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   // target brains are known, terminal skipped job rows are still created so
   // brain-scoped activity and audit trails can show the decision.
   skipReason?: string | null;
+  rawEventCount?: number;
   now?: Date;
   db?: DbLike;
 }): Promise<UpsertGoatBrainSourceItemResult> {
-  const db = input.db ?? getDb();
+  if (!input.db) {
+    const db = getDb();
+    return db.transaction((tx: DbLike) =>
+      upsertGoatBrainSourceItemAndEnqueue({
+        ...input,
+        db: tx,
+      }),
+    );
+  }
+
+  const db = input.db;
   const now = input.now ?? new Date();
   const kind = input.kind ?? GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND;
   const occurredAt = new Date(input.item.occurredAt);
   const capturedAt = new Date(input.item.capturedAt);
   const integrationId = input.integrationId ?? null;
   const skipReason = input.skipReason?.trim() || null;
+  const rawEventCount = input.rawEventCount ?? 1;
+  if (!Number.isInteger(rawEventCount) || rawEventCount < 1 || rawEventCount > 200) {
+    throw new Error("Goat ingestion raw event count must be between 1 and 200.");
+  }
   const brainRefs = uniqueBrainRefs(input.brainRefs ?? [input.brainRef ?? null]);
 
   const [sourceItem] = await db
@@ -74,6 +104,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
       contentHash: input.item.contentHash,
       rawPayload: input.rawPayload,
       normalizedPayload: input.item,
+      rawEventCount,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -94,6 +125,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
         contentHash: input.item.contentHash,
         rawPayload: input.rawPayload,
         normalizedPayload: input.item,
+        rawEventCount,
         updatedAt: now,
       },
     })
@@ -102,6 +134,21 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     });
 
   if (!sourceItem) throw new Error("Could not persist Goat Brain source item.");
+
+  const explicitBrainRefs = brainRefs.filter((brainRef): brainRef is string => brainRef !== null);
+  const brainRows: Array<{ id: string; workspaceId: string }> =
+    explicitBrainRefs.length === 0
+      ? []
+      : await db
+          .select({ id: goatBrains.id, workspaceId: goatBrains.workspaceId })
+          .from(goatBrains)
+          .where(inArray(goatBrains.id, explicitBrainRefs));
+  const workspaceByBrain = new Map(brainRows.map((row) => [row.id, row.workspaceId]));
+  for (const brainRef of explicitBrainRefs) {
+    if (!workspaceByBrain.has(brainRef)) {
+      throw new Error(`Cannot enqueue Goat ingestion for missing brain ${brainRef}.`);
+    }
+  }
 
   // Dedup is enforced by partial unique indexes on (source_item_id, content_hash,
   // kind[, brain_ref]); the conflict target must stay unspecified so both apply.
@@ -118,6 +165,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
               sourceProvider: input.item.sourceProvider,
               sourceConnectionId: input.sourceConnectionId,
               integrationId,
+              workspaceId: brainRef ? (workspaceByBrain.get(brainRef) ?? null) : null,
               brainRef,
               kind,
               contentHash: input.item.contentHash,
@@ -140,6 +188,52 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
             completedAt: goatBrainIngestJobs.completedAt,
             lastError: goatBrainIngestJobs.lastError,
           });
+
+  const workspaceIds = Array.from(new Set(brainRows.map((row) => row.workspaceId)));
+  const reservations: Awaited<ReturnType<typeof reserveGoatWorkspaceIngestion>>[] = [];
+  if (!skipReason) {
+    // A caller-provided db is often a live transaction. Keep its statements
+    // sequential; Neon transactions do not support concurrent queries on the
+    // same connection.
+    for (const workspaceId of workspaceIds) {
+      reservations.push(
+        await reserveGoatWorkspaceIngestion({
+          workspaceId,
+          sourceItemId: sourceItem.id,
+          sourceProvider: input.item.sourceProvider,
+          rawEventCount,
+          now,
+          db,
+        }),
+      );
+    }
+  }
+  const pausedWorkspaceIds = reservations
+    .filter((reservation) => reservation.paused)
+    .map((reservation) => reservation.reservation.workspaceId);
+  for (const workspaceId of pausedWorkspaceIds) {
+    await db
+      .update(goatBrainIngestJobs)
+      .set({ planPaused: true, updatedAt: now })
+      .where(
+        and(
+          eq(goatBrainIngestJobs.workspaceId, workspaceId),
+          eq(goatBrainIngestJobs.sourceItemId, sourceItem.id),
+          eq(goatBrainIngestJobs.status, "queued"),
+        ),
+      );
+  }
+  const quotaUpdates = reservations
+    .filter((reservation) => reservation.created)
+    .map((reservation) => ({
+      workspaceId: reservation.reservation.workspaceId,
+      plan: reservation.window.plan,
+      usedBefore: reservation.consumedBefore,
+      usedAfter: reservation.usedAfter,
+      limit: reservation.window.limit,
+      pendingUnits: reservation.pendingUnits,
+      paused: reservation.paused,
+    }));
 
   const persistedJobs = skipReason
     ? await transitionQueuedGoatBrainIngestJobsToSkipped({
@@ -186,6 +280,8 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     skipped:
       Boolean(skipReason) &&
       (persistedJobs.length === 0 || persistedJobs.every((job) => job.status === "skipped")),
+    ...(pausedWorkspaceIds.length > 0 ? { paused: true, pausedWorkspaceIds } : {}),
+    ...(quotaUpdates.length > 0 ? { quotaUpdates } : {}),
   };
 }
 

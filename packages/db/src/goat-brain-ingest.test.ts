@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { upsertGoatBrainSourceItemAndEnqueue } from "./goat-brain-ingest";
-import { goatBrainIngestJobs, goatBrainSourceItems } from "./goat-schema";
+import { goatBrainIngestJobs, goatBrainSourceItems, goatBrains } from "./goat-schema";
 
 describe("upsertGoatBrainSourceItemAndEnqueue", () => {
   it("transitions duplicate queued jobs to skipped on repeated skip delivery", async () => {
@@ -115,8 +115,11 @@ function goatBrainIngestDbMock(input: {
     select: () => ({
       from: (table: unknown) => ({
         where: async () => {
-          if (table !== goatBrainIngestJobs) throw new Error("Unexpected select table.");
-          return input.jobs;
+          if (table === goatBrains) {
+            return [{ id: "goat_brain_123", workspaceId: "goat_workspace_123" }];
+          }
+          if (table === goatBrainIngestJobs) return input.jobs;
+          throw new Error("Unexpected select table.");
         },
       }),
     }),

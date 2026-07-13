@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   createGoatBrainAssetDocument,
   goatBrainFilePathFor,
@@ -88,7 +89,7 @@ export async function createGoatBrainAssetForUser(
     sourceRef: `upload:${documentId}`,
   });
 
-  await enqueueAssetIngest({
+  const ingest = await enqueueAssetIngest({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     documentId,
@@ -105,6 +106,7 @@ export async function createGoatBrainAssetForUser(
     ok: true,
     path: goatBrainFilePathFor(row.folderPath, row.brainId),
     document: documentViewFromFileRow(row),
+    quotaPaused: Boolean(ingest.paused),
   };
 }
 
@@ -134,7 +136,7 @@ export async function replaceGoatBrainAssetForUser(
     return { ok: false, message: error instanceof Error ? error.message : "Replace failed." };
   }
 
-  await enqueueAssetIngest({
+  const ingest = await enqueueAssetIngest({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     documentId: row.id,
@@ -151,6 +153,7 @@ export async function replaceGoatBrainAssetForUser(
     ok: true,
     path: goatBrainFilePathFor(row.folderPath, row.brainId),
     document: documentViewFromFileRow(row),
+    quotaPaused: Boolean(ingest.paused),
   };
 }
 
@@ -211,7 +214,7 @@ async function enqueueAssetIngest(input: {
     contentSha256: input.contentSha256,
     uploadedAt: nowIso(),
   });
-  await upsertGoatBrainSourceItemAndEnqueue({
+  const result = await upsertGoatBrainSourceItemAndEnqueue({
     userWorkosId: input.userWorkosId,
     sourceConnectionId: input.brainRef,
     item,
@@ -219,4 +222,6 @@ async function enqueueAssetIngest(input: {
     kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
     brainRefs: [input.brainRef],
   });
+  captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
+  return result;
 }

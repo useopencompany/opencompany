@@ -74,7 +74,8 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
         toast.error(result.error);
         return;
       }
-      toast.success(`Removed ${member.name}.`);
+      if (result.warning) toast.warning(result.warning);
+      else toast.success(`Removed ${member.name}.`);
       router.refresh();
     });
   };

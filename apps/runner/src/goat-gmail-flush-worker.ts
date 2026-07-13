@@ -1,3 +1,4 @@
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
@@ -173,6 +174,7 @@ export async function flushGoatGmailThreadWindow(
       integrationId: window.integrationId,
       item,
       rawPayload: { eventIds: claimed.map((row) => row.id) },
+      rawEventCount: claimed.length,
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       now: flushedAt,
@@ -192,9 +194,11 @@ export async function flushGoatGmailThreadWindow(
       sourceItemId: upserted.sourceItemId,
       eventCount: claimed.length,
       enqueued: upserted.enqueued,
+      ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
   });
 
+  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
   if (result?.enqueued) wakeGoatBrainIngestWorker();
   return result;
 }

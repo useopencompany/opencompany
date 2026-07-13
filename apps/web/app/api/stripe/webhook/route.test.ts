@@ -1,4 +1,9 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
+import {
+  applyGoatStripeInvoicePaymentState,
+  applyGoatStripeSubscriptionProjection,
+  findGoatWorkspaceIdForStripeSubscription,
+} from "@opencompany/db/goat-billing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fulfillCheckoutSession } from "@/lib/billing/service";
 import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
@@ -6,6 +11,12 @@ import { POST } from "./route";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@opencompany/db/goat-billing", () => ({
+  applyGoatStripeInvoicePaymentState: vi.fn(),
+  applyGoatStripeSubscriptionProjection: vi.fn(),
+  findGoatWorkspaceIdForStripeSubscription: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/service", () => ({
@@ -31,6 +42,11 @@ const captureServerEventMock = vi.mocked(captureServerEvent);
 const fulfillCheckoutSessionMock = vi.mocked(fulfillCheckoutSession);
 const getStripeMock = vi.mocked(getStripe);
 const getStripeWebhookSecretMock = vi.mocked(getStripeWebhookSecret);
+const applyGoatStripeInvoicePaymentStateMock = vi.mocked(applyGoatStripeInvoicePaymentState);
+const applyGoatStripeSubscriptionProjectionMock = vi.mocked(applyGoatStripeSubscriptionProjection);
+const findGoatWorkspaceIdForStripeSubscriptionMock = vi.mocked(
+  findGoatWorkspaceIdForStripeSubscription,
+);
 
 function request(signature: string | null) {
   return new Request("https://app.example.com/api/stripe/webhook", {
@@ -44,6 +60,13 @@ describe("Stripe webhook route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getStripeWebhookSecretMock.mockReturnValue("whsec_123");
+    applyGoatStripeSubscriptionProjectionMock.mockResolvedValue({
+      applied: true,
+      planChanged: false,
+      plan: "pro",
+      cancellationScheduled: false,
+    });
+    applyGoatStripeInvoicePaymentStateMock.mockResolvedValue(true);
   });
 
   it("rejects requests without a Stripe signature", async () => {
@@ -124,6 +147,116 @@ describe("Stripe webhook route", () => {
     expect(response.status).toBe(200);
     expect(fulfillCheckoutSessionMock).toHaveBeenCalledWith(session, { eventId: "evt_123" });
     expect(captureServerEventMock).not.toHaveBeenCalled();
+  });
+
+  it("projects Goat subscription events without entering the credit checkout flow", async () => {
+    getStripeMock.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_goat_1",
+          type: "customer.subscription.updated",
+          created: 1_783_929_600,
+          data: {
+            object: {
+              id: "sub_goat_1",
+              customer: "cus_goat_1",
+              status: "active",
+              cancel_at_period_end: false,
+              metadata: { billingProduct: "goat", goatWorkspaceId: "goat_ws_1" },
+              items: {
+                data: [
+                  {
+                    id: "si_goat_1",
+                    quantity: 3,
+                    current_period_end: 1_786_608_000,
+                    price: { id: "price_goat_pro" },
+                  },
+                ],
+              },
+            },
+          },
+        })),
+      },
+    } as never);
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(applyGoatStripeSubscriptionProjectionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "goat_ws_1",
+        subscriptionId: "sub_goat_1",
+        status: "active",
+        seatQuantity: 3,
+      }),
+    );
+    expect(fulfillCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(findGoatWorkspaceIdForStripeSubscriptionMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves an existing Goat subscription when Stripe metadata is absent", async () => {
+    findGoatWorkspaceIdForStripeSubscriptionMock.mockResolvedValue("goat_ws_2");
+    getStripeMock.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_goat_2",
+          type: "customer.subscription.updated",
+          created: 1_783_929_600,
+          data: {
+            object: {
+              id: "sub_goat_2",
+              customer: "cus_goat_2",
+              status: "past_due",
+              cancel_at_period_end: false,
+              metadata: {},
+              items: { data: [] },
+            },
+          },
+        })),
+      },
+    } as never);
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(findGoatWorkspaceIdForStripeSubscriptionMock).toHaveBeenCalledWith("sub_goat_2");
+    expect(applyGoatStripeSubscriptionProjectionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "goat_ws_2", subscriptionId: "sub_goat_2" }),
+    );
+  });
+
+  it.each([
+    ["invoice.paid", false],
+    ["invoice.payment_failed", true],
+  ] as const)("projects Goat %s payment state", async (eventType, needsAttention) => {
+    findGoatWorkspaceIdForStripeSubscriptionMock.mockResolvedValue("goat_ws_3");
+    getStripeMock.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: `evt_${eventType}`,
+          type: eventType,
+          created: 1_783_929_600,
+          data: {
+            object: {
+              id: "in_goat_1",
+              parent: { subscription_details: { subscription: "sub_goat_3" } },
+            },
+          },
+        })),
+      },
+    } as never);
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(findGoatWorkspaceIdForStripeSubscriptionMock).toHaveBeenCalledWith("sub_goat_3");
+    expect(applyGoatStripeInvoicePaymentStateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType,
+        subscriptionId: "sub_goat_3",
+        needsAttention,
+      }),
+    );
   });
 
   it("ignores unrelated event types", async () => {
