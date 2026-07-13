@@ -578,6 +578,55 @@ export async function upsertGoatBrainFile(
   });
 }
 
+// Insert-only companion to upsertGoatBrainFile for interactive file creation.
+// A null result means another writer claimed the same brain id first; callers
+// can safely allocate the next display name without overwriting that document.
+export async function createGoatBrainMarkdownDocument(
+  input: GoatBrainScope & {
+    path: string;
+    content: string;
+    id?: string;
+  },
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainDocument | null> {
+  const db = options.db ?? getDb();
+  const projection = deriveGoatBrainFileProjection({ path: input.path, content: input.content });
+  const edges = deriveGoatBrainEdges({
+    id: projection.brainId,
+    relations: projection.relations,
+    body: [projection.body, ...projection.timeline.map((entry) => entry.body)].join("\n\n"),
+  });
+  if (projection.timeline.length > 0 || edges.length > 0) {
+    throw new Error(
+      "Interactive brain file creation only supports documents without derived rows.",
+    );
+  }
+
+  // Folder creation happens before the document insert, so the insert remains
+  // the only post-validation write that can fail. Its unique conflict handling
+  // is one atomic database statement even on the web app's neon-http client.
+  await ensureFolderPath(db, input, projection.folderPath);
+  const now = new Date();
+  const rows = await db
+    .insert(goatBrainDocuments)
+    .values({
+      id: input.id ?? `goat_brain_doc_${randomUUID()}`,
+      userWorkosId: input.userWorkosId,
+      createdByWorkosId: input.userWorkosId,
+      brainRef: input.brainRef,
+      ...documentValues(projection),
+      format: GOAT_BRAIN_FILE_FORMAT,
+      mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({
+      target: [goatBrainDocuments.brainRef, goatBrainDocuments.brainId],
+    })
+    .returning();
+  return rows[0] ?? null;
+}
+
 export async function updateGoatBrainFileContent(
   input: GoatBrainScope & { fileId: string; content: string; expectedContentHash?: string },
   options: { db?: DbClient } = {},
