@@ -1180,13 +1180,18 @@ export function normalizeJamieMeetingCompletedWebhook(
   const userId = readString(user.id, "data.user.id");
   const userEmail = optionalString(user.email);
 
-  const title = readString(event.title, "data.event.title");
-  const startTime = readIsoString(event.startTime, "data.event.startTime");
-  const endTime = optionalIsoString(event.endTime);
-  const summaryMarkdown = normalizeSummary(event.summary);
-  const transcript = normalizeTranscript(event.transcript);
-  const participants = normalizeParticipants(event.participants);
-  const actionItems = normalizeActionItems(event.actionItems ?? event.tasks);
+  const title = readString(event.title ?? data.title, "data.event.title");
+  const startTime = readIsoString(
+    event.startTime ?? event.scheduledTime ?? data.startTime,
+    "data.event.startTime",
+  );
+  const endTime = optionalIsoString(event.endTime ?? data.endTime);
+  const summaryMarkdown = normalizeSummary(event.summary ?? data.summary);
+  const transcript = normalizeTranscript(event.transcript ?? data.transcript);
+  const participants = normalizeParticipants(event.participants ?? data.participants);
+  const actionItems = normalizeActionItems(
+    event.actionItems ?? event.tasks ?? data.actionItems ?? data.tasks,
+  );
   const eventId = optionalString(event.id);
   const externalEventId = optionalString(event.externalId);
   const externalId =
@@ -1328,7 +1333,8 @@ function normalizeActionItems(value: unknown): NormalizedJamieMeetingActionItem[
     if (typeof action === "string")
       return [{ text: readNonEmpty(action, `data.event.actionItems[${index}]`) }];
     const object = readObject(action, `data.event.actionItems[${index}]`);
-    const text = optionalString(object.text) ?? optionalString(object.title);
+    const text =
+      optionalString(object.text) ?? optionalString(object.title) ?? optionalString(object.content);
     if (!text) return [];
     const assignee =
       optionalString(object.assignee) ??
