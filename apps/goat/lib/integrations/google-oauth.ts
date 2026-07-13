@@ -4,7 +4,7 @@ import { getGoatAppUrl } from "@/lib/workos";
 
 export type GoatGoogleIntegrationProvider = Extract<
   GoatIntegrationProvider,
-  "gmail" | "google_calendar"
+  "gmail" | "google_calendar" | "google_drive"
 >;
 
 export type GoatGoogleProviderConfig = {
@@ -36,6 +36,12 @@ export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
       "https://www.googleapis.com/auth/calendar.freebusy",
       ...OPENID_SCOPES,
     ],
+  },
+  google_drive: {
+    provider: "google_drive",
+    routeSegment: "google-drive",
+    displayName: "Google Drive",
+    scopes: ["https://www.googleapis.com/auth/drive.readonly", ...OPENID_SCOPES],
   },
 };
 
@@ -249,7 +255,9 @@ function isGoatGoogleIntegrationStatePayload(
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
-    (record.provider === "gmail" || record.provider === "google_calendar") &&
+    (record.provider === "gmail" ||
+      record.provider === "google_calendar" ||
+      record.provider === "google_drive") &&
     typeof record.userWorkosId === "string" &&
     typeof record.returnTo === "string" &&
     (record.oauthRedirectUri === undefined || typeof record.oauthRedirectUri === "string") &&

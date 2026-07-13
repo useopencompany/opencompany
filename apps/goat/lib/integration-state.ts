@@ -1,11 +1,20 @@
 import type { GoatIntegrationProvider, GoatIntegrationStatus } from "@opencompany/db/goat-schema";
 
 export type GoatGoogleProviderState = {
-  provider: "gmail" | "google_calendar";
+  provider: "gmail" | "google_calendar" | "google_drive";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
   accountEmail: string | null;
   accountName: string | null;
+};
+
+export type GoatGoogleDriveSourceProviderState = {
+  provider: "google_drive";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountEmail: string | null;
+  statusReason: string | null;
 };
 
 // The Gmail brain-source connection view: unlike GoatGoogleProviderState it
@@ -82,6 +91,7 @@ export type GoatCodexProviderState = {
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
   google_calendar: GoatGoogleProviderState;
+  google_drive: GoatGoogleProviderState;
   linear: GoatLinearProviderState;
   github: GoatGitHubProviderState;
   jamie: GoatJamieProviderState;
@@ -133,6 +143,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
   return {
     gmail: googleProviderState("gmail", byProvider.get("gmail")),
     google_calendar: googleProviderState("google_calendar", byProvider.get("google_calendar")),
+    google_drive: googleProviderState("google_drive", byProvider.get("google_drive")),
     linear: linearProviderState(byProvider.get("linear")),
     github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
@@ -150,7 +161,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
 export const goatGoogleIntegrationStateFromRows = goatIntegrationStateFromRows;
 
 function googleProviderState(
-  provider: "gmail" | "google_calendar",
+  provider: "gmail" | "google_calendar" | "google_drive",
   row: IntegrationStateRow | undefined,
 ): GoatGoogleProviderState {
   if (!row) {

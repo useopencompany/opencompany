@@ -127,7 +127,7 @@ function brainSummaryView(brain: {
 }
 
 function buildIntegrationState(input: {
-  googleIntegrations: Pick<GoatIntegrationState, "gmail" | "google_calendar">;
+  googleIntegrations: Pick<GoatIntegrationState, "gmail" | "google_calendar" | "google_drive">;
   linear: GoatIntegrationState["linear"];
   github: GoatIntegrationState["github"];
   jamie: GoatIntegrationState["jamie"];

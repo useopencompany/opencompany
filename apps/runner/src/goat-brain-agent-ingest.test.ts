@@ -4,6 +4,7 @@ import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-tra
 import {
   normalizeGmailThreadWindow,
   normalizeGoatChatCapture,
+  normalizeGoogleDriveDocument,
   normalizeJamieMeetingCompletedWebhook,
   normalizeSlackConversationWindow,
 } from "@opencompany/goat-brain";
@@ -75,6 +76,7 @@ vi.mock("@opencompany/db/goat-gmail", async (importOriginal) => ({
 import {
   buildGmailThreadAgentIngestPrompt,
   buildGoatChatCaptureAgentIngestPrompt,
+  buildGoogleDriveDocumentAgentIngestPrompt,
   buildJamieMeetingAgentIngestPrompt,
   buildSlackConversationAgentIngestPrompt,
   formatGoatBrainFolderInventoryPrompt,
@@ -455,6 +457,29 @@ describe("buildGmailThreadAgentIngestPrompt", () => {
       instructions: null,
     });
     expect(prompt).not.toContain("Owner's ingestion instructions");
+  });
+});
+
+describe("buildGoogleDriveDocumentAgentIngestPrompt", () => {
+  it("uses the live Drive pointer and explicitly forbids an evidence snapshot", () => {
+    const item = normalizeGoogleDriveDocument({
+      fileId: "file_123",
+      name: "Launch plan",
+      mimeType: "application/vnd.google-apps.document",
+      webViewLink: "https://docs.google.com/document/d/file_123/edit",
+      modifiedTime: "2026-07-13T08:00:00.000Z",
+      version: "9",
+      extractedText: "Launch in September.",
+      contentSha256: "a".repeat(64),
+      capturedAt: "2026-07-13T08:05:00.000Z",
+    });
+
+    const prompt = buildGoogleDriveDocumentAgentIngestPrompt(item);
+
+    expect(prompt).toContain("google-drive:file:file_123");
+    expect(prompt).toContain("https://docs.google.com/document/d/file_123/edit");
+    expect(prompt).toContain("Do not create an evidence/ snapshot");
+    expect(prompt).toContain("Launch in September.");
   });
 });
 

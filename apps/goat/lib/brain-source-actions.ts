@@ -16,6 +16,13 @@ import {
   type GoatGmailEventType,
   sanitizeGoatGmailInstructions,
 } from "@opencompany/db/goat-gmail";
+import {
+  GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE,
+  type GoatGoogleDriveCorpusKey,
+  type GoatGoogleDriveResourceRef,
+  readGoatGoogleDriveResources,
+  upsertGoatGoogleDriveSyncCursor,
+} from "@opencompany/db/goat-google-drive";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
   GOAT_LINEAR_EVENT_TYPES,
@@ -28,6 +35,7 @@ import {
   type GoatBrainSourceConfigProvider,
   type GoatIntegrationProvider,
   type GoatIntegrationStatus,
+  goatBrainSources,
   goatIntegrations,
   isWorkspaceOwnedGoatIntegrationProvider,
 } from "@opencompany/db/goat-schema";
@@ -39,6 +47,7 @@ import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import type {
   GoatGmailSourceProviderState,
+  GoatGoogleDriveSourceProviderState,
   GoatJamieProviderState,
   GoatLinearSourceProviderState,
   GoatSlackProviderState,
@@ -47,7 +56,18 @@ import {
   type GoatGitHubProviderState,
   getGoatGitHubIntegrationState,
 } from "@/lib/integrations/github";
-import { getGoatGmailSourceIntegrationState } from "@/lib/integrations/google-data";
+import {
+  getGoatGmailSourceIntegrationState,
+  getGoatGoogleDriveSourceIntegrationState,
+} from "@/lib/integrations/google-data";
+import {
+  GoatGoogleDriveRequestError,
+  getGoatGoogleDriveFile,
+  getGoatGoogleDriveStartPageToken,
+  listGoatGoogleDriveFiles,
+  listGoatGoogleSharedDrives,
+  loadOwnGoatGoogleDriveAccount,
+} from "@/lib/integrations/google-drive";
 import {
   getGoatJamieIntegrationState,
   isGoatJamieWebhookApiKeyConfigured,
@@ -57,6 +77,8 @@ import {
   linearGraphqlRequest,
 } from "@/lib/integrations/linear-ingest";
 import { getGoatSlackIntegrationState, slackApiRequest } from "@/lib/integrations/slack";
+import { triggerGoatGoogleDriveSyncWake } from "@/lib/task-runner";
+import { getGoatAppUrl } from "@/lib/workos";
 import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
 
 export type GoatBrainSourceView = {
@@ -95,6 +117,9 @@ export type GoatBrainSourcesDetails = {
   gmail: {
     integration: GoatGmailSourceProviderState;
   };
+  googleDrive: {
+    integration: GoatGoogleDriveSourceProviderState;
+  };
 };
 
 function integrationProviderFor(
@@ -103,6 +128,7 @@ function integrationProviderFor(
   switch (provider) {
     case "jamie":
     case "gmail":
+    case "google_drive":
     case "github":
     case "slack":
     case "linear":
@@ -178,16 +204,16 @@ export async function getGoatBrainSourcesAction(
   const context = await requireAdminBrainContext(brainRef);
   if (!context) return null;
 
-  const [sources, jamieState, slackState, linearState, githubState, gmailState] = await Promise.all(
-    [
+  const [sources, jamieState, slackState, linearState, githubState, gmailState, googleDriveState] =
+    await Promise.all([
       listGoatBrainSourcesForBrain(brainRef),
       getGoatJamieIntegrationState(context.workspace.id),
       getGoatSlackIntegrationState(context.user.workosUserId),
       getGoatLinearSourceIntegrationState(context.user.workosUserId),
       getGoatGitHubIntegrationState(context.workspace.id),
       getGoatGmailSourceIntegrationState(context.user.workosUserId),
-    ],
-  );
+      getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
+    ]);
 
   const jamieConfigured = jamieState.integrationId
     ? await hasAnyBrainSourceForIntegration(jamieState.integrationId)
@@ -227,6 +253,9 @@ export async function getGoatBrainSourcesAction(
     },
     gmail: {
       integration: gmailState,
+    },
+    googleDrive: {
+      integration: googleDriveState,
     },
   };
 }
@@ -662,6 +691,250 @@ export async function setGoatBrainGmailSourceAction(input: {
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not update the Gmail source.",
+    };
+  }
+}
+
+export type GoatGoogleDriveResourceListResult =
+  | {
+      ok: true;
+      files: Array<{
+        id: string;
+        name: string;
+        kind: "file" | "folder";
+        mimeType: string;
+        driveId: string | null;
+        webViewLink: string | null;
+      }>;
+      nextPageToken: string | null;
+    }
+  | { ok: false; error: string };
+
+export async function listGoatGoogleDriveResourcesAction(input: {
+  integrationId: string;
+  parentId?: string;
+  query?: string;
+  pageToken?: string;
+}): Promise<GoatGoogleDriveResourceListResult> {
+  const context = await currentGoatUser();
+  const parentId = input.parentId?.trim();
+  const query = input.query?.trim();
+  const pageToken = input.pageToken?.trim();
+  if (
+    (parentId?.length ?? 0) > 512 ||
+    (query?.length ?? 0) > 200 ||
+    (pageToken?.length ?? 0) > 4_096
+  ) {
+    return { ok: false, error: "Invalid Google Drive browse request." };
+  }
+  const account = await loadOwnGoatGoogleDriveAccount(
+    context.user.workosUserId,
+    input.integrationId,
+  );
+  if (!account) return { ok: false, error: "Connect Google Drive in Settings first." };
+  try {
+    const page = await listGoatGoogleDriveFiles({
+      account,
+      ...(parentId ? { parentId } : {}),
+      ...(query ? { query } : {}),
+      ...(pageToken ? { pageToken } : {}),
+    });
+    const sharedDrives =
+      !parentId && !query && !pageToken ? await listGoatGoogleSharedDrives({ account }) : [];
+    return {
+      ok: true,
+      files: [
+        ...sharedDrives.map((drive) => ({
+          id: drive.id,
+          name: `${drive.name} (Shared Drive)`,
+          kind: "folder" as const,
+          mimeType: GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE,
+          driveId: drive.id,
+          webViewLink: `https://drive.google.com/drive/folders/${drive.id}`,
+        })),
+        ...page.files.map((file) => ({
+          id: file.id,
+          name: file.name,
+          kind:
+            file.mimeType === GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE
+              ? ("folder" as const)
+              : ("file" as const),
+          mimeType: file.mimeType,
+          driveId: file.driveId,
+          webViewLink: file.webViewLink,
+        })),
+      ],
+      nextPageToken: page.nextPageToken,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not load Google Drive files.",
+    };
+  }
+}
+
+export async function setGoatBrainGoogleDriveSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+  enabled: boolean;
+  resourceIds: string[];
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireAdminBrainContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "Only workspace admins can configure brain sources." };
+  }
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "google_drive",
+    context,
+  });
+  if (!integration)
+    return { ok: false, error: "Only the connection owner can configure this source." };
+  const resourceIds = [...new Set(input.resourceIds.map((id) => id.trim()).filter(Boolean))];
+  if (resourceIds.some((id) => id.length > 512)) {
+    return { ok: false, error: "Invalid Google Drive resource id." };
+  }
+  if (input.enabled && resourceIds.length === 0) {
+    return { ok: false, error: "Select at least one Drive file or folder." };
+  }
+  if (resourceIds.length > 100) {
+    return { ok: false, error: "Select at most 100 Drive files or folders per brain." };
+  }
+
+  try {
+    const [existing] = await getDb()
+      .select({ config: goatBrainSources.config, enabled: goatBrainSources.enabled })
+      .from(goatBrainSources)
+      .where(
+        and(
+          eq(goatBrainSources.brainId, input.brainRef),
+          eq(goatBrainSources.integrationId, input.integrationId),
+        ),
+      )
+      .limit(1);
+    const existingResources = new Map(
+      readGoatGoogleDriveResources(existing?.config).map((resource) => [resource.id, resource]),
+    );
+
+    // Disabling must remain possible after token revocation or access loss.
+    // Retain only server-known resources; the editor passes an empty list when
+    // the user intentionally clears the selection.
+    if (!input.enabled) {
+      const resources = resourceIds.flatMap((id) => existingResources.get(id) ?? []);
+      await upsertGoatBrainSource({
+        brainRef: input.brainRef,
+        provider: "google_drive",
+        integrationId: input.integrationId,
+        userWorkosId: integration.userWorkosId,
+        createdByWorkosId: context.user.workosUserId,
+        enabled: false,
+        config: { resources },
+      });
+      revalidatePath("/", "layout");
+      return { ok: true };
+    }
+
+    if (integration.status === "disconnected") {
+      return { ok: false, error: "Reconnect Google Drive in Settings first." };
+    }
+    const account = await loadOwnGoatGoogleDriveAccount(
+      context.user.workosUserId,
+      input.integrationId,
+    );
+    if (!account) {
+      return { ok: false, error: "Only the connection owner can configure this source." };
+    }
+    const files = await Promise.all(
+      resourceIds.map((fileId) => getGoatGoogleDriveFile({ account, fileId })),
+    );
+    if (files.some((file) => file.trashed)) {
+      return { ok: false, error: "Remove trashed Drive items before saving." };
+    }
+
+    const resetSelectionTimes = Boolean(existing && !existing.enabled && input.enabled);
+    const driveIds = [...new Set(files.flatMap((file) => (file.driveId ? [file.driveId] : [])))];
+    const sharedTokens = new Map<string, string>();
+    await Promise.all(
+      driveIds.map(async (driveId) => {
+        try {
+          sharedTokens.set(driveId, await getGoatGoogleDriveStartPageToken({ account, driveId }));
+        } catch (error) {
+          // A directly shared file can carry a driveId without granting access
+          // to that Shared Drive's change log; the user corpus tracks it.
+          if (
+            !(error instanceof GoatGoogleDriveRequestError) ||
+            (error.status !== 403 && error.status !== 404)
+          ) {
+            throw error;
+          }
+        }
+      }),
+    );
+
+    // The account-level log covers My Drive and directly shared files and is
+    // always maintained alongside any selected Shared Drive logs.
+    const userToken = await getGoatGoogleDriveStartPageToken({ account });
+    const webhookAddress = `${getGoatAppUrl()}/api/webhooks/google-drive`;
+    const cursors = new Map<GoatGoogleDriveCorpusKey, { driveId: string | null; token: string }>();
+    cursors.set("user", { driveId: null, token: userToken });
+    for (const [driveId, token] of sharedTokens) {
+      cursors.set(`drive:${driveId}`, { driveId, token });
+    }
+    await Promise.all(
+      [...cursors].map(([corpusKey, cursor]) =>
+        upsertGoatGoogleDriveSyncCursor({
+          integrationId: input.integrationId,
+          userWorkosId: integration.userWorkosId,
+          corpusKey,
+          driveId: cursor.driveId,
+          pageToken: cursor.token,
+          webhookAddress,
+        }),
+      ),
+    );
+
+    // Tokens are durable before this timestamp is recorded. A change racing
+    // token acquisition is either before selection (filtered) or after it
+    // (present in the durable feed), so the no-backfill boundary has no gap.
+    const selectedAt = new Date().toISOString();
+    const resources: GoatGoogleDriveResourceRef[] = files.map((file) => {
+      const corpusKey: GoatGoogleDriveCorpusKey =
+        file.driveId && sharedTokens.has(file.driveId) ? `drive:${file.driveId}` : "user";
+      const previous = existingResources.get(file.id);
+      return {
+        id: file.id,
+        name: file.name,
+        kind: file.mimeType === GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE ? "folder" : "file",
+        mimeType: file.mimeType,
+        driveId: file.driveId,
+        corpusKey,
+        webViewLink: file.webViewLink,
+        selectedAt: !resetSelectionTimes && previous ? previous.selectedAt : selectedAt,
+      };
+    });
+
+    await upsertGoatBrainSource({
+      brainRef: input.brainRef,
+      provider: "google_drive",
+      integrationId: input.integrationId,
+      userWorkosId: integration.userWorkosId,
+      createdByWorkosId: context.user.workosUserId,
+      enabled: true,
+      config: { resources },
+    });
+    triggerGoatGoogleDriveSyncWake().catch((error) => {
+      console.warn("Could not wake Goat Google Drive sync worker.", {
+        event: "goat.google_drive_source_wake_failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the Google Drive source.",
     };
   }
 }
