@@ -11,6 +11,7 @@ import {
   House,
   Loader2,
   PanelLeft,
+  PlugZap,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,11 +27,13 @@ function SidebarNavRow({
   icon: Icon,
   label,
   active,
+  incomplete = false,
 }: {
   href: string;
   icon: LucideIcon;
   label: string;
   active: boolean;
+  incomplete?: boolean;
 }) {
   return (
     <Link
@@ -47,6 +50,9 @@ function SidebarNavRow({
         className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
+      {incomplete ? (
+        <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+      ) : null}
     </Link>
   );
 }
@@ -58,10 +64,11 @@ export function GoatSidebar({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
-  const { user } = useGoatAppData();
+  const { mcpSetup, user } = useGoatAppData();
   const pathname = usePathname();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const homeActive = pathname === "/";
+  const mcpSetupActive = pathname === "/setup/mcp";
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
@@ -94,6 +101,15 @@ export function GoatSidebar({
         {/* Primary nav */}
         <nav aria-label="Goat primary" className="flex flex-col gap-px px-2 pt-2">
           <SidebarNavRow href="/" icon={House} label="Home" active={homeActive} />
+          {!mcpSetup.completedAt ? (
+            <SidebarNavRow
+              href="/setup/mcp"
+              icon={PlugZap}
+              label="Connect your brain"
+              active={mcpSetupActive}
+              incomplete
+            />
+          ) : null}
         </nav>
 
         {/* Brains */}

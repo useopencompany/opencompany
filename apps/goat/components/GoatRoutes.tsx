@@ -17,13 +17,18 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
-import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
+import {
+  type GoatAppInitialData,
+  type GoatBrainSummaryView,
+  useGoatAppData,
+} from "@/components/GoatAppDataProvider";
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { GoatSpendOverview } from "@/components/GoatSpendOverview";
 import { GoatSurface } from "@/components/GoatSurface";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
+import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";
@@ -127,15 +132,46 @@ export function GoatSettingsRoute() {
 }
 
 export function GoatIntegrationsSettingsRoute() {
-  const { integrations, workspace } = useGoatAppData();
+  const { integrations, mcpSetup, workspace } = useGoatAppData();
 
   return (
     <GoatSettingsContent
       title="Integrations"
       description="Connect the tools Goat can read from and act on."
     >
-      <IntegrationRows integrations={integrations} isWorkspaceAdmin={workspace.role === "admin"} />
+      <IntegrationRows
+        integrations={integrations}
+        isWorkspaceAdmin={workspace.role === "admin"}
+        mcpSetup={mcpSetup}
+      />
     </GoatSettingsContent>
+  );
+}
+
+export function GoatMcpSetupRoute() {
+  const { activeBrain, brains, mcpSetup, user, workspace } = useGoatAppData();
+  const displayName =
+    [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || "Teammate";
+
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[760px] flex-col pb-24 pt-16 sm:pt-24">
+          <McpSetupGuide
+            displayName={displayName}
+            workspaceName={workspace.name}
+            brains={brains.map((brain) => ({
+              id: brain.id,
+              name: brain.name,
+              slug: brain.slug,
+            }))}
+            initialBrainRef={activeBrain?.id ?? null}
+            initialClient={mcpSetup.preferredClient}
+            initialCompletedAt={mcpSetup.completedAt}
+          />
+        </div>
+      </div>
+    </main>
   );
 }
 
@@ -598,14 +634,17 @@ function localBridgeName() {
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
+  mcpSetup,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  mcpSetup: GoatAppInitialData["mcpSetup"];
 }) {
   return (
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
+      mcpSetup={mcpSetup}
     />
   );
 }
