@@ -132,11 +132,19 @@ export function OnboardingWizard({
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [slugStatus, setSlugStatus] = useState<SlugStatus>("idle");
+  const [slugCheck, setSlugCheck] = useState<{ slug: string; available: boolean } | null>(null);
 
   const step = STEPS[stepIndex] ?? STEPS[0]!;
   const isLast = stepIndex === STEPS.length - 1;
   const effectiveSlug = slugTouched ? slug : slugify(workspaceName);
+  const shouldCheckSlug = step.key === "workspace" && effectiveSlug.length > 0;
+  const slugStatus: SlugStatus = !shouldCheckSlug
+    ? "idle"
+    : slugCheck?.slug === effectiveSlug
+      ? slugCheck.available
+        ? "available"
+        : "taken"
+      : "checking";
 
   // Persist the active step to a cookie so an OAuth round-trip (connecting a
   // source) resumes exactly here.
@@ -157,18 +165,14 @@ export function OnboardingWizard({
 
   // Live workspace-URL availability check (debounced).
   useEffect(() => {
-    if (step.key !== "workspace" || !effectiveSlug) {
-      setSlugStatus("idle");
-      return;
-    }
-    setSlugStatus("checking");
+    if (!shouldCheckSlug) return;
     const timer = window.setTimeout(() => {
-      void checkGoatWorkspaceSlugAction(effectiveSlug).then((result) =>
-        setSlugStatus(result.available ? "available" : "taken"),
-      );
+      void checkGoatWorkspaceSlugAction(effectiveSlug).then((result) => {
+        setSlugCheck({ slug: effectiveSlug, available: result.available });
+      });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [effectiveSlug, step.key]);
+  }, [effectiveSlug, shouldCheckSlug]);
 
   // Saves the current step server-side; returns false (and toasts) on rejection.
   const persistCurrentStep = async (): Promise<boolean> => {
@@ -642,7 +646,7 @@ function BrainStep({
 
       <p className="mt-3 flex items-center gap-1.5 text-[11.5px] text-ink-subtle">
         <Lock size={11} strokeWidth={2} />
-        Drag to reorder. Grayed folders are our defaults; locked ones can't be removed.
+        Drag to reorder. Grayed folders are our defaults; locked ones can&apos;t be removed.
       </p>
     </div>
   );
@@ -719,7 +723,7 @@ function LockedTreeRow({ path }: { path: string }) {
           className="shrink-0 text-ink-subtle opacity-0 transition-opacity group-hover:opacity-60"
         />
       </TooltipTrigger>
-      <TooltipContent>Default folder — part of every brain and can't be removed.</TooltipContent>
+      <TooltipContent>Default folder — part of every brain and can&apos;t be removed.</TooltipContent>
     </Tooltip>
   );
 }
@@ -950,7 +954,7 @@ function ContextStep({
         <Sparkles size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-muted" />
         <p className="text-[12.5px] leading-5 text-ink-muted">
           This is where the magic starts — the more context you give, the better your brain
-          understands your world. We'll only read what you share here.
+          understands your world. We&apos;ll only read what you share here.
         </p>
       </div>
 
@@ -1027,7 +1031,7 @@ function ConnectStep({ brainRef }: { brainRef: string | null }) {
       />
 
       <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-4">
-        <span className="text-[12px] font-medium text-ink">Your brain's connector URL</span>
+        <span className="text-[12px] font-medium text-ink">Your brain&apos;s connector URL</span>
         <div className="flex items-center gap-2">
           <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-muted px-3 py-2 text-[12.5px] text-ink-muted">
             {url}
@@ -1096,10 +1100,10 @@ function FinishStep({
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-            You're all set
+            You&apos;re all set
           </h1>
           <p className="text-[14px] leading-6 text-ink-muted">
-            {workspaceName ? `${workspaceName} is ready.` : "Your brain is ready."} It'll keep
+            {workspaceName ? `${workspaceName} is ready.` : "Your brain is ready."} It&apos;ll keep
             learning as content flows in — you can shape it anytime.
           </p>
         </div>
@@ -1169,7 +1173,7 @@ function ImportingScreen({ domain }: { domain: string }) {
           Building your brain
         </h1>
         <p className="text-[14px] leading-6 text-ink-muted">
-          Hang tight — we're turning your context into a living brain.
+          Hang tight — we&apos;re turning your context into a living brain.
         </p>
       </div>
       <pre className="font-mono text-[20px] tracking-[0.3em] text-ink" aria-hidden>

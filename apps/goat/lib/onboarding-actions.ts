@@ -23,7 +23,7 @@ function errorResult(error: unknown, fallback: string): { ok: false; error: stri
 }
 
 // Mirrors the client-side slugify so what the user previews is what we store.
-export function normalizeGoatWorkspaceSlug(value: string): string {
+function normalizeGoatWorkspaceSlug(value: string): string {
   return value
     .toLowerCase()
     .trim()
