@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CirclePause,
   Copy,
   Ellipsis,
   FileCode2,
@@ -697,7 +698,16 @@ function GoatBrainEditor({
         toast.error(result.message);
         return;
       }
-      toast.success("Uploaded — filing into the brain");
+      if (result.quotaPaused) {
+        toast.warning("Uploaded, but ingestion is paused by your plan.", {
+          action: {
+            label: "View usage",
+            onClick: () => router.push("/settings/workspace/usage"),
+          },
+        });
+      } else {
+        toast.success("Uploaded — filing into the brain");
+      }
       if (result.document) selectUploadedDocument(result.document);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed.");
@@ -730,7 +740,16 @@ function GoatBrainEditor({
         toast.error(result.message);
         return;
       }
-      toast.success("File replaced — re-filing into the brain");
+      if (result.quotaPaused) {
+        toast.warning("File replaced, but ingestion is paused by your plan.", {
+          action: {
+            label: "View usage",
+            onClick: () => router.push("/settings/workspace/usage"),
+          },
+        });
+      } else {
+        toast.success("File replaced — re-filing into the brain");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Replace failed.");
     } finally {
@@ -2139,14 +2158,22 @@ function BrainIngestStatusIcon({
   compact?: boolean;
 }) {
   const Icon =
-    state.kind === "failed" ? CircleAlert : state.kind === "retrying" ? RotateCw : Loader2;
+    state.kind === "failed"
+      ? CircleAlert
+      : state.kind === "paused"
+        ? CirclePause
+        : state.kind === "retrying"
+          ? RotateCw
+          : Loader2;
   const label = draftIngestStateLabel(state);
   const colorClass =
     state.kind === "failed"
       ? "text-danger"
-      : state.kind === "retrying"
+      : state.kind === "paused"
         ? "text-amber-600"
-        : "text-ink-muted";
+        : state.kind === "retrying"
+          ? "text-amber-600"
+          : "text-ink-muted";
   const animationClass = state.kind === "queued" || state.kind === "running" ? "animate-spin" : "";
 
   return (
@@ -2165,6 +2192,9 @@ function draftIngestStateLabel(state: GoatBrainDraftIngestState) {
   const title = state.title ? `: ${state.title}` : "";
   if (state.kind === "failed") {
     return `Brain filing failed${state.detail ? `: ${state.detail}` : title}`;
+  }
+  if (state.kind === "paused") {
+    return `Paused by plan${title}`;
   }
   if (state.kind === "retrying") {
     return `Retrying brain filing${title}`;

@@ -100,7 +100,7 @@ These are the root commands a contributor is expected to run directly:
 | `bun run setup` | Prepare or refresh local env files, Neon branch database, Stripe fallback values, and migrations. |
 | `bun run setup:dev` | Run setup, then start the full local dev stack. |
 | `bun run setup:personal` | Create `.env.override.local` for developer-owned values such as a personal Neon project. |
-| `bun run setup:stripe` | Fill only missing local Stripe values after the main setup already ran. |
+| `bun run setup:stripe` | Complete local Stripe billing setup: load restricted Goat values from Infisical when available, reuse or create the OpenCompany Pro test Price, generate the reconciliation secret, and refresh the Goat app env. |
 | `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
 | `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, a local Durable Streams server (auto-sets `DURABLE_STREAMS_URL`), and ngrok when available. |
 | `bun run dev:goat` | Start the Goat experiment app plus the runner with the same local Durable Streams/ngrok wrapper. Goat runs internally on port 3002 by default and is exposed locally through Caddy at `https://localhost:3443` when Caddy is installed. When ngrok is available, it also exposes one public URL through a local proxy so E2B Goat tasks can reach runner `/goat/tools/*` and `/broker/*` callbacks. Run `bun run setup` first so Electric, Caddy, and `apps/goat/.env.local` are ready. |
@@ -200,6 +200,10 @@ in Infisical `dev` + `/web` and `/runner`:
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
 - `STRIPE_SECRET_KEY`
+- `GOAT_STRIPE_API_KEY`
+- `GOAT_STRIPE_PRO_PRICE_ID`
+- `GOAT_STRIPE_CHECKOUT_ENABLED`
+- `CRON_SECRET`
 - optional runner, Linear, analytics, and observability values from `.env.example`
 
 `DATABASE_URL` can exist in Infisical `dev` only for the explicit `--shared-db` mode, but normal
@@ -213,11 +217,29 @@ without copying them by hand.
 
 Stripe setup has a local fallback: if `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` are still
 placeholders, `bun run setup` reads the active Stripe CLI test key and runs
-`stripe listen --print-secret`, then writes both values into `.env.local` without printing them. Run
-`stripe login` once first. If you use a non-default Stripe CLI profile, set `STRIPE_CLI_PROJECT_NAME`
-before running setup.
+`stripe listen --print-secret`, then writes both values into `.env.local` without printing them. It
+also loads Goat billing values from Infisical `dev` + `/web`, reuses or creates the licensed EUR 15
+OpenCompany Pro test Price by lookup key, generates `CRON_SECRET`, and refreshes
+`apps/goat/.env.local`. Run `stripe login` once first. If you use a non-default Stripe CLI profile,
+set `STRIPE_CLI_PROJECT_NAME` before running setup.
 
 For an existing checkout where only Stripe is missing, run `bun run setup:stripe`.
+
+Goat subscriptions additionally require `GOAT_STRIPE_API_KEY`. Setup prefers an `rk_test_` key from
+the Stripe CLI. Stripe may instead issue an expiring `sk_test_` CLI key; setup accepts that only as a
+gitignored local-development fallback. It refuses non-restricted keys without an expiry, and hosted
+environments always require a dedicated restricted key stored in Infisical. If the active profile
+has no suitable key, run `stripe login` or create a restricted test key in Stripe, store it in
+Infisical `dev` + `/web`, and rerun setup.
+`GOAT_STRIPE_PRO_PRICE_ID` is provisioned automatically in test mode. Stripe Checkout uses automatic
+tax; add the jurisdictions where the business is registered under **Stripe Tax → Registrations**
+before enabling live Checkout. Configure the customer portal separately in test and live modes
+with payment methods, invoice history, tax IDs, and cancellation at period end enabled; leave
+customer quantity changes disabled because Goat synchronizes active workspace members.
+Limit the Goat restricted key to Customer, Checkout Session, Customer Portal, Price read,
+Subscription read, and Subscription Item write permissions.
+Hosted live Checkout also requires `GOAT_STRIPE_CHECKOUT_ENABLED=true`; keep it false until the
+business's Stripe Tax registrations are configured.
 
 Then pull them locally:
 

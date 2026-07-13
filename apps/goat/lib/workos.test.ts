@@ -15,6 +15,7 @@ describe("Goat WorkOS URL helpers", () => {
 
   it("builds the callback URL from the Goat app URL before using a shared web callback", () => {
     vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://my.opencompany.chat");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", "");
     vi.stubEnv("NEXT_PUBLIC_WORKOS_REDIRECT_URI", "https://my.opencompany.cloud/auth/callback");
 
     expect(getGoatWorkOSRedirectUri()).toBe("https://my.opencompany.chat/auth/callback");

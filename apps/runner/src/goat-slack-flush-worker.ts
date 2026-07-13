@@ -1,3 +1,4 @@
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
@@ -31,7 +32,7 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-slac
 // comes first. One agent ingest session then covers the whole window.
 export const GOAT_SLACK_QUIET_PERIOD_MS = 12 * 60_000;
 export const GOAT_SLACK_MAX_WAIT_MS = 60 * 60_000;
-export const GOAT_SLACK_MAX_WINDOW_MESSAGES = 500;
+export const GOAT_SLACK_MAX_WINDOW_MESSAGES = 200;
 const GOAT_SLACK_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 export type GoatSlackDueWindow = {
@@ -159,6 +160,7 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       integrationId: window.integrationId,
       item,
       rawPayload: { eventIds: claimed.map((row) => row.id) },
+      rawEventCount: claimed.length,
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       now: flushedAt,
@@ -178,9 +180,11 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       sourceItemId: upserted.sourceItemId,
       messageCount: claimed.length,
       enqueued: upserted.enqueued,
+      ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
   });
 
+  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
   if (result?.enqueued) wakeGoatBrainIngestWorker();
   return result;
 }

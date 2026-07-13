@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Blocks,
   CircleDollarSign,
+  CreditCard,
   PanelLeft,
   SlidersHorizontal,
   UserRound,
@@ -59,6 +60,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         icon: CircleDollarSign,
         label: "Usage",
         isActive: (pathname) => pathname === "/settings/workspace/usage",
+      },
+      {
+        href: "/settings/workspace/billing",
+        icon: CreditCard,
+        label: "Billing",
+        isActive: (pathname) => pathname === "/settings/workspace/billing",
       },
       {
         href: "/settings/workspace",

@@ -1,3 +1,4 @@
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
@@ -147,6 +148,7 @@ async function handleActivityEvent(eventName: string, payload: Record<string, un
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
     });
+    captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
     enqueued += result.jobIds.length;
   }
 

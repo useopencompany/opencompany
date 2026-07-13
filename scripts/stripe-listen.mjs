@@ -26,7 +26,9 @@ function appOrigin() {
 }
 
 const forwardTo = `${appOrigin()}/api/stripe/webhook`;
-const events = process.env.STRIPE_LISTEN_EVENTS?.trim() || "checkout.session.completed";
+const events =
+  process.env.STRIPE_LISTEN_EVENTS?.trim() ||
+  "checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed,payment_intent.succeeded,payment_intent.payment_failed";
 const stripeCliProjectName = process.env.STRIPE_CLI_PROJECT_NAME?.trim();
 
 if (!process.env.STRIPE_WEBHOOK_SECRET?.trim()) {

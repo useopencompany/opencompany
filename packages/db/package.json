@@ -72,6 +72,10 @@
       "types": "./src/goat-workspaces.ts",
       "default": "./src/goat-workspaces.ts"
     },
+    "./goat-billing": {
+      "types": "./src/goat-billing.ts",
+      "default": "./src/goat-billing.ts"
+    },
     "./schema": {
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"

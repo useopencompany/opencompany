@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
@@ -387,8 +388,8 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
           kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
           brainRefs: uniqueStrings(eligibleRoutes.map((route) => route.brainRef)),
           skipReason: "Google Drive no longer permits this file to be read.",
-          db: getDb(),
         });
+        captureGoatIngestionQuotaAnalytics(upserted.quotaUpdates);
         await completeGoatGoogleDriveFile({
           id: state.id,
           leaseId,
@@ -452,8 +453,8 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs: uniqueStrings(matching.map((route) => route.brainRef)),
       skipReason: skippedReason,
-      db: getDb(),
     });
+    captureGoatIngestionQuotaAnalytics(upserted.quotaUpdates);
     await completeGoatGoogleDriveFile({
       id: state.id,
       leaseId,

@@ -177,6 +177,53 @@ export type AnalyticsEventPropertiesByName = {
     attempt_id: string;
     error: string;
   };
+  goat_billing_checkout_started: {
+    user_id: string;
+    workspace_id: string;
+    seat_quantity: number;
+    subtotal_eur_cents: number;
+  };
+  goat_billing_checkout_completed: {
+    workspace_id: string;
+    seat_quantity: number;
+    subtotal_eur_cents: number;
+  };
+  goat_billing_plan_changed: {
+    workspace_id: string;
+    plan: "free" | "pro";
+    subscription_status: string;
+  };
+  goat_billing_seat_quantity_changed: {
+    workspace_id: string;
+    previous_quantity: number;
+    seat_quantity: number;
+  };
+  goat_billing_cancellation_scheduled: {
+    workspace_id: string;
+    current_period_end: string | null;
+  };
+  goat_billing_payment_failed: {
+    workspace_id: string;
+    subscription_id: string;
+  };
+  goat_ingestion_quota_threshold: {
+    workspace_id: string;
+    plan: "free" | "pro";
+    used: number;
+    limit: number;
+    threshold_percent: 80 | 100;
+  };
+  goat_ingestion_quota_reached: {
+    workspace_id: string;
+    plan: "free" | "pro";
+    used: number;
+    limit: number;
+    pending_units: number;
+  };
+  goat_ingestion_backlog_size: {
+    workspace_id: string;
+    pending_units: number;
+  };
   sign_out: {
     user_id: string;
     workspace_id: string;
@@ -400,6 +447,51 @@ export const analyticsEvents = {
     name: "auto_refill_failed",
     description: "An automatic refill charge failed (declined or needs authentication).",
     safeProperties: ["workspace_id", "attempt_id", "error"],
+  },
+  goat_billing_checkout_started: {
+    name: "goat_billing_checkout_started",
+    description: "A Goat workspace admin opened Pro subscription Checkout.",
+    safeProperties: ["user_id", "workspace_id", "seat_quantity", "subtotal_eur_cents"],
+  },
+  goat_billing_checkout_completed: {
+    name: "goat_billing_checkout_completed",
+    description: "Stripe activated an OpenCompany Pro subscription after Checkout.",
+    safeProperties: ["workspace_id", "seat_quantity", "subtotal_eur_cents"],
+  },
+  goat_billing_plan_changed: {
+    name: "goat_billing_plan_changed",
+    description: "A Goat workspace's effective billing plan changed.",
+    safeProperties: ["workspace_id", "plan", "subscription_status"],
+  },
+  goat_billing_seat_quantity_changed: {
+    name: "goat_billing_seat_quantity_changed",
+    description: "An OpenCompany Pro subscription's licensed seat quantity changed.",
+    safeProperties: ["workspace_id", "previous_quantity", "seat_quantity"],
+  },
+  goat_billing_cancellation_scheduled: {
+    name: "goat_billing_cancellation_scheduled",
+    description: "An OpenCompany Pro subscription was scheduled to cancel at period end.",
+    safeProperties: ["workspace_id", "current_period_end"],
+  },
+  goat_billing_payment_failed: {
+    name: "goat_billing_payment_failed",
+    description: "Stripe reported a failed Goat subscription invoice payment.",
+    safeProperties: ["workspace_id", "subscription_id"],
+  },
+  goat_ingestion_quota_threshold: {
+    name: "goat_ingestion_quota_threshold",
+    description: "A Goat workspace crossed 80% or 100% of its current ingestion allowance.",
+    safeProperties: ["workspace_id", "plan", "used", "limit", "threshold_percent"],
+  },
+  goat_ingestion_quota_reached: {
+    name: "goat_ingestion_quota_reached",
+    description: "A Goat ingestion was paused because the workspace allowance could not fit it.",
+    safeProperties: ["workspace_id", "plan", "used", "limit", "pending_units"],
+  },
+  goat_ingestion_backlog_size: {
+    name: "goat_ingestion_backlog_size",
+    description: "The Goat ingestion backlog size after new work was paused by plan.",
+    safeProperties: ["workspace_id", "pending_units"],
   },
   sign_out: {
     name: "sign_out",

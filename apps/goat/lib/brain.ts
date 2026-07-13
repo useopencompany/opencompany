@@ -88,7 +88,7 @@ export type GoatBrainSnapshot = {
 };
 
 export type BrainMutationResult =
-  | { ok: true; path?: string; document?: GoatBrainDocumentView }
+  | { ok: true; path?: string; document?: GoatBrainDocumentView; quotaPaused?: boolean }
   | { ok: false; message: string };
 
 export type ValidatedGoatBrainContent = {
