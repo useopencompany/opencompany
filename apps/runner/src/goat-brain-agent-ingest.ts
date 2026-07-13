@@ -20,6 +20,7 @@ import {
   GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
   type GoatBrainIngestTrace,
   type GoatBrainIngestTraceToolCall,
+  type GoatBrainIngestTraceUsage,
   goatBrainIngestTracePreview,
   sanitizeGoatBrainIngestTraceArgs,
 } from "@opencompany/db/goat-brain-ingest-trace";
@@ -739,13 +740,19 @@ type BrainAgentIngestSessionResult = {
   upserted: number;
   deleted: number;
   pages: GoatBrainSyncPage[];
-  usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
+  usage: GoatBrainIngestTraceUsage;
   summary: string;
   trace: GoatBrainIngestTrace;
 };
 
 type BrainAgentNoMutationOutcome = "fail" | "skip";
 type BrainAgentIngestSkipMode = "explicit" | "inferred_no_mutations";
+
+// The agent loop ran to completion but produced no acceptable outcome (no
+// brain writes and no SKIP, or only failed mutating commands). Re-running the
+// identical content rarely changes that verdict, so the worker retries these
+// on a tighter attempt budget than infrastructure failures.
+export class GoatBrainAgentOutcomeError extends Error {}
 
 // Shared scaffolding for every agent ingest profile: resolve the target brain,
 // materialize it to a temp root, run the tool loop, and sync changes back with
@@ -835,6 +842,13 @@ async function runBrainAgentIngestSession(input: {
       steps: loop.steps,
       tool_calls: loop.toolCalls,
       mutations: loop.mutations,
+      input_tokens: loop.usage.inputTokens,
+      output_tokens: loop.usage.outputTokens,
+      // Verifies Anthropic cache_control pass-through via the gateway: zero
+      // reads across multi-step jobs means a silent invalidator (or the
+      // gateway dropped the provider options).
+      cache_read_input_tokens: loop.usage.cacheReadInputTokens,
+      cache_write_input_tokens: loop.usage.cacheWriteInputTokens,
     });
 
     const synced = await syncGoatBrainFilesFromRoot({
@@ -883,7 +897,7 @@ function brainAgentIngestCompletionOutcome(input: {
 }): { skipped: boolean; reason?: string; skipMode?: BrainAgentIngestSkipMode } {
   if (input.mutations > 0) return { skipped: false };
   if (input.failedMutatingToolCalls > 0) {
-    throw new Error(
+    throw new GoatBrainAgentOutcomeError(
       `Goat Brain ingestion agent attempted ${input.failedMutatingToolCalls} mutating command${
         input.failedMutatingToolCalls === 1 ? "" : "s"
       } without successfully writing to the brain.`,
@@ -904,7 +918,7 @@ function brainAgentIngestCompletionOutcome(input: {
       skipMode: "inferred_no_mutations",
     };
   }
-  throw new Error(
+  throw new GoatBrainAgentOutcomeError(
     "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
   );
 }
@@ -1400,6 +1414,47 @@ async function extractPdfText(bytes: Buffer): Promise<string> {
   return typeof text === "string" ? text.trim() : "";
 }
 
+// Anthropic prompt-cache breakpoint, forwarded through the AI Gateway as a
+// message-level provider option. The loop places two static breakpoints on the
+// fixed prefix (system prompt, source-content user message) and prepareStep
+// moves a third onto the newest message every step, so each step reads the
+// whole prior transcript from cache (~0.1x input price) instead of re-paying
+// it in full. Anthropic allows at most 4 breakpoints per request.
+const ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS = {
+  anthropic: { cacheControl: { type: "ephemeral" as const } },
+};
+
+function withAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
+  return {
+    ...message,
+    providerOptions: {
+      ...message.providerOptions,
+      ...ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
+    },
+  };
+}
+
+function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
+  if (!message.providerOptions || !("anthropic" in message.providerOptions)) return message;
+  const { anthropic: _anthropic, ...providerOptions } = message.providerOptions;
+  return { ...message, providerOptions };
+}
+
+// prepareStep hook: keep the static breakpoints on the first two messages and
+// place the moving breakpoint on the last message of this step. Earlier
+// non-static messages are stripped defensively so breakpoints never accumulate
+// past Anthropic's limit of 4, whatever the SDK does with prior step edits.
+export function placeMovingAnthropicCacheBreakpoint(
+  messages: ai.ModelMessage[],
+): ai.ModelMessage[] {
+  if (messages.length <= 2) return messages;
+  return messages.map((message, index) => {
+    if (index < 2) return message;
+    if (index < messages.length - 1) return withoutAnthropicCacheBreakpoint(message);
+    return withAnthropicCacheBreakpoint(withoutAnthropicCacheBreakpoint(message));
+  });
+}
+
 async function runIngestAgentLoop(input: {
   root: string;
   cliPath: string;
@@ -1687,8 +1742,14 @@ async function runIngestAgentLoop(input: {
   try {
     const result = await generateText({
       model: gateway(GOAT_BRAIN_AGENT_INGEST_MODEL),
-      system,
+      // The system prompt rides in messages (not the system param) so it can
+      // carry its own cache breakpoint; it is byte-stable for the whole job.
       messages: [
+        {
+          role: "system",
+          content: system,
+          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
+        },
         {
           role: "user",
           content: input.files?.length
@@ -1701,12 +1762,16 @@ async function runIngestAgentLoop(input: {
                 })),
               ]
             : input.prompt,
+          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
         },
       ],
       tools: { ...tools, ...enrichmentTools },
       stopWhen: [ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS)],
       abortSignal: abort.signal,
       providerOptions: goatGatewayProviderOptions(attribution),
+      prepareStep: ({ messages }) => ({
+        messages: placeMovingAnthropicCacheBreakpoint(messages),
+      }),
     });
     const usage = result.totalUsage;
     const finalText = result.text.trim();
@@ -1714,6 +1779,8 @@ async function runIngestAgentLoop(input: {
       inputTokens: usage?.inputTokens ?? null,
       outputTokens: usage?.outputTokens ?? null,
       totalTokens: usage?.totalTokens ?? null,
+      cacheReadInputTokens: usage?.inputTokenDetails?.cacheReadTokens ?? null,
+      cacheWriteInputTokens: usage?.inputTokenDetails?.cacheWriteTokens ?? null,
     };
     const trace: GoatBrainIngestTrace = {
       schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,

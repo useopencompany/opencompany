@@ -40,6 +40,7 @@ import {
   GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS,
   GOAT_BRAIN_AGENT_SKIP_SENTINEL,
   type GoatBrainAgentIngestEnv,
+  GoatBrainAgentOutcomeError,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
@@ -70,6 +71,11 @@ export const GOAT_BRAIN_INGEST_LEASE_TTL_MS =
   GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS + GOAT_BRAIN_INGEST_LEASE_BUFFER_MS;
 export const GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS = 5_000;
 export const GOAT_BRAIN_INGEST_MAX_ATTEMPTS = 5;
+// Agent-outcome failures (ran to completion, wrote nothing, did not skip) are
+// near-deterministic on identical content: one retry covers model
+// nondeterminism, further ones just burn full agent runs. Infrastructure
+// failures keep the full budget above.
+export const GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS = 2;
 const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
 // Per-entry cap for result.attemptErrors; the full text of the latest failure
 // still lives in last_error.
@@ -699,7 +705,11 @@ export async function runClaimedGoatBrainIngestJob(input: {
     });
   } catch (error) {
     const message = errorMessage(error);
-    const terminal = input.job.attempts >= GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
+    const maxAttempts =
+      error instanceof GoatBrainAgentOutcomeError
+        ? GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
+        : GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
+    const terminal = input.job.attempts >= maxAttempts;
     const active = await runSpan.runInContext(() =>
       withGoatSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
         store.fail({
@@ -710,6 +720,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           now: new Date(),
           attempts: input.job.attempts,
           error: message,
+          maxAttempts,
         }),
       ),
     );
