@@ -12,6 +12,7 @@ const routerMock = vi.hoisted(() => ({
 const workspaceRoleMock = vi.hoisted(() => ({
   value: "admin" as "admin" | "member",
 }));
+const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
@@ -24,6 +25,10 @@ vi.mock("@/lib/workspace-actions", () => ({
   createGoatBrainAction: vi.fn(),
   setGoatBrainAccessAction: vi.fn(),
   getGoatBrainAccessDetailsAction: vi.fn(),
+}));
+
+vi.mock("@/lib/chat-actions", () => ({
+  closeGoatChatSessionAction: vi.fn(),
 }));
 
 vi.mock("@/components/GoatAppDataProvider", () => ({
@@ -54,6 +59,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       visibility: "workspace",
     },
     recentChats: [],
+    mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
 }));
 
@@ -61,6 +67,7 @@ describe("GoatSidebar", () => {
   afterEach(() => {
     vi.clearAllMocks();
     workspaceRoleMock.value = "admin";
+    mcpSetupMock.completedAt = null;
   });
 
   it("renders home, the brain list, and settings in the account footer", () => {
@@ -94,6 +101,22 @@ describe("GoatSidebar", () => {
     const nav = screen.getByRole("navigation", { name: "Goat primary" });
     expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("shows MCP setup until the first successful query is verified", () => {
+    pathnameMock.value = "/setup/mcp";
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const setup = screen.getByRole("link", { name: "Connect your brain" });
+    expect(setup).toHaveAttribute("href", "/setup/mcp");
+    expect(setup).toHaveAttribute("aria-current", "page");
+  });
+
+  it("hides MCP setup after completion", () => {
+    mcpSetupMock.completedAt = "2026-07-13T09:00:00.000Z";
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.queryByRole("link", { name: "Connect your brain" })).not.toBeInTheDocument();
   });
 
   it("does not mark home active on chat subroutes", () => {

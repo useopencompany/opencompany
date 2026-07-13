@@ -18,7 +18,7 @@ import {
   listGoatBrainDocuments,
   searchGoatBrain,
 } from "@opencompany/db/goat-brain-read";
-import { goatBrainToolRuns } from "@opencompany/db/goat-schema";
+import { goatBrainToolRuns, goatUsers } from "@opencompany/db/goat-schema";
 import { createPooledDb } from "@opencompany/db/pool";
 import {
   GOAT_BRAIN_ENTITY_TYPES,
@@ -29,6 +29,7 @@ import {
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { createGoatGatewayAttribution } from "@opencompany/goat-observability";
+import { and, eq, isNull } from "drizzle-orm";
 import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 import type {
   GoatBrainCliCommand,
@@ -36,6 +37,7 @@ import type {
   GoatBrainToolInput,
   GoatBrainToolOutput,
 } from "@/lib/chat-ui";
+import { isGoatMcpSetupCompletionRun } from "@/lib/mcp-setup";
 
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
@@ -1086,9 +1088,8 @@ async function recordGoatBrainToolRun(input: {
   syncResult: { ok: true } | { ok: false; error: string } | null;
 }) {
   try {
-    await getDb()
-      .insert(goatBrainToolRuns)
-      .values({
+    await getDb().transaction(async (tx) => {
+      await tx.insert(goatBrainToolRuns).values({
         id: input.traceId,
         userWorkosId: input.userWorkosId,
         chatSessionId: input.traceContext?.chatSessionId ?? null,
@@ -1124,7 +1125,32 @@ async function recordGoatBrainToolRun(input: {
           toolInput: input.traceContext?.toolInput ?? null,
         },
       });
-  } catch {
+      if (
+        isGoatMcpSetupCompletionRun({
+          sourceRef: input.traceContext?.sourceRef,
+          command: input.command,
+          ok: input.output.ok,
+        })
+      ) {
+        await tx
+          .update(goatUsers)
+          .set({ mcpSetupCompletedAt: input.startedAt, updatedAt: new Date() })
+          .where(
+            and(
+              eq(goatUsers.workosUserId, input.userWorkosId),
+              isNull(goatUsers.mcpSetupCompletedAt),
+            ),
+          );
+      }
+    });
+  } catch (error) {
+    if (process.env.NODE_ENV !== "test") {
+      console.error("[goat] Failed to persist Brain tool run", {
+        traceId: input.traceId,
+        action: input.command,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     // Tool trace persistence is best effort; the chat response should still be returned.
   }
 }

@@ -17,7 +17,6 @@ import {
   Building2,
   CalendarDays,
   Check,
-  Copy,
   FlaskConical,
   Folder,
   GripVertical,
@@ -37,6 +36,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
+import { type GoatMcpBrainOption, McpSetupGuide } from "@/components/McpSetupGuide";
 import {
   type GoatBrainSourcesDetails,
   getGoatBrainSourcesAction,
@@ -111,6 +111,9 @@ export function OnboardingWizard({
   initialReferral,
   initialSourceDetails,
   initialConnectionResult,
+  mcpBrains,
+  initialMcpClient,
+  initialMcpCompletedAt,
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
@@ -124,6 +127,9 @@ export function OnboardingWizard({
   initialReferral: string | null;
   initialSourceDetails: GoatBrainSourcesDetails | null;
   initialConnectionResult: GoatOnboardingConnectionResult | null;
+  mcpBrains: GoatMcpBrainOption[];
+  initialMcpClient: "claude" | "chatgpt" | "cursor" | null;
+  initialMcpCompletedAt: string | null;
 }) {
   const router = useRouter();
   const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
@@ -298,7 +304,20 @@ export function OnboardingWizard({
                   onUrls={setContextUrls}
                 />
               )}
-              {step.key === "connect" && <ConnectStep brainRef={brainRef} />}
+              {step.key === "connect" && (
+                <McpSetupGuide
+                  displayName={user.name}
+                  workspaceName={
+                    variant === "member"
+                      ? currentWorkspaceName
+                      : workspaceName.trim() || currentWorkspaceName
+                  }
+                  brains={mcpBrains}
+                  initialBrainRef={brainRef}
+                  initialClient={initialMcpClient}
+                  initialCompletedAt={initialMcpCompletedAt}
+                />
+              )}
               {step.key === "finish" && (
                 <FinishStep
                   workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
@@ -1092,70 +1111,6 @@ function ContextStep({
           Add another URL
         </button>
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step — MCP connect
-// ---------------------------------------------------------------------------
-
-function ConnectStep({ brainRef }: { brainRef: string | null }) {
-  const [copied, setCopied] = useState(false);
-  const origin = typeof window !== "undefined" ? window.location.origin.replace(/\/+$/, "") : "";
-  const path = brainRef ? `/api/mcp/${encodeURIComponent(brainRef)}/mcp` : "/api/mcp/<brain>/mcp";
-  const url = origin ? `${origin}${path}` : path;
-
-  const copy = async () => {
-    if (!origin || !brainRef) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      toast.error("Could not copy the connector URL.");
-    }
-  };
-
-  return (
-    <div>
-      <StepHeader
-        title="Chat with your brain anywhere"
-        subtitle="Your brain speaks MCP. Connect it to Claude, Cursor, or any MCP client and ask it anything — it answers from what it knows about your company."
-      />
-
-      <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-4">
-        <span className="text-[12px] font-medium text-ink">Your brain&apos;s connector URL</span>
-        <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-muted px-3 py-2 text-[12.5px] text-ink-muted">
-            {url}
-          </code>
-          <button
-            type="button"
-            onClick={copy}
-            disabled={!brainRef}
-            aria-label="Copy connector URL"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-40"
-          >
-            {copied ? <Check size={15} strokeWidth={2.2} /> : <Copy size={15} strokeWidth={2} />}
-          </button>
-        </div>
-      </div>
-
-      <ol className="mt-5 flex flex-col gap-3">
-        {[
-          "Open Claude → Settings → Connectors → Add custom connector.",
-          "Paste the URL above and sign in with your OpenCompany account.",
-          "Ask your brain anything — it's ready.",
-        ].map((text, i) => (
-          <li key={text} className="flex items-start gap-3">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-medium text-canvas">
-              {i + 1}
-            </span>
-            <span className="text-[13px] leading-5 text-ink-muted">{text}</span>
-          </li>
-        ))}
-      </ol>
     </div>
   );
 }
