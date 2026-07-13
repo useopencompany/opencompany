@@ -13,6 +13,7 @@ import {
 import { resolveGoatDevEnv } from "./lib/goat-dev-env.mjs";
 import { startGoatDevProxy } from "./lib/goat-dev-proxy.mjs";
 import {
+  cleanupOrphanedNgrokProcesses,
   envForTunnel,
   ngrokConfigState,
   requestedNgrokUrl,
@@ -36,6 +37,27 @@ let goatHttpsEnv = {};
 let goatDevProxy = null;
 let goatLocalHttps = null;
 let goatProxyTarget = null;
+let durableStreams = null;
+let durableEnv = {};
+let dev = null;
+let shuttingDown = false;
+
+for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
+    if (ngrok && !ngrok.killed) ngrok.kill(childSignal);
+    stopDurableStreams();
+    stopGoatLocalHttps();
+    stopGoatDevProxy();
+    if (dev) {
+      stopDevProcess(childSignal);
+    } else {
+      exit(0);
+    }
+  });
+}
 
 if (appMode === "goat") {
   await clearGoatDevPorts(port);
@@ -54,14 +76,12 @@ if (!tunnelDisabled) {
 // Local session-transcript streaming. The web proxy and runner read
 // DURABLE_STREAMS_URL; without it they 503 / no-op. Start the in-memory
 // reference server and inject the URL so transcripts stream with no extra setup.
-let durableStreams = null;
-let durableEnv = {};
 if (!isCI) {
   durableStreams = await startDurableStreams();
 }
 
 const turboBin = existsSync("node_modules/.bin/turbo") ? "node_modules/.bin/turbo" : "turbo";
-const dev = spawn(turboBin, ["dev", ...turboArgs], {
+dev = spawn(turboBin, ["dev", ...turboArgs], {
   stdio: "inherit",
   env: {
     ...process.env,
@@ -72,8 +92,6 @@ const dev = spawn(turboBin, ["dev", ...turboArgs], {
     INNGEST_DEV: process.env.INNGEST_DEV ?? "1",
   },
 });
-
-let shuttingDown = false;
 
 function stopDurableStreams() {
   if (durableStreams) {
@@ -136,19 +154,8 @@ function envForAppMode() {
   return resolveGoatDevEnv({ port, processEnv: process.env, tunnelEnv, goatHttpsEnv });
 }
 
-for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    shuttingDown = true;
-    const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
-    if (ngrok && !ngrok.killed) ngrok.kill(childSignal);
-    stopDurableStreams();
-    stopGoatLocalHttps();
-    stopGoatDevProxy();
-    stopDevProcess(childSignal);
-  });
-}
-
 function stopDevProcess(signal = "SIGTERM") {
+  if (!dev) return;
   killProcessTree(dev, signal);
 }
 
@@ -359,7 +366,19 @@ async function startDefaultTunnel(
     console.warn(message);
   }
 
+  try {
+    const cleanup = await cleanupOrphanedNgrokProcesses();
+    if (cleanup.pids.length > 0) {
+      const forced =
+        cleanup.forcedPids.length > 0 ? `; force-killed ${cleanup.forcedPids.join(", ")}` : "";
+      console.log(`\nCleared stale ngrok agents: ${cleanup.pids.join(", ")}${forced}\n`);
+    }
+  } catch (error) {
+    console.warn(`\nCould not inspect stale ngrok agents: ${error.message}\n`);
+  }
+
   const child = startNgrok({ port: targetPort, url });
+  ngrok = child;
   child.on("error", (error) => {
     console.error(`\nFailed to start ngrok: ${error.message}\n`);
     exit(1);
