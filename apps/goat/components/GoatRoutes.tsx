@@ -9,11 +9,14 @@ import {
   Download,
   Loader2,
   Mail,
+  Monitor,
+  Moon,
+  Sun,
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
@@ -24,6 +27,7 @@ import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";
+import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import type { GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
 import type { GoatIntegrationState } from "@/lib/integration-state";
@@ -151,6 +155,13 @@ export function GoatPreferencesSettingsRoute() {
 
   return (
     <GoatSettingsContent title="Preferences" description="Experimental features and app behavior.">
+      <section className="flex flex-col gap-2">
+        <h2 className="mb-1 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Appearance
+        </h2>
+        <AppearanceSection />
+      </section>
+
       <section className="flex flex-col gap-1">
         <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Beta features
@@ -163,6 +174,75 @@ export function GoatPreferencesSettingsRoute() {
         />
       </section>
     </GoatSettingsContent>
+  );
+}
+
+const themeOptions: Array<{ value: ThemeMode; label: string; icon: typeof Monitor }> = [
+  { value: "system", label: "System", icon: Monitor },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+];
+
+function AppearanceSection() {
+  const { theme, setTheme } = useTheme();
+  const selectedIndex = themeOptions.findIndex((option) => option.value === theme);
+
+  function selectThemeOption(index: number, group: HTMLDivElement) {
+    const option = themeOptions[index];
+    if (!option) return;
+
+    setTheme(option.value);
+    requestAnimationFrame(() => {
+      group.querySelector<HTMLButtonElement>(`[data-theme-option="${option.value}"]`)?.focus();
+    });
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const currentIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      selectThemeOption((currentIndex + 1) % themeOptions.length, event.currentTarget);
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      selectThemeOption(
+        (currentIndex - 1 + themeOptions.length) % themeOptions.length,
+        event.currentTarget,
+      );
+    }
+  }
+
+  return (
+    <div
+      className="inline-flex w-fit rounded-lg border border-border bg-surface p-1 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
+      role="radiogroup"
+      aria-label="Theme"
+      onKeyDown={handleKeyDown}
+    >
+      {themeOptions.map((option, index) => {
+        const Icon = option.icon;
+        const selected = theme === option.value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            tabIndex={selected || (selectedIndex === -1 && index === 0) ? 0 : -1}
+            data-theme-option={option.value}
+            onClick={() => setTheme(option.value)}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              selected
+                ? "bg-surface-active text-ink shadow-[0_1px_1px_rgba(15,15,15,0.05)]"
+                : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+            }`}
+          >
+            <Icon size={13} strokeWidth={1.9} />
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
