@@ -26,6 +26,7 @@ import {
   Copy,
   Ellipsis,
   FileCode2,
+  FilePlus2,
   FileText,
   FileUp,
   Folder,
@@ -44,7 +45,16 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainActivity } from "@/components/GoatBrainActivity";
 import { useGoatNavInset } from "@/components/GoatNavInset";
@@ -52,6 +62,7 @@ import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
+  createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
   deleteGoatBrainDocumentAction,
   deleteGoatBrainFolderAction,
@@ -121,6 +132,13 @@ type EvidenceGraphItem = {
 type FolderDialogState =
   | { kind: "create"; initialPath?: string }
   | { kind: "rename"; path: string };
+
+type BrainContextMenuState = {
+  x: number;
+  y: number;
+  fileFolderPath: string;
+  folderParentPath: string;
+};
 
 const HIDDEN_EMPTY_ROOT_FOLDERS = new Set<string>();
 const AUTOSAVE_DELAY_MS = 1200;
@@ -278,11 +296,13 @@ function GoatBrainEditor({
   const [query, setQuery] = useState("");
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [isDocPending, startDocTransition] = useTransition();
+  const [isCreatePending, startCreateTransition] = useTransition();
   const [isFolderPending, startFolderTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<BrainContextMenuState | null>(null);
+  const [fileDialogFolder, setFileDialogFolder] = useState<string | null>(null);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const [docPanelState, setDocPanelState] = useState<{
     docId: string | null;
@@ -388,6 +408,44 @@ function GoatBrainEditor({
       replaceCurrentUrl(selectedDocumentUrl);
     }
   }, [selectedBrainId, selectedDocument, selectedDocumentUrl]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const closeContextMenu = () => setContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeContextMenu();
+    };
+
+    document.addEventListener("pointerdown", closeContextMenu);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("scroll", closeContextMenu, true);
+    window.addEventListener("blur", closeContextMenu);
+    window.addEventListener("resize", closeContextMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeContextMenu);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("scroll", closeContextMenu, true);
+      window.removeEventListener("blur", closeContextMenu);
+      window.removeEventListener("resize", closeContextMenu);
+    };
+  }, [contextMenu]);
+
+  const openContextMenu = (
+    event: ReactMouseEvent<HTMLElement>,
+    fileFolderPath: string,
+    folderParentPath: string,
+  ) => {
+    if (!brainRef || !canEditBrain) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 188)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 76)),
+      fileFolderPath,
+      folderParentPath,
+    });
+  };
 
   const selectDocument = (document: GoatBrainDocumentView) => {
     if (canEditBrain) saveRef.current(); // flush pending edits on the outgoing document
@@ -539,6 +597,31 @@ function GoatBrainEditor({
     });
   };
 
+  const submitFileDialog = (fileName: string) => {
+    const folderPath = fileDialogFolder;
+    if (!brainRef || !folderPath || !canEditBrain) return;
+    const trimmed = fileName.trim();
+    if (!trimmed) {
+      toast.error("Give the Markdown file a name.");
+      return;
+    }
+    startCreateTransition(async () => {
+      const result = await createGoatBrainDocumentAction({
+        brainRef,
+        folderPath,
+        fileName: trimmed,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      setFileDialogFolder(null);
+      setQuery("");
+      if (result.document) selectDocument(result.document);
+      toast.success("Markdown file created");
+    });
+  };
+
   const submitFolderDialog = (folderPath: string) => {
     const dialog = folderDialog;
     if (!brainRef || !dialog || !canEditBrain) return;
@@ -675,35 +758,7 @@ function GoatBrainEditor({
             Brain
           </span>
           <div className="flex shrink-0 items-center">
-            {brainRef && canEditBrain ? (
-              <button
-                type="button"
-                aria-label="Add folder"
-                title="Add folder"
-                disabled={isFolderPending}
-                onClick={() => setFolderDialog({ kind: "create" })}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
-              >
-                <FolderPlus size={15} strokeWidth={1.8} />
-              </button>
-            ) : null}
             {brainRef ? <GoatBrainActivity brainRef={brainRef} /> : null}
-            {brainRef && canEditBrain ? (
-              <button
-                type="button"
-                aria-label="Upload PDF"
-                title="Upload PDF into the selected folder"
-                disabled={isUploading}
-                onClick={() => uploadInputRef.current?.click()}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-45"
-              >
-                {isUploading ? (
-                  <Loader2 size={15} strokeWidth={1.8} className="animate-spin" />
-                ) : (
-                  <FileUp size={15} strokeWidth={1.8} />
-                )}
-              </button>
-            ) : null}
             {workspace.role === "admin" && brain ? (
               <button
                 type="button"
@@ -731,16 +786,6 @@ function GoatBrainEditor({
         </div>
 
         <input
-          ref={uploadInputRef}
-          type="file"
-          accept={BRAIN_ASSET_ACCEPT}
-          className="hidden"
-          onChange={(event) => {
-            void uploadAssetFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
-        />
-        <input
           ref={replaceInputRef}
           type="file"
           accept={BRAIN_ASSET_ACCEPT}
@@ -753,6 +798,7 @@ function GoatBrainEditor({
         <div
           role="tree"
           className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
+          onContextMenu={(event) => openContextMenu(event, activeFolder || "inbox", "")}
           onDragOver={(event) => {
             if (!canEditBrain) return;
             if (event.dataTransfer.types.includes("Files")) event.preventDefault();
@@ -785,6 +831,7 @@ function GoatBrainEditor({
                         draftIngestStatesByBrainId={draftIngestStatesByBrainId}
                         onSelect={selectDocument}
                         onToggleFolder={toggleFolder}
+                        onContextMenu={openContextMenu}
                       />
                     ))}
                   </div>
@@ -818,6 +865,9 @@ function GoatBrainEditor({
                       key={document.id}
                       type="button"
                       onClick={() => selectDocument(document)}
+                      onContextMenu={(event) =>
+                        openContextMenu(event, document.folderPath, document.folderPath)
+                      }
                       className={`group flex h-7 w-full items-center gap-1.5 rounded-[5px] pl-[20px] pr-2 text-left text-[13px] leading-5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
                         document.id === selectedDocument?.id
                           ? "bg-surface-active text-ink"
@@ -1017,6 +1067,31 @@ function GoatBrainEditor({
           onNavigateInternal={navigateToBrainHref}
         />
       </div>
+      {contextMenu && canEditBrain ? (
+        <BrainContextMenu
+          state={contextMenu}
+          onCreateFile={() => {
+            setContextMenu(null);
+            setFileDialogFolder(contextMenu.fileFolderPath);
+          }}
+          onCreateFolder={() => {
+            setContextMenu(null);
+            setFolderDialog({
+              kind: "create",
+              ...(contextMenu.folderParentPath
+                ? { initialPath: `${contextMenu.folderParentPath}/` }
+                : {}),
+            });
+          }}
+        />
+      ) : null}
+      {fileDialogFolder && canEditBrain ? (
+        <FileDialog
+          pending={isCreatePending}
+          onClose={() => setFileDialogFolder(null)}
+          onSubmit={submitFileDialog}
+        />
+      ) : null}
       {folderDialog && canEditBrain ? (
         <FolderDialog
           state={folderDialog}
@@ -1026,6 +1101,135 @@ function GoatBrainEditor({
         />
       ) : null}
     </main>
+  );
+}
+
+function BrainContextMenu({
+  state,
+  onCreateFile,
+  onCreateFolder,
+}: {
+  state: BrainContextMenuState;
+  onCreateFile: () => void;
+  onCreateFolder: () => void;
+}) {
+  return (
+    <div
+      role="menu"
+      aria-label="Brain file actions"
+      className="fixed z-[90] min-w-[180px] overflow-hidden rounded-md border border-border-strong bg-surface-raised py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
+      style={{ left: state.x, top: state.y }}
+      onContextMenu={(event) => event.preventDefault()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        const items = Array.from(
+          event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+        );
+        const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const nextIndex = (currentIndex + direction + items.length) % items.length;
+        items[nextIndex]?.focus();
+      }}
+    >
+      <ContextMenuButton
+        autoFocus
+        icon={<FilePlus2 size={14} strokeWidth={1.8} />}
+        label="New Markdown file"
+        onClick={onCreateFile}
+      />
+      <ContextMenuButton
+        icon={<FolderPlus size={14} strokeWidth={1.8} />}
+        label="New folder"
+        onClick={onCreateFolder}
+      />
+    </div>
+  );
+}
+
+function ContextMenuButton({
+  autoFocus,
+  icon,
+  label,
+  onClick,
+}: {
+  autoFocus?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      autoFocus={autoFocus}
+      onClick={onClick}
+      className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-ink transition-colors hover:bg-surface-hover focus:bg-surface-hover focus:outline-none"
+    >
+      <span className="flex w-4 shrink-0 justify-center text-ink-muted">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  );
+}
+
+function FileDialog({
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (fileName: string) => void;
+}) {
+  const [value, setValue] = useState("");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/20 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="New Markdown file"
+    >
+      <div className="flex w-full max-w-[360px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
+        <div className="text-[14px] font-semibold text-ink">New Markdown file</div>
+        <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
+          File name
+          <input
+            autoFocus
+            value={value}
+            maxLength={163}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onSubmit(value);
+              if (event.key === "Escape") onClose();
+            }}
+            placeholder="Untitled.md"
+            className="rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+          />
+        </label>
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-3 py-1.5 text-[13px] text-ink/70 transition-colors hover:bg-surface-hover"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onSubmit(value)}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {pending ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1043,8 +1247,8 @@ function FolderDialog({
   const [value, setValue] = useState(
     state.kind === "rename" ? state.path : (state.initialPath ?? ""),
   );
-  const title = state.kind === "rename" ? "Rename folder" : "Add folder";
-  const action = state.kind === "rename" ? "Rename" : "Add";
+  const title = state.kind === "rename" ? "Rename folder" : "New folder";
+  const action = state.kind === "rename" ? "Rename" : "Create";
 
   return (
     <div
@@ -1102,6 +1306,7 @@ function TreeItem({
   draftIngestStatesByBrainId,
   onSelect,
   onToggleFolder,
+  onContextMenu,
 }: {
   node: BrainTreeNode;
   depth: number;
@@ -1110,6 +1315,11 @@ function TreeItem({
   draftIngestStatesByBrainId: ReadonlyMap<string, GoatBrainDraftIngestState>;
   onSelect: (document: GoatBrainDocumentView) => void;
   onToggleFolder: (path: string) => void;
+  onContextMenu: (
+    event: ReactMouseEvent<HTMLElement>,
+    fileFolderPath: string,
+    folderParentPath: string,
+  ) => void;
 }) {
   const active = node.path === activePath;
   const expanded = node.type === "folder" && expandedPaths.has(node.path);
@@ -1130,6 +1340,10 @@ function TreeItem({
         onClick={() => {
           if (node.type === "folder") onToggleFolder(node.path);
           else if (node.document) onSelect(node.document);
+        }}
+        onContextMenu={(event) => {
+          const folderPath = node.type === "folder" ? node.path : node.document?.folderPath;
+          if (folderPath) onContextMenu(event, folderPath, folderPath);
         }}
         className={`group flex h-7 w-full items-center gap-1.5 rounded-[5px] pr-2 text-left text-[13px] leading-5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
           active
@@ -1162,6 +1376,7 @@ function TreeItem({
               draftIngestStatesByBrainId={draftIngestStatesByBrainId}
               onSelect={onSelect}
               onToggleFolder={onToggleFolder}
+              onContextMenu={onContextMenu}
             />
           ))
         : null}
