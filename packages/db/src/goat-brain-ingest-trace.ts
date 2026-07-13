@@ -11,6 +11,11 @@ export type GoatBrainIngestTraceUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  // Anthropic prompt-cache detail (reads bill ~0.1x, writes ~1.25x input).
+  // inputTokens already includes both. Optional so pre-cache traces normalize
+  // cleanly; null when the gateway did not report cache detail.
+  cacheReadInputTokens?: number | null;
+  cacheWriteInputTokens?: number | null;
 };
 
 export type GoatBrainIngestTraceToolCallStatus = "completed" | "failed" | "blocked";
@@ -106,6 +111,8 @@ function normalizeTraceUsage(value: unknown): GoatBrainIngestTraceUsage {
     inputTokens: readNullableNonNegativeInteger(record?.inputTokens),
     outputTokens: readNullableNonNegativeInteger(record?.outputTokens),
     totalTokens: readNullableNonNegativeInteger(record?.totalTokens),
+    cacheReadInputTokens: readNullableNonNegativeInteger(record?.cacheReadInputTokens),
+    cacheWriteInputTokens: readNullableNonNegativeInteger(record?.cacheWriteInputTokens),
   };
 }
 

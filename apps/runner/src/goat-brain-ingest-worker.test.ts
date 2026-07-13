@@ -1,7 +1,12 @@
 import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/goat-brain";
 import { describe, expect, it, vi } from "vitest";
-import { GOAT_BRAIN_AGENT_SKIP_SENTINEL } from "./goat-brain-agent-ingest";
 import {
+  GOAT_BRAIN_AGENT_SKIP_SENTINEL,
+  GoatBrainAgentOutcomeError,
+} from "./goat-brain-agent-ingest";
+import {
+  GOAT_BRAIN_INGEST_MAX_ATTEMPTS,
+  GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
   type GoatBrainIngestStore,
   runClaimedGoatBrainIngestJob,
 } from "./goat-brain-ingest-worker";
@@ -354,6 +359,7 @@ describe("Goat Brain ingest worker", () => {
         sourceItemId: "gbsrc_123",
         attempts: 5,
         error: "gateway stream failed",
+        maxAttempts: GOAT_BRAIN_INGEST_MAX_ATTEMPTS,
       }),
     );
     expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
@@ -369,5 +375,89 @@ describe("Goat Brain ingest worker", () => {
     );
     expect(complete).not.toHaveBeenCalled();
     expect(skip).not.toHaveBeenCalled();
+  });
+
+  it("caps retries for deterministic agent-outcome failures", async () => {
+    const normalizedPayload = {
+      sourceProvider: "jamie" as const,
+      sourceType: "meeting" as const,
+      externalId: "external_123",
+      sourceRef: "jamie:meeting:external_123",
+      title: "Registry Test",
+      occurredAt: "2026-01-01T10:00:00.000Z",
+      capturedAt: "2026-01-01T10:01:00.000Z",
+      contentHash: "hash_123",
+      contentHashInput: {},
+      content: {},
+    };
+    const run = vi.fn(async () => {
+      throw new GoatBrainAgentOutcomeError(
+        "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
+      );
+    });
+    const fail = vi.fn(async () => true);
+    const store: GoatBrainIngestStore = {
+      claimNext: vi.fn(async () => null),
+      heartbeat: vi.fn(async () => true),
+      complete: vi.fn(async () => true),
+      skip: vi.fn(async () => true),
+      fail,
+    };
+
+    await expect(
+      runClaimedGoatBrainIngestJob({
+        env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
+        store,
+        handlers: [
+          {
+            descriptor: {
+              kind: "brain_agent_ingest",
+              sourceProvider: "jamie",
+              sourceType: "meeting",
+            },
+            isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+            run,
+          },
+        ],
+        job: {
+          id: "gbjob_123",
+          sourceItemId: "gbsrc_123",
+          userWorkosId: "user_123",
+          sourceProvider: "jamie",
+          sourceConnectionId: "gint_123",
+          integrationId: "gint_123",
+          brainRef: "gbrain_123",
+          sourceType: "meeting",
+          kind: "brain_agent_ingest",
+          contentHash: "hash_123",
+          status: "running",
+          attempts: GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
+          nextRunAt: new Date("2026-01-01T10:00:00.000Z"),
+          leaseId: "lease_123",
+          leaseOwner: "runner_123",
+          leaseExpiresAt: new Date("2026-01-01T10:05:00.000Z"),
+          lastError: null,
+          result: {},
+          completedAt: null,
+          createdAt: new Date("2026-01-01T10:00:00.000Z"),
+          updatedAt: new Date("2026-01-01T10:00:00.000Z"),
+          normalizedPayload,
+        },
+      }),
+    ).rejects.toThrow("finished without writing");
+
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempts: GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
+        maxAttempts: GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
+      }),
+    );
+    // attempts >= the outcome cap: telemetry records this run as terminal.
+    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "failure",
+        attributes: expect.objectContaining({ "goat.status": "failed" }),
+      }),
+    );
   });
 });
