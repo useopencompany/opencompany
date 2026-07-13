@@ -21,8 +21,7 @@ export default async function OnboardingPage({
   const context = await currentGoatUser();
   const userWorkosId = context.user.workosUserId;
   const name =
-    [context.user.firstName, context.user.lastName].filter(Boolean).join(" ").trim() ||
-    context.user.email;
+    [context.user.firstName, context.user.lastName].filter(Boolean).join(" ").trim() || "Teammate";
 
   // Real signal for "came from an invite": the active workspace was created by
   // someone else, so this user joined it rather than starting it.
@@ -77,6 +76,13 @@ export default async function OnboardingPage({
       initialReferral={onboarding?.referralSource ?? null}
       initialSourceDetails={sourceDetails}
       initialConnectionResult={connectionResult}
+      mcpBrains={context.brains.map((brain) => ({
+        id: brain.id,
+        name: brain.name,
+        slug: brain.slug,
+      }))}
+      initialMcpClient={context.user.preferredMcpClient}
+      initialMcpCompletedAt={context.user.mcpSetupCompletedAt?.toISOString() ?? null}
     />
   );
 }

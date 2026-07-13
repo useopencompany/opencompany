@@ -1,8 +1,19 @@
 "use client";
 
+import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { type LucideIcon as IconComponent, SlackIcon } from "@opencompany/ui/icons";
 import { useLiveQuery } from "@tanstack/react-db";
-import { CalendarDays, Code2, Files, FileText, GitBranch, ListTodo, Mail } from "lucide-react";
+import {
+  CalendarDays,
+  Code2,
+  Files,
+  FileText,
+  GitBranch,
+  ListTodo,
+  Mail,
+  PlugZap,
+} from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
@@ -27,20 +38,27 @@ import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-colle
 export function SettingsIntegrationsPanel({
   initialIntegrations,
   isWorkspaceAdmin,
+  mcpSetup,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  mcpSetup: GoatMcpSetupView;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) {
     return (
-      <IntegrationRows integrations={initialIntegrations} isWorkspaceAdmin={isWorkspaceAdmin} />
+      <IntegrationRows
+        integrations={initialIntegrations}
+        isWorkspaceAdmin={isWorkspaceAdmin}
+        mcpSetup={mcpSetup}
+      />
     );
   }
   return (
     <LiveSettingsIntegrations
       initialIntegrations={initialIntegrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
+      mcpSetup={mcpSetup}
     />
   );
 }
@@ -48,9 +66,11 @@ export function SettingsIntegrationsPanel({
 function LiveSettingsIntegrations({
   initialIntegrations,
   isWorkspaceAdmin,
+  mcpSetup,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  mcpSetup: GoatMcpSetupView;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const { data: rows, isLoading } = useLiveQuery((q) =>
@@ -71,15 +91,23 @@ function LiveSettingsIntegrations({
     };
   }, [initialIntegrations, isLoading, rows]);
 
-  return <IntegrationRows integrations={integrations} isWorkspaceAdmin={isWorkspaceAdmin} />;
+  return (
+    <IntegrationRows
+      integrations={integrations}
+      isWorkspaceAdmin={isWorkspaceAdmin}
+      mcpSetup={mcpSetup}
+    />
+  );
 }
 
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
+  mcpSetup,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  mcpSetup: GoatMcpSetupView;
 }) {
   return (
     <>
@@ -120,9 +148,52 @@ function IntegrationRows({
         <IntegrationRow icon={Files} label="Google Drive" integration={integrations.google_drive} />
         <IntegrationRow icon={ListTodo} label="Linear" integration={integrations.linear} />
         <IntegrationRow icon={SlackIcon} label="Slack" integration={integrations.slack} />
+        <McpIntegrationRow setup={mcpSetup} />
         <CodexIntegrationRow integration={integrations.codex} />
       </section>
     </>
+  );
+}
+
+type GoatMcpSetupView = {
+  preferredClient: GoatMcpClient | null;
+  completedAt: string | null;
+};
+
+const MCP_CLIENT_LABELS: Record<GoatMcpClient, string> = {
+  claude: "Claude",
+  chatgpt: "ChatGPT",
+  cursor: "Cursor",
+};
+
+function McpIntegrationRow({ setup }: { setup: GoatMcpSetupView }) {
+  const clientLabel = setup.preferredClient ? MCP_CLIENT_LABELS[setup.preferredClient] : null;
+  const detail = setup.completedAt
+    ? clientLabel
+      ? `Connected with ${clientLabel}`
+      : "Connected"
+    : clientLabel
+      ? `Continue setup for ${clientLabel}`
+      : "Claude, ChatGPT, or Cursor";
+
+  return (
+    <Link
+      href="/setup/mcp"
+      className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <PlugZap size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="min-w-0">
+          <span className="block truncate text-[14px] font-medium leading-tight text-ink">
+            Goat Brain MCP
+          </span>
+          <span className="block truncate text-[12px] leading-4 text-ink-subtle">{detail}</span>
+        </div>
+        <span className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+          {setup.completedAt ? "Connected" : "Set up"}
+        </span>
+      </div>
+    </Link>
   );
 }
 

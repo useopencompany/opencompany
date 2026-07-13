@@ -177,6 +177,7 @@ export type GoatHarnessSpec = {
 };
 
 export type GoatWorkspaceRole = "admin" | "member";
+export type GoatMcpClient = "claude" | "chatgpt" | "cursor";
 export type GoatBrainVisibility = "workspace" | "restricted";
 export type GoatBrainFolderSource = "system" | "custom";
 export type GoatBrainEntityType =
@@ -352,19 +353,31 @@ export type GoatBrainToolRunTrace = Record<string, unknown>;
 export const goat = pgSchema("goat");
 export const goatTaskDisplayIdSequence = goat.sequence("task_display_id_seq");
 
-export const goatUsers = goat.table("users", {
-  workosUserId: text("workos_user_id").primaryKey(),
-  email: text("email").notNull(),
-  firstName: text("first_name"),
-  lastName: text("last_name"),
-  avatarUrl: text("avatar_url"),
-  timezone: text("timezone").notNull().default("UTC"),
-  localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
-  // Set when the user finishes the onboarding flow; null gates them into it.
-  onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const goatUsers = goat.table(
+  "users",
+  {
+    workosUserId: text("workos_user_id").primaryKey(),
+    email: text("email").notNull(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    avatarUrl: text("avatar_url"),
+    timezone: text("timezone").notNull().default("UTC"),
+    localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
+    preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
+    // Set exactly once, when this user first completes a successful Brain query over MCP.
+    mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
+    // Set when the user finishes the onboarding flow; null gates them into it.
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    preferredMcpClientCheck: check(
+      "goat_users_preferred_mcp_client_check",
+      sql`${table.preferredMcpClient} IS NULL OR ${table.preferredMcpClient} IN ('claude', 'chatgpt', 'cursor')`,
+    ),
+  }),
+);
 
 export const goatWorkspaces = goat.table(
   "workspaces",

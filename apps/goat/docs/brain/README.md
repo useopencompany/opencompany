@@ -56,8 +56,9 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 
 ## Invariants worth memorizing
 
-- **Writes are agent-mediated.** External consumers never get a document-write API; content enters
-  through ingestion jobs or chat capture, both of which run a brain agent. Main chat reads through
+- **Programmatic writes are agent-mediated.** External consumers never get a document-write API;
+  content enters through ingestion jobs or chat capture, both of which run a brain agent. Workspace
+  admins can manually create and edit draft Markdown notes in the Brain UI. Main chat reads through
   `goat_brain`, captures new content through `save_to_brain`, and cannot create canonical Brain
   entities directly.
 - **Everything is scoped to one `brain_ref`.** No query, job, or tool call joins across brains.

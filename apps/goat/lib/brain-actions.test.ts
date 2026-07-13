@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatBrainByRef } from "@/lib/auth";
 import {
+  createGoatBrainDocumentForUser,
   createGoatBrainFolderForUser,
   deleteGoatBrainDocumentForUser,
   updateGoatBrainDocumentForUser,
 } from "@/lib/brain";
 import {
+  createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
   deleteGoatBrainDocumentAction,
   updateGoatBrainDocumentAction,
@@ -16,6 +18,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/brain", () => ({
+  createGoatBrainDocumentForUser: vi.fn(),
   createGoatBrainFolderForUser: vi.fn(),
   deleteGoatBrainDocumentForUser: vi.fn(),
   deleteGoatBrainFolderForUser: vi.fn(),
@@ -39,6 +42,10 @@ describe("brain actions", () => {
     } as Awaited<ReturnType<typeof currentGoatBrainByRef>>);
     vi.mocked(updateGoatBrainDocumentForUser).mockResolvedValue({ ok: true });
     vi.mocked(deleteGoatBrainDocumentForUser).mockResolvedValue({ ok: true });
+    vi.mocked(createGoatBrainDocumentForUser).mockResolvedValue({
+      ok: true,
+      path: "projects/roadmap.md",
+    });
     vi.mocked(createGoatBrainFolderForUser).mockResolvedValue({ ok: true, path: "projects" });
   });
 
@@ -80,6 +87,52 @@ describe("brain actions", () => {
       userWorkosId: "user_1",
       folderPath: "projects",
     });
+  });
+
+  it("creates manual Markdown files in the explicitly authorized brain", async () => {
+    await createGoatBrainDocumentAction({
+      brainRef: "goat_brain_requested",
+      folderPath: "projects",
+      fileName: "Roadmap.md",
+    });
+
+    expect(createGoatBrainDocumentForUser).toHaveBeenCalledWith({
+      brainRef: "goat_brain_team",
+      userWorkosId: "user_1",
+      folderPath: "projects",
+      fileName: "Roadmap.md",
+    });
+  });
+
+  it("rejects manual Markdown creation when the requested brain is inaccessible", async () => {
+    vi.mocked(currentGoatBrainByRef).mockRejectedValueOnce(
+      new Error("You do not have access to that brain."),
+    );
+
+    const result = await createGoatBrainDocumentAction({
+      brainRef: "goat_brain_denied",
+      folderPath: "projects",
+      fileName: "Roadmap.md",
+    });
+
+    expect(result).toEqual({ ok: false, message: "You do not have access to that brain." });
+    expect(createGoatBrainDocumentForUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects manual Markdown creation for non-admin workspace members", async () => {
+    vi.mocked(currentGoatBrainByRef).mockResolvedValueOnce({
+      context: { role: "member", user: { workosUserId: "user_1" } },
+      brain: { id: "goat_brain_team" },
+    } as Awaited<ReturnType<typeof currentGoatBrainByRef>>);
+
+    const result = await createGoatBrainDocumentAction({
+      brainRef: "goat_brain_team",
+      folderPath: "projects",
+      fileName: "Roadmap.md",
+    });
+
+    expect(result).toEqual({ ok: false, message: "Only workspace admins can edit the brain." });
+    expect(createGoatBrainDocumentForUser).not.toHaveBeenCalled();
   });
 
   it("returns a mutation error without writing when the requested brain is inaccessible", async () => {

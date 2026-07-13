@@ -120,6 +120,8 @@ describe("cancelGoatTaskAction", () => {
         avatarUrl: null,
         timezone: "UTC",
         localCodexBetaEnabled: false,
+        preferredMcpClient: null,
+        mcpSetupCompletedAt: null,
         onboardedAt: null,
         createdAt: new Date("2026-01-01T00:00:00.000Z"),
         updatedAt: new Date("2026-01-01T00:00:00.000Z"),

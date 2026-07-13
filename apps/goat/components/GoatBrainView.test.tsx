@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
+  createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
   deleteGoatBrainFolderAction,
   renameGoatBrainDocumentAction,
@@ -85,6 +86,7 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
 }));
 
 vi.mock("@/lib/brain-actions", () => ({
+  createGoatBrainDocumentAction: vi.fn(),
   createGoatBrainFolderAction: vi.fn(),
   deleteGoatBrainDocumentAction: vi.fn(),
   deleteGoatBrainFolderAction: vi.fn(),
@@ -398,7 +400,10 @@ describe("GoatBrainView", () => {
     expect(screen.getAllByTestId("brain-root-divider")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Rename folder" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete folder" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add folder" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Add folder" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload PDF" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("brain-activity")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open settings for/ })).toBeInTheDocument();
   });
 
   it("renders workspace-member brain access as browse-only", async () => {
@@ -430,11 +435,11 @@ describe("GoatBrainView", () => {
     expect(renameGoatBrainDocumentAction).not.toHaveBeenCalled();
   });
 
-  it("creates an adjustable folder from the sidebar control", async () => {
+  it("creates a nested folder from the sidebar context menu", async () => {
     const user = userEvent.setup();
     vi.mocked(createGoatBrainFolderAction).mockResolvedValueOnce({
       ok: true,
-      path: "partners",
+      path: "projects/partners",
     });
 
     render(
@@ -448,17 +453,61 @@ describe("GoatBrainView", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Add folder" }));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /projects/i }));
+    await user.click(screen.getByRole("menuitem", { name: "New folder" }));
     await user.type(screen.getByLabelText("Path"), "partners");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => {
       expect(createGoatBrainFolderAction).toHaveBeenCalledWith({
         brainRef: "goat_brain_1",
-        folderPath: "partners",
+        folderPath: "projects/partners",
       });
     });
     expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+
+  it("creates a Markdown file in the context-clicked folder", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createGoatBrainDocumentAction).mockResolvedValueOnce({
+      ok: true,
+      path: "projects/roadmap.md",
+      document: {
+        ...documentLinkingToAda,
+        id: "doc_roadmap_new",
+        brainId: "roadmap",
+        folderPath: "projects",
+        path: "projects/roadmap.md",
+        title: "Roadmap",
+        body: "",
+        content: "",
+      },
+    });
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={orderedFolders}
+        documents={[]}
+        initialFolderPath="inbox"
+        initialBrainId={null}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /projects/i }));
+    await user.click(screen.getByRole("menuitem", { name: "New Markdown file" }));
+    await user.type(screen.getByLabelText("File name"), "Roadmap.md");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(createGoatBrainDocumentAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        folderPath: "projects",
+        fileName: "Roadmap.md",
+      });
+    });
+    expect(window.location.pathname).toBe("/brain/projects/roadmap");
   });
 
   it("renames only adjustable folders", async () => {

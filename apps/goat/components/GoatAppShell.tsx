@@ -105,6 +105,10 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     featureFlags: goatFeatureFlagsFromUser(user),
     codexConnected: codex.status === "connected",
     chatResumeEnabled: isGoatChatResumeEnabled(),
+    mcpSetup: {
+      preferredClient: user.preferredMcpClient,
+      completedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,
+    },
   };
 
   return <GoatAppDataProvider initialData={initialData}>{children}</GoatAppDataProvider>;
