@@ -13,8 +13,9 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 - Package manager: `bun@1.3.2`
 - Runtime: Node `>=20.20.0`
 - Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, WorkOS AuthKit, Inngest, Vercel AI Gateway, GitHub App integration.
-- Main app: `apps/web`
-- Runner service: `apps/runner`
+- Legacy app: `apps/web`
+- New Goat app: `apps/goat`
+- Shared runner service: `apps/runner`
 - Database package: `packages/db`
 - Agent file contract: `docs/agent-file.md`
 
@@ -33,6 +34,19 @@ Useful commands:
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
 
 Local dev logs: `bun run dev` and `bun run dev:stream` write Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source web --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.
+
+## App Boundaries
+
+This monorepo contains two product generations. `apps/web` is the older OpenCompany app. `apps/goat` is the new Goat app and should be treated as a separate product surface, even when a similarly named feature also exists in `apps/web`.
+
+When the user says "Goat" or the task is clearly about Goat:
+
+- Start in `apps/goat`; do not edit `apps/web` unless the task explicitly crosses both apps or a shared dependency requires it.
+- "Goat runner" means the Goat-specific execution paths inside the shared `apps/runner` package. Look first at `goat-*` modules, `/internal/goat/*` and `/goat/tools/*` routes, and the `RUNNER_GOAT_TASK_WORKER_ENABLED` gate. There is currently no separate `apps/goat-runner` package.
+- Follow Goat-specific shared code into `packages/db/src/goat-*`, `packages/goat-brain`, and `packages/goat-observability` as needed. Only modify generic or legacy paths when tracing confirms they are shared by the Goat flow.
+- Use `apps/goat/docs/README.md` for the current Goat app/runner flow and `bun run dev:goat` for the Goat development stack.
+
+If a request could reasonably refer to either app, inspect the relevant entry points and establish the target surface before editing. Do not default to `apps/web` merely because it is older or more complete.
 
 ## Product Context
 
