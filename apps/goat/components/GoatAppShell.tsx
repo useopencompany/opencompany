@@ -19,6 +19,7 @@ import { listCurrentUserGoatTasks } from "@/lib/tasks";
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, workspaces, brains, activeBrain } =
     await currentGoatUser();
+  const featureFlags = goatFeatureFlagsFromUser(user);
   const [
     tasks,
     schedules,
@@ -31,8 +32,8 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     codex,
     workspaceMembers,
   ] = await Promise.all([
-    listCurrentUserGoatTasks(),
-    listCurrentUserGoatTaskSchedules(),
+    featureFlags.taskSpawning ? listCurrentUserGoatTasks() : Promise.resolve([]),
+    featureFlags.taskSpawning ? listCurrentUserGoatTaskSchedules() : Promise.resolve([]),
     listCurrentUserRecentGoatChats(),
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
@@ -102,7 +103,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
         lastValidatedAt: codex.lastValidatedAt,
       },
     }),
-    featureFlags: goatFeatureFlagsFromUser(user),
+    featureFlags,
     codexConnected: codex.status === "connected",
     chatResumeEnabled: isGoatChatResumeEnabled(),
   };

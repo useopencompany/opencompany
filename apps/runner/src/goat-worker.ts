@@ -212,12 +212,17 @@ export function createDbGoatTaskStore(): GoatTaskStore {
     async claimNext(input) {
       const result = await getDb().execute(sql`
         WITH candidate AS (
-          SELECT id
-          FROM goat.tasks
+          SELECT task.id
+          FROM goat.tasks AS task
+          INNER JOIN goat.users AS "user"
+            ON "user".workos_user_id = task.user_workos_id
           WHERE
-            (status = 'queued' AND next_run_at <= ${input.now})
-            OR (status = 'running' AND lease_expires_at < ${input.now})
-          ORDER BY next_run_at ASC, created_at ASC
+            "user".task_spawning_enabled = true
+            AND (
+              (task.status = 'queued' AND task.next_run_at <= ${input.now})
+              OR (task.status = 'running' AND task.lease_expires_at < ${input.now})
+            )
+          ORDER BY task.next_run_at ASC, task.created_at ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         )

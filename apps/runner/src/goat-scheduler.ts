@@ -110,11 +110,14 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           prompt,
           planned_harness_spec AS "plannedHarnessSpec",
           next_run_at AS "nextRunAt"
-        FROM goat.task_schedules
-        WHERE enabled = true
-          AND deleted_at IS NULL
-          AND next_run_at <= ${now}
-        ORDER BY next_run_at ASC, created_at ASC
+        FROM goat.task_schedules AS schedule
+        INNER JOIN goat.users AS "user"
+          ON "user".workos_user_id = schedule.user_workos_id
+        WHERE schedule.enabled = true
+          AND schedule.deleted_at IS NULL
+          AND schedule.next_run_at <= ${now}
+          AND "user".task_spawning_enabled = true
+        ORDER BY schedule.next_run_at ASC, schedule.created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       `),

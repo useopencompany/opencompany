@@ -7,6 +7,7 @@ import {
   CircleUserRound,
   Code2,
   Download,
+  ListTodo,
   Loader2,
   Mail,
   Monitor,
@@ -33,7 +34,10 @@ import type { GoatChatSessionView } from "@/lib/chat-ui";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
-import { updateGoatLocalCodexBetaAction } from "@/lib/user-preferences";
+import {
+  updateGoatLocalCodexBetaAction,
+  updateGoatTaskSpawningAction,
+} from "@/lib/user-preferences";
 
 export function GoatHomeRoute({
   chatId,
@@ -68,6 +72,7 @@ export function GoatHomeRoute({
         recentChats={data.recentChats}
         codexConnected={data.codexConnected}
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
+        taskSpawningEnabled={data.featureFlags.taskSpawning}
         chatResumeEnabled={data.chatResumeEnabled}
         userName={userName}
         userWorkosId={data.user.workosUserId}
@@ -167,10 +172,19 @@ export function GoatPreferencesSettingsRoute() {
           Beta features
         </h2>
         <BetaFeatureSwitch
+          icon={ListTodo}
+          label="Background tasks"
+          description="Spawn tasks, Results, and recurring routines from chat"
+          checked={featureFlags.taskSpawning}
+          update={updateGoatTaskSpawningAction}
+        />
+        <BetaFeatureSwitch
           icon={Code2}
           label="Local Codex bridge"
           description="Local Codex engine mode"
           checked={featureFlags.localCodexBridge}
+          update={updateGoatLocalCodexBetaAction}
+          showLocalBridgePairing
         />
       </section>
     </GoatSettingsContent>
@@ -329,6 +343,9 @@ function GoatBrainSettingsRoute({ brain }: { brain: GoatBrainSummaryView }) {
 
 export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
+  const { featureFlags } = useGoatAppData();
+
+  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -344,7 +361,10 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
 
 export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
+  const { featureFlags } = useGoatAppData();
   const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/";
+
+  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -384,7 +404,7 @@ export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
 }
 
 function useTaskRun(taskId: string) {
-  const { tasks, taskRows } = useGoatAppData();
+  const { featureFlags, tasks, taskRows } = useGoatAppData();
   const [serverState, setServerState] = useState<{
     taskId: string;
     run: GoatHarnessRunViewModel | null;
@@ -404,6 +424,7 @@ function useTaskRun(taskId: string) {
   );
 
   useEffect(() => {
+    if (!featureFlags.taskSpawning) return;
     const controller = new AbortController();
     void fetch(`/api/tasks/${encodeURIComponent(taskId)}/run`, {
       cache: "no-store",
@@ -425,12 +446,36 @@ function useTaskRun(taskId: string) {
         if (error instanceof DOMException && error.name === "AbortError") return;
       });
     return () => controller.abort();
-  }, [taskId]);
+  }, [featureFlags.taskSpawning, taskId]);
 
   const currentServerState = serverState?.taskId === taskId ? serverState : null;
   if (currentServerState?.run) return currentServerState.run;
   if (currentServerState?.notFound && !placeholderRun) return null;
   return placeholderRun;
+}
+
+function TasksDisabledRoute() {
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
+          <BackLink href="/" label="Chat" />
+          <h1 className="text-[24px] font-semibold leading-tight text-ink">
+            Background tasks are disabled
+          </h1>
+          <p className="text-[13px] leading-5 text-ink-subtle">
+            Enable Background tasks in Preferences to use Results and recurring routines.
+          </p>
+          <Link
+            href="/settings/preferences"
+            className="inline-flex w-fit rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-medium text-ink hover:bg-surface-hover"
+          >
+            Open Preferences
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
 }
 
 function BackLink({ href, label }: { href: string; label: string }) {
@@ -471,11 +516,15 @@ function BetaFeatureSwitch({
   label,
   description,
   checked,
+  update,
+  showLocalBridgePairing = false,
 }: {
   icon: LucideIcon;
   label: string;
   description: string;
   checked: boolean;
+  update: (enabled: boolean) => Promise<{ ok: boolean }>;
+  showLocalBridgePairing?: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -485,13 +534,19 @@ function BetaFeatureSwitch({
     const nextEnabled = !checked;
     setError(null);
     startTransition(async () => {
-      const result = await updateGoatLocalCodexBetaAction(nextEnabled);
+      let result: { ok: boolean };
+      try {
+        result = await update(nextEnabled);
+      } catch {
+        setError("Could not update this preference.");
+        return;
+      }
       if (result.ok) {
         router.refresh();
         return;
       }
 
-      setError("Could not update this beta.");
+      setError("Could not update this preference.");
     });
   };
 
@@ -527,7 +582,7 @@ function BetaFeatureSwitch({
           </button>
         </div>
         {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
-        {checked ? <LocalCodexBridgePairButton /> : null}
+        {checked && showLocalBridgePairing ? <LocalCodexBridgePairButton /> : null}
       </div>
     </div>
   );

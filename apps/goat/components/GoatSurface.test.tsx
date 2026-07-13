@@ -192,7 +192,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "Hello Goat");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -217,7 +217,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("Kimi K2.6"));
-    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Compare");
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
@@ -254,7 +254,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Local Codex"));
-    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Inspect");
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Inspect");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -359,10 +359,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    await user.type(
-      screen.getByPlaceholderText("Ask a question or describe a task..."),
-      "Clone my repo",
-    );
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Clone my repo");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -421,10 +418,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
     await user.type(screen.getByPlaceholderText("Token budget"), "200000");
-    await user.type(
-      screen.getByPlaceholderText("Ask a question or describe a task..."),
-      "Run the failing suite",
-    );
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Run the failing suite");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -572,7 +566,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "First message");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -606,7 +600,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@");
 
     expect(screen.getByRole("listbox", { name: "Mention menu" })).toBeInTheDocument();
@@ -632,7 +626,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@");
 
     expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
@@ -650,7 +644,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@codex check repo access");
     expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -672,7 +666,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@");
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     await user.clear(textarea);
@@ -690,10 +684,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    await user.type(
-      screen.getByPlaceholderText("Ask a question or describe a task..."),
-      "Hello Goat",
-    );
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Hello Goat");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
@@ -746,6 +737,7 @@ describe("GoatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     render(
       <GoatSurface
+        taskSpawningEnabled
         tasks={[
           {
             id: "task_1",
@@ -789,6 +781,7 @@ describe("GoatSurface chat streaming UI", () => {
     try {
       render(
         <GoatSurface
+          taskSpawningEnabled
           tasks={[
             taskView({
               id: "recent_task",
@@ -889,7 +882,7 @@ describe("GoatSurface chat streaming UI", () => {
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
     await user.keyboard("{Meta>}k{/Meta}");
-    await user.type(screen.getByPlaceholderText("Describe the new chat or task..."), "Research Q3");
+    await user.type(screen.getByPlaceholderText("Describe the new chat..."), "Research Q3");
     await user.keyboard("{Enter}");
 
     const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
@@ -915,9 +908,7 @@ describe("GoatSurface chat streaming UI", () => {
     });
     expect(body.message.id).toMatch(/^ui_background_/);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
-    expect(
-      screen.queryByPlaceholderText("Describe the new chat or task..."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Describe the new chat...")).not.toBeInTheDocument();
   });
 
   it("updates the URL when a new chat returns a session id", async () => {
@@ -926,7 +917,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => {
@@ -941,7 +932,7 @@ describe("GoatSurface chat streaming UI", () => {
       <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     pathnameMock.value = "/brain";
@@ -1057,7 +1048,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Ask Goat anything...")).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Stop response" }));
 
     expect(chatMock.stop).toHaveBeenCalledTimes(1);
@@ -1253,6 +1244,7 @@ describe("GoatSurface chat streaming UI", () => {
   it("renders current task status from task state instead of start_task output", () => {
     render(
       <GoatSurface
+        taskSpawningEnabled
         tasks={[
           taskView({
             id: "task_1",
@@ -1304,6 +1296,7 @@ describe("GoatSurface chat streaming UI", () => {
   it("renders a metadata-only task card from the task state lookup", () => {
     render(
       <GoatSurface
+        taskSpawningEnabled
         tasks={[
           taskView({
             id: "task_1",
@@ -1697,6 +1690,7 @@ describe("GoatSurface chat streaming UI", () => {
     try {
       render(
         <GoatSurface
+          taskSpawningEnabled
           tasks={[taskView({ createdAt: "2026-07-02T17:43:45.000Z" })]}
           defaultModel={DEFAULT_GOAT_MODEL}
           initialChat={null}

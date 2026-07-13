@@ -11,6 +11,7 @@ import {
   goatTaskSandboxUsage,
   goatTasks,
   goatTaskToolUsage,
+  goatUsers,
 } from "@opencompany/db/goat-schema";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
@@ -31,6 +32,7 @@ export type CancelTaskResult = {
 
 export async function listCurrentUserGoatTasks() {
   const { user } = await currentGoatUser();
+  if (!user.taskSpawningEnabled) return [];
   return getDb()
     .select()
     .from(goatTasks)
@@ -251,6 +253,14 @@ export async function createGoatTaskForUser(input: {
   scheduleId?: string;
   scheduledFor?: Date;
 }) {
+  const initialTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
+  if (initialTaskSpawningState === null) {
+    throw new Error("Unable to create a Goat task for an unknown user.");
+  }
+  if (!initialTaskSpawningState) {
+    throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+  }
+
   const id = `goat_task_${randomUUID()}`;
   const userMessageId = `goat_task_msg_${randomUUID()}`;
   const now = new Date();
@@ -286,7 +296,7 @@ export async function createGoatTaskForUser(input: {
           updated_at,
           harness_spec
         )
-        VALUES (
+        SELECT
           ${id},
           ${name},
           ${input.userWorkosId},
@@ -300,7 +310,9 @@ export async function createGoatTaskForUser(input: {
           ${now},
           ${now},
           ${JSON.stringify(harnessSpec)}::jsonb
-        )
+        FROM goat.users AS "user"
+        WHERE "user".workos_user_id = ${input.userWorkosId}
+          AND "user".task_spawning_enabled = true
         RETURNING *
       ),
       inserted_user_message AS (
@@ -361,6 +373,13 @@ export async function createGoatTaskForUser(input: {
   ).map(goatTaskFromRow)[0];
 
   if (!task) {
+    const currentTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
+    if (currentTaskSpawningState === null) {
+      throw new Error("Unable to create a Goat task for an unknown user.");
+    }
+    if (!currentTaskSpawningState) {
+      throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+    }
     throw new Error("Unable to create Goat task.");
   }
 
@@ -378,6 +397,15 @@ export async function createGoatTaskForUser(input: {
   }
 
   return task;
+}
+
+async function loadGoatTaskSpawningState(userWorkosId: string): Promise<boolean | null> {
+  const [user] = await getDb()
+    .select({ enabled: goatUsers.taskSpawningEnabled })
+    .from(goatUsers)
+    .where(eq(goatUsers.workosUserId, userWorkosId))
+    .limit(1);
+  return user ? user.enabled : null;
 }
 
 type GoatTaskRow = Omit<

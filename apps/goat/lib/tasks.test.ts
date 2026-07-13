@@ -6,6 +6,7 @@ import { cancelGoatTaskAction, createGoatTaskForUser } from "@/lib/tasks";
 const mocks = vi.hoisted(() => {
   return {
     execute: vi.fn(),
+    select: vi.fn(),
     triggerGoatTaskRun: vi.fn(),
   };
 });
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
     execute: mocks.execute,
+    select: mocks.select,
   }),
 }));
 
@@ -37,6 +39,13 @@ describe("createGoatTaskForUser", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [{ enabled: true }]),
+        })),
+      })),
+    });
     mocks.execute.mockResolvedValue([
       {
         id: "task_1",
@@ -101,6 +110,69 @@ describe("createGoatTaskForUser", () => {
         event: "goat.runner_task_created_dispatch_failed",
       }),
     );
+    expect(sqlTextFromExecuteCall(0)).toContain("task_spawning_enabled = true");
+  });
+
+  it("does not create or dispatch a task when background tasks are disabled", async () => {
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [{ enabled: false }]),
+        })),
+      })),
+    });
+
+    await expect(
+      createGoatTaskForUser({
+        userWorkosId: "user_1",
+        prompt: "Research x",
+        model: DEFAULT_GOAT_MODEL,
+      }),
+    ).rejects.toThrow("Background tasks are disabled");
+
+    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("reports a concurrent disable when the atomic insert is rejected", async () => {
+    mocks.select
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn(async () => [{ enabled: true }]) })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn(async () => [{ enabled: false }]) })),
+        })),
+      });
+    mocks.execute.mockResolvedValueOnce([]);
+
+    await expect(
+      createGoatTaskForUser({
+        userWorkosId: "user_1",
+        prompt: "Research x",
+        model: DEFAULT_GOAT_MODEL,
+      }),
+    ).rejects.toThrow("Background tasks are disabled");
+    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+  });
+
+  it("reports an unknown user separately from a disabled preference", async () => {
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({ limit: vi.fn(async () => []) })),
+      })),
+    });
+
+    await expect(
+      createGoatTaskForUser({
+        userWorkosId: "missing_user",
+        prompt: "Research x",
+        model: DEFAULT_GOAT_MODEL,
+      }),
+    ).rejects.toThrow("unknown user");
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
 
@@ -119,6 +191,7 @@ describe("cancelGoatTaskAction", () => {
         lastName: null,
         avatarUrl: null,
         timezone: "UTC",
+        taskSpawningEnabled: true,
         localCodexBetaEnabled: false,
         onboardedAt: null,
         createdAt: new Date("2026-01-01T00:00:00.000Z"),
@@ -183,7 +256,9 @@ function sqlTextFromExecuteCall(callIndex: number) {
     | undefined;
   return (
     query?.queryChunks
-      ?.map((chunk) => (typeof chunk === "string" ? "?" : (chunk.value ?? []).join("")))
+      ?.map((chunk) =>
+        typeof chunk === "string" ? "?" : ((chunk?.value ?? []) as string[]).join(""),
+      )
       .join("") ?? ""
   );
 }

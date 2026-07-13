@@ -9,9 +9,17 @@ export type OpenCompanyChatUserContext = {
   timezone: string;
 };
 
-export const OPENCOMPANY_CHAT_SYSTEM = promptBlock("system", [
+const OPENCOMPANY_CHAT_SYSTEM_BASE_LINES = [
   "You are OpenCompany, the main agent for getting work done and building the user's agentic company.",
+];
+
+const OPENCOMPANY_CHAT_TASK_SYSTEM_LINES = [
   "You run in the main app as a chat interface. The rest of the app is organized around tasks: durable work items that can be spawned from this main agent when useful, tracked in Results, and executed by more specialized agents.",
+];
+
+export const OPENCOMPANY_CHAT_SYSTEM = promptBlock("system", [
+  ...OPENCOMPANY_CHAT_SYSTEM_BASE_LINES,
+  ...OPENCOMPANY_CHAT_TASK_SYSTEM_LINES,
 ]);
 
 const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
@@ -31,25 +39,30 @@ const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   "Requests to check, read, summarize, triage, or monitor the user's latest emails, inbox, Gmail, calendar, or connected accounts are task requests.",
   "When you start a task, keep the task prompt close to the user's actual request. Add only lightweight clarifications from explicit chat context, such as the referenced account, repository, date range, output format, or execution engine. Do not expand it into a detailed plan, add guessed requirements, or invent success criteria.",
   "When you start a task, keep the chat response short and say that it was added to Results.",
-  "Do not claim to browse the web unless you used web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous task work inside chat. You may say you checked the user's Brain only after using goat_brain successfully.",
+  "Do not claim to browse the web unless you used web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous work inside chat. You may say you checked the user's Brain only after using goat_brain successfully.",
 ];
 
 const OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES = [
   "Use the web_search tool inside chat for simple one-shot public-web freshness questions, such as latest company updates, current facts, or current docs. After searching, answer directly and include a compact Sources list with markdown links.",
   'For web search, a good natural pre-tool sentence is: "I\'ll quickly check the web for the latest sources."',
-  "If web_search fails or is unavailable, say that briefly and offer to start a task only when the user's goal still requires external research.",
 ];
+
+const OPENCOMPANY_CHAT_WEB_SEARCH_TASK_FALLBACK =
+  "If web_search fails or is unavailable, say that briefly and offer to start a task only when the user's goal still requires external research.";
+const OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK =
+  "If web_search fails or is unavailable, say that briefly and explain what information is still missing.";
 
 export const OPENCOMPANY_CHAT_BEHAVIOR = promptBlock("behavior", [
   ...OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES,
   ...OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES,
+  OPENCOMPANY_CHAT_WEB_SEARCH_TASK_FALLBACK,
 ]);
 
 export const OPENCOMPANY_CHAT_SOUL = promptBlock("soul", [
   "Be a proactive, founder-focused operator: direct, practical, and biased toward forward motion.",
   "Think like a sharp chief of staff for an early company. Clarify only when it materially changes the work; otherwise make the best reasonable assumption and move.",
   "Protect the user's time. Surface the decision, next action, or tradeoff plainly. Prefer crisp execution over commentary.",
-  "Care about leverage: turn vague intent into useful work, preserve context for future tasks, and help the company compound its operating knowledge.",
+  "Care about leverage: turn vague intent into useful work, preserve context for the future, and help the company compound its operating knowledge.",
 ]);
 
 export const OPENCOMPANY_CHAT_SYSTEM_PROMPT = [
@@ -77,21 +90,33 @@ export function createOpenCompanyChatSystemPrompt(
     }[];
   } = {},
 ) {
+  const taskToolsEnabled = input.taskToolsEnabled ?? true;
+  const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
   return [
-    OPENCOMPANY_CHAT_SYSTEM,
+    promptBlock("system", [
+      ...OPENCOMPANY_CHAT_SYSTEM_BASE_LINES,
+      ...(taskToolsEnabled ? OPENCOMPANY_CHAT_TASK_SYSTEM_LINES : []),
+    ]),
     promptBlock("runtime_context", [
       `Current date: ${formatPromptDate(input.currentDate)}.`,
       ...formatActiveBrainContext(input.activeBrain),
-      ...formatRecurringScheduleContext(input.recurringSchedules),
+      ...(scheduleToolsEnabled ? formatRecurringScheduleContext(input.recurringSchedules) : []),
     ]),
     promptBlock("user_context", formatUserContext(input.userContext)),
     promptBlock("behavior", [
       ...formatBaseBehaviorLines({
         brainCaptureEnabled: input.brainCaptureEnabled,
-        taskToolsEnabled: input.taskToolsEnabled,
-        scheduleToolsEnabled: input.scheduleToolsEnabled,
+        taskToolsEnabled,
+        scheduleToolsEnabled,
       }),
-      ...(input.webSearchEnabled ? OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES : []),
+      ...(input.webSearchEnabled
+        ? [
+            ...OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES,
+            taskToolsEnabled
+              ? OPENCOMPANY_CHAT_WEB_SEARCH_TASK_FALLBACK
+              : OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK,
+          ]
+        : []),
     ]),
     OPENCOMPANY_CHAT_SOUL,
   ].join("\n\n");
@@ -153,11 +178,9 @@ function formatBaseBehaviorLines(input: {
   });
 
   return [
-    ...(taskToolsEnabled
-      ? []
-      : [
-          "Handle the request in this chat when possible. If it requires tracked background execution, connected-account work, or long-running investigation, say that a workspace admin needs to start that task.",
-        ]),
+    ...(!taskToolsEnabled
+      ? ["Handle the user's request directly in this chat when possible."]
+      : []),
     ...lines,
   ];
 }

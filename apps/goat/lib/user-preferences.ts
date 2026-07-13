@@ -41,3 +41,24 @@ export async function updateGoatLocalCodexBetaAction(enabled: boolean) {
     enabled: updated?.localCodexBetaEnabled ?? user.localCodexBetaEnabled,
   } as const;
 }
+
+export async function updateGoatTaskSpawningAction(enabled: boolean) {
+  const { user } = await currentGoatUser();
+  const nextEnabled = enabled === true;
+  if (nextEnabled === user.taskSpawningEnabled) {
+    return { ok: true, enabled: nextEnabled } as const;
+  }
+
+  const [updated] = await getDb()
+    .update(goatUsers)
+    .set({ taskSpawningEnabled: nextEnabled, updatedAt: new Date() })
+    .where(eq(goatUsers.workosUserId, user.workosUserId))
+    .returning({ taskSpawningEnabled: goatUsers.taskSpawningEnabled });
+
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return {
+    ok: Boolean(updated),
+    enabled: updated?.taskSpawningEnabled ?? user.taskSpawningEnabled,
+  } as const;
+}

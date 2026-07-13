@@ -37,7 +37,7 @@ Browser
       streamText(default Goat chat agent)
         answer directly
         OR call goat_brain
-        OR call start_task
+        OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
     OR Local Codex mode
@@ -110,13 +110,12 @@ model turn when the task finishes.
 
 The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
-the current date, recurring schedules, and a compact DB-backed `user_context` profile with the
-user's name, email, and timezone. Its tools are `start_task`, `goat_brain`, and optional
-`web_search`; tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`. The prompt
-tells the model to answer directly for small or ambiguous work, use `goat_brain` for durable
-personal context, use `web_search` for one-shot public freshness checks when Exa is configured, and
-start a task for research, monitoring, comparison, connected-account work, or durable work that
-belongs in Results.
+the current date and a compact DB-backed `user_context` profile with the user's name, email, and
+timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
+`start_task` and the recurring schedule tools, prompt guidance, schedule context, Results UI, and
+runner claims are enabled only when the user opts into **Background tasks** in Preferences. The
+database flag defaults off, so the standard Goat experience is chat plus Brain without task
+spawning. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
 
 The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model
@@ -397,7 +396,8 @@ Goat-specific tables live in `packages/db/src/goat-schema.ts`.
 
 Important tables:
 
-- `goat.users`: WorkOS-backed Goat user profile, including the `local_codex_beta_enabled` beta flag.
+- `goat.users`: WorkOS-backed Goat user profile, including the off-by-default
+  `task_spawning_enabled` feature flag and the `local_codex_beta_enabled` beta flag.
 - `goat.chat_sessions`: one open or closed chat thread per user.
 - `goat.chat_messages`: persisted user and assistant chat messages. Assistant messages can point
   at a `taskId` so the UI can render a task card. Task completion notifications are also persisted
