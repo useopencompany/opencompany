@@ -56,6 +56,10 @@
       "types": "./src/goat-gmail.ts",
       "default": "./src/goat-gmail.ts"
     },
+    "./goat-google-drive": {
+      "types": "./src/goat-google-drive.ts",
+      "default": "./src/goat-google-drive.ts"
+    },
     "./goat-linear": {
       "types": "./src/goat-linear.ts",
       "default": "./src/goat-linear.ts"

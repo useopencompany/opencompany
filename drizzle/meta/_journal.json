@@ -862,6 +862,13 @@
       "when": 1783981400000,
       "tag": "0122_goat_mcp_onboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1783981500000,
+      "tag": "0123_goat_google_drive_source",
+      "breakpoints": true
     }
   ]
 }

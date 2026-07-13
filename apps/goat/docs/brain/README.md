@@ -15,7 +15,7 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 | Page | What it answers |
 | --- | --- |
 | [data-model.md](./data-model.md) | **Reference for all enums and grammars**: kinds, the 8 entity types, statuses, default folders, id/folder/source-ref patterns, document anatomy, DB tables. `packages/goat-brain/src/schema.ts` remains the code-level source of truth. |
-| [ingestion.md](./ingestion.md) | How content enters the brain: source items, the ingest job queue, and the three pipelines (Jamie meetings, chat captures, legacy template writes). |
+| [ingestion.md](./ingestion.md) | How content enters the brain: source items, the ingest job queue, and connector pipelines including Google Drive change ingestion. |
 | [tools-and-cli.md](./tools-and-cli.md) | Every surface that touches a brain: the `goat-brain` CLI commands, chat tools (`goat_brain`, `save_to_brain`), and the per-brain MCP connector. |
 | [pointer-copy-contract.md](./pointer-copy-contract.md) | How brain writers cite external sources: pointer vs. snapshot rules per source class, source-ref grammar, enforcement. |
 | [retrieval-planes.md](./retrieval-planes.md) | Design for how non-writers read the brain: deterministic read plane + librarian agent (step 4 of #597, partially implemented). |

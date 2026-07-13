@@ -7,7 +7,7 @@ worker hand it to a registered handler — usually an agentic loop over the brai
 ## The shape
 
 ```text
-Source (webhook, chat tool)
+Source (webhook, poller, chat tool)
   normalize → goat.brain_source_items        (idempotent on external_id + content_hash)
   enqueue   → goat.brain_ingest_jobs         (kind + brain_ref pinned at enqueue)
 
@@ -39,8 +39,31 @@ Current providers/types:
 | --- | --- | --- | --- |
 | `jamie` | `meeting` | `normalizeJamieMeetingCompletedWebhook` | `jamie:meeting:<externalId>` |
 | `goat-chat` | `capture` | `normalizeGoatChatCapture` | `goat-chat:<userMessageId>` |
+| `google_drive` | `document` | `normalizeGoogleDriveDocument` | `google-drive:file:<fileId>` |
 
-## The three pipelines
+## Google Drive documents
+
+Google Drive is a personal, ingestion-only Brain source. A workspace admin may attach only their
+own Drive connection to brains they administer. Each source selects explicit files or recursive
+folders from My Drive or Shared Drives; source configuration stores a server-controlled
+`selectedAt`, and the initial Drive page token is persisted before the selection is saved. Existing
+content is therefore not backfilled.
+
+The runner maintains one durable change cursor for the user corpus and one for every selected
+Shared Drive. Valid Drive notifications only wake these cursors—the notification body is never
+treated as change data. Cursors reconcile at least every 15 minutes, while seven-day watch channels
+renew with 24 hours remaining and deliberately overlap. Local HTTP development skips watch creation
+and uses reconciliation polling.
+
+Changed files debounce for five quiet minutes with a thirty-minute ceiling and use durable leases.
+The worker rechecks the enabled source and current folder ancestry before download and fan-out. It
+extracts supported Google-native and uploaded document formats without persisting raw binary,
+normalizes one `google_drive/document` item, and enqueues `runGoogleDriveDocumentAgentIngest`.
+Drive remains canonical, so the agent writes synthesized facts with a canonical pointer and never
+creates an `evidence/` snapshot. Removal, moves out, deletion, and access loss stop future ingestion
+without deleting existing Brain knowledge.
+
+## Other pipelines
 
 ### 1. Jamie meetings (agentic — current path)
 

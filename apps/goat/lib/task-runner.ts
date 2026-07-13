@@ -229,6 +229,26 @@ export async function triggerGoatBrainIngestWake() {
   }
 }
 
+export async function triggerGoatGoogleDriveSyncWake() {
+  const baseUrl = runnerInternalBaseUrl();
+  const token = runnerToken();
+  if (!baseUrl || !token) {
+    console.warn("Goat Google Drive sync wake skipped because the runner is not configured.", {
+      event: "goat.google_drive_sync_wake_unconfigured",
+    });
+    return;
+  }
+
+  const response = await fetch(`${baseUrl}/internal/goat/google-drive/sync`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Goat Google Drive sync wake failed with ${response.status}: ${details}`);
+  }
+}
+
 function isGoatHarnessSpec(value: unknown): value is GoatHarnessSpec {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;

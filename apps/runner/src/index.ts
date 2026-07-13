@@ -21,6 +21,10 @@ import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-bra
 import { setGoatCodexChatWakeup, startGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
 import { startGoatGmailPollWorker } from "./goat-gmail-poll-worker";
+import {
+  setGoatGoogleDriveSyncWakeup,
+  startGoatGoogleDriveSyncWorker,
+} from "./goat-google-drive-sync-worker";
 import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
@@ -100,6 +104,9 @@ const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWork
 const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
 const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
 const goatGmailFlushWorker = env.goatTaskWorkerEnabled ? startGoatGmailFlushWorker(env) : null;
+const goatGoogleDriveSyncWorker = env.goatTaskWorkerEnabled
+  ? startGoatGoogleDriveSyncWorker(env)
+  : null;
 const goatTaskScheduleWorker =
   env.goatTaskWorkerEnabled && goatTaskWorker
     ? startGoatTaskScheduleWorker({ onTaskCreated: goatTaskWorker.notify })
@@ -119,6 +126,9 @@ setGoatTaskWakeup(() => {
 setGoatBrainIngestWakeup(() => {
   goatBrainIngestWorker?.notify();
 });
+setGoatGoogleDriveSyncWakeup(() => {
+  goatGoogleDriveSyncWorker?.notify();
+});
 setGoatCodexChatWakeup(() => {
   goatCodexChatWorker?.notify();
 });
@@ -132,6 +142,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       active_job_count: jobWorker.activeCount(),
       active_goat_task_count: goatTaskWorker?.activeCount() ?? 0,
       active_goat_brain_ingest_count: goatBrainIngestWorker?.activeCount() ?? 0,
+      active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
       active_run_count: listActiveRuns().length,
     });
     // Stop accepting work and drain in-flight jobs/requests first, flush any pending
@@ -163,6 +174,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
       goatGmailPollWorker?.stop() ?? Promise.resolve(),
       goatGmailFlushWorker?.stop() ?? Promise.resolve(),
+      goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])
       .then(() => Promise.allSettled([flushAllSessionStreams()]))

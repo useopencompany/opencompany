@@ -3,7 +3,16 @@
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { type LucideIcon as IconComponent, SlackIcon } from "@opencompany/ui/icons";
 import { useLiveQuery } from "@tanstack/react-db";
-import { CalendarDays, Code2, FileText, GitBranch, ListTodo, Mail, PlugZap } from "lucide-react";
+import {
+  CalendarDays,
+  Code2,
+  Files,
+  FileText,
+  GitBranch,
+  ListTodo,
+  Mail,
+  PlugZap,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
@@ -136,6 +145,7 @@ function IntegrationRows({
           label="Google Calendar"
           integration={integrations.google_calendar}
         />
+        <IntegrationRow icon={Files} label="Google Drive" integration={integrations.google_drive} />
         <IntegrationRow icon={ListTodo} label="Linear" integration={integrations.linear} />
         <IntegrationRow icon={SlackIcon} label="Slack" integration={integrations.slack} />
         <McpIntegrationRow setup={mcpSetup} />
@@ -419,6 +429,9 @@ function integrationConnectHref(
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
+  }
+  if (provider === "google_drive") {
+    return "/api/integrations/google-drive/start?returnTo=/settings/integrations";
   }
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";

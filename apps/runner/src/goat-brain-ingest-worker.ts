@@ -15,6 +15,7 @@ import {
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
@@ -43,6 +44,7 @@ import {
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
+  runGoogleDriveDocumentAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
   runSlackConversationAgentIngest,
@@ -162,6 +164,12 @@ const GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "thread",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "google_drive",
+  sourceType: "document",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -202,6 +210,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGmailThreadSourceItem,
     run: runTypedGoatBrainIngestHandler(runGmailThreadAgentIngest),
+  },
+  {
+    descriptor: GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGoogleDriveDocumentSourceItem,
+    run: runTypedGoatBrainIngestHandler(runGoogleDriveDocumentAgentIngest),
   },
 ];
 

@@ -15,14 +15,17 @@ import {
   type GoatBrainSourcesDetails,
   type GoatBrainSourceView,
   type GoatGitHubRepositoryListResult,
+  type GoatGoogleDriveResourceListResult,
   type GoatLinearTeamListResult,
   type GoatSlackConversationListResult,
   getGoatBrainSourcesAction,
   listGoatGitHubRepositoriesAction,
+  listGoatGoogleDriveResourcesAction,
   listGoatLinearTeamsAction,
   listGoatSlackConversationsAction,
   setGoatBrainGitHubSourceAction,
   setGoatBrainGmailSourceAction,
+  setGoatBrainGoogleDriveSourceAction,
   setGoatBrainLinearSourceAction,
   setGoatBrainSlackSourceAction,
   setGoatBrainSourceEnabledAction,
@@ -56,7 +59,9 @@ export function resolveGoatBrainSourceState(
             ? details?.github.integration
             : providerId === "gmail"
               ? details?.gmail.integration
-              : undefined;
+              : providerId === "google_drive"
+                ? details?.googleDrive.integration
+                : undefined;
   const jamieReady =
     providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
   const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
@@ -147,7 +152,12 @@ export function SourceProviderCard({
   const linear = provider.id === "linear" ? details?.linear : undefined;
   const github = provider.id === "github" ? details?.github : undefined;
   const gmail = provider.id === "gmail" ? details?.gmail : undefined;
-  const canToggle = provider.available && (source ? source.canManage : connected) && !isPending;
+  const googleDrive = provider.id === "google_drive" ? details?.googleDrive : undefined;
+  const canToggle =
+    provider.available &&
+    (source ? source.canManage : connected) &&
+    (provider.id !== "google_drive" || Boolean(source)) &&
+    !isPending;
   const sourceNeedsSetup = Boolean(
     source && source.integrationStatus !== "connected" && !(provider.id === "jamie" && connected),
   );
@@ -168,12 +178,20 @@ export function SourceProviderCard({
     const integrationId = state.integrationId;
     if (!integrationId) return;
     startTransition(async () => {
-      const result = await setGoatBrainSourceEnabledAction({
-        brainRef,
-        provider: provider.id,
-        integrationId,
-        enabled: !enabled,
-      });
+      const result =
+        provider.id === "google_drive"
+          ? await setGoatBrainGoogleDriveSourceAction({
+              brainRef,
+              integrationId,
+              enabled: !enabled,
+              resourceIds: googleDriveResourceIds(source?.config),
+            })
+          : await setGoatBrainSourceEnabledAction({
+              brainRef,
+              provider: provider.id,
+              integrationId,
+              enabled: !enabled,
+            });
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -314,6 +332,17 @@ export function SourceProviderCard({
         <GmailSourceEditor
           brainRef={brainRef}
           integrationId={source?.integrationId ?? gmail.integration.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {provider.id === "google_drive" &&
+      googleDrive?.integration.integrationId &&
+      (connected || source) &&
+      (source ? source.canManage : true) ? (
+        <GoogleDriveSourceEditor
+          brainRef={brainRef}
+          integrationId={source?.integrationId ?? googleDrive.integration.integrationId}
           source={source}
           onChanged={onChanged}
         />
@@ -1274,6 +1303,303 @@ function GmailSourceEditor({
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >
             {isPending ? "Saving..." : "Save Gmail source"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type GoogleDriveSelection = {
+  id: string;
+  name: string;
+  kind: "file" | "folder";
+  mimeType: string;
+  driveId: string | null;
+  webViewLink: string | null;
+};
+
+function googleDriveSelectionsFromConfig(
+  config: Record<string, unknown> | undefined,
+): GoogleDriveSelection[] {
+  const resources = config?.resources;
+  if (!Array.isArray(resources)) return [];
+  return resources.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const row = value as Record<string, unknown>;
+    if (
+      typeof row.id !== "string" ||
+      typeof row.name !== "string" ||
+      typeof row.mimeType !== "string" ||
+      (row.kind !== "file" && row.kind !== "folder")
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: row.id,
+        name: row.name,
+        kind: row.kind,
+        mimeType: row.mimeType,
+        driveId: typeof row.driveId === "string" ? row.driveId : null,
+        webViewLink: typeof row.webViewLink === "string" ? row.webViewLink : null,
+      },
+    ];
+  });
+}
+
+function googleDriveResourceIds(config: Record<string, unknown> | undefined) {
+  return googleDriveSelectionsFromConfig(config).map((resource) => resource.id);
+}
+
+function GoogleDriveSourceEditor({
+  brainRef,
+  integrationId,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  integrationId: string;
+  source: GoatBrainSourceView | null;
+  onChanged: () => Promise<void>;
+}) {
+  const saved = useMemo(() => googleDriveSelectionsFromConfig(source?.config), [source]);
+  const [expanded, setExpanded] = useState(false);
+  const [selection, setSelection] = useState<Map<string, GoogleDriveSelection>>(
+    () => new Map(saved.map((resource) => [resource.id, resource])),
+  );
+  const [breadcrumbs, setBreadcrumbs] = useState<Array<{ id: string; name: string }>>([]);
+  const [query, setQuery] = useState("");
+  const [result, setResult] = useState<GoatGoogleDriveResourceListResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const currentFolder = breadcrumbs.at(-1);
+
+  const load = useCallback(
+    async (options: {
+      parentId?: string;
+      query?: string;
+      pageToken?: string;
+      append?: boolean;
+    }) => {
+      setLoading(true);
+      try {
+        const next = await listGoatGoogleDriveResourcesAction({
+          integrationId,
+          ...(options.parentId ? { parentId: options.parentId } : {}),
+          ...(options.query?.trim() ? { query: options.query.trim() } : {}),
+          ...(options.pageToken ? { pageToken: options.pageToken } : {}),
+        });
+        setResult((current) => {
+          if (!options.append || !current?.ok || !next.ok) return next;
+          return {
+            ok: true,
+            files: [...current.files, ...next.files],
+            nextPageToken: next.nextPageToken,
+          };
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [integrationId],
+  );
+
+  const toggleExpanded = () => {
+    if (!expanded && !result) void load({});
+    setExpanded((value) => !value);
+  };
+
+  const openFolder = (folder: GoogleDriveSelection) => {
+    const nextBreadcrumbs = [...breadcrumbs, { id: folder.id, name: folder.name }];
+    setBreadcrumbs(nextBreadcrumbs);
+    setQuery("");
+    void load({ parentId: folder.id });
+  };
+
+  const goToBreadcrumb = (index: number) => {
+    const next = index < 0 ? [] : breadcrumbs.slice(0, index + 1);
+    setBreadcrumbs(next);
+    setQuery("");
+    void load({ ...(next.at(-1)?.id ? { parentId: next.at(-1)!.id } : {}) });
+  };
+
+  const toggle = (resource: GoogleDriveSelection) => {
+    setSelection((current) => {
+      const next = new Map(current);
+      if (next.has(resource.id)) next.delete(resource.id);
+      else next.set(resource.id, resource);
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const save = () => {
+    startTransition(async () => {
+      const result = await setGoatBrainGoogleDriveSourceAction({
+        brainRef,
+        integrationId,
+        enabled: selection.size > 0,
+        resourceIds: [...selection.keys()],
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setDirty(false);
+      toast.success("Google Drive source updated.");
+      await onChanged();
+    });
+  };
+
+  return (
+    <div className="mt-1 flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <button
+        type="button"
+        onClick={toggleExpanded}
+        className="flex items-center gap-1 text-left text-[12px] font-medium text-ink"
+      >
+        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        Select files and folders ({selection.size})
+      </button>
+      {expanded ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-1 text-[11.5px] text-ink-subtle">
+            <button type="button" onClick={() => goToBreadcrumb(-1)} className="hover:text-ink">
+              Drive
+            </button>
+            {breadcrumbs.map((crumb, index) => (
+              <span key={crumb.id} className="flex items-center gap-1">
+                <span>/</span>
+                <button
+                  type="button"
+                  onClick={() => goToBreadcrumb(index)}
+                  className="max-w-40 truncate hover:text-ink"
+                >
+                  {crumb.name}
+                </button>
+              </span>
+            ))}
+          </div>
+          <form
+            className="flex gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void load({
+                ...(currentFolder ? { parentId: currentFolder.id } : {}),
+                ...(query.trim() ? { query } : {}),
+              });
+            }}
+          >
+            <div className="relative flex-1">
+              <Search
+                size={13}
+                className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-subtle"
+              />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search this folder"
+                className="w-full rounded-md border border-ink/10 bg-transparent py-1.5 pl-7 pr-2 text-[12px] text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded-md border border-ink/15 px-2.5 text-[12px] font-medium text-ink disabled:opacity-60"
+            >
+              Search
+            </button>
+          </form>
+          <div className="max-h-64 overflow-y-auto rounded-md border border-ink/10">
+            {loading && !result ? (
+              <p className="px-3 py-3 text-[12px] text-ink-subtle">Loading Drive…</p>
+            ) : result && !result.ok ? (
+              <p className="px-3 py-3 text-[12px] text-warning">{result.error}</p>
+            ) : result?.ok && result.files.length === 0 ? (
+              <p className="px-3 py-3 text-[12px] text-ink-subtle">No files found.</p>
+            ) : result?.ok ? (
+              <>
+                {result.files.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center gap-2 border-b border-ink/10 px-2.5 py-2 last:border-b-0"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selection.has(file.id)}
+                      onChange={() => toggle(file)}
+                      aria-label={`Select ${file.name}`}
+                      className="h-3.5 w-3.5 accent-ink"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
+                      {file.name}
+                    </span>
+                    {file.kind === "folder" ? (
+                      <>
+                        <span className="text-[10.5px] text-ink-subtle">Recursive</span>
+                        <button
+                          type="button"
+                          onClick={() => openFolder(file)}
+                          className="text-[11.5px] font-medium text-ink-subtle hover:text-ink"
+                        >
+                          Open
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                ))}
+                {result.nextPageToken ? (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() =>
+                      void load({
+                        ...(currentFolder ? { parentId: currentFolder.id } : {}),
+                        ...(query.trim() ? { query } : {}),
+                        ...(result.nextPageToken ? { pageToken: result.nextPageToken } : {}),
+                        append: true,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-[11.5px] font-medium text-ink-subtle hover:text-ink disabled:opacity-60"
+                  >
+                    {loading ? "Loading…" : "Load more"}
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+          {selection.size > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {[...selection.values()].map((resource) => (
+                <button
+                  type="button"
+                  key={resource.id}
+                  onClick={() => toggle(resource)}
+                  className="max-w-full truncate rounded-full bg-surface-muted px-2 py-0.5 text-[10.5px] text-ink-subtle"
+                  title={`Remove ${resource.name}`}
+                >
+                  {resource.name} ×
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <p className="text-[11.5px] leading-4 text-ink-subtle">
+        Selected Drive content will be summarized into this brain and visible to everyone who can
+        access it. Existing content is not imported until it changes after selection.
+      </p>
+      {dirty ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={save}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {isPending ? "Saving..." : "Save Google Drive source"}
           </button>
         </div>
       ) : null}
