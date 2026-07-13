@@ -1164,6 +1164,70 @@ describe("runJamieMeetingAgentIngest", () => {
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalledTimes(1);
   });
 
+  it("treats reasoning that ends with SKIP on its own line as an explicit skip", async () => {
+    mockAgentRun({
+      finalText: "This is a transactional receipt email with no durable company knowledge.\n\nSKIP",
+      toolInvocations: [{ command: "query", args: ["receipt"] }],
+    });
+
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "explicit",
+      reason: "This is a transactional receipt email with no durable company knowledge.",
+      mutations: 0,
+    });
+  });
+
+  it("keeps the reason that follows a leading SKIP sentinel", async () => {
+    mockAgentRun({ finalText: "SKIP — routine dependency bump, nothing durable." });
+
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "explicit",
+      reason: "routine dependency bump, nothing durable.",
+      mutations: 0,
+    });
+  });
+
+  it("does not mistake words starting with the sentinel for an explicit skip", async () => {
+    mockAgentRun({
+      finalText: "SKIPPED nothing; the meeting page was already current.",
+      toolInvocations: [{ command: "query", args: ["meeting"] }],
+    });
+
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({ skipped: true, skipMode: "inferred_no_mutations" });
+  });
+
   it("infers a skip when the agent completes without brain mutations", async () => {
     mockAgentRun({
       finalText: "All done!",

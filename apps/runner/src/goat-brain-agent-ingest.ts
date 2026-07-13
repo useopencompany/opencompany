@@ -849,8 +849,13 @@ function brainAgentIngestCompletionOutcome(input: {
       } without successfully writing to the brain.`,
     );
   }
-  if (input.finalText.startsWith(GOAT_BRAIN_AGENT_SKIP_SENTINEL)) {
-    return { skipped: true, skipMode: "explicit" };
+  const explicitSkip = explicitSkipFromFinalText(input.finalText);
+  if (explicitSkip) {
+    return {
+      skipped: true,
+      ...(explicitSkip.reason ? { reason: explicitSkip.reason } : {}),
+      skipMode: "explicit",
+    };
   }
   if (input.noMutationOutcome === "skip") {
     return {
@@ -862,6 +867,30 @@ function brainAgentIngestCompletionOutcome(input: {
   throw new Error(
     "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
   );
+}
+
+// The skip rule asks for a reply of exactly SKIP, but models routinely prepend
+// their reasoning ("This is a receipt... SKIP") or append a reason after the
+// sentinel. Accept the sentinel as the first word or as its own final line and
+// keep the surrounding prose as the skip reason instead of discarding it.
+function explicitSkipFromFinalText(finalText: string): { reason?: string } | null {
+  const trimmed = finalText.trim();
+  if (!trimmed) return null;
+  const sentinel = GOAT_BRAIN_AGENT_SKIP_SENTINEL;
+  if (new RegExp(`^${sentinel}\\b`).test(trimmed)) {
+    const reason = trimmed
+      .slice(sentinel.length)
+      .replace(/^[\s.:—–-]+/, "")
+      .trim();
+    return reason ? { reason } : {};
+  }
+  const lines = trimmed.split("\n");
+  const lastLine = (lines[lines.length - 1] ?? "").trim();
+  if (new RegExp(`^${sentinel}[.!]*$`).test(lastLine)) {
+    const reason = lines.slice(0, -1).join("\n").trim();
+    return reason ? { reason } : {};
+  }
+  return null;
 }
 
 export async function buildGoatBrainFolderInventoryPrompt(root: string): Promise<string | null> {
