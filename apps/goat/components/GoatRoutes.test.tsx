@@ -70,6 +70,10 @@ vi.mock("@/components/JamieIntegrationSetup", () => ({
   JamieIntegrationSetup: () => null,
 }));
 
+vi.mock("@/components/McpSetupGuide", () => ({
+  McpSetupGuide: () => <div data-testid="mcp-setup-guide" />,
+}));
+
 vi.mock("@/components/TaskDetailPanel", () => ({
   TaskDetailPanel: () => null,
 }));

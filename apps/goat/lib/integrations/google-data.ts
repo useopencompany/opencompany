@@ -4,13 +4,14 @@ import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type {
   GoatGmailSourceProviderState,
+  GoatGoogleDriveSourceProviderState,
   GoatGoogleProviderState,
 } from "@/lib/integration-state";
 import { goatGoogleIntegrationStateFromRows } from "@/lib/integration-state";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
-const GOOGLE_PROVIDERS: GoatIntegrationProvider[] = ["gmail", "google_calendar"];
+const GOOGLE_PROVIDERS: GoatIntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
 const GOAT_BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",
@@ -79,6 +80,47 @@ export async function getGoatGmailSourceIntegrationState(
 
   return {
     provider: "gmail",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id,
+    accountEmail: row.accountEmail,
+    statusReason: row.statusReason,
+  };
+}
+
+export async function getGoatGoogleDriveSourceIntegrationState(
+  userWorkosId: string,
+): Promise<GoatGoogleDriveSourceProviderState> {
+  const [row] = await getDb()
+    .select({
+      id: goatIntegrations.id,
+      status: goatIntegrations.status,
+      accountEmail: goatIntegrations.accountEmail,
+      statusReason: goatIntegrations.statusReason,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.userWorkosId, userWorkosId),
+        eq(goatIntegrations.provider, "google_drive"),
+      ),
+    )
+    .orderBy(desc(goatIntegrations.updatedAt))
+    .limit(1);
+
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "google_drive",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountEmail: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "google_drive",
     connected: row.status === "connected",
     status: row.status,
     integrationId: row.id,

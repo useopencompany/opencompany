@@ -5,18 +5,70 @@ import {
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   normalizeGitHubActivityWebhook,
   normalizeGmailThreadWindow,
   normalizeGoatChatCapture,
+  normalizeGoogleDriveDocument,
   normalizeJamieMeetingCompletedWebhook,
   normalizeLinearIssueWindow,
   normalizeSlackConversationWindow,
   normalizeUploadAsset,
   slackTsToIso,
 } from "./source-items";
+
+describe("Google Drive document normalization", () => {
+  const base = {
+    fileId: "drive_file_123",
+    name: "Launch plan",
+    mimeType: "application/vnd.google-apps.document",
+    webViewLink: "https://docs.google.com/document/d/drive_file_123/edit",
+    modifiedTime: "2026-07-13T08:00:00.000Z",
+    version: "42",
+    extractedText: "The launch is approved for September.",
+    contentSha256: "a".repeat(64),
+    capturedAt: "2026-07-13T08:05:00.000Z",
+  };
+
+  it("uses the canonical Drive provenance and document contract", () => {
+    const item = normalizeGoogleDriveDocument(base);
+    expect(item.sourceRef).toBe("google-drive:file:drive_file_123");
+    expect(item.sourceProvider).toBe("google_drive");
+    expect(item.sourceType).toBe("document");
+    expect(item.content.document.webViewLink).toBe(base.webViewLink);
+    expect(isNormalizedGoogleDriveDocumentSourceItem(item)).toBe(true);
+  });
+
+  it("deduplicates metadata-only changes but hashes content changes", () => {
+    const first = normalizeGoogleDriveDocument(base);
+    const renamed = normalizeGoogleDriveDocument({
+      ...base,
+      name: "Renamed launch plan",
+      version: "43",
+      modifiedTime: "2026-07-13T09:00:00.000Z",
+      capturedAt: "2026-07-13T09:01:00.000Z",
+    });
+    const changed = normalizeGoogleDriveDocument({
+      ...base,
+      contentSha256: "b".repeat(64),
+      version: "44",
+    });
+    expect(renamed.contentHash).toBe(first.contentHash);
+    expect(changed.contentHash).not.toBe(first.contentHash);
+  });
+
+  it("rejects invalid digests and guards unrelated payloads", () => {
+    expect(() => normalizeGoogleDriveDocument({ ...base, contentSha256: "bad" })).toThrow(
+      BrainSourceNormalizationError,
+    );
+    expect(isNormalizedGoogleDriveDocumentSourceItem({ sourceProvider: "google_drive" })).toBe(
+      false,
+    );
+  });
+});
 
 function jamiePayload(overrides: Record<string, unknown> = {}) {
   return {

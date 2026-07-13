@@ -11,5 +11,6 @@ export const GOAT_BRAIN_POINTER_COPY_RULE = [
   "- Meeting transcripts and call recordings: snapshot into evidence/. Pages link the evidence record; never inline the transcript.",
   "- Emails: snapshot into evidence/.",
   "- Tracked work items (Linear issues, GitHub issues and pull requests): pointer plus a one-line current-state summary. Never copy the body — the tracker is the canonical live home and copies go stale immediately.",
+  "- Google Drive documents: pointer only. Drive is the canonical live home; synthesize durable facts but never create an evidence/ snapshot or mirror the full document.",
   "- Anything else: pointer only by default; snapshot only if the content could not be re-fetched later.",
 ].join("\n");

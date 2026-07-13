@@ -1,6 +1,6 @@
 import type { GoatBrainSourceConfigProvider } from "@opencompany/db/goat-schema";
 import type { LucideIcon } from "lucide-react";
-import { FileText, GitBranch, ListTodo, Mail, MessageSquare } from "lucide-react";
+import { Files, FileText, GitBranch, ListTodo, Mail, MessageSquare } from "lucide-react";
 
 export const GOAT_JAMIE_DOCS_HREF = "/docs/integrations/jamie";
 
@@ -38,6 +38,15 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectionKind: "oauth",
     available: true,
     connectHref: "/api/integrations/gmail/start?returnTo=/settings/integrations",
+  },
+  {
+    id: "google_drive",
+    name: "Google Drive",
+    description: "Ingest changes from selected files and folders into this brain.",
+    icon: Files,
+    connectionKind: "oauth",
+    available: true,
+    connectHref: "/api/integrations/google-drive/start?returnTo=/settings/integrations",
   },
   {
     id: "github",

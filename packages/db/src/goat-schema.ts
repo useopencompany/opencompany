@@ -51,6 +51,7 @@ export type GoatTaskScheduleRunStatus = "pending" | "created" | "failed";
 export type GoatIntegrationProvider =
   | "gmail"
   | "google_calendar"
+  | "google_drive"
   | "linear"
   | "github"
   | "jamie"
@@ -92,8 +93,15 @@ export type GoatBrainSourceProvider =
   | "slack"
   | "linear"
   | "github"
-  | "gmail";
-export type GoatBrainSourceConfigProvider = "jamie" | "gmail" | "github" | "slack" | "linear";
+  | "gmail"
+  | "google_drive";
+export type GoatBrainSourceConfigProvider =
+  | "jamie"
+  | "gmail"
+  | "google_drive"
+  | "github"
+  | "slack"
+  | "linear";
 export type GoatBrainSourceType =
   | "meeting"
   | "capture"
@@ -101,7 +109,9 @@ export type GoatBrainSourceType =
   | "conversation"
   | "issue"
   | "activity"
-  | "thread";
+  | "thread"
+  | "document";
+export type GoatGoogleDriveWatchChannelStatus = "creating" | "active" | "stopped";
 export type GoatGmailMessageDirection = "sent" | "received";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
@@ -167,6 +177,7 @@ export type GoatHarnessSpec = {
 };
 
 export type GoatWorkspaceRole = "admin" | "member";
+export type GoatMcpClient = "claude" | "chatgpt" | "cursor";
 export type GoatBrainVisibility = "workspace" | "restricted";
 export type GoatBrainFolderSource = "system" | "custom";
 export type GoatBrainEntityType =
@@ -342,20 +353,32 @@ export type GoatBrainToolRunTrace = Record<string, unknown>;
 export const goat = pgSchema("goat");
 export const goatTaskDisplayIdSequence = goat.sequence("task_display_id_seq");
 
-export const goatUsers = goat.table("users", {
-  workosUserId: text("workos_user_id").primaryKey(),
-  email: text("email").notNull(),
-  firstName: text("first_name"),
-  lastName: text("last_name"),
-  avatarUrl: text("avatar_url"),
-  timezone: text("timezone").notNull().default("UTC"),
-  taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
-  localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
-  // Set when the user finishes the onboarding flow; null gates them into it.
-  onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const goatUsers = goat.table(
+  "users",
+  {
+    workosUserId: text("workos_user_id").primaryKey(),
+    email: text("email").notNull(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    avatarUrl: text("avatar_url"),
+    timezone: text("timezone").notNull().default("UTC"),
+    taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
+    localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
+    preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
+    // Set exactly once, when this user first completes a successful Brain query over MCP.
+    mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
+    // Set when the user finishes the onboarding flow; null gates them into it.
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    preferredMcpClientCheck: check(
+      "goat_users_preferred_mcp_client_check",
+      sql`${table.preferredMcpClient} IS NULL OR ${table.preferredMcpClient} IN ('claude', 'chatgpt', 'cursor')`,
+    ),
+  }),
+);
 
 export const goatWorkspaces = goat.table(
   "workspaces",
@@ -829,7 +852,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -878,7 +901,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -932,7 +955,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -981,7 +1004,7 @@ export const goatBrainSources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'github', 'slack', 'linear')`,
+      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear')`,
     ),
   }),
 );
@@ -1047,11 +1070,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread')`,
+      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -1115,7 +1138,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -1294,6 +1317,130 @@ export const goatGmailSyncState = goat.table("gmail_sync_state", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// One durable Drive change-feed cursor per connected account/corpus. My Drive
+// and directly shared files use corpus_key "user"; selected Shared Drives use
+// "drive:<id>" because Google maintains a distinct change log for each drive.
+export const goatGoogleDriveSyncCursors = goat.table(
+  "google_drive_sync_cursors",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    corpusKey: text("corpus_key").notNull(),
+    driveId: text("drive_id"),
+    pageToken: text("page_token").notNull(),
+    webhookAddress: text("webhook_address").notNull(),
+    wakeRequestedAt: timestamp("wake_requested_at", { withTimezone: true }),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    lastSuccessfulAt: timestamp("last_successful_at", { withTimezone: true }),
+    lastResetAt: timestamp("last_reset_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationCorpusIdx: uniqueIndex("goat_google_drive_sync_cursors_integration_corpus_idx").on(
+      table.integrationId,
+      table.corpusKey,
+    ),
+    dueIdx: index("goat_google_drive_sync_cursors_due_idx").on(
+      table.wakeRequestedAt,
+      table.lastPolledAt,
+    ),
+    leaseIdx: index("goat_google_drive_sync_cursors_lease_idx").on(table.leaseExpiresAt),
+  }),
+);
+
+// Drive watch renewal intentionally overlaps old and new channels. Keeping
+// each channel lets the public webhook authenticate either one until expiry.
+export const goatGoogleDriveWatchChannels = goat.table(
+  "google_drive_watch_channels",
+  {
+    id: text("id").primaryKey(),
+    cursorId: text("cursor_id")
+      .notNull()
+      .references(() => goatGoogleDriveSyncCursors.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    resourceId: text("resource_id"),
+    tokenHash: text("token_hash").notNull(),
+    status: text("status").$type<GoatGoogleDriveWatchChannelStatus>().notNull().default("creating"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    cursorExpiryIdx: index("goat_google_drive_watch_channels_cursor_expiry_idx").on(
+      table.cursorId,
+      table.status,
+      table.expiresAt,
+    ),
+    statusCheck: check(
+      "goat_google_drive_watch_channels_status_check",
+      sql`${table.status} IN ('creating', 'active', 'stopped')`,
+    ),
+  }),
+);
+
+// A single coalescing row per Drive file. observed_version may advance while a
+// leased ingest is running; completion only advances ingested_version to the
+// exact fetched version, leaving any newer observation eligible for the next pass.
+export const goatGoogleDriveFileStates = goat.table(
+  "google_drive_file_states",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    fileId: text("file_id").notNull(),
+    driveId: text("drive_id"),
+    observedVersion: text("observed_version").notNull(),
+    ingestedVersion: text("ingested_version"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).notNull(),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).notNull(),
+    nextIngestAt: timestamp("next_ingest_at", { withTimezone: true }).notNull(),
+    forceIngestAt: timestamp("force_ingest_at", { withTimezone: true }).notNull(),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    lastSourceItemId: text("last_source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationFileIdx: uniqueIndex("goat_google_drive_file_states_integration_file_idx").on(
+      table.integrationId,
+      table.fileId,
+    ),
+    dueIdx: index("goat_google_drive_file_states_due_idx").on(
+      table.nextIngestAt,
+      table.forceIngestAt,
+    ),
+    leaseExpiryIdx: index("goat_google_drive_file_states_lease_expiry_idx").on(
+      table.leaseExpiresAt,
+    ),
+  }),
+);
 
 export const goatTaskSchedules = goat.table(
   "task_schedules",

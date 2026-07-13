@@ -20,6 +20,7 @@ import {
   GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
   type GoatBrainIngestTrace,
   type GoatBrainIngestTraceToolCall,
+  type GoatBrainIngestTraceUsage,
   goatBrainIngestTracePreview,
   sanitizeGoatBrainIngestTraceArgs,
 } from "@opencompany/db/goat-brain-ingest-trace";
@@ -36,6 +37,7 @@ import {
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
   type NormalizedGoatChatCaptureSourceItem,
+  type NormalizedGoogleDriveDocumentSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
@@ -103,6 +105,7 @@ const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
 const PROMPT_GMAIL_MESSAGES_BYTES = 80_000;
+const PROMPT_GOOGLE_DRIVE_DOCUMENT_BYTES = 100_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 const INFERRED_NO_MUTATION_SKIP_REASON =
   "No brain-worthy content identified; agent completed without brain mutations.";
@@ -250,6 +253,44 @@ export const GMAIL_THREAD_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPromp
     "folds one window of email-thread activity into a single brain of Markdown knowledge documents.",
   skipRule: `Email is high-noise: newsletters, receipts, notifications, automated mail, and scheduling logistics carry no durable knowledge. If nothing in the thread window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, commitments, plans, and facts about people, companies, or projects belong in the brain. When the brain owner's ingestion instructions are provided in the task, they refine this judgment about what matters and what to skip; they never override your working discipline.`,
 });
+
+export const GOOGLE_DRIVE_DOCUMENT_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one changed Google Drive document into a single brain of Markdown knowledge documents.",
+  skipRule: `If the document has no durable knowledge or its extracted text is empty, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Google Drive is the live canonical home: never create an evidence/ snapshot or copy the whole document into a brain page.`,
+});
+
+export function buildGoogleDriveDocumentAgentIngestPrompt(
+  item: NormalizedGoogleDriveDocumentSourceItem,
+) {
+  const document = item.content.document;
+  const extractedText = truncateByBytes(document.extractedText, PROMPT_GOOGLE_DRIVE_DOCUMENT_BYTES);
+  const truncated =
+    Buffer.byteLength(extractedText, "utf8") < Buffer.byteLength(document.extractedText, "utf8");
+  return [
+    "Ingest this changed Google Drive document into the brain.",
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Query the brain first for likely existing pages and facts before writing, so you update durable knowledge instead of duplicating it.",
+    "2. Extract only durable facts, decisions, commitments, plans, and substantive knowledge. Ignore formatting churn and boilerplate.",
+    `3. Cite every synthesized fact or timeline entry with --source-ref ${item.sourceRef}. Use the canonical Drive link as the live pointer when one is available.`,
+    "4. Google Drive follows the pointer rule: Drive remains the canonical home. Do not create an evidence/ snapshot, paste the whole document into compiled truth, or create a page merely to mirror this file.",
+    "5. A document may justify a source, project, company, person, concept, or analysis page when its content is itself durable knowledge; otherwise fold facts into existing pages.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Name: ${document.name}`,
+    `MIME type: ${document.mimeType}`,
+    `Modified: ${document.modifiedTime}`,
+    document.webViewLink ? `Canonical link: ${document.webViewLink}` : null,
+    document.owners?.length ? `Owners: ${document.owners.join("; ")}` : null,
+    document.lastModifyingUser ? `Last modified by: ${document.lastModifyingUser}` : null,
+    truncated ? "The extracted text below was truncated to fit the 100 KB prompt limit." : null,
+    "",
+    `## Extracted document text\n${extractedText}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
 
 export function buildGmailThreadAgentIngestPrompt(
   item: NormalizedGmailThreadSourceItem,
@@ -699,13 +740,19 @@ type BrainAgentIngestSessionResult = {
   upserted: number;
   deleted: number;
   pages: GoatBrainSyncPage[];
-  usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
+  usage: GoatBrainIngestTraceUsage;
   summary: string;
   trace: GoatBrainIngestTrace;
 };
 
 type BrainAgentNoMutationOutcome = "fail" | "skip";
 type BrainAgentIngestSkipMode = "explicit" | "inferred_no_mutations";
+
+// The agent loop ran to completion but produced no acceptable outcome (no
+// brain writes and no SKIP, or only failed mutating commands). Re-running the
+// identical content rarely changes that verdict, so the worker retries these
+// on a tighter attempt budget than infrastructure failures.
+export class GoatBrainAgentOutcomeError extends Error {}
 
 // Shared scaffolding for every agent ingest profile: resolve the target brain,
 // materialize it to a temp root, run the tool loop, and sync changes back with
@@ -795,6 +842,13 @@ async function runBrainAgentIngestSession(input: {
       steps: loop.steps,
       tool_calls: loop.toolCalls,
       mutations: loop.mutations,
+      input_tokens: loop.usage.inputTokens,
+      output_tokens: loop.usage.outputTokens,
+      // Verifies Anthropic cache_control pass-through via the gateway: zero
+      // reads across multi-step jobs means a silent invalidator (or the
+      // gateway dropped the provider options).
+      cache_read_input_tokens: loop.usage.cacheReadInputTokens,
+      cache_write_input_tokens: loop.usage.cacheWriteInputTokens,
     });
 
     const synced = await syncGoatBrainFilesFromRoot({
@@ -843,7 +897,7 @@ function brainAgentIngestCompletionOutcome(input: {
 }): { skipped: boolean; reason?: string; skipMode?: BrainAgentIngestSkipMode } {
   if (input.mutations > 0) return { skipped: false };
   if (input.failedMutatingToolCalls > 0) {
-    throw new Error(
+    throw new GoatBrainAgentOutcomeError(
       `Goat Brain ingestion agent attempted ${input.failedMutatingToolCalls} mutating command${
         input.failedMutatingToolCalls === 1 ? "" : "s"
       } without successfully writing to the brain.`,
@@ -864,7 +918,7 @@ function brainAgentIngestCompletionOutcome(input: {
       skipMode: "inferred_no_mutations",
     };
   }
-  throw new Error(
+  throw new GoatBrainAgentOutcomeError(
     "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
   );
 }
@@ -1149,6 +1203,44 @@ export async function runGmailThreadAgentIngest(
   };
 }
 
+export async function runGoogleDriveDocumentAgentIngest(
+  input: {
+    jobId?: string;
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedGoogleDriveDocumentSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const document = input.item.content.document;
+  const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: GOOGLE_DRIVE_DOCUMENT_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildGoogleDriveDocumentAgentIngestPrompt(input.item),
+    // Drive content is authored by its document collaborators, not the
+    // personal integration owner.
+    createdByWorkosId: null,
+    noMutationOutcome: "skip",
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    fileId: document.fileId,
+    mimeType: document.mimeType,
+    version: document.version,
+    canonicalLink: document.webViewLink ?? null,
+  };
+}
+
 export async function runGitHubActivityAgentIngest(
   input: {
     jobId?: string;
@@ -1320,6 +1412,47 @@ async function extractPdfText(bytes: Buffer): Promise<string> {
   const pdf = await getDocumentProxy(new Uint8Array(bytes));
   const { text } = await extractText(pdf, { mergePages: true });
   return typeof text === "string" ? text.trim() : "";
+}
+
+// Anthropic prompt-cache breakpoint, forwarded through the AI Gateway as a
+// message-level provider option. The loop places two static breakpoints on the
+// fixed prefix (system prompt, source-content user message) and prepareStep
+// moves a third onto the newest message every step, so each step reads the
+// whole prior transcript from cache (~0.1x input price) instead of re-paying
+// it in full. Anthropic allows at most 4 breakpoints per request.
+const ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS = {
+  anthropic: { cacheControl: { type: "ephemeral" as const } },
+};
+
+function withAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
+  return {
+    ...message,
+    providerOptions: {
+      ...message.providerOptions,
+      ...ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
+    },
+  };
+}
+
+function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
+  if (!message.providerOptions || !("anthropic" in message.providerOptions)) return message;
+  const { anthropic: _anthropic, ...providerOptions } = message.providerOptions;
+  return { ...message, providerOptions };
+}
+
+// prepareStep hook: keep the static breakpoints on the first two messages and
+// place the moving breakpoint on the last message of this step. Earlier
+// non-static messages are stripped defensively so breakpoints never accumulate
+// past Anthropic's limit of 4, whatever the SDK does with prior step edits.
+export function placeMovingAnthropicCacheBreakpoint(
+  messages: ai.ModelMessage[],
+): ai.ModelMessage[] {
+  if (messages.length <= 2) return messages;
+  return messages.map((message, index) => {
+    if (index < 2) return message;
+    if (index < messages.length - 1) return withoutAnthropicCacheBreakpoint(message);
+    return withAnthropicCacheBreakpoint(withoutAnthropicCacheBreakpoint(message));
+  });
 }
 
 async function runIngestAgentLoop(input: {
@@ -1609,8 +1742,14 @@ async function runIngestAgentLoop(input: {
   try {
     const result = await generateText({
       model: gateway(GOAT_BRAIN_AGENT_INGEST_MODEL),
-      system,
+      // The system prompt rides in messages (not the system param) so it can
+      // carry its own cache breakpoint; it is byte-stable for the whole job.
       messages: [
+        {
+          role: "system",
+          content: system,
+          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
+        },
         {
           role: "user",
           content: input.files?.length
@@ -1623,12 +1762,16 @@ async function runIngestAgentLoop(input: {
                 })),
               ]
             : input.prompt,
+          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
         },
       ],
       tools: { ...tools, ...enrichmentTools },
       stopWhen: [ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS)],
       abortSignal: abort.signal,
       providerOptions: goatGatewayProviderOptions(attribution),
+      prepareStep: ({ messages }) => ({
+        messages: placeMovingAnthropicCacheBreakpoint(messages),
+      }),
     });
     const usage = result.totalUsage;
     const finalText = result.text.trim();
@@ -1636,6 +1779,8 @@ async function runIngestAgentLoop(input: {
       inputTokens: usage?.inputTokens ?? null,
       outputTokens: usage?.outputTokens ?? null,
       totalTokens: usage?.totalTokens ?? null,
+      cacheReadInputTokens: usage?.inputTokenDetails?.cacheReadTokens ?? null,
+      cacheWriteInputTokens: usage?.inputTokenDetails?.cacheWriteTokens ?? null,
     };
     const trace: GoatBrainIngestTrace = {
       schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,

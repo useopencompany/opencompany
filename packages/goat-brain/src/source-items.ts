@@ -7,7 +7,8 @@ export type BrainSourceProvider =
   | "slack"
   | "linear"
   | "github"
-  | "gmail";
+  | "gmail"
+  | "google_drive";
 export type BrainSourceType =
   | "meeting"
   | "capture"
@@ -15,7 +16,8 @@ export type BrainSourceType =
   | "conversation"
   | "issue"
   | "activity"
-  | "thread";
+  | "thread"
+  | "document";
 
 export type NormalizedBrainSourceItem<TContent = unknown> = {
   sourceProvider: BrainSourceProvider;
@@ -1141,6 +1143,133 @@ export function isNormalizedGmailThreadSourceItem(
     Array.isArray(thread.participants) &&
     Array.isArray(thread.messages) &&
     thread.messages.length > 0
+  );
+}
+
+export type NormalizedGoogleDriveDocumentContent = {
+  document: {
+    fileId: string;
+    name: string;
+    mimeType: string;
+    webViewLink?: string;
+    driveId?: string;
+    modifiedTime: string;
+    version: string;
+    extractedText: string;
+    contentSha256: string;
+    owners?: string[];
+    lastModifyingUser?: string;
+  };
+};
+
+export type NormalizedGoogleDriveDocumentSourceItem =
+  NormalizedBrainSourceItem<NormalizedGoogleDriveDocumentContent> & {
+    sourceProvider: "google_drive";
+    sourceType: "document";
+  };
+
+export function normalizeGoogleDriveDocument(input: {
+  fileId: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
+  driveId?: string;
+  modifiedTime: string;
+  version: string;
+  extractedText: string;
+  contentSha256: string;
+  owners?: string[];
+  lastModifyingUser?: string;
+  capturedAt: string;
+}): NormalizedGoogleDriveDocumentSourceItem {
+  const fileId = input.fileId.trim();
+  if (!fileId) throw invalid("Drive fileId must not be empty", "invalid_document");
+  const name = input.name.trim();
+  if (!name) throw invalid("Drive name must not be empty", "invalid_document");
+  const mimeType = input.mimeType.trim();
+  if (!mimeType) throw invalid("Drive mimeType must not be empty", "invalid_document");
+  const modifiedTime = optionalIsoString(input.modifiedTime);
+  if (!modifiedTime) {
+    throw invalid("Drive modifiedTime must be a timestamp", "invalid_document");
+  }
+  const capturedAt = optionalIsoString(input.capturedAt);
+  if (!capturedAt) throw invalid("Drive capturedAt must be a timestamp", "invalid_document");
+  const version = input.version.trim();
+  if (!version) throw invalid("Drive version must not be empty", "invalid_document");
+  const contentSha256 = input.contentSha256.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(contentSha256)) {
+    throw invalid("Drive contentSha256 must be a sha256 hex digest", "invalid_document");
+  }
+
+  const document = {
+    fileId,
+    name,
+    mimeType,
+    ...(optionalString(input.webViewLink) ? { webViewLink: input.webViewLink!.trim() } : {}),
+    ...(optionalString(input.driveId) ? { driveId: input.driveId!.trim() } : {}),
+    modifiedTime,
+    version,
+    extractedText: input.extractedText,
+    contentSha256,
+    ...(input.owners?.length
+      ? { owners: [...new Set(input.owners.map((owner) => owner.trim()).filter(Boolean))] }
+      : {}),
+    ...(optionalString(input.lastModifyingUser)
+      ? { lastModifyingUser: input.lastModifyingUser!.trim() }
+      : {}),
+  };
+  const contentHashInput = {
+    sourceProvider: "google_drive",
+    sourceType: "document",
+    fileId,
+    mimeType,
+    contentSha256,
+  };
+
+  return {
+    sourceProvider: "google_drive",
+    sourceType: "document",
+    externalId: fileId,
+    sourceRef: `google-drive:file:${fileId}`,
+    title: name,
+    occurredAt: modifiedTime,
+    capturedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { document },
+  };
+}
+
+export function isNormalizedGoogleDriveDocumentSourceItem(
+  value: unknown,
+): value is NormalizedGoogleDriveDocumentSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedGoogleDriveDocumentSourceItem>;
+  if (
+    item.sourceProvider !== "google_drive" ||
+    item.sourceType !== "document" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const document = (item.content as Partial<NormalizedGoogleDriveDocumentContent>).document;
+  return (
+    !!document &&
+    typeof document === "object" &&
+    typeof document.fileId === "string" &&
+    typeof document.name === "string" &&
+    typeof document.mimeType === "string" &&
+    typeof document.modifiedTime === "string" &&
+    typeof document.version === "string" &&
+    typeof document.extractedText === "string" &&
+    typeof document.contentSha256 === "string"
   );
 }
 

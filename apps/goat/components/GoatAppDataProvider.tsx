@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { useLiveQuery } from "@tanstack/react-db";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
@@ -64,6 +65,10 @@ export type GoatAppInitialData = {
   featureFlags: GoatFeatureFlags;
   codexConnected: boolean;
   chatResumeEnabled: boolean;
+  mcpSetup: {
+    preferredClient: GoatMcpClient | null;
+    completedAt: string | null;
+  };
 };
 
 type GoatAppData = GoatAppInitialData & {

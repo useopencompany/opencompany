@@ -63,6 +63,26 @@ wrappers `query_brain` and `get_document` remain available for older clients and
 the same tool runner. Reads are served by the read plane. External consumers never get write tools;
 external content enters via ingestion jobs only.
 
+### Member MCP setup and completion
+
+The reusable setup guide lives at `/setup/mcp` and is also embedded in the owner and invited-member
+onboarding flows. It gives Claude, ChatGPT, and Cursor equal prominence, remembers the user's chosen
+client, defaults to the active brain, and generates a first useful query from the user's display
+name, workspace, and selected brain. The permanent Settings → Integrations entry links back to the
+guide.
+
+Setup completion is global per Goat user, not per workspace, brain, or client. The sidebar reminder
+stays visible until the user completes one successful `query` command through MCP against any brain
+they can access. `goat.brain_tool_runs` remains the audit source of truth: completion requires
+`ok = true`, `action = 'query'`, and a `source_ref` beginning with `mcp:`. OAuth alone, failed calls,
+other MCP commands, and Goat chat queries do not qualify. A successful query with no hits does
+qualify because it proves the authenticated connector path works.
+
+The first qualifying trace and the user's `mcp_setup_completed_at` update are written in one
+transaction. The timestamp is only set while it is null, so later or concurrent calls cannot
+replace the first committed completion. Migration `0122_goat_mcp_onboarding.sql` backfills the same
+signal from the earliest qualifying historical tool run.
+
 ## Capability summary
 
 | Consumer | Read | Write |
