@@ -10,6 +10,7 @@ import {
   DURABLE_STREAMS_DEV_URL,
   startDurableStreamsDevServer,
 } from "./lib/durable-streams-dev.mjs";
+import { resolveGoatDevEnv } from "./lib/goat-dev-env.mjs";
 import { startGoatDevProxy } from "./lib/goat-dev-proxy.mjs";
 import {
   envForTunnel,
@@ -132,56 +133,7 @@ function parseArgs(args) {
 function envForAppMode() {
   if (appMode !== "goat") return {};
 
-  const goatAppUrl =
-    goatHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
-    tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
-    tunnelEnv.NEXT_PUBLIC_APP_URL?.trim() ||
-    configuredGoatAppUrl() ||
-    `http://localhost:${port}`;
-  const goatRedirectUri =
-    tunnelEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() ||
-    process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() ||
-    `${goatAppUrl}/auth/callback`;
-
-  return {
-    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    GOAT_LOCAL_BRIDGE_BASE_URL:
-      process.env.GOAT_LOCAL_BRIDGE_BASE_URL?.trim() || `http://127.0.0.1:${port}`,
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    WORKOS_REDIRECT_URI: goatRedirectUri,
-    RUNNER_GOAT_TASK_WORKER_ENABLED: "true",
-    RUNNER_ALLOWED_ORIGINS: appendCsvValues(
-      process.env.RUNNER_ALLOWED_ORIGINS,
-      [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL].filter(
-        Boolean,
-      ),
-    ),
-  };
-}
-
-function configuredGoatAppUrl() {
-  const configured = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
-  if (!configured) return null;
-  if (configured.startsWith("https://localhost") && !goatHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) {
-    return null;
-  }
-  return configured;
-}
-
-function appendCsvValues(raw, values) {
-  const existing = (raw ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const seen = new Set(existing);
-  for (const value of values) {
-    if (seen.has(value)) continue;
-    existing.push(value);
-    seen.add(value);
-  }
-  return existing.join(",");
+  return resolveGoatDevEnv({ port, processEnv: process.env, tunnelEnv, goatHttpsEnv });
 }
 
 for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
@@ -432,14 +384,10 @@ async function startDefaultTunnel(
   try {
     tunnelEnv = envForTunnel(publicUrl, process.env, { localPort: appPort });
     if (exposesRunnerCallbacks) {
-      const goatRedirectUri = `${publicUrl}/auth/callback`;
       tunnelEnv = {
         ...tunnelEnv,
         GOAT_NEXT_PUBLIC_APP_URL: publicUrl,
-        GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
         NEXT_PUBLIC_APP_URL: publicUrl,
-        NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-        WORKOS_REDIRECT_URI: goatRedirectUri,
         RUNNER_LLM_BROKER_PUBLIC_URL: publicUrl,
       };
     }
@@ -447,7 +395,6 @@ async function startDefaultTunnel(
     if (exposesRunnerCallbacks) {
       console.log(`Goat public URL: ${publicUrl}`);
       console.log(`Goat GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
-      console.log(`Goat WorkOS redirect URI: ${tunnelEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
     } else {
       console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
       console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
