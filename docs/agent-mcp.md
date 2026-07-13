@@ -9,7 +9,14 @@ gitignored because MCP auth can create machine-specific credentials.
 
 ## Configure SigNoz
 
-Set one of these local env vars in `.env.override.local` or `.env.local`:
+OpenCompany's default SigNoz MCP region is `eu2`, so most local and Conductor workspaces only need:
+
+```sh
+bun run mcp:configure
+```
+
+Set one of these local env vars in `.env.override.local` or `.env.local` only when you need to
+override that default:
 
 ```sh
 SIGNOZ_MCP_REGION="eu2"
@@ -18,7 +25,8 @@ SIGNOZ_MCP_URL="https://mcp.eu2.signoz.cloud/mcp"
 ```
 
 If neither value is set, `bun run mcp:configure` tries to infer the region from
-`GOAT_OTEL_EXPORTER_OTLP_ENDPOINT`, for example `https://ingest.eu2.signoz.cloud:443`.
+`GOAT_OTEL_EXPORTER_OTLP_ENDPOINT`, for example `https://ingest.eu2.signoz.cloud:443`, and then
+falls back to the project default `eu2`.
 
 Then run:
 
@@ -32,9 +40,9 @@ The command writes:
 - `.codex/config.toml` for Codex
 
 Conductor workspace setup also runs this command after `bun install`, so new workspaces pick up the
-config automatically when the env is present. In Conductor workspaces, the command also checks the
-root checkout named by `CONDUCTOR_ROOT_PATH` for only these MCP-related env keys, so you do not need
-to copy the full `.env.local` into every worktree.
+config automatically. In Conductor workspaces, the command also checks the root checkout named by
+`CONDUCTOR_ROOT_PATH` for only these MCP-related env keys, so you do not need to copy the full
+`.env.local` into every worktree.
 
 ## Authenticate
 

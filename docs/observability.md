@@ -158,7 +158,12 @@ Goat signups, chat turns, task runs, and Brain agent ingest jobs emit a first-la
 through `@opencompany/goat-observability` when `GOAT_OBSERVABILITY_ENABLED=true` and
 `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
-Use SigNoz for the aggregate view:
+For the SigNoz dashboard, saved trace views, MCP prompts, and event inventory, see
+[signoz-goat-observability.md](./signoz-goat-observability.md).
+
+Use SigNoz for the aggregate view. The current production dashboard starts with trace-backed
+aggregates because those are live and drill down to investigation IDs. Add metric-native panels for
+these series once fresh counter data is present:
 
 - `goat.signups_total` grouped by `goat.signup_source`
 - `goat.runs_total` grouped by `goat.surface`, `goat.outcome`, and `goat.failure_category`

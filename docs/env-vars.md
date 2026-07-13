@@ -31,7 +31,7 @@ gitignored Claude Code and Codex MCP config for Conductor workspaces.
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `SIGNOZ_MCP_REGION` | No | SigNoz Cloud region used to build `https://mcp.<region>.signoz.cloud/mcp`. If unset, setup can infer the region from `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` when it uses `https://ingest.<region>.signoz.cloud:443`. |
+| `SIGNOZ_MCP_REGION` | No | SigNoz Cloud region used to build `https://mcp.<region>.signoz.cloud/mcp`. If unset, setup can infer the region from `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` when it uses `https://ingest.<region>.signoz.cloud:443`, then falls back to the project default `eu2`. |
 | `SIGNOZ_MCP_URL` | No | Full hosted SigNoz MCP URL. Overrides `SIGNOZ_MCP_REGION` for non-standard endpoints. Do not include API keys or auth headers here. |
 
 ## Must Match Across Services
@@ -379,6 +379,7 @@ Release-only script vars:
 | `EXPECTED_RELEASE` | No | Smoke check expects health endpoint release fields to start with this SHA. |
 | `RENDER_DEPLOY_TIMEOUT_MS` | No | Maximum time to wait for the Render deploy API before smoke checks. Defaults to `900000`. |
 | `RENDER_DEPLOY_POLL_MS` | No | Delay between Render deploy status polls. Defaults to `10000`. |
+| `RENDER_DEPLOY_STALE_MS` | No | Age after which an in-flight Render deploy is considered hung or superseded; the release script cancels such deploys before triggering (and cancels its own deploy on wait timeout) so they cannot block the queue. Defaults to `600000`. |
 | `SMOKE_WEB` | No | Set to `false`, `0`, or `no` to skip web health checks. Defaults to enabled. |
 | `SMOKE_GOAT` | No | Set to `true`, `1`, or `yes` to include the Goat health check. Defaults to disabled for local script runs; the production workflow enables it. |
 | `SMOKE_RUNNER` | No | Set to `false`, `0`, or `no` to skip runner health checks. Defaults to enabled. |

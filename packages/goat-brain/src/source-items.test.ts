@@ -53,6 +53,45 @@ function jamiePayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function jamieDocumentedPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    metadata: {
+      id: "delivery_123",
+      event: "meeting.completed",
+      created: "2026-01-01T11:05:00.000Z",
+    },
+    data: {
+      title: "Product Review",
+      startTime: "2026-01-01T10:00:00.000Z",
+      endTime: "2026-01-01T11:00:00.000Z",
+      user: {
+        id: "user_123",
+        email: "founder@example.com",
+      },
+      summary: {
+        markdown: "We reviewed the new onboarding flow.",
+      },
+      transcript: [
+        {
+          speakerName: "Jamie",
+          startTime: "00:00:01",
+          text: "Let's review the onboarding flow.",
+        },
+      ],
+      participants: [{ id: "person_1", name: "Jamie", email: "jamie@example.com" }, "Alex"],
+      event: {
+        id: "meeting_123",
+        externalId: "calendar_event_123",
+        title: "Product Review",
+        scheduledTime: "2026-01-01T10:00:00.000Z",
+        endTime: "2026-01-01T11:00:00.000Z",
+      },
+      tasks: [{ content: "Ship the prototype", assignee: "Jamie" }],
+    },
+    ...overrides,
+  };
+}
+
 describe("Jamie brain source normalization", () => {
   it("normalizes a meeting.completed payload", () => {
     const item = normalizeJamieMeetingCompletedWebhook(jamiePayload(), {
@@ -67,6 +106,22 @@ describe("Jamie brain source normalization", () => {
     expect(item.occurredAt).toBe("2026-01-01T10:00:00.000Z");
     expect(item.capturedAt).toBe("2026-01-01T11:06:00.000Z");
     expect(item.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(item.content.meeting.summaryMarkdown).toBe("We reviewed the new onboarding flow.");
+    expect(item.content.meeting.participants).toHaveLength(2);
+    expect(item.content.meeting.actionItems).toEqual([
+      { text: "Ship the prototype", assignee: "Jamie" },
+    ]);
+  });
+
+  it("normalizes Jamie's documented meeting.completed payload shape", () => {
+    const item = normalizeJamieMeetingCompletedWebhook(jamieDocumentedPayload(), {
+      capturedAt: "2026-01-01T11:06:00.000Z",
+    });
+
+    expect(item.externalId).toBe("calendar_event_123");
+    expect(item.sourceRef).toBe("jamie:meeting:calendar_event_123");
+    expect(item.title).toBe("Product Review");
+    expect(item.occurredAt).toBe("2026-01-01T10:00:00.000Z");
     expect(item.content.meeting.summaryMarkdown).toBe("We reviewed the new onboarding flow.");
     expect(item.content.meeting.participants).toHaveLength(2);
     expect(item.content.meeting.actionItems).toEqual([

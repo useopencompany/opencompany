@@ -18,6 +18,8 @@ import {
 import type { GoatTaskScheduleView } from "@/lib/task-schedules";
 
 type GoatUserView = {
+  // Scopes client-side chat attachment uploads (blob prefix goat-chat/{id}/).
+  workosUserId: string;
   email: string;
   firstName: string | null;
   lastName: string | null;

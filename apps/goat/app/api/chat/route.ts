@@ -1,4 +1,5 @@
-import { executeExaSearchRequest } from "@opencompany/agent-runtime";
+import { executeExaSearchRequest, modelSupportsAttachments } from "@opencompany/agent-runtime";
+import { calculateModelUsageCost } from "@opencompany/billing";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
@@ -8,10 +9,18 @@ import {
   hashGoatUserId,
   recordGoatChatTurn,
   recordGoatCounter,
+  recordGoatModelCost,
   startGoatSpan,
 } from "@opencompany/goat-observability";
 import { createLogger } from "@opencompany/observability";
-import { convertToModelMessages, createGateway, smoothStream, stepCountIs, streamText } from "ai";
+import {
+  convertToModelMessages,
+  createGateway,
+  type LanguageModelUsage,
+  smoothStream,
+  stepCountIs,
+  streamText,
+} from "ai";
 import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
@@ -31,6 +40,12 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
+import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
+import {
+  extractGoatChatAttachmentTexts,
+  hydrateGoatChatAttachmentParts,
+  parseGoatChatAttachmentsInput,
+} from "@/lib/chat-attachments";
 import {
   clearActiveGoatChatStream,
   getGoatChatStreamContext,
@@ -84,17 +99,40 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Invalid chat message.", { status: 400 });
   }
 
+  const parsedAttachments = parseGoatChatAttachmentsInput(
+    message.metadata?.attachments,
+    context.user.workosUserId,
+  );
+  if (!parsedAttachments.ok) return new Response(parsedAttachments.error, { status: 400 });
+  const attachments = parsedAttachments.attachments;
+
   const parsed = validateGoatChatInput({
     prompt: textFromGoatChatUiMessage(message),
     model: body.value.model,
     sessionId: body.value.sessionId,
+    hasAttachments: attachments.length > 0,
   });
   if (!parsed.ok) return new Response(parsed.error, { status: 400 });
+
+  const attachmentCapabilities = modelSupportsAttachments(parsed.value.model);
+  if (
+    attachments.some((attachment) => attachment.kind === "image") &&
+    !attachmentCapabilities.images
+  ) {
+    return new Response("The selected model does not support image attachments.", { status: 400 });
+  }
+  if (attachments.some((attachment) => attachment.kind === "pdf") && !attachmentCapabilities.pdf) {
+    return new Response("The selected model does not support PDF attachments.", { status: 400 });
+  }
+
   const mentionEngine = readGoatChatMentionEngine(body.value.mentions);
   const requestedEngine =
     mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
       ? "codex"
       : undefined;
+  if (requestedEngine && attachments.length > 0) {
+    return new Response("Attachments are not supported in engine chats yet.", { status: 400 });
+  }
 
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
@@ -164,6 +202,10 @@ export async function POST(request: Request): Promise<Response> {
 
   let turn: Awaited<ReturnType<typeof createGoatChatUserTurn>>;
   try {
+    // Extract docx/xlsx text once at submit time; every later turn reads the
+    // stored text instead of re-downloading the blob.
+    const attachmentTexts =
+      attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;
     turn = await createGoatChatUserTurn(
       {
         userWorkosId: context.user.workosUserId,
@@ -171,6 +213,8 @@ export async function POST(request: Request): Promise<Response> {
         model: parsed.value.model,
         sessionId: parsed.value.sessionId,
         messageId: safeClientMessageId(message.id),
+        attachments: attachments.length > 0 ? attachments : null,
+        attachmentTexts,
       },
       store,
     );
@@ -251,10 +295,26 @@ export async function POST(request: Request): Promise<Response> {
                 error: "You do not have access to any brain in this workspace.",
               };
             }
+            const attachmentIds = toolInput.attachmentIds ?? [];
+            if (attachmentIds.length > 0) {
+              return saveChatAttachmentsToGoatBrain({
+                brainRef: activeBrain.id,
+                userWorkosId: context.user.workosUserId,
+                attachmentIds,
+                sessionMessages: turn.storedMessages,
+              });
+            }
+            const content = toolInput.content?.trim();
+            if (!content) {
+              return {
+                ok: false,
+                error: "Provide content or attachmentIds to save.",
+              };
+            }
             const captured = await captureToGoatBrainInbox({
               brainRef: activeBrain.id,
               userWorkosId: context.user.workosUserId,
-              text: toolInput.content,
+              text: content,
               ...(toolInput.title ? { title: toolInput.title } : {}),
               ...(toolInput.intent ? { intent: toolInput.intent } : {}),
               chatSessionId: turn.session.id,
@@ -488,7 +548,13 @@ export async function POST(request: Request): Promise<Response> {
       scheduleToolsEnabled: canManageWorkspaceBrain,
       recurringSchedules,
     }),
-    messages: await convertToModelMessages(turn.messages),
+    messages: await convertToModelMessages(
+      await hydrateGoatChatAttachmentParts({
+        uiMessages: turn.messages,
+        storedMessages: turn.storedMessages,
+        modelId: turn.session.model,
+      }),
+    ),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     // Providers deliver tokens in bursts; re-chunk to word-level with a small
     // delay so streamed text reads as a steady flow instead of jumps.
@@ -498,6 +564,10 @@ export async function POST(request: Request): Promise<Response> {
     providerOptions: goatGatewayProviderOptions(gatewayAttribution),
     onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
+      recordChatModelCost({
+        model: turn.session.model,
+        usage: event.totalUsage,
+      });
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
         steps: event.steps,
@@ -722,6 +792,29 @@ async function executeGoatChatExaSearch(input: {
 function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
   if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
   return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function recordChatModelCost(input: { model: string; usage?: LanguageModelUsage }) {
+  if (!input.usage) return;
+  const cost = calculateModelUsageCost({
+    modelName: input.model,
+    inputTokens: readUsageNumber(input.usage.inputTokens),
+    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
+    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
+    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
+    outputTokens: readUsageNumber(input.usage.outputTokens),
+  });
+  recordGoatModelCost({
+    costUsdMicros: cost.totalCostUsdMicros,
+    attributes: {
+      "goat.model": input.model,
+      "goat.surface": "chat",
+    },
+  });
+}
+
+function readUsageNumber(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function resolveChatScheduleTarget(

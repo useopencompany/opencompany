@@ -44,12 +44,6 @@ const NAV_GROUPS: SettingsNavGroup[] = [
           pathname === "/settings/integrations" || pathname.startsWith("/settings/jamie"),
       },
       {
-        href: "/settings/usage",
-        icon: CircleDollarSign,
-        label: "Usage",
-        isActive: (pathname) => pathname === "/settings/usage",
-      },
-      {
         href: "/settings/preferences",
         icon: SlidersHorizontal,
         label: "Preferences",
@@ -61,10 +55,16 @@ const NAV_GROUPS: SettingsNavGroup[] = [
     label: "Workspace",
     items: [
       {
+        href: "/settings/workspace/usage",
+        icon: CircleDollarSign,
+        label: "Usage",
+        isActive: (pathname) => pathname === "/settings/workspace/usage",
+      },
+      {
         href: "/settings/workspace",
         icon: Users,
         label: "Members",
-        isActive: (pathname) => pathname.startsWith("/settings/workspace"),
+        isActive: (pathname) => pathname === "/settings/workspace",
       },
     ],
   },

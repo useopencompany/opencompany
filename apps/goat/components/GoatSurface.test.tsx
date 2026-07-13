@@ -18,6 +18,7 @@ const chatMock = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   stop: vi.fn(),
   finishSessionId: null as string | null,
+  finishWithSessionId: null as ((sessionId: string) => void) | null,
   preparedRequestBodies: [] as unknown[],
   lastResume: null as boolean | null,
 }));
@@ -28,8 +29,13 @@ const routerMock = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
 
+const pathnameMock = vi.hoisted(() => ({
+  value: "/",
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
+  usePathname: () => pathnameMock.value,
 }));
 
 vi.mock("@/lib/chat-actions", () => ({
@@ -84,6 +90,16 @@ vi.mock("@ai-sdk/react", async () => {
       );
       chatMock.lastResume = options.resume ?? false;
       const transportRef = React.useRef(options.transport);
+      chatMock.finishWithSessionId = (sessionId: string) => {
+        options.onFinish?.({
+          message: {
+            id: "assistant_1",
+            role: "assistant",
+            metadata: { sessionId },
+            parts: [{ type: "text", text: "Done." }],
+          },
+        });
+      };
 
       return {
         id: "test-chat",
@@ -138,8 +154,10 @@ vi.mock("@ai-sdk/react", async () => {
 
 describe("GoatSurface chat streaming UI", () => {
   beforeEach(() => {
+    pathnameMock.value = "/";
     chatMock.status = "ready";
     chatMock.finishSessionId = null;
+    chatMock.finishWithSessionId = null;
     chatMock.sendMessage.mockReset();
     chatMock.stop.mockReset();
     routerMock.prefetch.mockReset();
@@ -915,6 +933,26 @@ describe("GoatSurface chat streaming UI", () => {
       expect(routerMock.replace).toHaveBeenCalledWith("/chat/goat_chat_123");
     });
     expect(routerMock.refresh).toHaveBeenCalled();
+  });
+
+  it("does not route back to chat when a turn finishes after navigating away", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    pathnameMock.value = "/brain";
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    act(() => {
+      chatMock.finishWithSessionId?.("goat_chat_123");
+    });
+
+    expect(routerMock.replace).not.toHaveBeenCalledWith("/chat/goat_chat_123");
+    expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
   it("keeps a completed existing chat turn visible while server props refresh", async () => {

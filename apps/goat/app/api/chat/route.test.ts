@@ -1099,6 +1099,7 @@ function mockCreateTurn() {
     userMessage: {
       id: "user_message_1",
     },
+    storedMessages: [],
     messages: [],
   });
 }

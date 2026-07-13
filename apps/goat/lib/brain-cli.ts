@@ -29,6 +29,7 @@ import {
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { createGoatGatewayAttribution } from "@opencompany/goat-observability";
+import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 import type {
   GoatBrainCliCommand,
   GoatBrainToolFlagValue,
@@ -53,12 +54,7 @@ const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
 // Commands served by the DB read plane (@opencompany/db/goat-brain-read) — indexed SQL, no brain
 // materialization, no CLI spawn. `help`/`folder`/`doctor` stay on the CLI: help is static text and
 // doctor legitimately wants the full corpus.
-const READ_PLANE_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
-  "query",
-  "get",
-  "timeline",
-  "list",
-]);
+const READ_PLANE_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>(GOAT_BRAIN_READ_PLANE_COMMANDS);
 const GOAT_BRAIN_MUTATION_QUEUES = new Map<string, Promise<void>>();
 
 type GoatBrainCliTraceContext = {
@@ -372,6 +368,7 @@ async function executeGoatBrainReadCommand(
         ...(flagBoolean(flags["lexical-only"]) ? { lexicalOnly: true } : {}),
         ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
         ...(flagBoolean(flags["include-archived"]) ? { includeArchived: true } : {}),
+        ...(flagBoolean(flags["include-conflicts"]) ? { includeConflicts: true } : {}),
       });
       return { stdout: renderQueryHits(hits), parsed: { hits } };
     }
@@ -432,6 +429,7 @@ async function executeGoatBrainReadCommand(
         ...(kind ? { kind: kind as GoatBrainKind } : {}),
         ...(limit !== undefined ? { limit } : {}),
         ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
+        ...(flagBoolean(flags["include-conflicts"]) ? { includeConflicts: true } : {}),
       });
       const stdout = documents.length
         ? documents
@@ -638,7 +636,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "status",
     "json",
   ],
-  list: ["folder", "type", "kind", "limit", "include-merged", "json"],
+  list: ["folder", "type", "kind", "limit", "include-merged", "include-conflicts", "json"],
   get: ["id", "section", "json"],
   query: [
     "text",
@@ -655,6 +653,7 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "include-invalid",
     "include-merged",
     "include-archived",
+    "include-conflicts",
     "json",
   ],
   timeline: ["id", "limit", "since", "json"],

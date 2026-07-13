@@ -22,11 +22,21 @@ import {
 } from "@/lib/brain";
 
 export const GOAT_BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
-export const GOAT_BRAIN_ASSET_CONTENT_TYPES = ["application/pdf"] as const;
+// Claude's per-image limit is 5 MB; the ingestion agent sees images natively.
+export const GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
-const CONTENT_TYPE_FORMATS: Record<string, "pdf"> = {
+export type GoatBrainAssetFormat = "pdf" | "docx" | "xlsx" | "image";
+
+const CONTENT_TYPE_FORMATS: Record<string, GoatBrainAssetFormat> = {
   "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "image/png": "image",
+  "image/jpeg": "image",
+  "image/webp": "image",
 };
+
+export const GOAT_BRAIN_ASSET_CONTENT_TYPES = Object.keys(CONTENT_TYPE_FORMATS);
 
 export function goatBrainAssetUploadPrefix(brainRef: string): string {
   return `goat-brain/${brainRef}/assets/`;
@@ -147,14 +157,22 @@ export async function replaceGoatBrainAssetForUser(
 function validateAssetUpload(
   brainRef: string,
   input: GoatBrainAssetUploadInput,
-): { ok: true; format: "pdf" } | { ok: false; message: string } {
+): { ok: true; format: GoatBrainAssetFormat } | { ok: false; message: string } {
   const format = CONTENT_TYPE_FORMATS[input.mimeType];
-  if (!format) return { ok: false, message: "Only PDF uploads are supported right now." };
+  if (!format) {
+    return {
+      ok: false,
+      message: "Supported uploads: PDF, Word (.docx), Excel (.xlsx), PNG, JPEG, WebP.",
+    };
+  }
   if (!Number.isFinite(input.sizeBytes) || input.sizeBytes <= 0) {
     return { ok: false, message: "Upload size is invalid." };
   }
   if (input.sizeBytes > GOAT_BRAIN_ASSET_MAX_BYTES) {
     return { ok: false, message: "Uploads are limited to 20 MB." };
+  }
+  if (format === "image" && input.sizeBytes > GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES) {
+    return { ok: false, message: "Images are limited to 5 MB." };
   }
   let pathname: string;
   try {

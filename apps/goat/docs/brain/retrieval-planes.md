@@ -205,9 +205,9 @@ A point read is one indexed SQL roundtrip (~30–80ms) instead of full-brain mat
 
 | Consumer | Today | Target |
 | --- | --- | --- |
-| Chat `goat_brain` reads (`query`, `get`, `timeline`, `list`, `folder`) | materialize + CLI spawn | read module in-process; tool run tracing stays at the transport layer (`goatBrainToolRuns`) |
-| Chat `goat_brain` mutations | materialize + CLI + sync-back | unchanged (write mediation is a separate track) |
-| MCP `query_brain` (`app/api/mcp/[brainId]`) | CLI spawn per call | read module directly; add a `get_document` tool |
+| Chat `goat_brain` reads (`query`, `get`, `timeline`, `list`) | materialize + CLI spawn | shared read-only `goat_brain` surface + read module in-process; tool run tracing stays at the transport layer (`goatBrainToolRuns`) |
+| Chat `goat_brain` mutations | materialize + CLI + sync-back | not exposed; use `save_to_brain` capture + curation |
+| MCP (`app/api/mcp/[brainId]`) | CLI spawn per call | same shared read-only `goat_brain` surface as chat; compatibility `query_brain`/`get_document` wrappers delegate through it |
 | Ingestion agent reads (runner tool loop) | CLI against per-job root | **stays on the CLI, deliberately**: the loop writes to its materialized root mid-job and syncs to the DB only at job end, so DB reads would miss the agent's own uncommitted writes (create page → get page would 404). It still gains from the expansion/rerank deletion; priming its embedding cache from `brain_document_embeddings` at materialize time is a possible follow-up |
 | CLI on a local filesystem root (dev/offline) | `queryGoatBrain(root, ...)` | unchanged — `corpus.ts`/`bm25.ts` and the file embedding cache stay for this mode only, minus expansion/rerank (delete from `providers.ts` too) |
 | `doctor` | CLI | unchanged (integrity checks legitimately want the full corpus) |

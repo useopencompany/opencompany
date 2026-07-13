@@ -3,6 +3,7 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatChatMessage,
+  type GoatChatMessageAttachment,
   type GoatChatMessageDebugTrace,
   type GoatChatRole,
   type GoatChatSession,
@@ -69,6 +70,8 @@ export type GoatChatStore = {
     content: string;
     taskId?: string | null;
     debugTrace?: GoatChatMessageDebugTrace | null;
+    attachments?: GoatChatMessageAttachment[] | null;
+    attachmentTexts?: Record<string, string> | null;
   }): Promise<GoatChatMessage>;
   touchSession(input: { sessionId: string; now: Date }): Promise<void>;
   closeSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
@@ -169,6 +172,8 @@ export async function createGoatChatUserTurn(
     model: AgentModelId;
     sessionId?: string | null;
     messageId?: string | null;
+    attachments?: GoatChatMessageAttachment[] | null;
+    attachmentTexts?: Record<string, string> | null;
   },
   store: GoatChatStore = createDbGoatChatStore(),
 ) {
@@ -178,6 +183,7 @@ export async function createGoatChatUserTurn(
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     model: input.model,
     prompt: input.prompt,
+    firstAttachmentName: input.attachments?.[0]?.filename ?? null,
   });
   const previousMessages = await store.listMessages(session.id);
   const userMessage = await store.insertMessage({
@@ -185,17 +191,18 @@ export async function createGoatChatUserTurn(
     sessionId: session.id,
     role: "user",
     content: input.prompt,
+    attachments: input.attachments ?? null,
+    attachmentTexts: input.attachmentTexts ?? null,
   });
   const now = new Date();
   await store.touchSession({ sessionId: session.id, now });
 
+  const storedMessages = [...previousMessages, toStoredChatMessage(userMessage)];
   return {
     session,
     userMessage,
-    messages: [
-      ...previousMessages.map((message) => toGoatChatUiMessage(message)),
-      toGoatChatUiMessage(toStoredChatMessage(userMessage)),
-    ],
+    storedMessages,
+    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
   };
 }
 
@@ -312,6 +319,8 @@ export function createDbGoatChatStore(): GoatChatStore {
           content: goatChatMessages.content,
           taskId: goatChatMessages.taskId,
           debugTrace: goatChatMessages.debugTrace,
+          attachments: goatChatMessages.attachments,
+          attachmentTexts: goatChatMessages.attachmentTexts,
           createdAt: goatChatMessages.createdAt,
           updatedAt: goatChatMessages.updatedAt,
           taskDisplayId: goatTasks.displayId,
@@ -337,6 +346,8 @@ export function createDbGoatChatStore(): GoatChatStore {
           content: input.content,
           taskId: input.taskId ?? null,
           debugTrace: input.debugTrace ?? null,
+          attachments: input.attachments ?? null,
+          attachmentTexts: input.attachmentTexts ?? null,
           createdAt: now,
           updatedAt: now,
         })
@@ -434,6 +445,7 @@ async function findOrCreateOpenSession(input: {
   sessionId?: string | null;
   model: AgentModelId;
   prompt: string;
+  firstAttachmentName?: string | null;
 }) {
   if (input.sessionId) {
     const existing = await input.store.findOpenSession({
@@ -446,16 +458,16 @@ async function findOrCreateOpenSession(input: {
   return input.store.createSession({
     userWorkosId: input.userWorkosId,
     model: input.model,
-    title: titleFromPrompt(input.prompt),
+    title: titleFromPrompt(input.prompt, input.firstAttachmentName ?? null),
   });
 }
 
-function titleFromPrompt(prompt: string) {
+function titleFromPrompt(prompt: string, firstAttachmentName: string | null = null) {
   const title = prompt
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  return toGoatTaskTitle(title ?? "New chat");
+  return toGoatTaskTitle(title ?? firstAttachmentName ?? "New chat");
 }
 
 function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
@@ -466,6 +478,8 @@ function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
     content: message.content,
     taskId: message.taskId,
     debugTrace: message.debugTrace,
+    attachments: message.attachments,
+    attachmentTexts: message.attachmentTexts,
     createdAt: message.createdAt,
     updatedAt: message.updatedAt,
     taskDisplayId: null,

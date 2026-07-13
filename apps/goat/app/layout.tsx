@@ -3,6 +3,7 @@ import { TooltipProvider } from "@opencompany/ui/components/tooltip";
 import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import type { Metadata, Viewport } from "next";
 import type * as React from "react";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,14 +22,16 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-theme="system" suppressHydrationWarning>
       <body className="h-dvh overflow-hidden bg-canvas font-sans text-ink antialiased">
-        <AuthKitProvider>
-          <TooltipProvider>
-            {children}
-            <Toaster />
-          </TooltipProvider>
-        </AuthKitProvider>
+        <ThemeProvider initialTheme="system">
+          <AuthKitProvider>
+            <TooltipProvider>
+              {children}
+              <Toaster />
+            </TooltipProvider>
+          </AuthKitProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

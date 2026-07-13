@@ -30,6 +30,7 @@ const brainFilesMock = vi.hoisted(() => ({
 const workspacesMock = vi.hoisted(() => ({
   getDefaultGoatBrainForUser: vi.fn(async () => ({ id: "gbrain_default" })),
   getGoatBrainEnrichmentEnabled: vi.fn(async () => true),
+  getGoatUserDisplayName: vi.fn(async () => null as string | null),
 }));
 const localBrainMock = vi.hoisted(() => ({
   writeLocalBrainFile: vi.fn(async () => undefined),
@@ -59,6 +60,7 @@ vi.mock("@opencompany/db/goat-brain-files", async (importOriginal) => ({
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   getDefaultGoatBrainForUser: workspacesMock.getDefaultGoatBrainForUser,
   getGoatBrainEnrichmentEnabled: workspacesMock.getGoatBrainEnrichmentEnabled,
+  getGoatUserDisplayName: workspacesMock.getGoatUserDisplayName,
 }));
 vi.mock("@opencompany/goat-brain/cli-bundle", () => ({
   getGoatBrainCliSource: () => "// cli bundle",
@@ -231,6 +233,7 @@ beforeEach(() => {
   });
   workspacesMock.getDefaultGoatBrainForUser.mockResolvedValue({ id: "gbrain_default" });
   workspacesMock.getGoatBrainEnrichmentEnabled.mockResolvedValue(true);
+  workspacesMock.getGoatUserDisplayName.mockResolvedValue(null);
   agentRuntimeMock.executeExaSearchRequest.mockReset();
 });
 
@@ -305,6 +308,22 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem());
 
     expect(prompt).toContain("append-evidence with --folder evidence/chat");
+  });
+
+  it("names the capturing user when their display name is known", () => {
+    const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem(), {
+      capturedByName: "Ada Lovelace",
+    });
+
+    expect(prompt).toContain("Ada Lovelace explicitly asked to save it");
+    expect(prompt).toContain("attribute the idea or capture to Ada Lovelace");
+    expect(prompt).not.toContain("The user explicitly asked to save it");
+  });
+
+  it("falls back to anonymous phrasing without a display name", () => {
+    const prompt = buildGoatChatCaptureAgentIngestPrompt(captureItem(), { capturedByName: null });
+
+    expect(prompt).toContain("The user explicitly asked to save it during a chat conversation.");
   });
 });
 
@@ -633,6 +652,85 @@ describe("runSlackConversationAgentIngest", () => {
 });
 
 describe("runGoatChatCaptureAgentIngest", () => {
+  it("looks up the capturing user name and threads it into the agent prompt", async () => {
+    workspacesMock.getGoatUserDisplayName.mockResolvedValueOnce("Ada Lovelace");
+    let seenPrompt = "";
+    aiMock.generateText.mockImplementationOnce(
+      async (options: {
+        tools: Record<string, CapturedTool>;
+        messages: Array<{ content: string }>;
+      }) => {
+        seenPrompt = options.messages[0]?.content ?? "";
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--status", "active"],
+        });
+        return {
+          text: "Promoted the capture.",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(workspacesMock.getGoatUserDisplayName).toHaveBeenCalledWith(
+      "user_123",
+      expect.objectContaining({ db: expect.any(Object) }),
+    );
+    expect(seenPrompt).toContain("Ada Lovelace explicitly asked to save it");
+    expect(seenPrompt).toContain("attribute the idea or capture to Ada Lovelace");
+    expect(seenPrompt).not.toContain("The user explicitly asked to save it");
+    expect(result).toMatchObject({ mutations: 1 });
+  });
+
+  it("falls back to anonymous capture wording when the user name lookup fails", async () => {
+    workspacesMock.getGoatUserDisplayName.mockRejectedValueOnce(new Error("lookup failed"));
+    let seenPrompt = "";
+    aiMock.generateText.mockImplementationOnce(
+      async (options: {
+        tools: Record<string, CapturedTool>;
+        messages: Array<{ content: string }>;
+      }) => {
+        seenPrompt = options.messages[0]?.content ?? "";
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--status", "active"],
+        });
+        return {
+          text: "Promoted the capture.",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(seenPrompt).toContain(
+      "The user explicitly asked to save it during a chat conversation.",
+    );
+    expect(seenPrompt).not.toContain("attribute the idea or capture to");
+    expect(result).toMatchObject({ mutations: 1 });
+  });
+
   it("prepends the current custom folder inventory to the agent prompt", async () => {
     brainFilesMock.materializeGoatBrainFilesToRoot.mockImplementationOnce(
       async (input?: { root: string }) => {
@@ -1144,6 +1242,70 @@ describe("runJamieMeetingAgentIngest", () => {
 
     expect(result).toMatchObject({ skipped: true, mutations: 0 });
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats reasoning that ends with SKIP on its own line as an explicit skip", async () => {
+    mockAgentRun({
+      finalText: "This is a transactional receipt email with no durable company knowledge.\n\nSKIP",
+      toolInvocations: [{ command: "query", args: ["receipt"] }],
+    });
+
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "explicit",
+      reason: "This is a transactional receipt email with no durable company knowledge.",
+      mutations: 0,
+    });
+  });
+
+  it("keeps the reason that follows a leading SKIP sentinel", async () => {
+    mockAgentRun({ finalText: "SKIP — routine dependency bump, nothing durable." });
+
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "explicit",
+      reason: "routine dependency bump, nothing durable.",
+      mutations: 0,
+    });
+  });
+
+  it("does not mistake words starting with the sentinel for an explicit skip", async () => {
+    mockAgentRun({
+      finalText: "SKIPPED nothing; the meeting page was already current.",
+      toolInvocations: [{ command: "query", args: ["meeting"] }],
+    });
+
+    const result = await runJamieMeetingAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: jamieItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({ skipped: true, skipMode: "inferred_no_mutations" });
   });
 
   it("infers a skip when the agent completes without brain mutations", async () => {

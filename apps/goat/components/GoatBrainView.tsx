@@ -1301,6 +1301,15 @@ function BrainAssetViewer({
           src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
           className="min-h-0 w-full flex-1 border-0 bg-surface-muted"
         />
+      ) : document.format === "image" ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-surface-muted p-6">
+          {/* eslint-disable-next-line @next/next/no-img-element -- auth-scoped byte route; next/image can't optimize it. */}
+          <img
+            src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+            alt={document.title ?? document.brainId}
+            className="max-h-full max-w-full rounded-md object-contain"
+          />
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-ink-muted">
           No inline preview for this file type yet — use Download.
@@ -2005,7 +2014,15 @@ function safeDecodePathSegment(segment: string) {
 }
 
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
-  const extension = document.format === "markdown" ? "md" : document.format;
+  // "image" is a format, not an extension — recover the real one (png/jpg/…)
+  // from the original filename.
+  const originalExtension = document.originalFileName?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const extension =
+    document.format === "markdown"
+      ? "md"
+      : document.format === "image"
+        ? (originalExtension ?? "png")
+        : document.format;
   return `${document.folderPath}/${document.brainId}.${extension}`;
 }
 
@@ -2279,7 +2296,7 @@ function normalizeTimeline(
 }
 
 function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
-  if (value === "pdf" || value === "docx") return value;
+  if (value === "pdf" || value === "docx" || value === "xlsx" || value === "image") return value;
   return "markdown";
 }
 

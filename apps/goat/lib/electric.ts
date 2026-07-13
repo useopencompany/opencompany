@@ -6,6 +6,7 @@ type ShapeWhere = {
 type ShapeWhereContext = {
   authorizedChatSessionId?: string | null | undefined;
   authorizedBrainRef?: string | null | undefined;
+  workspaceId?: string | null | undefined;
 };
 
 const BRAIN_SHAPE_TABLES = new Set([
@@ -72,6 +73,20 @@ const BRAIN_DOCUMENT_COLUMNS = [
   "updated_at",
 ] as const;
 
+// Chat messages sync everything except attachment_texts: docx/xlsx extracted
+// text (up to 64KB per attachment) only the chat model needs, never the UI.
+const CHAT_MESSAGE_COLUMNS = [
+  "id",
+  "session_id",
+  "role",
+  "content",
+  "task_id",
+  "debug_trace",
+  "attachments",
+  "created_at",
+  "updated_at",
+] as const;
+
 const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"] as const;
 
 const SHAPE_SCOPES = {
@@ -134,10 +149,12 @@ const SHAPE_SCOPES = {
   chat_messages: {
     table: "goat.chat_messages",
     where: scopedChatMessageWhere,
+    columns: CHAT_MESSAGE_COLUMNS,
   },
   "goat.chat_messages": {
     table: "goat.chat_messages",
     where: scopedChatMessageWhere,
+    columns: CHAT_MESSAGE_COLUMNS,
   },
   chat_sessions: {
     table: "goat.chat_sessions",
@@ -165,11 +182,11 @@ const SHAPE_SCOPES = {
   },
   integrations: {
     table: "goat.integrations",
-    where: scopedUserWhere,
+    where: scopedIntegrationsWhere,
   },
   "goat.integrations": {
     table: "goat.integrations",
-    where: scopedUserWhere,
+    where: scopedIntegrationsWhere,
   },
   brain_folders: {
     table: "goat.brain_folders",
@@ -240,6 +257,7 @@ export function buildGoatElectricOriginUrl(input: {
   electricUrl: string;
   requestUrl: URL;
   userWorkosId: string;
+  workspaceId?: string | null | undefined;
   authorizedChatSessionId?: string | null | undefined;
   authorizedBrainRef?: string | null | undefined;
   sourceId?: string | null | undefined;
@@ -265,6 +283,7 @@ export function buildGoatElectricOriginUrl(input: {
   const resolved = scope.where(input.userWorkosId, input.requestUrl, {
     authorizedChatSessionId: input.authorizedChatSessionId,
     authorizedBrainRef: input.authorizedBrainRef,
+    workspaceId: input.workspaceId,
   });
   if (!resolved) return null;
 
@@ -446,6 +465,25 @@ function scopedUserWhere(userWorkosId: string): ShapeWhere {
   return {
     clause: `"user_workos_id" = $1`,
     params: [userWorkosId],
+  };
+}
+
+// Integrations are visible when personally owned OR owned by the active
+// workspace (github/jamie plumbing every member can see the status of).
+function scopedIntegrationsWhere(
+  userWorkosId: string,
+  _requestUrl: URL,
+  context: ShapeWhereContext,
+): ShapeWhere {
+  if (!context.workspaceId) {
+    return {
+      clause: `"user_workos_id" = $1 AND "workspace_id" IS NULL`,
+      params: [userWorkosId],
+    };
+  }
+  return {
+    clause: `("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2`,
+    params: [userWorkosId, context.workspaceId],
   };
 }
 

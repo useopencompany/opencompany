@@ -1,6 +1,7 @@
 import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type {
+  GoatChatAttachmentKind,
   GoatChatEngine,
   GoatChatMessage,
   GoatHarnessEngine,
@@ -49,9 +50,27 @@ export type GoatChatMention = {
   id: "codex";
 };
 
+// Attachment view riding on user-message metadata. The blob fields are only
+// present client → server on submit (the server re-validates them); server →
+// client rehydration strips them — the client fetches bytes through
+// /api/chat-attachments/{messageId}/{attachmentId} instead.
+export type GoatChatUiAttachment = {
+  id: string;
+  kind: GoatChatAttachmentKind;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  blobUrl?: string;
+  blobPathname?: string;
+  // Local object URL for the optimistic (not-yet-persisted) message render;
+  // never persisted and ignored by the server.
+  previewUrl?: string;
+};
+
 export type GoatChatMessageMetadata = {
   sessionId?: string;
   mentions?: GoatChatMention[];
+  attachments?: GoatChatUiAttachment[];
   taskId?: string;
   task?: GoatTaskCardMetadata | null;
   timing?: {
@@ -59,6 +78,9 @@ export type GoatChatMessageMetadata = {
     updatedAt?: string;
     durationMs?: number;
   };
+  // Approximate context-window occupancy after this turn (input + output tokens of
+  // the final model call), used to render the chat header's context meter.
+  contextTokens?: number;
   error?: string;
   aborted?: boolean;
 };
@@ -186,18 +208,24 @@ export type GoatBrainToolOutput = {
 };
 
 export type SaveToBrainToolInput = {
-  content: string;
+  // Text to capture; optional when attachmentIds carry the payload.
+  content?: string;
   title?: string;
   intent?: string;
+  // Ids of files attached in this conversation to file as brain assets.
+  attachmentIds?: string[];
 };
 
 export type SaveToBrainToolOutput =
   | {
       ok: true;
-      draftId: string;
-      path: string;
-      title: string;
       status: "captured" | "already_captured";
+      // Text capture result (absent for attachment-only saves).
+      draftId?: string;
+      path?: string;
+      title?: string;
+      // Attachment capture results (absent for text-only saves).
+      assets?: Array<{ documentId: string; path: string; title: string }>;
     }
   | {
       ok: false;
@@ -293,7 +321,16 @@ export type GoatChatSummaryView = {
 
 export type GoatStoredChatMessage = Pick<
   GoatChatMessage,
-  "id" | "sessionId" | "role" | "content" | "taskId" | "debugTrace" | "createdAt" | "updatedAt"
+  | "id"
+  | "sessionId"
+  | "role"
+  | "content"
+  | "taskId"
+  | "debugTrace"
+  | "attachments"
+  | "attachmentTexts"
+  | "createdAt"
+  | "updatedAt"
 > & {
   taskDisplayId: string | null;
   taskName: string | null;
@@ -350,6 +387,7 @@ export function toGoatChatMessageMetadata(
     | "taskName"
     | "taskStatus"
     | "debugTrace"
+    | "attachments"
     | "createdAt"
     | "updatedAt"
   >,
@@ -366,18 +404,55 @@ export function toGoatChatMessageMetadata(
   const error = message.debugTrace?.error;
   const aborted = message.debugTrace?.aborted === true;
   const timing = toGoatChatMessageTiming(message);
+  const attachments = toGoatChatUiAttachments(message.attachments);
+  const contextTokens = contextTokensFromUsage(message.debugTrace?.usage);
 
-  if (!message.sessionId && !message.taskId && !task && !timing && !error && !aborted) {
+  if (
+    !message.sessionId &&
+    !message.taskId &&
+    !task &&
+    !timing &&
+    contextTokens === undefined &&
+    !error &&
+    !aborted &&
+    !attachments
+  ) {
     return undefined;
   }
   return {
     sessionId: message.sessionId,
+    ...(attachments ? { attachments } : {}),
     ...(message.taskId ? { taskId: message.taskId } : {}),
     ...(task ? { task } : {}),
     ...(timing ? { timing } : {}),
+    ...(contextTokens !== undefined ? { contextTokens } : {}),
     ...(error ? { error } : {}),
     ...(aborted ? { aborted } : {}),
   };
+}
+
+// Strips the private blob fields: the client fetches bytes through the
+// auth-scoped attachment route, never from the blob store directly.
+function toGoatChatUiAttachments(
+  attachments: GoatStoredChatMessage["attachments"],
+): GoatChatUiAttachment[] | null {
+  if (!attachments || attachments.length === 0) return null;
+  return attachments.map((attachment) => ({
+    id: attachment.id,
+    kind: attachment.kind,
+    mediaType: attachment.mediaType,
+    filename: attachment.filename,
+    sizeBytes: attachment.sizeBytes,
+  }));
+}
+
+function contextTokensFromUsage(
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null | undefined,
+): number | undefined {
+  if (!usage) return undefined;
+  if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) return usage.totalTokens;
+  const sum = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  return sum > 0 ? sum : undefined;
 }
 
 function toGoatChatMessageTiming(

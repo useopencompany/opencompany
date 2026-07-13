@@ -28,7 +28,7 @@ export type GoatBrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number]
 export type HardDefaultGoatBrainFolder = (typeof HARD_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
 export type AdjustableDefaultGoatBrainFolder =
   (typeof ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
-export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx";
+export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "image";
 
 export const GOAT_BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 export const GOAT_BRAIN_FOLDER_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*){0,5}$/;

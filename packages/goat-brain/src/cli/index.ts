@@ -97,7 +97,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "evidence-id",
     "status",
   ],
-  list: ["folder", "limit", "include-merged"],
+  list: ["folder", "limit", "include-merged", "include-conflicts"],
   rewrite: ["id", "truth", "truth-stdin"],
   set: ["id", "title", "type", "status"],
   timeline: ["id", "limit", "since"],
@@ -158,6 +158,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "include-invalid",
     "include-merged",
     "include-archived",
+    "include-conflicts",
   ],
 };
 
@@ -228,7 +229,7 @@ Examples:
   goat-brain create --type company --folder companies --id opencompany --title OpenCompany --truth "OpenCompany builds agent infrastructure."
   goat-brain create --type person --folder team/gtm --id ada --title Ada --truth "Ada leads GTM."
   goat-brain create --type source --kind evidence --id ev-acme-email --title "Acme email" --truth "Acme asked for pricing."`,
-  list: `Usage: goat-brain list [--folder <path>] [--limit <n>] [--include-merged] [--json]
+  list: `Usage: goat-brain list [--folder <path>] [--limit <n>] [--include-merged] [--include-conflicts] [--json]
 
 List existing brain docs without retrieval or model calls.
 
@@ -254,7 +255,7 @@ Examples:
        goat-brain query --text <text> [options]
 
 Search and retrieve relevant brain docs. Use list for inventory/enumeration instead of wildcard queries.
-Merged and archived docs are excluded unless explicitly included.
+Merged, archived, and conflict-copy docs are excluded unless explicitly included.
 
 Options:
   --folder <path>
@@ -266,6 +267,7 @@ Options:
   --include-invalid
   --include-merged
   --include-archived
+  --include-conflicts
   --json
 
 Examples:
@@ -595,6 +597,12 @@ async function list(ctx: CommandContext): Promise<CommandResult> {
             return null;
           }
           if (!ctx.args.has("include-merged") && doc.frontmatter.status === "merged") return null;
+          if (
+            !ctx.args.has("include-conflicts") &&
+            (doc.frontmatter.relations ?? []).some((relation) => relation.type === "conflicts_with")
+          ) {
+            return null;
+          }
           const type = isBuiltInGoatBrainEntityType(doc.frontmatter.type)
             ? doc.frontmatter.type
             : null;
@@ -688,6 +696,7 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
       ...(ctx.args.has("include-invalid") ? { includeInvalid: true } : {}),
       ...(ctx.args.has("include-merged") ? { includeMerged: true } : {}),
       ...(ctx.args.has("include-archived") ? { includeArchived: true } : {}),
+      ...(ctx.args.has("include-conflicts") ? { includeConflicts: true } : {}),
     },
     providers,
   );

@@ -19,6 +19,7 @@ export function GoatBrainSwitcher() {
     ? brains.find((brain) => encodeURIComponent(brain.id) === routeBrainSegment)
     : null;
   const highlightedBrainRef = routeBrain?.id ?? activeBrain?.id ?? null;
+  const canCreateBrain = workspace.role === "admin";
 
   const switchBrain = (brainRef: string) => {
     const href = goatBrainHref(brainRef);
@@ -38,6 +39,22 @@ export function GoatBrainSwitcher() {
 
   return (
     <>
+      <div className="group/brains-title flex items-center px-2 pb-1">
+        <div className="min-w-0 flex-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+          Brains
+        </div>
+        {canCreateBrain ? (
+          <button
+            type="button"
+            aria-label="New brain"
+            title="New brain"
+            onClick={() => setCreating(true)}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-ink/50 opacity-0 transition-[opacity,color,background-color] duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/brains-title:opacity-100"
+          >
+            <Plus size={13} strokeWidth={1.75} />
+          </button>
+        ) : null}
+      </div>
       <div className="flex flex-col gap-px">
         {brains.map((brain) => {
           const active = brainRouteActive && brain.id === highlightedBrainRef;
@@ -71,16 +88,6 @@ export function GoatBrainSwitcher() {
           <div className="px-2 py-1.5 text-[12px] text-ink-subtle">
             No brains available in this workspace.
           </div>
-        ) : null}
-        {workspace.role === "admin" ? (
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Plus size={14} strokeWidth={1.75} className="shrink-0" />
-            <span className="truncate tracking-[-0.005em]">New brain</span>
-          </button>
         ) : null}
       </div>
       {creating ? <CreateBrainDialog onClose={() => setCreating(false)} /> : null}

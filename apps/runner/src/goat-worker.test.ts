@@ -12,6 +12,7 @@ import {
 type GoatTask = typeof goatTasks.$inferSelect;
 
 const telemetry = vi.hoisted(() => ({
+  recordGoatModelCost: vi.fn(),
   recordGoatTaskRun: vi.fn(),
   recordGoatHistogram: vi.fn(),
   startGoatSpan: vi.fn(() => ({
@@ -29,6 +30,7 @@ vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
   return {
     ...actual,
+    recordGoatModelCost: telemetry.recordGoatModelCost,
     recordGoatTaskRun: telemetry.recordGoatTaskRun,
     recordGoatHistogram: telemetry.recordGoatHistogram,
     startGoatSpan: telemetry.startGoatSpan,
@@ -247,6 +249,13 @@ describe("runClaimedGoatTask", () => {
         }),
       }),
     );
+    expect(telemetry.recordGoatModelCost).toHaveBeenCalledWith({
+      costUsdMicros: expect.any(Number),
+      attributes: {
+        "goat.model": "openai/gpt-5.4-mini",
+        "goat.surface": "task",
+      },
+    });
     expect(store.recordToolUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         toolCallId: "call_search",

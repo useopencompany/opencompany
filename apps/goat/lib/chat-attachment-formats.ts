@@ -1,0 +1,66 @@
+import type { GoatChatAttachmentKind } from "@opencompany/db/goat-schema";
+
+// Isomorphic (client + server) constants for Goat chat attachments. The core
+// set matches what the brain asset pipeline can ingest: pdf, docx, xlsx, and
+// still images. No legacy .doc/.xls, no gif (animated frames collapse), no
+// plain-text kinds — pasted text already flows through the composer.
+export const GOAT_CHAT_ATTACHMENT_MIME_KINDS: Record<string, GoatChatAttachmentKind> = {
+  "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "image/png": "image",
+  "image/jpeg": "image",
+  "image/webp": "image",
+};
+
+export const GOAT_CHAT_ATTACHMENT_CONTENT_TYPES = Object.keys(GOAT_CHAT_ATTACHMENT_MIME_KINDS);
+
+export const GOAT_CHAT_ATTACHMENT_ACCEPT = [
+  ...GOAT_CHAT_ATTACHMENT_CONTENT_TYPES,
+  ".pdf",
+  ".docx",
+  ".xlsx",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+].join(",");
+
+export const GOAT_CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
+// Claude's per-image request limit is 5 MB; reject rather than downscale (v1).
+export const GOAT_CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE = 5;
+
+export function goatChatAttachmentKindForMime(mediaType: string): GoatChatAttachmentKind | null {
+  return GOAT_CHAT_ATTACHMENT_MIME_KINDS[mediaType] ?? null;
+}
+
+export type GoatChatAttachmentValidation =
+  | { ok: true; kind: GoatChatAttachmentKind }
+  | { ok: false; reason: "type" | "size"; message: string };
+
+export function validateGoatChatAttachmentCandidate(input: {
+  mediaType: string;
+  sizeBytes: number;
+}): GoatChatAttachmentValidation {
+  const kind = goatChatAttachmentKindForMime(input.mediaType);
+  if (!kind) {
+    return {
+      ok: false,
+      reason: "type",
+      message: "Supported files: PDF, Word (.docx), Excel (.xlsx), PNG, JPEG, WebP.",
+    };
+  }
+  if (!Number.isFinite(input.sizeBytes) || input.sizeBytes <= 0) {
+    return { ok: false, reason: "size", message: "File is empty or its size is unknown." };
+  }
+  const maxBytes = kind === "image" ? GOAT_CHAT_IMAGE_MAX_BYTES : GOAT_CHAT_ATTACHMENT_MAX_BYTES;
+  if (input.sizeBytes > maxBytes) {
+    return {
+      ok: false,
+      reason: "size",
+      message: kind === "image" ? "Images are limited to 5 MB." : "Files are limited to 20 MB.",
+    };
+  }
+  return { ok: true, kind };
+}

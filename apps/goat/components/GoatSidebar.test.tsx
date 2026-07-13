@@ -53,6 +53,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       description: null,
       visibility: "workspace",
     },
+    recentChats: [],
   }),
 }));
 
@@ -76,6 +77,8 @@ describe("GoatSidebar", () => {
     expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
     expect(screen.getByText("Brains")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "General" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "New brain" })).toHaveClass("opacity-0");
+    expect(screen.queryByText("New brain")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Manage access to General" }),
     ).not.toBeInTheDocument();

@@ -46,6 +46,7 @@ export const GOAT_METRICS = {
   toolCallsTotal: "goat.tool_calls_total",
   toolCallDurationMs: "goat.tool_call_duration_ms",
   modelUsageTokens: "goat.model_usage_tokens",
+  modelCostUsdMicros: "goat.model_cost_usd_micros",
 } as const;
 
 export type GoatRunSurface = "chat" | "task" | "brain_ingest";
@@ -469,6 +470,13 @@ export function recordGoatModelUsageTokens(input: {
   recordGoatCounter(GOAT_METRICS.modelUsageTokens, input.tokens, {
     ...input.attributes,
     "goat.token_direction": input.direction,
+  });
+}
+
+export function recordGoatModelCost(input: { costUsdMicros: number; attributes?: GoatAttributes }) {
+  if (!Number.isFinite(input.costUsdMicros) || input.costUsdMicros <= 0) return;
+  recordGoatCounter(GOAT_METRICS.modelCostUsdMicros, Math.round(input.costUsdMicros), {
+    ...input.attributes,
   });
 }
 

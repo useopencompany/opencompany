@@ -134,16 +134,17 @@ export function SourceProviderCard({
   const linear = provider.id === "linear" ? details?.linear : undefined;
   const github = provider.id === "github" ? details?.github : undefined;
   const gmail = provider.id === "gmail" ? details?.gmail : undefined;
-  const canToggle =
-    provider.available && (source ? source.isOwnIntegration : connected) && !isPending;
+  const canToggle = provider.available && (source ? source.canManage : connected) && !isPending;
   const sourceNeedsSetup = Boolean(
     source && source.integrationStatus !== "connected" && !(provider.id === "jamie" && connected),
   );
   const sourceStatusBadge =
     sourceNeedsSetup && source
-      ? source.integrationStatus === "needs_reauth"
-        ? "Needs setup"
-        : "Sync issue"
+      ? source.integrationStatus === "disconnected"
+        ? "Connection lost"
+        : source.integrationStatus === "needs_reauth"
+          ? "Needs setup"
+          : "Sync issue"
       : null;
 
   const toggle = () => {
@@ -208,9 +209,19 @@ export function SourceProviderCard({
           )
         ) : null}
       </div>
-      {source && !source.isOwnIntegration ? (
+      {source && source.integrationStatus === "disconnected" ? (
+        <p className="text-[11.5px] leading-4 text-ink-subtle">
+          The connection behind this source is gone; ingestion is paused until it is reconnected.
+        </p>
+      ) : null}
+      {source && !source.canManage ? (
         <p className="text-[11.5px] leading-4 text-ink-subtle">
           Connected by {source.connectedByName}. Only they can change this source.
+        </p>
+      ) : null}
+      {source && source.ownerKind === "workspace" ? (
+        <p className="text-[11.5px] leading-4 text-ink-subtle">
+          Workspace integration · connected by {source.connectedByName}.
         </p>
       ) : null}
       {legacyEnabled ? (
@@ -221,7 +232,7 @@ export function SourceProviderCard({
       {provider.id === "slack" &&
       slack?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.isOwnIntegration : true) ? (
+      (source ? source.canManage : true) ? (
         <SlackChannelPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? slack.integration.integrationId}
@@ -232,7 +243,7 @@ export function SourceProviderCard({
       {provider.id === "linear" &&
       linear?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.isOwnIntegration : true) ? (
+      (source ? source.canManage : true) ? (
         <LinearTeamPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? linear.integration.integrationId}
@@ -243,7 +254,7 @@ export function SourceProviderCard({
       {provider.id === "github" &&
       github?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.isOwnIntegration : true) ? (
+      (source ? source.canManage : true) ? (
         <GitHubRepoPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? github.integration.integrationId}
@@ -254,7 +265,7 @@ export function SourceProviderCard({
       {provider.id === "gmail" &&
       gmail?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.isOwnIntegration : true) ? (
+      (source ? source.canManage : true) ? (
         <GmailSourceEditor
           brainRef={brainRef}
           integrationId={source?.integrationId ?? gmail.integration.integrationId}

@@ -166,6 +166,25 @@ export async function requireGoatWorkspaceAdmin(
   if (role !== "admin") throw new Error("Only workspace admins can do this.");
 }
 
+// Human-readable name for attributing a user's own captures/uploads in
+// ingestion prompts. Never falls back to the email: an address is not how the
+// user should be named in prose.
+export async function getGoatUserDisplayName(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+): Promise<string | null> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .select({ firstName: goatUsers.firstName, lastName: goatUsers.lastName })
+    .from(goatUsers)
+    .where(eq(goatUsers.workosUserId, userWorkosId))
+    .limit(1);
+  const user = rows[0];
+  if (!user) return null;
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  return name || null;
+}
+
 export async function getDefaultGoatBrainForUser(
   userWorkosId: string,
   options: { db?: DbClient } = {},

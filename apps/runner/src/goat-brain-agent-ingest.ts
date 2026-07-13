@@ -27,6 +27,7 @@ import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail"
 import {
   getDefaultGoatBrainForUser,
   getGoatBrainEnrichmentEnabled,
+  getGoatUserDisplayName,
 } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
@@ -189,6 +190,7 @@ function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: st
     "- Compiled truth is a rewrite, not a log: when a page's state of play changes, use rewrite to replace it with the current durable synthesis. Do not append updates to the bottom of compiled truth.",
     "- Timeline entries are concise dated evidence: use timeline-add with what happened and why it matters, always with --source-ref (and --evidence-id when an evidence record exists).",
     "- Backlink iron law: every mention of an entity that has a brain page must be written as a [[page:...]] link — in compiled truth and in timeline entries.",
+    '- Name people: when the source shows who said, decided, proposed, or captured something, attribute it to them by name in compiled truth and timeline entries — as a [[page:...]] link when they have a page, a plain name otherwise. Prefer "Anna proposed X" over passive phrasing like "it was proposed". Never guess an author the source does not identify.',
     `- ${GOAT_BRAIN_POINTER_COPY_RULE.split("\n").join("\n  ")}`,
     "- No fabrication: write only what the source or the brain supports. If the source does not say it, it does not go in.",
     "- Status discipline: status is the curation signal. New pages start as draft; once a page's compiled truth is a durable synthesis that cites evidence with [[evidence:...]], promote it with `set <id> --status active` (the brain rejects active pages whose compiled truth has no citation). Leave a page draft only when it is genuinely uncurated.",
@@ -614,11 +616,16 @@ function boundedTranscriptMarkdown(item: NormalizedJamieMeetingSourceItem) {
   return formatTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
-export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCaptureSourceItem) {
+export function buildGoatChatCaptureAgentIngestPrompt(
+  item: NormalizedGoatChatCaptureSourceItem,
+  context: { capturedByName?: string | null } = {},
+) {
   const capture = item.content.capture;
   const draftPath = `${capture.draftFolder}/${capture.draftBrainId}.md`;
   return [
-    "Curate this chat capture into the brain. The user explicitly asked to save it during a chat conversation.",
+    context.capturedByName
+      ? `Curate this chat capture into the brain. ${context.capturedByName} explicitly asked to save it during a chat conversation; when you write it up, attribute the idea or capture to ${context.capturedByName} by name (unless the capture text itself names a different author).`
+      : "Curate this chat capture into the brain. The user explicitly asked to save it during a chat conversation.",
     "",
     `The raw capture is already stored as a draft page with id "${capture.draftBrainId}" at ${draftPath} (type: note, status: draft). Start by reading it with get, then decide its proper home.`,
     "",
@@ -641,23 +648,30 @@ export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCa
 
 export function buildUploadAssetAgentIngestPrompt(
   item: NormalizedUploadAssetSourceItem,
-  context: { extractedText: string; truncatedText: boolean },
+  context: { extractedText: string; truncatedText: boolean; format?: string },
 ) {
   const asset = item.content.asset;
   const extracted = context.extractedText.trim();
+  const isImage = (context.format ?? asset.format) === "image";
   return [
-    "Ingest this file the user uploaded into the brain.",
+    isImage
+      ? "Ingest this image the user uploaded into the brain."
+      : "Ingest this file the user uploaded into the brain.",
     "",
     `The file already exists as a page in this brain: id "${asset.brainId}" in the "${asset.folderPath}" folder (format: ${asset.format}, original file: ${asset.originalFileName}).`,
-    'The page\'s materialized file ends with a generated "Extracted text" block mirroring the text below; it is machine-derived and any edits to it are discarded, so never write into it.',
+    isImage
+      ? "The image itself is attached to this message: read it directly — describe what it shows and extract any text, figures, tables, or structure it contains."
+      : 'The page\'s materialized file ends with a generated "Extracted text" block mirroring the text below; it is machine-derived and any edits to it are discarded, so never write into it.',
     "",
     "Required outcome, all scoped to this brain:",
-    `1. Rewrite that page's compiled truth into a durable synthesis of the document: what it is, who it involves, the key facts, claims, and figures, and why it matters — with [[page:...]] links to every entity page. Do not paste the extracted text; synthesize it.`,
+    isImage
+      ? `1. Rewrite that page's compiled truth into a durable synthesis of the image: what it shows, who it involves, the key facts, claims, and figures, and why it matters — with [[page:...]] links to every entity page.`
+      : `1. Rewrite that page's compiled truth into a durable synthesis of the document: what it is, who it involves, the key facts, claims, and figures, and why it matters — with [[page:...]] links to every entity page. Do not paste the extracted text; synthesize it.`,
     "2. Give the page the right type for what the document represents (an external artifact is `source`) and a clear human title. Keep its id and folder unchanged unless another folder is clearly the better home.",
     `3. Create or update person, company, or project pages for entities central to the document, with the document on their timelines (timeline-add with --source-ref ${item.sourceRef}). Do not create pages for entities merely mentioned in passing.`,
     "4. Backlinks between all of these pages per the iron law.",
     "",
-    extracted
+    extracted || isImage
       ? null
       : "No text could be extracted from this file (it may be scanned or image-only). Write a minimal compiled truth stating what the file is, judged from its name and metadata, and leave the page as draft.",
     context.truncatedText
@@ -668,7 +682,7 @@ export function buildUploadAssetAgentIngestPrompt(
     `Uploaded at: ${item.capturedAt}`,
     "",
     `## File\n- Name: ${asset.originalFileName}\n- Type: ${asset.mimeType}\n- Size: ${asset.sizeBytes} bytes`,
-    `## Extracted text\n${extracted || "(none)"}`,
+    ...(isImage ? [] : [`## Extracted text\n${extracted || "(none)"}`]),
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -705,6 +719,9 @@ async function runBrainAgentIngestSession(input: {
   env: GoatBrainAgentIngestEnv;
   system: string;
   buildPrompt: () => string;
+  // Binary parts attached to the agent's user message (e.g. an image asset so
+  // the multimodal ingest model can see it).
+  files?: readonly { mediaType: string; data: Buffer }[];
   commands?: readonly string[];
   prepareRoot?: (root: string) => Promise<void>;
   noMutationOutcome?: BrainAgentNoMutationOutcome;
@@ -756,6 +773,7 @@ async function runBrainAgentIngestSession(input: {
       ingestJobId: input.jobId,
       system: input.system,
       prompt: appendGoatBrainFolderInventory(input.buildPrompt(), folderPrompt),
+      ...(input.files?.length ? { files: input.files } : {}),
       ...(input.commands ? { commands: input.commands } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
@@ -831,8 +849,13 @@ function brainAgentIngestCompletionOutcome(input: {
       } without successfully writing to the brain.`,
     );
   }
-  if (input.finalText.startsWith(GOAT_BRAIN_AGENT_SKIP_SENTINEL)) {
-    return { skipped: true, skipMode: "explicit" };
+  const explicitSkip = explicitSkipFromFinalText(input.finalText);
+  if (explicitSkip) {
+    return {
+      skipped: true,
+      ...(explicitSkip.reason ? { reason: explicitSkip.reason } : {}),
+      skipMode: "explicit",
+    };
   }
   if (input.noMutationOutcome === "skip") {
     return {
@@ -844,6 +867,30 @@ function brainAgentIngestCompletionOutcome(input: {
   throw new Error(
     "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
   );
+}
+
+// The skip rule asks for a reply of exactly SKIP, but models routinely prepend
+// their reasoning ("This is a receipt... SKIP") or append a reason after the
+// sentinel. Accept the sentinel as the first word or as its own final line and
+// keep the surrounding prose as the skip reason instead of discarding it.
+function explicitSkipFromFinalText(finalText: string): { reason?: string } | null {
+  const trimmed = finalText.trim();
+  if (!trimmed) return null;
+  const sentinel = GOAT_BRAIN_AGENT_SKIP_SENTINEL;
+  if (new RegExp(`^${sentinel}\\b`).test(trimmed)) {
+    const reason = trimmed
+      .slice(sentinel.length)
+      .replace(/^[\s.:—–-]+/, "")
+      .trim();
+    return reason ? { reason } : {};
+  }
+  const lines = trimmed.split("\n");
+  const lastLine = (lines[lines.length - 1] ?? "").trim();
+  if (new RegExp(`^${sentinel}[.!]*$`).test(lastLine)) {
+    const reason = lines.slice(0, -1).join("\n").trim();
+    return reason ? { reason } : {};
+  }
+  return null;
 }
 
 export async function buildGoatBrainFolderInventoryPrompt(root: string): Promise<string | null> {
@@ -919,6 +966,18 @@ export async function runGoatChatCaptureAgentIngest(
   },
   deps: GoatBrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
+  // The capture's author is the acting user; their name lets the agent
+  // attribute the idea in prose instead of writing "the user".
+  const capturedByName = await getGoatUserDisplayName(input.userWorkosId, {
+    db: getDb(),
+  }).catch((error) => {
+    logger.warn("Goat chat capture ingest user name lookup failed", {
+      event: "opencompany.goat_chat_capture_user_name_lookup_failed",
+      user_workos_id: input.userWorkosId,
+      error,
+    });
+    return null;
+  });
   const session = await runBrainAgentIngestSession({
     jobId: input.jobId ?? input.item.sourceRef,
     userWorkosId: input.userWorkosId,
@@ -926,7 +985,7 @@ export async function runGoatChatCaptureAgentIngest(
     sourceRef: input.item.sourceRef,
     env: input.env,
     system: GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
-    buildPrompt: () => buildGoatChatCaptureAgentIngestPrompt(input.item),
+    buildPrompt: () => buildGoatChatCaptureAgentIngestPrompt(input.item, { capturedByName }),
     commands: CAPTURE_AGENT_CLI_COMMANDS,
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
@@ -1157,9 +1216,10 @@ export async function runUploadAssetAgentIngest(
 
   // Stage 1 (deterministic): fetch the bytes, extract text, record it on the
   // row so materialization inside the agent session includes the generated
-  // extracted-text block and retrieval can index it.
+  // extracted-text block and retrieval can index it. Images have no text to
+  // extract — the bytes go to the (multimodal) agent as an image part instead.
   const bytes = await downloadGoatBrainAssetBytes(row.assetStorageKey, input.env);
-  const extractedText = row.format === "pdf" ? await extractPdfText(bytes) : "";
+  const extractedText = await extractAssetText(row.format, bytes);
   await updateGoatBrainAssetExtraction(
     {
       brainRef,
@@ -1184,7 +1244,11 @@ export async function runUploadAssetAgentIngest(
       buildUploadAssetAgentIngestPrompt(input.item, {
         extractedText: truncateByBytes(extractedText, PROMPT_ASSET_TEXT_BYTES),
         truncatedText,
+        format: row.format,
       }),
+    ...(row.format === "image"
+      ? { files: [{ mediaType: row.mimeType ?? "image/png", data: bytes }] }
+      : {}),
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
   });
@@ -1224,19 +1288,38 @@ async function downloadGoatBrainAssetBytes(
   return Buffer.concat(chunks);
 }
 
-async function extractPdfText(bytes: Buffer): Promise<string> {
+async function extractAssetText(format: string, bytes: Buffer): Promise<string> {
   try {
-    const { extractText, getDocumentProxy } = await import("unpdf");
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
-    const { text } = await extractText(pdf, { mergePages: true });
-    return typeof text === "string" ? text.trim() : "";
+    switch (format) {
+      case "pdf":
+        return await extractPdfText(bytes);
+      case "docx": {
+        const { extractDocxText } = await import("@opencompany/file-extract");
+        return await extractDocxText(bytes);
+      }
+      case "xlsx": {
+        const { extractXlsxText } = await import("@opencompany/file-extract");
+        return await extractXlsxText(bytes);
+      }
+      default:
+        // Images (and any future format without a text plane) extract nothing.
+        return "";
+    }
   } catch (error) {
     logger.warn("Goat Brain asset text extraction failed", {
       event: "opencompany.goat_brain_asset_extraction_failed",
+      format,
       error,
     });
     return "";
   }
+}
+
+async function extractPdfText(bytes: Buffer): Promise<string> {
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const { text } = await extractText(pdf, { mergePages: true });
+  return typeof text === "string" ? text.trim() : "";
 }
 
 async function runIngestAgentLoop(input: {
@@ -1248,6 +1331,7 @@ async function runIngestAgentLoop(input: {
   ingestJobId: string;
   system: string;
   prompt: string;
+  files?: readonly { mediaType: string; data: Buffer }[];
   commands?: readonly string[];
   signal?: AbortSignal;
   runCli?: GoatBrainAgentCliRunner;
@@ -1526,7 +1610,21 @@ async function runIngestAgentLoop(input: {
     const result = await generateText({
       model: gateway(GOAT_BRAIN_AGENT_INGEST_MODEL),
       system,
-      messages: [{ role: "user", content: input.prompt }],
+      messages: [
+        {
+          role: "user",
+          content: input.files?.length
+            ? [
+                { type: "text" as const, text: input.prompt },
+                ...input.files.map((file) => ({
+                  type: "image" as const,
+                  image: new Uint8Array(file.data),
+                  mediaType: file.mediaType,
+                })),
+              ]
+            : input.prompt,
+        },
+      ],
       tools: { ...tools, ...enrichmentTools },
       stopWhen: [ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS)],
       abortSignal: abort.signal,

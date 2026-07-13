@@ -53,6 +53,27 @@ const HOP_DECAY = 0.5;
 const GRAPH_SEED_LIMIT = 20;
 
 const DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-small";
+const RELATIVE_SINCE = /^(\d+)\s*([mhdw])$/i;
+const NATURAL_RELATIVE_SINCE =
+  /^(?:last\s+)?(\d+)\s*(minute|minutes|min|mins|hour|hours|hr|hrs|day|days|week|weeks)$/i;
+const SINCE_UNIT_MS: Record<string, number> = {
+  m: 60_000,
+  minute: 60_000,
+  minutes: 60_000,
+  min: 60_000,
+  mins: 60_000,
+  h: 3_600_000,
+  hour: 3_600_000,
+  hours: 3_600_000,
+  hr: 3_600_000,
+  hrs: 3_600_000,
+  d: 86_400_000,
+  day: 86_400_000,
+  days: 86_400_000,
+  w: 604_800_000,
+  week: 604_800_000,
+  weeks: 604_800_000,
+};
 
 // Matches goat-brain-files.ts DbClient: neon-http (web) and pooled node-postgres (runner) differ
 // in type identity, so the module accepts either.
@@ -88,6 +109,10 @@ export type GoatBrainSearchOptions = {
   hops?: number;
   includeMerged?: boolean;
   includeArchived?: boolean;
+  // Conflict copies (pages carrying a conflicts_with relation, written when a
+  // sync loses a same-page race) are pending curation, not knowledge; they are
+  // hidden from search/list by default so they cannot outrank the canonical page.
+  includeConflicts?: boolean;
   lexicalOnly?: boolean;
 };
 
@@ -171,7 +196,7 @@ export async function searchGoatBrain(
   const text = options.text?.trim() ?? "";
   const limit = clamp(options.limit ?? DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT);
   const hops = Math.max(0, options.hops ?? 0);
-  const conditions = documentFilters(ctx.brainRef, options, hops);
+  const conditions = documentFilters(ctx.brainRef, options, hops, now);
 
   // No query text → freshness-ordered browse over the filtered set (CLI parity: every candidate
   // gets relevance 1 and the recency blend decides).
@@ -377,10 +402,7 @@ export async function getGoatBrainTimeline(
   const doc = documents[0];
   if (!doc) return null;
   const limit = clamp(options.limit ?? DEFAULT_TIMELINE_LIMIT, 1, MAX_TIMELINE_LIMIT);
-  const sinceMs = options.since ? Date.parse(options.since) : Number.NaN;
-  if (options.since && Number.isNaN(sinceMs)) {
-    throw new Error(`Invalid "since" value: ${options.since}`);
-  }
+  const since = options.since ? resolveGoatBrainSince(options.since) : null;
 
   const rows = await db
     .select({
@@ -396,7 +418,7 @@ export async function getGoatBrainTimeline(
       and(
         eq(goatBrainTimelineEntries.brainRef, ctx.brainRef),
         eq(goatBrainTimelineEntries.brainId, doc.id),
-        ...(Number.isNaN(sinceMs) ? [] : [gte(goatBrainTimelineEntries.at, new Date(sinceMs))]),
+        ...(since ? [gte(goatBrainTimelineEntries.at, since)] : []),
       ),
     )
     .orderBy(desc(goatBrainTimelineEntries.at))
@@ -433,11 +455,12 @@ export async function listGoatBrainDocuments(
     limit?: number;
     includeMerged?: boolean;
     includeArchived?: boolean;
+    includeConflicts?: boolean;
   } = {},
 ): Promise<GoatBrainDocumentSummary[]> {
   const db = ctx.db ?? getDb();
   const limit = clamp(options.limit ?? DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT);
-  const conditions = documentFilters(ctx.brainRef, options, 0);
+  const conditions = documentFilters(ctx.brainRef, options, 0, Date.now());
   const rows = await fetchDocumentMetaWhere(db, and(...conditions), limit);
   return rows.map((row) => ({
     id: row.brainId,
@@ -456,9 +479,10 @@ function documentFilters(
   brainRef: string,
   options: Pick<
     GoatBrainSearchOptions,
-    "folder" | "type" | "kind" | "since" | "includeMerged" | "includeArchived"
+    "folder" | "type" | "kind" | "since" | "includeMerged" | "includeArchived" | "includeConflicts"
   >,
   hops: number,
+  now: number,
 ): SQL[] {
   const conditions: (SQL | undefined)[] = [eq(goatBrainDocuments.brainRef, brainRef)];
   if (options.folder) {
@@ -477,13 +501,43 @@ function documentFilters(
   const kind = options.kind ?? (hops > 0 ? "page" : undefined);
   if (kind) conditions.push(eq(goatBrainDocuments.kind, kind));
   if (options.since) {
-    const sinceMs = Date.parse(options.since);
-    if (Number.isNaN(sinceMs)) throw new Error(`Invalid "since" value: ${options.since}`);
-    conditions.push(gte(goatBrainDocuments.updatedAt, new Date(sinceMs)));
+    conditions.push(gte(goatBrainDocuments.updatedAt, resolveGoatBrainSince(options.since, now)));
   }
   if (!options.includeMerged) conditions.push(ne(goatBrainDocuments.status, "merged"));
   if (!options.includeArchived) conditions.push(ne(goatBrainDocuments.status, "archived"));
+  if (!options.includeConflicts) {
+    // A conflict copy declares a conflicts_with relation to the canonical page
+    // (see upsertConflictDocument); the projection turns that into a brain_edges
+    // row, so exclusion is a plain anti-join.
+    conditions.push(
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${goatBrainEdges} AS conflict_edge
+        WHERE conflict_edge.document_id = ${goatBrainDocuments.id}
+          AND conflict_edge.relation_type = 'conflicts_with'
+          AND conflict_edge.source_kind = 'relation'
+      )`,
+    );
+  }
   return conditions.filter((condition): condition is SQL => condition !== undefined);
+}
+
+export function resolveGoatBrainSince(raw: string, now: number = Date.now()): Date {
+  const trimmed = raw.trim();
+  const relative = RELATIVE_SINCE.exec(trimmed) ?? NATURAL_RELATIVE_SINCE.exec(trimmed);
+  if (relative) {
+    const amount = Number(relative[1]);
+    const unitMs = SINCE_UNIT_MS[(relative[2] ?? "").toLowerCase()];
+    if (!unitMs || !Number.isFinite(amount) || amount <= 0) {
+      throw new Error(`Invalid "since" value: ${raw}`);
+    }
+    const timestamp = now - amount * unitMs;
+    if (!Number.isFinite(timestamp)) throw new Error(`Invalid "since" value: ${raw}`);
+    return new Date(timestamp);
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (Number.isNaN(parsed)) throw new Error(`Invalid "since" value: ${raw}`);
+  return new Date(parsed);
 }
 
 async function ftsCandidates(db: DbClient, conditions: SQL[], text: string): Promise<string[]> {
