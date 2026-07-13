@@ -6,11 +6,13 @@ import { seedDefaultGoatBrainFolders } from "./goat-brain-files";
 import {
   type GoatBrain,
   type GoatBrainVisibility,
+  type GoatOnboarding,
   type GoatUser,
   type GoatWorkspace,
   type GoatWorkspaceRole,
   goatBrainMembers,
   goatBrains,
+  goatOnboarding,
   goatUsers,
   goatWorkspaceMembers,
   goatWorkspaces,
@@ -481,4 +483,89 @@ export async function updateGoatWorkspaceName(
     .update(goatWorkspaces)
     .set({ name: input.name, updatedAt: new Date() })
     .where(eq(goatWorkspaces.id, input.workspaceId));
+}
+
+export async function updateGoatWorkspaceNameAndSlug(
+  input: { workspaceId: string; name: string; slug: string | null },
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  await db
+    .update(goatWorkspaces)
+    .set({ name: input.name, slug: input.slug, updatedAt: new Date() })
+    .where(eq(goatWorkspaces.id, input.workspaceId));
+}
+
+// A slug is free when no other workspace holds it. The excludeWorkspaceId keeps a
+// workspace's own slug from reading as "taken" while it edits.
+export async function isGoatWorkspaceSlugAvailable(
+  input: { slug: string; excludeWorkspaceId?: string },
+  options: { db?: DbClient } = {},
+): Promise<boolean> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .select({ id: goatWorkspaces.id })
+    .from(goatWorkspaces)
+    .where(eq(goatWorkspaces.slug, input.slug))
+    .limit(2);
+  return rows.every((row: { id: string }) => row.id === input.excludeWorkspaceId);
+}
+
+export async function markGoatUserOnboarded(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  const now = new Date();
+  await db
+    .update(goatUsers)
+    .set({ onboardedAt: now, updatedAt: now })
+    .where(eq(goatUsers.workosUserId, userWorkosId));
+}
+
+export async function getGoatOnboarding(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+): Promise<GoatOnboarding | null> {
+  const db = options.db ?? getDb();
+  const [row] = await db
+    .select()
+    .from(goatOnboarding)
+    .where(eq(goatOnboarding.userWorkosId, userWorkosId))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function upsertGoatOnboarding(
+  input: {
+    userWorkosId: string;
+    workspaceId?: string | null;
+    referralSource?: string | null;
+    companyDomain?: string | null;
+    contextUrls?: string[] | null;
+  },
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  const now = new Date();
+  // Only overwrite the fields the caller actually provided, so a later step
+  // doesn't wipe an earlier one.
+  const set: Record<string, unknown> = { updatedAt: now };
+  if (input.workspaceId !== undefined) set.workspaceId = input.workspaceId;
+  if (input.referralSource !== undefined) set.referralSource = input.referralSource;
+  if (input.companyDomain !== undefined) set.companyDomain = input.companyDomain;
+  if (input.contextUrls !== undefined) set.contextUrls = input.contextUrls;
+
+  await db
+    .insert(goatOnboarding)
+    .values({
+      userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId ?? null,
+      referralSource: input.referralSource ?? null,
+      companyDomain: input.companyDomain ?? null,
+      contextUrls: input.contextUrls ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({ target: goatOnboarding.userWorkosId, set });
 }
