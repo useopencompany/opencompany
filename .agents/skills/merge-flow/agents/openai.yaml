@@ -1,0 +1,4 @@
+interface:
+  display_name: "Merge Flow"
+  short_description: "Merge open PRs safely in strict sequence"
+  default_prompt: "Use $merge-flow to update and merge all eligible open PRs one by one after CI passes."
