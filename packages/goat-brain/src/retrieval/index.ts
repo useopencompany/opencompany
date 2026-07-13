@@ -24,6 +24,10 @@ export type GoatBrainQueryOptions = {
   includeInvalid?: boolean;
   includeMerged?: boolean;
   includeArchived?: boolean;
+  // Conflict copies (pages carrying a conflicts_with relation, written when a
+  // sync loses a same-page race) are pending curation; hidden by default so
+  // they cannot outrank or shadow the canonical page.
+  includeConflicts?: boolean;
 };
 
 export type RetrievalProviders = {
@@ -154,6 +158,12 @@ function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): I
     if (!options.includeInvalid && !record.valid) return false;
     if (!options.includeMerged && record.status === "merged") return false;
     if (!options.includeArchived && record.status === "archived") return false;
+    if (
+      !options.includeConflicts &&
+      record.relations.some((relation) => relation.type === "conflicts_with")
+    ) {
+      return false;
+    }
     if (
       options.folder &&
       record.folder !== options.folder &&
