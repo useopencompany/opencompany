@@ -2,7 +2,14 @@
 
 import type { GitHubActivityEventType } from "@opencompany/goat-brain";
 import { toast } from "@opencompany/ui/components/sonner";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  LoaderCircle,
+  Search,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   type GoatBrainSourcesDetails,
@@ -119,11 +126,17 @@ export function SourceProviderCard({
   provider,
   details,
   onChanged,
+  onConnect,
+  connectPending = false,
+  connectDisabled = false,
 }: {
   brainRef: string;
   provider: GoatBrainSourceProviderDef;
   details: GoatBrainSourcesDetails | null;
   onChanged: () => Promise<void>;
+  onConnect?: () => void;
+  connectPending?: boolean;
+  connectDisabled?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
   const Icon = provider.icon;
@@ -145,7 +158,11 @@ export function SourceProviderCard({
         : source.integrationStatus === "needs_reauth"
           ? "Needs setup"
           : "Sync issue"
-      : null;
+      : enabled
+        ? "Feeding Brain"
+        : connected
+          ? "Authorized"
+          : null;
 
   const toggle = () => {
     const integrationId = state.integrationId;
@@ -199,6 +216,22 @@ export function SourceProviderCard({
               onToggle={toggle}
               label={`${provider.name} source`}
             />
+          ) : onConnect ? (
+            <button
+              type="button"
+              onClick={onConnect}
+              disabled={connectDisabled || connectPending}
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-ink/15 px-2.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {connectPending ? (
+                <LoaderCircle size={12} strokeWidth={2} className="animate-spin" />
+              ) : null}
+              {connectPending
+                ? "Connecting"
+                : provider.connectionKind === "oauth"
+                  ? "Connect"
+                  : "Set up"}
+            </button>
           ) : (
             <a
               href={provider.connectHref}
@@ -209,6 +242,18 @@ export function SourceProviderCard({
           )
         ) : null}
       </div>
+      {provider.docsHref ? (
+        <a
+          href={provider.docsHref}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex w-fit items-center gap-1.5 text-[11.5px] font-medium text-ink-subtle transition-colors hover:text-ink"
+        >
+          <BookOpen size={12} strokeWidth={1.9} />
+          Setup guide
+          <ExternalLink size={11} strokeWidth={1.9} />
+        </a>
+      ) : null}
       {source && source.integrationStatus === "disconnected" ? (
         <p className="text-[11.5px] leading-4 text-ink-subtle">
           The connection behind this source is gone; ingestion is paused until it is reconnected.
@@ -292,7 +337,10 @@ function slackSelectionFromConfig(
           const record = entry as Record<string, unknown>;
           if (typeof record.id !== "string" || !record.id) return [];
           return [
-            { id: record.id, name: typeof record.name === "string" ? record.name : record.id },
+            {
+              id: record.id,
+              name: typeof record.name === "string" ? record.name : record.id,
+            },
           ];
         })
       : [];

@@ -79,6 +79,39 @@ describe("GoatBrainSourceCards", () => {
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByText("Needs setup")).not.toBeInTheDocument();
   });
+
+  it("supports onboarding-owned setup actions and links to the manual guide", async () => {
+    const user = userEvent.setup();
+    const onConnect = vi.fn();
+    if (!jamieProvider) throw new Error("Jamie source provider is not registered.");
+
+    render(
+      <SourceProviderCard
+        brainRef="goat_brain_1"
+        provider={jamieProvider}
+        details={brainSourceDetails({
+          jamie: {
+            integration: jamieState({
+              integrationId: null,
+              webhookUrl: null,
+              apiKeyConfigured: false,
+            }),
+            legacyDefaultDelivery: false,
+            isDefaultBrain: false,
+          },
+        })}
+        onChanged={async () => {}}
+        onConnect={onConnect}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
+      "href",
+      "/docs/integrations/jamie",
+    );
+    await user.click(screen.getByRole("button", { name: "Set up" }));
+    expect(onConnect).toHaveBeenCalledOnce();
+  });
 });
 
 const jamieProvider = GOAT_BRAIN_SOURCE_PROVIDERS.find((provider) => provider.id === "jamie");
