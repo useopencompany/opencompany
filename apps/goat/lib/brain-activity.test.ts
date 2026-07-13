@@ -17,6 +17,7 @@ function job(overrides: Partial<GoatBrainIngestJobRow> = {}): GoatBrainIngestJob
     kind: "brain_agent_ingest",
     content_hash: "hash",
     status: "queued",
+    plan_paused: false,
     attempts: 0,
     next_run_at: "2026-07-09T10:00:00.000Z",
     lease_id: null,
@@ -63,6 +64,15 @@ describe("buildGoatBrainActivityEvents", () => {
       title: "Captured to inbox",
       sourceTitle: "Pricing teardown reference",
       at: "2026-07-09T10:00:00.000Z",
+    });
+  });
+
+  it("shows queued work held by a quota reservation as paused by plan", () => {
+    const events = buildGoatBrainActivityEvents([job({ plan_paused: true })], [item()]);
+
+    expect(events.find((event) => event.kind === "paused")).toMatchObject({
+      kind: "paused",
+      title: "Paused by plan",
     });
   });
 

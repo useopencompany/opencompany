@@ -1,3 +1,4 @@
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
@@ -166,6 +167,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       integrationId: window.integrationId,
       item,
       rawPayload: { eventIds: claimed.map((row) => row.id) },
+      rawEventCount: claimed.length,
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       skipReason: ingestDecision.action === "skip" ? ingestDecision.reason : null,
@@ -187,9 +189,11 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       eventCount: claimed.length,
       enqueued: upserted.enqueued,
       skipped: upserted.skipped,
+      ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
   });
 
+  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
   if (result?.enqueued) wakeGoatBrainIngestWorker();
   return result;
 }

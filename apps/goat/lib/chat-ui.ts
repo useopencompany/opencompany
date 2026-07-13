@@ -219,7 +219,8 @@ export type SaveToBrainToolInput = {
 export type SaveToBrainToolOutput =
   | {
       ok: true;
-      status: "captured" | "already_captured";
+      status: "captured" | "already_captured" | "paused_by_plan";
+      message?: string;
       // Text capture result (absent for attachment-only saves).
       draftId?: string;
       path?: string;

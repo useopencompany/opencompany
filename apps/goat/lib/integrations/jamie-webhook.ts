@@ -1,3 +1,4 @@
+import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
@@ -100,6 +101,7 @@ export async function handleGoatJamieWebhookDelivery(input: {
     brainRefs,
     now: receivedAt,
   });
+  captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
 
   await markGoatJamieWebhookConnected({
     integrationId: webhookContext.integrationId,

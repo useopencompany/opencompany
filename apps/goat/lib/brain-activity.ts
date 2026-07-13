@@ -8,6 +8,7 @@ export type GoatBrainActivityKind =
   | "captured"
   | "filing"
   | "filed"
+  | "paused"
   | "retrying"
   | "failed"
   | "skipped";
@@ -34,7 +35,7 @@ export type GoatBrainActivityEvent = {
   trace: GoatBrainIngestTrace | null;
 };
 
-export type GoatBrainDraftIngestStateKind = "queued" | "running" | "retrying" | "failed";
+export type GoatBrainDraftIngestStateKind = "queued" | "paused" | "running" | "retrying" | "failed";
 
 export type GoatBrainDraftIngestState = {
   kind: GoatBrainDraftIngestStateKind;
@@ -112,6 +113,19 @@ export function buildGoatBrainActivityEvents(
         at: job.completed_at ?? job.updated_at,
         title: `Filing failed after ${job.attempts} ${job.attempts === 1 ? "attempt" : "attempts"}`,
         detail: truncateDetail(job.last_error),
+        sourceTitle,
+        brainId: null,
+        pages: [],
+        trace: null,
+      });
+    } else if (job.status === "queued" && job.plan_paused) {
+      events.push({
+        id: `${job.id}:paused`,
+        traceId: job.id,
+        kind: "paused",
+        at: job.updated_at,
+        title: "Paused by plan",
+        detail: "This ingestion will resume automatically when allowance becomes available.",
         sourceTitle,
         brainId: null,
         pages: [],
@@ -195,6 +209,16 @@ function draftIngestStateForJob(
       jobId: job.id,
       title,
       detail: null,
+      updatedAt: job.updated_at,
+      attempts: job.attempts,
+    };
+  }
+  if (job.plan_paused) {
+    return {
+      kind: "paused",
+      jobId: job.id,
+      title,
+      detail: "Paused by plan",
       updatedAt: job.updated_at,
       attempts: job.attempts,
     };

@@ -303,6 +303,7 @@ export type GoatBrainIngestJobRow = {
   kind: string;
   content_hash: string;
   status: "queued" | "running" | "succeeded" | "failed" | "skipped";
+  plan_paused: boolean;
   attempts: number;
   next_run_at: string;
   lease_id: string | null;

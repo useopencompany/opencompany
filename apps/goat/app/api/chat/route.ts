@@ -326,7 +326,13 @@ export async function POST(request: Request): Promise<Response> {
               draftId: captured.draftBrainId,
               path: captured.path,
               title: captured.title,
-              status: "captured",
+              status: captured.quotaPaused ? "paused_by_plan" : "captured",
+              ...(captured.quotaPaused
+                ? {
+                    message:
+                      "Saved to the brain inbox. Ingestion is paused by the workspace plan; see Settings → Usage or Billing to review the limit or upgrade.",
+                  }
+                : {}),
             };
           },
         }

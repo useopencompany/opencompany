@@ -19,6 +19,7 @@
     "@ai-sdk/react": "3.0.191",
     "@modelcontextprotocol/sdk": "1.26.0",
     "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/file-extract": "workspace:*",
@@ -51,6 +52,7 @@
     "redis": "^6.1.0",
     "remark-gfm": "^4.0.1",
     "resumable-stream": "^2.2.12",
+    "stripe": "^22.1.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
