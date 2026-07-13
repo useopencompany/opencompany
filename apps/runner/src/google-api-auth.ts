@@ -164,23 +164,7 @@ export async function googleApiCall(input: {
   body?: unknown;
   signal: AbortSignal;
 }): Promise<unknown> {
-  const run = async (token: string) =>
-    fetch(input.url, {
-      method: input.method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(input.body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      signal: input.signal,
-      ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
-    });
-
-  let token = await getGoogleAccessToken(input);
-  let response = await run(token);
-  if (response.status === 401) {
-    token = await getGoogleAccessToken({ ...input, forceRefresh: true });
-    response = await run(token);
-  }
+  const response = await googleApiFetch(input);
 
   if (response.status === 204) return {};
   const text = await response.text();
@@ -193,8 +177,38 @@ export async function googleApiCall(input: {
   return text ? JSON.parse(text) : {};
 }
 
+export async function googleApiFetch(input: {
+  env: RunnerEnv;
+  userWorkosId: string;
+  account: GoogleApiAccount;
+  method: string;
+  url: string;
+  body?: unknown;
+  signal: AbortSignal;
+}): Promise<Response> {
+  const run = async (token: string) =>
+    fetch(input.url, {
+      method: input.method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(input.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      signal: input.signal,
+      ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
+    });
+  let token = await getGoogleAccessToken(input);
+  let response = await run(token);
+  if (response.status === 401) {
+    token = await getGoogleAccessToken({ ...input, forceRefresh: true });
+    response = await run(token);
+  }
+  return response;
+}
+
 export function googleProviderDisplayName(provider: GoatIntegrationProvider) {
-  return provider === "gmail" ? "Gmail" : "Google Calendar";
+  if (provider === "gmail") return "Gmail";
+  if (provider === "google_drive") return "Google Drive";
+  return "Google Calendar";
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): Record<string, unknown> {

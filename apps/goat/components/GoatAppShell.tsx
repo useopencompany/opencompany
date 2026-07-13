@@ -105,6 +105,10 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     featureFlags: goatFeatureFlagsFromUser(user),
     codexConnected: codex.status === "connected",
     chatResumeEnabled: isGoatChatResumeEnabled(),
+    mcpSetup: {
+      preferredClient: user.preferredMcpClient,
+      completedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,
+    },
   };
 
   return <GoatAppDataProvider initialData={initialData}>{children}</GoatAppDataProvider>;
@@ -127,7 +131,7 @@ function brainSummaryView(brain: {
 }
 
 function buildIntegrationState(input: {
-  googleIntegrations: Pick<GoatIntegrationState, "gmail" | "google_calendar">;
+  googleIntegrations: Pick<GoatIntegrationState, "gmail" | "google_calendar" | "google_drive">;
   linear: GoatIntegrationState["linear"];
   github: GoatIntegrationState["github"];
   jamie: GoatIntegrationState["jamie"];

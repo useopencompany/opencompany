@@ -3,6 +3,7 @@
 import { currentGoatBrainByRef } from "@/lib/auth";
 import {
   type BrainMutationResult,
+  createGoatBrainDocumentForUser,
   createGoatBrainFolderForUser,
   deleteGoatBrainDocumentForUser,
   deleteGoatBrainFolderForUser,
@@ -19,10 +20,24 @@ import {
 
 // All mutations run against the explicit route-selected brain after checking
 // that the current user can access it.
-// Creating markdown documents is deliberately not exposed as an action:
-// written content enters through the brain CLI and ingestion agents only.
-// File uploads are the one exception — the upload action registers a binary
-// asset whose curation still happens through the ingestion agent.
+// Manual markdown and folder creation are admin-only mutations. Automated and
+// external content still enters through the brain CLI and ingestion agents.
+
+export async function createGoatBrainDocumentAction(input: {
+  brainRef: string;
+  folderPath: string;
+  fileName: string;
+}): Promise<BrainMutationResult> {
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
+  return createGoatBrainDocumentForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    folderPath: input.folderPath,
+    fileName: input.fileName,
+  });
+}
 
 export async function updateGoatBrainDocumentAction(input: {
   brainRef: string;

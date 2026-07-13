@@ -1,5 +1,7 @@
 import {
   createGoatBrainFolderRow,
+  createGoatBrainMarkdownContent,
+  createGoatBrainMarkdownDocument,
   deleteGoatBrainFile,
   deleteGoatBrainFolderRow,
   deriveGoatBrainFileProjection,
@@ -34,6 +36,7 @@ import {
   isValidGoatBrainKind,
   normalizeGoatBrainCompiledTruth,
   normalizeGoatBrainFolderForV1,
+  normalizeGoatBrainId,
   nowIso,
   parseGoatBrainDocument,
   serializeGoatBrainDocument,
@@ -151,6 +154,61 @@ export async function updateGoatBrainDocumentForUser(input: {
     path: goatBrainFilePathFor(row.folderPath, row.brainId),
     document: documentViewFromFileRow(row),
   };
+}
+
+export async function createGoatBrainDocumentForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  folderPath: string;
+  fileName: string;
+}): Promise<BrainMutationResult> {
+  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
+  if (!isValidGoatBrainFolder(folderPath)) {
+    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
+  }
+
+  const fileName = input.fileName.trim();
+  if (!fileName) return { ok: false, message: "Give the Markdown file a name." };
+  if (fileName.includes("/") || fileName.includes("\\")) {
+    return { ok: false, message: "File names cannot include a folder path." };
+  }
+  const title = fileName.replace(/\.md$/i, "").trim();
+  if (!title) return { ok: false, message: "Give the Markdown file a name." };
+  if (title.length > 160) {
+    return { ok: false, message: "File names must be 160 characters or fewer." };
+  }
+
+  const baseId = normalizeGoatBrainId(title);
+  if (!baseId) {
+    return { ok: false, message: "File names must contain at least one letter or number." };
+  }
+
+  try {
+    const rows = await listGoatBrainFiles({ brainRef: input.brainRef }, { includeInvalid: true });
+    const used = new Set(rows.map((row) => row.brainId));
+    for (let suffix = 1; suffix < 1000; suffix++) {
+      const brainId = goatBrainIdCandidate(baseId, suffix);
+      if (used.has(brainId)) continue;
+      const path = goatBrainFilePathFor(folderPath, brainId);
+      const row = await createGoatBrainMarkdownDocument({
+        brainRef: input.brainRef,
+        userWorkosId: input.userWorkosId,
+        path,
+        content: createGoatBrainMarkdownContent({
+          id: brainId,
+          folderPath,
+          title,
+          type: "note",
+          status: "draft",
+        }),
+      });
+      if (row) return { ok: true, path, document: documentViewFromFileRow(row) };
+      used.add(brainId);
+    }
+    throw new Error("Could not allocate a unique brain id.");
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
 }
 
 export async function renameGoatBrainDocumentForUser(input: {
@@ -421,11 +479,18 @@ export async function nextAvailableGoatBrainId(brainRef: string, baseId: string)
   const rows = await listGoatBrainFiles({ brainRef }, { includeInvalid: true });
   const used = new Set(rows.map((row) => row.brainId));
   if (!used.has(base)) return base;
-  for (let i = 2; i < 1000; i++) {
-    const candidate = `${base}-${i}`;
+  for (let suffix = 2; suffix < 1000; suffix++) {
+    const candidate = goatBrainIdCandidate(base, suffix);
     if (!used.has(candidate)) return candidate;
   }
   throw new Error("Could not allocate a unique brain id.");
+}
+
+function goatBrainIdCandidate(base: string, suffix: number): string {
+  if (suffix <= 1) return base;
+  const ending = `-${suffix}`;
+  const prefix = base.slice(0, 80 - ending.length).replace(/-+$/g, "");
+  return `${prefix || "untitled"}${ending}`;
 }
 
 export { hashGoatBrainContent };

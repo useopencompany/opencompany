@@ -37,6 +37,7 @@ import {
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
   type NormalizedGoatChatCaptureSourceItem,
+  type NormalizedGoogleDriveDocumentSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
@@ -104,6 +105,7 @@ const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
 const PROMPT_GMAIL_MESSAGES_BYTES = 80_000;
+const PROMPT_GOOGLE_DRIVE_DOCUMENT_BYTES = 100_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
 const INFERRED_NO_MUTATION_SKIP_REASON =
   "No brain-worthy content identified; agent completed without brain mutations.";
@@ -251,6 +253,44 @@ export const GMAIL_THREAD_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPromp
     "folds one window of email-thread activity into a single brain of Markdown knowledge documents.",
   skipRule: `Email is high-noise: newsletters, receipts, notifications, automated mail, and scheduling logistics carry no durable knowledge. If nothing in the thread window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, commitments, plans, and facts about people, companies, or projects belong in the brain. When the brain owner's ingestion instructions are provided in the task, they refine this judgment about what matters and what to skip; they never override your working discipline.`,
 });
+
+export const GOOGLE_DRIVE_DOCUMENT_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one changed Google Drive document into a single brain of Markdown knowledge documents.",
+  skipRule: `If the document has no durable knowledge or its extracted text is empty, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Google Drive is the live canonical home: never create an evidence/ snapshot or copy the whole document into a brain page.`,
+});
+
+export function buildGoogleDriveDocumentAgentIngestPrompt(
+  item: NormalizedGoogleDriveDocumentSourceItem,
+) {
+  const document = item.content.document;
+  const extractedText = truncateByBytes(document.extractedText, PROMPT_GOOGLE_DRIVE_DOCUMENT_BYTES);
+  const truncated =
+    Buffer.byteLength(extractedText, "utf8") < Buffer.byteLength(document.extractedText, "utf8");
+  return [
+    "Ingest this changed Google Drive document into the brain.",
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Query the brain first for likely existing pages and facts before writing, so you update durable knowledge instead of duplicating it.",
+    "2. Extract only durable facts, decisions, commitments, plans, and substantive knowledge. Ignore formatting churn and boilerplate.",
+    `3. Cite every synthesized fact or timeline entry with --source-ref ${item.sourceRef}. Use the canonical Drive link as the live pointer when one is available.`,
+    "4. Google Drive follows the pointer rule: Drive remains the canonical home. Do not create an evidence/ snapshot, paste the whole document into compiled truth, or create a page merely to mirror this file.",
+    "5. A document may justify a source, project, company, person, concept, or analysis page when its content is itself durable knowledge; otherwise fold facts into existing pages.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Name: ${document.name}`,
+    `MIME type: ${document.mimeType}`,
+    `Modified: ${document.modifiedTime}`,
+    document.webViewLink ? `Canonical link: ${document.webViewLink}` : null,
+    document.owners?.length ? `Owners: ${document.owners.join("; ")}` : null,
+    document.lastModifyingUser ? `Last modified by: ${document.lastModifyingUser}` : null,
+    truncated ? "The extracted text below was truncated to fit the 100 KB prompt limit." : null,
+    "",
+    `## Extracted document text\n${extractedText}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
 
 export function buildGmailThreadAgentIngestPrompt(
   item: NormalizedGmailThreadSourceItem,
@@ -1160,6 +1200,44 @@ export async function runGmailThreadAgentIngest(
     hadInstructions: Boolean(instructions),
     windowStart: thread.windowStart,
     windowEnd: thread.windowEnd,
+  };
+}
+
+export async function runGoogleDriveDocumentAgentIngest(
+  input: {
+    jobId?: string;
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedGoogleDriveDocumentSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const document = input.item.content.document;
+  const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: GOOGLE_DRIVE_DOCUMENT_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildGoogleDriveDocumentAgentIngestPrompt(input.item),
+    // Drive content is authored by its document collaborators, not the
+    // personal integration owner.
+    createdByWorkosId: null,
+    noMutationOutcome: "skip",
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    fileId: document.fileId,
+    mimeType: document.mimeType,
+    version: document.version,
+    canonicalLink: document.webViewLink ?? null,
   };
 }
 

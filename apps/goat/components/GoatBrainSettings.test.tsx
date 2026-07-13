@@ -9,11 +9,13 @@ import type { GoatJamieProviderState } from "@/lib/integration-state";
 
 const brainSourceActionsMock = vi.hoisted(() => ({
   getGoatBrainSourcesAction: vi.fn(),
+  listGoatGoogleDriveResourcesAction: vi.fn(),
   listGoatGitHubRepositoriesAction: vi.fn(),
   listGoatLinearTeamsAction: vi.fn(),
   listGoatSlackConversationsAction: vi.fn(),
   setGoatBrainGitHubSourceAction: vi.fn(),
   setGoatBrainGmailSourceAction: vi.fn(),
+  setGoatBrainGoogleDriveSourceAction: vi.fn(),
   setGoatBrainLinearSourceAction: vi.fn(),
   setGoatBrainSlackSourceAction: vi.fn(),
   setGoatBrainSourceEnabledAction: vi.fn(async () => ({ ok: true })),
@@ -35,6 +37,29 @@ describe("GoatBrainSourceCards", () => {
     brainSourceActionsMock.getGoatBrainSourcesAction.mockReset();
     brainSourceActionsMock.getGoatBrainSourcesAction.mockResolvedValue(brainSourceDetails());
     brainSourceActionsMock.setGoatBrainSourceEnabledAction.mockClear();
+    brainSourceActionsMock.listGoatGoogleDriveResourcesAction.mockResolvedValue({
+      ok: true,
+      files: [
+        {
+          id: "drive_file_1",
+          name: "Roadmap",
+          kind: "file",
+          mimeType: "application/vnd.google-apps.document",
+          driveId: null,
+          webViewLink: "https://docs.google.com/document/d/drive_file_1/edit",
+        },
+        {
+          id: "drive_folder_1",
+          name: "Product",
+          kind: "folder",
+          mimeType: "application/vnd.google-apps.folder",
+          driveId: null,
+          webViewLink: "https://drive.google.com/drive/folders/drive_folder_1",
+        },
+      ],
+      nextPageToken: null,
+    });
+    brainSourceActionsMock.setGoatBrainGoogleDriveSourceAction.mockResolvedValue({ ok: true });
     toastMock.error.mockClear();
   });
 
@@ -78,6 +103,50 @@ describe("GoatBrainSourceCards", () => {
     const toggle = await screen.findByRole("switch", { name: "Jamie source" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByText("Needs setup")).not.toBeInTheDocument();
+  });
+
+  it("browses and saves personal Drive selections with the workspace visibility warning", async () => {
+    const user = userEvent.setup();
+    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "google_drive");
+    if (!provider) throw new Error("Google Drive source provider is not registered.");
+    render(
+      <SourceProviderCard
+        brainRef="goat_brain_1"
+        provider={provider}
+        details={brainSourceDetails({
+          googleDrive: {
+            integration: {
+              provider: "google_drive",
+              connected: true,
+              status: "connected",
+              integrationId: "gint_drive_1",
+              accountEmail: "owner@example.com",
+              statusReason: null,
+            },
+          },
+        })}
+        onChanged={async () => {}}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Selected Drive content will be summarized into this brain/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Select files and folders/ }));
+    expect(await screen.findByText("Roadmap")).toBeInTheDocument();
+    expect(screen.getByText("Recursive")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Roadmap" }));
+    await user.click(screen.getByRole("button", { name: "Save Google Drive source" }));
+
+    await waitFor(() =>
+      expect(brainSourceActionsMock.setGoatBrainGoogleDriveSourceAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        integrationId: "gint_drive_1",
+        enabled: true,
+        resourceIds: ["drive_file_1"],
+      }),
+    );
   });
 
   it("supports onboarding-owned setup actions and links to the manual guide", async () => {
@@ -177,6 +246,16 @@ function brainSourceDetails(
     gmail: {
       integration: {
         provider: "gmail",
+        connected: false,
+        status: "not_connected",
+        integrationId: null,
+        accountEmail: null,
+        statusReason: null,
+      },
+    },
+    googleDrive: {
+      integration: {
+        provider: "google_drive",
         connected: false,
         status: "not_connected",
         integrationId: null,

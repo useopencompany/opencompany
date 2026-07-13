@@ -1,13 +1,13 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { Brain, Check, Copy } from "lucide-react";
+import { Brain, PlugZap } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import type { GoatBrainSummaryView, GoatWorkspaceView } from "@/components/GoatAppDataProvider";
 import { GoatBrainOverviewFlow } from "@/components/GoatBrainOverviewFlow";
 import { BrainSourcesSection } from "@/components/GoatBrainSourceCards";
 import { VisibilityOption } from "@/components/GoatBrainSwitcher";
-import { useHydrated } from "@/components/useHydrated";
 import {
   type GoatWorkspaceMemberView,
   getGoatBrainAccessDetailsAction,
@@ -64,8 +64,8 @@ export function GoatBrainSettings({
             <EnrichmentSection brainRef={brain.id} />
           </SettingsSection>
 
-          <SettingsSection title="Claude connector">
-            <ClaudeConnectorBlock brainRef={brain.id} />
+          <SettingsSection title="AI clients">
+            <McpSetupLink />
           </SettingsSection>
 
           <SettingsSection title="Sources">
@@ -296,48 +296,19 @@ function EnrichmentSection({ brainRef }: { brainRef: string }) {
   );
 }
 
-function ClaudeConnectorBlock({ brainRef }: { brainRef: string }) {
-  const [copied, setCopied] = useState(false);
-  const hydrated = useHydrated();
-  const origin = hydrated ? window.location.origin.replace(/\/+$/, "") : "";
-  const connectorPath = `/api/mcp/${encodeURIComponent(brainRef)}/mcp`;
-  const connectorUrl = origin ? `${origin}${connectorPath}` : connectorPath;
-
-  const copyConnectorUrl = async () => {
-    if (!origin) return;
-    try {
-      await navigator.clipboard.writeText(connectorUrl);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      toast.error("Could not copy connector URL.");
-    }
-  };
-
+function McpSetupLink() {
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-ink/10 p-2.5">
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <span className="block text-[12px] font-medium text-ink">Connect to Claude</span>
-          <code className="block truncate text-[12px] leading-5 text-ink-subtle">
-            {connectorUrl}
-          </code>
-        </div>
-        <button
-          type="button"
-          onClick={copyConnectorUrl}
-          disabled={!origin}
-          aria-label="Copy Claude connector URL"
-          title="Copy Claude connector URL"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {copied ? <Check size={15} strokeWidth={2} /> : <Copy size={15} strokeWidth={2} />}
-        </button>
+    <Link
+      href="/setup/mcp"
+      className="flex items-center gap-3 rounded-md border border-ink/10 p-3 transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <PlugZap size={16} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+      <div className="min-w-0 flex-1">
+        <span className="block text-[13px] font-medium text-ink">Connect Goat Brain</span>
+        <span className="block text-[12px] leading-5 text-ink-subtle">
+          Set up Claude, ChatGPT, or Cursor and verify your first Brain query.
+        </span>
       </div>
-      <p className="text-[11.5px] leading-4 text-ink-subtle">
-        Claude -&gt; Settings -&gt; Connectors -&gt; Add custom connector, then sign in with your
-        Goat account.
-      </p>
-    </div>
+    </Link>
   );
 }
