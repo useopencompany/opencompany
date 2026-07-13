@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
@@ -185,14 +185,40 @@ const themeOptions: Array<{ value: ThemeMode; label: string; icon: typeof Monito
 
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
+  const selectedIndex = themeOptions.findIndex((option) => option.value === theme);
+
+  function selectThemeOption(index: number, group: HTMLDivElement) {
+    const option = themeOptions[index];
+    if (!option) return;
+
+    setTheme(option.value);
+    requestAnimationFrame(() => {
+      group.querySelector<HTMLButtonElement>(`[data-theme-option="${option.value}"]`)?.focus();
+    });
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const currentIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      selectThemeOption((currentIndex + 1) % themeOptions.length, event.currentTarget);
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      selectThemeOption(
+        (currentIndex - 1 + themeOptions.length) % themeOptions.length,
+        event.currentTarget,
+      );
+    }
+  }
 
   return (
     <div
       className="inline-flex w-fit rounded-lg border border-border bg-surface p-1 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
       role="radiogroup"
       aria-label="Theme"
+      onKeyDown={handleKeyDown}
     >
-      {themeOptions.map((option) => {
+      {themeOptions.map((option, index) => {
         const Icon = option.icon;
         const selected = theme === option.value;
 
@@ -202,6 +228,8 @@ function AppearanceSection() {
             type="button"
             role="radio"
             aria-checked={selected}
+            tabIndex={selected || (selectedIndex === -1 && index === 0) ? 0 : -1}
+            data-theme-option={option.value}
             onClick={() => setTheme(option.value)}
             className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
               selected

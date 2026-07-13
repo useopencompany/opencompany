@@ -125,16 +125,17 @@ describe("GoatSettingsRoute", () => {
     const user = userEvent.setup();
     const { rerender } = render(<GoatPreferencesSettingsRoute />);
 
-    expect(screen.getByRole("radio", { name: "System" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: "System" })).toHaveAttribute("aria-checked", "true");
 
     await user.click(screen.getByRole("radio", { name: "Dark" }));
     expect(themeMock.setTheme).toHaveBeenCalledWith("dark");
 
     rerender(<GoatPreferencesSettingsRoute />);
     expect(screen.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "System" })).toHaveAttribute("aria-checked", "false");
+
+    await user.keyboard("{ArrowLeft}");
+    expect(themeMock.setTheme).toHaveBeenLastCalledWith("light");
   });
 
   it("shows the Local Codex bridge beta switch and persists changes", async () => {

@@ -4,10 +4,11 @@ import { useServerInsertedHTML } from "next/navigation";
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 export type ThemeMode = "system" | "light" | "dark";
+type ResolvedTheme = "light" | "dark";
 
 type ThemeContextValue = {
   theme: ThemeMode;
-  resolvedTheme: "light" | "dark";
+  resolvedTheme: ResolvedTheme;
   setTheme: (theme: ThemeMode) => void;
 };
 
@@ -15,17 +16,18 @@ const THEME_COOKIE = "opencompany-goat-theme";
 const THEME_STORAGE_KEY = "opencompany-goat-theme";
 const THEME_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const THEME_VALUES = new Set<ThemeMode>(["system", "light", "dark"]);
+const THEME_SCRIPT_VALUES = Object.fromEntries([...THEME_VALUES].map((value) => [value, 1]));
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 const themeListeners = new Set<() => void>();
 
-const themeInitScript = `(()=>{try{var e="opencompany-goat-theme",t={system:1,light:1,dark:1},m=localStorage.getItem(e);if(!t[m]){var r=document.cookie.match(/(?:^|; )opencompany-goat-theme=([^;]*)/);m=r?decodeURIComponent(r[1]):"system"}if(!t[m])m="system";var o=m==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):m;document.documentElement.dataset.theme=m;document.documentElement.dataset.resolvedTheme=o}catch(e){}})();`;
+const themeInitScript = `(()=>{try{var e=${JSON.stringify(THEME_STORAGE_KEY)},c=${JSON.stringify(THEME_COOKIE)},t=${JSON.stringify(THEME_SCRIPT_VALUES)},m=localStorage.getItem(e);if(!t[m]){var r=document.cookie.match(new RegExp("(?:^|; )"+c+"=([^;]*)"));m=r?decodeURIComponent(r[1]):"system"}if(!t[m])m="system";var o=m==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):m;document.documentElement.dataset.theme=m;document.documentElement.dataset.resolvedTheme=o}catch(e){}})();`;
 
 function isThemeMode(value: unknown): value is ThemeMode {
   return typeof value === "string" && THEME_VALUES.has(value as ThemeMode);
 }
 
-function resolveTheme(theme: ThemeMode): "light" | "dark" {
+function resolveTheme(theme: ThemeMode): ResolvedTheme {
   if (theme !== "system") return theme;
   if (typeof window === "undefined") return "light";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -50,6 +52,18 @@ function themeSnapshot() {
   return readStoredTheme() ?? "system";
 }
 
+type ThemeStateSnapshot = `${ThemeMode}:${ResolvedTheme}`;
+
+function themeStateSnapshot(): ThemeStateSnapshot {
+  const theme = themeSnapshot();
+  return `${theme}:${resolveTheme(theme)}`;
+}
+
+function parseThemeStateSnapshot(snapshot: ThemeStateSnapshot) {
+  const [theme, resolvedTheme] = snapshot.split(":") as [ThemeMode, ResolvedTheme];
+  return { theme, resolvedTheme };
+}
+
 function subscribeTheme(listener: () => void) {
   themeListeners.add(listener);
 
@@ -72,7 +86,7 @@ function notifyThemeListeners() {
   for (const listener of themeListeners) listener();
 }
 
-function applyTheme(theme: ThemeMode, resolvedTheme: "light" | "dark") {
+function applyTheme(theme: ThemeMode, resolvedTheme: ResolvedTheme) {
   document.documentElement.dataset.theme = theme;
   document.documentElement.dataset.resolvedTheme = resolvedTheme;
   window.localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -91,12 +105,12 @@ export function ThemeProvider({
     <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
   ));
 
-  const theme = useSyncExternalStore(subscribeTheme, themeSnapshot, () => initialTheme);
-  const resolvedTheme = useSyncExternalStore(
+  const snapshot = useSyncExternalStore(
     subscribeTheme,
-    () => resolveTheme(themeSnapshot()),
-    () => resolveTheme(initialTheme),
+    themeStateSnapshot,
+    () => `${initialTheme}:${resolveTheme(initialTheme)}` as ThemeStateSnapshot,
   );
+  const { theme, resolvedTheme } = useMemo(() => parseThemeStateSnapshot(snapshot), [snapshot]);
 
   useEffect(() => {
     const storedTheme = readStoredTheme();
