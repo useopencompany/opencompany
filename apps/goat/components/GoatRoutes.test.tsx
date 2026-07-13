@@ -20,13 +20,14 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { localCodexBridge: false },
+    featureFlags: { taskSpawning: false, localCodexBridge: false },
     integrations: {},
   },
 }));
 
 const userPreferencesMock = vi.hoisted(() => ({
   updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -91,6 +92,7 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
 
 vi.mock("@/lib/user-preferences", () => ({
   updateGoatLocalCodexBetaAction: userPreferencesMock.updateGoatLocalCodexBetaAction,
+  updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -112,6 +114,7 @@ describe("GoatSettingsRoute", () => {
     themeMock.setTheme.mockClear();
     routerMock.refresh.mockReset();
     userPreferencesMock.updateGoatLocalCodexBetaAction.mockClear();
+    userPreferencesMock.updateGoatTaskSpawningAction.mockClear();
     toastMock.success.mockClear();
     toastMock.error.mockClear();
     fetchMock.mockReset();
@@ -153,6 +156,33 @@ describe("GoatSettingsRoute", () => {
 
     expect(userPreferencesMock.updateGoatLocalCodexBetaAction).toHaveBeenCalledWith(true);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+  });
+
+  it("shows the background tasks switch off by default and persists opt-in", async () => {
+    const user = userEvent.setup();
+    render(<GoatPreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Background tasks" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+
+    expect(userPreferencesMock.updateGoatTaskSpawningAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Download Mac launcher" })).not.toBeInTheDocument();
+  });
+
+  it("shows an error when a preference update is rejected", async () => {
+    userPreferencesMock.updateGoatTaskSpawningAction.mockRejectedValueOnce(
+      new Error("database unavailable"),
+    );
+    const user = userEvent.setup();
+    render(<GoatPreferencesSettingsRoute />);
+
+    await user.click(screen.getByRole("switch", { name: "Background tasks" }));
+
+    expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
+    expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
   it("downloads a paired Local Codex bridge launcher when beta is enabled", async () => {

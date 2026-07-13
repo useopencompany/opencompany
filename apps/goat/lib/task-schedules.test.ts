@@ -5,11 +5,14 @@ import { createGoatTaskScheduleForUser } from "@/lib/task-schedules";
 const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
   planGoatTaskHarness: vi.fn(),
+  select: vi.fn(),
+  transaction: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
-    insert: mocks.insert,
+    select: mocks.select,
+    transaction: mocks.transaction,
   }),
 }));
 
@@ -37,6 +40,25 @@ describe("createGoatTaskScheduleForUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.planGoatTaskHarness.mockResolvedValue(harnessSpec);
+    mocks.transaction.mockImplementation(async (callback) =>
+      callback({ insert: mocks.insert, select: mocks.select }),
+    );
+    mocks.select.mockReturnValueOnce({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [{ enabled: true }]),
+        })),
+      })),
+    });
+    mocks.select.mockReturnValueOnce({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(() => ({
+            for: vi.fn(async () => [{ enabled: true }]),
+          })),
+        })),
+      })),
+    });
     mocks.insert.mockReturnValue({
       values: vi.fn(() => ({
         returning: vi.fn(async () => [
@@ -95,5 +117,61 @@ describe("createGoatTaskScheduleForUser", () => {
       }),
     ).rejects.toThrow("valid 5-field cron");
     expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
+  });
+
+  it("rejects schedule creation when background tasks are disabled", async () => {
+    mocks.select.mockReset();
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [{ enabled: false }]),
+        })),
+      })),
+    });
+
+    await expect(
+      createGoatTaskScheduleForUser({
+        userWorkosId: "user_1",
+        name: "Daily briefing",
+        cron: "0 9 * * *",
+        timezone: "UTC",
+        prompt: "Send a daily briefing.",
+      }),
+    ).rejects.toThrow("Background tasks are disabled");
+    expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the flag under a row lock before inserting a schedule", async () => {
+    mocks.select.mockReset();
+    mocks.select
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [{ enabled: true }]),
+          })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => ({
+              for: vi.fn(async () => [{ enabled: false }]),
+            })),
+          })),
+        })),
+      });
+
+    await expect(
+      createGoatTaskScheduleForUser({
+        userWorkosId: "user_1",
+        name: "Daily briefing",
+        cron: "0 9 * * *",
+        timezone: "UTC",
+        prompt: "Send a daily briefing.",
+      }),
+    ).rejects.toThrow("Background tasks are disabled");
+    expect(mocks.planGoatTaskHarness).toHaveBeenCalledOnce();
+    expect(mocks.insert).not.toHaveBeenCalled();
   });
 });

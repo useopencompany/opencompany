@@ -373,6 +373,7 @@ export const goatUsers = goat.table(
     lastName: text("last_name"),
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
+    taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
     // Set exactly once, when this user first completes a successful Brain query over MCP.

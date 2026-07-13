@@ -85,11 +85,17 @@ export function GoatAppDataProvider({
   children: ReactNode;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
-  const { data: taskRows, isLoading: tasksLoading } = useLiveQuery((q) =>
-    q.from({ task: collections.tasks }),
+  const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
+    (q) =>
+      initialData.featureFlags.taskSpawning ? q.from({ task: collections.tasks }) : undefined,
+    [initialData.featureFlags.taskSpawning, collections],
   );
-  const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery((q) =>
-    q.from({ schedule: collections.taskSchedules }),
+  const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
+    (q) =>
+      initialData.featureFlags.taskSpawning
+        ? q.from({ schedule: collections.taskSchedules })
+        : undefined,
+    [initialData.featureFlags.taskSpawning, collections],
   );
   const { data: chatSessionRows, isLoading: chatsLoading } = useLiveQuery((q) =>
     q.from({ session: collections.chatSessions }),
@@ -99,20 +105,27 @@ export function GoatAppDataProvider({
   );
 
   const tasks = useMemo(() => {
+    if (!initialData.featureFlags.taskSpawning) return [];
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return ((taskRows ?? []) as GoatTaskRow[])
       .map(taskRowToView)
       .filter((task) => !task.archivedAt && isRecentGoatHomeActivity(task.createdAt))
       .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [initialData.tasks, taskRows, tasksLoading]);
+  }, [initialData.featureFlags.taskSpawning, initialData.tasks, taskRows, tasksLoading]);
 
   const schedules = useMemo(() => {
+    if (!initialData.featureFlags.taskSpawning) return [];
     if (schedulesLoading && !scheduleRows?.length) return initialData.schedules;
     return ((scheduleRows ?? []) as GoatTaskScheduleRow[])
       .filter((row) => !row.deleted_at)
       .map(taskScheduleRowToView)
       .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [initialData.schedules, scheduleRows, schedulesLoading]);
+  }, [
+    initialData.featureFlags.taskSpawning,
+    initialData.schedules,
+    scheduleRows,
+    schedulesLoading,
+  ]);
 
   const recentChats = useMemo(() => {
     if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
@@ -159,7 +172,7 @@ export function GoatAppDataProvider({
       schedules,
       recentChats,
       integrations,
-      taskRows: (taskRows ?? []) as GoatTaskRow[],
+      taskRows: initialData.featureFlags.taskSpawning ? ((taskRows ?? []) as GoatTaskRow[]) : [],
     }),
     [initialData, integrations, recentChats, schedules, taskRows, tasks],
   );

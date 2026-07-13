@@ -406,6 +406,44 @@ describe("POST /api/chat", () => {
     expect(listCurrentUserGoatTaskSchedules).not.toHaveBeenCalled();
   });
 
+  it("keeps background task and schedule behavior out of chat when the user has not opted in", async () => {
+    mockAuth({ taskSpawningEnabled: false });
+    mockCreateTurn();
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        tools?: Record<string, unknown>;
+      };
+      expect(typedOptions.system).not.toContain("The rest of the app is organized around tasks");
+      expect(typedOptions.system).not.toContain("Current recurring schedules");
+      expect(typedOptions.system).not.toContain("Start a task when the user asks");
+      expect(typedOptions.system).not.toMatch(/\btask(?:s)?\b|Results|routines/i);
+      expect(typedOptions.tools?.[GOAT_BRAIN_TOOL_NAME]).toBeDefined();
+      expect(typedOptions.tools?.[START_TASK_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[SCHEDULE_TASK_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[EDIT_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[DELETE_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "Research competitors" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(listCurrentUserGoatTaskSchedules).not.toHaveBeenCalled();
+    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+  });
+
   it("wires Exa-backed web_search into the model stream when configured", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:00:00.000Z"));
@@ -1026,6 +1064,7 @@ function mockAuth(
     firstName: string | null;
     lastName: string | null;
     timezone: string;
+    taskSpawningEnabled: boolean;
     role: "admin" | "member";
   }> = {},
 ) {
@@ -1048,6 +1087,9 @@ function mockAuth(
       lastName: user.lastName,
       avatarUrl: null,
       timezone: user.timezone,
+      taskSpawningEnabled: overrides.taskSpawningEnabled ?? true,
+      localCodexBetaEnabled: false,
+      onboardedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
     },

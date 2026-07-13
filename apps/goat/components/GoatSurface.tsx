@@ -196,6 +196,7 @@ export function GoatSurface({
   recentChats = [],
   codexConnected = false,
   localCodexBetaEnabled = false,
+  taskSpawningEnabled = false,
   chatResumeEnabled = false,
   userName = "there",
   userWorkosId = "",
@@ -207,6 +208,7 @@ export function GoatSurface({
   recentChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
   localCodexBetaEnabled?: boolean;
+  taskSpawningEnabled?: boolean;
   chatResumeEnabled?: boolean;
   userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
@@ -304,10 +306,13 @@ export function GoatSurface({
     () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const homeSchedules = useMemo(() => visibleHomeSchedules(schedules), [schedules]);
+  const homeSchedules = useMemo(
+    () => (taskSpawningEnabled ? visibleHomeSchedules(schedules) : []),
+    [schedules, taskSpawningEnabled],
+  );
   const homeResults = useMemo(
-    () => visibleHomeResults(tasks, optimisticallyArchivedIds),
-    [optimisticallyArchivedIds, tasks],
+    () => (taskSpawningEnabled ? visibleHomeResults(tasks, optimisticallyArchivedIds) : []),
+    [optimisticallyArchivedIds, taskSpawningEnabled, tasks],
   );
   const hasHomeActivity =
     homeChats.length > 0 || homeSchedules.length > 0 || homeResults.length > 0;
@@ -505,12 +510,14 @@ export function GoatSurface({
 
   const chatTaskLookup = useMemo(
     () =>
-      buildChatTaskLookup({
-        messages: chatMessages,
-        tasks,
-        liveTasks: liveChatTasks,
-      }),
-    [chatMessages, liveChatTasks, tasks],
+      taskSpawningEnabled
+        ? buildChatTaskLookup({
+            messages: chatMessages,
+            tasks,
+            liveTasks: liveChatTasks,
+          })
+        : new Map(),
+    [chatMessages, liveChatTasks, taskSpawningEnabled, tasks],
   );
   const activeChatSummary = chatSessionId
     ? (recentChats.find((chat) => chat.id === chatSessionId) ?? null)
@@ -1034,7 +1041,9 @@ export function GoatSurface({
         <CommandInput
           value={newChatPrompt}
           onValueChange={setNewChatPrompt}
-          placeholder="Describe the new chat or task..."
+          placeholder={
+            taskSpawningEnabled ? "Describe the new chat or task..." : "Describe the new chat..."
+          }
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
             event.preventDefault();
@@ -1064,7 +1073,7 @@ export function GoatSurface({
                   Create new background chat
                 </p>
                 <p className="truncate text-[12px] text-ink-subtle">
-                  {trimmedNewChatPrompt || "Start a chat that can spawn a task"}
+                  {trimmedNewChatPrompt || "Start another chat with Goat"}
                 </p>
               </div>
               <CommandShortcut>Enter</CommandShortcut>
@@ -1189,7 +1198,9 @@ export function GoatSurface({
           setSandboxStatus={setCodexSandboxStatus}
         />
       ) : null}
-      {mode === "chat" ? <LiveChatTasks setTasks={setLiveChatTasks} /> : null}
+      {mode === "chat" && taskSpawningEnabled ? (
+        <LiveChatTasks setTasks={setLiveChatTasks} />
+      ) : null}
 
       <form
         ref={formRef}
@@ -1268,7 +1279,11 @@ export function GoatSurface({
                   name="prompt"
                   value={input}
                   placeholder={
-                    mode === "chat" ? "Reply..." : "Ask a question or describe a task..."
+                    mode === "chat"
+                      ? "Reply..."
+                      : taskSpawningEnabled
+                        ? "Ask a question or describe a task..."
+                        : "Ask Goat anything..."
                   }
                   onChange={onInputChange}
                   onBlur={() => setMentionToken(null)}

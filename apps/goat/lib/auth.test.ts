@@ -64,6 +64,7 @@ const goatUser = {
   lastName: authUser.lastName,
   avatarUrl: authUser.profilePictureUrl,
   timezone: "America/Los_Angeles",
+  taskSpawningEnabled: false,
   localCodexBetaEnabled: false,
   createdAt: now,
   updatedAt: now,

@@ -140,11 +140,10 @@ export async function POST(request: Request): Promise<Response> {
   }
   const exaApiKey = process.env.EXA_API_KEY?.trim();
   const canManageWorkspaceBrain = context.role === "admin";
+  const taskToolsEnabled = context.user.taskSpawningEnabled && canManageWorkspaceBrain;
 
   const store = createDbGoatChatStore();
-  const recurringSchedules = canManageWorkspaceBrain
-    ? await listCurrentUserGoatTaskSchedules()
-    : [];
+  const recurringSchedules = taskToolsEnabled ? await listCurrentUserGoatTaskSchedules() : [];
   const startedAt = performance.now();
   const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
@@ -355,7 +354,7 @@ export async function POST(request: Request): Promise<Response> {
             }),
         }
       : {}),
-    ...(canManageWorkspaceBrain
+    ...(taskToolsEnabled
       ? {
           startTask: async (task) => {
             const created = await createGoatTaskForUser({
@@ -550,8 +549,8 @@ export async function POST(request: Request): Promise<Response> {
           }
         : null,
       brainCaptureEnabled: canManageWorkspaceBrain,
-      taskToolsEnabled: canManageWorkspaceBrain,
-      scheduleToolsEnabled: canManageWorkspaceBrain,
+      taskToolsEnabled,
+      scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,
     }),
     messages: await convertToModelMessages(

@@ -59,6 +59,7 @@ describe("sweepDueGoatTaskSchedules", () => {
     ).resolves.toEqual({ checked: 1, created: 1 });
 
     expect(onTaskCreated).toHaveBeenCalledOnce();
+    expect(sqlTextFromExecuteCall(execute, 0)).toContain("task_spawning_enabled");
     expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.tasks");
     expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.task_messages");
   });
