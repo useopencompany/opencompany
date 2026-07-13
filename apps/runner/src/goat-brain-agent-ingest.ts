@@ -27,6 +27,7 @@ import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail"
 import {
   getDefaultGoatBrainForUser,
   getGoatBrainEnrichmentEnabled,
+  getGoatUserDisplayName,
 } from "@opencompany/db/goat-workspaces";
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
@@ -189,6 +190,7 @@ function buildGoatBrainIngestSystemPrompt(input: { mission: string; skipRule: st
     "- Compiled truth is a rewrite, not a log: when a page's state of play changes, use rewrite to replace it with the current durable synthesis. Do not append updates to the bottom of compiled truth.",
     "- Timeline entries are concise dated evidence: use timeline-add with what happened and why it matters, always with --source-ref (and --evidence-id when an evidence record exists).",
     "- Backlink iron law: every mention of an entity that has a brain page must be written as a [[page:...]] link — in compiled truth and in timeline entries.",
+    '- Name people: when the source shows who said, decided, proposed, or captured something, attribute it to them by name in compiled truth and timeline entries — as a [[page:...]] link when they have a page, a plain name otherwise. Prefer "Anna proposed X" over passive phrasing like "it was proposed". Never guess an author the source does not identify.',
     `- ${GOAT_BRAIN_POINTER_COPY_RULE.split("\n").join("\n  ")}`,
     "- No fabrication: write only what the source or the brain supports. If the source does not say it, it does not go in.",
     "- Status discipline: status is the curation signal. New pages start as draft; once a page's compiled truth is a durable synthesis that cites evidence with [[evidence:...]], promote it with `set <id> --status active` (the brain rejects active pages whose compiled truth has no citation). Leave a page draft only when it is genuinely uncurated.",
@@ -614,11 +616,16 @@ function boundedTranscriptMarkdown(item: NormalizedJamieMeetingSourceItem) {
   return formatTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
-export function buildGoatChatCaptureAgentIngestPrompt(item: NormalizedGoatChatCaptureSourceItem) {
+export function buildGoatChatCaptureAgentIngestPrompt(
+  item: NormalizedGoatChatCaptureSourceItem,
+  context: { capturedByName?: string | null } = {},
+) {
   const capture = item.content.capture;
   const draftPath = `${capture.draftFolder}/${capture.draftBrainId}.md`;
   return [
-    "Curate this chat capture into the brain. The user explicitly asked to save it during a chat conversation.",
+    context.capturedByName
+      ? `Curate this chat capture into the brain. ${context.capturedByName} explicitly asked to save it during a chat conversation; when you write it up, attribute the idea or capture to ${context.capturedByName} by name (unless the capture text itself names a different author).`
+      : "Curate this chat capture into the brain. The user explicitly asked to save it during a chat conversation.",
     "",
     `The raw capture is already stored as a draft page with id "${capture.draftBrainId}" at ${draftPath} (type: note, status: draft). Start by reading it with get, then decide its proper home.`,
     "",
@@ -959,6 +966,18 @@ export async function runGoatChatCaptureAgentIngest(
   },
   deps: GoatBrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
+  // The capture's author is the acting user; their name lets the agent
+  // attribute the idea in prose instead of writing "the user".
+  const capturedByName = await getGoatUserDisplayName(input.userWorkosId, {
+    db: getDb(),
+  }).catch((error) => {
+    logger.warn("Goat chat capture ingest user name lookup failed", {
+      event: "opencompany.goat_chat_capture_user_name_lookup_failed",
+      user_workos_id: input.userWorkosId,
+      error,
+    });
+    return null;
+  });
   const session = await runBrainAgentIngestSession({
     jobId: input.jobId ?? input.item.sourceRef,
     userWorkosId: input.userWorkosId,
@@ -966,7 +985,7 @@ export async function runGoatChatCaptureAgentIngest(
     sourceRef: input.item.sourceRef,
     env: input.env,
     system: GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
-    buildPrompt: () => buildGoatChatCaptureAgentIngestPrompt(input.item),
+    buildPrompt: () => buildGoatChatCaptureAgentIngestPrompt(input.item, { capturedByName }),
     commands: CAPTURE_AGENT_CLI_COMMANDS,
     ...(input.signal ? { signal: input.signal } : {}),
     deps,
