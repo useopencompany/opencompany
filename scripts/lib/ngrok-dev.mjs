@@ -4,11 +4,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 const DEFAULT_LOCAL_WEB_PORT = "3000";
 const NGROK_API_PORTS = Array.from({ length: 10 }, (_, index) => 4040 + index);
 const NGROK_API_FETCH_TIMEOUT_MS = 300;
+const NGROK_TERM_TIMEOUT_MS = 1_000;
 
 export function ngrokConfigState() {
   const command = spawnSync("ngrok", ["version"], {
@@ -55,6 +57,49 @@ export function startNgrok({ port, url, stdio = ["ignore", "ignore", "pipe"] }) 
     args.push("--authtoken", process.env.NGROK_AUTHTOKEN.trim());
   }
   return spawn("ngrok", args, { stdio });
+}
+
+export async function cleanupOrphanedNgrokProcesses({
+  scopePath = defaultNgrokCleanupScope(),
+  timeoutMs = NGROK_TERM_TIMEOUT_MS,
+} = {}) {
+  const processes = listProcesses();
+  const cwdByPid = new Map();
+  for (const processInfo of processes) {
+    if (!isOrphanedNgrok(processInfo)) continue;
+    const processCwd = workingDirectoryForPid(processInfo.pid);
+    if (processCwd) cwdByPid.set(processInfo.pid, processCwd);
+  }
+
+  const stale = selectOrphanedNgrokProcesses(processes, cwdByPid, scopePath);
+  for (const processInfo of stale) {
+    killPid(processInfo.pid, "SIGTERM");
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  let remaining = stale.filter((processInfo) => pidIsAlive(processInfo.pid));
+  while (remaining.length > 0 && Date.now() < deadline) {
+    await delay(50);
+    remaining = remaining.filter((processInfo) => pidIsAlive(processInfo.pid));
+  }
+
+  for (const processInfo of remaining) {
+    killPid(processInfo.pid, "SIGKILL");
+  }
+
+  return {
+    pids: stale.map((processInfo) => processInfo.pid),
+    forcedPids: remaining.map((processInfo) => processInfo.pid),
+  };
+}
+
+export function selectOrphanedNgrokProcesses(processes, cwdByPid, scopePath) {
+  const scope = resolve(scopePath);
+  return processes.filter((processInfo) => {
+    if (!isOrphanedNgrok(processInfo)) return false;
+    const processCwd = cwdByPid.get(processInfo.pid);
+    return Boolean(processCwd && isPathWithin(processCwd, scope));
+  });
 }
 
 export async function waitForNgrokUrl(targetPort, timeoutMs = 20_000) {
@@ -111,6 +156,80 @@ function ngrokConfigPaths() {
     join(homedir(), "Library", "Application Support", "ngrok", "ngrok.yml"),
     join(homedir(), ".config", "ngrok", "ngrok.yml"),
   ];
+}
+
+function defaultNgrokCleanupScope() {
+  const cwd = resolve(process.cwd());
+  const conductorWorkspace = process.env.CONDUCTOR_WORKSPACE_PATH?.trim();
+  if (!conductorWorkspace) return cwd;
+
+  const workspacePath = resolve(conductorWorkspace);
+  return isPathWithin(cwd, workspacePath) ? dirname(workspacePath) : cwd;
+}
+
+function listProcesses() {
+  const command = spawnSync("ps", ["-axo", "pid=,ppid=,comm="], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (command.error) throw command.error;
+  if (command.status !== 0) {
+    throw new Error(command.stderr.trim() || "Unable to inspect local processes.");
+  }
+
+  return command.stdout
+    .split("\n")
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/))
+    .filter(Boolean)
+    .map((match) => ({
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      command: match[3].trim(),
+    }));
+}
+
+function workingDirectoryForPid(pid) {
+  const command = spawnSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (command.error) throw command.error;
+  if (command.status === 1) return null;
+  if (command.status !== 0) {
+    throw new Error(command.stderr.trim() || `Unable to inspect ngrok PID ${pid}.`);
+  }
+
+  const pathLine = command.stdout.split("\n").find((line) => line.startsWith("n"));
+  return pathLine?.slice(1).trim() || null;
+}
+
+function isOrphanedNgrok(processInfo) {
+  return processInfo.ppid === 1 && basename(processInfo.command) === "ngrok";
+}
+
+function isPathWithin(path, scope) {
+  const normalizedPath = resolve(path);
+  return normalizedPath === scope || normalizedPath.startsWith(`${scope}${sep}`);
+}
+
+function killPid(pid, signal) {
+  try {
+    process.kill(pid, signal);
+  } catch (error) {
+    if (error?.code === "ESRCH") return;
+    throw error;
+  }
+}
+
+function pidIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    if (error?.code === "EPERM") return true;
+    throw error;
+  }
 }
 
 function configuredNgrokUrl() {

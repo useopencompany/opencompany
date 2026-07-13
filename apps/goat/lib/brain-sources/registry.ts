@@ -2,6 +2,8 @@ import type { GoatBrainSourceConfigProvider } from "@opencompany/db/goat-schema"
 import type { LucideIcon } from "lucide-react";
 import { Files, FileText, GitBranch, ListTodo, Mail, MessageSquare } from "lucide-react";
 
+export const GOAT_JAMIE_DOCS_HREF = "/docs/integrations/jamie";
+
 export type GoatBrainSourceProviderDef = {
   id: GoatBrainSourceConfigProvider;
   name: string;
@@ -12,6 +14,8 @@ export type GoatBrainSourceProviderDef = {
   // means shipping its connector and flipping this flag.
   available: boolean;
   connectHref: string;
+  onboardingConnectHref?: string;
+  docsHref?: string;
 };
 
 export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
@@ -23,6 +27,8 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectionKind: "webhook",
     available: true,
     connectHref: "/settings/jamie",
+    onboardingConnectHref: "/onboarding/jamie",
+    docsHref: GOAT_JAMIE_DOCS_HREF,
   },
   {
     id: "gmail",

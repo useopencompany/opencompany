@@ -360,6 +360,8 @@ export const goatUsers = goat.table("users", {
   avatarUrl: text("avatar_url"),
   timezone: text("timezone").notNull().default("UTC"),
   localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
+  // Set when the user finishes the onboarding flow; null gates them into it.
+  onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -370,6 +372,9 @@ export const goatWorkspaces = goat.table(
     id: text("id").primaryKey(),
     workosOrganizationId: text("workos_organization_id"),
     name: text("name").notNull(),
+    // URL slug chosen at onboarding. Nullable (Postgres treats NULLs as distinct,
+    // so the unique index permits many not-yet-set workspaces).
+    slug: text("slug"),
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
@@ -380,8 +385,25 @@ export const goatWorkspaces = goat.table(
     workosOrganizationIdx: uniqueIndex("goat_workspaces_workos_organization_idx").on(
       table.workosOrganizationId,
     ),
+    slugIdx: uniqueIndex("goat_workspaces_slug_idx").on(table.slug),
   }),
 );
+
+// One row per user capturing what the onboarding flow collected. Owner flows set
+// referral + company context; invited members only ever set (or skip) referral.
+export const goatOnboarding = goat.table("onboarding", {
+  userWorkosId: text("user_workos_id")
+    .primaryKey()
+    .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+  workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+    onDelete: "set null",
+  }),
+  referralSource: text("referral_source"),
+  companyDomain: text("company_domain"),
+  contextUrls: jsonb("context_urls").$type<string[]>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const goatWorkspaceMembers = goat.table(
   "workspace_members",
@@ -2779,6 +2801,7 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, man
 
 export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
+export type GoatOnboarding = typeof goatOnboarding.$inferSelect;
 export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
 export type GoatBrain = typeof goatBrains.$inferSelect;
 export type GoatBrainMember = typeof goatBrainMembers.$inferSelect;

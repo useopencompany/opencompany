@@ -10,8 +10,10 @@ import {
   DURABLE_STREAMS_DEV_URL,
   startDurableStreamsDevServer,
 } from "./lib/durable-streams-dev.mjs";
+import { resolveGoatDevEnv } from "./lib/goat-dev-env.mjs";
 import { startGoatDevProxy } from "./lib/goat-dev-proxy.mjs";
 import {
+  cleanupOrphanedNgrokProcesses,
   envForTunnel,
   ngrokConfigState,
   requestedNgrokUrl,
@@ -35,6 +37,27 @@ let goatHttpsEnv = {};
 let goatDevProxy = null;
 let goatLocalHttps = null;
 let goatProxyTarget = null;
+let durableStreams = null;
+let durableEnv = {};
+let dev = null;
+let shuttingDown = false;
+
+for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
+    if (ngrok && !ngrok.killed) ngrok.kill(childSignal);
+    stopDurableStreams();
+    stopGoatLocalHttps();
+    stopGoatDevProxy();
+    if (dev) {
+      stopDevProcess(childSignal);
+    } else {
+      exit(0);
+    }
+  });
+}
 
 if (appMode === "goat") {
   await clearGoatDevPorts(port);
@@ -53,14 +76,12 @@ if (!tunnelDisabled) {
 // Local session-transcript streaming. The web proxy and runner read
 // DURABLE_STREAMS_URL; without it they 503 / no-op. Start the in-memory
 // reference server and inject the URL so transcripts stream with no extra setup.
-let durableStreams = null;
-let durableEnv = {};
 if (!isCI) {
   durableStreams = await startDurableStreams();
 }
 
 const turboBin = existsSync("node_modules/.bin/turbo") ? "node_modules/.bin/turbo" : "turbo";
-const dev = spawn(turboBin, ["dev", ...turboArgs], {
+dev = spawn(turboBin, ["dev", ...turboArgs], {
   stdio: "inherit",
   env: {
     ...process.env,
@@ -71,8 +92,6 @@ const dev = spawn(turboBin, ["dev", ...turboArgs], {
     INNGEST_DEV: process.env.INNGEST_DEV ?? "1",
   },
 });
-
-let shuttingDown = false;
 
 function stopDurableStreams() {
   if (durableStreams) {
@@ -132,71 +151,11 @@ function parseArgs(args) {
 function envForAppMode() {
   if (appMode !== "goat") return {};
 
-  const goatAppUrl =
-    goatHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
-    tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
-    tunnelEnv.NEXT_PUBLIC_APP_URL?.trim() ||
-    configuredGoatAppUrl() ||
-    `http://localhost:${port}`;
-  const goatRedirectUri =
-    tunnelEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() ||
-    process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() ||
-    `${goatAppUrl}/auth/callback`;
-
-  return {
-    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    GOAT_LOCAL_BRIDGE_BASE_URL:
-      process.env.GOAT_LOCAL_BRIDGE_BASE_URL?.trim() || `http://127.0.0.1:${port}`,
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    WORKOS_REDIRECT_URI: goatRedirectUri,
-    RUNNER_GOAT_TASK_WORKER_ENABLED: "true",
-    RUNNER_ALLOWED_ORIGINS: appendCsvValues(
-      process.env.RUNNER_ALLOWED_ORIGINS,
-      [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL].filter(
-        Boolean,
-      ),
-    ),
-  };
-}
-
-function configuredGoatAppUrl() {
-  const configured = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
-  if (!configured) return null;
-  if (configured.startsWith("https://localhost") && !goatHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) {
-    return null;
-  }
-  return configured;
-}
-
-function appendCsvValues(raw, values) {
-  const existing = (raw ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const seen = new Set(existing);
-  for (const value of values) {
-    if (seen.has(value)) continue;
-    existing.push(value);
-    seen.add(value);
-  }
-  return existing.join(",");
-}
-
-for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    shuttingDown = true;
-    const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
-    if (ngrok && !ngrok.killed) ngrok.kill(childSignal);
-    stopDurableStreams();
-    stopGoatLocalHttps();
-    stopGoatDevProxy();
-    stopDevProcess(childSignal);
-  });
+  return resolveGoatDevEnv({ port, processEnv: process.env, tunnelEnv, goatHttpsEnv });
 }
 
 function stopDevProcess(signal = "SIGTERM") {
+  if (!dev) return;
   killProcessTree(dev, signal);
 }
 
@@ -407,7 +366,19 @@ async function startDefaultTunnel(
     console.warn(message);
   }
 
+  try {
+    const cleanup = await cleanupOrphanedNgrokProcesses();
+    if (cleanup.pids.length > 0) {
+      const forced =
+        cleanup.forcedPids.length > 0 ? `; force-killed ${cleanup.forcedPids.join(", ")}` : "";
+      console.log(`\nCleared stale ngrok agents: ${cleanup.pids.join(", ")}${forced}\n`);
+    }
+  } catch (error) {
+    console.warn(`\nCould not inspect stale ngrok agents: ${error.message}\n`);
+  }
+
   const child = startNgrok({ port: targetPort, url });
+  ngrok = child;
   child.on("error", (error) => {
     console.error(`\nFailed to start ngrok: ${error.message}\n`);
     exit(1);
@@ -432,14 +403,10 @@ async function startDefaultTunnel(
   try {
     tunnelEnv = envForTunnel(publicUrl, process.env, { localPort: appPort });
     if (exposesRunnerCallbacks) {
-      const goatRedirectUri = `${publicUrl}/auth/callback`;
       tunnelEnv = {
         ...tunnelEnv,
         GOAT_NEXT_PUBLIC_APP_URL: publicUrl,
-        GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
         NEXT_PUBLIC_APP_URL: publicUrl,
-        NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-        WORKOS_REDIRECT_URI: goatRedirectUri,
         RUNNER_LLM_BROKER_PUBLIC_URL: publicUrl,
       };
     }
@@ -447,7 +414,6 @@ async function startDefaultTunnel(
     if (exposesRunnerCallbacks) {
       console.log(`Goat public URL: ${publicUrl}`);
       console.log(`Goat GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
-      console.log(`Goat WorkOS redirect URI: ${tunnelEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
     } else {
       console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
       console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
