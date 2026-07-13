@@ -79,6 +79,8 @@ import {
   buildSlackConversationAgentIngestPrompt,
   formatGoatBrainFolderInventoryPrompt,
   type GoatBrainAgentCliRunner,
+  GoatBrainAgentOutcomeError,
+  placeMovingAnthropicCacheBreakpoint,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
@@ -180,6 +182,30 @@ function gmailItem() {
 type CapturedTool = {
   execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
+
+type CapturedMessage = {
+  role: string;
+  content: unknown;
+  providerOptions?: Record<string, unknown>;
+};
+
+// The system prompt rides in messages[0] (not the system param) so it can
+// carry an Anthropic cache breakpoint.
+function systemPromptFrom(options: { messages: CapturedMessage[] }): string {
+  const first = options.messages[0];
+  if (!first || first.role !== "system" || typeof first.content !== "string") {
+    throw new Error("Expected the first message to be the system prompt.");
+  }
+  return first.content;
+}
+
+function userPromptFrom(options: { messages: CapturedMessage[] }): string {
+  const user = options.messages.find((message) => message.role === "user");
+  if (!user || typeof user.content !== "string") {
+    throw new Error("Expected a user message with a string prompt.");
+  }
+  return user.content;
+}
 
 function mockAgentRun(input: {
   finalText: string;
@@ -481,11 +507,8 @@ describe("runGmailThreadAgentIngest", () => {
     );
     let seenPrompt = "";
     aiMock.generateText.mockImplementationOnce(
-      async (options: {
-        tools: Record<string, CapturedTool>;
-        messages: Array<{ content: string }>;
-      }) => {
-        seenPrompt = options.messages[0]?.content ?? "";
+      async (options: { tools: Record<string, CapturedTool>; messages: CapturedMessage[] }) => {
+        seenPrompt = userPromptFrom(options);
         await options.tools.goat_brain?.execute({
           command: "timeline-add",
           args: ["ada", "--body", "Term sheet received.", "--source-ref", "gmail:message:msg_1"],
@@ -656,11 +679,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
     workspacesMock.getGoatUserDisplayName.mockResolvedValueOnce("Ada Lovelace");
     let seenPrompt = "";
     aiMock.generateText.mockImplementationOnce(
-      async (options: {
-        tools: Record<string, CapturedTool>;
-        messages: Array<{ content: string }>;
-      }) => {
-        seenPrompt = options.messages[0]?.content ?? "";
+      async (options: { tools: Record<string, CapturedTool>; messages: CapturedMessage[] }) => {
+        seenPrompt = userPromptFrom(options);
         await options.tools.goat_brain?.execute({
           command: "set",
           args: ["pricing-teardown-reference", "--status", "active"],
@@ -697,11 +717,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
     workspacesMock.getGoatUserDisplayName.mockRejectedValueOnce(new Error("lookup failed"));
     let seenPrompt = "";
     aiMock.generateText.mockImplementationOnce(
-      async (options: {
-        tools: Record<string, CapturedTool>;
-        messages: Array<{ content: string }>;
-      }) => {
-        seenPrompt = options.messages[0]?.content ?? "";
+      async (options: { tools: Record<string, CapturedTool>; messages: CapturedMessage[] }) => {
+        seenPrompt = userPromptFrom(options);
         await options.tools.goat_brain?.execute({
           command: "set",
           args: ["pricing-teardown-reference", "--status", "active"],
@@ -745,11 +762,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
     );
     let seenPrompt = "";
     aiMock.generateText.mockImplementationOnce(
-      async (options: {
-        tools: Record<string, CapturedTool>;
-        messages: Array<{ content: string }>;
-      }) => {
-        seenPrompt = options.messages[0]?.content ?? "";
+      async (options: { tools: Record<string, CapturedTool>; messages: CapturedMessage[] }) => {
+        seenPrompt = userPromptFrom(options);
         await options.tools.goat_brain?.execute({
           command: "set",
           args: ["pricing-teardown-reference", "--type", "concept", "--status", "active"],
@@ -1007,25 +1021,31 @@ describe("runGoatChatCaptureAgentIngest", () => {
       toolInvocations: [{ command: "folder", args: ["list"] }],
     });
 
-    await expect(
-      runGoatChatCaptureAgentIngest(
-        {
-          userWorkosId: "user_123",
-          brainRef: "gbrain_123",
-          item: captureItem(),
-          env: { vercelAiGatewayApiKey: "gw_test" },
-        },
-        { runCli: okCli },
-      ),
-    ).rejects.toThrow("finished without writing");
+    const error = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    ).then(
+      () => {
+        throw new Error("Expected the ingest to fail.");
+      },
+      (thrown: unknown) => thrown,
+    );
+    // Typed so the worker can retry outcome failures on the tighter budget.
+    expect(error).toBeInstanceOf(GoatBrainAgentOutcomeError);
+    expect(String(error)).toContain("finished without writing");
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
   });
 
   it("omits web search when brain enrichment is disabled", async () => {
     workspacesMock.getGoatBrainEnrichmentEnabled.mockResolvedValueOnce(false);
     aiMock.generateText.mockImplementationOnce(
-      async (options: { system: string; tools: Record<string, CapturedTool> }) => {
-        expect(options.system).not.toContain("Web-search enrichment");
+      async (options: { messages: CapturedMessage[]; tools: Record<string, CapturedTool> }) => {
+        expect(systemPromptFrom(options)).not.toContain("Web-search enrichment");
         expect(options.tools.web_search).toBeUndefined();
         await options.tools.goat_brain?.execute({
           command: "set",
@@ -1076,8 +1096,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
       },
     });
     aiMock.generateText.mockImplementationOnce(
-      async (options: { system: string; tools: Record<string, CapturedTool> }) => {
-        expect(options.system).toContain("Web-search enrichment");
+      async (options: { messages: CapturedMessage[]; tools: Record<string, CapturedTool> }) => {
+        expect(systemPromptFrom(options)).toContain("Web-search enrichment");
         const search = options.tools.web_search;
         expect(search).toBeDefined();
         if (!search) throw new Error("Expected web_search tool.");
@@ -1399,5 +1419,106 @@ describe("runJamieMeetingAgentIngest", () => {
         { runCli: okCli },
       ),
     ).rejects.toThrow(/people\/ada\.md/);
+  });
+});
+
+describe("anthropic prompt caching", () => {
+  it("sends cached system and source messages plus a prepareStep hook", async () => {
+    mockAgentRun({
+      finalText: "Promoted the capture.",
+      toolInvocations: [
+        { command: "set", args: ["pricing-teardown-reference", "--status", "active"] },
+      ],
+    });
+
+    await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    const options = aiMock.generateText.mock.calls[0]?.[0] as {
+      system?: string;
+      messages: CapturedMessage[];
+      prepareStep?: (input: { messages: CapturedMessage[] }) => { messages: CapturedMessage[] };
+    };
+    const cacheBreakpoint = { anthropic: { cacheControl: { type: "ephemeral" } } };
+    // The system prompt must ride in messages so it can carry a breakpoint.
+    expect(options.system).toBeUndefined();
+    expect(options.messages[0]).toMatchObject({ role: "system", providerOptions: cacheBreakpoint });
+    expect(options.messages[1]).toMatchObject({ role: "user", providerOptions: cacheBreakpoint });
+    expect(typeof options.prepareStep).toBe("function");
+  });
+
+  it("records cache read/write token detail from the gateway usage", async () => {
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { tools: Record<string, CapturedTool> }) => {
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--status", "active"],
+        });
+        return {
+          text: "Promoted the capture.",
+          steps: [{}, {}],
+          totalUsage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+            inputTokenDetails: { cacheReadTokens: 80, cacheWriteTokens: 15 },
+          },
+        };
+      },
+    );
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      cacheReadInputTokens: 80,
+      cacheWriteInputTokens: 15,
+    });
+  });
+});
+
+describe("placeMovingAnthropicCacheBreakpoint", () => {
+  const cacheBreakpoint = { anthropic: { cacheControl: { type: "ephemeral" as const } } };
+  const staticPrefix = [
+    { role: "system" as const, content: "system", providerOptions: cacheBreakpoint },
+    { role: "user" as const, content: "source", providerOptions: cacheBreakpoint },
+  ];
+
+  it("leaves the initial request untouched", () => {
+    expect(placeMovingAnthropicCacheBreakpoint(staticPrefix)).toBe(staticPrefix);
+  });
+
+  it("marks only the newest message and strips stale marks in between", () => {
+    const marked = placeMovingAnthropicCacheBreakpoint([
+      ...staticPrefix,
+      // Stale mark from a hypothetical earlier step: must be stripped so
+      // breakpoints never exceed Anthropic's limit of 4 per request.
+      { role: "assistant" as const, content: "step one", providerOptions: cacheBreakpoint },
+      { role: "tool" as const, content: [], providerOptions: cacheBreakpoint },
+      { role: "assistant" as const, content: "step two" },
+    ]);
+
+    expect(marked[0]?.providerOptions).toMatchObject(cacheBreakpoint);
+    expect(marked[1]?.providerOptions).toMatchObject(cacheBreakpoint);
+    expect(marked[2]?.providerOptions).toEqual({});
+    expect(marked[3]?.providerOptions).toEqual({});
+    expect(marked[4]?.providerOptions).toMatchObject(cacheBreakpoint);
   });
 });
