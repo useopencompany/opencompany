@@ -26,7 +26,6 @@ import {
   Inbox,
   Lightbulb,
   LineChart,
-  Link2,
   Lock,
   Megaphone,
   MessagesSquare,
@@ -35,7 +34,6 @@ import {
   Rocket,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Target,
   Users,
   X,
@@ -43,6 +41,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { GoatBrainImport } from "@/components/GoatBrainImport";
 import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
 import { type GoatMcpBrainOption, McpSetupGuide } from "@/components/McpSetupGuide";
 import {
@@ -57,7 +56,6 @@ import {
   checkGoatWorkspaceSlugAction,
   finishGoatOnboardingAction,
   saveGoatOnboardingBrainFoldersAction,
-  saveGoatOnboardingContextAction,
   saveGoatOnboardingProfileAction,
   saveGoatOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
@@ -130,7 +128,7 @@ const ROLE_PROFILES: RoleProfile[] = [
     label: "Founder / CEO",
     hint: "Running the whole company",
     icon: Rocket,
-    folders: ["thoughts", "projects", "meetings", "decisions", "fundraising", "metrics"],
+    folders: ["thoughts", "projects", "product", "meetings", "decisions", "fundraising", "metrics"],
   },
   {
     id: "product",
@@ -204,8 +202,6 @@ export function OnboardingWizard({
   initialSlug,
   initialRole,
   initialBuilding,
-  initialCompanyDomain,
-  initialContextUrls,
   initialReferral,
   initialSourceDetails,
   initialConnectionResult,
@@ -222,8 +218,6 @@ export function OnboardingWizard({
   initialSlug: string;
   initialRole: string | null;
   initialBuilding: string;
-  initialCompanyDomain: string;
-  initialContextUrls: string[];
   initialReferral: string | null;
   initialSourceDetails: GoatBrainSourcesDetails | null;
   initialConnectionResult: GoatOnboardingConnectionResult | null;
@@ -244,12 +238,6 @@ export function OnboardingWizard({
   const [role, setRole] = useState<string | null>(initialRole);
   const [building, setBuilding] = useState(initialBuilding);
   const [workingFolders, setWorkingFolders] = useState<string[]>(() => foldersForRole(initialRole));
-  const [companyDomain, setCompanyDomain] = useState(initialCompanyDomain);
-  const [contextUrls, setContextUrls] = useState<string[]>(
-    initialContextUrls.length > 0 ? initialContextUrls : [""],
-  );
-  const [importing, setImporting] = useState(false);
-  const [imported, setImported] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [slugCheck, setSlugCheck] = useState<{
     slug: string;
@@ -273,17 +261,6 @@ export function OnboardingWizard({
   useEffect(() => {
     document.cookie = `${ONBOARDING_STEP_COOKIE}=${stepIndex}; path=/; max-age=86400; samesite=lax`;
   }, [stepIndex]);
-
-  // Play the import animation for a beat, then advance to the next step.
-  useEffect(() => {
-    if (!importing) return;
-    const timer = window.setTimeout(() => {
-      setImported(true);
-      setImporting(false);
-      setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
-    }, 3400);
-    return () => window.clearTimeout(timer);
-  }, [importing, STEPS.length]);
 
   // Live workspace-URL availability check (debounced).
   useEffect(() => {
@@ -323,21 +300,6 @@ export function OnboardingWizard({
   };
 
   const goNext = () => {
-    // Leaving the context step saves answers, then plays the import animation once.
-    if (step.key === "context" && !imported) {
-      startTransition(async () => {
-        const r = await saveGoatOnboardingContextAction({
-          companyDomain,
-          contextUrls,
-        });
-        if (!r.ok) {
-          toast.error(r.error);
-          return;
-        }
-        setImporting(true);
-      });
-      return;
-    }
     startTransition(async () => {
       if (!(await persistCurrentStep())) return;
       if (isLast) {
@@ -378,114 +340,101 @@ export function OnboardingWizard({
       {/* Vertically centered content column with nav attached directly below */}
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-[560px] flex-col justify-center px-6 py-12">
-          {importing ? (
-            <ImportingScreen domain={companyDomain} />
-          ) : (
-            <>
-              {step.key === "profile" && (
-                <ProfileStep
-                  user={user}
-                  role={role}
-                  onRole={selectRole}
-                  building={building}
-                  onBuilding={setBuilding}
-                />
-              )}
-              {step.key === "workspace" && (
-                <WorkspaceStep
-                  user={user}
-                  name={workspaceName}
-                  onName={(v) => {
-                    setWorkspaceName(v);
-                    if (!slugTouched) setSlug(slugify(v));
-                  }}
-                  slug={effectiveSlug}
-                  onSlug={(v) => {
-                    setSlugTouched(true);
-                    setSlug(slugify(v));
-                  }}
-                  slugStatus={slugStatus}
-                />
-              )}
-              {step.key === "welcome" && (
-                <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
-              )}
-              {step.key === "brain" && (
-                <BrainStep workingFolders={workingFolders} onChange={setWorkingFolders} />
-              )}
-              {step.key === "sources" && (
-                <SourcesStep
-                  brainRef={brainRef}
-                  initialDetails={initialSourceDetails}
-                  initialConnectionResult={initialConnectionResult}
-                />
-              )}
-              {step.key === "context" && (
-                <ContextStep
-                  domain={companyDomain}
-                  onDomain={setCompanyDomain}
-                  urls={contextUrls}
-                  onUrls={setContextUrls}
-                />
-              )}
-              {step.key === "connect" && (
-                <McpSetupGuide
-                  displayName={user.name}
-                  workspaceName={
-                    variant === "member"
-                      ? currentWorkspaceName
-                      : workspaceName.trim() || currentWorkspaceName
-                  }
-                  brains={mcpBrains}
-                  initialBrainRef={brainRef}
-                  initialClient={initialMcpClient}
-                  initialCompletedAt={initialMcpCompletedAt}
-                />
-              )}
-              {step.key === "finish" && (
-                <FinishStep
-                  workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
-                  referral={referral}
-                  onSelect={setReferral}
-                  showReferral={variant === "owner"}
-                />
-              )}
+          {step.key === "profile" && (
+            <ProfileStep
+              user={user}
+              role={role}
+              onRole={selectRole}
+              building={building}
+              onBuilding={setBuilding}
+            />
+          )}
+          {step.key === "workspace" && (
+            <WorkspaceStep
+              user={user}
+              name={workspaceName}
+              onName={(v) => {
+                setWorkspaceName(v);
+                if (!slugTouched) setSlug(slugify(v));
+              }}
+              slug={effectiveSlug}
+              onSlug={(v) => {
+                setSlugTouched(true);
+                setSlug(slugify(v));
+              }}
+              slugStatus={slugStatus}
+            />
+          )}
+          {step.key === "welcome" && (
+            <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
+          )}
+          {step.key === "brain" && (
+            <BrainStep workingFolders={workingFolders} onChange={setWorkingFolders} />
+          )}
+          {step.key === "sources" && (
+            <SourcesStep
+              brainRef={brainRef}
+              initialDetails={initialSourceDetails}
+              initialConnectionResult={initialConnectionResult}
+            />
+          )}
+          {step.key === "context" && <ImportStep brainRef={brainRef} />}
+          {step.key === "connect" && (
+            <McpSetupGuide
+              displayName={user.name}
+              workspaceName={
+                variant === "member"
+                  ? currentWorkspaceName
+                  : workspaceName.trim() || currentWorkspaceName
+              }
+              brains={mcpBrains}
+              initialBrainRef={brainRef}
+              initialClient={initialMcpClient}
+              initialCompletedAt={initialMcpCompletedAt}
+            />
+          )}
+          {step.key === "finish" && (
+            <FinishStep
+              workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
+              referral={referral}
+              onSelect={setReferral}
+              showReferral={variant === "owner"}
+            />
+          )}
 
-              {/* Nav — sits right under the content */}
-              <div className="mt-9 flex items-center justify-between">
+          {/* Nav — sits right under the content */}
+          <div className="mt-9 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={goBack}
+              disabled={stepIndex === 0 || isPending}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink disabled:invisible"
+            >
+              <ArrowLeft size={15} strokeWidth={2} />
+              Back
+            </button>
+            <div className="flex items-center gap-2">
+              {isSkippable(step.key) && !isLast && (
                 <button
                   type="button"
-                  onClick={goBack}
-                  disabled={stepIndex === 0 || isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink disabled:invisible"
+                  onClick={goNext}
+                  disabled={isPending}
+                  className="rounded-lg px-3 py-2 text-[13px] font-medium text-ink-subtle transition-colors hover:text-ink disabled:opacity-40"
                 >
-                  <ArrowLeft size={15} strokeWidth={2} />
-                  Back
+                  Skip
                 </button>
-                <div className="flex items-center gap-2">
-                  {isSkippable(step.key) && !isLast && (
-                    <button
-                      type="button"
-                      onClick={goNext}
-                      disabled={isPending}
-                      className="rounded-lg px-3 py-2 text-[13px] font-medium text-ink-subtle transition-colors hover:text-ink disabled:opacity-40"
-                    >
-                      Skip
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={goNext}
-                    disabled={!canContinue || isPending}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[13px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
-                  >
-                    {isPending ? "Saving…" : isLast ? "Enter OpenCompany" : "Continue"}
-                    {!isLast && !isPending && <ArrowRight size={15} strokeWidth={2} />}
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+              )}
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={!canContinue || isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[13px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                {isPending ? "Saving…" : isLast ? "Enter OpenCompany" : "Continue"}
+                {!isLast && !isPending && <ArrowRight size={15} strokeWidth={2} />}
+              </button>
+            </div>
+          </div>
         </div>
       </main>
     </div>
@@ -1244,79 +1193,27 @@ function SourcesStep({
 }
 
 // ---------------------------------------------------------------------------
-// Step — Import context (mock)
+// Step — Import context (real company-context import)
 // ---------------------------------------------------------------------------
 
-function ContextStep({
-  domain,
-  onDomain,
-  urls,
-  onUrls,
-}: {
-  domain: string;
-  onDomain: (v: string) => void;
-  urls: string[];
-  onUrls: (v: string[]) => void;
-}) {
-  const setUrl = (i: number, value: string) =>
-    onUrls(urls.map((u, idx) => (idx === i ? value : u)));
-  const addUrl = () => onUrls([...urls, ""]);
-
+// Wraps the shared GoatBrainImport flow (scan → review workload → build) in the
+// onboarding chrome. The import runs on background workers, so the user can kick
+// it off and keep moving — or Skip and run it later from Brain settings.
+function ImportStep({ brainRef }: { brainRef: string | null }) {
   return (
     <div>
       <StepHeader
         title="Help us set up your brain"
-        subtitle="Point us at a few places that describe your company. We'll use them to seed your brain with real context so it's useful from day one."
+        subtitle="Point Goat at your company website and pick what to pull in. It scans first and shows you the exact workload before any ingestion runs — so nothing happens you didn't ask for."
       />
 
-      <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-border bg-surface-muted p-3.5">
-        <Sparkles size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-muted" />
-        <p className="text-[12.5px] leading-5 text-ink-muted">
-          This is where the magic starts — the more context you give, the better your brain
-          understands your world. We&apos;ll only read what you share here.
+      {brainRef ? (
+        <GoatBrainImport brainRef={brainRef} compact />
+      ) : (
+        <p className="text-[12px] leading-4 text-danger">
+          A Brain is required before context can be imported.
         </p>
-      </div>
-
-      <div className="flex flex-col gap-5">
-        <Field label="Company domain">
-          <input
-            className={inputClass}
-            value={domain}
-            onChange={(e) => onDomain(e.target.value)}
-            placeholder="acme.com"
-          />
-        </Field>
-        <Field
-          label="LinkedIn or other context URLs"
-          hint="Company LinkedIn, an about page, a pitch deck link — anything that describes you."
-        >
-          <div className="flex flex-col gap-2">
-            {urls.map((url, i) => (
-              <div
-                // biome-ignore lint/suspicious/noArrayIndexKey: order-stable free-form list
-                key={i}
-                className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 focus-within:border-ink/40 focus-within:ring-2 focus-within:ring-ink/10"
-              >
-                <Link2 size={15} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                <input
-                  className="w-full bg-transparent py-2 text-[14px] text-ink outline-none placeholder:text-ink-subtle"
-                  value={url}
-                  onChange={(e) => setUrl(i, e.target.value)}
-                  placeholder="https://linkedin.com/company/acme"
-                />
-              </div>
-            ))}
-          </div>
-        </Field>
-        <button
-          type="button"
-          onClick={addUrl}
-          className="inline-flex w-fit items-center gap-1.5 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
-        >
-          <Plus size={15} strokeWidth={2.2} />
-          Add another URL
-        </button>
-      </div>
+      )}
     </div>
   );
 }
@@ -1391,50 +1288,6 @@ function FinishStep({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-
-function ImportingScreen({ domain }: { domain: string }) {
-  const NODES = 7;
-  const [pulse, setPulse] = useState(0);
-  const [statusIndex, setStatusIndex] = useState(0);
-
-  const statuses = [
-    domain.trim() ? `Reading ${domain.trim()}…` : "Reading your sources…",
-    "Extracting people & companies…",
-    "Mapping relationships…",
-    "Filing everything into your brain…",
-  ];
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setPulse((p) => (p + 1) % NODES), 150);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setStatusIndex((s) => (s + 1) % statuses.length), 850);
-    return () => window.clearInterval(timer);
-  }, [statuses.length]);
-
-  const line = Array.from({ length: NODES }, (_, i) => (i === pulse ? "●" : "○")).join("─");
-
-  return (
-    <div className="flex flex-col items-center gap-7 py-10 text-center">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-          Building your brain
-        </h1>
-        <p className="text-[14px] leading-6 text-ink-muted">
-          Hang tight — we&apos;re turning your context into a living brain.
-        </p>
-      </div>
-      <pre className="font-mono text-[20px] tracking-[0.3em] text-ink" aria-hidden>
-        {line}
-      </pre>
-      <p className="font-mono text-[12.5px] text-ink-subtle">{statuses[statusIndex]}</p>
     </div>
   );
 }

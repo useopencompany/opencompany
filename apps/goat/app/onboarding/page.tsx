@@ -73,8 +73,6 @@ export default async function OnboardingPage({
       initialSlug={savedSlug}
       initialRole={onboarding?.role ?? null}
       initialBuilding={onboarding?.building ?? ""}
-      initialCompanyDomain={onboarding?.companyDomain ?? ""}
-      initialContextUrls={onboarding?.contextUrls ?? []}
       initialReferral={onboarding?.referralSource ?? null}
       initialSourceDetails={sourceDetails}
       initialConnectionResult={connectionResult}
