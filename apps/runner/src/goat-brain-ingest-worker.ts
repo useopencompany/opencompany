@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { calculateModelUsageCost } from "@opencompany/billing";
 import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
 import {
   goatBrainFilePathFor,
   listGoatBrainFiles,
   upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
+import { normalizeGoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import {
   type GoatBrainIngestJob,
   type GoatBrainIngestJobKind,
@@ -30,6 +32,7 @@ import {
   type GoatAttributes,
   hashGoatUserId,
   recordGoatBrainIngestRun,
+  recordGoatModelCost,
   startGoatSpan,
   withGoatSpan,
 } from "@opencompany/goat-observability";
@@ -694,6 +697,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           }),
       ),
     );
+    recordBrainIngestModelCost(result);
     if (!leaseActive) {
       finishTelemetry("aborted", {
         "goat.status": "running",
@@ -754,6 +758,9 @@ export async function runClaimedGoatBrainIngestJob(input: {
       ...goatBrainIngestBudgetAttributes(result),
     });
   } catch (error) {
+    if (error instanceof GoatBrainIngestBudgetError) {
+      recordBrainIngestModelCost(error.result);
+    }
     const message = errorMessage(error);
     const maxAttempts =
       error instanceof GoatBrainIngestBudgetError
@@ -801,6 +808,31 @@ export async function runClaimedGoatBrainIngestJob(input: {
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
   }
+}
+
+function recordBrainIngestModelCost(result: Record<string, unknown>) {
+  const trace = normalizeGoatBrainIngestTrace(result.trace);
+  if (!trace) return;
+
+  const inputTokens = trace.usage.inputTokens ?? 0;
+  const inputCacheReadTokens = trace.usage.cacheReadInputTokens ?? 0;
+  const inputCacheWriteTokens = trace.usage.cacheWriteInputTokens ?? 0;
+  const cost = calculateModelUsageCost({
+    modelName: trace.model,
+    inputTokens,
+    inputNoCacheTokens: Math.max(inputTokens - inputCacheReadTokens - inputCacheWriteTokens, 0),
+    inputCacheReadTokens,
+    inputCacheWriteTokens,
+    outputTokens: trace.usage.outputTokens ?? 0,
+  });
+
+  recordGoatModelCost({
+    costUsdMicros: cost.totalCostUsdMicros,
+    attributes: {
+      "goat.model": trace.model,
+      "goat.surface": "brain_ingest",
+    },
+  });
 }
 
 export function startGoatBrainIngestWorker(
