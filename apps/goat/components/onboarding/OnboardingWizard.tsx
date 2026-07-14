@@ -67,6 +67,12 @@ import {
   goatOnboardingConnectHref,
   goatOnboardingConnectionError,
 } from "@/lib/onboarding-integrations";
+import {
+  GOAT_ONBOARDING_BUILDING_MAX_LENGTH,
+  type GoatOnboardingRole,
+  goatOnboardingFoldersForRole,
+  isGoatOnboardingRole,
+} from "@/lib/onboarding-profile";
 
 type OnboardingUser = {
   name: string;
@@ -115,11 +121,10 @@ const PAGES_PER_SOURCE = 50;
 // hard defaults inbox/people/companies/evidence are always added on top). Every
 // folder here must satisfy GOAT_BRAIN_FOLDER_PATTERN (lowercase, single word).
 type RoleProfile = {
-  id: string;
+  id: GoatOnboardingRole;
   label: string;
   hint: string;
   icon: LucideIcon;
-  folders: string[];
 };
 
 const ROLE_PROFILES: RoleProfile[] = [
@@ -128,64 +133,55 @@ const ROLE_PROFILES: RoleProfile[] = [
     label: "Founder / CEO",
     hint: "Running the whole company",
     icon: Rocket,
-    folders: ["thoughts", "projects", "product", "meetings", "decisions", "fundraising", "metrics"],
   },
   {
     id: "product",
     label: "Product / Engineering",
     hint: "Building the product",
     icon: Code2,
-    folders: ["projects", "specs", "meetings", "decisions", "research", "incidents"],
   },
   {
     id: "sales",
     label: "Sales / GTM",
     hint: "Pipeline & closing deals",
     icon: Target,
-    folders: ["deals", "meetings", "calls", "playbooks", "competitors", "notes"],
   },
   {
     id: "marketing",
     label: "Marketing / Growth",
     hint: "Demand & brand",
     icon: Megaphone,
-    folders: ["campaigns", "content", "research", "meetings", "ideas", "competitors"],
   },
   {
     id: "operations",
     label: "Operations / Finance",
     hint: "Keeping it all running",
     icon: Settings2,
-    folders: ["projects", "processes", "meetings", "decisions", "metrics", "vendors"],
   },
   {
     id: "investing",
     label: "Investing / VC",
     hint: "Sourcing & backing companies",
     icon: LineChart,
-    folders: ["deals", "meetings", "research", "thesis", "portfolio", "notes"],
   },
   {
     id: "consulting",
     label: "Consulting / Agency",
     hint: "Serving clients",
     icon: Briefcase,
-    folders: ["clients", "projects", "meetings", "deliverables", "research", "notes"],
   },
   {
     id: "research",
     label: "Research / Analysis",
     hint: "Digging into topics",
     icon: Microscope,
-    folders: ["research", "sources", "notes", "concepts", "meetings", "reports"],
   },
 ];
 
 // Folders to seed the brain step with for a given role — falls back to the
 // generic adjustable defaults when no role is chosen or recognized.
-function foldersForRole(role: string | null): string[] {
-  const profile = role ? ROLE_PROFILES.find((p) => p.id === role) : null;
-  return profile ? [...profile.folders] : [...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS];
+function foldersForRole(role: GoatOnboardingRole | null): string[] {
+  return goatOnboardingFoldersForRole(role);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +223,7 @@ export function OnboardingWizard({
 }) {
   const router = useRouter();
   const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
+  const normalizedInitialRole = isGoatOnboardingRole(initialRole) ? initialRole : null;
   const [stepIndex, setStepIndex] = useState(() =>
     Math.min(Math.max(initialStep, 0), STEPS.length - 1),
   );
@@ -235,9 +232,11 @@ export function OnboardingWizard({
   const [slugTouched, setSlugTouched] = useState(Boolean(initialSlug));
   const [slug, setSlug] = useState(initialSlug);
   const [referral, setReferral] = useState<string | null>(initialReferral);
-  const [role, setRole] = useState<string | null>(initialRole);
+  const [role, setRole] = useState<GoatOnboardingRole | null>(normalizedInitialRole);
   const [building, setBuilding] = useState(initialBuilding);
-  const [workingFolders, setWorkingFolders] = useState<string[]>(() => foldersForRole(initialRole));
+  const [workingFolders, setWorkingFolders] = useState<string[]>(() =>
+    foldersForRole(normalizedInitialRole),
+  );
   const [isPending, startTransition] = useTransition();
   const [slugCheck, setSlugCheck] = useState<{
     slug: string;
@@ -314,7 +313,7 @@ export function OnboardingWizard({
   // Picking a role re-seeds the brain folders with that role's preset. We only
   // reseed on an actual change so a user who tweaked folders and stepped back
   // doesn't lose their edits by re-clicking the role they already had.
-  const selectRole = (next: string) => {
+  const selectRole = (next: GoatOnboardingRole) => {
     if (next === role) return;
     setRole(next);
     setWorkingFolders(foldersForRole(next));
@@ -516,8 +515,8 @@ function ProfileStep({
   onBuilding,
 }: {
   user: OnboardingUser;
-  role: string | null;
-  onRole: (id: string) => void;
+  role: GoatOnboardingRole | null;
+  onRole: (id: GoatOnboardingRole) => void;
   building: string;
   onBuilding: (v: string) => void;
 }) {
@@ -540,6 +539,7 @@ function ProfileStep({
                   key={profile.id}
                   type="button"
                   onClick={() => onRole(profile.id)}
+                  aria-pressed={active}
                   className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors ${
                     active
                       ? "border-ink bg-surface-active/50"
@@ -570,14 +570,12 @@ function ProfileStep({
           </div>
         </div>
 
-        <Field
-          label="What are you building?"
-          hint="One line is plenty — we use it to tailor how your brain files things."
-        >
+        <Field label="What are you building?" hint="Optional — one line is plenty.">
           <input
             className={inputClass}
             value={building}
             onChange={(e) => onBuilding(e.target.value)}
+            maxLength={GOAT_ONBOARDING_BUILDING_MAX_LENGTH}
             placeholder="A B2B analytics platform for logistics teams"
           />
         </Field>
