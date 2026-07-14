@@ -68,6 +68,30 @@ describe("goat brain inline links", () => {
     ]);
   });
 
+  it("ignores escaped links and links inside Markdown code", () => {
+    const text = [
+      String.raw`\[[page:escaped|Escaped]]`,
+      "`[[page:inline-code|Inline code]]`",
+      "```text",
+      "[[page:fenced-code|Fenced code]]",
+      "```",
+      "    [[page:indented-code|Indented code]]",
+      "[[page:visible|Visible]]",
+    ].join("\n");
+
+    expect(parseGoatBrainInlineLinks(text)).toEqual([
+      expect.objectContaining({ kind: "page", target: "visible", label: "Visible" }),
+    ]);
+    expect(parseGoatBrainInlineLinks(String.raw`\\[[page:visible|Visible]]`)).toEqual([
+      expect.objectContaining({ kind: "page", target: "visible", label: "Visible" }),
+    ]);
+    expect(
+      parseGoatBrainInlineLinks(
+        "```text\r\n[[page:fenced-code|Fenced code]]\r\n```\r\n[[page:visible|Visible]]",
+      ),
+    ).toEqual([expect.objectContaining({ kind: "page", target: "visible", label: "Visible" })]);
+  });
+
   it("requires source targets to be provider:id shaped", () => {
     expect(
       parseGoatBrainInlineLinks(
@@ -108,6 +132,9 @@ describe("goat brain inline links", () => {
       "Invalid Goat Brain evidence link target.",
     );
     expect(() => formatGoatBrainSourceLink("gmail:1", "bad]label")).toThrow(
+      "Invalid Goat Brain link label.",
+    );
+    expect(() => formatGoatBrainPageLink("acme", "bad[label")).toThrow(
       "Invalid Goat Brain link label.",
     );
   });

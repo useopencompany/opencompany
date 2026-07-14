@@ -122,12 +122,14 @@ export function validateGoatBrainDocument(
   ) {
     errors.push("document must include ## Compiled truth and ## Timeline sections.");
   }
-  for (const link of parseGoatBrainInlineLinks(doc.compiledTruth)) {
-    if (link.valid) continue;
-    if (link.kind === "page") errors.push(`wiki link target "${link.target}" is invalid.`);
-    else if (link.kind === "evidence")
-      errors.push(`evidence link target "${link.target}" is invalid.`);
-    else errors.push(`source link target "${link.target}" is invalid.`);
+  for (const text of [doc.compiledTruth, ...doc.timeline.map((entry) => entry.body)]) {
+    for (const link of parseGoatBrainInlineLinks(text)) {
+      if (link.valid) continue;
+      if (link.kind === "page") errors.push(`wiki link target "${link.target}" is invalid.`);
+      else if (link.kind === "evidence")
+        errors.push(`evidence link target "${link.target}" is invalid.`);
+      else errors.push(`source link target "${link.target}" is invalid.`);
+    }
   }
   const evidenceIds = new Set<string>();
   for (const entry of doc.timeline) {
