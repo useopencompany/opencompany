@@ -3,17 +3,19 @@
 
 import "./load-env.mjs";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
 import { goatHttpsDisabled, goatHttpsPort, startGoatLocalHttpsProxy } from "./lib/caddy-dev.mjs";
 import {
+  DURABLE_STREAMS_DEV_HOST,
+  DURABLE_STREAMS_DEV_PORT,
   DURABLE_STREAMS_DEV_URL,
   startDurableStreamsDevServer,
 } from "./lib/durable-streams-dev.mjs";
 import { resolveGoatDevEnv } from "./lib/goat-dev-env.mjs";
+import { isolatedGoatDevEnvironment, selectGoatDevPorts } from "./lib/goat-dev-ports.mjs";
 import { startGoatDevProxy } from "./lib/goat-dev-proxy.mjs";
 import {
-  cleanupOrphanedNgrokProcesses,
   envForTunnel,
   ngrokConfigState,
   requestedNgrokUrl,
@@ -21,9 +23,21 @@ import {
   valueFor,
   waitForNgrokUrl,
 } from "./lib/ngrok-dev.mjs";
-import { killPortListeners } from "./lib/port-kill.mjs";
+import { findPortListeners } from "./lib/port-kill.mjs";
 
 const { appMode, turboArgs } = parseArgs(process.argv.slice(2));
+const goatDevPorts =
+  appMode === "goat" ? selectGoatDevPorts({ httpsDisabled: goatHttpsDisabled() }) : null;
+if (goatDevPorts?.isolated) {
+  console.log(
+    `\nConfigured Goat ports are already in use; using this workspace's isolated ports ` +
+      `(${goatDevPorts.app}-${goatDevPorts.electric ?? goatDevPorts.durableStreams}).`,
+  );
+  Object.assign(
+    process.env,
+    isolatedGoatDevEnvironment(goatDevPorts, { httpsDisabled: goatHttpsDisabled() }),
+  );
+}
 const defaultPort = appMode === "goat" ? (process.env.GOAT_PORT ?? "3002") : "3000";
 const port =
   valueFor(turboArgs, "--port") ??
@@ -41,6 +55,18 @@ let durableStreams = null;
 let durableEnv = {};
 let dev = null;
 let shuttingDown = false;
+
+process.on("uncaughtExceptionMonitor", (error, origin) => {
+  recordSupervisorCrash(error, origin);
+});
+
+process.on("exit", () => {
+  if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
+  stopGoatLocalHttps();
+  if (dev?.exitCode === null && !dev.killed) {
+    killProcessTree(dev, "SIGTERM");
+  }
+});
 
 for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
@@ -60,7 +86,7 @@ for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
 }
 
 if (appMode === "goat") {
-  await clearGoatDevPorts(port);
+  assertGoatDevPortsAvailable();
   goatProxyTarget = await prepareGoatProxyTarget(port);
   goatLocalHttps = await startGoatHttps(goatProxyTarget.port);
 }
@@ -127,6 +153,20 @@ function configureDevLogFile(args) {
   console.log(`\nDev logs: ${logFile}`);
   console.log("Read them with: bun run dev:logs -- --tail 100 --source runner\n");
   return logFile;
+}
+
+function recordSupervisorCrash(error, origin) {
+  try {
+    mkdirSync(".context/logs", { recursive: true });
+    const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    appendFileSync(
+      ".context/logs/dev-supervisor.log",
+      `[${new Date().toISOString()}] ${origin}\n${details}\n\n`,
+      { mode: 0o600 },
+    );
+  } catch {
+    // Preserve Node's original uncaught-exception behavior if diagnostics fail.
+  }
 }
 
 function parseArgs(args) {
@@ -235,7 +275,8 @@ async function startDurableStreams() {
   }
 
   try {
-    const { url, server } = await startDurableStreamsDevServer();
+    const durablePort = Number(goatDevPorts?.durableStreams ?? DURABLE_STREAMS_DEV_PORT);
+    const { url, server } = await startDurableStreamsDevServer({ port: durablePort });
     durableEnv = { DURABLE_STREAMS_URL: url };
     console.log(`\nDurable Streams (local) ready: ${url}`);
     console.log(
@@ -244,8 +285,11 @@ async function startDurableStreams() {
     return server;
   } catch (error) {
     if (error?.code === "EADDRINUSE") {
-      durableEnv = { DURABLE_STREAMS_URL: DURABLE_STREAMS_DEV_URL };
-      console.log(`\nDurable Streams already running at ${DURABLE_STREAMS_DEV_URL}; reusing it.\n`);
+      const durableUrl = goatDevPorts
+        ? `http://${DURABLE_STREAMS_DEV_HOST}:${goatDevPorts.durableStreams}`
+        : DURABLE_STREAMS_DEV_URL;
+      durableEnv = { DURABLE_STREAMS_URL: durableUrl };
+      console.log(`\nDurable Streams already running at ${durableUrl}; reusing it.\n`);
       return null;
     }
     console.warn(
@@ -265,32 +309,38 @@ async function prepareGoatProxyTarget(appPort) {
   return { port: goatDevProxy.port, exposesRunnerCallbacks: true };
 }
 
-async function clearGoatDevPorts(appPort) {
+function assertGoatDevPortsAvailable() {
   if (isCI) return;
 
   const ports = [
-    { label: "Goat app", port: appPort },
+    { label: "Goat app", port },
     { label: "runner", port: localRunnerPort() },
   ];
   if (!goatHttpsDisabled()) {
     ports.push({ label: "Goat HTTPS", port: goatHttpsPort() });
   }
+  const configuredDurableUrl = process.env.DURABLE_STREAMS_URL?.trim();
+  if (goatDevPorts?.isolated && (!configuredDurableUrl || configuredDurableUrl.includes("..."))) {
+    ports.push({ label: "Durable Streams", port: goatDevPorts.durableStreams });
+  }
 
-  const stopped = [];
+  const busy = [];
   for (const { label, port } of dedupePorts(ports)) {
-    const result = await killPortListeners(port);
-    if (result.pids.length === 0) continue;
-    stopped.push({ label, ...result });
+    const pids = findPortListeners(port);
+    if (pids.length > 0) busy.push({ label, port, pids });
   }
 
-  if (stopped.length === 0) return;
+  if (busy.length === 0) return;
 
-  console.log("\nCleared ports for Goat dev:");
-  for (const entry of stopped) {
-    const forced =
-      entry.forcedPids.length > 0 ? `; force-killed ${entry.forcedPids.join(", ")}` : "";
-    console.log(`  ${entry.label} :${entry.port} stopped PID ${entry.pids.join(", ")}${forced}`);
-  }
+  const details = busy
+    .map(({ label, port, pids }) => `  ${label} :${port} (PID ${pids.join(", ")})`)
+    .join("\n");
+  console.error(
+    `\nCannot start Goat dev because required ports are already in use:\n${details}\n\n` +
+      "Another dev stack may be running. Stop it first; dev:goat will not terminate " +
+      "processes owned by another workspace.\n",
+  );
+  exit(1);
 }
 
 function dedupePorts(ports) {
@@ -329,6 +379,8 @@ async function startGoatHttps(targetPort) {
 }
 
 function localRunnerPort() {
+  if (goatDevPorts) return goatDevPorts.runner;
+
   const configured =
     process.env.RUNNER_INTERNAL_URL?.trim() || process.env.RUNNER_PUBLIC_URL?.trim();
   if (configured) {
@@ -364,17 +416,6 @@ async function startDefaultTunnel(
     const message =
       "\nngrok authentication could not be verified from local env/config. Attempting to start ngrok anyway.\n";
     console.warn(message);
-  }
-
-  try {
-    const cleanup = await cleanupOrphanedNgrokProcesses();
-    if (cleanup.pids.length > 0) {
-      const forced =
-        cleanup.forcedPids.length > 0 ? `; force-killed ${cleanup.forcedPids.join(", ")}` : "";
-      console.log(`\nCleared stale ngrok agents: ${cleanup.pids.join(", ")}${forced}\n`);
-    }
-  } catch (error) {
-    console.warn(`\nCould not inspect stale ngrok agents: ${error.message}\n`);
   }
 
   const child = startNgrok({ port: targetPort, url });

@@ -17,6 +17,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./delegation";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
+import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { setGoatCodexChatWakeup, startGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
@@ -35,7 +36,10 @@ import { assertPreviewIdentity } from "./preview-guard";
 import { createServer } from "./server";
 import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
 
-const logger = createLogger({ service: "opencompany-runner", runtime: "index" });
+const logger = createLogger({
+  service: "opencompany-runner",
+  runtime: "index",
+});
 // Shutdown budget. Render sends SIGTERM on deploy and SIGKILLs after
 // `maxShutdownDelaySeconds` (300s, render.yaml). An interrupted turn is non-retryable —
 // the job layer treats post-lease failures as terminal (see MessageTurnFailedError) and
@@ -100,6 +104,7 @@ const jobWorker = startRunnerJobWorker(env, {
 const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
 const goatCodexChatWorker = env.goatTaskWorkerEnabled ? startGoatCodexChatWorker(env) : null;
 const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
+const goatBrainImportWorker = env.goatTaskWorkerEnabled ? startGoatBrainImportWorker(env) : null;
 const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
 const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
 const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
@@ -129,6 +134,9 @@ setGoatBrainIngestWakeup(() => {
 setGoatGoogleDriveSyncWakeup(() => {
   goatGoogleDriveSyncWorker?.notify();
 });
+setGoatBrainImportWakeup(() => {
+  goatBrainImportWorker?.notify();
+});
 setGoatCodexChatWakeup(() => {
   goatCodexChatWorker?.notify();
 });
@@ -143,6 +151,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       active_goat_task_count: goatTaskWorker?.activeCount() ?? 0,
       active_goat_brain_ingest_count: goatBrainIngestWorker?.activeCount() ?? 0,
       active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
+      active_goat_brain_import_count: goatBrainImportWorker?.activeCount() ?? 0,
       active_run_count: listActiveRuns().length,
     });
     // Stop accepting work and drain in-flight jobs/requests first, flush any pending
@@ -170,6 +179,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatTaskWorker?.stop() ?? Promise.resolve(),
       goatCodexChatWorker?.stop() ?? Promise.resolve(),
       goatBrainIngestWorker?.stop() ?? Promise.resolve(),
+      goatBrainImportWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
       goatGmailPollWorker?.stop() ?? Promise.resolve(),

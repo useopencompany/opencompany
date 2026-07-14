@@ -4,11 +4,41 @@
 // leaves a working dev environment in one go.
 
 export const ELECTRIC_IMAGE = "electricsql/electric:latest";
-export const ELECTRIC_CONTAINER =
-  process.env.ELECTRIC_CONTAINER_NAME?.trim() || "opencompany-electric";
-export const ELECTRIC_PORT = process.env.ELECTRIC_DEV_PORT?.trim() || "3010";
+const electricDevConfig = resolveElectricDevConfig();
+export const ELECTRIC_CONTAINER = electricDevConfig.container;
+export const ELECTRIC_PORT = electricDevConfig.port;
 export const ELECTRIC_LOCAL_URL = `http://localhost:${ELECTRIC_PORT}`;
 export const ELECTRIC_HEALTH_URL = `${ELECTRIC_LOCAL_URL}/v1/health`;
+
+export function resolveElectricDevConfig(env = process.env) {
+  const conductorPort = optionalPort(env.CONDUCTOR_PORT, "CONDUCTOR_PORT");
+  const explicitPort = optionalPort(env.ELECTRIC_DEV_PORT, "ELECTRIC_DEV_PORT");
+  const port = explicitPort ?? (conductorPort ? offsetPort(conductorPort, 4) : "3010");
+  const container =
+    env.ELECTRIC_CONTAINER_NAME?.trim() ||
+    (conductorPort ? `opencompany-electric-${conductorPort}` : "opencompany-electric");
+  return { container, port };
+}
+
+function optionalPort(value, label) {
+  const configured = value?.trim();
+  if (!configured) return null;
+  const port = Number(configured);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`${label} must be a TCP port from 1 to 65535; received ${configured}.`);
+  }
+  return String(port);
+}
+
+function offsetPort(base, offset) {
+  const port = Number(base) + offset;
+  if (port > 65_535) {
+    throw new Error(
+      `CONDUCTOR_PORT ${base} leaves no available Electric port at offset +${offset}.`,
+    );
+  }
+  return String(port);
+}
 
 /**
  * The connection string Electric should sync from. Electric needs Neon's DIRECT
