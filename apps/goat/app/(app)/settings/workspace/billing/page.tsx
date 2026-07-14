@@ -1,5 +1,9 @@
 import {
-  GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS,
+  GOAT_FREE_MONTHLY_INGESTION_LIMIT,
+  GOAT_PRO_MONTHLY_INGESTION_LIMIT,
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+  GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS,
+  GOAT_SOURCE_BONUS_MONTHLY_ITEMS,
   loadGoatBillingOverview,
 } from "@opencompany/db/goat-billing";
 import { GoatBillingPanel } from "@/components/GoatBillingPanel";
@@ -16,14 +20,17 @@ export default async function WorkspaceBillingSettingsPage() {
         cancelAtPeriodEnd: overview.billing.cancelAtPeriodEnd,
         currentPeriodEnd: overview.billing.currentPeriodEnd?.toISOString() ?? null,
         paymentNeedsAttention: overview.billing.paymentNeedsAttention,
-        seatSyncPending: Boolean(overview.billing.seatSyncPendingAt),
-        seatCount: overview.seatCount,
-        seatPriceEurCents: GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS,
-        monthlySubtotalEurCents: overview.monthlySubtotalEurCents,
-        monthlyIngestionsUsed: overview.monthlyUsed,
-        monthlyIngestionLimit: overview.plan === "free" ? overview.window.limit : null,
-        monthStartedAt: overview.monthWindow.start.toISOString(),
-        monthResetAt: overview.monthWindow.resetAt.toISOString(),
+        monthlyPriceUsdCents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+        monthlyIngestionsUsed: overview.used,
+        monthlyIngestionLimit: overview.window.limit,
+        baseMonthlyLimit: overview.window.baseLimit,
+        freeMonthlyLimit: GOAT_FREE_MONTHLY_INGESTION_LIMIT,
+        proMonthlyLimit: GOAT_PRO_MONTHLY_INGESTION_LIMIT,
+        sourceBonus: overview.window.sourceBonus,
+        sourceBonusPerSource: GOAT_SOURCE_BONUS_MONTHLY_ITEMS,
+        sourceBonusMax: GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS,
+        monthStartedAt: overview.window.start.toISOString(),
+        monthResetAt: overview.window.resetAt.toISOString(),
         isAdmin: context.role === "admin",
       }}
     />

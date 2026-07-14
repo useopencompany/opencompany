@@ -20,9 +20,7 @@ import type { User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { after } from "next/server";
 import { cache } from "react";
-import { syncGoatWorkspaceSeatQuantity } from "@/lib/billing/seat-sync";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
@@ -95,29 +93,13 @@ async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
       userId: authUser.id,
       statuses: ["active"],
     });
-    const adopted = await adoptGoatWorkspaceMembershipsFromOrgs({
+    await adoptGoatWorkspaceMembershipsFromOrgs({
       userWorkosId: authUser.id,
       memberships: memberships.data.map((membership) => ({
         organizationId: membership.organizationId,
         role: membership.role?.slug === "admin" ? ("admin" as const) : ("member" as const),
       })),
     });
-    if (adopted > 0) {
-      const workspaces = await listGoatWorkspacesForUser(authUser.id);
-      after(async () => {
-        const results = await Promise.allSettled(
-          workspaces.map((entry) => syncGoatWorkspaceSeatQuantity(entry.workspace.id)),
-        );
-        for (const result of results) {
-          if (result.status === "rejected") {
-            console.error(
-              "[goat] Failed to synchronize a newly adopted member seat",
-              result.reason,
-            );
-          }
-        }
-      });
-    }
   } catch (error) {
     console.error("[goat] Failed to adopt WorkOS organization memberships", error);
   }

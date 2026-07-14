@@ -180,23 +180,16 @@ export type AnalyticsEventPropertiesByName = {
   goat_billing_checkout_started: {
     user_id: string;
     workspace_id: string;
-    seat_quantity: number;
-    subtotal_eur_cents: number;
+    monthly_price_usd_cents: number;
   };
   goat_billing_checkout_completed: {
     workspace_id: string;
-    seat_quantity: number;
-    subtotal_eur_cents: number;
+    monthly_price_usd_cents: number;
   };
   goat_billing_plan_changed: {
     workspace_id: string;
     plan: "free" | "pro";
     subscription_status: string;
-  };
-  goat_billing_seat_quantity_changed: {
-    workspace_id: string;
-    previous_quantity: number;
-    seat_quantity: number;
   };
   goat_billing_cancellation_scheduled: {
     workspace_id: string;
@@ -451,22 +444,17 @@ export const analyticsEvents = {
   goat_billing_checkout_started: {
     name: "goat_billing_checkout_started",
     description: "A Goat workspace admin opened Pro subscription Checkout.",
-    safeProperties: ["user_id", "workspace_id", "seat_quantity", "subtotal_eur_cents"],
+    safeProperties: ["user_id", "workspace_id", "monthly_price_usd_cents"],
   },
   goat_billing_checkout_completed: {
     name: "goat_billing_checkout_completed",
     description: "Stripe activated an OpenCompany Pro subscription after Checkout.",
-    safeProperties: ["workspace_id", "seat_quantity", "subtotal_eur_cents"],
+    safeProperties: ["workspace_id", "monthly_price_usd_cents"],
   },
   goat_billing_plan_changed: {
     name: "goat_billing_plan_changed",
     description: "A Goat workspace's effective billing plan changed.",
     safeProperties: ["workspace_id", "plan", "subscription_status"],
-  },
-  goat_billing_seat_quantity_changed: {
-    name: "goat_billing_seat_quantity_changed",
-    description: "An OpenCompany Pro subscription's licensed seat quantity changed.",
-    safeProperties: ["workspace_id", "previous_quantity", "seat_quantity"],
   },
   goat_billing_cancellation_scheduled: {
     name: "goat_billing_cancellation_scheduled",

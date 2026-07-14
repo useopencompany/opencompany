@@ -1,28 +1,54 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import {
   type GoatBrainSourceProvider,
   type GoatStripeSubscriptionStatus,
   type GoatWorkspacePlan,
   goatBrainIngestJobs,
+  goatBrainSources,
+  goatBrains,
+  goatIntegrations,
   goatStripeWebhookEvents,
   goatWorkspaceBilling,
   goatWorkspaceIngestionReservations,
-  goatWorkspaceMembers,
 } from "./goat-schema";
 
 type DbLike = any;
 
-export const GOAT_FREE_MONTHLY_INGESTION_LIMIT = 200;
-export const GOAT_PRO_DAILY_INGESTION_LIMIT = 200;
-export const GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS = 1_500;
+export {
+  GOAT_FREE_MONTHLY_INGESTION_LIMIT,
+  GOAT_PRO_MONTHLY_INGESTION_LIMIT,
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+  GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS,
+  GOAT_SOURCE_BONUS_MONTHLY_ITEMS,
+  goatSourceBonusItems,
+} from "./goat-billing-constants";
+
+import {
+  GOAT_FREE_MONTHLY_INGESTION_LIMIT,
+  GOAT_PRO_MONTHLY_INGESTION_LIMIT,
+  goatSourceBonusItems,
+} from "./goat-billing-constants";
 
 const PRO_STATUSES = new Set<GoatStripeSubscriptionStatus>(["active", "trialing", "past_due"]);
+
+// The default web-app client (`./client`) is neon-http, which has no interactive
+// transactions (one HTTPS request per query) and throws on db.transaction().
+// Run the mutation steps sequentially there; pooled callers (the runner) keep a
+// real transaction. Mirrors runAtomically() in ./goat-brain-files.
+function runAtomically<T>(db: DbLike, fn: (tx: DbLike) => Promise<T>): Promise<T> {
+  if (db instanceof NeonHttpDatabase) return fn(db);
+  if (typeof db.transaction !== "function") return fn(db);
+  return db.transaction(fn);
+}
 
 export type GoatIngestionWindow = {
   plan: GoatWorkspacePlan;
   limit: number;
+  baseLimit: number;
+  sourceBonus: number;
   start: Date;
   resetAt: Date;
 };
@@ -42,31 +68,52 @@ export function goatPlanForSubscriptionStatus(
   return status && PRO_STATUSES.has(status) ? "pro" : "free";
 }
 
+// Both plans share a single pooled UTC-calendar-month allowance. The window
+// start is clamped to plan_started_at so a mid-month plan change starts a
+// fresh allowance instead of retroactively re-counting the old plan's usage.
 export function goatIngestionWindow(input: {
   plan: GoatWorkspacePlan;
   planStartedAt: Date;
   now: Date;
+  connectedSourceCount?: number;
 }): GoatIngestionWindow {
-  const calendarStart = new Date(input.now);
-  const resetAt = new Date(input.now);
-  if (input.plan === "pro") {
-    calendarStart.setUTCHours(0, 0, 0, 0);
-    resetAt.setUTCHours(0, 0, 0, 0);
-    resetAt.setUTCDate(resetAt.getUTCDate() + 1);
-  } else {
-    calendarStart.setUTCDate(1);
-    calendarStart.setUTCHours(0, 0, 0, 0);
-    resetAt.setUTCDate(1);
-    resetAt.setUTCHours(0, 0, 0, 0);
-    resetAt.setUTCMonth(resetAt.getUTCMonth() + 1);
-  }
+  const { start: calendarStart, resetAt } = goatCalendarMonthWindow(input.now);
+  const baseLimit =
+    input.plan === "pro" ? GOAT_PRO_MONTHLY_INGESTION_LIMIT : GOAT_FREE_MONTHLY_INGESTION_LIMIT;
+  const sourceBonus = goatSourceBonusItems(input.connectedSourceCount ?? 0);
   return {
     plan: input.plan,
-    limit:
-      input.plan === "pro" ? GOAT_PRO_DAILY_INGESTION_LIMIT : GOAT_FREE_MONTHLY_INGESTION_LIMIT,
+    limit: baseLimit + sourceBonus,
+    baseLimit,
+    sourceBonus,
     start: input.planStartedAt > calendarStart ? input.planStartedAt : calendarStart,
     resetAt,
   };
+}
+
+// A "connected source" is a distinct provider that feeds any of the
+// workspace's brains through an integration that has not been disconnected.
+// The bonus is recomputed from live rows on every allowance check, so
+// disconnecting an integration (or disabling its brain sources) drops the
+// bonus with it — connect → bonus → disconnect cannot bank allowance.
+// Transient failures (needs_reauth, sync_failed) keep the bonus; only a
+// deliberate disconnect or removal loses it.
+export async function countGoatConnectedWorkspaceSources(workspaceId: string, db?: DbLike) {
+  const [row] = await (db ?? getDb())
+    .select({
+      count: sql<number>`count(distinct ${goatBrainSources.provider})::integer`,
+    })
+    .from(goatBrainSources)
+    .innerJoin(goatBrains, eq(goatBrainSources.brainId, goatBrains.id))
+    .innerJoin(goatIntegrations, eq(goatBrainSources.integrationId, goatIntegrations.id))
+    .where(
+      and(
+        eq(goatBrains.workspaceId, workspaceId),
+        eq(goatBrainSources.enabled, true),
+        ne(goatIntegrations.status, "disconnected"),
+      ),
+    );
+  return Number(row?.count ?? 0);
 }
 
 export function goatReservationFitsAllowance(input: {
@@ -75,18 +122,19 @@ export function goatReservationFitsAllowance(input: {
   rawEventCount: number;
   limit: number;
 }) {
-  return input.pendingUnits === 0 && input.consumedUnits + input.rawEventCount <= input.limit;
+  if (input.pendingUnits > 0) return false;
+  // A batch can be larger than the entire allowance (flush batches go up to
+  // 200 raw events; the Free base is 150). Admit it while the window is
+  // untouched — otherwise it could never run and would wedge the FIFO backlog
+  // behind it forever, surviving every monthly reset.
+  if (input.consumedUnits === 0) return true;
+  return input.consumedUnits + input.rawEventCount <= input.limit;
 }
 
 async function ensureBillingRow(workspaceId: string, db: DbLike) {
-  const [seatCount] = await db
-    .select({ count: sql<number>`count(*)::integer` })
-    .from(goatWorkspaceMembers)
-    .where(eq(goatWorkspaceMembers.workspaceId, workspaceId));
-  const desiredSeatQuantity = Math.max(1, Number(seatCount?.count ?? 1));
   await db
     .insert(goatWorkspaceBilling)
-    .values({ workspaceId, desiredSeatQuantity })
+    .values({ workspaceId })
     .onConflictDoNothing({ target: goatWorkspaceBilling.workspaceId });
   const [billing] = await db
     .select()
@@ -119,12 +167,16 @@ export async function reserveGoatWorkspaceIngestion(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const run = async (tx: DbLike) => {
+    // The bonus is eventually consistent by design, so count sources before
+    // taking the workspace row lock instead of lengthening the lock window.
+    const connectedSourceCount = await countGoatConnectedWorkspaceSources(input.workspaceId, tx);
     await lockWorkspace(input.workspaceId, tx);
     const billing = await ensureBillingRow(input.workspaceId, tx);
     const window = goatIngestionWindow({
       plan: billing.plan,
       planStartedAt: billing.planStartedAt,
       now,
+      connectedSourceCount,
     });
     const [usage] = await tx
       .select({
@@ -206,17 +258,19 @@ export async function reserveGoatWorkspaceIngestion(input: {
       created: false as const,
     };
   };
-  return input.db ? run(db) : db.transaction(run);
+  return input.db ? run(db) : runAtomically(db, run);
 }
 
 async function releasePendingForWorkspace(workspaceId: string, now: Date, db: DbLike) {
-  return db.transaction(async (tx: DbLike) => {
+  return runAtomically(db, async (tx: DbLike) => {
+    const connectedSourceCount = await countGoatConnectedWorkspaceSources(workspaceId, tx);
     await lockWorkspace(workspaceId, tx);
     const billing = await ensureBillingRow(workspaceId, tx);
     const window = goatIngestionWindow({
       plan: billing.plan,
       planStartedAt: billing.planStartedAt,
       now,
+      connectedSourceCount,
     });
     const [usage] = await tx
       .select({
@@ -230,7 +284,8 @@ async function releasePendingForWorkspace(workspaceId: string, now: Date, db: Db
           gte(goatWorkspaceIngestionReservations.consumedAt, window.start),
         ),
       );
-    let available = window.limit - Number(usage?.total ?? 0);
+    let consumed = Number(usage?.total ?? 0);
+    let available = window.limit - consumed;
     if (available <= 0) return 0;
     const pending = await tx
       .select()
@@ -245,32 +300,43 @@ async function releasePendingForWorkspace(workspaceId: string, now: Date, db: Db
         asc(goatWorkspaceIngestionReservations.createdAt),
         asc(goatWorkspaceIngestionReservations.id),
       );
-    let released = 0;
+    const releasable: typeof pending = [];
     for (const reservation of pending) {
-      if (reservation.rawEventCount > available) break;
-      await tx
-        .update(goatWorkspaceIngestionReservations)
-        .set({ status: "consumed", consumedAt: now, updatedAt: now })
-        .where(
-          and(
-            eq(goatWorkspaceIngestionReservations.id, reservation.id),
-            eq(goatWorkspaceIngestionReservations.status, "pending"),
-          ),
-        );
-      await tx
-        .update(goatBrainIngestJobs)
-        .set({ planPaused: false, updatedAt: now })
-        .where(
-          and(
-            eq(goatBrainIngestJobs.workspaceId, workspaceId),
-            eq(goatBrainIngestJobs.sourceItemId, reservation.sourceItemId),
-            eq(goatBrainIngestJobs.planPaused, true),
-          ),
-        );
+      // Same progress guarantee as goatReservationFitsAllowance: a batch
+      // larger than the whole allowance is admitted while the window is
+      // untouched, so it cannot wedge the FIFO backlog behind it forever.
+      if (consumed > 0 && reservation.rawEventCount > available) break;
+      releasable.push(reservation);
+      consumed += reservation.rawEventCount;
       available -= reservation.rawEventCount;
-      released += 1;
     }
-    return released;
+    if (releasable.length === 0) return 0;
+    await tx
+      .update(goatWorkspaceIngestionReservations)
+      .set({ status: "consumed", consumedAt: now, updatedAt: now })
+      .where(
+        and(
+          inArray(
+            goatWorkspaceIngestionReservations.id,
+            releasable.map((reservation: { id: string }) => reservation.id),
+          ),
+          eq(goatWorkspaceIngestionReservations.status, "pending"),
+        ),
+      );
+    await tx
+      .update(goatBrainIngestJobs)
+      .set({ planPaused: false, updatedAt: now })
+      .where(
+        and(
+          eq(goatBrainIngestJobs.workspaceId, workspaceId),
+          inArray(
+            goatBrainIngestJobs.sourceItemId,
+            releasable.map((reservation: { sourceItemId: string }) => reservation.sourceItemId),
+          ),
+          eq(goatBrainIngestJobs.planPaused, true),
+        ),
+      );
+    return releasable.length;
   });
 }
 
@@ -279,27 +345,48 @@ export async function releasePendingGoatIngestionReservations(
 ) {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
+  const oldestPendingAt = sql<Date>`min(${goatWorkspaceIngestionReservations.createdAt})`;
+  // Oldest backlog first, so a sweep capped by maxWorkspaces cannot starve the
+  // same workspaces every run when more than one page of backlogs exists.
   const rows = await db
-    .selectDistinct({ workspaceId: goatWorkspaceIngestionReservations.workspaceId })
+    .select({ workspaceId: goatWorkspaceIngestionReservations.workspaceId })
     .from(goatWorkspaceIngestionReservations)
     .where(eq(goatWorkspaceIngestionReservations.status, "pending"))
+    .groupBy(goatWorkspaceIngestionReservations.workspaceId)
+    .orderBy(oldestPendingAt)
     .limit(input.maxWorkspaces ?? 50);
   let released = 0;
-  for (const row of rows) released += await releasePendingForWorkspace(row.workspaceId, now, db);
-  return released;
+  let failed = 0;
+  for (const row of rows) {
+    // One workspace's failure (lock timeout, transient DB error) must not
+    // abort the sweep for every other paused workspace.
+    try {
+      released += await releasePendingForWorkspace(row.workspaceId, now, db);
+    } catch (error) {
+      failed += 1;
+      console.error(
+        `Failed to release the paused Goat ingestion backlog for workspace ${row.workspaceId}.`,
+        error,
+      );
+    }
+  }
+  return { released, failed };
 }
 
 export async function loadGoatBillingOverview(workspaceId: string, options: { db?: DbLike } = {}) {
   const db = options.db ?? getDb();
   const now = new Date();
   const billing = await ensureBillingRow(workspaceId, db);
-  const monthWindow = goatCalendarMonthWindow(now);
-  const window = goatIngestionWindow({
+  // The window start only depends on the plan row; the connected-source count
+  // only affects the limit, so it can run inside the parallel batch below and
+  // the final window (with the bonus folded in) is computed afterwards.
+  const { start: windowStart } = goatIngestionWindow({
     plan: billing.plan,
     planStartedAt: billing.planStartedAt,
     now,
   });
-  const [usage, monthlyUsage, pending, seats, providerRows, recentRows] = await Promise.all([
+  const [connectedSourceCount, usage, pending, providerRows, recentRows] = await Promise.all([
+    countGoatConnectedWorkspaceSources(workspaceId, db),
     db
       .select({
         total: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.rawEventCount}), 0)::integer`,
@@ -309,19 +396,7 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
         and(
           eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
           eq(goatWorkspaceIngestionReservations.status, "consumed"),
-          gte(goatWorkspaceIngestionReservations.consumedAt, window.start),
-        ),
-      ),
-    db
-      .select({
-        total: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.rawEventCount}), 0)::integer`,
-      })
-      .from(goatWorkspaceIngestionReservations)
-      .where(
-        and(
-          eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
-          eq(goatWorkspaceIngestionReservations.status, "consumed"),
-          gte(goatWorkspaceIngestionReservations.consumedAt, monthWindow.start),
+          gte(goatWorkspaceIngestionReservations.consumedAt, windowStart),
         ),
       ),
     db
@@ -336,10 +411,6 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
         ),
       ),
     db
-      .select({ total: sql<number>`count(*)::integer` })
-      .from(goatWorkspaceMembers)
-      .where(eq(goatWorkspaceMembers.workspaceId, workspaceId)),
-    db
       .select({
         provider: goatWorkspaceIngestionReservations.sourceProvider,
         total: sql<number>`sum(${goatWorkspaceIngestionReservations.rawEventCount})::integer`,
@@ -349,7 +420,7 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
         and(
           eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
           eq(goatWorkspaceIngestionReservations.status, "consumed"),
-          gte(goatWorkspaceIngestionReservations.consumedAt, window.start),
+          gte(goatWorkspaceIngestionReservations.consumedAt, windowStart),
         ),
       )
       .groupBy(goatWorkspaceIngestionReservations.sourceProvider),
@@ -367,40 +438,25 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
       .orderBy(desc(goatWorkspaceIngestionReservations.createdAt))
       .limit(20),
   ]);
-  const seatCount = Math.max(1, Number(seats[0]?.total ?? 1));
+  const window = goatIngestionWindow({
+    plan: billing.plan,
+    planStartedAt: billing.planStartedAt,
+    now,
+    connectedSourceCount,
+  });
   return {
     billing,
     plan: billing.plan,
     window,
-    monthWindow,
     used: Number(usage[0]?.total ?? 0),
-    monthlyUsed: Number(monthlyUsage[0]?.total ?? 0),
     pending: Number(pending[0]?.total ?? 0),
-    seatCount,
-    monthlySubtotalEurCents: seatCount * GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS,
+    connectedSourceCount,
     providers: providerRows.map((row: { provider: GoatBrainSourceProvider; total: number }) => ({
       provider: row.provider,
       count: Number(row.total),
     })),
     recent: recentRows,
   };
-}
-
-export async function markGoatSeatSyncPending(workspaceId: string, options: { db?: DbLike } = {}) {
-  const db = options.db ?? getDb();
-  const [seats] = await db
-    .select({ total: sql<number>`count(*)::integer` })
-    .from(goatWorkspaceMembers)
-    .where(eq(goatWorkspaceMembers.workspaceId, workspaceId));
-  const desiredSeatQuantity = Math.max(1, Number(seats?.total ?? 1));
-  await db
-    .insert(goatWorkspaceBilling)
-    .values({ workspaceId, desiredSeatQuantity, seatSyncPendingAt: new Date() })
-    .onConflictDoUpdate({
-      target: goatWorkspaceBilling.workspaceId,
-      set: { desiredSeatQuantity, seatSyncPendingAt: new Date(), updatedAt: new Date() },
-    });
-  return desiredSeatQuantity;
 }
 
 export async function setGoatStripeCustomerId(
@@ -440,7 +496,6 @@ export type GoatStripeSubscriptionProjection = {
   status: GoatStripeSubscriptionStatus;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: Date | null;
-  seatQuantity: number;
 };
 
 export async function applyGoatStripeSubscriptionProjection(
@@ -448,7 +503,7 @@ export async function applyGoatStripeSubscriptionProjection(
   options: { db?: DbLike } = {},
 ) {
   const db = options.db ?? getDb();
-  return db.transaction(async (tx: DbLike) => {
+  return runAtomically(db, async (tx: DbLike) => {
     const [recorded] = await tx
       .insert(goatStripeWebhookEvents)
       .values({
@@ -479,8 +534,6 @@ export async function applyGoatStripeSubscriptionProjection(
         subscriptionStatus: input.status,
         cancelAtPeriodEnd: input.cancelAtPeriodEnd,
         currentPeriodEnd: input.currentPeriodEnd,
-        stripeSeatQuantity: input.seatQuantity,
-        seatSyncPendingAt: input.seatQuantity === current.desiredSeatQuantity ? null : new Date(),
         paymentNeedsAttention: input.status === "past_due" || input.status === "unpaid",
         lastStripeEventCreated: input.eventCreatedAt,
         updatedAt: new Date(),
@@ -488,34 +541,6 @@ export async function applyGoatStripeSubscriptionProjection(
       .where(eq(goatWorkspaceBilling.workspaceId, input.workspaceId));
     return { applied: true as const, planChanged, plan, cancellationScheduled };
   });
-}
-
-export async function listGoatBillingSeatSyncCandidates(limit = 50, options: { db?: DbLike } = {}) {
-  const db = options.db ?? getDb();
-  return db
-    .select()
-    .from(goatWorkspaceBilling)
-    .where(
-      and(
-        eq(goatWorkspaceBilling.plan, "pro"),
-        isNotNull(goatWorkspaceBilling.stripeSubscriptionItemId),
-        isNotNull(goatWorkspaceBilling.seatSyncPendingAt),
-      ),
-    )
-    .orderBy(asc(goatWorkspaceBilling.seatSyncPendingAt))
-    .limit(limit);
-}
-
-export async function completeGoatSeatSync(input: {
-  workspaceId: string;
-  quantity: number;
-  db?: DbLike;
-}) {
-  const db = input.db ?? getDb();
-  await db
-    .update(goatWorkspaceBilling)
-    .set({ stripeSeatQuantity: input.quantity, seatSyncPendingAt: null, updatedAt: new Date() })
-    .where(eq(goatWorkspaceBilling.workspaceId, input.workspaceId));
 }
 
 export async function findGoatWorkspaceIdForStripeSubscription(
@@ -542,7 +567,7 @@ export async function applyGoatStripeInvoicePaymentState(
   options: { db?: DbLike } = {},
 ) {
   const db = options.db ?? getDb();
-  return db.transaction(async (tx: DbLike) => {
+  return runAtomically(db, async (tx: DbLike) => {
     const [recorded] = await tx
       .insert(goatStripeWebhookEvents)
       .values({

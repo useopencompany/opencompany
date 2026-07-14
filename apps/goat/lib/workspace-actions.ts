@@ -24,7 +24,6 @@ import {
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
 } from "@/lib/auth";
-import { syncGoatWorkspaceSeatQuantity } from "@/lib/billing/seat-sync";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 
@@ -349,17 +348,8 @@ export async function removeGoatWorkspaceMemberAction(
       workspaceId: context.workspace.id,
       userWorkosId,
     });
-    let warning: string | undefined;
-    try {
-      await syncGoatWorkspaceSeatQuantity(context.workspace.id);
-    } catch (error) {
-      // syncGoatWorkspaceSeatQuantity marks the row pending before contacting
-      // Stripe, so the hourly reconciliation job will durably retry this.
-      console.error("[goat] Failed to synchronize Stripe seat quantity", error);
-      warning = "The member was removed, but the Stripe seat update is pending retry.";
-    }
     revalidatePath("/", "layout");
-    return { ok: true, ...(warning ? { warning } : {}) };
+    return { ok: true };
   } catch (error) {
     return errorResult(error, "Could not remove the member.");
   }

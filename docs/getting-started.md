@@ -221,7 +221,7 @@ without copying them by hand.
 Stripe setup has a local fallback: if `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` are still
 placeholders, `bun run setup` reads the active Stripe CLI test key and runs
 `stripe listen --print-secret`, then writes both values into `.env.local` without printing them. It
-also loads Goat billing values from Infisical `dev` + `/web`, reuses or creates the licensed EUR 15
+also loads Goat billing values from Infisical `dev` + `/web`, reuses or creates the flat USD 99
 OpenCompany Pro test Price by lookup key, generates `CRON_SECRET`, and refreshes
 `apps/goat/.env.local`. Run `stripe login` once first. If you use a non-default Stripe CLI profile,
 set `STRIPE_CLI_PROJECT_NAME` before running setup.
