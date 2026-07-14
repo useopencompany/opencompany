@@ -287,6 +287,36 @@ Old truth.
       }),
     ).toThrow('Invalid timeline "at" value');
   });
+
+  it("validates inline links in timeline bodies", () => {
+    const source = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "acme",
+        folder: "companies",
+        kind: "page",
+        type: "company",
+        status: "draft",
+        title: "Acme",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Acme",
+      compiledTruth: "Acme is a company.",
+      timeline: [
+        {
+          evidenceId: "ev-invalid-source",
+          at: "2026-01-01T00:00:00.000Z",
+          body: "Captured from [[source:no-provider-id|an invalid source]].",
+        },
+      ],
+    });
+
+    expect(validateGoatBrainDocument(parseGoatBrainDocument(source), "acme", source)).toEqual({
+      ok: false,
+      errors: expect.arrayContaining(['source link target "no-provider-id" is invalid.']),
+    });
+  });
 });
 
 describe("goat brain asset text block", () => {

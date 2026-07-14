@@ -13,28 +13,35 @@ import {
   ArrowRight,
   BookOpen,
   Brain,
+  Briefcase,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
   Check,
+  Code2,
   FlaskConical,
   Folder,
   GripVertical,
   History,
   Inbox,
   Lightbulb,
-  Link2,
+  LineChart,
   Lock,
+  Megaphone,
   MessagesSquare,
+  Microscope,
   Plus,
+  Rocket,
+  Settings2,
   ShieldCheck,
-  Sparkles,
+  Target,
   Users,
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { GoatBrainImport } from "@/components/GoatBrainImport";
 import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
 import { type GoatMcpBrainOption, McpSetupGuide } from "@/components/McpSetupGuide";
 import {
@@ -49,7 +56,7 @@ import {
   checkGoatWorkspaceSlugAction,
   finishGoatOnboardingAction,
   saveGoatOnboardingBrainFoldersAction,
-  saveGoatOnboardingContextAction,
+  saveGoatOnboardingProfileAction,
   saveGoatOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
 import {
@@ -60,6 +67,12 @@ import {
   goatOnboardingConnectHref,
   goatOnboardingConnectionError,
 } from "@/lib/onboarding-integrations";
+import {
+  GOAT_ONBOARDING_BUILDING_MAX_LENGTH,
+  type GoatOnboardingRole,
+  goatOnboardingFoldersForRole,
+  isGoatOnboardingRole,
+} from "@/lib/onboarding-profile";
 
 type OnboardingUser = {
   name: string;
@@ -67,14 +80,23 @@ type OnboardingUser = {
   avatarUrl: string | null;
 };
 
-type StepKey = "workspace" | "brain" | "sources" | "context" | "connect" | "finish" | "welcome";
+type StepKey =
+  | "profile"
+  | "workspace"
+  | "brain"
+  | "sources"
+  | "context"
+  | "connect"
+  | "finish"
+  | "welcome";
 
 type StepDef = { key: StepKey; label: string };
 
-// Activation-optimized order: name it → shape it (light) → feed it (peak) →
-// teach it → use it → done. Referral is folded into the finish so it never
-// interrupts a value step.
+// Activation-optimized order: know them → name it → shape it (pre-tailored from
+// their role) → feed it (peak) → teach it → use it → done. Referral is folded
+// into the finish so it never interrupts a value step.
 const OWNER_STEPS: StepDef[] = [
+  { key: "profile", label: "About you" },
   { key: "workspace", label: "Create workspace" },
   { key: "brain", label: "Set up your brain" },
   { key: "sources", label: "Connect sources" },
@@ -94,6 +116,74 @@ const MEMBER_STEPS: StepDef[] = [
 
 const PAGES_PER_SOURCE = 50;
 
+// Role presets — the first onboarding step. Picking one seeds the adjustable
+// brain folders with a set that matches how that person actually works (the
+// hard defaults inbox/people/companies/evidence are always added on top). Every
+// folder here must satisfy GOAT_BRAIN_FOLDER_PATTERN (lowercase, single word).
+type RoleProfile = {
+  id: GoatOnboardingRole;
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+};
+
+const ROLE_PROFILES: RoleProfile[] = [
+  {
+    id: "founder",
+    label: "Founder / CEO",
+    hint: "Running the whole company",
+    icon: Rocket,
+  },
+  {
+    id: "product",
+    label: "Product / Engineering",
+    hint: "Building the product",
+    icon: Code2,
+  },
+  {
+    id: "sales",
+    label: "Sales / GTM",
+    hint: "Pipeline & closing deals",
+    icon: Target,
+  },
+  {
+    id: "marketing",
+    label: "Marketing / Growth",
+    hint: "Demand & brand",
+    icon: Megaphone,
+  },
+  {
+    id: "operations",
+    label: "Operations / Finance",
+    hint: "Keeping it all running",
+    icon: Settings2,
+  },
+  {
+    id: "investing",
+    label: "Investing / VC",
+    hint: "Sourcing & backing companies",
+    icon: LineChart,
+  },
+  {
+    id: "consulting",
+    label: "Consulting / Agency",
+    hint: "Serving clients",
+    icon: Briefcase,
+  },
+  {
+    id: "research",
+    label: "Research / Analysis",
+    hint: "Digging into topics",
+    icon: Microscope,
+  },
+];
+
+// Folders to seed the brain step with for a given role — falls back to the
+// generic adjustable defaults when no role is chosen or recognized.
+function foldersForRole(role: GoatOnboardingRole | null): string[] {
+  return goatOnboardingFoldersForRole(role);
+}
+
 // ---------------------------------------------------------------------------
 
 type SlugStatus = "idle" | "checking" | "available" | "taken";
@@ -106,8 +196,8 @@ export function OnboardingWizard({
   initialStep,
   initialWorkspaceName,
   initialSlug,
-  initialCompanyDomain,
-  initialContextUrls,
+  initialRole,
+  initialBuilding,
   initialReferral,
   initialSourceDetails,
   initialConnectionResult,
@@ -122,8 +212,8 @@ export function OnboardingWizard({
   initialStep: number;
   initialWorkspaceName: string;
   initialSlug: string;
-  initialCompanyDomain: string;
-  initialContextUrls: string[];
+  initialRole: string | null;
+  initialBuilding: string;
   initialReferral: string | null;
   initialSourceDetails: GoatBrainSourcesDetails | null;
   initialConnectionResult: GoatOnboardingConnectionResult | null;
@@ -133,6 +223,7 @@ export function OnboardingWizard({
 }) {
   const router = useRouter();
   const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
+  const normalizedInitialRole = isGoatOnboardingRole(initialRole) ? initialRole : null;
   const [stepIndex, setStepIndex] = useState(() =>
     Math.min(Math.max(initialStep, 0), STEPS.length - 1),
   );
@@ -141,15 +232,11 @@ export function OnboardingWizard({
   const [slugTouched, setSlugTouched] = useState(Boolean(initialSlug));
   const [slug, setSlug] = useState(initialSlug);
   const [referral, setReferral] = useState<string | null>(initialReferral);
-  const [workingFolders, setWorkingFolders] = useState<string[]>(() => [
-    ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  ]);
-  const [companyDomain, setCompanyDomain] = useState(initialCompanyDomain);
-  const [contextUrls, setContextUrls] = useState<string[]>(
-    initialContextUrls.length > 0 ? initialContextUrls : [""],
+  const [role, setRole] = useState<GoatOnboardingRole | null>(normalizedInitialRole);
+  const [building, setBuilding] = useState(initialBuilding);
+  const [workingFolders, setWorkingFolders] = useState<string[]>(() =>
+    foldersForRole(normalizedInitialRole),
   );
-  const [importing, setImporting] = useState(false);
-  const [imported, setImported] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [slugCheck, setSlugCheck] = useState<{
     slug: string;
@@ -174,17 +261,6 @@ export function OnboardingWizard({
     document.cookie = `${ONBOARDING_STEP_COOKIE}=${stepIndex}; path=/; max-age=86400; samesite=lax`;
   }, [stepIndex]);
 
-  // Play the import animation for a beat, then advance to the next step.
-  useEffect(() => {
-    if (!importing) return;
-    const timer = window.setTimeout(() => {
-      setImported(true);
-      setImporting(false);
-      setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
-    }, 3400);
-    return () => window.clearTimeout(timer);
-  }, [importing, STEPS.length]);
-
   // Live workspace-URL availability check (debounced).
   useEffect(() => {
     if (!shouldCheckSlug) return;
@@ -198,6 +274,10 @@ export function OnboardingWizard({
 
   // Saves the current step server-side; returns false (and toasts) on rejection.
   const persistCurrentStep = async (): Promise<boolean> => {
+    if (step.key === "profile") {
+      const r = await saveGoatOnboardingProfileAction({ role, building });
+      return r.ok || toastFail(r.error);
+    }
     if (step.key === "workspace") {
       const r = await saveGoatOnboardingWorkspaceAction({
         name: workspaceName,
@@ -219,21 +299,6 @@ export function OnboardingWizard({
   };
 
   const goNext = () => {
-    // Leaving the context step saves answers, then plays the import animation once.
-    if (step.key === "context" && !imported) {
-      startTransition(async () => {
-        const r = await saveGoatOnboardingContextAction({
-          companyDomain,
-          contextUrls,
-        });
-        if (!r.ok) {
-          toast.error(r.error);
-          return;
-        }
-        setImporting(true);
-      });
-      return;
-    }
     startTransition(async () => {
       if (!(await persistCurrentStep())) return;
       if (isLast) {
@@ -245,10 +310,21 @@ export function OnboardingWizard({
   };
   const goBack = () => setStepIndex((i) => Math.max(i - 1, 0));
 
+  // Picking a role re-seeds the brain folders with that role's preset. We only
+  // reseed on an actual change so a user who tweaked folders and stepped back
+  // doesn't lose their edits by re-clicking the role they already had.
+  const selectRole = (next: GoatOnboardingRole) => {
+    if (next === role) return;
+    setRole(next);
+    setWorkingFolders(foldersForRole(next));
+  };
+
   const canContinue =
-    step.key === "workspace"
-      ? workspaceName.trim().length > 0 && effectiveSlug.length > 0 && slugStatus !== "taken"
-      : true;
+    step.key === "profile"
+      ? role !== null
+      : step.key === "workspace"
+        ? workspaceName.trim().length > 0 && effectiveSlug.length > 0 && slugStatus !== "taken"
+        : true;
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -263,105 +339,101 @@ export function OnboardingWizard({
       {/* Vertically centered content column with nav attached directly below */}
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-[560px] flex-col justify-center px-6 py-12">
-          {importing ? (
-            <ImportingScreen domain={companyDomain} />
-          ) : (
-            <>
-              {step.key === "workspace" && (
-                <WorkspaceStep
-                  user={user}
-                  name={workspaceName}
-                  onName={(v) => {
-                    setWorkspaceName(v);
-                    if (!slugTouched) setSlug(slugify(v));
-                  }}
-                  slug={effectiveSlug}
-                  onSlug={(v) => {
-                    setSlugTouched(true);
-                    setSlug(slugify(v));
-                  }}
-                  slugStatus={slugStatus}
-                />
-              )}
-              {step.key === "welcome" && (
-                <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
-              )}
-              {step.key === "brain" && (
-                <BrainStep workingFolders={workingFolders} onChange={setWorkingFolders} />
-              )}
-              {step.key === "sources" && (
-                <SourcesStep
-                  brainRef={brainRef}
-                  initialDetails={initialSourceDetails}
-                  initialConnectionResult={initialConnectionResult}
-                />
-              )}
-              {step.key === "context" && (
-                <ContextStep
-                  domain={companyDomain}
-                  onDomain={setCompanyDomain}
-                  urls={contextUrls}
-                  onUrls={setContextUrls}
-                />
-              )}
-              {step.key === "connect" && (
-                <McpSetupGuide
-                  displayName={user.name}
-                  workspaceName={
-                    variant === "member"
-                      ? currentWorkspaceName
-                      : workspaceName.trim() || currentWorkspaceName
-                  }
-                  brains={mcpBrains}
-                  initialBrainRef={brainRef}
-                  initialClient={initialMcpClient}
-                  initialCompletedAt={initialMcpCompletedAt}
-                />
-              )}
-              {step.key === "finish" && (
-                <FinishStep
-                  workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
-                  referral={referral}
-                  onSelect={setReferral}
-                  showReferral={variant === "owner"}
-                />
-              )}
+          {step.key === "profile" && (
+            <ProfileStep
+              user={user}
+              role={role}
+              onRole={selectRole}
+              building={building}
+              onBuilding={setBuilding}
+            />
+          )}
+          {step.key === "workspace" && (
+            <WorkspaceStep
+              user={user}
+              name={workspaceName}
+              onName={(v) => {
+                setWorkspaceName(v);
+                if (!slugTouched) setSlug(slugify(v));
+              }}
+              slug={effectiveSlug}
+              onSlug={(v) => {
+                setSlugTouched(true);
+                setSlug(slugify(v));
+              }}
+              slugStatus={slugStatus}
+            />
+          )}
+          {step.key === "welcome" && (
+            <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
+          )}
+          {step.key === "brain" && (
+            <BrainStep workingFolders={workingFolders} onChange={setWorkingFolders} />
+          )}
+          {step.key === "sources" && (
+            <SourcesStep
+              brainRef={brainRef}
+              initialDetails={initialSourceDetails}
+              initialConnectionResult={initialConnectionResult}
+            />
+          )}
+          {step.key === "context" && <ImportStep brainRef={brainRef} />}
+          {step.key === "connect" && (
+            <McpSetupGuide
+              displayName={user.name}
+              workspaceName={
+                variant === "member"
+                  ? currentWorkspaceName
+                  : workspaceName.trim() || currentWorkspaceName
+              }
+              brains={mcpBrains}
+              initialBrainRef={brainRef}
+              initialClient={initialMcpClient}
+              initialCompletedAt={initialMcpCompletedAt}
+            />
+          )}
+          {step.key === "finish" && (
+            <FinishStep
+              workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
+              referral={referral}
+              onSelect={setReferral}
+              showReferral={variant === "owner"}
+            />
+          )}
 
-              {/* Nav — sits right under the content */}
-              <div className="mt-9 flex items-center justify-between">
+          {/* Nav — sits right under the content */}
+          <div className="mt-9 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={goBack}
+              disabled={stepIndex === 0 || isPending}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink disabled:invisible"
+            >
+              <ArrowLeft size={15} strokeWidth={2} />
+              Back
+            </button>
+            <div className="flex items-center gap-2">
+              {isSkippable(step.key) && !isLast && (
                 <button
                   type="button"
-                  onClick={goBack}
-                  disabled={stepIndex === 0 || isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink disabled:invisible"
+                  onClick={goNext}
+                  disabled={isPending}
+                  className="rounded-lg px-3 py-2 text-[13px] font-medium text-ink-subtle transition-colors hover:text-ink disabled:opacity-40"
                 >
-                  <ArrowLeft size={15} strokeWidth={2} />
-                  Back
+                  Skip
                 </button>
-                <div className="flex items-center gap-2">
-                  {isSkippable(step.key) && !isLast && (
-                    <button
-                      type="button"
-                      onClick={goNext}
-                      disabled={isPending}
-                      className="rounded-lg px-3 py-2 text-[13px] font-medium text-ink-subtle transition-colors hover:text-ink disabled:opacity-40"
-                    >
-                      Skip
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={goNext}
-                    disabled={!canContinue || isPending}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[13px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
-                  >
-                    {isPending ? "Saving…" : isLast ? "Enter OpenCompany" : "Continue"}
-                    {!isLast && !isPending && <ArrowRight size={15} strokeWidth={2} />}
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+              )}
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={!canContinue || isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[13px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                {isPending ? "Saving…" : isLast ? "Enter OpenCompany" : "Continue"}
+                {!isLast && !isPending && <ArrowRight size={15} strokeWidth={2} />}
+              </button>
+            </div>
+          </div>
         </div>
       </main>
     </div>
@@ -432,6 +504,87 @@ function IdentityRow({ user }: { user: OnboardingUser }) {
 }
 
 // ---------------------------------------------------------------------------
+// Step — Profile (role + what they're building)
+// ---------------------------------------------------------------------------
+
+function ProfileStep({
+  user,
+  role,
+  onRole,
+  building,
+  onBuilding,
+}: {
+  user: OnboardingUser;
+  role: GoatOnboardingRole | null;
+  onRole: (id: GoatOnboardingRole) => void;
+  building: string;
+  onBuilding: (v: string) => void;
+}) {
+  return (
+    <div>
+      <StepHeader
+        title={`Welcome, ${user.name.split(" ")[0]}`}
+        subtitle="Two quick questions so we can shape your brain around how you actually work."
+      />
+
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2.5">
+          <span className="text-[12px] font-medium text-ink">What best describes your role?</span>
+          <div className="grid grid-cols-2 gap-2.5">
+            {ROLE_PROFILES.map((profile) => {
+              const active = role === profile.id;
+              const Icon = profile.icon;
+              return (
+                <button
+                  key={profile.id}
+                  type="button"
+                  onClick={() => onRole(profile.id)}
+                  aria-pressed={active}
+                  className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors ${
+                    active
+                      ? "border-ink bg-surface-active/50"
+                      : "border-border bg-surface hover:border-border-strong"
+                  }`}
+                >
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                      active ? "bg-ink text-canvas" : "bg-surface-muted text-ink-muted"
+                    }`}
+                  >
+                    <Icon size={17} strokeWidth={1.9} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className={`truncate text-[13px] font-medium ${active ? "text-ink" : "text-ink-muted"}`}
+                    >
+                      {profile.label}
+                    </div>
+                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                      {profile.hint}
+                    </div>
+                  </div>
+                  {active && <Check size={15} strokeWidth={2.4} className="shrink-0 text-ink" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <Field label="What are you building?" hint="Optional — one line is plenty.">
+          <input
+            className={inputClass}
+            value={building}
+            onChange={(e) => onBuilding(e.target.value)}
+            maxLength={GOAT_ONBOARDING_BUILDING_MAX_LENGTH}
+            placeholder="A B2B analytics platform for logistics teams"
+          />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step — Workspace
 // ---------------------------------------------------------------------------
 
@@ -490,7 +643,7 @@ function WorkspaceStep({
             }`}
           >
             <span className="flex items-center bg-surface-muted px-3 text-[13px] text-ink-subtle">
-              opencompany.com/
+              opencompany.chat/
             </span>
             <input
               className="w-full bg-transparent px-2.5 py-2 text-[14px] text-ink outline-none placeholder:text-ink-subtle"
@@ -1038,79 +1191,27 @@ function SourcesStep({
 }
 
 // ---------------------------------------------------------------------------
-// Step — Import context (mock)
+// Step — Import context (real company-context import)
 // ---------------------------------------------------------------------------
 
-function ContextStep({
-  domain,
-  onDomain,
-  urls,
-  onUrls,
-}: {
-  domain: string;
-  onDomain: (v: string) => void;
-  urls: string[];
-  onUrls: (v: string[]) => void;
-}) {
-  const setUrl = (i: number, value: string) =>
-    onUrls(urls.map((u, idx) => (idx === i ? value : u)));
-  const addUrl = () => onUrls([...urls, ""]);
-
+// Wraps the shared GoatBrainImport flow (scan → review workload → build) in the
+// onboarding chrome. The import runs on background workers, so the user can kick
+// it off and keep moving — or Skip and run it later from Brain settings.
+function ImportStep({ brainRef }: { brainRef: string | null }) {
   return (
     <div>
       <StepHeader
         title="Help us set up your brain"
-        subtitle="Point us at a few places that describe your company. We'll use them to seed your brain with real context so it's useful from day one."
+        subtitle="Point Goat at your company website and pick what to pull in. It scans first and shows you the exact workload before any ingestion runs — so nothing happens you didn't ask for."
       />
 
-      <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-border bg-surface-muted p-3.5">
-        <Sparkles size={16} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-muted" />
-        <p className="text-[12.5px] leading-5 text-ink-muted">
-          This is where the magic starts — the more context you give, the better your brain
-          understands your world. We&apos;ll only read what you share here.
+      {brainRef ? (
+        <GoatBrainImport brainRef={brainRef} compact />
+      ) : (
+        <p className="text-[12px] leading-4 text-danger">
+          A Brain is required before context can be imported.
         </p>
-      </div>
-
-      <div className="flex flex-col gap-5">
-        <Field label="Company domain">
-          <input
-            className={inputClass}
-            value={domain}
-            onChange={(e) => onDomain(e.target.value)}
-            placeholder="acme.com"
-          />
-        </Field>
-        <Field
-          label="LinkedIn or other context URLs"
-          hint="Company LinkedIn, an about page, a pitch deck link — anything that describes you."
-        >
-          <div className="flex flex-col gap-2">
-            {urls.map((url, i) => (
-              <div
-                // biome-ignore lint/suspicious/noArrayIndexKey: order-stable free-form list
-                key={i}
-                className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 focus-within:border-ink/40 focus-within:ring-2 focus-within:ring-ink/10"
-              >
-                <Link2 size={15} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                <input
-                  className="w-full bg-transparent py-2 text-[14px] text-ink outline-none placeholder:text-ink-subtle"
-                  value={url}
-                  onChange={(e) => setUrl(i, e.target.value)}
-                  placeholder="https://linkedin.com/company/acme"
-                />
-              </div>
-            ))}
-          </div>
-        </Field>
-        <button
-          type="button"
-          onClick={addUrl}
-          className="inline-flex w-fit items-center gap-1.5 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
-        >
-          <Plus size={15} strokeWidth={2.2} />
-          Add another URL
-        </button>
-      </div>
+      )}
     </div>
   );
 }
@@ -1185,50 +1286,6 @@ function FinishStep({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-
-function ImportingScreen({ domain }: { domain: string }) {
-  const NODES = 7;
-  const [pulse, setPulse] = useState(0);
-  const [statusIndex, setStatusIndex] = useState(0);
-
-  const statuses = [
-    domain.trim() ? `Reading ${domain.trim()}…` : "Reading your sources…",
-    "Extracting people & companies…",
-    "Mapping relationships…",
-    "Filing everything into your brain…",
-  ];
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setPulse((p) => (p + 1) % NODES), 150);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setStatusIndex((s) => (s + 1) % statuses.length), 850);
-    return () => window.clearInterval(timer);
-  }, [statuses.length]);
-
-  const line = Array.from({ length: NODES }, (_, i) => (i === pulse ? "●" : "○")).join("─");
-
-  return (
-    <div className="flex flex-col items-center gap-7 py-10 text-center">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-          Building your brain
-        </h1>
-        <p className="text-[14px] leading-6 text-ink-muted">
-          Hang tight — we&apos;re turning your context into a living brain.
-        </p>
-      </div>
-      <pre className="font-mono text-[20px] tracking-[0.3em] text-ink" aria-hidden>
-        {line}
-      </pre>
-      <p className="font-mono text-[12.5px] text-ink-subtle">{statuses[statusIndex]}</p>
     </div>
   );
 }
