@@ -105,8 +105,8 @@ drains, but they are not currently visible in this SigNoz tenant.
 Important span attributes:
 
 - `goat.outcome`: `success`, `failure`, `skipped`, or `aborted`.
-- `goat.failure_category`: `model_provider`, `tool`, `auth`, `integration`, `lease_lost`,
-  `timeout`, `validation`, `runner_unconfigured`, `network`, `bug`, or `unknown`.
+- `goat.failure_category`: `model_provider`, `tool`, `auth`, `integration`, `budget`,
+  `lease_lost`, `timeout`, `validation`, `runner_unconfigured`, `network`, `bug`, or `unknown`.
 - `goat.model`
 - `goat.status`
 - `goat.stage`
@@ -142,6 +142,8 @@ Important span attributes:
 | `goat.task_stage_duration_ms` | Histogram | Runner task stage duration. |
 | `goat.brain_ingest_runs_total` | Counter | Brain agent ingest terminal outcomes. |
 | `goat.brain_ingest_run_duration_ms` | Histogram | Brain agent ingest duration. |
+| `goat.brain_ingest_spend_usd_micros` | Counter | Brain ingest provider spend by model, Brain query, or web search. |
+| `goat.brain_ingest_budget_exhaustions_total` | Counter | Brain ingest attempts stopped by the spend gate. |
 | `goat.tool_calls_total` | Counter | Task tool-call count by outcome. |
 | `goat.tool_call_duration_ms` | Histogram | Task tool-call duration. |
 | `goat.model_usage_tokens` | Counter | Model token usage by token direction. |
@@ -284,7 +286,8 @@ from goat.tasks
 where id = '<task_id>' or display_id = '<display_id>';
 
 -- Brain ingest
-select id, source_item_id, status, attempts, last_error, completed_at, updated_at
+select id, source_item_id, status, attempts, last_error, result->'budget' as budget,
+       completed_at, updated_at
 from goat.brain_ingest_jobs
 where id = '<job_id>';
 ```
@@ -309,6 +312,8 @@ dashboard to add metric-native panels for:
 - `goat.task_run_duration_ms`
 - `goat.brain_ingest_runs_total`
 - `goat.brain_ingest_run_duration_ms`
+- `goat.brain_ingest_spend_usd_micros`
+- `goat.brain_ingest_budget_exhaustions_total`
 
 Keep ID-bearing investigation panels trace-based. Do not add run IDs, source refs, prompts, tool
 args, model output, or result text as metric labels.

@@ -27,6 +27,30 @@ Key properties:
 - **Payloads are validated on claim** with the `isNormalized*SourceItem` guards from
   `packages/goat-brain/src/source-items.ts`.
 
+## Per-attempt spend gate
+
+Agentic ingestion has a provider-spend circuit breaker in
+`apps/runner/src/goat-brain-agent-ingest.ts`. Each claimed worker attempt has a 500,000 USD-micro
+($0.50) limit and stops starting new model steps at 400,000 USD-micros, reserving the remaining
+$0.10 for the request that just completed and concurrently executing tools. Model output is also
+bounded per step. The gate includes:
+
+- ingestion-model usage, priced from the shared billing catalog;
+- semantic `goat_brain query` embeddings, reported by the CLI and priced from gateway usage;
+- Exa enrichment searches, using provider-reported cost.
+
+The final `brain_ingest_jobs.result` JSONB stores the budget limit, stop threshold, model/query/search
+breakdown, total provider spend, accounting-complete flag, and exhaustion flag. The same data is
+embedded in the normalized ingest trace. Budget exhaustion after valid mutations completes with the
+valid changes and records `budget.exhausted = true`; exhaustion before any mutation fails terminally
+and persists the failure trace instead of retrying another paid run. Unpriceable query usage also
+fails terminally rather than silently bypassing the gate.
+
+SigNoz receives `goat.brain_ingest_spend_usd_micros` by low-cardinality `goat.cost_source`,
+`goat.brain_ingest_budget_exhaustions_total`, and the final spend/budget fields on the ingest root
+span. The structured completion log carries the same fields for the configured log backend. Gateway
+requests retain the `ingest:<job-id>` attribution tag for request-level investigation.
+
 ## Source items
 
 `NormalizedBrainSourceItem` (`packages/goat-brain/src/source-items.ts`): provider, type,

@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { type ExaSearchResult, executeExaSearchRequest } from "@opencompany/agent-runtime";
+import { AUX_GATEWAY_MODEL_PRICING, calculateModelUsageCost } from "@opencompany/billing";
 import {
   type GoatBrainSyncPage,
   getGoatBrainFile,
@@ -18,6 +19,7 @@ import {
   GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
   GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
   GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
+  type GoatBrainIngestBudget,
   type GoatBrainIngestTrace,
   type GoatBrainIngestTraceToolCall,
   type GoatBrainIngestTraceUsage,
@@ -33,6 +35,7 @@ import {
 import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type GoatBrainFolderManifestEntry,
+  type GoatBrainUsageEntry,
   type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
@@ -45,12 +48,15 @@ import {
   type NormalizedSlackConversationMessage,
   type NormalizedSlackConversationSourceItem,
   type NormalizedUploadAssetSourceItem,
+  parseGoatBrainUsageReport,
   slackTsToIso,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import {
   createGoatGatewayAttribution,
   goatGatewayProviderOptions,
+  recordGoatBrainIngestBudgetExhausted,
+  recordGoatBrainIngestSpend,
 } from "@opencompany/goat-observability";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
@@ -73,8 +79,15 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-brai
 
 export const GOAT_BRAIN_AGENT_INGEST_MODEL = "anthropic/claude-sonnet-5";
 export const GOAT_BRAIN_AGENT_INGEST_MAX_STEPS = 32;
+export const GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS = 4_000;
 export const GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const GOAT_BRAIN_AGENT_SKIP_SENTINEL = "SKIP";
+// The agent stops starting new model steps at 40c, leaving 10c of headroom for
+// the just-completed request and concurrently executing tools. Provider usage
+// is reported only after a request finishes, so this reserve is what makes the
+// 50c product limit useful as a practical per-attempt cap.
+export const GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS = 500_000;
+export const GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS = 400_000;
 // Hard per-ingest cap on web-search enrichment calls. Bounds cost and stops the
 // agent from spelunking; enforced in code, not just prompt.
 export const GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT = 4;
@@ -741,6 +754,7 @@ type BrainAgentIngestSessionResult = {
   deleted: number;
   pages: GoatBrainSyncPage[];
   usage: GoatBrainIngestTraceUsage;
+  budget: GoatBrainIngestBudget;
   summary: string;
   trace: GoatBrainIngestTrace;
 };
@@ -753,6 +767,21 @@ type BrainAgentIngestSkipMode = "explicit" | "inferred_no_mutations";
 // identical content rarely changes that verdict, so the worker retries these
 // on a tighter attempt budget than infrastructure failures.
 export class GoatBrainAgentOutcomeError extends Error {}
+
+export type GoatBrainIngestBudgetErrorResult = Pick<
+  BrainAgentIngestSessionResult,
+  "budget" | "trace" | "usage" | "steps" | "toolCalls" | "mutations"
+>;
+
+export class GoatBrainIngestBudgetError extends Error {
+  readonly result: GoatBrainIngestBudgetErrorResult;
+
+  constructor(message: string, result: GoatBrainIngestBudgetErrorResult) {
+    super(message);
+    this.name = "GoatBrainIngestBudgetError";
+    this.result = result;
+  }
+}
 
 // Shared scaffolding for every agent ingest profile: resolve the target brain,
 // materialize it to a temp root, run the tool loop, and sync changes back with
@@ -826,6 +855,28 @@ async function runBrainAgentIngestSession(input: {
       ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
       ...(enrichmentEnabled && exaApiKey ? { exaApiKey } : {}),
     });
+    const budgetErrorResult = {
+      budget: loop.budget,
+      trace: loop.trace,
+      usage: loop.usage,
+      steps: loop.steps,
+      toolCalls: loop.toolCalls,
+      mutations: loop.mutations,
+    };
+
+    if (!loop.budget.accountingComplete) {
+      throw new GoatBrainIngestBudgetError(
+        loop.budgetAccountingError ?? "Goat Brain ingestion spend could not be accounted for.",
+        budgetErrorResult,
+      );
+    }
+
+    if (loop.budget.exhausted && loop.mutations === 0) {
+      throw new GoatBrainIngestBudgetError(
+        `Goat Brain ingestion budget exhausted after ${loop.budget.totalCostUsdMicros} USD micros without producing a brain mutation.`,
+        budgetErrorResult,
+      );
+    }
 
     const outcome = brainAgentIngestCompletionOutcome({
       mutations: loop.mutations,
@@ -849,6 +900,7 @@ async function runBrainAgentIngestSession(input: {
       // gateway dropped the provider options).
       cache_read_input_tokens: loop.usage.cacheReadInputTokens,
       cache_write_input_tokens: loop.usage.cacheWriteInputTokens,
+      ...goatBrainBudgetLogFields(loop.budget),
     });
 
     const synced = await syncGoatBrainFilesFromRoot({
@@ -881,6 +933,7 @@ async function runBrainAgentIngestSession(input: {
       deleted: synced.deleted,
       pages: synced.pages,
       usage: loop.usage,
+      budget: loop.budget,
       summary: (outcome.reason ?? loop.finalText).slice(0, RESULT_SUMMARY_LIMIT),
       trace: loop.trace,
     };
@@ -1500,11 +1553,69 @@ async function runIngestAgentLoop(input: {
   let mutations = 0;
   let failedMutatingToolCalls = 0;
   let webSearchCount = 0;
+  let modelCostUsdMicros = 0;
+  let brainQueryCostUsdMicros = 0;
   let webSearchCostUsdMicros = 0;
+  let budgetExhausted = false;
+  let budgetAccountingError: string | null = null;
   let cliQueue: Promise<void> = Promise.resolve();
   const traceToolCalls: GoatBrainIngestTraceToolCall[] = [];
   const runCli = input.runCli ?? runGoatBrainAgentCli;
   const commands = input.commands ?? AGENT_CLI_COMMANDS;
+  const totalCostUsdMicros = () =>
+    modelCostUsdMicros + brainQueryCostUsdMicros + webSearchCostUsdMicros;
+  const budgetSnapshot = (): GoatBrainIngestBudget => ({
+    limitUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
+    stopThresholdUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
+    modelCostUsdMicros,
+    brainQueryCostUsdMicros,
+    webSearchCostUsdMicros,
+    totalCostUsdMicros: totalCostUsdMicros(),
+    accountingComplete: budgetAccountingError === null,
+    exhausted: budgetExhausted,
+  });
+  const recordSpend = (source: "model" | "brain_query" | "web_search", costUsdMicros: number) => {
+    if (!Number.isFinite(costUsdMicros) || costUsdMicros < 0) {
+      budgetAccountingError = `Invalid ${source} provider cost reported for Goat Brain ingestion.`;
+      if (!budgetExhausted) {
+        budgetExhausted = true;
+        recordGoatBrainIngestBudgetExhausted();
+      }
+      logger.warn("Goat Brain ingestion received invalid provider cost", {
+        event: "opencompany.goat_brain_ingest_cost_invalid",
+        brain_ref: input.brainRef,
+        ingest_job_id: input.ingestJobId,
+        cost_source: source,
+        ...goatBrainBudgetLogFields(budgetSnapshot()),
+      });
+      return;
+    }
+    const cost = Math.max(0, Math.round(costUsdMicros));
+    if (cost === 0) return;
+    if (source === "model") modelCostUsdMicros += cost;
+    if (source === "brain_query") brainQueryCostUsdMicros += cost;
+    if (source === "web_search") webSearchCostUsdMicros += cost;
+    recordGoatBrainIngestSpend({
+      costUsdMicros: cost,
+      source,
+      attributes: {
+        "goat.model": source === "model" ? GOAT_BRAIN_AGENT_INGEST_MODEL : undefined,
+      },
+    });
+    if (
+      !budgetExhausted &&
+      totalCostUsdMicros() >= GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS
+    ) {
+      budgetExhausted = true;
+      recordGoatBrainIngestBudgetExhausted();
+      logger.warn("Goat Brain ingestion spend gate reached", {
+        event: "opencompany.goat_brain_ingest_budget_exhausted",
+        brain_ref: input.brainRef,
+        ingest_job_id: input.ingestJobId,
+        ...goatBrainBudgetLogFields(budgetSnapshot()),
+      });
+    }
+  };
   const runSerializedCli = async <T>(fn: () => Promise<T>): Promise<T> => {
     const previous = cliQueue.catch(() => {});
     let release!: () => void;
@@ -1561,7 +1672,11 @@ async function runIngestAgentLoop(input: {
             ? goatBrainIngestTracePreview(args.stdin, GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
             : null;
         const mutating = isMutatingGoatBrainAgentInvocation(args);
-        const invalid = validateGoatBrainAgentInvocation(args, commands);
+        const invalid =
+          budgetExhausted || budgetAccountingError
+            ? (budgetAccountingError ??
+              "ingestion spend budget exhausted; finish with the brain changes already made")
+            : validateGoatBrainAgentInvocation(args, commands);
         if (invalid) {
           if (mutating) failedMutatingToolCalls += 1;
           appendTraceToolCall(traceToolCalls, {
@@ -1584,18 +1699,39 @@ async function runIngestAgentLoop(input: {
           });
           return { ok: false, error: invalid };
         }
-        const result = await runSerializedCli(() => {
+        const rawResult = await runSerializedCli(() => {
           startedAt = new Date().toISOString();
           return runCli({
             cliPath: input.cliPath,
             root: input.root,
-            argv: [args.command, ...(args.args ?? [])],
+            argv: [
+              args.command,
+              ...(args.args ?? []),
+              ...(args.command === "query" ? ["--report-usage"] : []),
+            ],
             gatewayApiKey: input.gatewayApiKey,
             reporting: brainQueryAttribution,
             ...(args.stdin ? { stdin: args.stdin } : {}),
             signal: abort.signal,
           });
         });
+        const reportedUsage = parseGoatBrainUsageReport(rawResult.stderr);
+        for (const entry of reportedUsage.entries) {
+          const cost = priceGoatBrainUsageEntry(entry);
+          if (cost === null) {
+            budgetAccountingError = `Could not price ${entry.operation} usage for model ${entry.model}.`;
+            logger.warn("Goat Brain query usage could not be priced", {
+              event: "opencompany.goat_brain_ingest_usage_unpriced",
+              brain_ref: input.brainRef,
+              ingest_job_id: input.ingestJobId,
+              model: entry.model,
+              operation: entry.operation,
+            });
+            continue;
+          }
+          recordSpend("brain_query", cost);
+        }
+        const result = { ...rawResult, stderr: reportedUsage.cleanedStdout };
         if (result.ok && mutating) {
           mutations += 1;
         } else if (!result.ok && mutating) {
@@ -1690,6 +1826,14 @@ async function runIngestAgentLoop(input: {
             additionalProperties: false,
           }),
           execute: async (args) => {
+            if (budgetExhausted || budgetAccountingError) {
+              return {
+                ok: false,
+                error:
+                  budgetAccountingError ??
+                  "ingestion spend budget exhausted; finish with what you have",
+              };
+            }
             if (webSearchCount >= GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT) {
               return {
                 ok: false,
@@ -1716,7 +1860,7 @@ async function runIngestAgentLoop(input: {
                 signal: abort.signal,
                 defaults: { type: "fast", numResults: ENRICHMENT_RESULT_LIMIT_DEFAULT },
               });
-              webSearchCostUsdMicros += usage.costUsdMicros;
+              recordSpend("web_search", usage.costUsdMicros);
               return {
                 ok: true,
                 searchesUsed: webSearchCount,
@@ -1742,6 +1886,7 @@ async function runIngestAgentLoop(input: {
   try {
     const result = await generateText({
       model: gateway(GOAT_BRAIN_AGENT_INGEST_MODEL),
+      maxOutputTokens: GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
       // The system prompt rides in messages (not the system param) so it can
       // carry its own cache breakpoint; it is byte-stable for the whole job.
       messages: [
@@ -1766,12 +1911,18 @@ async function runIngestAgentLoop(input: {
         },
       ],
       tools: { ...tools, ...enrichmentTools },
-      stopWhen: [ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS)],
+      stopWhen: [
+        ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS),
+        () => budgetExhausted || budgetAccountingError !== null,
+      ],
       abortSignal: abort.signal,
       providerOptions: goatGatewayProviderOptions(attribution),
       prepareStep: ({ messages }) => ({
         messages: placeMovingAnthropicCacheBreakpoint(messages),
       }),
+      onStepFinish: ({ usage }) => {
+        recordSpend("model", priceModelUsage(usage));
+      },
     });
     const usage = result.totalUsage;
     const finalText = result.text.trim();
@@ -1782,6 +1933,7 @@ async function runIngestAgentLoop(input: {
       cacheReadInputTokens: usage?.inputTokenDetails?.cacheReadTokens ?? null,
       cacheWriteInputTokens: usage?.inputTokenDetails?.cacheWriteTokens ?? null,
     };
+    const budget = budgetSnapshot();
     const trace: GoatBrainIngestTrace = {
       schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
       model: GOAT_BRAIN_AGENT_INGEST_MODEL,
@@ -1794,6 +1946,7 @@ async function runIngestAgentLoop(input: {
       truncatedToolCalls: Math.max(0, toolCalls - traceToolCalls.length),
       webSearchCount,
       webSearchCostUsdMicros,
+      budget,
       createdAt: new Date().toISOString(),
     };
     if (webSearchCount > 0) {
@@ -1812,6 +1965,8 @@ async function runIngestAgentLoop(input: {
       mutations,
       failedMutatingToolCalls,
       usage: normalizedUsage,
+      budget,
+      budgetAccountingError,
       webSearchCount,
       webSearchCostUsdMicros,
       trace,
@@ -1828,6 +1983,66 @@ function appendTraceToolCall(
 ) {
   if (toolCalls.length >= GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS) return;
   toolCalls.push(toolCall);
+}
+
+function goatBrainBudgetLogFields(budget: GoatBrainIngestBudget) {
+  return {
+    budget_limit_usd_micros: budget.limitUsdMicros,
+    budget_stop_threshold_usd_micros: budget.stopThresholdUsdMicros,
+    model_cost_usd_micros: budget.modelCostUsdMicros,
+    brain_query_cost_usd_micros: budget.brainQueryCostUsdMicros,
+    web_search_cost_usd_micros: budget.webSearchCostUsdMicros,
+    total_cost_usd_micros: budget.totalCostUsdMicros,
+    budget_accounting_complete: budget.accountingComplete,
+    budget_exhausted: budget.exhausted,
+  };
+}
+
+function priceModelUsage(usage: ai.LanguageModelUsage): number {
+  const inputTokens = positiveUsageNumber(usage.inputTokens);
+  const inputCacheReadTokens = positiveUsageNumber(usage.inputTokenDetails?.cacheReadTokens);
+  const inputCacheWriteTokens = positiveUsageNumber(usage.inputTokenDetails?.cacheWriteTokens);
+  const reportedNoCacheTokens = usage.inputTokenDetails?.noCacheTokens;
+  const inputNoCacheTokens =
+    typeof reportedNoCacheTokens === "number" && Number.isFinite(reportedNoCacheTokens)
+      ? Math.max(0, Math.round(reportedNoCacheTokens))
+      : Math.max(0, inputTokens - inputCacheReadTokens - inputCacheWriteTokens);
+  return calculateModelUsageCost({
+    modelName: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    inputTokens,
+    inputNoCacheTokens,
+    inputCacheReadTokens,
+    inputCacheWriteTokens,
+    outputTokens: positiveUsageNumber(usage.outputTokens),
+  }).providerCostUsdMicros;
+}
+
+function priceGoatBrainUsageEntry(entry: GoatBrainUsageEntry): number | null {
+  if (entry.costUsd !== null && Number.isFinite(entry.costUsd) && entry.costUsd >= 0) {
+    return Math.round(entry.costUsd * 1_000_000);
+  }
+  const catalogCost = calculateModelUsageCost({
+    modelName: entry.model,
+    inputTokens: entry.inputTokens,
+    inputNoCacheTokens: entry.inputTokens,
+    inputCacheReadTokens: 0,
+    inputCacheWriteTokens: 0,
+    outputTokens: entry.outputTokens,
+  });
+  if (typeof catalogCost.costBasis.reason !== "string") {
+    return catalogCost.providerCostUsdMicros;
+  }
+  const auxiliaryPricing = AUX_GATEWAY_MODEL_PRICING[entry.model];
+  if (!auxiliaryPricing) return null;
+  return Math.round(
+    (entry.inputTokens * auxiliaryPricing.inputUsdMicrosPerMillion +
+      entry.outputTokens * auxiliaryPricing.outputUsdMicrosPerMillion) /
+      1_000_000,
+  );
+}
+
+function positiveUsageNumber(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
 export function validateGoatBrainAgentInvocation(
