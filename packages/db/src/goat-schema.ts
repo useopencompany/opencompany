@@ -466,6 +466,11 @@ export const goatOnboarding = goat.table("onboarding", {
     onDelete: "set null",
   }),
   referralSource: text("referral_source"),
+  // Self-reported profile captured on the first onboarding step. `role` is one
+  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders;
+  // `building` is a free-form one-liner describing what they're working on.
+  role: text("role"),
+  building: text("building"),
   companyDomain: text("company_domain"),
   contextUrls: jsonb("context_urls").$type<string[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

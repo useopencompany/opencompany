@@ -3,7 +3,8 @@
 import { parseGoatBrainInlineLinks } from "@opencompany/goat-brain/inline-links";
 import { Extension } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
-import { Plugin } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
@@ -13,10 +14,12 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/brain-source-links";
 
+const EMPTY_BRAIN_LINKS: Record<string, string> = {};
+
 export function MarkdownGoatBrainEditor({
   content,
   onChange,
-  brainLinks = {},
+  brainLinks = EMPTY_BRAIN_LINKS,
   readOnly = false,
   onNavigateInternal,
 }: {
@@ -31,14 +34,11 @@ export function MarkdownGoatBrainEditor({
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
   const [initialContent] = useState(() => content);
-  // Keep the latest navigation handler reachable from the ProseMirror plugin,
-  // which is created once (useEditor deps are []) and would otherwise capture a
-  // stale closure.
-  const navigateRef = useRef(onNavigateInternal);
+  const onChangeRef = useRef(onChange);
+  const readOnlyRef = useRef(readOnly);
   useEffect(() => {
-    navigateRef.current = onNavigateInternal;
-  }, [onNavigateInternal]);
-  const [navigateInternal] = useState(() => (href: string) => navigateRef.current?.(href) ?? false);
+    onChangeRef.current = onChange;
+  }, [onChange]);
   const editor = useEditor(
     {
       immediatelyRender: false,
@@ -48,7 +48,11 @@ export function MarkdownGoatBrainEditor({
           indentation: { style: "space", size: 2 },
           markedOptions: { gfm: true, breaks: false },
         }),
-        WikiLinkDecoration.configure({ brainLinks, onNavigateInternal: navigateInternal }),
+        WikiLinkDecoration.configure({
+          brainLinks,
+          editingEnabled: !readOnly,
+          onNavigateInternal,
+        }),
       ],
       content: initialContent,
       contentType: "markdown",
@@ -66,14 +70,27 @@ export function MarkdownGoatBrainEditor({
         refreshToolbar((value) => value + 1);
       },
       onUpdate: ({ editor }) => {
-        if (readOnly) return;
+        if (readOnlyRef.current) return;
         setIsEmpty(editor.isEmpty);
         refreshToolbar((value) => value + 1);
-        onChange(editor.getMarkdown());
+        onChangeRef.current(editor.getMarkdown());
       },
     },
     [],
   );
+
+  useEffect(() => {
+    readOnlyRef.current = readOnly;
+    if (!editor) return;
+    editor.setEditable(!readOnly);
+    editor.view.dispatch(
+      editor.state.tr.setMeta(WIKI_LINK_PLUGIN_KEY, {
+        brainLinks,
+        editingEnabled: !readOnly,
+        onNavigateInternal,
+      } satisfies WikiLinkPluginState),
+    );
+  }, [brainLinks, editor, onNavigateInternal, readOnly]);
 
   return (
     <div className="relative">
@@ -139,92 +156,138 @@ const WIKI_LINK_ICON =
 const GITHUB_ICON =
   '<svg class="wiki-brain-chip-icon wiki-brain-chip-icon-github" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
 
-const WikiLinkDecoration = Extension.create<{
+type WikiLinkPluginState = {
   brainLinks: Record<string, string>;
-  onNavigateInternal?: (href: string) => boolean;
-}>({
+  editingEnabled: boolean;
+  onNavigateInternal: ((href: string) => boolean) | undefined;
+};
+
+const WIKI_LINK_PLUGIN_KEY = new PluginKey<WikiLinkPluginState>("wikiLinkDecoration");
+
+const WikiLinkDecoration = Extension.create<WikiLinkPluginState>({
   name: "wikiLinkDecoration",
   addOptions() {
-    return { brainLinks: {} };
+    return { brainLinks: {}, editingEnabled: true, onNavigateInternal: undefined };
   },
   addProseMirrorPlugins() {
-    const links = this.options.brainLinks;
-    const onNavigate = this.options.onNavigateInternal;
+    const initialState = this.options;
     return [
       new Plugin({
+        key: WIKI_LINK_PLUGIN_KEY,
+        state: {
+          init: () => initialState,
+          apply(transaction, value) {
+            return transaction.getMeta(WIKI_LINK_PLUGIN_KEY) ?? value;
+          },
+        },
         props: {
           decorations(state) {
+            const pluginState = WIKI_LINK_PLUGIN_KEY.getState(state) ?? initialState;
             const decorations: Decoration[] = [];
             const { from, to } = state.selection;
+            const links = pluginState.brainLinks;
             state.doc.descendants((node, pos) => {
-              if (!node.isText || !node.text) return;
-              for (const link of parseGoatBrainInlineLinks(node.text)) {
-                const href = inlineLinkHref(link, links) ?? "";
-                const start = pos + link.index;
-                const end = start + link.raw.length;
-                const bounds = linkLabelBounds(link.raw);
-                const label = link.raw.slice(bounds.labelStart, bounds.labelEnd).trim();
-                // Reveal the raw markup for editing while the caret sits inside/adjacent.
-                const editing = from <= end && to >= start;
+              if (!node.isTextblock || node.type.spec.code) return;
+              for (const run of inlineTextRuns(node, pos + 1)) {
+                for (const link of parseGoatBrainInlineLinks(run.text)) {
+                  const href = inlineLinkHref(link, links) ?? "";
+                  const start = run.start + link.index;
+                  const end = start + link.raw.length;
+                  const bounds = linkLabelBounds(link.raw);
+                  const label = link.raw.slice(bounds.labelStart, bounds.labelEnd).trim();
+                  // Reveal the raw markup for editing while the caret sits inside/adjacent.
+                  const editing = pluginState.editingEnabled && from <= end && to >= start;
 
-                if (editing) {
-                  if (bounds.labelStart > 0) {
+                  if (editing) {
+                    if (bounds.labelStart > 0) {
+                      decorations.push(
+                        Decoration.inline(start, start + bounds.labelStart, {
+                          class: "wiki-brain-syntax",
+                        }),
+                      );
+                    }
+                    if (bounds.labelEnd < link.raw.length) {
+                      decorations.push(
+                        Decoration.inline(start + bounds.labelEnd, end, {
+                          class: "wiki-brain-syntax",
+                        }),
+                      );
+                    }
                     decorations.push(
-                      Decoration.inline(start, start + bounds.labelStart, {
-                        class: "wiki-brain-syntax",
+                      Decoration.inline(start + bounds.labelStart, start + bounds.labelEnd, {
+                        class: href
+                          ? "wiki-brain-link"
+                          : "wiki-brain-link wiki-brain-link-unresolved",
+                        title: href ? linkTitle(link.kind, href) : unresolvedLinkTitle(link.kind),
+                        ...(href ? { "data-brain-href": href } : {}),
                       }),
                     );
+                    continue;
                   }
-                  if (bounds.labelEnd < link.raw.length) {
-                    decorations.push(
-                      Decoration.inline(start + bounds.labelEnd, end, {
-                        class: "wiki-brain-syntax",
-                      }),
-                    );
-                  }
+
+                  // Collapsed: hide the raw markup and render a compact chip in its place.
+                  const chip =
+                    link.kind === "source"
+                      ? sourceChipDisplay(link.target, label)
+                      : { icon: "link" as const, label };
+                  // Preserve the fuller authored label as a tooltip when we shorten it.
+                  const chipTitle = chip.label !== label ? label : undefined;
+                  decorations.push(Decoration.inline(start, end, { class: "wiki-brain-hidden" }));
                   decorations.push(
-                    Decoration.inline(start + bounds.labelStart, start + bounds.labelEnd, {
-                      class: href
-                        ? "wiki-brain-link"
-                        : "wiki-brain-link wiki-brain-link-unresolved",
-                      title: href ? linkTitle(link.kind, href) : unresolvedLinkTitle(link.kind),
-                      ...(href ? { "data-brain-href": href } : {}),
-                    }),
+                    Decoration.widget(
+                      start,
+                      (view) =>
+                        buildWikiChip(
+                          chip.label,
+                          href,
+                          link.kind,
+                          chip.icon,
+                          chipTitle,
+                          () => WIKI_LINK_PLUGIN_KEY.getState(view.state) ?? initialState,
+                        ),
+                      {
+                        side: -1,
+                        marks: [],
+                        key: `wiki:${href || "unresolved"}:${chip.icon}:${chip.label}`,
+                        ignoreSelection: true,
+                      },
+                    ),
                   );
-                  continue;
                 }
-
-                // Collapsed: hide the raw markup and render a compact chip in its place.
-                const chip =
-                  link.kind === "source"
-                    ? sourceChipDisplay(link.target, label)
-                    : { icon: "link" as const, label };
-                // Preserve the fuller authored label as a tooltip when we shorten it.
-                const chipTitle = chip.label !== label ? label : undefined;
-                decorations.push(Decoration.inline(start, end, { class: "wiki-brain-hidden" }));
-                decorations.push(
-                  Decoration.widget(
-                    start,
-                    () =>
-                      buildWikiChip(chip.label, href, link.kind, chip.icon, chipTitle, onNavigate),
-                    {
-                      side: -1,
-                      marks: [],
-                      key: `wiki:${href || "unresolved"}:${chip.icon}:${chip.label}`,
-                      ignoreSelection: true,
-                    },
-                  ),
-                );
               }
+              return false;
             });
             return DecorationSet.create(state.doc, decorations);
           },
-          handleClick(_view, _pos, event) {
+          handleClick(view, _pos, event) {
             const target = event.target instanceof Element ? event.target : null;
-            const href = target?.closest("[data-brain-href]")?.getAttribute("data-brain-href");
+            const decoratedLink = target?.closest("[data-brain-href]");
+            const href = decoratedLink?.getAttribute("data-brain-href");
             if (!href) return false;
+
+            // Widget decorations are real anchors. Preserve their native external,
+            // modifier-key, and full-page navigation behavior, only intercepting a
+            // plain internal click when the latest client-side handler accepts it.
+            if (decoratedLink instanceof HTMLAnchorElement) {
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey ||
+                isExternalHref(href)
+              ) {
+                return false;
+              }
+              const pluginState = WIKI_LINK_PLUGIN_KEY.getState(view.state) ?? initialState;
+              if (!pluginState.onNavigateInternal?.(href)) return false;
+              event.preventDefault();
+              return true;
+            }
+
             event.preventDefault();
-            openDecoratedHref(href, onNavigate);
+            const pluginState = WIKI_LINK_PLUGIN_KEY.getState(view.state) ?? initialState;
+            openDecoratedHref(href, pluginState.onNavigateInternal);
             return true;
           },
         },
@@ -239,9 +302,9 @@ function buildWikiChip(
   kind: ReturnType<typeof parseGoatBrainInlineLinks>[number]["kind"],
   icon: "github" | "link" = "link",
   title?: string,
-  onNavigate?: (href: string) => boolean,
+  getPluginState?: () => WikiLinkPluginState,
 ): HTMLElement {
-  const chip = document.createElement("span");
+  const chip = document.createElement(href ? "a" : "span");
   chip.className = href ? "wiki-brain-chip" : "wiki-brain-chip wiki-brain-chip-unresolved";
   chip.title = title ?? (href ? linkTitle(kind, href) : unresolvedLinkTitle(kind));
   chip.innerHTML = icon === "github" ? GITHUB_ICON : WIKI_LINK_ICON;
@@ -250,14 +313,59 @@ function buildWikiChip(
   text.textContent = label || "Untitled";
   chip.appendChild(text);
   if (href) {
+    chip.setAttribute("href", href);
     chip.setAttribute("data-brain-href", href);
-    chip.setAttribute("role", "link");
-    chip.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      openDecoratedHref(href, onNavigate);
+    if (isExternalHref(href)) {
+      chip.setAttribute("target", "_blank");
+      chip.setAttribute("rel", "noopener noreferrer");
+    }
+    chip.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!(event instanceof MouseEvent)) return;
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        isExternalHref(href)
+      ) {
+        return;
+      }
+      if (getPluginState?.().onNavigateInternal?.(href)) event.preventDefault();
     });
   }
   return chip;
+}
+
+type InlineTextRun = { text: string; start: number };
+
+function inlineTextRuns(node: ProseMirrorNode, contentStart: number): InlineTextRun[] {
+  const runs: InlineTextRun[] = [];
+  let current: InlineTextRun | null = null;
+  const flush = () => {
+    if (current?.text) runs.push(current);
+    current = null;
+  };
+
+  node.forEach((child, offset) => {
+    const text = child.isText ? child.text : null;
+    const isCode = child.marks.some((mark) => mark.type.name === "code");
+    if (!text || isCode) {
+      flush();
+      return;
+    }
+
+    const start = contentStart + offset;
+    if (!current || current.start + current.text.length !== start) {
+      flush();
+      current = { text, start };
+      return;
+    }
+    current.text += text;
+  });
+  flush();
+  return runs;
 }
 
 function linkTitle(

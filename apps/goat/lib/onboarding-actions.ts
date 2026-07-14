@@ -14,6 +14,7 @@ import {
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import { createGoatBrainFolderForUser, deleteGoatBrainFolderForUser } from "@/lib/brain";
+import { parseGoatOnboardingProfile } from "@/lib/onboarding-profile";
 import { getWorkOSClient } from "@/lib/workos-client";
 
 export type GoatOnboardingActionResult = { ok: true } | { ok: false; error: string };
@@ -118,23 +119,23 @@ export async function saveGoatOnboardingBrainFoldersAction(input: {
   return { ok: true };
 }
 
-export async function saveGoatOnboardingContextAction(input: {
-  companyDomain: string;
-  contextUrls: string[];
+export async function saveGoatOnboardingProfileAction(input: {
+  role: string | null;
+  building: string | null;
 }): Promise<GoatOnboardingActionResult> {
   const context = await currentGoatUser();
+  const profile = parseGoatOnboardingProfile(input);
+  if (!profile.ok) return profile;
   try {
-    const companyDomain = input.companyDomain.trim() || null;
-    const contextUrls = input.contextUrls.map((u) => u.trim()).filter((u) => u.length > 0);
     await upsertGoatOnboarding({
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
-      companyDomain,
-      contextUrls: contextUrls.length > 0 ? contextUrls : null,
+      role: profile.role,
+      building: profile.building,
     });
     return { ok: true };
   } catch (error) {
-    return errorResult(error, "Could not save your context.");
+    return errorResult(error, "Could not save your profile.");
   }
 }
 

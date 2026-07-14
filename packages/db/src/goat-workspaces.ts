@@ -560,6 +560,8 @@ export async function upsertGoatOnboarding(
     userWorkosId: string;
     workspaceId?: string | null;
     referralSource?: string | null;
+    role?: string | null;
+    building?: string | null;
     companyDomain?: string | null;
     contextUrls?: string[] | null;
   },
@@ -572,6 +574,8 @@ export async function upsertGoatOnboarding(
   const set: Record<string, unknown> = { updatedAt: now };
   if (input.workspaceId !== undefined) set.workspaceId = input.workspaceId;
   if (input.referralSource !== undefined) set.referralSource = input.referralSource;
+  if (input.role !== undefined) set.role = input.role;
+  if (input.building !== undefined) set.building = input.building;
   if (input.companyDomain !== undefined) set.companyDomain = input.companyDomain;
   if (input.contextUrls !== undefined) set.contextUrls = input.contextUrls;
 
@@ -581,6 +585,8 @@ export async function upsertGoatOnboarding(
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId ?? null,
       referralSource: input.referralSource ?? null,
+      role: input.role ?? null,
+      building: input.building ?? null,
       companyDomain: input.companyDomain ?? null,
       contextUrls: input.contextUrls ?? null,
       createdAt: now,

@@ -68,6 +68,107 @@ describe("goat brain inline links", () => {
     ]);
   });
 
+  it("ignores escaped links and links inside Markdown code", () => {
+    const text = [
+      String.raw`\[[page:escaped|Escaped]]`,
+      "`[[page:inline-code|Inline code]]`",
+      "```text",
+      "[[page:fenced-code|Fenced code]]",
+      "```",
+      "    [[page:indented-code|Indented code]]",
+      "- ~~~",
+      "  [[page:list-fenced-code|List fenced code]]",
+      "  ~~~",
+      "> ~~~",
+      "> [[page:quoted-fenced-code|Quoted fenced code]]",
+      "> ~~~",
+      ">     [[page:quoted-indented-code|Quoted indented code]]",
+      String.raw`\[^ev:ev-escaped]`,
+      "`[^ev:ev-inline-code]`",
+      "[[page:visible|Visible]]",
+    ].join("\n");
+
+    expect(parseGoatBrainInlineLinks(text)).toEqual([
+      expect.objectContaining({ kind: "page", target: "visible", label: "Visible" }),
+    ]);
+    expect(parseGoatBrainInlineLinks(String.raw`\\[[page:visible|Visible]]`)).toEqual([
+      expect.objectContaining({ kind: "page", target: "visible", label: "Visible" }),
+    ]);
+    expect(
+      parseGoatBrainInlineLinks(
+        "```text\r\n[[page:fenced-code|Fenced code]]\r\n```\r\n[[page:visible|Visible]]",
+      ),
+    ).toEqual([expect.objectContaining({ kind: "page", target: "visible", label: "Visible" })]);
+  });
+
+  it("keeps scanning indented paragraph and list content", () => {
+    const text = [
+      "Paragraph",
+      "    [[page:continuation|Continuation]]",
+      "- Parent",
+      "    - [[page:nested|Nested]]",
+      "",
+      "    [[page:list-paragraph|List paragraph]]",
+      "",
+      "      [[page:list-code|List code]]",
+    ].join("\n");
+
+    expect(parseGoatBrainInlineLinks(text).map((link) => link.target)).toEqual([
+      "continuation",
+      "nested",
+      "list-paragraph",
+    ]);
+  });
+
+  it("ends unclosed fences when their Markdown container ends", () => {
+    const text = [
+      "> ~~~",
+      "> [[page:quoted-code|Quoted code]]",
+      "[[page:after-quote|After quote]]",
+      "> > ~~~",
+      "> > [[page:nested-quoted-code|Nested quoted code]]",
+      "> [[page:outer-quote|Outer quote]]",
+      "- ~~~",
+      "  [[page:list-code|List code]]",
+      "outside [[page:lazy-list-code|Lazy list code]]",
+      "",
+      "[[page:after-list|After list]]",
+      "- ~~~",
+      "  [[page:second-list-code|Second list code]]",
+      "- [[page:sibling-list-item|Sibling list item]]",
+      "- ~~~",
+      "  [[page:third-list-code|Third list code]]",
+      "> [[page:blockquote-after-list|Blockquote after list]]",
+      "- ~~~",
+      "  [[page:fourth-list-code|Fourth list code]]",
+      "# [[page:heading-after-list|Heading after list]]",
+      "- ~~~",
+      "  [[page:fifth-list-code|Fifth list code]]",
+      "---",
+      "[[page:after-rule|After rule]]",
+      "- ~~~",
+      "  [[page:sixth-list-code|Sixth list code]]",
+      "<3 [[page:lazy-angle-code|Lazy angle code]]",
+      "",
+      "[[page:after-lazy-angle|After lazy angle]]",
+      "- ~~~",
+      "  [[page:seventh-list-code|Seventh list code]]",
+      "<span>[[page:html-after-list|HTML after list]]</span>",
+    ].join("\n");
+
+    expect(parseGoatBrainInlineLinks(text).map((link) => link.target)).toEqual([
+      "after-quote",
+      "outer-quote",
+      "after-list",
+      "sibling-list-item",
+      "blockquote-after-list",
+      "heading-after-list",
+      "after-rule",
+      "after-lazy-angle",
+      "html-after-list",
+    ]);
+  });
+
   it("requires source targets to be provider:id shaped", () => {
     expect(
       parseGoatBrainInlineLinks(
@@ -108,6 +209,9 @@ describe("goat brain inline links", () => {
       "Invalid Goat Brain evidence link target.",
     );
     expect(() => formatGoatBrainSourceLink("gmail:1", "bad]label")).toThrow(
+      "Invalid Goat Brain link label.",
+    );
+    expect(() => formatGoatBrainPageLink("acme", "bad[label")).toThrow(
       "Invalid Goat Brain link label.",
     );
   });
