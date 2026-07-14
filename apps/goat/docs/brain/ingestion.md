@@ -30,10 +30,11 @@ Key properties:
 ## Per-attempt spend gate
 
 Agentic ingestion has a provider-spend circuit breaker in
-`apps/runner/src/goat-brain-agent-ingest.ts`. Each claimed worker attempt has a 500,000 USD-micro
-($0.50) limit and stops starting new model steps at 400,000 USD-micros, reserving the remaining
-$0.10 for the request that just completed and concurrently executing tools. Model output is also
-bounded per step. The gate includes:
+`apps/runner/src/goat-brain-agent-ingest.ts`. Each claimed worker attempt has a 1,000,000 USD-micro
+($1.00) soft limit and stops starting new model steps at 900,000 USD-micros, reserving the remaining
+$0.10 for the request that just completed and concurrently executing tools. Because provider usage
+is reported only after completion and tools may execute concurrently, an attempt can overshoot the
+soft limit. Model output is also bounded per step. The gate includes:
 
 - ingestion-model usage, priced from the shared billing catalog;
 - semantic `goat_brain query` embeddings, reported by the CLI and priced from gateway usage;

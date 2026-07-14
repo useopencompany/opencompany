@@ -86,12 +86,13 @@ export const GOAT_BRAIN_AGENT_INGEST_MAX_STEPS = 32;
 export const GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS = 4_000;
 export const GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const GOAT_BRAIN_AGENT_SKIP_SENTINEL = "SKIP";
-// The agent stops starting new model steps at 40c, leaving 10c of headroom for
+// The agent stops starting new model steps at 90c, leaving 10c of headroom for
 // the just-completed request and concurrently executing tools. Provider usage
 // is reported only after a request finishes, so this reserve is what makes the
-// 50c product limit useful as a practical per-attempt cap.
-export const GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS = 500_000;
-export const GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS = 400_000;
+// $1 product limit useful as a practical per-attempt soft cap. Spend can still
+// overshoot when one request or a group of concurrent tools crosses the reserve.
+export const GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS = 1_000_000;
+export const GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS = 900_000;
 // Hard per-ingest cap on web-search enrichment calls. Bounds cost and stops the
 // agent from spelunking; enforced in code, not just prompt.
 export const GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT = 4;

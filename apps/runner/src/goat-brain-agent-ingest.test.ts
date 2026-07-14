@@ -982,14 +982,14 @@ describe("runGoatChatCaptureAgentIngest", () => {
           args: ["pricing-teardown-reference", "--status", "active"],
         });
         options.onStepFinish({
-          usage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+          usage: { inputTokens: 100, outputTokens: 60_000, totalTokens: 60_100 },
         });
         expect(options.maxOutputTokens).toBe(GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS);
         expect(options.stopWhen[1]?.({ steps: [{}] })).toBe(true);
         return {
           text: "",
           steps: [{}],
-          totalUsage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+          totalUsage: { inputTokens: 100, outputTokens: 60_000, totalTokens: 60_100 },
         };
       },
     );
@@ -1007,12 +1007,70 @@ describe("runGoatChatCaptureAgentIngest", () => {
     expect(result).toMatchObject({
       mutations: 1,
       budget: {
-        modelCostUsdMicros: 450_300,
-        totalCostUsdMicros: 450_300,
+        modelCostUsdMicros: 900_300,
+        totalCostUsdMicros: 900_300,
         exhausted: true,
       },
     });
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalledOnce();
+  });
+
+  it("stops after in-flight tool spend overshoots the soft limit", async () => {
+    agentRuntimeMock.executeExaSearchRequest.mockResolvedValueOnce({
+      output: { searchType: "fast", costDollars: 0.2, results: [] },
+      usage: {
+        provider: "exa",
+        operation: "search",
+        costUsdMicros: 200_000,
+        rawUsage: {},
+      },
+    });
+    aiMock.generateText.mockImplementationOnce(
+      async (options: {
+        tools: Record<string, CapturedTool>;
+        stopWhen: Array<(input: { steps: unknown[] }) => boolean>;
+        onStepFinish: (event: { usage: Record<string, unknown> }) => void;
+      }) => {
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--status", "active"],
+        });
+        options.onStepFinish({
+          usage: { inputTokens: 280_000, outputTokens: 0, totalTokens: 280_000 },
+        });
+        expect(options.stopWhen[1]?.({ steps: [{}] })).toBe(false);
+        await options.tools.web_search?.execute({
+          entityName: "ExampleCo",
+          anchor: "example.com",
+        });
+        expect(options.stopWhen[1]?.({ steps: [{}, {}] })).toBe(true);
+        return {
+          text: "",
+          steps: [{}, {}],
+          totalUsage: { inputTokens: 280_000, outputTokens: 0, totalTokens: 280_000 },
+        };
+      },
+    );
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test", exaApiKey: "exa_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      mutations: 1,
+      budget: {
+        modelCostUsdMicros: 840_000,
+        webSearchCostUsdMicros: 200_000,
+        totalCostUsdMicros: 1_040_000,
+        exhausted: true,
+      },
+    });
   });
 
   it("fails closed when Brain query usage cannot be priced", async () => {
@@ -1050,12 +1108,12 @@ describe("runGoatChatCaptureAgentIngest", () => {
     aiMock.generateText.mockImplementationOnce(
       async (options: { onStepFinish: (event: { usage: Record<string, unknown> }) => void }) => {
         options.onStepFinish({
-          usage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+          usage: { inputTokens: 100, outputTokens: 60_000, totalTokens: 60_100 },
         });
         return {
           text: "",
           steps: [{}],
-          totalUsage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+          totalUsage: { inputTokens: 100, outputTokens: 60_000, totalTokens: 60_100 },
         };
       },
     );
@@ -1072,7 +1130,7 @@ describe("runGoatChatCaptureAgentIngest", () => {
 
     expect(error).toBeInstanceOf(GoatBrainIngestBudgetError);
     expect((error as GoatBrainIngestBudgetError).result).toMatchObject({
-      budget: { totalCostUsdMicros: 450_300, exhausted: true },
+      budget: { totalCostUsdMicros: 900_300, exhausted: true },
       mutations: 0,
       trace: { budget: { exhausted: true } },
     });
