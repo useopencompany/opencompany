@@ -11,6 +11,7 @@ import {
   House,
   Loader2,
   PanelLeft,
+  Pin,
   PlugZap,
   Settings,
 } from "lucide-react";
@@ -19,7 +20,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
-import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
+import type { GoatChatSummaryView } from "@/lib/chat-ui";
 import { switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function SidebarNavRow({
@@ -170,11 +172,24 @@ function GoatSidebarRecentChats() {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
+  const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
+  const [previousRecentChats, setPreviousRecentChats] = useState(recentChats);
+
+  if (previousRecentChats !== recentChats) {
+    setPreviousRecentChats(recentChats);
+    setPinOverrides((current) => reconcilePinOverrides(current, recentChats));
+  }
 
   // Keep the footer pinned to the bottom when there is nothing to show.
   if (recentChats.length === 0) {
     return <div className="min-h-0 flex-1" />;
   }
+
+  const isPinned = (chat: GoatChatSummaryView) =>
+    pinOverrides.get(chat.id) ?? Boolean(chat.pinnedAt);
+  const pinnedChats = recentChats.filter(isPinned);
+  const unpinnedChats = recentChats.filter((chat) => !isPinned(chat));
 
   const archiveChat = (chatId: string, chatTitle: string, href: string) => {
     setArchivingId(chatId);
@@ -192,54 +207,180 @@ function GoatSidebarRecentChats() {
     });
   };
 
+  const togglePin = (chatId: string, chatTitle: string, currentlyPinned: boolean) => {
+    if (pinningIds.has(chatId)) return;
+    const desiredPinned = !currentlyPinned;
+    setPinOverrides((current) => new Map(current).set(chatId, desiredPinned));
+    setPinningIds((current) => new Set(current).add(chatId));
+    startTransition(async () => {
+      try {
+        const result = await setGoatChatPinnedAction(chatId, desiredPinned);
+        if (result.ok) return;
+
+        setPinOverrides((current) => {
+          const next = new Map(current);
+          next.delete(chatId);
+          return next;
+        });
+        toast.error(
+          result.error ??
+            (currentlyPinned ? `Could not unpin "${chatTitle}".` : `Could not pin "${chatTitle}".`),
+        );
+      } catch {
+        setPinOverrides((current) => {
+          const next = new Map(current);
+          next.delete(chatId);
+          return next;
+        });
+        toast.error(
+          currentlyPinned ? `Could not unpin "${chatTitle}".` : `Could not pin "${chatTitle}".`,
+        );
+      } finally {
+        setPinningIds((current) => {
+          const next = new Set(current);
+          next.delete(chatId);
+          return next;
+        });
+      }
+    });
+  };
+
+  const renderRow = (chat: GoatChatSummaryView) => {
+    const href = chatHref(chat.id);
+    const pinned = isPinned(chat);
+    return (
+      <GoatSidebarChatRow
+        key={chat.id}
+        chat={chat}
+        href={href}
+        active={pathname === href}
+        pinned={pinned}
+        archiving={archivingId === chat.id}
+        pinning={pinningIds.has(chat.id)}
+        onPrefetch={() => router.prefetch(href)}
+        onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
+        onArchive={() => archiveChat(chat.id, chat.title, href)}
+      />
+    );
+  };
+
   return (
-    <div className="mt-4 flex min-h-0 flex-1 flex-col">
-      <div className="px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
-        Recent chats
-      </div>
-      <nav
-        aria-label="Recent chats"
-        className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2"
+    <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {pinnedChats.length > 0 ? (
+        <div className="pb-2">
+          <div className="flex items-center gap-1 px-4 pb-1">
+            <Pin size={9} strokeWidth={2} fill="currentColor" className="text-ink-subtle" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+              Pinned
+            </span>
+          </div>
+          <nav aria-label="Pinned chats" className="flex flex-col gap-px px-2">
+            {pinnedChats.map(renderRow)}
+          </nav>
+        </div>
+      ) : null}
+      {unpinnedChats.length > 0 ? (
+        <div>
+          <div className="px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+            Recent chats
+          </div>
+          <nav aria-label="Recent chats" className="flex flex-col gap-px px-2">
+            {unpinnedChats.map(renderRow)}
+          </nav>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function reconcilePinOverrides(
+  current: ReadonlyMap<string, boolean>,
+  recentChats: readonly GoatChatSummaryView[],
+) {
+  const next = new Map(current);
+  for (const [chatId, desiredPinned] of current) {
+    const chat = recentChats.find((item) => item.id === chatId);
+    if (!chat || Boolean(chat.pinnedAt) === desiredPinned) {
+      next.delete(chatId);
+    }
+  }
+  return next;
+}
+
+function GoatSidebarChatRow({
+  chat,
+  href,
+  active,
+  pinned,
+  archiving,
+  pinning,
+  onPrefetch,
+  onTogglePin,
+  onArchive,
+}: {
+  chat: GoatChatSummaryView;
+  href: string;
+  active: boolean;
+  pinned: boolean;
+  archiving: boolean;
+  pinning: boolean;
+  onPrefetch: () => void;
+  onTogglePin: () => void;
+  onArchive: () => void;
+}) {
+  return (
+    <div
+      className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
+        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+      }`}
+    >
+      <Link
+        href={href}
+        prefetch
+        onMouseEnter={onPrefetch}
+        onFocus={onPrefetch}
+        aria-current={active ? "page" : undefined}
+        className="flex min-w-0 flex-1 items-center rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        {recentChats.map((chat) => {
-          const href = chatHref(chat.id);
-          const active = pathname === href;
-          const prefetchChat = () => router.prefetch(href);
-          const archiving = archivingId === chat.id;
-          return (
-            <div key={chat.id} className="group relative">
-              <Link
-                href={href}
-                prefetch
-                onMouseEnter={prefetchChat}
-                onFocus={prefetchChat}
-                aria-current={active ? "page" : undefined}
-                className={`flex w-full items-center rounded-md py-[5px] pl-2 pr-8 text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                  active
-                    ? "bg-surface-active text-ink"
-                    : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-                }`}
-              >
-                <span className="truncate tracking-[-0.005em]">{chat.title}</span>
-              </Link>
-              <button
-                type="button"
-                aria-label={`Archive ${chat.title}`}
-                title="Archive chat"
-                disabled={archiving}
-                onClick={() => archiveChat(chat.id, chat.title, href)}
-                className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-ink/50 opacity-0 transition-[opacity,color,background-color] duration-150 hover:bg-surface-active hover:text-ink focus:outline-none focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-100"
-              >
-                {archiving ? (
-                  <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-                ) : (
-                  <Archive size={13} strokeWidth={1.75} />
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </nav>
+        <span className="truncate tracking-[-0.005em]">{chat.title}</span>
+      </Link>
+      <button
+        type="button"
+        title={pinned ? "Unpin chat" : "Pin chat"}
+        aria-label={pinned ? `Unpin ${chat.title}` : `Pin ${chat.title}`}
+        aria-pressed={pinned}
+        disabled={pinning}
+        onClick={onTogglePin}
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+          pinned || pinning
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+        }`}
+      >
+        {pinning ? (
+          <Loader2 size={12} strokeWidth={1.75} className="animate-spin" />
+        ) : (
+          <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
+        )}
+      </button>
+      <button
+        type="button"
+        title="Archive chat"
+        aria-label={`Archive ${chat.title}`}
+        disabled={archiving}
+        onClick={onArchive}
+        className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+          archiving
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+        }`}
+      >
+        {archiving ? (
+          <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
+        ) : (
+          <Archive size={13} strokeWidth={1.75} />
+        )}
+      </button>
     </div>
   );
 }

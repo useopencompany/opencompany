@@ -5,7 +5,7 @@ import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { useLiveQuery } from "@tanstack/react-db";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
-import type { GoatChatSummaryView } from "@/lib/chat-ui";
+import { GOAT_PINNED_CHAT_LIMIT, type GoatChatSummaryView } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
@@ -130,22 +130,37 @@ export function GoatAppDataProvider({
   const recentChats = useMemo(() => {
     if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
-    return ((chatSessionRows ?? []) as GoatChatSessionRow[])
-      .filter((row) => !row.closed_at && isRecentGoatHomeActivity(row.updated_at))
+    const toSummary = (row: GoatChatSessionRow) => {
+      const initial = initialById.get(row.id);
+      return {
+        id: row.id,
+        title: row.title,
+        model: row.model as AgentModelId,
+        engine: row.engine,
+        codexComposerSettings: initial?.codexComposerSettings ?? null,
+        preview: initial?.preview ?? "No messages yet.",
+        updatedAt: row.updated_at,
+        pinnedAt: row.pinned_at,
+      };
+    };
+    const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
+      (row) => !row.closed_at,
+    );
+    // Pinned chats stay visible regardless of the recency window, with separate
+    // caps for pinned and unpinned hydration (mirrors listOpenSessions on the server).
+    const pinned = openRows
+      .filter((row) => row.pinned_at)
+      .toSorted(
+        (a, b) => new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime(),
+      )
+      .slice(0, GOAT_PINNED_CHAT_LIMIT)
+      .map(toSummary);
+    const recent = openRows
+      .filter((row) => !row.pinned_at && isRecentGoatHomeActivity(row.updated_at))
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, 8)
-      .map((row) => {
-        const initial = initialById.get(row.id);
-        return {
-          id: row.id,
-          title: row.title,
-          model: row.model as AgentModelId,
-          engine: row.engine,
-          codexComposerSettings: initial?.codexComposerSettings ?? null,
-          preview: initial?.preview ?? "No messages yet.",
-          updatedAt: row.updated_at,
-        };
-      });
+      .map(toSummary);
+    return [...pinned, ...recent];
   }, [chatSessionRows, chatsLoading, initialData.recentChats]);
 
   const integrations = useMemo(() => {

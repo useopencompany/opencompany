@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
-import { closeGoatChatSessionForUser } from "@/lib/chat";
+import { closeGoatChatSessionForUser, setGoatChatSessionPinnedForUser } from "@/lib/chat";
 
 export type CloseGoatChatResult = {
   ok: boolean;
@@ -22,6 +22,27 @@ export async function closeGoatChatSessionAction(
   });
   if (!closed) {
     return { ok: false, error: "Could not close that chat." };
+  }
+
+  revalidatePath("/");
+  return { ok: true, error: null };
+}
+
+export async function setGoatChatPinnedAction(
+  sessionId: string | null,
+  pinned: boolean,
+): Promise<CloseGoatChatResult> {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return { ok: true, error: null };
+
+  const { user } = await currentGoatUser();
+  const updated = await setGoatChatSessionPinnedForUser({
+    userWorkosId: user.workosUserId,
+    sessionId: trimmed,
+    pinned,
+  });
+  if (!updated) {
+    return { ok: false, error: pinned ? "Could not pin that chat." : "Could not unpin that chat." };
   }
 
   revalidatePath("/");

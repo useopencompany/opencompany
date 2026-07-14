@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GoatSidebar } from "./GoatSidebar";
@@ -8,11 +8,24 @@ const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 const routerMock = vi.hoisted(() => ({
   push: vi.fn(),
   refresh: vi.fn(),
+  prefetch: vi.fn(),
 }));
 const workspaceRoleMock = vi.hoisted(() => ({
   value: "admin" as "admin" | "member",
 }));
 const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
+const recentChatsMock = vi.hoisted(() => ({
+  value: [] as Array<{
+    id: string;
+    title: string;
+    model: string;
+    engine: string;
+    codexComposerSettings: null;
+    preview: string;
+    updatedAt: string;
+    pinnedAt: string | null;
+  }>,
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
@@ -27,9 +40,12 @@ vi.mock("@/lib/workspace-actions", () => ({
   getGoatBrainAccessDetailsAction: vi.fn(),
 }));
 
-vi.mock("@/lib/chat-actions", () => ({
-  closeGoatChatSessionAction: vi.fn(),
+const chatActionsMock = vi.hoisted(() => ({
+  closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
+  setGoatChatPinnedAction: vi.fn(async () => ({ ok: true, error: null })),
 }));
+
+vi.mock("@/lib/chat-actions", () => chatActionsMock);
 
 vi.mock("@/components/GoatAppDataProvider", () => ({
   useGoatAppData: () => ({
@@ -58,7 +74,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       description: null,
       visibility: "workspace",
     },
-    recentChats: [],
+    recentChats: recentChatsMock.value,
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
 }));
@@ -68,6 +84,7 @@ describe("GoatSidebar", () => {
     vi.clearAllMocks();
     workspaceRoleMock.value = "admin";
     mcpSetupMock.completedAt = null;
+    recentChatsMock.value = [];
   });
 
   it("renders home, the brain list, and settings in the account footer", () => {
@@ -156,6 +173,131 @@ describe("GoatSidebar", () => {
     expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
     expect(screen.queryByText("member")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New brain" })).not.toBeInTheDocument();
+  });
+
+  it("splits pinned chats into their own section above recent chats", () => {
+    pathnameMock.value = "/";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_pinned",
+        title: "Pinned chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Pinned",
+        updatedAt: "2026-07-01T09:00:00.000Z",
+        pinnedAt: "2026-07-13T09:00:00.000Z",
+      },
+      {
+        id: "goat_chat_recent",
+        title: "Recent chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Recent",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const pinnedNav = screen.getByRole("navigation", { name: "Pinned chats" });
+    expect(within(pinnedNav).getByRole("link", { name: "Pinned chat" })).toHaveAttribute(
+      "href",
+      "/chat/goat_chat_pinned",
+    );
+    const recentNav = screen.getByRole("navigation", { name: "Recent chats" });
+    expect(within(recentNav).getByRole("link", { name: "Recent chat" })).toBeInTheDocument();
+    expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
+  });
+
+  it("pins and unpins chats via the row toggle", async () => {
+    const user = userEvent.setup();
+    pathnameMock.value = "/";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_pinned",
+        title: "Pinned chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Pinned",
+        updatedAt: "2026-07-01T09:00:00.000Z",
+        pinnedAt: "2026-07-13T09:00:00.000Z",
+      },
+      {
+        id: "goat_chat_recent",
+        title: "Recent chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Recent",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Pin Recent chat" }));
+    expect(chatActionsMock.setGoatChatPinnedAction).toHaveBeenCalledWith("goat_chat_recent", true);
+    expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    const unpin = screen.getByRole("button", { name: "Unpin Pinned chat" });
+    expect(unpin).toHaveAttribute("aria-pressed", "true");
+    await user.click(unpin);
+    expect(chatActionsMock.setGoatChatPinnedAction).toHaveBeenCalledWith("goat_chat_pinned", false);
+  });
+
+  it("tracks concurrent pin requests independently and restores failed rows", async () => {
+    const user = userEvent.setup();
+    let resolvePin!: (value: { ok: true; error: null }) => void;
+    let rejectUnpin!: (reason: Error) => void;
+    chatActionsMock.setGoatChatPinnedAction
+      .mockImplementationOnce(() => new Promise((resolve) => (resolvePin = resolve)))
+      .mockImplementationOnce(() => new Promise((_, reject) => (rejectUnpin = reject)));
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_pinned",
+        title: "Pinned chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Pinned",
+        updatedAt: "2026-07-01T09:00:00.000Z",
+        pinnedAt: "2026-07-13T09:00:00.000Z",
+      },
+      {
+        id: "goat_chat_recent",
+        title: "Recent chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Recent",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Pin Recent chat" }));
+    await user.click(screen.getByRole("button", { name: "Unpin Pinned chat" }));
+
+    expect(chatActionsMock.setGoatChatPinnedAction).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pin Pinned chat" })).toBeDisabled();
+
+    await act(async () => resolvePin({ ok: true, error: null }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toBeEnabled(),
+    );
+
+    await act(async () => rejectUnpin(new Error("network unavailable")));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Unpin Pinned chat" })).toBeEnabled(),
+    );
   });
 
   it("collapses to zero width and toggles via the sidebar button", () => {
