@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import type { NormalizedBrainSourceItem } from "../../goat-brain/src/index";
 import { getDb } from "./client";
 import { reserveGoatWorkspaceIngestion } from "./goat-billing";
@@ -65,7 +66,14 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   db?: DbLike;
 }): Promise<UpsertGoatBrainSourceItemResult> {
   if (!input.db) {
-    const db = getDb();
+    const db: DbLike = getDb();
+    // The web app's getDb() is the neon-http driver, which has no interactive
+    // transactions (one HTTPS request per query) and throws on db.transaction().
+    // Run the mutation steps sequentially there; pooled callers (the runner) get
+    // a real transaction. Mirrors runAtomically() in ./goat-brain-files.
+    if (db instanceof NeonHttpDatabase) {
+      return upsertGoatBrainSourceItemAndEnqueue({ ...input, db });
+    }
     return db.transaction((tx: DbLike) =>
       upsertGoatBrainSourceItemAndEnqueue({
         ...input,
