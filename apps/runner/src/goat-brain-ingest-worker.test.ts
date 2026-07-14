@@ -1,5 +1,6 @@
+import { calculateModelUsageCost } from "@opencompany/billing";
 import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/goat-brain";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GOAT_BRAIN_AGENT_SKIP_SENTINEL,
   GoatBrainAgentOutcomeError,
@@ -14,6 +15,7 @@ import { buildJamieMeetingBrainWrites } from "./goat-brain-jamie-writes";
 
 const telemetry = vi.hoisted(() => ({
   recordGoatBrainIngestRun: vi.fn(),
+  recordGoatModelCost: vi.fn(),
   startGoatSpan: vi.fn(() => ({
     setAttributes: vi.fn(),
     runInContext: vi.fn((run: () => unknown) => run()),
@@ -30,6 +32,7 @@ vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   return {
     ...actual,
     recordGoatBrainIngestRun: telemetry.recordGoatBrainIngestRun,
+    recordGoatModelCost: telemetry.recordGoatModelCost,
     startGoatSpan: telemetry.startGoatSpan,
     withGoatSpan: telemetry.withGoatSpan,
   };
@@ -64,6 +67,10 @@ function jamieItem(segmentCount = 2) {
 }
 
 describe("Goat Brain ingest worker", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("builds deterministic Jamie meeting and evidence documents", () => {
     const first = buildJamieMeetingBrainWrites(jamieItem());
     const second = buildJamieMeetingBrainWrites(jamieItem());
@@ -184,6 +191,109 @@ describe("Goat Brain ingest worker", () => {
     );
     expect(skip).not.toHaveBeenCalled();
     expect(fail).not.toHaveBeenCalled();
+    expect(telemetry.recordGoatModelCost).not.toHaveBeenCalled();
+  });
+
+  it("records agent ingestion model cost with the brain_ingest surface", async () => {
+    const normalizedPayload = {
+      sourceProvider: "linear" as const,
+      sourceType: "issue" as const,
+      externalId: "external_123",
+      sourceRef: "linear:issue:G-51",
+      title: "Registry Test",
+      occurredAt: "2026-01-01T10:00:00.000Z",
+      capturedAt: "2026-01-01T10:01:00.000Z",
+      contentHash: "hash_123",
+      contentHashInput: {},
+      content: {},
+    };
+    const usage = {
+      inputTokens: 1_000,
+      outputTokens: 500,
+      totalTokens: 1_500,
+      cacheReadInputTokens: 200,
+      cacheWriteInputTokens: 100,
+    };
+    const result = {
+      handled: true,
+      trace: {
+        schemaVersion: "goat.brain_ingest_trace.v1",
+        model: "anthropic/claude-sonnet-5",
+        steps: 1,
+        toolCallCount: 0,
+        mutations: 1,
+        usage,
+        finalText: "Updated the brain.",
+        toolCalls: [],
+        truncatedToolCalls: 0,
+        createdAt: "2026-01-01T10:01:00.000Z",
+      },
+    };
+    const store: GoatBrainIngestStore = {
+      claimNext: vi.fn(async () => null),
+      heartbeat: vi.fn(async () => true),
+      complete: vi.fn(async () => true),
+      skip: vi.fn(async () => true),
+      fail: vi.fn(async () => true),
+    };
+
+    await runClaimedGoatBrainIngestJob({
+      env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
+      store,
+      handlers: [
+        {
+          descriptor: {
+            kind: "brain_agent_ingest",
+            sourceProvider: "linear",
+            sourceType: "issue",
+          },
+          isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+          run: vi.fn(async () => result),
+        },
+      ],
+      job: {
+        id: "gbjob_123",
+        sourceItemId: "gbsrc_123",
+        userWorkosId: "user_123",
+        sourceProvider: "linear",
+        sourceConnectionId: "gint_123",
+        integrationId: "gint_123",
+        brainRef: "gbrain_123",
+        sourceType: "issue",
+        kind: "brain_agent_ingest",
+        contentHash: "hash_123",
+        status: "running",
+        attempts: 1,
+        nextRunAt: new Date("2026-01-01T10:00:00.000Z"),
+        leaseId: "lease_123",
+        leaseOwner: "runner_123",
+        leaseExpiresAt: new Date("2026-01-01T10:05:00.000Z"),
+        lastError: null,
+        result: {},
+        completedAt: null,
+        createdAt: new Date("2026-01-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-01-01T10:00:00.000Z"),
+        normalizedPayload,
+      },
+    });
+
+    const expectedCost = calculateModelUsageCost({
+      modelName: "anthropic/claude-sonnet-5",
+      inputTokens: usage.inputTokens,
+      inputNoCacheTokens:
+        usage.inputTokens - usage.cacheReadInputTokens - usage.cacheWriteInputTokens,
+      inputCacheReadTokens: usage.cacheReadInputTokens,
+      inputCacheWriteTokens: usage.cacheWriteInputTokens,
+      outputTokens: usage.outputTokens,
+    });
+    expect(telemetry.recordGoatModelCost).toHaveBeenCalledOnce();
+    expect(telemetry.recordGoatModelCost).toHaveBeenCalledWith({
+      costUsdMicros: expectedCost.totalCostUsdMicros,
+      attributes: {
+        "goat.model": "anthropic/claude-sonnet-5",
+        "goat.surface": "brain_ingest",
+      },
+    });
   });
 
   it("marks skipped handler results as terminal skips", async () => {
