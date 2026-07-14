@@ -1040,8 +1040,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
 
     expect(error).toBeInstanceOf(GoatBrainIngestBudgetError);
     expect((error as GoatBrainIngestBudgetError).result).toMatchObject({
-      budget: { accountingComplete: false, exhausted: false },
-      trace: { budget: { accountingComplete: false } },
+      budget: { accountingComplete: false, exhausted: true },
+      trace: { budget: { accountingComplete: false, exhausted: true } },
     });
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
   });

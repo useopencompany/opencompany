@@ -1720,6 +1720,10 @@ async function runIngestAgentLoop(input: {
           const cost = priceGoatBrainUsageEntry(entry);
           if (cost === null) {
             budgetAccountingError = `Could not price ${entry.operation} usage for model ${entry.model}.`;
+            if (!budgetExhausted) {
+              budgetExhausted = true;
+              recordGoatBrainIngestBudgetExhausted();
+            }
             logger.warn("Goat Brain query usage could not be priced", {
               event: "opencompany.goat_brain_ingest_usage_unpriced",
               brain_ref: input.brainRef,
