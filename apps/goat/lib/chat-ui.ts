@@ -318,7 +318,10 @@ export type GoatChatSummaryView = {
   codexComposerSettings?: GoatCodexComposerSettingsView | null;
   preview: string;
   updatedAt: string;
+  pinnedAt?: string | null;
 };
+
+export const GOAT_PINNED_CHAT_LIMIT = 20;
 
 export type GoatStoredChatMessage = Pick<
   GoatChatMessage,

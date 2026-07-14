@@ -11,10 +11,11 @@ import {
   listRecentGoatChatsForUser,
   loadGoatChatSessionByIdForUser,
   persistGoatChatAssistantMessage,
+  setGoatChatSessionPinnedForUser,
   textFromGoatChatUiMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
-import { START_TASK_TOOL_NAME } from "@/lib/chat-ui";
+import { GOAT_PINNED_CHAT_LIMIT, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 vi.mock("next/cache", () => ({
@@ -223,10 +224,136 @@ describe("Goat chat history helpers", () => {
         title: "Second chat",
         preview: "second chat",
         updatedAt: "2026-07-04T12:00:00.000Z",
+        pinnedAt: null,
       });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps pinned chats listed even outside the recency window until unpinned", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
+    const { store, sessions } = createInMemoryChatStore();
+    try {
+      const recent = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "recent chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      const old = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "old pinned chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      sessions.find((session) => session.id === old.session.id)!.updatedAt = new Date(
+        "2026-07-01T12:00:00.000Z",
+      );
+
+      await expect(
+        setGoatChatSessionPinnedForUser(
+          { userWorkosId: "user_1", sessionId: old.session.id, pinned: true },
+          store,
+        ),
+      ).resolves.toBe(true);
+
+      const summaries = await listRecentGoatChatsForUser(
+        { userWorkosId: "user_1", limit: 8 },
+        store,
+      );
+      expect(summaries.map((summary) => summary.id)).toEqual([old.session.id, recent.session.id]);
+      expect(summaries[0]).toMatchObject({
+        title: "Old pinned chat",
+        pinnedAt: "2026-07-04T12:30:00.000Z",
+      });
+
+      await expect(
+        setGoatChatSessionPinnedForUser(
+          { userWorkosId: "user_1", sessionId: old.session.id, pinned: false },
+          store,
+        ),
+      ).resolves.toBe(true);
+      const afterUnpin = await listRecentGoatChatsForUser(
+        { userWorkosId: "user_1", limit: 8 },
+        store,
+      );
+      expect(afterUnpin.map((summary) => summary.id)).toEqual([recent.session.id]);
+
+      // Other users' sessions are not pinnable.
+      await expect(
+        setGoatChatSessionPinnedForUser(
+          { userWorkosId: "user_2", sessionId: old.session.id, pinned: true },
+          store,
+        ),
+      ).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds pinned chat hydration and rejects pins beyond the limit", async () => {
+    const { store, sessions } = createInMemoryChatStore();
+    const candidate = await createGoatChatUserTurn(
+      { userWorkosId: "user_1", prompt: "candidate", model: DEFAULT_GOAT_MODEL },
+      store,
+    );
+    const now = new Date();
+    for (let index = 0; index < GOAT_PINNED_CHAT_LIMIT + 1; index += 1) {
+      sessions.push({
+        ...candidate.session,
+        id: `pinned_${index}`,
+        title: `Pinned ${index}`,
+        pinnedAt: new Date(now.getTime() + index),
+      });
+    }
+
+    const summaries = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+    expect(summaries.filter((summary) => summary.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
+    await expect(
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: candidate.session.id, pinned: true },
+        store,
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it("keeps concurrent pin requests within the per-user limit", async () => {
+    const { store, sessions } = createInMemoryChatStore();
+    const first = await createGoatChatUserTurn(
+      { userWorkosId: "user_1", prompt: "first candidate", model: DEFAULT_GOAT_MODEL },
+      store,
+    );
+    const second = await createGoatChatUserTurn(
+      { userWorkosId: "user_1", prompt: "second candidate", model: DEFAULT_GOAT_MODEL },
+      store,
+    );
+    const now = new Date();
+    for (let index = 0; index < GOAT_PINNED_CHAT_LIMIT - 1; index += 1) {
+      sessions.push({
+        ...first.session,
+        id: `existing_pin_${index}`,
+        title: `Existing pin ${index}`,
+        pinnedAt: new Date(now.getTime() + index),
+      });
+    }
+
+    const results = await Promise.all([
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: first.session.id, pinned: true },
+        store,
+      ),
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: second.session.id, pinned: true },
+        store,
+      ),
+    ]);
+
+    expect(results).toEqual([true, false]);
+    expect(sessions.filter((session) => session.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
+    await expect(
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: first.session.id, pinned: true },
+        store,
+      ),
+    ).resolves.toBe(true);
   });
 
   it("loads only the requested user's open chat", async () => {
@@ -272,6 +399,7 @@ describe("Goat chat history helpers", () => {
         model: DEFAULT_GOAT_MODEL,
         engine: "codex",
         closedAt: null,
+        pinnedAt: null,
         createdAt: now,
         updatedAt: now,
       });
@@ -335,13 +463,21 @@ function createInMemoryChatStore(
     },
 
     async listOpenSessions(input) {
-      return sessions
-        .filter((session) => session.userWorkosId === input.userWorkosId && !session.closedAt)
+      const open = sessions.filter(
+        (session) => session.userWorkosId === input.userWorkosId && !session.closedAt,
+      );
+      const pinned = open
+        .filter((session) => session.pinnedAt)
+        .toSorted((a, b) => (b.pinnedAt?.getTime() ?? 0) - (a.pinnedAt?.getTime() ?? 0))
+        .slice(0, GOAT_PINNED_CHAT_LIMIT);
+      const recent = open
+        .filter((session) => !session.pinnedAt)
         .filter((session) =>
           input.updatedAfter ? session.updatedAt.getTime() >= input.updatedAfter.getTime() : true,
         )
         .toSorted((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
         .slice(0, input.limit);
+      return [...pinned, ...recent];
     },
 
     async createSession(input) {
@@ -353,6 +489,7 @@ function createInMemoryChatStore(
         model: input.model,
         engine: "opencompany",
         closedAt: null,
+        pinnedAt: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -406,6 +543,26 @@ function createInMemoryChatStore(
       if (!session) return false;
       session.closedAt = input.now;
       session.updatedAt = input.now;
+      return true;
+    },
+
+    async setSessionPinned(input) {
+      const session = sessions.find(
+        (item) =>
+          item.id === input.sessionId && item.userWorkosId === input.userWorkosId && !item.closedAt,
+      );
+      if (!session) return false;
+      if (
+        input.pinned &&
+        !session.pinnedAt &&
+        sessions.filter(
+          (item) =>
+            item.userWorkosId === input.userWorkosId && !item.closedAt && Boolean(item.pinnedAt),
+        ).length >= GOAT_PINNED_CHAT_LIMIT
+      ) {
+        return false;
+      }
+      session.pinnedAt = input.pinned ? input.now : null;
       return true;
     },
   };

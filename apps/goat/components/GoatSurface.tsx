@@ -219,6 +219,7 @@ export function GoatSurface({
   const pathnameRef = useRef(pathname);
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputOverlayRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const lastError = useRef<string | null>(null);
   const isPinnedAtBottomRef = useRef(true);
@@ -638,6 +639,16 @@ export function GoatSurface({
     return () => cancelAnimationFrame(frame);
   }, [chatSessionId, initialChat, initialChatId, openChat]);
 
+  // The visible composer text is painted by an overlay div behind the transparent
+  // textarea; once the textarea scrolls past its max height the overlay must follow
+  // its scroll position or the painted text freezes while the caret keeps moving.
+  const syncInputOverlayScroll = useCallback(() => {
+    const overlay = inputOverlayRef.current;
+    const el = inputRef.current;
+    if (!overlay || !el) return;
+    overlay.scrollTop = el.scrollTop;
+  }, []);
+
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -647,7 +658,8 @@ export function GoatSurface({
     }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-  }, [input]);
+    syncInputOverlayScroll();
+  }, [input, syncInputOverlayScroll]);
 
   useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
@@ -1266,6 +1278,7 @@ export function GoatSurface({
               <div className="relative min-w-0 flex-1 self-center">
                 {input ? (
                   <div
+                    ref={inputOverlayRef}
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
                   >
@@ -1294,6 +1307,7 @@ export function GoatSurface({
                     )
                   }
                   onKeyDown={onKeyDown}
+                  onScroll={syncInputOverlayScroll}
                   onPaste={(event) => {
                     composerAttachments.handlePasteFiles(event);
                   }}

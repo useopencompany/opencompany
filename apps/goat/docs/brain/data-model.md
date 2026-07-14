@@ -80,6 +80,9 @@ reserved zone (see Kind above).
 | Relation type | `^[a-z][a-z0-9_]*$` | Default `related`. Free-form beyond the pattern (e.g. `owner`, `about`, `works_at`). |
 | Inline link | `[[kind:target]]` or `[[kind:target\|Label]]` | `kind` is `page`, `evidence`, or `source` (`GoatBrainInlineLinkKind`, `inline-links.ts`). Bare `[[target]]` is a legacy page link. |
 
+Escaped inline-link syntax and link-shaped text inside inline, fenced, or indented code are treated
+as literal Markdown, not graph edges or citations.
+
 ### brain_ref vs brain_id
 
 Easy to confuse, deliberately distinct:
