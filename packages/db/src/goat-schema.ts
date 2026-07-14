@@ -89,6 +89,7 @@ export type GoatIntegrationResourceStatus =
 export type GoatBrainSourceProvider =
   | "jamie"
   | "goat-chat"
+  | "goat-import"
   | "upload"
   | "slack"
   | "linear"
@@ -104,6 +105,7 @@ export type GoatBrainSourceConfigProvider =
   | "linear";
 export type GoatBrainSourceType =
   | "meeting"
+  | "run"
   | "capture"
   | "asset"
   | "conversation"
@@ -119,6 +121,46 @@ export type GoatLinearEventAction = "create" | "update" | "remove";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
+export type GoatBrainImportStatus =
+  | "discovering"
+  | "awaiting_confirmation"
+  | "ingesting"
+  | "finalizing"
+  | "succeeded"
+  | "partial"
+  | "failed"
+  | "canceled";
+export type GoatBrainImportProvider =
+  | "public_web"
+  | "github"
+  | "jamie"
+  | "gmail"
+  | "slack"
+  | "linear";
+export type GoatBrainImportSourceSelection = Partial<
+  Record<
+    GoatBrainImportProvider,
+    {
+      enabled: boolean;
+      integrationId?: string;
+      config?: Record<string, unknown>;
+    }
+  >
+>;
+export type GoatBrainImportProviderSummary = {
+  status: "pending" | "ready" | "failed" | "unavailable";
+  discoveredEntries: number;
+  eligibleEntries: number;
+  alreadyKnownEntries: number;
+  selectedEntries: number;
+  plannedRuns: number;
+  searchCount?: number;
+  resultCount?: number;
+  error?: string;
+};
+export type GoatBrainImportDiscoverySummary = Partial<
+  Record<GoatBrainImportProvider, GoatBrainImportProviderSummary>
+>;
 
 export type GoatTaskToolName =
   | "exa_search"
@@ -549,13 +591,85 @@ export const goatBrains = goat.table(
   }),
 );
 
+export const goatBrainImportRuns = goat.table(
+  "brain_import_runs",
+  {
+    id: text("id").primaryKey(),
+    brainRef: text("brain_ref")
+      .notNull()
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    companyUrl: text("company_url").notNull(),
+    companyDomain: text("company_domain").notNull(),
+    companyName: text("company_name"),
+    focus: text("focus"),
+    historyStartAt: timestamp("history_start_at", {
+      withTimezone: true,
+    }).notNull(),
+    historyEndAt: timestamp("history_end_at", { withTimezone: true }).notNull(),
+    sourceSelection: jsonb("source_selection")
+      .$type<GoatBrainImportSourceSelection>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    discoverySummary: jsonb("discovery_summary")
+      .$type<GoatBrainImportDiscoverySummary>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    status: text("status").$type<GoatBrainImportStatus>().notNull().default("discovering"),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    activeBrainIdx: uniqueIndex("goat_brain_import_runs_active_brain_idx")
+      .on(table.brainRef)
+      .where(
+        sql`${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing')`,
+      ),
+    statusNextRunIdx: index("goat_brain_import_runs_status_next_run_idx").on(
+      table.status,
+      table.nextRunAt,
+    ),
+    leaseExpiresAtIdx: index("goat_brain_import_runs_lease_expires_at_idx").on(
+      table.leaseExpiresAt,
+    ),
+    brainCreatedIdx: index("goat_brain_import_runs_brain_created_idx").on(
+      table.brainRef,
+      table.createdAt,
+    ),
+    statusCheck: check(
+      "goat_brain_import_runs_status_check",
+      sql`${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing', 'succeeded', 'partial', 'failed', 'canceled')`,
+    ),
+    historyWindowCheck: check(
+      "goat_brain_import_runs_history_window_check",
+      sql`${table.historyStartAt} < ${table.historyEndAt}`,
+    ),
+  }),
+);
+
 export const goatBrainMembers = goat.table(
   "brain_members",
   {
     id: text("id").primaryKey(),
     brainId: text("brain_id")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
@@ -580,7 +694,10 @@ export const goatBrainFolders = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
     path: text("path").notNull(),
     source: text("source").$type<GoatBrainFolderSource>().notNull().default("custom"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -615,7 +732,10 @@ export const goatBrainDocuments = goat.table(
     }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
     brainId: text("brain_id").notNull(),
     folderPath: text("folder_path").notNull(),
     title: text("title"),
@@ -718,7 +838,10 @@ export const goatBrainTimelineEntries = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
     brainId: text("brain_id").notNull(),
     evidenceId: text("evidence_id").notNull(),
     at: timestamp("at", { withTimezone: true }).notNull(),
@@ -754,7 +877,10 @@ export const goatBrainEdges = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
     documentId: text("document_id")
       .notNull()
       .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
@@ -804,7 +930,10 @@ export const goatBrainDocumentEmbeddings = goat.table(
       .references(() => goatBrainDocuments.id, { onDelete: "cascade" }),
     brainRef: text("brain_ref")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
     contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
     embedding: vector("embedding").notNull(),
@@ -830,6 +959,9 @@ export const goatBrainDocumentVersions = goat.table(
       onDelete: "set null",
     }),
     taskId: text("task_id"),
+    importRunId: text("import_run_id").references(() => goatBrainImportRuns.id, {
+      onDelete: "set null",
+    }),
     brainId: text("brain_id").notNull(),
     folderPath: text("folder_path").notNull(),
     content: text("content").notNull().default(""),
@@ -847,6 +979,10 @@ export const goatBrainDocumentVersions = goat.table(
     userTaskCreatedIdx: index("goat_brain_document_versions_user_task_created_idx").on(
       table.userWorkosId,
       table.taskId,
+      table.createdAt,
+    ),
+    importRunCreatedIdx: index("goat_brain_document_versions_import_run_created_idx").on(
+      table.importRunId,
       table.createdAt,
     ),
     operationCheck: check(
@@ -1037,7 +1173,10 @@ export const goatBrainSources = goat.table(
     id: text("id").primaryKey(),
     brainId: text("brain_id")
       .notNull()
-      .references(() => goatBrains.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
     provider: text("provider").$type<GoatBrainSourceConfigProvider>().notNull(),
     integrationId: text("integration_id").notNull(),
     // user_workos_id of the referenced integration row (its owner for personal
@@ -1140,11 +1279,11 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
+      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -1168,6 +1307,9 @@ export const goatBrainIngestJobs = goat.table(
     integrationId: text("integration_id"),
     workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
       onDelete: "cascade",
+    }),
+    importRunId: text("import_run_id").references(() => goatBrainImportRuns.id, {
+      onDelete: "set null",
     }),
     // Target brain for the job (principle: ingestion is per-brain). Null means
     // the handler resolves the user's default brain at run time.
@@ -1214,9 +1356,10 @@ export const goatBrainIngestJobs = goat.table(
       table.workspaceId,
       table.createdAt,
     ),
+    importRunIdx: index("goat_brain_ingest_jobs_import_run_idx").on(table.importRunId),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -1272,11 +1415,48 @@ export const goatWorkspaceIngestionReservations = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_ingestion_reservations_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
     ),
     consumptionStateCheck: check(
       "goat_ingestion_reservations_consumption_state_check",
       sql`(${table.status} = 'consumed' AND ${table.consumedAt} IS NOT NULL) OR (${table.status} = 'pending' AND ${table.consumedAt} IS NULL)`,
+    ),
+  }),
+);
+
+export const goatBrainImportCandidates = goat.table(
+  "brain_import_candidates",
+  {
+    id: text("id").primaryKey(),
+    importRunId: text("import_run_id")
+      .notNull()
+      .references(() => goatBrainImportRuns.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<GoatBrainImportProvider>().notNull(),
+    sourceItemId: text("source_item_id")
+      .notNull()
+      .references(() => goatBrainSourceItems.id, { onDelete: "cascade" }),
+    ingestJobId: text("ingest_job_id").references(() => goatBrainIngestJobs.id, {
+      onDelete: "set null",
+    }),
+    entryCount: integer("entry_count").notNull().default(1),
+    rank: integer("rank").notNull().default(0),
+    selected: boolean("selected").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    runSourceIdx: uniqueIndex("goat_brain_import_candidates_run_source_idx").on(
+      table.importRunId,
+      table.sourceItemId,
+    ),
+    runProviderRankIdx: index("goat_brain_import_candidates_run_provider_rank_idx").on(
+      table.importRunId,
+      table.provider,
+      table.rank,
+    ),
+    providerCheck: check(
+      "goat_brain_import_candidates_provider_check",
+      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'gmail', 'slack', 'linear')`,
     ),
   }),
 );
@@ -1686,7 +1866,9 @@ export const goatTaskScheduleRuns = goat.table(
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
-    taskId: text("task_id").references(() => goatTasks.id, { onDelete: "set null" }),
+    taskId: text("task_id").references(() => goatTasks.id, {
+      onDelete: "set null",
+    }),
     status: text("status").$type<GoatTaskScheduleRunStatus>().notNull().default("pending"),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1765,7 +1947,9 @@ export const goatTaskEvents = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => goatTaskMessages.id, { onDelete: "set null" }),
+    messageId: text("message_id").references(() => goatTaskMessages.id, {
+      onDelete: "set null",
+    }),
     type: text("type").$type<GoatTaskEventType>().notNull(),
     payload: jsonb("payload").$type<GoatTaskEventPayload>().notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1815,7 +1999,9 @@ export const goatTaskModelUsage = goat.table(
       .notNull()
       .default(sql`'{}'::jsonb`),
     providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }),
-    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", {
+      mode: "number",
+    })
       .notNull()
       .default(0),
     platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
@@ -1865,7 +2051,9 @@ export const goatTaskToolUsage = goat.table(
     provider: text("provider").notNull(),
     operation: text("operation").notNull(),
     providerRequestId: text("provider_request_id"),
-    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", {
+      mode: "number",
+    })
       .notNull()
       .default(0),
     platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
@@ -1918,7 +2106,9 @@ export const goatTaskSandboxUsage = goat.table(
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     activeMs: integer("active_ms").notNull().default(0),
-    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", {
+      mode: "number",
+    })
       .notNull()
       .default(0),
     platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
@@ -1986,7 +2176,9 @@ export const goatChatMessages = goat.table(
       .references(() => goatChatSessions.id, { onDelete: "cascade" }),
     role: text("role").$type<GoatChatRole>().notNull(),
     content: text("content").notNull().default(""),
-    taskId: text("task_id").references(() => goatTasks.id, { onDelete: "set null" }),
+    taskId: text("task_id").references(() => goatTasks.id, {
+      onDelete: "set null",
+    }),
     debugTrace: jsonb("debug_trace").$type<GoatChatMessageDebugTrace | null>(),
     attachments: jsonb("attachments").$type<GoatChatMessageAttachment[] | null>(),
     // docx/xlsx extracted text keyed by attachment id; server-side model context
@@ -2039,7 +2231,9 @@ export const goatLocalCodexSessions = goat.table(
     chatSessionId: text("chat_session_id")
       .notNull()
       .references(() => goatChatSessions.id, { onDelete: "cascade" }),
-    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, { onDelete: "set null" }),
+    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, {
+      onDelete: "set null",
+    }),
     repositoryPath: text("repository_path"),
     worktreePath: text("worktree_path"),
     model: text("model").notNull().default("gpt-5.5"),
@@ -2126,7 +2320,9 @@ export const goatLocalCodexCommands = goat.table(
     localCodexTurnId: text("local_codex_turn_id").references(() => goatLocalCodexTurns.id, {
       onDelete: "set null",
     }),
-    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, { onDelete: "set null" }),
+    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, {
+      onDelete: "set null",
+    }),
     claimedByBridgeId: text("claimed_by_bridge_id").references(() => goatLocalBridges.id, {
       onDelete: "set null",
     }),
@@ -2173,7 +2369,9 @@ export const goatLocalCodexEvents = goat.table(
     localCodexTurnId: text("local_codex_turn_id").references(() => goatLocalCodexTurns.id, {
       onDelete: "set null",
     }),
-    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, { onDelete: "set null" }),
+    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, {
+      onDelete: "set null",
+    }),
     commandId: text("command_id").references(() => goatLocalCodexCommands.id, {
       onDelete: "set null",
     }),
@@ -2259,7 +2457,9 @@ export const goatCodexChatTurns = goat.table(
       .notNull()
       .default(sql`'{}'::jsonb`),
     error: text("error"),
-    interruptRequestedAt: timestamp("interrupt_requested_at", { withTimezone: true }),
+    interruptRequestedAt: timestamp("interrupt_requested_at", {
+      withTimezone: true,
+    }),
     attempts: integer("attempts").notNull().default(0),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),

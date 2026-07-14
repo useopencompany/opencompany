@@ -8,6 +8,7 @@ import {
   startGoatCodexDeviceAuthFlow,
 } from "./codex-auth";
 import type { RunnerEnv } from "./env";
+import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
@@ -20,7 +21,10 @@ import { enqueueRunnerJob } from "./jobs";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus } from "./sandbox";
 
-const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
+const logger = createLogger({
+  service: "opencompany-runner",
+  runtime: "server",
+});
 
 export function createServer(
   env: RunnerEnv,
@@ -151,6 +155,16 @@ export function createServer(
     reply.status(202).send({ ok: true });
   });
 
+  app.post("/internal/goat/brain-import/wake", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat workers are disabled." });
+      return;
+    }
+    wakeGoatBrainImportWorker();
+    reply.status(202).send({ ok: true });
+  });
+
   app.post("/internal/goat/task-harness/plan", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     if (!env.goatTaskWorkerEnabled) {
@@ -237,7 +251,11 @@ export function createServer(
       workspace_id: workspaceId,
       requested_by_user_id: requestedByUserId,
     });
-    const flow = await startCodexDeviceAuthFlow({ workspaceId, requestedByUserId, env });
+    const flow = await startCodexDeviceAuthFlow({
+      workspaceId,
+      requestedByUserId,
+      env,
+    });
     logger.info("Codex device auth start route completed", {
       event: "opencompany.runner_codex_auth_start_route_completed",
       workspace_id: workspaceId,
@@ -313,7 +331,11 @@ export function createServer(
       user_workos_id: userWorkosId,
       flow_id: flowId,
     });
-    const flow = await pollGoatCodexDeviceAuthFlow({ userWorkosId, flowId, env });
+    const flow = await pollGoatCodexDeviceAuthFlow({
+      userWorkosId,
+      flowId,
+      env,
+    });
     if (!flow) {
       reply.status(404).send({ error: "Goat Codex device auth flow was not found." });
       return;
@@ -331,7 +353,10 @@ export function createServer(
 
   app.post("/internal/sessions/:id/messages/:messageId/run", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    const { id, messageId } = request.params as { id: string; messageId: string };
+    const { id, messageId } = request.params as {
+      id: string;
+      messageId: string;
+    };
     logger.info("Runner message run accepted", {
       event: "opencompany.runner_message_run_accepted",
       session_id: id,
@@ -348,7 +373,10 @@ export function createServer(
 
   app.post("/internal/sessions/:id/messages/:messageId/codex-turn", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    const { id, messageId } = request.params as { id: string; messageId: string };
+    const { id, messageId } = request.params as {
+      id: string;
+      messageId: string;
+    };
     logger.info("Runner Codex turn accepted", {
       event: "opencompany.runner_codex_turn_accepted",
       session_id: id,
@@ -365,7 +393,10 @@ export function createServer(
 
   app.post("/internal/sessions/:id/approvals/:toolCallId/resume", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    const { id, toolCallId } = request.params as { id: string; toolCallId: string };
+    const { id, toolCallId } = request.params as {
+      id: string;
+      toolCallId: string;
+    };
     logger.info("Runner approval resume accepted", {
       event: "opencompany.runner_approval_resume_accepted",
       session_id: id,
@@ -384,7 +415,10 @@ export function createServer(
 
   app.post("/internal/sessions/:id/questions/:toolCallId/resume", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    const { id, toolCallId } = request.params as { id: string; toolCallId: string };
+    const { id, toolCallId } = request.params as {
+      id: string;
+      toolCallId: string;
+    };
     logger.info("Runner question resume accepted", {
       event: "opencompany.runner_question_resume_accepted",
       session_id: id,
@@ -403,7 +437,10 @@ export function createServer(
 
   app.post("/internal/sessions/:id/messages/:messageId/title", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    const { id, messageId } = request.params as { id: string; messageId: string };
+    const { id, messageId } = request.params as {
+      id: string;
+      messageId: string;
+    };
     await enqueueRunnerJob({
       kind: "title",
       sessionId: id,

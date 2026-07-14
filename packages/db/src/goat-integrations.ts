@@ -31,9 +31,18 @@ type GoatIntegrationDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "insert" | "select" | "update"
 >;
-type GoatIntegrationRootDb = GoatIntegrationDb & {
+type GoatIntegrationTransactionalDb = GoatIntegrationDb & {
   transaction<T>(callback: (tx: GoatIntegrationDb) => Promise<T>): Promise<T>;
 };
+type GoatIntegrationBatchDb = Pick<ReturnType<typeof getDb>, "batch" | "insert" | "update">;
+type GoatIntegrationRefreshDb = GoatIntegrationTransactionalDb | GoatIntegrationBatchDb;
+const GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING = {
+  id: goatIntegrationCredentials.id,
+  expiresAt: goatIntegrationCredentials.expiresAt,
+  lastRotatedAt: goatIntegrationCredentials.lastRotatedAt,
+  updatedAt: goatIntegrationCredentials.updatedAt,
+  encryptionKeyVersion: goatIntegrationCredentials.encryptionKeyVersion,
+} as const;
 
 export type GoatIntegrationCredentialContext = {
   userWorkosId: string;
@@ -366,45 +375,16 @@ export async function saveGoatIntegrationCredential(
 ) {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const keyVersion = DEFAULT_ENCRYPTION_KEY_VERSION;
-  const encryptedPayload = encryptJson(input.payload, {
-    key: loadEncryptionKey(keyVersion),
-    aad: goatCredentialAad({ ...input, keyVersion }),
-  });
+  const write = prepareGoatIntegrationCredentialWrite(input, now);
 
   const [credential] = await db
     .insert(goatIntegrationCredentials)
-    .values({
-      id: newGoatIntegrationCredentialId(),
-      userWorkosId: input.userWorkosId,
-      integrationId: input.integrationId,
-      provider: input.provider,
-      kind: input.kind,
-      encryptedPayload,
-      encryptionKeyVersion: keyVersion,
-      expiresAt: input.expiresAt ?? null,
-      lastRotatedAt: now,
-      updatedAt: now,
-    })
+    .values(write.values)
     .onConflictDoUpdate({
       target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
-      set: {
-        userWorkosId: input.userWorkosId,
-        provider: input.provider,
-        encryptedPayload,
-        encryptionKeyVersion: keyVersion,
-        expiresAt: input.expiresAt ?? null,
-        lastRotatedAt: now,
-        updatedAt: now,
-      },
+      set: write.conflictSet,
     })
-    .returning({
-      id: goatIntegrationCredentials.id,
-      expiresAt: goatIntegrationCredentials.expiresAt,
-      lastRotatedAt: goatIntegrationCredentials.lastRotatedAt,
-      updatedAt: goatIntegrationCredentials.updatedAt,
-      encryptionKeyVersion: goatIntegrationCredentials.encryptionKeyVersion,
-    });
+    .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING);
 
   if (!credential) {
     throw new Error("Could not persist Goat integration credential.");
@@ -417,11 +397,45 @@ export async function refreshGoatIntegrationCredential(
   input: GoatIntegrationCredentialContext & {
     payload: Record<string, unknown>;
     expiresAt?: Date | null;
-    db: GoatIntegrationRootDb;
+    db: GoatIntegrationRefreshDb;
     now?: Date;
   },
 ) {
   const now = input.now ?? new Date();
+  const write = prepareGoatIntegrationCredentialWrite(input, now);
+
+  // neon-http cannot open an interactive transaction, but its batch API sends
+  // all queries through Neon's transactional HTTP endpoint. The runner's
+  // pooled driver keeps using a regular interactive transaction below.
+  if ("batch" in input.db) {
+    const [credentials] = await input.db.batch([
+      input.db
+        .insert(goatIntegrationCredentials)
+        .values(write.values)
+        .onConflictDoUpdate({
+          target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
+          set: write.conflictSet,
+        })
+        .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
+      input.db
+        .update(goatIntegrations)
+        .set({ status: "connected", statusReason: null, updatedAt: now })
+        .where(
+          and(
+            eq(goatIntegrations.userWorkosId, input.userWorkosId),
+            eq(goatIntegrations.id, input.integrationId),
+            eq(goatIntegrations.provider, input.provider),
+          ),
+        ),
+    ] as const);
+    const credential = credentials[0];
+
+    if (!credential) {
+      throw new Error("Could not refresh Goat integration credential.");
+    }
+
+    return credential;
+  }
 
   return input.db.transaction(async (tx) => {
     const credential = await saveGoatIntegrationCredential({ ...input, db: tx, now });
@@ -436,6 +450,50 @@ export async function refreshGoatIntegrationCredential(
     });
     return credential;
   });
+}
+
+function prepareGoatIntegrationCredentialWrite(
+  input: GoatIntegrationCredentialContext & {
+    payload: Record<string, unknown>;
+    expiresAt?: Date | null;
+  },
+  now: Date,
+) {
+  const keyVersion = DEFAULT_ENCRYPTION_KEY_VERSION;
+  const encryptedPayload = encryptJson(input.payload, {
+    key: loadEncryptionKey(keyVersion),
+    aad: goatCredentialAad({
+      userWorkosId: input.userWorkosId,
+      integrationId: input.integrationId,
+      provider: input.provider,
+      kind: input.kind,
+      keyVersion,
+    }),
+  });
+
+  return {
+    values: {
+      id: newGoatIntegrationCredentialId(),
+      userWorkosId: input.userWorkosId,
+      integrationId: input.integrationId,
+      provider: input.provider,
+      kind: input.kind,
+      encryptedPayload,
+      encryptionKeyVersion: keyVersion,
+      expiresAt: input.expiresAt ?? null,
+      lastRotatedAt: now,
+      updatedAt: now,
+    },
+    conflictSet: {
+      userWorkosId: input.userWorkosId,
+      provider: input.provider,
+      encryptedPayload,
+      encryptionKeyVersion: keyVersion,
+      expiresAt: input.expiresAt ?? null,
+      lastRotatedAt: now,
+      updatedAt: now,
+    },
+  };
 }
 
 export async function loadGoatIntegrationCredential(
